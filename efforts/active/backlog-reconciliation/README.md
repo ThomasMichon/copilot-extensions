@@ -252,6 +252,30 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The seven-contract checkpoint is actually delivered in #10703 after genuine
+exact-head approval, no active findings, one resolved thread and complete
+successful CI before normal managed merge. All eight actual merged/current
+blobs equal the approved head; only its publication child finalized, retained.
+The [delivery journal](<journal/2026/11.05 finite-producer-policy-fixture-contracts.md>)
+records two equal complete 03:48 PST scans: 1,010 whole open, 735
+creator-eligible, 275 excluded, 672 original-cohort and 338 inflow.
+One eligible metadata-only arrival, #10706, adds no text admission or credit.
+There are no departures; dispositions remain 777 and the parent stays Active,
+281 issues above 729. Six whole originals and eighteen ranked relationships
+are integrated for reviewed publication; eleven further originals and
+thirty-three comparisons are fully researched. Protected whole sources and
+all existing custodians remain.
+
+The [six launch/progress/delivery contracts](finite-launch-progress-delivery-contracts.md)
+integrate 34 whole texts and eighteen ranked relationships without new
+completion or receiving-transfer credit. All six stay OPEN. Clean measured
+launches, the one-ledger hook nudge, independent watchdog custody, real named
+supplier adoption, three routing-lock manifestations and one explicit native
+full-suite proof/disposition remain distinct from actual delivered partials.
+The [journal](<journal/2026/11.05 finite-launch-progress-delivery-contracts.md>)
+preserves current versus historical state, actual owner reservations and
+protected whole evidence without retry.
+
 The eleven-contract checkpoint is actually delivered in #10702 after genuine
 exact-head approval, no active findings or threads and eight complete
 successful/skipped checks before normal managed merge. All eight actual
@@ -1758,6 +1782,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [launch/progress/delivery study](finite-launch-progress-delivery-contracts.md)
+separates thirteen whole-message, one fresh whole-description, two reused
+whole-description and two protected relations. Three other unchanged whole
+originals remain protected; three changed originals were freshly qualified
+then withheld before model reading. No comparison supplies consumer acceptance,
+native full-suite evidence, causal diagnosis, owner release or receiving consent.
 
 The [producer/policy/fixture study](finite-producer-policy-fixture-contracts.md)
 separates twelve whole-message, four fresh whole-description, three reused
