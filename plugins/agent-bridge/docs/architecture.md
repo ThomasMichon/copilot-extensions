@@ -1030,6 +1030,9 @@ Concurrent end requests cannot issue delayed duplicate releases. A successful
 release makes teardown terminal before deferred cancellation propagates;
 cancelled starts persist FAILED and cancelled resumes persist STOPPED while
 retaining unresolved ownership and the same conversation.
+If the original provider fails after cancellation, cancellation remains
+non-retryable and chains that failure for diagnosis. Failed-start parity
+finalization uses ordinary terminal teardown rather than a second release path.
 Release removes the admission-only disable flag from its copied child environment.
 Relay-provider absence, timeout, failure or malformed
 output stops authenticated preparation explicitly; successful existing

@@ -18,9 +18,9 @@ class _SessionParityMixin:
     @codespace_session_operation
     async def finalize_parity_fault_start(self, session, fault: str) -> dict[str, Any]:
         """Remove a confirmed failed-start transaction and report booleans."""
-        from . import session_manager as core
-        from .session_manager import _codespace_claim_key, _container_claim_key, _REQUEST_OVERRIDES_KEY
-        from .session_host.codespace_transport import codespace_provider_call
+        from .session_manager import (
+            RemoteHostRecoveryPendingError, _codespace_claim_key, _container_claim_key,
+        )
 
         result = dict(session.parity_fault_result or {})
         result["fault"] = fault
@@ -47,27 +47,17 @@ class _SessionParityMixin:
             })
             return result
         session_id = session.session_id
-        claim_key = _codespace_claim_key(session.target)
-        async with codespace_provider_call(
-            lambda: True if claim_key is None else core._release_codespace_claim(*claim_key),
-        ) as claim_removed:
-            result["codespace_claim_removed"] = claim_removed
-            if not claim_removed:
-                result.update({
-                    "cleanup_confirmed": False, "ownership_retained": True,
-                    "durable_session_retained": self._db.get_session(session_id) is not None,
-                })
-                return result
-            if claim_key is not None:
-                if session.target.venue is None:
-                    session.target.venue = {}
-                session.target.venue.setdefault(_REQUEST_OVERRIDES_KEY, {})["codespace_claim"] = None
-                self._db.update_session_target(
-                    session_id, session.target.to_json(), session.target.cwd,
-                )
-            self._release_container_lock(session_id)
-            self._release_codespace_lock(session_id)
-        await self._end_session_owned(session_id, force=True)
+        self._release_container_lock(session_id)
+        try:
+            await self._end_session_owned(session_id, force=True)
+        except RemoteHostRecoveryPendingError:
+            result.update({
+                "codespace_claim_removed": False,
+                "cleanup_confirmed": False, "ownership_retained": True,
+                "durable_session_retained": self._db.get_session(session_id) is not None,
+            })
+            return result
+        result["codespace_claim_removed"] = True
         result.update({
             "session_row_removed": self._db.get_session(session_id) is None,
             "session_memory_removed": session_id not in self._sessions,

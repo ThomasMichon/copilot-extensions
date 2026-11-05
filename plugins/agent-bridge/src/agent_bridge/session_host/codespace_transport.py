@@ -469,14 +469,20 @@ async def codespace_provider_call(function, *args, **kwargs):
     """Settle one bounded provider call and its local receipt before cancellation."""
     operation = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
     cancellation = None
-    while not operation.done():
-        try:
-            await asyncio.shield(operation)
-        except asyncio.CancelledError as exc:
-            cancellation = exc
+    try:
+        while not operation.done():
+            try:
+                await asyncio.shield(operation)
+            except asyncio.CancelledError as exc:
+                cancellation = exc
+        result = operation.result()
+    except Exception as failure:
+        if cancellation is not None:
+            raise cancellation from failure
+        raise
     # The body runs on the owner loop, without an intervening cancellation point.
     # It must persist the result before cancellation is allowed to unwind custody.
-    yield operation.result()
+    yield result
     if cancellation is not None:
         raise cancellation
 

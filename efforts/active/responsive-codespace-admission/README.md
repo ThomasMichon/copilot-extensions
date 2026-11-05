@@ -205,3 +205,20 @@ daemon. Review the plan before implementation.
   transport, session, resume ladder/ownership, host-claim and parity packet
   passed 338 cases. Exact-head source gates, review and CI are refreshed before
   merge; no live deployment acceptance is implied.
+
+### 2026-11-05 - Deferred cancellation closes the remaining consumers
+
+- Corrected provider failure after recorded cancellation: the settled failure
+  becomes the cancellation's cause, not a new resume-retry opportunity.
+  The resume regression makes a hypothetical second provider call succeed;
+  it proves that no such retry or worker launch occurs.
+- Removed parity finalization's duplicate provider-release path. It now reuses
+  ordinary cancellation-safe terminal teardown, with failed release retaining
+  its explicit unsuccessful cleanup result and custody. Repeated-cancellation
+  controls cover both confirmed and unconfirmed release.
+- Four carried-over stop/recovery/metadata/resume findings were already fixed
+  and covered. Replied with exact commit/test anchors and resolved those
+  threads; the two new findings still require the corrected-head review.
+- Focused packet: 46 passed. Integrated admission, transport, session, resume,
+  host-claim and parity packet: 341 passed. Required source gates, exact-head CI
+  and renewed review are checked before merge. No rollout or live acceptance.

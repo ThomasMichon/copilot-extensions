@@ -1429,14 +1429,28 @@ async def test_failed_handshake_provider_cleanup_retains_container_lock(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("released, concurrent_end", [(False, False), (True, False), (True, True)])
+@pytest.mark.parametrize("released, concurrent_end, cancel", [
+    (False, False, False), (True, False, False), (True, True, False),
+    (False, False, True), (True, False, True),
+])
 async def test_failed_handshake_claim_release_settles_receipt_before_session_removal(
     tmp_db,
     monkeypatch,
     released,
     concurrent_end,
+    cancel,
 ) -> None:
-    release = Mock(return_value=released)
+    import threading
+
+    entered, finish = threading.Event(), threading.Event()
+
+    def release_claim(*identity):
+        if cancel:
+            entered.set()
+            assert finish.wait(5)
+        return released
+
+    release = Mock(side_effect=release_claim)
     monkeypatch.setattr(
         "agent_bridge.session_manager._release_codespace_claim",
         release,
@@ -1481,13 +1495,38 @@ async def test_failed_handshake_claim_release_settles_receipt_before_session_rem
         target_json=target.to_json(),
     )
 
-    finalization = manager.finalize_parity_fault_start(session, FAILED_ACP_HANDSHAKE_FAULT)
-    if concurrent_end:
-        result, _ended = await asyncio.gather(
-            finalization, manager.end_session(session.session_id, force=True),
-        )
-    else:
-        result = await finalization
+    finalization = asyncio.create_task(
+        manager.finalize_parity_fault_start(session, FAILED_ACP_HANDSHAKE_FAULT),
+    )
+    try:
+        if cancel:
+            async with asyncio.timeout(5):
+                while not entered.is_set():
+                    await asyncio.sleep(0.01)
+            finalization.cancel()
+            await asyncio.sleep(0)
+            finalization.cancel()
+            await asyncio.sleep(0)
+            assert not finalization.done()
+            finish.set()
+            if released:
+                with pytest.raises(asyncio.CancelledError):
+                    await finalization
+                release.assert_called_once_with("example-codespace", "venue-parity:test")
+                assert manager.get_session(session.session_id) is None
+                assert tmp_db.get_session(session.session_id) is None
+                assert session.session_id not in manager._codespace_lock_sessions
+                return
+        if concurrent_end:
+            result, _ended = await asyncio.gather(
+                finalization, manager.end_session(session.session_id, force=True),
+            )
+        else:
+            result = await finalization
+    finally:
+        finish.set()
+        with contextlib.suppress(BaseException):
+            await finalization
 
     release.assert_called_once_with("example-codespace", "venue-parity:test")
     assert result["cleanup_confirmed"] is released
@@ -1499,6 +1538,7 @@ async def test_failed_handshake_claim_release_settles_receipt_before_session_rem
     else:
         assert result["durable_session_retained"] is True
         assert manager.get_session(session.session_id) is session
+        manager._release_codespace_lock(session.session_id)
 
 
 @pytest.mark.asyncio
@@ -5722,8 +5762,9 @@ class TestCodespaceExclusiveClaim:
                 manager._release_codespace_lock(session_id)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_fails", [False, True])
     async def test_cancelled_resume_retains_stopped_conversation_and_claim(
-        self, tmp_db, monkeypatch,
+        self, tmp_db, monkeypatch, provider_fails,
     ) -> None:
         import threading
 
@@ -5736,10 +5777,14 @@ class TestCodespaceExclusiveClaim:
         monkeypatch.setattr(manager, "_try_reattach_live_host", AsyncMock(return_value=False))
         monkeypatch.setattr(manager, "_refresh_provider_target", AsyncMock())
         entered, finish = threading.Event(), threading.Event()
+        calls = []
 
         def relay(*args):
+            calls.append(args)
             entered.set()
             assert finish.wait(5)
+            if provider_fails and len(calls) == 1:
+                raise RuntimeError("synthetic relay refusal after cancellation")
             return "", None
 
         monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env", relay)
@@ -5754,8 +5799,12 @@ class TestCodespaceExclusiveClaim:
             await asyncio.sleep(0)
             assert not resume.done()
             finish.set()
-            with pytest.raises(asyncio.CancelledError):
+            with pytest.raises(asyncio.CancelledError) as cancelled:
                 await resume
+            assert len(calls) == 1
+            if provider_fails:
+                assert isinstance(cancelled.value.__cause__, RuntimeError)
+                assert "synthetic relay refusal" in str(cancelled.value.__cause__)
             assert session.status == SessionStatus.STOPPED
             assert tmp_db.get_session(session.session_id)["status"] == SessionStatus.STOPPED.value
             assert session.acp_session_id == native_id
