@@ -1517,3 +1517,20 @@ live external installation are unperformed: the available hosted bootstrap
 lifetime portfolio is a different contract, and no new venue or installed
 host is activated for this slice. U13 and the remaining #10653 acceptance
 retain their owners. Current-head CI, review, merge and release remain required.
+
+Final pre-merge inspection tightens the diagnostic-only change: replace only
+the known force-retry advice, never the entire existing error. Added controls
+retain unrelated readiness failures as well as control errors. The combined
+cutover and real attached-session packet passes 39 tests with eight platform
+skips in 6.08 seconds; fatal lint and all thirteen install contracts pass again.
+No native installer/watchdog or serving-publication behavior is added.
+
+The first review of #10736 reports one Low documentation finding: explicit
+Contract impact and Graceful cutover impact sections are required for the
+observable busy-timeout change. The revised description names the legacy
+`cutover --require-live --force` activation seam, unchanged wire shape and
+supported count-bearing peer baseline, deliberate nonzero/rollback outcome
+instead of false forced success, and the absence of a protection guarantee
+when rolling back to the older defective control client. U13/#10652 incoming
+publication and #10653's broader reaping/installer acceptance remain separate.
+The new source head still requires its own CI and review.

@@ -568,9 +568,13 @@ def test_forced_busy_mcp_drain_rolls_back_without_shutdown(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("force", [False, True])
-@pytest.mark.parametrize("control_error", [None, "control request rejected"])
+@pytest.mark.parametrize("prior_error,control_error", [
+    ("old daemon did not drain; rerun with force to proceed", None),
+    ("replacement readiness failed", None),
+    ("old daemon did not drain; rerun with force to proceed", "control request rejected"),
+])
 def test_busy_cutover_diagnostic_does_not_recommend_force(
-    tmp_path, monkeypatch, force, control_error,
+    tmp_path, monkeypatch, force, prior_error, control_error,
 ):
     from zdd.cutover import CutoverOrchestrator
     from zdd.cutover_result import CutoverResult
@@ -578,7 +582,7 @@ def test_busy_cutover_diagnostic_does_not_recommend_force(
     monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
     monkeypatch.setattr(_cutover, "_fixed_handle_has_live_listener", lambda root: False)
     observed = CutoverResult(
-        ok=False, rolled_back=True, error="old daemon did not drain; rerun with force",
+        ok=False, rolled_back=True, error=prior_error,
         drain={"drained": False, "clean": False, "forced": False, "busy_sessions": 2},
     )
     if control_error:
@@ -587,9 +591,10 @@ def test_busy_cutover_diagnostic_does_not_recommend_force(
     result = _cutover.run_cutover(force=force)
     assert not result["ok"] and result["rolled_back"]
     assert result["drain"]["busy_sessions"] == 2
-    if control_error:
+    if control_error or prior_error == "replacement readiness failed":
         assert result["error"] == observed.error
-        assert result["drain"]["error"] == control_error
+        if control_error:
+            assert result["drain"]["error"] == control_error
     else:
         assert "attached sessions cannot be forcibly retired" in result["error"]
         assert "rerun with force" not in result["error"]

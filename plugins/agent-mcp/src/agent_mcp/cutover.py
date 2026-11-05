@@ -914,12 +914,12 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
         }
     result = res.to_dict()
     if (
-        not res.ok and res.drain and res.drain.get("busy_sessions")
+        not res.ok and res.error and res.drain and res.drain.get("busy_sessions")
         and not res.drain.get("drained") and not res.drain.get("error")
     ):
-        result["error"] = (
-            f"old daemon did not drain (busy: {res.drain['busy_sessions']}); "
-            "attached sessions cannot be forcibly retired"
+        result["error"] = res.error.replace(
+            "; rerun with force to proceed",
+            "; attached sessions cannot be forcibly retired",
         )
     if res.ok:
         result["data_socket"] = str(ctx.new_socket_path)
