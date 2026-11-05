@@ -30,7 +30,8 @@ recovery remain; do not invent an extra formal ACK or whole-parent gate.
 
 ## #8796 - Exact original allocation recovery, then same-claim disposition
 
-The original is unowned; this study does not adopt it. Preserve its
+The original is unassigned but still explicitly claimed; this study does
+not adopt it or release its retained claim. Preserve its
 explicit operator-authorized recovery of the exact retained targeted
 allocation that failed before a durable Bridge prelaunch receipt.
 Retain original attempt/allocation/native history and target owner.
