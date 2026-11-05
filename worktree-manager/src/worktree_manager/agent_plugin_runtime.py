@@ -117,7 +117,7 @@ def _runtime_candidates(root: Path) -> list[Path]:
     for marker_name in ("current-version", "last-known-good"):
         try:
             version = (root / marker_name).read_text(encoding="utf-8").strip()
-        except OSError:
+        except (OSError, UnicodeError):
             version = ""
         candidate = contained_slot(version)
         if candidate is not None:
