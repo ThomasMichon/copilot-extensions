@@ -210,3 +210,79 @@ def test_represented_project_is_not_borrowed_and_federated_relationship_is_not_a
                     relationship_qualification="unknown", incarnation={"relationship_id": "relation"})
     with pytest.raises(OwnerReadError, match="locally admitted"):
         SessionCodec("example", "selected", OWNER, selected, "fixture-generation")
+
+
+@pytest.mark.parametrize("lifecycle,label", [
+    ("started", "Reported agent start"),
+    ("completed", "Reported agent completion"),
+    ("failed", "Reported agent failure"),
+])
+def test_actual_acp_contribution_labels_reach_readable_literal_rows(
+    semantic, lifecycle: str, label: str,
+) -> None:
+    from agent_bridge.acp_subagents import SubagentAttribution
+
+    attribution = SubagentAttribution(
+        semantic.log.append, lambda: True, lambda: "native-session",
+    )
+    attribution.handle_raw_event({
+        "sessionId": "native-session", "type": "subagent." + lifecycle,
+        "agentId": "helper", "data": {
+            "agentName": "search", "agentDisplayName": "[bold]Compare options[/bold]",
+            "agentDescription": "private task description must not be projected",
+            "toolCallId": "launch-call",
+        },
+    })
+    codec = semantic.codec()
+    frame = codec.decode(semantic.frame())
+    event = codec.events(frame, codec.token(frame, 1))[0]
+    assert event.summary == label + ": [bold]Compare options[/bold]"
+    assert event.kind.value == "contribution-reported"
+    assert event.actor.qualification.value == "reported"
+    assert "Reported linkage is not custody" in event.details
+    raw = json.loads(event.data_json)
+    assert raw["native_kind"] == "subagent_" + lifecycle
+    assert raw["details"]["agent_name"] == "search"
+    assert raw["details"]["parent_tool_call_id"] == "launch-call"
+    assert "private task description" not in event.data_json
+    assert raw["answerability"] == "unknown" and frame["coverage"] == "partial"
+    window = TimelineWindow()
+    token = codec.token(frame, 1)
+    assert window.bind(token).applied and window.apply_snapshot(codec.snapshot(frame, token)).applied
+    layout = TimelineLayout()
+    layout.rebuild(window, 120)
+    assert event.summary in layout.blocks[0].heading_text
+    assert raw["native_kind"] not in layout.blocks[0].heading_text
+
+
+@pytest.mark.parametrize("kind,details,expected", [
+    ("tool_call_start", {"title": "Inspect [literal] changes"}, "Tool started: Inspect [literal] changes"),
+    ("tool_call_update", {"status": "completed"}, "Tool completed"),
+    ("tool_call_update", {"status": "unfamiliar"}, "Tool update"),
+    ("subagent_started", {}, "Reported agent start"),
+    ("subagent_started", {"agent_name": "search", "agent_display_name": "  "},
+     "Reported agent start: search"),
+    ("subagent_started", {"agent_display_name": ["invalid"]}, "Reported agent start"),
+    ("unfamiliar_awaiting_operator", {"title": "Permission requested"},
+     "Bridge session: unfamiliar_awaiting_operator"),
+])
+def test_missing_old_or_malformed_labels_do_not_infer_work_or_current_state(
+    semantic, kind: str, details: dict, expected: str,
+) -> None:
+    semantic.log.append(kind, details)
+    codec = semantic.codec()
+    frame = codec.decode(semantic.frame())
+    event = codec.events(frame, codec.token(frame, 1))[0]
+    assert event.summary == expected
+    assert frame["current_requests"] == "unknown" and frame["coverage"] == "partial"
+    assert json.loads(event.data_json)["native_kind"] == kind
+
+
+def test_bounded_work_label_preserves_full_reported_title_in_evidence(semantic) -> None:
+    title = "Inspect " + "\u754c" * 300
+    semantic.log.append("tool_call_start", {"title": title})
+    codec = semantic.codec()
+    frame = codec.decode(semantic.frame())
+    event = codec.events(frame, codec.token(frame, 1))[0]
+    assert event.summary == "Tool started: " + title[:160] + "..."
+    assert json.loads(event.data_json)["details"]["title"] == title

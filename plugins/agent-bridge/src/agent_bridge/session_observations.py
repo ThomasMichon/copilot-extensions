@@ -48,6 +48,8 @@ _DETAILS = (
     "action_id",
     "agent_id",
     "parent_tool_call_id",
+    "agent_name",
+    "agent_display_name",
     "status",
     "state",
     "successor_id",

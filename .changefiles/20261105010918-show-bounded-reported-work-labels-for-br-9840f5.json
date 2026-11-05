@@ -1,0 +1,13 @@
+{
+  "comment": "Show bounded reported work labels for Bridge timeline occurrences",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
