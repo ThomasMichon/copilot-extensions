@@ -288,6 +288,36 @@ def test_retained_admission_deadline_interrupts_snapshot_reads(feeds, tmp_path, 
     assert len(reads) == 1 and not state["requests"]
 
 
+def test_snapshot_deadline_bounds_a_stalled_retained_feed_worker(feeds, tmp_path):
+    state = feeds()
+    metadata = project(state)
+    started, release = threading.Event(), threading.Event()
+
+    def stall(handler):
+        started.set()
+        release.wait(5)
+        try:
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/vnd.pypi.simple.v1+json")
+            handler.send_header("Content-Length", str(len(metadata)))
+            handler.end_headers()
+            handler.wfile.write(metadata)
+        except OSError:
+            pass
+
+    state["routes"]["/simple/fixture/"] = stall
+    with retained_wheel(tmp_path) as snapshot:
+        shorter = replace(snapshot, _deadline=time.monotonic() + 2)
+        before = time.monotonic()
+        try:
+            with pytest.raises(acquisition.WheelError, match="deadline"):
+                with admit_retained(state, shorter, deadline=time.monotonic() + 10):
+                    pytest.fail("stalled feed outlived snapshot custody")
+        finally:
+            release.set()
+        assert started.is_set() and time.monotonic() - before < 4
+
+
 @pytest.mark.parametrize("certificate", [
     CERTIFICATE, CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"),
 ])

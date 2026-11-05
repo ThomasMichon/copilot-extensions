@@ -532,15 +532,17 @@ def admit_retained_wheel_inputs(
     """
     import installer_dependency_policy as policy
 
+    if not isinstance(snapshot, WheelSnapshot):
+        raise WheelError("feed admission requires retained wheel custody")
+    _check_deadline(deadline)
+    _check_deadline(snapshot._deadline)
+    deadline = min(snapshot._deadline, deadline)
     selected, origins = validate_acquisition_inputs(
         expected, feeds=feeds, download_origins=download_origins, cutoffs=cutoffs,
         policy_id=policy_id, limits=limits, deadline=deadline, ssl_context=ssl_context,
         proxies=proxies, procutil=procutil,
     )
-    if not isinstance(snapshot, WheelSnapshot):
-        raise WheelError("feed admission requires retained wheel custody")
-    _check_deadline(snapshot._deadline)
-    snapshot = replace(snapshot, _deadline=min(snapshot._deadline, deadline))
+    snapshot = replace(snapshot, _deadline=deadline)
     snapshot.verify()
     expected_hashes = {item["filename"]: item["sha256"] for item in selected}
     if dict(snapshot.digests) != expected_hashes:

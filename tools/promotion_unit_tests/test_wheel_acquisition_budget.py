@@ -282,15 +282,16 @@ def test_retained_feed_admission_uses_exact_first_owner_metadata_without_downloa
 
 
 @pytest.mark.parametrize("outcome", [
-    "success", "wrong-digest", "over-budget", "worker-size", "worker-download", "changed",
+    "success", "snapshot-deadline", "wrong-digest", "over-budget", "worker-size", "worker-download", "changed",
 ])
 def test_retained_admission_binds_worker_facts_to_live_snapshot(tmp_path, monkeypatch, outcome):
     filename, digest = "fixture-1.0-py3-none-any.whl", "sha256:" + "a" * 64
     expected = {"name": "fixture", "filename": filename, "sha256": digest}
     size = 11 if outcome == "over-budget" else 4
     deadline = time.monotonic() + 30
+    snapshot_deadline = deadline - 10 if outcome == "snapshot-deadline" else deadline + 30
     snapshot = acquisition.WheelSnapshot(
-        {filename: tmp_path / filename}, {}, {filename: (None, None, digest, size)}, deadline + 30,
+        {filename: tmp_path / filename}, {}, {filename: (None, None, digest, size)}, snapshot_deadline,
     )
     checks, workers = [], []
 
@@ -306,6 +307,7 @@ def test_retained_admission_binds_worker_facts_to_live_snapshot(tmp_path, monkey
     def worker(_root, selected, _feeds, _origins, _cutoffs, _limits, _deadline, _context, _procutil,
                *, retained_sizes):
         workers.append(True)
+        assert _deadline == min(deadline, snapshot_deadline)
         assert selected == [expected] and retained_sizes == {filename: size}
         return {
             "files": [{
@@ -333,14 +335,14 @@ def test_retained_admission_binds_worker_facts_to_live_snapshot(tmp_path, monkey
         "deadline": deadline, "ssl_context": ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
         "proxies": {}, "procutil": ModuleType("test_procutil"),
     }
-    if outcome == "success":
+    if outcome in ("success", "snapshot-deadline"):
         with acquisition.admit_retained_wheel_inputs([expected], **options) as admitted:
             evidence = admitted.evidence()
             assert admitted.snapshot.paths == snapshot.paths
             assert evidence["retained_wheel_bytes"] == size
             assert evidence["downloaded_wheel_bytes"] == 0
             assert evidence["temporary_highwater_bytes"] == size + 3
-        assert checks == [deadline, deadline, deadline] and workers == [True]
+        assert checks == [min(deadline, snapshot_deadline)] * 3 and workers == [True]
     else:
         with pytest.raises(acquisition.WheelError), acquisition.admit_retained_wheel_inputs([expected], **options):
             pytest.fail("invalid retained admission was exposed")
