@@ -950,15 +950,19 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
             print(json.dumps({"action": "reconcile", "executed": [], **failure}))
             return 1
         failed = [item for item in summary.get("executed", []) if not item.get("ok", False)]
+        incomplete = {
+            key: summary[key] for key in ("diagnostics", "skipped") if summary.get(key)
+        }
         _write_status(
             {
-                "ok": not failed,
+                "ok": not failed and not incomplete,
                 "repo": str(Path(repo_dir).resolve()),
                 "failed": failed,
+                **incomplete,
             }
         )
         print(json.dumps(summary))
-        return 1 if failed else 0
+        return 1 if failed or incomplete else 0
 
     try:
         plan = reconcile.build_plan(

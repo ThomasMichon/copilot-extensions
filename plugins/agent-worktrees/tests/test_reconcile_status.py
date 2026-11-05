@@ -74,6 +74,132 @@ def test_successful_apply_clears_previous_failure(tmp_path, monkeypatch):
     assert payload["failed"] == []
 
 
+@pytest.mark.parametrize("blocked", ["diagnostic", "copilot-unavailable"])
+def test_incomplete_apply_cannot_publish_success(tmp_path, monkeypatch, capsys, blocked):
+    status = tmp_path / "status.json"
+    diagnostic = {
+        "service": "agent-example",
+        "phase": "runtime",
+        "reason": "installation-context-invalid",
+        "message": "Selected installation is unavailable",
+    }
+    plan = (
+        {"action": "continue", "diagnostics": [diagnostic]}
+        if blocked == "diagnostic" else {
+            "action": "reconcile",
+            "updates": [{
+                "service": "agent-example",
+                "phase": "payload",
+                "reason": "payload-missing",
+                "argv": ["copilot", "plugin", "install", "agent-example@copilot-extensions"],
+            }],
+        }
+    )
+    monkeypatch.setattr(reconcile, "build_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(reconcile, "resolve_copilot", lambda: None)
+
+    assert cli.cmd_reconcile_plugins(_args(tmp_path, status)) == 1
+
+    summary = json.loads(capsys.readouterr().out)
+    recorded = json.loads(status.read_text(encoding="utf-8"))
+    assert recorded["ok"] is False
+    assert summary["executed"] == []
+    if blocked == "diagnostic":
+        assert summary["diagnostics"] == [diagnostic]
+        assert recorded["diagnostics"] == [diagnostic]
+    else:
+        assert summary["skipped"][0]["service"] == "agent-example"
+        assert summary["skipped"][0]["reason"] == "copilot-unavailable"
+        assert recorded["skipped"] == summary["skipped"]
+
+
+@pytest.mark.parametrize("resolved", [False, True])
+def test_diagnostics_preserve_independent_work_and_terminal_outcome(
+    tmp_path, monkeypatch, capsys, resolved,
+):
+    status = tmp_path / "status.json"
+    diagnostic = {
+        "service": "agent-blocked",
+        "phase": "runtime",
+        "reason": "installation-context-invalid",
+        "message": "Selected installation is unavailable",
+    }
+    plans = iter([
+        {
+            "action": "reconcile",
+            "diagnostics": [diagnostic],
+            "updates": [{
+                "service": "agent-independent",
+                "phase": "runtime",
+                "reason": "runtime-missing",
+                "argv": ["fixture-installer"],
+            }],
+        },
+        {"action": "continue", **({} if resolved else {"diagnostics": [diagnostic]})},
+    ])
+    calls = []
+    monkeypatch.setattr(reconcile, "build_plan", lambda *args, **kwargs: next(plans))
+    monkeypatch.setattr(reconcile, "execution_diagnostic", lambda _update: None)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step",
+        lambda argv, _update, _log: calls.append(list(argv)) or 0,
+    )
+
+    assert cli.cmd_reconcile_plugins(_args(tmp_path, status)) == (0 if resolved else 1)
+
+    summary = json.loads(capsys.readouterr().out)
+    recorded = json.loads(status.read_text(encoding="utf-8"))
+    assert calls == [["fixture-installer"]]
+    assert summary["executed"][0]["ok"] is True
+    assert recorded["ok"] is resolved
+    if resolved:
+        assert not summary.get("diagnostics")
+    else:
+        assert summary["diagnostics"] == [diagnostic]
+        assert recorded["diagnostics"] == [diagnostic]
+
+
+@pytest.mark.parametrize("retried", [False, True])
+def test_skipped_payload_requires_actual_success_not_a_later_empty_plan(
+    tmp_path, monkeypatch, capsys, retried,
+):
+    status = tmp_path / "status.json"
+    payload_plan = {
+        "action": "reconcile",
+        "updates": [{
+            "service": "agent-example",
+            "phase": "payload",
+            "reason": "payload-refresh",
+            "argv": ["copilot", "plugin", "update", "agent-example@copilot-extensions"],
+        }],
+    }
+    plans = iter([payload_plan, payload_plan if retried else {"action": "continue"}])
+    commands = iter([None, "fixture-copilot"])
+    calls = []
+    monkeypatch.setattr(reconcile, "build_plan", lambda *args, **kwargs: next(plans))
+    monkeypatch.setattr(reconcile, "resolve_copilot", lambda: next(commands))
+    monkeypatch.setattr(reconcile, "execution_diagnostic", lambda _update: None)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step",
+        lambda argv, _update, _log: calls.append(list(argv)) or 0,
+    )
+
+    assert cli.cmd_reconcile_plugins(_args(tmp_path, status)) == (0 if retried else 1)
+
+    summary = json.loads(capsys.readouterr().out)
+    assert json.loads(status.read_text(encoding="utf-8"))["ok"] is retried
+    if retried:
+        assert calls == [[
+            "fixture-copilot", "plugin", "update", "agent-example@copilot-extensions",
+        ]]
+        assert summary["executed"][0]["ok"] is True
+        assert not summary.get("skipped")
+    else:
+        assert calls == []
+        assert summary["executed"] == []
+        assert summary["skipped"][0]["reason"] == "copilot-unavailable"
+
+
 def test_handled_apply_error_reports_json_and_preserves_failed_status(tmp_path, monkeypatch, capsys):
     status = tmp_path / "status.json"
 

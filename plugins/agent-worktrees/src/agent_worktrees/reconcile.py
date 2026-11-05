@@ -1950,9 +1950,9 @@ def apply_plan(
 
     Best-effort: a step failure is logged and the loop continues; nothing here
     raises for a bad step. A ``copilot ...`` step is skipped when ``copilot`` is
-    not on ``PATH`` (mirrors the launcher, which cannot install a payload without
-    the CLI). Returns a summary dict ``{"executed": [...], "passes": N,
-    "action": "reconcile"|"continue"}``.
+    unavailable (mirrors the launcher, which cannot install a payload without
+    the CLI). The summary retains executed steps and terminal planning
+    diagnostics/skips; best-effort execution does not imply a successful result.
     """
     _log = log or (lambda _m: None)
 
@@ -1984,13 +1984,16 @@ def apply_plan(
 
     executed: list[dict[str, Any]] = []
     final_action = "continue"
+    diagnostics: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
 
     for pass_no in range(1, passes + 1):
         plan = build_plan(
             repo_dir, machine=machine,
             include_payload_refresh=include_payload_refresh,
         )
-        for diagnostic in plan.get("diagnostics", []):
+        diagnostics = plan.get("diagnostics", [])
+        for diagnostic in diagnostics:
             _log(
                 "provision: "
                 f"{diagnostic.get('service', '?')} "
@@ -2017,6 +2020,13 @@ def apply_plan(
                 copilot = resolve_copilot()
                 if copilot is None:
                     _log(f"provision: skipping {service} (copilot not found)")
+                    skipped_action = {
+                        "service": service,
+                        "phase": upd.get("phase"),
+                        "reason": "copilot-unavailable",
+                    }
+                    if skipped_action not in skipped:
+                        skipped.append(skipped_action)
                     continue
                 argv[0] = copilot
             _log(f"provision: {service} [{upd.get('reason', '?')}] -> {' '.join(argv)}")
@@ -2049,6 +2059,10 @@ def apply_plan(
             ok = rc == 0
             if ok and upd.get("phase") == "payload":
                 acquired.add(service)
+                skipped = [
+                    item for item in skipped
+                    if (item["service"], item["phase"]) != (service, upd.get("phase"))
+                ]
             if not ok:
                 _log(f"provision: step for {service} exited {rc}")
             executed.append({
@@ -2058,4 +2072,9 @@ def apply_plan(
                 "returncode": rc,
             })
 
-    return {"action": final_action, "passes": passes, "executed": executed}
+    summary = {"action": final_action, "passes": passes, "executed": executed}
+    if diagnostics:
+        summary["diagnostics"] = diagnostics
+    if skipped:
+        summary["skipped"] = skipped
+    return summary
