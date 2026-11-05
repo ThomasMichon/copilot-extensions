@@ -127,7 +127,7 @@ def embedded_projects(project):
             raise RuntimeError("first-party core must use the declared library source layout")
         canonical = project / source["path"]
         included = project / "_first_party" / name
-        directory = canonical if os.path.lexists(canonical) else included
+        directory = included if os.path.lexists(included) else canonical
         metadata = tomllib.loads(select_bytes(
             [directory / "pyproject.toml"], "first-party metadata",
         ).decode())
@@ -181,15 +181,14 @@ def embedded_members(project):
 
 def commands(project, package, canonical_directory=None, *, companion_resources=None):
     """Bind one package's hooks; generated sdist resources are not source mirrors."""
-    from setuptools import find_packages
     from setuptools.command.build_py import build_py
-    from setuptools.command.egg_info import egg_info
-    from setuptools.command.install_lib import install_lib
     from setuptools.command.sdist import sdist
 
     project = Path(project).absolute()
     embedded = embedded_projects(project) if package == "worktree_manager" else {}
     members = embedded_members(project) if embedded else {}
+    if embedded:
+        from setuptools import find_packages
     resources = {
         name: Path("src") / package / destination
         for name, destination in RUNTIME_RESOURCES.items()
@@ -232,13 +231,17 @@ def commands(project, package, canonical_directory=None, *, companion_resources=
                 for name, (directory, data) in embedded.items():
                     source = directory / "src"
                     discovered = find_packages(where=str(source))
-                    if packages.intersection(discovered):
-                        raise RuntimeError("embedded import package collides with application")
-                    packages.update(discovered)
                     for selected in discovered:
+                        destination = source.joinpath(*selected.split("."))
+                        previous = mapping.get(selected)
+                        if selected in packages and (
+                            previous is None or (project / previous).resolve() != destination.resolve()
+                        ):
+                            raise RuntimeError("embedded import package collides with application")
                         mapping[selected] = os.path.relpath(
-                            source.joinpath(*selected.split(".")), project,
+                            destination, project,
                         )
+                    packages.update(discovered)
                     package_data.update(data.get("tool", {}).get("setuptools", {}).get("package-data", {}))
                 distribution.packages = sorted(packages)
                 distribution.package_dir = mapping
@@ -333,6 +336,12 @@ def commands(project, package, canonical_directory=None, *, companion_resources=
                     copy_function=copy_input,
                     ignore=ignore,
                 )
+
+    if not embedded:
+        return {"build_py": BuildPy, "sdist": BuildSdist}
+
+    from setuptools.command.egg_info import egg_info
+    from setuptools.command.install_lib import install_lib
 
     class EggInfo(egg_info):
         def run(self):

@@ -167,6 +167,60 @@ def test_embedded_sdist_preserves_full_inputs_and_refuses_links(
         ).read_bytes()
 
 
+def test_embedded_sdist_rebuild_prefers_archived_inputs_over_matching_neighbor(tmp_path, monkeypatch):
+    import tarfile
+    import setuptools.build_meta as backend
+
+    source, library = _embedded_source(tmp_path / "original")
+    (source / "scripts").mkdir()
+    (source / "scripts/installer_fixture.py").write_bytes(b"# controlled runtime asset\n")
+    expected = (library / "src/agent_procutil/__init__.py").read_bytes()
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    monkeypatch.chdir(source)
+    filename = backend.build_sdist(str(archives))
+    unpacked = tmp_path / "unpacked"
+    with tarfile.open(archives / filename) as archive:
+        archive.extractall(unpacked, filter="data")
+    rebuilt_source = next(unpacked.iterdir())
+    neighbor = unpacked / "libs/agent-procutil"
+    shutil.copytree(library, neighbor)
+    (neighbor / "src/agent_procutil/__init__.py").write_bytes(b"FOREIGN = True\n")
+    monkeypatch.chdir(rebuilt_source)
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    filename = backend.build_wheel(str(wheels))
+    with zipfile.ZipFile(wheels / filename) as archive:
+        assert archive.read("agent_procutil/__init__.py") == expected
+
+
+def test_embedded_editable_build_reinitializes_registered_packages(tmp_path, monkeypatch):
+    import setuptools.build_meta as backend
+
+    source, _library = _embedded_source(tmp_path)
+    (source / "scripts").mkdir()
+    (source / "scripts/installer_fixture.py").write_bytes(b"# controlled runtime asset\n")
+    monkeypatch.chdir(source)
+    output = tmp_path / "editable"
+    output.mkdir()
+    filename = backend.build_editable(str(output))
+    assert (output / filename).is_file()
+
+
+def test_embedded_registration_still_refuses_application_package_collision(tmp_path):
+    from setuptools import Distribution
+
+    source, _library = _embedded_source(tmp_path)
+    helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    classes = helpers["commands"](source, "worktree_manager", tmp_path / "libs/versioned-runtime")
+    distribution = Distribution({
+        "name": "fixture", "version": "1.0",
+        "packages": ["worktree_manager", "agent_procutil"], "package_dir": {"": "src"},
+    })
+    with pytest.raises(RuntimeError, match="collides with application"):
+        classes["build_py"](distribution).ensure_finalized()
+
+
 @pytest.mark.parametrize("fail", [False, True])
 def test_embedded_package_copy_is_bounded_and_settled_before_return(tmp_path, monkeypatch, fail):
     import threading
@@ -278,6 +332,11 @@ def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, mo
         package = "worktree_manager"
     helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
     classes = helpers["commands"](source, package, tmp_path / "libs/versioned-runtime")
+    if mode == "legacy":
+        assert "install_lib" not in classes and "egg_info" not in classes
+        distribution = Distribution({"cmdclass": classes})
+        assert distribution.get_command_class("install_lib") is install_lib
+        return
     command = classes["install_lib"](Distribution({"name": "fixture", "version": "1.0"}))
     command.ensure_finalized()
     command.build_dir = str(tmp_path / "build-output")

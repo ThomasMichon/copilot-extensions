@@ -100,6 +100,9 @@ inputs in `_first_party/` inside the sdist. Libraries do not gain separate
 dist-info or runtime receipts. Static third-party runtime metadata and native
 source/member validation remain independent. This wheel uses an isolated
 application environment; profile admission refuses overlapping wheel ownership.
+Archived `_first_party/` inputs take precedence over neighboring checkout
+libraries. Reinitializing Manager's editable build retains the same admitted
+package mappings while still refusing a different application's import root.
 For embedded Manager builds, the standard package and wheel-staging copy hooks
 use at most four workers and settle them before returning or propagating failure.
 Other consumers, namespace exclusions and dry-run behavior retain the stock path.

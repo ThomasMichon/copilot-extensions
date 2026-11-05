@@ -127,12 +127,16 @@ def test_existing_output_is_never_replaced(tmp_path, inputs):
     (True, True, False, "ordinary"), (True, True, True, "ordinary"),
     (False, True, False, "ordinary"), (True, False, False, "ordinary"),
     (True, True, False, "windows-case"), (True, True, False, "purelib"),
+    (True, True, False, "file-parent"), (True, True, True, "file-parent"),
+    (True, True, False, "windows-parent"), (True, True, True, "windows-parent"),
+    (True, True, False, "purelib-parent"), (True, True, True, "purelib-parent"),
+    (True, True, False, "metadata-parent"), (True, True, True, "metadata-parent"),
 ])
 def test_manager_embedded_file_ownership_is_checked_before_transport(
     tmp_path, inputs, embedded, separate, reverse, layout,
 ):
     record, _paths = inputs
-    if layout == "windows-case":
+    if layout.startswith("windows"):
         record["target"]["environment"].update(
             os_name="nt", sys_platform="win32", platform_system="Windows",
         )
@@ -147,6 +151,10 @@ def test_manager_embedded_file_ownership_is_checked_before_transport(
             "ordinary": "agent_procutil/__init__.py",
             "windows-case": "Agent_Procutil/__init__.py",
             "purelib": f"{name}-1.0.data/purelib/agent_procutil/__init__.py",
+            "file-parent": "agent_procutil",
+            "windows-parent": "Agent_Procutil",
+            "purelib-parent": f"{name}-1.0.data/purelib/agent_procutil",
+            "metadata-parent": f"{name}-1.0.data/purelib/agent_procutil-1.0.dist-info",
         }[layout]
         extra = (
             {member: b"VALUE = 1\n"}
@@ -175,14 +183,15 @@ def test_manager_embedded_file_ownership_is_checked_before_transport(
         assert build(record, paths, output)["size"] > 0
 
 
-def test_manager_admission_does_not_change_other_application_profiles(tmp_path, inputs):
+@pytest.mark.parametrize("member", ["helper/__init__.py", "helper"])
+def test_manager_admission_does_not_change_other_application_profiles(tmp_path, inputs, member):
     record, paths = inputs
     root = record["wheels"][0]
     path = paths[root["filename"]]
     path.write_bytes(wheel_bytes(
         name="demo_pkg", prefix="demo_pkg-1.0.dist-info/",
         metadata=b"Metadata-Version: 2.4\nName: demo-pkg\nVersion: 1.0\nRequires-Dist: helper==1.0\n\n",
-        extra={"helper/__init__.py": b"VALUE = 1\n"},
+        extra={member: b"VALUE = 1\n"},
     ))
     root["sha256"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
     assert build(record, paths, tmp_path / "unchanged-profile.zip")["size"] > 0

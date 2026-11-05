@@ -109,6 +109,8 @@ def _verified_profile_wheels(
         remaining_unpacked = max_unpacked_bytes
         distributions = []
         owners = {}
+        directory_owners = {}
+        manager_directories = set()
         manager = "copilot-extensions-worktree-manager"
         check_ownership = any(
             canonicalize_name(wheel["name"]) == manager for wheel in expected.values()
@@ -130,22 +132,47 @@ def _verified_profile_wheels(
                 max_metadata_bytes=max_metadata_bytes, limits=limits, deadline=deadline,
             )
             metadata, unpacked = facts.metadata, facts.unpacked_size
+            wheel_is_manager = canonicalize_name(wheel["name"]) == manager
             for member in facts.member_hashes if check_ownership else ():
                 _check_deadline(deadline)
-                if member.startswith(facts.prefix):
-                    continue
                 parts = member.split("/")
                 if len(parts) > 2 and parts[0].endswith(".data") and parts[1] in {"purelib", "platlib"}:
                     member = "/".join(parts[2:])
                 key = member.casefold() if record["target"]["environment"]["os_name"] == "nt" else member
+                parents = []
+                parent = key
+                while "/" in parent:
+                    _check_deadline(deadline)
+                    parent = parent.rsplit("/", 1)[0]
+                    parents.append(parent)
                 previous = owners.get(key)
-                if previous is not None and manager in {
-                    canonicalize_name(previous), canonicalize_name(wheel["name"]),
-                }:
+                if previous is None or not (
+                    wheel_is_manager or canonicalize_name(previous) == manager
+                ):
+                    previous = None
+                    for parent in parents:
+                        _check_deadline(deadline)
+                        ancestor = owners.get(parent)
+                        if ancestor is not None and (
+                            wheel_is_manager or canonicalize_name(ancestor) == manager
+                        ):
+                            previous = ancestor
+                            break
+                if previous is None and key in directory_owners:
+                    if wheel_is_manager:
+                        previous = directory_owners[key]
+                    elif key in manager_directories:
+                        previous = manager
+                if previous is not None:
                     raise ProfileError(
                         f"wheel payload ownership collision: {member} belongs to {previous} and {wheel['name']}"
                     )
                 owners[key] = wheel["name"]
+                for parent in parents:
+                    _check_deadline(deadline)
+                    directory_owners.setdefault(parent, wheel["name"])
+                    if wheel_is_manager:
+                        manager_directories.add(parent)
             requires_python = metadata.get_all("Requires-Python", [])
             if (
                 requires_python != ([wheel["requires_python"]] if wheel["requires_python"] else [])
