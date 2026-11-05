@@ -25,11 +25,13 @@ or seed cleanup: the launcher still owns exactly one child wait, preserves its
 actual result, retains unconfirmed receipts, and never repeats the launch.
 
 Worktrees' `--test-file tests/test_embody_receipt.py --test-file
-tests/test_embody.py --test-file tests/test_embody_resume_seed.py
+tests/test_embody.py --test-file tests/test_embody_resume_seed.py --test-file
+tests/test_copilot.py
 --allow-explicit-tiers` packet covers additive ordinary state receipts, fresh,
 resume and reuse semantics, incompatible/stale heads, native uncertainty,
 bounded late registration/timeouts, one census per compatible live candidate,
 strict parser handling and a frozen prior no-wait syntax subset.
+The attended attachment consumer also captures the real additive receipt.
 `tests/native/test_embody_receipt_native.py` adds opt-in finite Python CLI
 process/stdout controls, with synthetic launch/session evidence. These prove
 the real parser/stdio seam, not a real mux, Copilot/model startup, cold-machine

@@ -169,3 +169,13 @@ validation documentation. Existing visions need no intent amendment.
 - Captured the operator request verbatim and established #10745.
 - Confirmed the existing mux-only result and missing native identity.
 - Qualified target-owned effort adoption. No runtime changes or rollout yet.
+
+### 2026-11-05 - Attended consumer compatibility
+
+- The core receipt corrections received current-head approval.
+- Strengthened the existing attended attachment test to consume the actual
+  receipt wrapper rather than only a legacy-shaped fake output. All 24
+  attended consumer tests passed; combined focused validation is 179 cases.
+- Captured receipt JSON stays off the attached terminal's stdout; no real
+  Copilot session or production mux was launched. Publish this regression
+  before final merge; exact-head review and CI remain required.
