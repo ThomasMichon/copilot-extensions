@@ -150,8 +150,12 @@ pre/post-admission fence prevents a ticket returned after ownership loss from
 being used. Earlier tickets retain the Gateway's existing monotonic-generation
 rejection. Old process retirement is independent. `__local-stop --config ...`
 requires an exact cohort and waits for that authenticated native peer's exit.
-A connector refused as stale that cannot assert current writer ownership stops
-route admission but retains native control until retirement is authorized.
+A confirmed different writer stops route admission but retains native control
+until retirement is authorized. An unavailable ownership probe instead pauses
+admission with a stop-aware 250 ms retry backoff. Fresh ownership checks must
+succeed before a new admission or returned ticket can be used; temporary
+database locks do not permanently disable a still-current connector. Unavailable
+evidence never confirms ownership or authorizes retirement.
 The existing local-control worker independently observes the current database
 fence and canonical selected slot, authenticates that exact owner's existing
 ready health, and rechecks both before scheduling and applying its own stop.

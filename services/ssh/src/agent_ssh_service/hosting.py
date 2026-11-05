@@ -40,6 +40,12 @@ class RegisteredRelay(Protocol):
 _LEASE = "agent-ssh-service.lock"
 
 
+def _require_writer(writer: FencedWriter) -> None:
+    owner = writer.observed_owner()
+    check(owner is not None, "service-writer-unavailable")
+    check(owner == writer.owner, "stale-service-writer")
+
+
 class FencedConnector(ServiceConnector):
     """Do not publish an admission ticket returned after this owner was fenced."""
 
@@ -48,18 +54,27 @@ class FencedConnector(ServiceConnector):
         super().__init__(**options)
 
     async def _admit(self, session: ClientSession) -> str:
-        check(self.writer.current(), "stale-service-writer")
+        _require_writer(self.writer)
         ticket = await super()._admit(session)
-        check(self.writer.current(), "stale-service-writer")
+        _require_writer(self.writer)
         return ticket
 
     async def run(self, stop: asyncio.Event) -> None:
-        try:
-            await super().run(stop)
-        except SSHServiceError as error:
-            if str(error) != "stale-service-writer" or self.writer.current():
-                raise
-            await stop.wait()
+        while not stop.is_set():
+            try:
+                await super().run(stop)
+                return
+            except SSHServiceError as error:
+                if str(error) == "service-writer-unavailable":
+                    try:
+                        await asyncio.wait_for(stop.wait(), 0.25)
+                    except asyncio.TimeoutError:
+                        continue
+                    return
+                if str(error) != "stale-service-writer" or self.writer.current():
+                    raise
+                await stop.wait()
+                return
 
 
 class UnsettledRelay(RuntimeError):
@@ -197,9 +212,9 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None,
             original_access = credentials.access_token
 
             async def current_access() -> str:
-                check(lifecycle.writer.current(), "stale-service-writer")
+                _require_writer(lifecycle.writer)
                 access = await original_access()
-                check(lifecycle.writer.current(), "stale-service-writer")
+                _require_writer(lifecycle.writer)
                 return access
 
             credentials_access = current_access

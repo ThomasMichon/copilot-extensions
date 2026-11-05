@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 from pathlib import Path
 import sqlite3
+import time
 from types import SimpleNamespace
 from typing import Any, TYPE_CHECKING, cast
 
@@ -286,6 +287,119 @@ def test_fenced_connector_preserves_native_lifetime_until_explicit_stop(
 
     asyncio.run(scenario())
     assert calls == ["admission"]
+
+
+@pytest.mark.parametrize("finish", ["stop", "cancel"])
+def test_unavailable_connector_retry_remains_interruptible(
+    config: ServiceConfig, writer: type[FencedWriter], monkeypatch: pytest.MonkeyPatch,
+    finish: str,
+) -> None:
+    from agent_ssh_service.hosting import FencedConnector
+    from fleet_manager.gateway_service_connector import ServiceConnector
+
+    active = writer(config, "current-owner")
+    active.activate()
+    connector = object.__new__(FencedConnector)
+    connector.writer = active
+
+    async def scenario() -> None:
+        unavailable, stop = asyncio.Event(), asyncio.Event()
+        observed_owner = active.observed_owner
+        def observe() -> str | None:
+            owner = observed_owner()
+            if owner is None:
+                unavailable.set()
+            return owner
+        async def connect(current: Any, _stop: asyncio.Event) -> None:
+            await current._admit(cast(Any, None))
+            raise AssertionError("locked ownership must not admit")
+        monkeypatch.setattr(active, "observed_owner", observe)
+        monkeypatch.setattr(ServiceConnector, "run", connect)
+        with closing(sqlite3.connect(active.root / "directory.sqlite3")) as blocker:
+            blocker.execute("BEGIN EXCLUSIVE")
+            task = asyncio.create_task(connector.run(stop))
+            try:
+                await asyncio.wait_for(unavailable.wait(), 4)
+                if finish == "stop":
+                    stop.set()
+                else:
+                    task.cancel()
+                result, = await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
+                assert result is None if finish == "stop" else isinstance(result, asyncio.CancelledError)
+            finally:
+                blocker.rollback()
+                stop.set()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("position", ["before-admission", "after-ticket"])
+def test_current_connector_resumes_after_real_database_lock(
+    config: ServiceConfig, writer: type[FencedWriter], monkeypatch: pytest.MonkeyPatch,
+    position: str,
+) -> None:
+    from agent_ssh_service.hosting import FencedConnector
+    from fleet_manager.gateway_service_connector import ServiceConnector
+
+    active = writer(config, "current-owner")
+    store = active.activate()
+    baseline = store.snapshot()
+    connector = object.__new__(FencedConnector)
+    connector.writer = active
+    path = Path(config.to_dict()["data_dir"]) / "directory.sqlite3"
+
+    async def scenario() -> None:
+        stop, unavailable, admitted = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        probes: list[tuple[float, float, str | None]] = []
+        tickets: list[str] = []
+        used: list[str] = []
+        observed_owner = active.observed_owner
+        blocker = sqlite3.connect(path)
+
+        def observe() -> str | None:
+            started = time.monotonic()
+            owner = observed_owner()
+            probes.append((started, time.monotonic(), owner))
+            if sum(value is None for _start, _end, value in probes) >= 2:
+                unavailable.set()
+            return owner
+
+        async def ticket(_self: Any, _session: Any) -> str:
+            tickets.append(f"ticket-{len(tickets)}")
+            if position == "after-ticket" and len(tickets) == 1:
+                blocker.execute("BEGIN EXCLUSIVE")
+            return tickets[-1]
+
+        async def connect(current: Any, stopping: asyncio.Event) -> None:
+            used.append(await current._admit(cast(Any, None)))
+            admitted.set()
+            await stopping.wait()
+
+        monkeypatch.setattr(active, "observed_owner", observe)
+        monkeypatch.setattr(ServiceConnector, "_admit", ticket)
+        monkeypatch.setattr(ServiceConnector, "run", connect)
+        if position == "before-admission":
+            blocker.execute("BEGIN EXCLUSIVE")
+        task = asyncio.create_task(connector.run(stop))
+        try:
+            await asyncio.wait_for(unavailable.wait(), 5)
+            assert not used and not task.done()
+            assert len(tickets) == (0 if position == "before-admission" else 1)
+            blocker.rollback()
+            await asyncio.wait_for(admitted.wait(), 3)
+            assert used == [tickets[-1]]
+            assert active.current() and store.snapshot() == baseline
+            failed = [(start, end) for start, end, owner in probes if owner is None]
+            assert failed[1][0] - failed[0][1] >= 0.2
+        finally:
+            blocker.rollback()
+            blocker.close()
+            stop.set()
+            outcome, = await asyncio.gather(task, return_exceptions=True)
+        assert outcome is None
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("code", ["fixture-service-error", "stale-service-writer"])
