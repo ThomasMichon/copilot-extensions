@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Four profile, settings and ACP control contracts](<journal/2026/11.04 native-controls-contracts.md>)
+
+- [2026-11-04 - Four engine, adopter and selector contracts](<journal/2026/11.04 engine-adoption-contracts.md>)
+
+- [2026-11-04 - Four daemon scheduling and retirement contracts](<journal/2026/11.04 daemon-scheduling-contracts.md>)
+
 - [2026-11-04 - Three repository-authority contracts, closed metadata exclusion and nine comparisons](<journal/2026/11.04 repository-authority-contracts.md>)
 
 - [2026-11-04 - Four finalization/recovery contracts, twelve comparisons and retained historical intake](<journal/2026/11.04 finalization-recovery-contracts.md>)
