@@ -11,8 +11,8 @@ It closes the existing
 [worktree-responsibility intent](../../../visions/plugins/agent-dispatch/task-outputs-and-review/README.md#submission-retains-worktree-responsibility)
 using [provider-first contract evolution](../../../docs/patterns/service-contract-evolution.md).
 The original Plan and Validation Plan remain binding.
-The refinement merged in [#10762](https://github.com/ThomasMichon/copilot-extensions/pull/10762)
-after current-head independent approval and successful required checks.
+See the [qualification refinement](https://github.com/ThomasMichon/copilot-extensions/pull/10762)
+and [dated journal](journal/2026/11.05-submission-resubmission.md#resident-only-observation-source).
 
 ## Established boundaries
 
