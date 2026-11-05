@@ -27,7 +27,7 @@ a recovered CI incident whose signature/history should remain available,
 as in progress or already done. These are individual triage directions, not
 permission to claim every example fixed without reading the actual outcome.
 
-> Honestly you can use API queries to grab the whole list (avoid throttling), splat everything to markdown files with context and metadata, then sick a fleet of Luna agents on doing the research against them all in parallel, using VEI to find matching close-out PRs and commits, or scrutizing bug quality.
+> Honestly you can use API queries to grab the whole list (avoid throttling), splat everything to markdown files with context and metadata, then sick a fleet of Luna agents on doing the research against them all in parallel, using [the semantic index] to find matching close-out PRs and commits, or scrutizing bug quality.
 
 The research engine therefore uses one rate-aware collector and independent
 Luna workers, with coordinator-owned integration and tracker effects. The

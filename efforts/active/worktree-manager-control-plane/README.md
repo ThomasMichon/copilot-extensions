@@ -878,8 +878,8 @@ bundled retirement, shift source/resource custody or make the Picker mandatory.
   and leave coherent onboarding/empty state. Preserve fully usable headless
   `agent-worktrees` CLI operation without the Manager and behavioral parity for
   launch, resume, create, finalize, status, refresh, and consequential-action
-  safety. Remove built-in paths and the legacy Picker only after that parity is
-  demonstrated.
+  safety. Remove the remaining Manager-owned Worktrees-specific paths only after
+  that parity is demonstrated; do not reopen completed bundled Picker retirement.
 
 - [ ] Keep agent-worktrees mechanics and authoritative lifecycle/state separate
   from Manager-owned interactive progress/choices. Expose a structured

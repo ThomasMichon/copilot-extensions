@@ -29,7 +29,7 @@ it does not implement fixes, change product behavior, or declare deployment.
 
 - **Topology:** One coordinator; independent, read-only research assignments.
 - **Host (owns PRs):** Coordinator.
-- **Delegates:** The same four researchers cover exact, non-overlapping primary
+- **Delegates:** Independent researchers cover exact, non-overlapping primary
   issue sets across the eligible backlog. Research is wider than publication:
   use broad thematic sweeps and share cross-theme candidate edges through the
   coordinator. Researchers cannot close issues, edit plans, or spawn workers.
