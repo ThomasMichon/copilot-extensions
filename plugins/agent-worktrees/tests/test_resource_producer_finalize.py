@@ -235,7 +235,7 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
         state = invoke("agenda_cli.py", "read", "--state-home", str(home))
         original = _owner_snapshot(home)
         rescue = root / "verified-rescue"
-        rescue.mkdir()
+        rescue.mkdir(mode=0o700)
         selection = [
             "--destination", str(rescue), "--worktree", record.worktree_id,
             "--store-id", state["store_id"], "--expected-revision", str(state["revision"]),
