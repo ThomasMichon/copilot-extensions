@@ -1007,6 +1007,38 @@ and `transport.spawn` asks the same policy before any raw-transport CodeSpace
 spawn (a resync, or a resume without a Session Host),
 advertised as HTTP generation 26 (`codespace_launch_policy`).
 
+Codespace admission and teardown run finite claim/release provider commands
+off the serving loop, using the existing contained process runner and 30-second
+provider deadline. Relay launch-environment resolution uses the same boundary
+with its 15-second deadline, both on fresh start and cold recovery. These calls
+prefer the active registered provider command, preserving its installation
+context; `PATH` is the legacy fallback.
+
+Cancellation waits for the original provider call to settle, including repeated
+cancellation during rollback. The owning loop persists the exact claim receipt
+before unwinding, and clears it before releasing the local TargetLock only after
+confirmed provider release. Unconfirmed release retains the session, receipt and
+lock for reconciliation instead of deleting the session. No create or prompt is
+replayed by this boundary. A per-session ownership guard serializes fresh
+admission, cold recovery, teardown and failed-start finalization, and prevents
+metadata refresh from replacing an in-use target. Stop waits for admission in
+resume-compatible lock order. Remote reaping and authority recovery preserve
+the TargetLock while either the guard or a durable claim remains. After restart,
+claim-bearing teardown/finalization reacquires target-level custody before
+releasing the claim, excluding a new same-owner admission through another alias.
+Concurrent end requests cannot issue delayed duplicate releases. A successful
+release makes teardown terminal before deferred cancellation propagates;
+cancelled starts persist FAILED and cancelled resumes persist STOPPED while
+retaining unresolved ownership and the same conversation.
+If the original provider fails after cancellation, cancellation remains
+non-retryable and chains that failure for diagnosis. Failed-start parity
+finalization uses ordinary terminal teardown rather than a second release path.
+Release removes the admission-only disable flag from its copied child environment.
+Relay-provider absence, timeout, failure or malformed
+output stops authenticated preparation explicitly; successful existing
+`{"prelude": "", "port": null}` output still represents relay opt-out. The
+provider CLI syntax, JSON fields and watchdog grace are unchanged.
+
 ## Ordinary native startup admission receipts
 
 HTTP protocol 45 adds an opt-in keyed native prompt endpoint and a receipt-only
