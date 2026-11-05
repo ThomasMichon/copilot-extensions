@@ -11,10 +11,14 @@ from .worktree_observation_contract import (
 
 
 class FeedUnavailable(ValueError):
-    def __init__(self, message: str, *, retry: bool = True, connected: bool = False) -> None:
+    def __init__(
+        self, message: str, *, retry: bool = True, connected: bool = False,
+        pending: bool = False,
+    ) -> None:
         super().__init__(message)
         self.retry = retry
         self.connected = connected
+        self.pending = pending
 
 
 class CurrentFeed:
@@ -63,16 +67,20 @@ class CurrentFeed:
             )
             raise FeedUnavailable(
                 message, retry=not fatal and error.get("retry", True), connected=True,
+                pending=error.get("code") == "unready" and error.get("retry", True),
             )
         if kind == "going-away":
             generation, cursor = frame.get("generation"), frame.get("cursor")
+            early = self.head is None or (
+                self.head["quality"] == "advisory" and cursor is None
+            )
             if (
                 self._begin is not None
                 or not isinstance(generation, str) or len(generation) != 32
                 or any(c not in "0123456789abcdef" for c in generation)
                 or not isinstance(frame.get("reason"), str) or not frame["reason"]
-                or (self.head is None and cursor is not None)
-                or (self.head is not None and (
+                or (early and cursor is not None)
+                or (not early and (
                     generation != self.head["generation"] or cursor != self.head["revision"]
                 ))
             ):
@@ -81,6 +89,12 @@ class CurrentFeed:
             return None
         if self.notice is not None:
             raise ValueError("current-roster feed continued after its cutover notice")
+        if kind == "pending":
+            if self._begin is not None or (
+                self.head is not None and self.head["quality"] == "current"
+            ) or not isinstance(frame.get("reason"), str) or not frame["reason"]:
+                raise ValueError("current-roster feed sent an invalid pending notice")
+            return None
         if kind in {"heartbeat", "availability"}:
             if self.head is None or self._begin is not None:
                 raise ValueError("current-roster feed interrupted its publication barrier")
@@ -113,19 +127,24 @@ class CurrentFeed:
                 raise ValueError("current-roster feed changed project")
             parse_current_rows({**frame, "ok": True, "worktrees": []}, complete=False)
             if (
-                head["quality"] != "current"
+                (kind == "update" and head["quality"] != "current")
                 or type(frame.get("cursor")) is not int
                 or frame["cursor"] != head["revision"]
                 or frame.get("selected_count") != head["selected_count"]
             ):
                 raise ValueError("current-roster feed omitted its cursor or selected count")
             if kind == "begin":
-                if self.head is not None or frame.get("base_cursor") is not None:
+                if (
+                    self.head is not None and self.head["quality"] != "advisory"
+                ) or frame.get("base_cursor") is not None:
                     raise ValueError("current-roster feed sent an unexpected reset")
+                if self.head is not None:
+                    self._snapshot = CurrentSnapshot()
                 self._snapshot.receive(frame)
             else:
                 if (
-                    self.head is None or head["generation"] != self.head["generation"]
+                    self.head is None or self.head["quality"] != "current"
+                    or head["generation"] != self.head["generation"]
                     or head["revision"] <= self.head["revision"]
                     or frame.get("base_cursor") != self.head["revision"]
                 ):

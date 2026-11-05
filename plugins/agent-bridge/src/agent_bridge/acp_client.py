@@ -49,6 +49,7 @@ from acp.schema import (
 
 from . import __version__
 from .acp_callbacks import _BridgeClientImpl
+from .acp_current_requests import CurrentRequests
 from .acp_subagents import (
     BG_TASK_AGENT_ID_RE as _BG_TASK_AGENT_ID_RE,
     BG_TASK_INACTIVE_STATUSES as _BG_TASK_INACTIVE_STATUSES,
@@ -357,6 +358,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
         self._pending_permission_id: str | None = None
         self._pending_permission_options: set[str] = set()
+        self.current_requests = CurrentRequests()
 
         # Parked ``ask_user`` elicitations, keyed by tool_call_id. Each future
         # resolves to a CreateElicitationResponse once a human answers (via
@@ -528,6 +530,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self, input_stream: asyncio.StreamWriter, output_stream: asyncio.StreamReader,
     ) -> None:
         """Initialize the ACP connection over the supplied write/read streams."""
+        self.current_requests.invalidate()
         client_impl = _BridgeClientImpl(self)
         if self._idle_transport is None:
             self._connection = ClientSideConnection(client_impl, input_stream, output_stream)
@@ -544,6 +547,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             ),
             retry_overrides={"client_capabilities": client_capabilities({})},
         )
+        self.current_requests.bind(client_impl, self._connection, self._process)
 
     @idle_operation
     async def new_session(
@@ -562,6 +566,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             raise RuntimeError("ACP connection not initialized")
         if self._acquisition_launch is not acquisition_launch:
             raise RuntimeCustodyError("Session RPC requires its original acquisition owner")
+        self.current_requests.session_changed(None)
         started = time.monotonic()
         servers = build_mcp_servers(mcp_servers)
         if timing_callback is not None:
@@ -578,6 +583,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         if timing_callback is not None:
             timing_callback("session_new_rpc", time.monotonic() - started)
         self._acp_session_id = result.session_id
+        self.current_requests.session_changed(result.session_id)
         await self._adopt_remote_session()
         # Set the session's model/effort now that it exists (dotfiles#790):
         # copilot ignores the ``--model`` launch flag in ``--acp`` mode, so the
@@ -608,6 +614,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         dotfiles#1478).
         """
         self._acp_session_id = acp_session_id
+        self.current_requests.session_changed(acp_session_id)
         self._preferences_ready = True
 
     @idle_operation
@@ -642,6 +649,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             raise RuntimeCustodyError("Session RPC requires its original acquisition owner")
         if self._remote_transport is not None and not self._remote_can_load:
             raise PermissionError("Remote agent does not advertise session/load")
+        self.current_requests.session_changed(None)
         self._cancel_out_of_turn()
         self._subagent_attr.reset()
         self._loading_session = True
@@ -668,6 +676,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             self._suppress_replay = True
             self._subagent_attr.reset_text_runs()
         self._acp_session_id = session_id
+        self.current_requests.session_changed(session_id)
         await self._adopt_remote_session()
         # Re-assert the model/effort on resume: a reloaded session may report
         # the agent's default in its config options (dotfiles#790).
@@ -1003,6 +1012,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self,
         options: list[PermissionOption],
         tool_call: ToolCallUpdate,
+        *, producer: object | None = None, session_id: str | None = None,
     ) -> RequestPermissionResponse:
         """Handle a permission request from the agent."""
         option_dicts = [
@@ -1052,6 +1062,9 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             for option in option_dicts
             if option.get("optionId")
         }
+        self.current_requests.register(
+            future, "permission", producer=producer, session_id=session_id,
+        )
         try:
             self._emit("permission_request", {
                 "request_id": request_id,
@@ -1110,7 +1123,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         return True
 
     async def _handle_elicitation(
-        self, message: str, mode: Any
+        self, message: str, mode: Any, *, producer: object | None = None,
     ) -> AcceptElicitationResponse | DeclineElicitationResponse | CancelElicitationResponse:
         """Surface an ``ask_user`` elicitation and block on a human answer.
 
@@ -1157,6 +1170,9 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         if stale is not None and not stale.done():
             stale.set_result(CancelElicitationResponse(action="cancel"))
         self._pending_elicitations[tool_call_id] = fut
+        self.current_requests.register(
+            fut, "input", producer=producer, session_id=getattr(mode, "session_id", None),
+        )
         self._pending_ask_user_meta[tool_call_id] = {
             "message": message,
             "requested_schema": schema_data,
@@ -1265,6 +1281,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self._pending_permission_future = None
         self._pending_permission_id = None
         self._pending_permission_options = set()
+        self.current_requests.changed()
         self._completion_event = asyncio.Event()
 
     def _build_turn_result(self) -> dict[str, Any]:

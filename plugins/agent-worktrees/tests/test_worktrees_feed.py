@@ -124,6 +124,167 @@ def request(**selection):
     return {"contract_version": 1, "project": "project", **selection}
 
 
+@pytest.mark.parametrize("saved", [False, True])
+@pytest.mark.parametrize("version", [1, 2])
+def test_cold_bootstrap_socket_serves_saved_rows_before_live_publication(tmp_path, saved, version):
+    from agent_worktrees import worktrees_projection as projection
+
+    path = tmp_path / "current.sqlite3"
+    if saved:
+        previous = WorktreesRuntime(path)
+        previous.activate()
+        for revision in range(3):
+            previous.publish("project", [
+                {"id": "saved", "dirty": 7},
+                {"id": "shared", "title": f"old-{revision}"},
+            ], observed_at=1)
+        previous.shutdown()
+    owner = WorktreesRuntime(path)
+    owner.activate()
+    payload = request(bootstrap=True, contract_version=version)
+    server = control.ControlServer(
+        lambda action, body: owner.health() if action == "health" else owner.handle(body),
+        token="fixture",
+        stream_handle=lambda action, body, disconnected: owner.feed.stream(body, disconnected),
+    )
+    server.start()
+    frames = client.transport(
+        control.ControlClient(f"http://127.0.0.1:{server.port}", token="fixture"),
+        payload,
+    )
+    receiver = client.FeedReceiver(payload)
+    try:
+        started = time.monotonic()
+        if saved:
+            result = apply(receiver, transaction(frames))
+            assert result["projection"]["quality"] == "advisory"
+            assert result["projection"]["observed_at"] == 1
+            assert [row["id"] for row in result["worktrees"]] == ["saved", "shared"]
+            assert result["projection"]["revision"] == 3
+            assert result["availability"]["status"] == "advisory"
+        pending = next(frames)
+        assert pending["type"] == "pending"
+        assert receiver.receive(pending) == [pending]
+        assert time.monotonic() - started < 2
+        assert owner.handle(request())["error"]["code"] == "unready"
+        owner.publish("project", [{"id": "live", "dirty": 0}, {"id": "shared", "title": "current"}],
+                      observed_at=2)
+        result = apply(receiver, transaction(frames))
+        assert result["projection"]["quality"] == "current"
+        assert result["projection"]["generation"] == owner.store.generation
+        assert [row["id"] for row in result["worktrees"]] == ["live", "shared"]
+        assert result["projection"]["revision"] == 1
+        assert projection.read_advisory(path, "project")["worktrees"][0]["id"] == "live"
+        if version == 2:
+            assert {item["id"] for item in result["observations"]} == {"live", "shared"}
+            assert result["worktrees"][1]["semantic_revision"] == 1
+    finally:
+        frames.close()
+        server.close()
+        owner.shutdown()
+
+
+def test_saved_feed_cutover_before_current_keeps_cached_rows_and_reconnect_policy(tmp_path):
+    previous = WorktreesRuntime(tmp_path / "current.sqlite3")
+    previous.activate()
+    previous.publish("project", [{"id": "saved"}], observed_at=1)
+    previous.shutdown()
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    payload = request(bootstrap=True)
+    receiver = client.FeedReceiver(payload)
+    stream = owner.feed.stream(payload, lambda: False)
+    try:
+        apply(receiver, transaction(stream))
+        assert next(stream)["type"] == "pending"
+        owner.close_admission("draining")
+        notice = next(stream)
+        assert notice["type"] == "going-away"
+        assert notice["cursor"] is None
+        assert notice["generation"] != receiver.current["projection"]["generation"]
+        assert receiver.receive(notice) == [notice]
+        assert receiver.current["worktrees"] == [{"id": "saved"}]
+    finally:
+        stream.close()
+        owner.shutdown()
+
+
+def test_bootstrap_retains_real_producer_failure_instead_of_waiting_forever(tmp_path):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    owner.publication_failed("project", RuntimeError("fixture producer failure"))
+    stream = owner.feed.stream(request(bootstrap=True), lambda: False)
+    try:
+        frame = next(stream)
+        assert frame["type"] == "error"
+        assert frame["error"] == {"code": "unavailable", "message": "fixture producer failure"}
+    finally:
+        stream.close()
+        owner.shutdown()
+
+
+def test_legacy_feed_never_receives_unnegotiated_bootstrap(tmp_path):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    stream = owner.feed.stream(request(), lambda: False)
+    try:
+        frame = next(stream)
+        assert frame["type"] == "error" and frame["error"]["code"] == "unready"
+    finally:
+        stream.close()
+        owner.shutdown()
+
+
+def test_cli_saved_bootstrap_flushes_bounded_transactions_before_connecting(
+    tmp_path, monkeypatch, capsys,
+):
+    from agent_worktrees import worktrees_client, worktrees_projection
+
+    monkeypatch.setattr(worktrees_client.cfg, "install_dir", lambda: tmp_path)
+    store = worktrees_projection.WorktreesProjection(tmp_path / "worktrees-current.sqlite3")
+    rows = [{"id": f"row-{i}", "title": "saved " * 100} for i in range(300)]
+    store.publish("project", rows, observed_at=1)
+    before_connect = []
+
+    def connect(payload):
+        before_connect.extend(json.loads(line) for line in capsys.readouterr().out.splitlines())
+        raise client.FeedFailure("starting", code="unready", retry=True)
+
+    monkeypatch.setattr(client, "_client", connect)
+    with pytest.raises(client.FeedFailure, match="starting"):
+        client.relay(request(), bootstrap=True)
+    assert before_connect[0]["type"] == "begin"
+    assert before_connect[-2]["type"] == "done"
+    assert before_connect[-1]["type"] == "pending"
+    assert all(len(json.dumps(frame).encode()) < client.MAX_FRAME_BYTES for frame in before_connect)
+    receiver = client.FeedReceiver(request(bootstrap=True))
+    for frame in before_connect:
+        receiver.receive(frame)
+    assert receiver.current["projection"]["quality"] == "advisory"
+    assert receiver.current["worktrees"] == rows
+    with pytest.raises(ProjectionUnavailable, match="invalid cursor"):
+        client.FeedReceiver(request()).receive(before_connect[0])
+
+
+def test_cli_local_saved_prelude_accepts_early_resident_cutover(tmp_path, monkeypatch, capsys):
+    from agent_worktrees import worktrees_client, worktrees_projection
+
+    monkeypatch.setattr(worktrees_client.cfg, "install_dir", lambda: tmp_path)
+    store = worktrees_projection.WorktreesProjection(tmp_path / "worktrees-current.sqlite3")
+    store.publish("project", [{"id": "saved"}], observed_at=1)
+    notice = {"type": "going-away", "generation": "f" * 32, "cursor": None, "reason": "update"}
+    monkeypatch.setattr(client, "_client", lambda payload: object())
+    monkeypatch.setattr(client, "transport", lambda *args: (frame for frame in (notice,)))
+    assert client.relay(request(), bootstrap=True) == 0
+    frames = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    receiver = client.FeedReceiver(request(bootstrap=True))
+    for frame in frames:
+        receiver.receive(frame)
+    assert frames[-1] == notice
+    assert receiver.current["projection"]["quality"] == "advisory"
+    assert receiver.current["worktrees"] == [{"id": "saved"}]
+
+
 @pytest.fixture
 def owner(tmp_path):
     runtime = WorktreesRuntime(tmp_path / "current.sqlite3")

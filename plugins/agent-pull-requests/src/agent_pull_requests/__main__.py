@@ -492,7 +492,13 @@ def _watch_dial() -> tuple[str, int, str] | None:
         return dial(_WATCH_INVOCATION)
     from .watch_daemon import endpoint_from_rendezvous, read_lock_data
 
-    return endpoint_from_rendezvous(read_lock_data())
+    from single_instance_lease import pid_alive
+
+    data = read_lock_data()
+    pid = data.get("pid") if isinstance(data, dict) else None
+    if type(pid) is int and pid > 0 and not pid_alive(pid):
+        return None
+    return endpoint_from_rendezvous(data)
 
 
 def _watch_boot() -> None:

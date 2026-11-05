@@ -1090,6 +1090,16 @@ rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
 
+Cold local loads request a labeled saved-DB bootstrap on the same subscription.
+Saved rows remain advisory and non-authoritative while the source is loading;
+the first complete current publication replaces them atomically. Retryable
+resident startup/unready responses keep the loading state instead of reporting
+a failed load. Direct feeds negotiate `worktrees-feed-bootstrap-v1`; CLI feeds
+use the backward-compatible `--follow --cache-only` combination. A missing
+direct resident uses the existing CLI launch/recovery owner, never caller-side
+Git computation or a new daemon owner. Real producer, protocol, authentication
+and live-peer failures remain explicit.
+
 Machine-SSH listing and follow-feed calls suppress configured local and remote
 forwarding with `ClearAllForwardings=yes`; aliases, routing, identity, host trust
 and timeouts remain unchanged. Interactive launches and effectful commands retain
@@ -1147,8 +1157,9 @@ companions.
 
 Initial live rows come from one authoritative snapshot-plus-follow subscription,
 not a preceding cache-only one-shot process. Pivot discovery remains independent
-and remote loading remains lazy. There is no advisory initial-row result that
-can subsequently overwrite current rows. Optional bootstrap `project_config`
+and remote loading remains lazy. An explicitly labeled advisory bootstrap may
+arrive on that same subscription, but cannot overwrite accepted current rows.
+Optional bootstrap `project_config`
 fields (`config_dir`, `repo_dir`, `machine`) seed the Manager's config cache.
 Older engines retain one memoized fallback call per missing scalar, on setup
 workers. Bound scalars survive ordinary setup/reload file-cache invalidation;

@@ -55,6 +55,27 @@ def request(**extra):
     return {"contract_version": 1, "project": "project", **extra}
 
 
+def test_cold_read_starts_owner_and_returns_saved_db_without_waiting_for_live_probe(
+    tmp_path, monkeypatch, no_caller_compute,
+):
+    monkeypatch.setattr(client.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(client.monitor, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(client.monitor, "_status_monitor_enabled", lambda: True)
+    starts = []
+    monkeypatch.setattr(client.monitor, "_ensure_status_monitor", lambda: starts.append(1) or True)
+    monkeypatch.setattr(client, "_resident",
+                        lambda _: (_ for _ in ()).throw(ConnectionRefusedError("stopped")))
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("waited behind live refresh"))
+    store = projection.WorktreesProjection(tmp_path / "worktrees-current.sqlite3")
+    store.publish("project", [{"id": "saved", "dirty": 9}], observed_at=1)
+    result = client.read_current(request())
+    assert starts == [1]
+    assert result["projection"]["quality"] == "advisory"
+    assert result["projection"]["observed_at"] == 1
+    assert result["worktrees"] == [{"id": "saved", "dirty": 9}]
+    assert result["availability"]["status"] == "advisory"
+
+
 @pytest.mark.parametrize("birth", [None, "12345"])
 def test_confirmed_dead_route_recovers_before_attempting_transport(
     tmp_path, monkeypatch, no_caller_compute, birth,

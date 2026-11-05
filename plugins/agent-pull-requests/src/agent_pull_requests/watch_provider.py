@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .watch_contract import PRSnapshot
-from .watch_process import run_owned
+from .native_command import run_command
 
 NATIVE_SNAPSHOTS = "native_snapshots/v1"
 CONTINUOUS_NOTIFICATIONS = "continuous_notifications/v1"
@@ -30,7 +30,7 @@ def target_id(snapshot: PRSnapshot) -> str:
 
 
 def _run_native(argv: list[str]) -> subprocess.CompletedProcess:
-    return run_owned(argv, timeout=20.0)
+    return run_command(argv, timeout=20.0)
 
 
 def command_path(value: object) -> str:

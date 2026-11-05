@@ -136,6 +136,13 @@ pending. Unknown native kinds remain `source-event`, without prose inference.
 Reported lifecycle/tool/subagent events do not allocate, settle or release
 canonical resources.
 
+The internal `acp_current_requests.py` helper separately qualifies actual local
+manual permission/form waiters, with bounded view-only identities and explicit
+connection/session invalidation. It is not connected to this wire contract:
+there is no current-state query, CLI flag or advertised optional capability yet.
+The [implementation contract](../../../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-current-requests.md)
+retains provider/parser negotiation and consumer validation as separate work.
+
 Actual translated compaction starts carry `bridge-compaction-evidence-v1`
 records, including optional direct total usage, attempt, model, execution,
 trigger and target-window fields. Active pre-window capacity remains unknown.
