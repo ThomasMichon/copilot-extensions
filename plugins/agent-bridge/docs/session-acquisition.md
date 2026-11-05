@@ -305,6 +305,17 @@ that an earlier launch did not happen. Historical and unknown effects retain
 their existing reconciliation requirement. No acquisition wire capability or
 protocol change is introduced by installed-owner resolution.
 
+Local lineage registration, succession, handoff notes and successor-context
+reads use that same owner selection and environment filtering. They retain
+their best-effort, ten-second timeout behavior: unavailable or refused owners
+skip the operation rather than breaking an ordinary Bridge handoff. They never
+substitute a global owner after an explicit installation refusal. Owner-routing
+and Python-environment overrides are removed case-insensitively before launch.
+Coherent delegation is not proof that the selected Worktrees runtime or its
+resident preserves a protected relationship and workspace nonce. Governed
+assignment still requires independent qualification of the actual participants;
+legacy lineage success alone grants no admission or cleanup authority.
+
 Worktree identity preflight reads the exact current tracking record with
 `record --worktree-id <id> --json`, avoiding global transcript scans
 and cached full-list results. Only tracking identity, path and lifecycle state

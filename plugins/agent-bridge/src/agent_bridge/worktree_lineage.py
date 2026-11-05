@@ -28,7 +28,11 @@ via its opening turn instead):
 - :func:`session_role` -- the successor's role over the ground layer.
 - :func:`history_digest` -- the worktree's recent session-tagged history.
 
-Every write and read is **fail-open**: a missing binstub, an untracked worktree,
+Every operation selects the same Worktrees owner prefix and scrubbed environment
+as acquisition; an explicit installation refusal cannot use a global fallback.
+This shared selection alone does not qualify the selected record writer.
+
+Every write and read is **fail-open**: an unavailable owner, an untracked worktree,
 a timeout, or a non-zero exit degrades to a no-op (writes) or ``None`` (reads) so
 the ground layer is a *supplement*, never a mainline dependency -- a bridge
 handoff must never break because the CLI could not be consulted.
@@ -43,7 +47,7 @@ import subprocess
 
 from agent_procutil import no_window_flags
 
-from .agent_registry import _agent_worktrees_bin
+from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
 
 log = logging.getLogger("agent_bridge.worktree_lineage")
 
@@ -52,25 +56,12 @@ log = logging.getLogger("agent_bridge.worktree_lineage")
 # long (fail-open on timeout, exactly like the head read).
 _LINEAGE_TIMEOUT_S = 10.0
 
-# env markers scrubbed so a uv-managed child Python does not trip an `_sre`
-# module mismatch -- the same guard worktree_head / agent_registry use.
-_SCRUB = ("VIRTUAL_ENV", "PYTHONHOME", "__PYVENV_LAUNCHER__", "PYTHONPATH")
-
-
-def _child_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k not in _SCRUB}
-
-
 def _run(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str] | None:
     """Shell ``agent-worktrees <args>`` fail-open; return the completed process
-    or ``None`` when the binstub is missing / the call could not run.
+    or ``None`` when the selected owner is unavailable / the call could not run.
 
     ``cwd`` (the worktree checkout) is where agent-worktrees resolves its project
     context from -- pass it so verbs work outside a repo cwd."""
-    exe = _agent_worktrees_bin()
-    if not exe:
-        log.debug("agent-worktrees binstub not found -- lineage write skipped")
-        return None
     # Run from the worktree checkout when known: agent-worktrees resolves its
     # project context from cwd "like git", and several verbs don't honor an
     # ``--worktree-id`` alone -- so a neutral cwd (the systemd daemon's) makes
@@ -78,14 +69,18 @@ def _run(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess
     # resolver; fall back to the daemon's cwd when the dir is unknown.
     run_cwd = cwd if (cwd and os.path.isdir(cwd)) else None
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            [exe, *args],
+        prefix = _agent_worktrees_launch_prefix()
+        if not prefix:
+            log.debug("agent-worktrees owner unavailable -- lineage operation skipped")
+            return None
+        proc = subprocess.run(  # noqa: S603 -- selected owner command prefix
+            [*prefix, *args],
             capture_output=True,
             text=True,
             timeout=_LINEAGE_TIMEOUT_S,
             check=False,
             creationflags=no_window_flags(),
-            env=_child_env(),
+            env=_agent_worktrees_environment(),
             cwd=run_cwd,
         )
     except Exception as exc:  # broad by design -- fail-open contract

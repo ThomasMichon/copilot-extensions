@@ -19,8 +19,10 @@ The effort remains **Active**. Passing one source phase or PR is not completion.
 Current source credit: first-proposal guarded submission merged in #10608;
 same-owner rejected-proposal lineage merged in #10674. The ordinary whole-stack
 case still fails at missing protected assignment/preparation integration.
-Next, qualify the actual participating writers and ordinary submission
-consumers, then post-stop same-native recovery and the complete running
+Resident-only inspection is available at the provider boundary; Bridge's
+delegated selection and the complete writer cohort remain unqualified.
+Next, reconcile and qualify those writers and ordinary submission consumers,
+then post-stop same-native recovery and the complete running
 lifecycle. No deployment or cleanup permission is implied.
 
 ## Context
