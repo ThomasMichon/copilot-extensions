@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from worktree_manager.companion_bridge_session_codec import SessionCodec
-from worktree_manager.companion_timeline_contract import TimelineContractError
+from worktree_manager.companion_timeline_contract import LiveDelta, TimelineContractError
 from worktree_manager.companion_timeline_layout import TimelineLayout
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_worktree_codec import OwnerReadError
@@ -286,3 +286,45 @@ def test_bounded_work_label_preserves_full_reported_title_in_evidence(semantic) 
     event = codec.events(frame, codec.token(frame, 1))[0]
     assert event.summary == "Tool started: " + title[:160] + "..."
     assert json.loads(event.data_json)["details"]["title"] == title
+
+
+@pytest.mark.parametrize("live", [False, True])
+@pytest.mark.parametrize("kind,details,expected", [
+    ("tool_call_start", {"title": "Inspect\x00changes"}, "Tool started"),
+    ("subagent_started", {"agent_display_name": "Compare\x00options", "agent_name": "search"},
+     "Reported agent start: search"),
+    ("subagent_started", {"agent_name": "search\x00"}, "Reported agent start"),
+])
+def test_invalid_prose_labels_fall_back_in_snapshot_and_live_without_losing_evidence(
+    semantic, live: bool, kind: str, details: dict, expected: str,
+) -> None:
+    codec, window = semantic.codec(), TimelineWindow()
+    initial = None
+    if live:
+        semantic.log.append("turn_complete", {})
+        initial = codec.decode(semantic.frame())
+        token = codec.token(initial, 1)
+        assert window.bind(token).applied
+        assert window.apply_snapshot(codec.snapshot(initial, token)).applied
+    semantic.log.append(kind, details)
+    frame = codec.decode(semantic.frame(position=initial["position"] if live else None))
+    token = codec.token(frame, 1)
+    if live:
+        assert frame["kind"] == "delta"
+        result = window.apply_delta(LiveDelta(
+            token, codec.position(token, frame["base_position"]),
+            codec.position(token, frame["position"]), codec.events(frame, token),
+        ))
+    else:
+        assert window.bind(token).applied
+        result = window.apply_snapshot(codec.snapshot(frame, token))
+    assert result.applied
+    event = window.events[-1]
+    assert event.summary == expected
+    assert json.loads(event.data_json)["details"] == details
+
+
+def test_invalid_utf8_reported_name_remains_an_explicit_wire_source_error(semantic) -> None:
+    semantic.log.append("subagent_started", {"agent_display_name": "Compare\ud800options"})
+    with pytest.raises(TimelineContractError, match="invalid UTF-8 text"):
+        semantic.codec().decode(semantic.frame())

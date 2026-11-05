@@ -13,7 +13,7 @@ from .companion_timeline_contract import (
     ActorKind, Availability, Completeness, EvidenceKind, HistoryPage, Provider, Qualification,
     RelationKind, SourceIdentity, SourcePosition, SourceToken, TimelineActor, TimelineContractError,
     TimelineEvent, TimelineKind, TimelineRelation, TimelineSnapshot, check_wire_body,
-    decode_wire_frame, identifier,
+    decode_wire_frame, identifier, text,
 )
 from .companion_worktree_codec import OwnerReadError, encoded, object_fields, stamp
 
@@ -83,6 +83,10 @@ def _event_summary(item: dict[str, Any]) -> str:
     for field in fields:
         value = details.get(field)
         if isinstance(value, str) and len(value) <= 512 and value.strip():
+            try:
+                text(value, "Bridge reported label")
+            except TimelineContractError:
+                continue
             value = value.strip()
             return label + ": " + value[:160] + ("..." if len(value) > 160 else "")
     return label

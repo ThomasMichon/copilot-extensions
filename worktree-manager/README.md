@@ -147,6 +147,9 @@ older-provider fields use generic occurrence labels. Exact native kinds and
 source fields remain in expandable Evidence. These labels do not establish
 current concurrency, allocated-agent custody, lifetime tool totals or pending
 input.
+An optional label that cannot be used as literal display text falls back to
+the next reported name or generic occurrence label while its source value stays
+in Evidence. Invalid wire text remains a source error, not a hidden fallback.
 
 Timeline keeps the purpose, compact source/input qualification and bottom-anchored
 work canvas visible. Expand **Evidence** for exact source IDs, qualifications,
