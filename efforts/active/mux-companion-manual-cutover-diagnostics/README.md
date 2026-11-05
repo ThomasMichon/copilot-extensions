@@ -484,7 +484,9 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       finite owner commands and fresh local readback. #10520 connects that boundary
       to the existing tick through strict machine-local opt-in, shared bounded
       execution and independent collection-context scheduling. D4's source
-      integration is complete; D5 rescue, actual archive acknowledgment and
+      integration is complete. #10528 delivers D5's conservative checkout-local
+      preservation and independent managed-data retirement source controls;
+      D5 rescue, actual archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
       whole S2-S5 and original root gates remain open.
@@ -564,6 +566,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Checkout preservation merged; rescue qualification continues](journal/2026/11.04-sidecar-checkout-preservation.md)
 - [2026-11-04 - Existing-tick collection merged; legacy preservation next](journal/2026/11.04-sidecar-existing-tick-collection.md)
 - [2026-11-04 - Explicit managed export composed; existing-tick integration next](journal/2026/11.04-sidecar-managed-export-composition.md)
 - [2026-11-04 - Passive archival providers merged; existing-tick orchestration next](journal/2026/11.04-sidecar-logger-provider-discovery.md)

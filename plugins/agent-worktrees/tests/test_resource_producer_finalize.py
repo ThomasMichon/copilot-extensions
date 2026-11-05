@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -181,12 +182,10 @@ def test_confirmed_close_then_actual_finalize(final_owner, monkeypatch):
     assert current.status == "finalized" and current.resources[0].producer["phase"] == "closed"
 
 
-@pytest.mark.parametrize("layout", ["legacy", "managed"])
+@pytest.mark.parametrize("layout", ["legacy", "legacy-exported", "managed"])
 def test_completed_finalize_retains_agenda_without_an_archive_dependency(
     final_owner, monkeypatch, layout,
 ):
-    from pathlib import Path
-
     from agent_worktrees import repos, worktree_data_store
 
     root, path, config = final_owner
@@ -202,7 +201,7 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
         "repos": {config.repo_name: {"remote": str(root / "origin.git")}},
     }))
     monkeypatch.setattr(repos, "_repos_yaml_path", lambda: registry)
-    if layout == "legacy":
+    if layout != "managed":
         (anchor / ".git/info/exclude").write_text(".effort-agenda/\n")
         home = checkout / ".effort-agenda/main"
         home.mkdir(parents=True)
@@ -213,7 +212,49 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
         )
         home = Path(placement.state_home)
     member = home / "agenda.sqlite3"
-    member.write_bytes(b"synthetic agenda bytes, not a live database")
+    rescue = None
+    if layout == "legacy-exported":
+        skill = Path(__file__).resolve().parents[2] / "efforts/skills/driving-effort-agendas"
+
+        def invoke(script, *args, request=None):
+            result = subprocess.run(
+                [sys.executable, "-B", str(skill / "scripts" / script), *args],
+                input=json.dumps(request) if request is not None else None,
+                capture_output=True, text=True, timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            assert result.returncode == 0, result.stderr
+            return json.loads(result.stdout)
+
+        request = json.loads((skill / "assets/init.context-qualified.example.json").read_text())
+        request["change"]["worktree"] = record.worktree_id
+        invoke(
+            "agenda_cli.py", "init", "--mode", "context-qualified",
+            "--state-home", str(home), request=request,
+        )
+        state = invoke("agenda_cli.py", "read", "--state-home", str(home))
+        original = _owner_snapshot(home)
+        rescue = root / "verified-rescue"
+        rescue.mkdir()
+        selection = [
+            "--destination", str(rescue), "--worktree", record.worktree_id,
+            "--store-id", state["store_id"], "--expected-revision", str(state["revision"]),
+            "--contract-version", "1",
+        ]
+        exported = invoke(
+            "agenda_export_cli.py", "export", "--state-home", str(home), *selection,
+        )
+        verified = invoke("agenda_export_cli.py", "verify", *selection)
+        assert verified["manifest"] == exported["manifest"]
+        assert verified["manifest"]["completeness"] == "complete"
+        historical = invoke("agenda_cli.py", "read", "--state-home", str(rescue))
+        for field in ("store_id", "revision", "documents", "records", "metadata"):
+            assert historical[field] == state[field]
+        assert _owner_snapshot(home) == original
+        rescue_before = _owner_snapshot(rescue)
+    else:
+        member.write_bytes(b"synthetic agenda bytes, not a live database")
+    original_member = member.read_bytes()
     descriptor_root = path.parent.parent / "worktree-state"
     before = {
         item: item.read_bytes()
@@ -229,14 +270,14 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
 
     assert finalize.validate_and_finalize("owner", config) is True
     assert tracking.load_record(path).status == "finalized"
-    assert member.read_bytes() == b"synthetic agenda bytes, not a live database"
-    assert checkout.exists() is (layout == "legacy")
-    assert bool(_git("branch", "--list", "worktree/owner", cwd=anchor)) is (layout == "legacy")
+    assert member.read_bytes() == original_member
+    assert checkout.exists() is (layout != "managed")
+    assert bool(_git("branch", "--list", "worktree/owner", cwd=anchor)) is (layout != "managed")
     assert any(
         kind == "worktree_finalized" and data["removed"] is (layout == "managed")
         for kind, data in events
     )
-    if layout == "legacy":
+    if layout != "managed":
         assert any(
             kind == "finalize_skipped_removal" and data["reason"] == "retained_data"
             for kind, data in events
@@ -245,6 +286,10 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
         item: item.read_bytes()
         for item in descriptor_root.rglob("*") if item.is_file()
     } == before
+    if rescue is not None:
+        assert _owner_snapshot(home) == original
+        assert _owner_snapshot(rescue) == rescue_before
+        assert not descriptor_root.exists()
     if layout == "managed":
         observed = worktree_data_store.read_worktree_data(
             config.repo_name, "owner", store_id="a" * 32,
