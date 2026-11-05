@@ -1,5 +1,15 @@
 # Testing copilot-extensions
 
+Bridge's opt-in `--test-file tests/test_acp_current_requests.py
+--test-file tests/test_acp_client.py --test-file tests/test_attention_current.py
+--test-file tests/test_attention_wait.py --allow-explicit-tiers` packet checks
+actual local callback/Future lifetime, bounded candidate/output counts, privacy,
+manual-versus-forwarded/automatic permission, connection/process/session
+replacement and failed initialization. Delayed old callbacks never qualify as
+the new producer, and completion invalidations do not append history. It starts
+no SDK/model actor and does not qualify optional wire, Manager, installed or
+native-client behavior; required unit-only CI is unchanged.
+
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
 --allow-explicit-tiers` packet checks complete verified contributor provenance,
