@@ -3,6 +3,16 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Retained registration encoding and independently completed Windows census correction](<journal/2026/11.04 windows-census-registration-encoding-contracts.md>)
+
+- [2026-11-04 - Prompt watchdog exit and bounded retained-tombstone work](<journal/2026/11.04 exit-observation-history-work-contracts.md>)
+
+- [2026-11-04 - Independent Bridge target refusal and caller-parent metadata](<journal/2026/11.04 bridge-target-parent-metadata-contracts.md>)
+
+- [2026-11-04 - Finite artifact boundary follow-up and protected whole-source exclusion](<journal/2026/11.04 artifact-boundary-followup-contracts.md>)
+
+- [2026-11-04 - Unclaimed task transfer and actual acknowledged execution boundaries](<journal/2026/11.04 task-transfer-execution-handoff-contracts.md>)
+
 - [2026-11-04 - Two undiagnosed Windows transaction completion conditions](<journal/2026/11.04 windows-transaction-denial-contracts.md>)
 
 - [2026-11-04 - Refined instruction delivery and finite source compatibility](<journal/2026/11.04 instruction-source-delivery-contracts.md>)
