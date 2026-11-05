@@ -23,7 +23,8 @@ The original #7009 guest boundary and #7687 remain separately owned.
 #8847's actual native long-path/PowerShell corrections are credited at the
 whole-message tier, not represented as missing source or complete #7010
 acceptance. #10019's typing correction and previously whole-read #10058's
-SDK work also do not supply that exact native witness.
+POSIX installer correction for Linux containers sharing a WSL kernel also
+do not supply that exact native witness.
 No native launch, setting change, identity relaxation or installation runs.
 
 ## Batched novelty inspection and the remaining repeated Git work
@@ -82,11 +83,12 @@ The original 55-failure report is not asserted as the present state.
 The complete original-equivalent hosted WSL inventory/assertions remain,
 including real process/publisher concurrency, production-guest and foreign
 native/container refusal, and valid setup/call/teardown timing.
-The 55-fail/130-pass/24-skip report and later 185-pass/24-skip report cover
-different selections; their 151/218-second totals are not a speed comparison.
+The 55-fail/130-pass/24-skip WSL report and 185-pass/24-skip hosted Linux
+report run the same original 209-case inventory in different environments.
+Their different outcomes and 151/218-second totals are not a speed comparison.
 The marketplace-declaration cause remains a separate question.
-#10330's Bridge fixture and previously whole-read #10146's Windows fixture
-do not establish this selector.
+#10330's Bridge fixture and previously whole-read #10146's Gateway RS256
+user-bearer caller admission do not establish this selector.
 Fresh whole #10063 concerns canonical SDK synthetic-input/HTTP contracts,
 not the complete hosted WSL binding.
 No fixture, guest binding, publisher, container or hosted selection runs.
@@ -131,8 +133,8 @@ No lock removal, termination, repair, recovery or claim change runs.
 ## Verified receipt aliases and whole-snapshot incompleteness
 
 **#7180** credits the current strict #7102 snapshot behavior.
-Receipt-consumer aliases require verified equivalent record scope, not
-arbitrary removal of a WSL path prefix.
+Receipt-consumer machine identifiers require verified, record-scoped
+machine-name equivalence, not blindly stripping a `-wsl` suffix.
 An unresolved accepted chain makes the whole snapshot incomplete and
 suppresses all current-owner conclusions, not just the ambiguous row.
 Retain an exact positive qualified-alias case and an unverified negative.
@@ -174,8 +176,10 @@ a limit, real concurrent writers and untorn observer assertions.
 A sixty-second inner allowance does not enlarge the thirty-second outer item.
 The #7248/#7253 consent feature is legitimately Done; this retained residual
 does not reopen the parent feature.
-Previously whole-read #10293's authorization caps, #9416's empty listener
-and #9681's logger partition do not establish this timeout's cause.
+Previously whole-read #10293's read-only update-authentication probe and
+credential-helper deadline correction from five to thirty seconds,
+#9416's empty listener and #9681's logger partition do not establish
+this native stamp timeout's cause.
 No rerun, limit change, flake waiver or completed-parent reopening occurs.
 
 ## Native Python-free marker-set transaction
