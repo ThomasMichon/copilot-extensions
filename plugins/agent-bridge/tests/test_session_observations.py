@@ -89,6 +89,28 @@ def append(source, count):
     return log
 
 
+def test_contribution_projection_retains_only_bounded_reported_names(source):
+    log = source.session_manager.get_session("session-1").event_log
+    log.append("subagent_started", {
+        "agent_id": "helper", "agent_name": "search", "agent_display_name": "Compare options",
+        "agent_description": "private task body", "model": "unneeded model metadata",
+    })
+    log.append("subagent_completed", {
+        "agent_id": "helper", "agent_name": ["invalid"], "agent_display_name": "x" * 513,
+    })
+    selected = request()
+    result = frame(admit(source, selected), selected)
+    validate_frame(result, selected)
+    first, second = result["entries"]
+    assert first["details"] == {
+        "agent_id": "helper", "agent_name": "search", "agent_display_name": "Compare options",
+    }
+    assert second["details"] == {"agent_id": "helper"}
+    assert set(second["omitted_fields"]) == {"agent_name", "agent_display_name"}
+    assert result["coverage"] == "partial" and result["current_requests"] == "unknown"
+    assert frame(admit(source, selected), selected)["entries"] == result["entries"]
+
+
 def test_snapshot_delta_and_backward_page_do_not_move_delivery_cursor(source):
     log = append(source, 5)
     selected = request(limit=2)

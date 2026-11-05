@@ -91,6 +91,23 @@ def test_repository_identity_requires_common_git_metadata(tmp_path, missing):
     assert reader.repository_identity(caller / "new.txt")["root"] == reader.canonical(caller)
 
 
+@pytest.mark.parametrize("missing", ["HEAD", "objects", "refs"])
+def test_repository_probe_observes_failed_and_successful_dependencies(tmp_path, missing):
+    reader = _load("guarded_anchor_map")
+    caller = _repo(tmp_path / "caller")
+    target = caller / ".git" / missing
+    observed = []
+    assert reader.repository_identity(caller, observe=observed.append)
+    assert caller in observed and target in observed
+    if target.is_dir():
+        target.rmdir()
+    else:
+        target.unlink()
+    observed.clear()
+    assert reader.repository_identity(caller, observe=observed.append) is None
+    assert target in observed
+
+
 def test_map_validation_does_not_probe_inventory_paths(tmp_path, monkeypatch):
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
