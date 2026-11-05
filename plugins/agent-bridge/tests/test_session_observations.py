@@ -33,7 +33,7 @@ from agent_bridge.session_observations import admit, frame
 
 def request(
     *, history=False, after=None, before=None, limit=64, project="demo", follow=False,
-    current=False,
+    current=False, statistics=False,
 ):
     return ReadRequest(
         Selection("session-1", project, "worktree-1", None),
@@ -42,6 +42,7 @@ def request(
         before if history else after,
         limit,
         current,
+        statistics,
     )
 
 
@@ -87,6 +88,164 @@ def append(source, count):
     for index in range(count):
         log.append("tool_call_start", {"tool_call_id": f"tool-{index}", "title": "Work"})
     return log
+
+
+def test_statistics_cover_owner_range_not_page_or_repeated_delivery(source):
+    log = append(source, 80)
+    selected = request(limit=2, statistics=True, current=True)
+    initial = frame(admit(source, selected), selected)
+    validate_frame(initial, selected)
+    stats = initial["tool_statistics"]
+    assert stats == {
+        "version": 1, "availability": "observed", "reason": "native-event-range",
+        "basis": "native-tool-start-record-occurrences",
+        "coverage": "partial", "durability": "unknown",
+        "start_occurrences": 80, "observed_records": 80,
+        "floor": 1, "head": 80, "contiguous": True,
+    }
+    assert len(initial["entries"]) == 2 and initial["has_more"]
+    assert frame(admit(source, selected), selected)["tool_statistics"] == stats
+    older = request(history=True, before=initial["next_before"], limit=2)
+    assert "tool_statistics" not in frame(admit(source, older), older)
+    for _ in range(3):
+        log.append("tool_call_start", {"tool_call_id": "same-replayed-or-nested-id"})
+    delta_request = request(after=initial["position"], limit=1, statistics=True)
+    delta = frame(admit(source, delta_request), delta_request)
+    validate_frame(delta, delta_request)
+    assert delta["entries"][0]["native_event_id"] == 81 and delta["has_more"]
+    assert read_position(delta["position"], delta["source"]) == 81
+    assert delta["tool_statistics"]["head"] == 83
+    assert delta["tool_statistics"]["start_occurrences"] == 83
+    assert source.db.get_cursor("observer", "session-1") == 0
+
+
+def test_statistics_empty_zero_and_ancillary_failure_keep_source_records(source):
+    selected = request(statistics=True)
+    known = admit(source, selected)
+    empty = frame(known, selected)
+    validate_frame(empty, selected)
+    assert empty["tool_statistics"]["availability"] == "unknown"
+    assert empty["tool_statistics"]["start_occurrences"] is None
+    known.log.append("tool_call_update", {})
+    zero = frame(known, selected)
+    validate_frame(zero, selected)
+    assert zero["tool_statistics"]["start_occurrences"] == 0
+    assert zero["tool_statistics"]["observed_records"] == 1
+    known.log._tool_statistics = None
+    unknown = frame(known, selected)
+    validate_frame(unknown, selected)
+    assert unknown["tool_statistics"]["reason"] == "counter-unavailable"
+    assert unknown["tool_statistics"]["head"] is None
+    assert unknown["entries"] == zero["entries"]
+    assert unknown["position"] == zero["position"]
+
+
+def test_statistics_atomic_cut_and_captured_gap_do_not_claim_full_history(source, monkeypatch):
+    from agent_bridge.events import SseEvent
+
+    session = source.session_manager.get_session("session-1")
+    session.event_log = EventLog.from_captured_events(
+        [SseEvent(i, "tool_call_start" if i == 101 else "tool_call_update", {})
+         for i in (101, 102, 105, 106)],
+        107, db=source.db, session_id="session-1", acp_session_id="durable-1",
+        worktree_id="worktree-1",
+    )
+    log = session.event_log
+    snapshot = log.snapshot_observation_with_statistics
+
+    def append_after_cut(**kwargs):
+        result = snapshot(**kwargs)
+        log.append("tool_call_start", {"tool_call_id": "after-atomic-cut"})
+        return result
+
+    monkeypatch.setattr(log, "snapshot_observation_with_statistics", append_after_cut)
+    selected = request(limit=1, statistics=True)
+    body = frame(admit(source, selected), selected)
+    validate_frame(body, selected)
+    stats = body["tool_statistics"]
+    assert body["retained"]["head"] == stats["head"] == 106
+    assert stats["floor"] == 101 and stats["observed_records"] == 4
+    assert stats["start_occurrences"] == 1 and stats["contiguous"] is False
+    assert stats["coverage"] == "partial" and log.latest_id == 107
+    monkeypatch.setattr(log, "snapshot_observation_with_statistics", snapshot)
+    later = frame(admit(source, selected), selected)
+    assert later["tool_statistics"]["head"] == 107
+    assert later["tool_statistics"]["start_occurrences"] == 2
+
+
+def test_statistics_large_range_uses_only_bounded_event_projection(source, monkeypatch):
+    import agent_bridge.session_observations as projection
+
+    session = source.session_manager.get_session("session-1")
+    session.event_log = EventLog()
+    for index in range(5000):
+        session.event_log.append("tool_call_start", {"tool_call_id": str(index)})
+    original = projection.entry
+    seen = []
+
+    def record(event, source):
+        seen.append(event.id)
+        return original(event, source)
+
+    monkeypatch.setattr(projection, "entry", record)
+    selected = request(limit=2, statistics=True, current=True)
+    body = frame(admit(source, selected), selected)
+    validate_frame(body, selected)
+    assert seen == [5000, 4999]
+    assert body["tool_statistics"]["start_occurrences"] == 5000
+    assert len(encode(body)) <= MAX_BODY and len(sse(body)) <= MAX_FRAME
+
+
+@pytest.mark.asyncio
+async def test_statistics_only_qualification_change_pushes_on_existing_follower(source):
+    log = append(source, 1)
+    selected = request(follow=True, statistics=True)
+    reader = observations(_http_request(source), selected)
+    first = decode((await anext(reader)).split(b"data: ", 1)[1].strip())
+    log._tool_statistics = None
+    log.wake_observers()
+    changed = decode((await asyncio.wait_for(anext(reader), 0.25)).split(b"data: ", 1)[1].strip())
+    validate_frame(changed, selected)
+    assert changed["tool_statistics"]["availability"] == "unknown"
+    assert changed["position"] == first["position"] and changed["entries"] == []
+    await reader.aclose()
+    assert not log._waiters
+    assert source.session_manager.get_session("session-1").subscriber_count == 0
+
+
+@pytest.mark.parametrize("change", [
+    "bool-count", "bool-records", "bool-floor", "bool-head", "float-count",
+    "overflow", "negative", "too-many-starts", "zero-records", "false-contiguity",
+    "foreign-floor", "foreign-head", "complete", "durable", "basis", "extra",
+    "unknown-positive", "unknown-reason", "bool-version", "missing-continuity",
+])
+def test_statistics_parser_rejects_malformed_or_cross_cut_claims(source, change):
+    selected = request(statistics=True)
+    append(source, 3)
+    body = frame(admit(source, selected), selected)
+    stats = body["tool_statistics"]
+    mutations = {
+        "bool-count": ("start_occurrences", True), "bool-records": ("observed_records", True),
+        "bool-floor": ("floor", True), "bool-head": ("head", True),
+        "float-count": ("start_occurrences", 3.0),
+        "overflow": ("head", 1 << 53), "negative": ("start_occurrences", -1),
+        "too-many-starts": ("start_occurrences", 4), "zero-records": ("observed_records", 0),
+        "false-contiguity": ("contiguous", False), "foreign-floor": ("floor", 2),
+        "foreign-head": ("head", 4), "complete": ("coverage", "complete"),
+        "durable": ("durability", "durable"), "basis": ("basis", "unique-tools"),
+        "extra": ("title", "private"), "unknown-positive": ("availability", "unknown"),
+        "unknown-reason": ("reason", "probably-zero"), "bool-version": ("version", True),
+    }
+    if change == "missing-continuity":
+        from agent_bridge.session_tool_statistics import validate
+
+        with pytest.raises(ObservationError):
+            validate(stats, {**body["source"], "journal_incarnation": None}, body["retained"])
+    else:
+        key, value = mutations[change]
+        stats[key] = value
+        with pytest.raises(ObservationError):
+            validate_frame(body, selected)
 
 
 def test_contribution_projection_retains_only_bounded_reported_names(source):

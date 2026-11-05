@@ -21,6 +21,7 @@ from agent_bridge.session_observation_contract import (
     HISTORY,
     CURRENT_REQUESTS,
     OBSERVATIONS,
+    TOOL_STATISTICS,
     ObservationError,
     ReadRequest,
     decode,
@@ -88,6 +89,72 @@ def test_optional_wire_is_explicit_and_never_added_to_old_or_history_reads(endpo
         assert _read(endpoint, history=history, current_requests="True").status_code == 422
     assert _read(endpoint, history=True, current_requests="true").status_code == 422
     assert _read(endpoint, history=True, current_requests="false").status_code == 422
+
+
+def test_statistics_wire_is_optional_and_independent_of_current_requests(endpoint):
+    baseline = _body(_read(endpoint))
+    assert "tool_statistics" not in baseline
+    assert _body(_read(endpoint, tool_statistics="false")) == baseline
+    opted = _body(_read(endpoint, tool_statistics="true"))
+    assert opted["entries"] == baseline["entries"] and opted["position"] == baseline["position"]
+    assert opted["tool_statistics"]["start_occurrences"] == 0
+    assert opted["tool_statistics"]["observed_records"] == 1
+    assert "current_request_state" not in opted
+    joined = _body(_read(endpoint, tool_statistics="true", current_requests="true"))
+    assert joined["tool_statistics"] == opted["tool_statistics"]
+    assert joined["current_request_state"]["availability"] == "unknown"
+    assert _read(endpoint, tool_statistics="True").status_code == 422
+    for value in ("true", "false"):
+        assert _read(endpoint, history=True, tool_statistics=value).status_code == 422
+
+
+@pytest.mark.parametrize("support", [None, True, 2, 1])
+def test_statistics_cli_checks_live_support_without_losing_supported_waiters(support):
+    client = MagicMock()
+    capabilities = {OBSERVATIONS: 1, CURRENT_REQUESTS: 1}
+    if support is not None:
+        capabilities[TOOL_STATISTICS] = support
+    client.health.return_value = {"capabilities": capabilities}
+    query = [("contract_version", "1"), ("worktree_id", "worktree-1"),
+             ("current_requests", "true")]
+    selected = ReadRequest.parse("session-1", [*query, ("tool_statistics", "true")], history=False)
+    if type(support) is int and support == 1:
+        read(client, selected)
+        assert "tool_statistics=true" in client._stream_sse.call_args.args[0]
+    else:
+        with pytest.raises(ObservationError, match=TOOL_STATISTICS):
+            read(client, selected)
+        client._stream_sse.assert_not_called()
+        read(client, ReadRequest.parse("session-1", query, history=False))
+        assert "tool_statistics" not in client._stream_sse.call_args.args[0]
+    assert "current_requests=true" in client._stream_sse.call_args.args[0]
+
+
+def test_statistics_actual_cli_parser_http_join_and_strict_legacy(endpoint, monkeypatch, capsys):
+    from agent_bridge import session_observation_cli
+
+    client = MagicMock()
+    client.health.return_value = {"capabilities": {OBSERVATIONS: 1, TOOL_STATISTICS: 1}}
+    payload = _read(endpoint, tool_statistics="true").content
+    client._stream_sse.side_effect = lambda *args, **kwargs: kwargs["stream_factory"](
+        io.BytesIO(payload)
+    )
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    parser = cli.build_parser()
+    base = ["observe-session", "session-1", "--contract-version", "1",
+            "--worktree-id", "worktree-1", "--json"]
+    args = parser.parse_args(["--project", "demo", *base, "--tool-statistics"])
+    session_observation_cli._cmd(args)
+    body = decode(capsys.readouterr().out.encode())
+    assert body["tool_statistics"]["start_occurrences"] == 0
+    assert "tool_statistics=true" in client._stream_sse.call_args.args[0]
+    for flags in ([*base, "--tool-statistic"],
+                  ["session-observation-history", *base[1:], "--tool-statistics"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(flags)
+    declaration = parser.parse_args(["version", "--contracts-json"])
+    declaration.func(declaration)
+    assert decode(capsys.readouterr().out.encode())["contracts"][TOOL_STATISTICS]["version"] == 1
 
 
 def test_actual_local_callback_future_reaches_http_without_history_inference(endpoint):

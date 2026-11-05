@@ -56,6 +56,18 @@ from test_session_observations import (
     as test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends,
     test_closing_one_current_follower_preserves_other_follower_push
     as test_closing_one_current_follower_preserves_other_follower_push,
+    test_statistics_cover_owner_range_not_page_or_repeated_delivery
+    as test_statistics_cover_owner_range_not_page_or_repeated_delivery,
+    test_statistics_empty_zero_and_ancillary_failure_keep_source_records
+    as test_statistics_empty_zero_and_ancillary_failure_keep_source_records,
+    test_statistics_atomic_cut_and_captured_gap_do_not_claim_full_history
+    as test_statistics_atomic_cut_and_captured_gap_do_not_claim_full_history,
+    test_statistics_large_range_uses_only_bounded_event_projection
+    as test_statistics_large_range_uses_only_bounded_event_projection,
+    test_statistics_only_qualification_change_pushes_on_existing_follower
+    as test_statistics_only_qualification_change_pushes_on_existing_follower,
+    test_statistics_parser_rejects_malformed_or_cross_cut_claims
+    as test_statistics_parser_rejects_malformed_or_cross_cut_claims,
 )
 from test_session_observation_transport import (
     endpoint as endpoint,
@@ -68,6 +80,12 @@ from test_session_observation_transport import (
     as test_optional_cli_negotiates_actual_provider_before_sending_new_query,
     test_actual_cli_optional_parser_declaration_and_http_frame_join
     as test_actual_cli_optional_parser_declaration_and_http_frame_join,
+    test_statistics_wire_is_optional_and_independent_of_current_requests
+    as test_statistics_wire_is_optional_and_independent_of_current_requests,
+    test_statistics_cli_checks_live_support_without_losing_supported_waiters
+    as test_statistics_cli_checks_live_support_without_losing_supported_waiters,
+    test_statistics_actual_cli_parser_http_join_and_strict_legacy
+    as test_statistics_actual_cli_parser_http_join_and_strict_legacy,
 )
 from test_owner_membership import (
     test_adopted_writable_connection_preserves_membership_commits
@@ -111,6 +129,7 @@ def test_http51_capture_actual_observations(
     native_send = manager, session, original.model_copy(update={"prompt": vector["requests"]["prompt"]})
     # Keep ordinary middleware/installation binding while allowing an actual HTTP 500 response.
     api = TestClient(app, headers=client.headers, raise_server_exceptions=False)
+    assert api.get("/health").json()["capabilities"]["bridge-session-tool-statistics-v1"] == 1
     observed = {"advertised": {
         key: api.get("/health").json()[key]
         for key in ("protocol_version", "min_protocol_version")

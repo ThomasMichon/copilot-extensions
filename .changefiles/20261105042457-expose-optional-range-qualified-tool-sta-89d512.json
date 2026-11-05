@@ -1,0 +1,9 @@
+{
+  "comment": "Expose optional range-qualified tool-start statistics through the existing observation reader",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

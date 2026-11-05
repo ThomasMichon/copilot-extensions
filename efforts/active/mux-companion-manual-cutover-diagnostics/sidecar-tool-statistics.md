@@ -4,11 +4,14 @@ Parent: [complete effort](README.md), Step 7.
 Source obligation: [S2](sidecar-live-timeline.md#s2---worktree-and-agenda-owner-observations).
 Existing boundary: [observation contract](sidecar-observation-contract.md).
 
-**Status: reviewed source-contract amendment; implementation pending.**
+**Status: reviewed amendment; internal owner projection merged;
+optional wire and Manager consumption pending.**
 Plan #10704 merged as `9c5a68a52abbee9fd2679fb3acab2c6af0390705`
 after current-head independent approval and green CI, before runtime code.
 The [admission readback](journal/2026/11.05-sidecar-tool-statistics-plan.md)
 retains the complete parent and original contracts.
+The [owner-projection readback](journal/2026/11.05-sidecar-tool-statistics-owner.md)
+records #10707's bounded internal source tier without closing this amendment.
 
 ## Confirmed gap and selected scope
 
@@ -68,8 +71,11 @@ do not add a persistent statistics ledger, polling worker or service.
 
 - [x] Review this amendment through a normal PR before source execution.
   #10704 admits this plan only, not the unchecked implementation below.
-- [ ] Implement the bounded owner projection at all actual construction and
+- [x] Implement the bounded owner projection at all actual construction and
   lifecycle seams, with no second history scan, persistence owner or actor.
+  #10707 qualifies append, hydration, captured-tail, rebuild and represented
+  restoration, atomic range/page reads and ancillary failure/exhaustion.
+  It adds no optional HTTP/CLI statistic or consumer behavior.
 - [ ] Expand and qualify the optional provider/parser/CLI boundary first.
   Preserve old/new peer behavior and source-bound protocol compatibility.
 - [ ] Consume the negotiated projection on the existing held Manager reader,
