@@ -11,14 +11,15 @@ SSE event log for agent-bridge sessions.
 from __future__ import annotations
 
 import asyncio
-from bisect import bisect_left, bisect_right
 import math
 import time
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from . import telemetry
+from .event_tool_statistics import ToolStartCounter, ToolStartStatistics
 
 if TYPE_CHECKING:
     from .db import Database
@@ -77,6 +78,7 @@ class EventLog:
         self._next_id = 1
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._observation_revision = 0
+        self._reset_tool_statistics()
         #: Set when this log was merged into another: (target log, old id -> new id).
         self.merged_into: tuple[EventLog, dict[int, int]] | None = None
         self._db = db
@@ -107,6 +109,7 @@ class EventLog:
         )
         for evt in events:
             log._events.append(evt)
+            log._observe_tool_start(evt)
             log._track_tool_event(evt)
             if evt.id == 1:
                 log._telemetry.set_log_origin(evt.timestamp)
@@ -143,6 +146,7 @@ class EventLog:
                     timestamp=row["timestamp"],
                 )
                 log._events.append(evt)
+                log._observe_tool_start(evt)
                 log._track_tool_event(evt)
                 if evt.id == 1:
                     log._telemetry.set_log_origin(evt.timestamp)
@@ -170,6 +174,7 @@ class EventLog:
             self._next_id += 1
             evt = SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
             self._events.append(evt)
+            self._observe_tool_start(evt)
             self._track_tool_event(evt)
             waiters = list(self._waiters)
             if event_id == 1:
@@ -272,6 +277,7 @@ class EventLog:
             self._events = []
             self._open_tool_calls = {}
             self._next_id = 1
+            self._reset_tool_statistics()
             for event_type, data in events:
                 event_id = self._next_id
                 self._next_id += 1
@@ -283,6 +289,7 @@ class EventLog:
                     id=event_id, event=event_type, data=data, timestamp=ts
                 )
                 self._events.append(evt)
+                self._observe_tool_start(evt)
                 self._track_tool_event(evt)
                 if event_id == 1:
                     self._telemetry.set_log_origin(ts)
@@ -396,19 +403,65 @@ class EventLog:
         start above one; source readers must preserve that retained floor.
         """
         with self._lock:
-            if not self._events:
-                return None, 0, 0, []
-            floor, head = self._events[0].id, self._events[-1].id
-            if after is not None:
-                start = bisect_right(self._events, after, key=lambda event: event.id)
-                end = min(len(self._events), start + limit)
-            else:
-                end = (
-                    bisect_left(self._events, before, key=lambda event: event.id)
-                    if before is not None else len(self._events)
+            return self._snapshot_observation_locked(after=after, before=before, limit=limit)
+
+    def snapshot_observation_with_statistics(
+        self, *, after: int | None = None, before: int | None = None, limit: int = 64,
+    ) -> tuple[str | None, int, int, list[SseEvent], ToolStartStatistics]:
+        """Read a page and range statistics at the same atomic native head.
+
+        Statistics cover admitted retained records, independently of this page.
+        They do not establish SQLite durability or complete session coverage.
+        """
+        with self._lock:
+            continuity, floor, head, rows = self._snapshot_observation_locked(
+                after=after, before=before, limit=limit,
+            )
+            try:
+                statistics = (
+                    self._tool_statistics.snapshot(
+                        continuity=continuity, floor=floor, head=head,
+                        records=len(self._events),
+                    )
+                    if self._tool_statistics is not None else
+                    ToolStartStatistics(unavailable_reason="counter-unavailable")
                 )
-                start = max(0, end - limit)
-            return self._telemetry.log_epoch or None, floor, head, list(self._events[start:end])
+            except Exception:
+                self._tool_statistics = None
+                statistics = ToolStartStatistics(unavailable_reason="counter-unavailable")
+            return continuity, floor, head, rows, statistics
+
+    def _snapshot_observation_locked(
+        self, *, after: int | None, before: int | None, limit: int,
+    ) -> tuple[str | None, int, int, list[SseEvent]]:
+        if not self._events:
+            return None, 0, 0, []
+        floor, head = self._events[0].id, self._events[-1].id
+        if after is not None:
+            start = bisect_right(self._events, after, key=lambda event: event.id)
+            end = min(len(self._events), start + limit)
+        else:
+            end = (
+                bisect_left(self._events, before, key=lambda event: event.id)
+                if before is not None else len(self._events)
+            )
+            start = max(0, end - limit)
+        return self._telemetry.log_epoch or None, floor, head, list(self._events[start:end])
+
+    def _reset_tool_statistics(self) -> None:
+        self._tool_statistics: ToolStartCounter | None = None
+        try:
+            self._tool_statistics = ToolStartCounter()
+        except Exception:
+            self._tool_statistics = None
+
+    def _observe_tool_start(self, event: SseEvent) -> None:
+        # Ancillary projection failure must never reject a canonical record.
+        try:
+            if self._tool_statistics is not None:
+                self._tool_statistics.observe(event.id, event.event)
+        except Exception:
+            self._tool_statistics = None
 
     def snapshot_event(
         self, event_id: int, *, durable: bool = False

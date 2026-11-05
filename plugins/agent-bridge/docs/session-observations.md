@@ -145,6 +145,29 @@ Older readers may ignore them; newer readers must retain a generic occurrence
 label when a supported older provider or rollback lacks them. The original v1
 frame, parser, capability and identity/continuity contracts are unchanged.
 
+### Owner-internal tool-start projection
+
+EventLog also maintains a fixed-size, content-free projection while appending,
+hydrating, rebuilding or restoring its existing native records. Its internal
+`snapshot_observation_with_statistics` reads the projection, native range and
+bounded page under the same lock. `start_occurrences` counts reported
+`tool_call_start` records, including distinct replay and nested occurrences;
+it does not count unique calls, completions, current concurrency or lifetime
+activity. Loading a page or subscribing does not recount those records.
+
+The projection retains its actual floor/head, observed-record count and whether
+that range is contiguous. A captured tail or gapped range is not full coverage.
+Empty or unqualified logs and ancillary counter failure/exhaustion report
+unavailable statistics, not zero; a qualified range without starts may report
+zero only for that range. Rebuild resets the projection. Statistics can become
+visible before SQLite persistence, like the underlying events, without blocking
+source delivery on a projection failure.
+
+This is an internal source primitive only. It adds no CLI option, HTTP field or
+capability and changes no legacy response. Negotiated provider expansion and
+Manager consumption remain pending in the
+[statistics implementation contract](../../../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-tool-statistics.md).
+
 ## Optional current input and permissions
 
 The executing CLI declares `bridge-session-current-requests-v1`, version 1,

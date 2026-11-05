@@ -115,6 +115,7 @@ def _log(record: _Log) -> EventLog:
     log._telemetry._identity = dict(identity)
     for event in record.events:
         log._events.append(event)
+        log._observe_tool_start(event)
         log._track_tool_event(event)
         if event.id == 1:
             log._telemetry.set_log_origin(event.timestamp)
