@@ -64,8 +64,11 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
     config = tmp_path / "psmux.conf"
     config.write_text("", encoding="utf-8")
     inert = tmp_path / "inert_cli.py"
+    cli_receipt = tmp_path / "inert-started.json"
     inert.write_text(
-        "import sys\nprint('INERT SOURCE CLI',flush=True)\n"
+        "import json,os,sys\nfrom pathlib import Path\n"
+        f"Path({str(cli_receipt)!r}).write_text(json.dumps({{'pid':os.getpid(),'argv':sys.argv}}))\n"
+        "print('INERT SOURCE CLI',flush=True)\n"
         "for line in sys.stdin: print('CLI RECEIVED '+line.strip(),flush=True)\n",
         encoding="utf-8",
     )
@@ -125,7 +128,21 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
             ).split("\t")
             cli_handle = pin_owned(int(pid))
             cli_birth = client.birth(cli_handle)
-            wait_for(lambda: "INERT SOURCE CLI" in mux("capture-pane", "-p", "-t", cli))
+
+            def cli_diagnostic():
+                process = psutil.Process(int(pid))
+                return json.dumps({
+                    "client": diagnostic(),
+                    "pane": mux("capture-pane", "-p", "-t", cli, check=False).stdout,
+                    "command": process.cmdline(),
+                    "children": [
+                        {"pid": child.pid, "command": child.cmdline()}
+                        for child in process.children(recursive=True)
+                    ],
+                    "started": cli_receipt.read_text() if cli_receipt.exists() else None,
+                })
+
+            wait_for(lambda: "INERT SOURCE CLI" in mux("capture-pane", "-p", "-t", cli), cli_diagnostic)
             mux_mapping_registry.register_mapping({
                 "project": "example", "worktree_id": "selected", "mux_bin": binary,
                 "mux_session": session, "worktree_path": str(checkout),
