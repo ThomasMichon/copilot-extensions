@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import asdict
 
 from .assignment_workspace import AssignmentWorkspace
-from .queue_common import StructuredResult, Task, _task_transition_spec
+from .queue_common import CompletionOutcome, StructuredResult, Task, _task_transition_spec
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import TaskError
 from .queue_task_relationships import latest_relationship, require_relationship
@@ -72,17 +72,66 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " BEFORE DELETE ON task_events WHEN OLD.submission_preparation IS NOT NULL"
         " BEGIN SELECT RAISE(ABORT, 'submission preparation event is retained'); END"
     )
-    # A provider rollback must not let an old completion path bypass preparation.
+    # Install the replacement before removing the stricter rollback-era trigger.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard"
-        " BEFORE UPDATE OF status ON tasks"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard_v2"
+        " BEFORE UPDATE ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
         " AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND e.submission_preparation IS NOT NULL)"
+        " AND NOT EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
+        " AND json_extract(e.submission_preparation, '$.advancement.state')='admitting'"
+        " AND json_extract(e.submission_preparation, '$.advancement.version')=1"
+        " AND NEW.status='submitted' AND NEW.require_verification=1"
+        " AND OLD.hold_reason IS NULL AND OLD.awaiting_steer=0"
+        " AND NEW.owner IS NULL AND NEW.lease_expires_at IS NULL"
+        " AND OLD.owner=json_extract(e.submission_preparation, '$.request.worker_id')"
+        " AND NEW.completed_by=OLD.owner"
+        " AND NEW.id=json_extract(e.submission_preparation, '$.request.task_id')"
+        " AND NEW.generation=OLD.generation"
+        " AND NEW.generation=json_extract(e.submission_preparation, '$.request.generation')"
+        " AND NEW.owner_session_id=OLD.owner_session_id"
+        " AND NEW.owner_session_id="
+        " json_extract(e.submission_preparation, '$.request.owner_session_id')"
+        " AND NEW.completed_at=json_extract(e.submission_preparation, '$.advancement.at')"
+        " AND NEW.result IS"
+        " json_extract(e.submission_preparation, '$.advancement.encoded_result')"
+        " AND NEW.result_ref IS json_extract(e.submission_preparation, '$.request.result_ref'))"
         " BEGIN SELECT RAISE(ABORT,"
         " 'submission preparation requires authoritative readiness'); END"
     )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_consume_admission"
+        " AFTER UPDATE OF status ON tasks"
+        " WHEN NEW.status='submitted' AND OLD.status NOT IN ('submitted','completed')"
+        " BEGIN UPDATE task_events SET submission_preparation="
+        " json_set(submission_preparation, '$.advancement.state', 'submitted')"
+        " WHERE task_id=NEW.id"
+        " AND json_extract(submission_preparation, '$.advancement.state')='admitting'; END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_advancement_retained"
+        " BEFORE UPDATE ON task_events"
+        " WHEN json_extract(OLD.submission_preparation, '$.advancement.state')='submitted'"
+        " AND json_extract(NEW.submission_preparation, '$.advancement')"
+        " IS NOT json_extract(OLD.submission_preparation, '$.advancement')"
+        " BEGIN SELECT RAISE(ABORT, 'submission advancement receipt is immutable'); END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v2"
+        " BEFORE UPDATE ON tasks"
+        " WHEN OLD.status IN ('submitted','completed')"
+        " AND NEW.status IN ('submitted','completed')"
+        " AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=OLD.id"
+        " AND e.submission_preparation IS NOT NULL)"
+        " AND (NEW.result IS NOT OLD.result OR NEW.result_ref IS NOT OLD.result_ref"
+        " OR NEW.completed_by IS NOT OLD.completed_by OR NEW.completed_at IS NOT OLD.completed_at"
+        " OR NEW.require_verification<>1)"
+        " BEGIN SELECT RAISE(ABORT, 'submission preparation result is retained'); END"
+    )
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained")
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard")
 
 
 def _binding(
@@ -140,6 +189,12 @@ def _binding(
 
 
 class QueueSubmissionPreparationMixin:
+    def advance_prepared_submission(self, task_id: str, *, request_id: str) -> CompletionOutcome:
+        """Internal guarded submission only; no ordinary caller capability."""
+        from .queue_submission_advancement import advance
+
+        return advance(self, task_id, request_id=request_id)
+
     def observe_submission_readiness(self, task_id: str, *, request_id: str) -> dict:
         """Internal owner observation only; ordinary submission stays disabled."""
         from .queue_submission_readiness import observe
