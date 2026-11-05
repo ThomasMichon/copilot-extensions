@@ -330,6 +330,22 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+Fourteen further subordinate trackers consolidate into eleven existing OPEN
+parents, with complete original/refined requirements and distinct unfinished
+lanes: live registry reload, paired/removal recovery, task observation and
+uncertain consume, cancellation/terminal obligations, session history/context,
+self-update receipts, native ownership, Manager observations and Windows
+fixture/admission callers. Explicit independent-open, live-umbrella, native
+qualification and resource-custody conditions remain; all product acceptance
+stays unchecked. Two equal complete nine-page scans at 15:54 PST measure
+898 whole OPEN, 624 creator-eligible, 274 excluded, 606 original-cohort and
+292 inflow. Fourteen audited departures and one creator-eligible metadata-only
+arrival explain the change from 911; there are no external departures.
+Verified dispositions are 900; the fixed 729 whole-queue checkpoint remains
+169 away. The [dated journal](journal/2026/11.05%20cohort-parent-luna-reconciliation.md)
+records each direct parent-first intake and independent retention.
+The campaign remains Active.
+
 Five additional child trackers now consolidate into three OPEN parents:
 #3004 preserves first-restart admission, confirmed defaults, provider-policy
 preflight and new-GitHub history protection; #4959 retains recipe composition,
