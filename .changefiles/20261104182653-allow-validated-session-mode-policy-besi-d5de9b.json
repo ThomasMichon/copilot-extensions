@@ -1,0 +1,9 @@
+{
+  "comment": "Allow validated session-mode policy beside ordinary portable spawn defaults without grafting mode authority.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
