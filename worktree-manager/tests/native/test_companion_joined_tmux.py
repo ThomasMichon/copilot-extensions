@@ -52,7 +52,7 @@ def source_entrypoint(
     bridge = companion_bridge_source.bridge_command(ROOT)
     state_path = peer["checkout"].parent / "native-state.json"
     bootstrap = f"""
-import argparse,json,sys
+import argparse,json,os,sys
 from pathlib import Path
 sys.path[:0]={[str(ROOT / "worktree-manager/src"), *map(str, SOURCE_PATHS)]!r}
 from worktree_manager import companion_bridge_source,engine_client,mux_companion
@@ -81,7 +81,12 @@ def observed_mount(app):
             path=Path({str(state_path)!r})
             pending=path.with_suffix('.pending')
             pending.write_text(value,encoding='utf-8')
-            pending.replace(path)
+            try:
+                pending.replace(path)
+            except PermissionError as error:
+                if os.name!='nt' or getattr(error,'winerror',None) not in (32,33):
+                    raise
+                return
             previous[0]=value
     app.set_interval(.05,observe)
 mux_companion.MuxCompanionApp.on_mount=observed_mount
@@ -93,12 +98,12 @@ raise SystemExit(mux_companion.run(
     args.cwd,args.cli_pane,project=args.project,worktree_id=args.worktree_id,
     session_incarnation=args.session_incarnation))
 """
+    entry = peer["checkout"].parent / "native-app.py"
+    entry.write_text(bootstrap, encoding="utf-8")
 
     def command(arguments: list[str]) -> str:
         assert arguments[:2] == ["-m", "worktree_manager.mux_companion"]
         if os.name == "nt":
-            entry = peer["checkout"].parent / "native-app.py"
-            entry.write_text(bootstrap, encoding="utf-8")
             argv = [sys.executable, "-I", "-B", str(entry), *arguments[2:]]
             script = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
             script += "; exit $LASTEXITCODE"

@@ -2433,6 +2433,9 @@ caller-owned Job and retained handles govern failure cleanup. Linux skips are
 not Windows qualification; exact source-stamped native execution is required.
 Its change-only geometry/focus snapshots are fixture observations, not headed
 pixels, native-frame or input-ready performance measurements.
+`test_companion_joined_fixture.py` deterministically checks that this observer
+retries only Windows sharing/lock violations on a later tick without advancing
+its published value; other permission failures remain visible errors.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that
