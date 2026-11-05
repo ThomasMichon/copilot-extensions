@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from textual.app import App, ComposeResult
+from textual import events
 from textual.message_pump import MessagePump
 from textual.widgets import Button, Static
 
@@ -466,5 +467,39 @@ def test_parent_delegates_and_toolbar_messages_keep_child_sender() -> None:
             await pilot.pause()
             assert app.demands and app.demands[-1].visible is False
             assert app.demands[-1]._sender is timeline
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("count", [1, 64])
+def test_mouse_wheel_up_browses_and_requests_history_at_the_loaded_top(count: int) -> None:
+    window, source = window_with_events(count)
+
+    async def check() -> None:
+        app = TimelineApp(window)
+        async with app.run_test(size=(80, 30)) as pilot:
+            timeline = app.query_one(SubwayTimeline)
+            timeline.focus()
+            await pilot.pause()
+            bottom = timeline.scroll_offset.y
+            for modifier in ("shift", "control"):
+                assert await pilot._post_mouse_events(
+                    [events.MouseScrollUp], timeline, offset=(2, 1), **{modifier: True},
+                )
+                await pilot.pause()
+                assert window.follow_live and not app.requests
+            assert await pilot._post_mouse_events([events.MouseScrollUp], timeline, offset=(2, 1))
+            await pilot.pause()
+            assert not window.follow_live and timeline.has_focus
+            if count > 1:
+                assert timeline.scroll_offset.y < bottom
+                await pilot.press("home")
+            await pilot.pause()
+            assert len(app.requests) == 1 and app.requests[0].token == source
+            assert await pilot._post_mouse_events(
+                [events.MouseScrollUp], timeline, offset=(2, 1), times=3,
+            )
+            await pilot.pause()
+            assert len(app.requests) == 1 and not window.follow_live
 
     asyncio.run(check())

@@ -5,11 +5,13 @@ import argparse
 from collections import Counter
 from dataclasses import dataclass
 import hashlib
+from itertools import product
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from typing import Literal, cast
@@ -40,6 +42,8 @@ class Project:
     python_version: str
     platforms: tuple[str, ...]
     requirements: str
+    additional_python_versions: tuple[str, ...] = ()
+    import_roots: tuple[str, ...] = ()
 
     def owns(self, path: str) -> bool:
         """Match exact files or complete directory prefixes, not filename globs."""
@@ -102,7 +106,7 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
     defaults = {key: manifest[key] for key in ("python_version", "platforms", "requirements")}
     for value in rows:
         row = _object(value)
-        if not required <= set(row) <= required | set(defaults):
+        if not required <= set(row) <= required | set(defaults) | {"additional_python_versions", "import_roots"}:
             raise TypecheckError("Invalid project fields")
         row = {**defaults, **row}
         name, level, python_version, requirements = (
@@ -114,20 +118,143 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
             raise TypecheckError(f"{name}: invalid admission level")
         if not isinstance(python_version, str) or not re.fullmatch(r"3\.[0-9]+", python_version):
             raise TypecheckError(f"{name}: invalid Python version")
+        additional = _strings(
+            row.get("additional_python_versions", []), "additional_python_versions", allow_empty=True,
+        )
+        for version in additional:
+            if not re.fullmatch(r"3\.(?:0|[1-9][0-9]*)", version):
+                raise TypecheckError(f"{name}: invalid additional Python version")
+            if tuple(map(int, version.split("."))) <= tuple(map(int, python_version.split("."))):
+                raise TypecheckError(f"{name}: additional Python versions must exceed the minimum")
         if not isinstance(requirements, str):
             raise TypecheckError(f"{name}: invalid requirements path")
         include = tuple(_relative(path) for path in _strings(row["include"], "include"))
         exclude = tuple(_relative(path) for path in _strings(row["exclude"], "exclude", allow_empty=True))
+        import_roots = tuple(
+            _relative(path) for path in _strings(row.get("import_roots", []), "import_roots", allow_empty=True)
+        )
+        for path in import_roots:
+            _import_directory(root, path)
         platforms = _strings(row["platforms"], "platforms")
         if any(platform not in ("linux", "win32", "darwin") for platform in platforms):
             raise TypecheckError(f"{name}: unsupported platform")
         projects.append(Project(
             name, include, exclude, cast(Level, level), python_version, platforms,
-            _relative(requirements),
+            _relative(requirements), additional,
+            import_roots=import_roots,
         ))
     if len({project.name for project in projects}) != len(projects) or not projects:
         raise TypecheckError("Project names must be unique and the portfolio nonempty")
     return tuple(projects)
+
+
+def _import_directory(root: Path, relative: str) -> Path:
+    _import_identity(root, directory=True)
+    directory = root
+    for part in _relative(relative).split("/"):
+        directory /= part
+        _import_identity(directory, directory=True)
+    if os.pathsep in str(directory.absolute()):
+        raise TypecheckError(
+            f"Import root contains the native path-list separator: {directory}"
+        )
+    return directory
+
+
+def _import_identity(path: Path, *, directory: bool = False) -> tuple[int, int]:
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise TypecheckError(f"Import input is missing: {path}") from error
+    ordinary = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
+    if not ordinary or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+        raise TypecheckError(f"Import input must be an ordinary repository {'directory' if directory else 'file'}: {path}")
+    return info.st_dev, info.st_ino
+
+
+@dataclass(frozen=True)
+class _ImportInputs:
+    roots: tuple[str, ...]
+    inventory: tuple[str, ...]
+    directories: tuple[tuple[str, tuple[int, int]], ...]
+    files: tuple[tuple[str, tuple[int, int], bytes], ...]
+
+    def verify(self, root: Path) -> None:
+        if self != _import_inputs(root, self.roots, self.inventory):
+            raise TypecheckError("Declared import inputs changed during type checking")
+
+
+def _import_suffix(path: Path) -> str:
+    suffix = path.suffix
+    lower = suffix.lower()
+    if os.name == "nt" and suffix != lower and lower in {".py", ".pyi"}:
+        try:
+            if path.with_suffix(lower).samefile(path):
+                return lower
+        except OSError:
+            pass
+    return suffix
+
+
+def _import_inputs(root: Path, roots: tuple[str, ...], paths: tuple[str, ...]) -> _ImportInputs:
+    owned = set(paths)
+    directories: dict[str, tuple[int, int]] = {}
+    files: dict[str, tuple[tuple[int, int], bytes]] = {}
+    expected: set[str] = set()
+    for relative in roots:
+        directory = _import_directory(root, relative)
+        ancestor = root
+        directories[""] = _import_identity(ancestor, directory=True)
+        for part in relative.split("/"):
+            ancestor /= part
+            directories[ancestor.relative_to(root).as_posix()] = _import_identity(ancestor, directory=True)
+        prefix = relative + "/"
+        members = {
+            path for path in paths if path.startswith(prefix)
+            and path.endswith(".py")
+            and all(part.isidentifier() for part in path[len(prefix):-3].split("/"))
+        }
+        if not members:
+            raise TypecheckError(f"Import root has no inventoried Python source: {relative}")
+        expected.update(members)
+        root_identity = _import_identity(directory, directory=True)
+        directories[relative] = root_identity
+        pending: list[tuple[Path, tuple[tuple[str, tuple[int, int]], ...]]] = [
+            (directory, ((relative, root_identity),)),
+        ]
+        while pending:
+            parent, ancestors = pending.pop()
+            for child in sorted(parent.iterdir()):
+                suffix = _import_suffix(child)
+                module = suffix in {".py", ".pyi"} and child.stem.isidentifier()
+                if not module and not child.name.isidentifier():
+                    continue
+                info = child.lstat()
+                name = _relative(child.relative_to(root).as_posix())
+                if stat.S_ISDIR(info.st_mode) or (not module and child.is_dir()):
+                    if child.name.isidentifier():
+                        identity = _import_identity(child, directory=True)
+                        pending.append((child, (*ancestors, (name, identity))))
+                    continue
+                if not module:
+                    continue
+                identity = _import_identity(child)
+                if suffix == ".pyi":
+                    raise TypecheckError(f"First-party import stubs cannot substitute for source: {name}")
+                owned_name = child.with_suffix(suffix).relative_to(root).as_posix()
+                if owned_name not in owned:
+                    raise TypecheckError(f"Import source is unowned or ignored: {name}")
+                content = child.read_bytes()
+                if _import_identity(child) != identity:
+                    raise TypecheckError(f"Import source identity changed during capture: {name}")
+                directories.update(ancestors)
+                files[owned_name] = identity, content
+    if set(files) != expected:
+        raise TypecheckError("Declared import source membership changed or is missing")
+    return _ImportInputs(
+        roots, paths, tuple(sorted(directories.items())),
+        tuple((name, identity, content) for name, (identity, content) in sorted(files.items())),
+    )
 
 
 def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -286,6 +413,7 @@ def check_project(
         raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
     lease = acquire_environment(0, path)
     view: SourceView | None = None
+    import_inputs: _ImportInputs | None = None
     try:
         if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
             raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
@@ -294,11 +422,17 @@ def check_project(
             str(root.joinpath(*file.split("/")[:file.split("/").index("src") + 1]))
             for file in all_paths if "src" in file.split("/")
         )
+        ordered_imports = sorted(imports)
+        if project.import_roots:
+            import_inputs = _import_inputs(root, project.import_roots, all_paths)
+        for relative in project.import_roots:
+            directory = _import_directory(root, relative)
+            if str(directory) not in ordered_imports:
+                ordered_imports.append(str(directory))
         env = {
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
-        env["MYPYPATH"] = os.pathsep.join(sorted(imports))
         if INSTALLATION_ENTRY in files or INSTALLATION_ENTRY in all_paths:
             view = installation_view(
                 root, all_paths,
@@ -309,31 +443,47 @@ def check_project(
                 if not members <= set(files):
                     raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
                 files = (*tuple(file for file in files if file not in members), str(view.output))
-            env["MYPYPATH"] = str(view.output.parent) + os.pathsep + env["MYPYPATH"]
+            ordered_imports.insert(0, str(view.output.parent))
+        if project.import_roots and any(os.pathsep in entry for entry in ordered_imports):
+            raise TypecheckError("Import search paths contain the native path-list separator")
+        env["MYPYPATH"] = os.pathsep.join(ordered_imports)
         targets = path / "typecheck-targets.txt"
         targets.write_text("\n".join(files) + "\n", encoding="utf-8")
         config = path / "typecheck-mypy.ini"
         config.write_text("[mypy]\n", encoding="utf-8")
-        for platform in project.platforms:
+        failure = 0
+        versions = (project.python_version, *project.additional_python_versions)
+        for version, platform in product(versions, project.platforms):
             argv = [
                 str(python), "-I", "-X", "utf8", "-m", "mypy", "--config-file", str(config),
-                "--python-version", project.python_version, "--platform", platform,
+                "--python-version", version, "--platform", platform,
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
-                "--cache-dir", str(path / "mypy-cache" / project.name / platform),
+                "--cache-dir", (
+                    os.devnull if project.import_roots
+                    else str(path / "mypy-cache" / project.name / platform / version)
+                ),
             ]
             if strict or project.level == "strict":
                 argv.append("--strict")
             argv.append("@" + str(targets))
-            result = _run(argv, root, env=env)
+            if import_inputs is not None:
+                import_inputs.verify(root)
+            try:
+                result = _run(argv, root, env=env)
+            finally:
+                if import_inputs is not None:
+                    import_inputs.verify(root)
             if view is not None:
                 view.verify(root)
-            print(f"[{project.level}] {project.name} ({platform}, {physical_count} physical files, {len(files)} targets)")
+            print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
             print(view.diagnostics(result.stdout, root) if view is not None else result.stdout, end="")
             print(result.stderr, end="", file=sys.stderr)
             if result.returncode:
-                return result.returncode
-        return 0
+                if not project.additional_python_versions:
+                    return result.returncode
+                failure = failure or result.returncode
+        return failure
     finally:
         try:
             if view is not None:
@@ -341,7 +491,11 @@ def check_project(
             (path / "typecheck-targets.txt").unlink(missing_ok=True)
             (path / "typecheck-mypy.ini").unlink(missing_ok=True)
         finally:
-            lease.release()
+            try:
+                if import_inputs is not None:
+                    import_inputs.verify(root)
+            finally:
+                lease.release()
 
 
 def main(argv: list[str] | None = None) -> int:

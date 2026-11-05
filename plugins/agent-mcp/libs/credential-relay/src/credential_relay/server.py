@@ -441,11 +441,16 @@ class CredentialRelayServer:
             if action in self.token_required_actions:
                 scope_denied = False
                 try:
-                    authorized = (
-                        self.token_authorizer(token, action, dict(fields))
-                        if self.token_authorizer else
-                        bool(self.token_validator and self.token_validator(token))
-                    )
+                    if self.token_authorizer:
+                        authorized = await asyncio.to_thread(
+                            self.token_authorizer, token, action, dict(fields),
+                        )
+                    else:
+                        authorized = bool(
+                            self.token_validator and await asyncio.to_thread(
+                                self.token_validator, token,
+                            )
+                        )
                 except ScopeDenied:
                     authorized = False
                     scope_denied = True

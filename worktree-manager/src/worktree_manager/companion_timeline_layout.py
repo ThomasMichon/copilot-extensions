@@ -127,6 +127,7 @@ class TimelineLayout:
         return "\n".join(lines)
 
     def rebuild(self, window: TimelineWindow, width: int, *, now: datetime | None = None) -> None:
+        previous_width = self.text_width
         self.width = max(1, width)
         self._lane_count = window.lane_count
         wide_prefix = self._lane_count * 2
@@ -135,15 +136,24 @@ class TimelineLayout:
         blocks = []
         start = 0
         for event in window.events:
+            previous = self._refs.get(event.ref) if previous_width == self.text_width else None
             heading = (
                 f"{self._time(event, now)} | {event.kind.value} | "
                 f"{event.actor.label}: {event.summary}"
             )
             if window.lane(event) == MAX_LANES - 1:
                 heading = "Other actors (overflow lane) | " + heading
-            heading_rows, heading_clipped = self._count(heading, self.text_width, OVERSCAN_LINES)
+            heading_rows, heading_clipped = (
+                (previous.heading_rows, previous.heading_clipped)
+                if previous is not None and previous.heading_text == heading
+                else self._count(heading, self.text_width, OVERSCAN_LINES)
+            )
             details = self._details(event, window) if event.ref in window.expanded else ""
-            detail_rows, detail_clipped = self._count(details, self.text_width, MAX_DETAIL_LINES) if details else (0, False)
+            detail_rows, detail_clipped = (
+                (previous.detail_rows, previous.detail_clipped)
+                if previous is not None and previous.detail_text == details
+                else self._count(details, self.text_width, MAX_DETAIL_LINES) if details else (0, False)
+            )
             height = heading_rows + detail_rows
             block = EventBlock(
                 event, start, height, heading_rows, detail_rows, heading, details,

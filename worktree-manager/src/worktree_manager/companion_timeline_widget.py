@@ -229,6 +229,10 @@ class SubwayTimeline(ScrollView, can_focus=True):
             self.action_request_history()
         self._post_timeline_message(self.Changed())
 
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        if not event.ctrl and not event.shift:
+            self._begin_upward_browse()
+
     def action_page_up(self) -> None:
         self._begin_upward_browse()
         if self.allow_vertical_scroll:

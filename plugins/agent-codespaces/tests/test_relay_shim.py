@@ -30,6 +30,61 @@ def isolated_tokens(tmp_path, monkeypatch):
 
 
 class TestRelayToken:
+    @pytest.mark.parametrize("content", ["not-json", "[]", "null", '""'])
+    def test_malformed_store_is_not_replaced(self, isolated_tokens, content):
+        path = relay_token._TOKENS_FILE
+        path.write_text(content, encoding="utf-8")
+        with pytest.raises(ValueError):
+            relay_token.token_for("cs-new")
+        assert path.read_text(encoding="utf-8") == content
+        assert relay_token.validate("unknown") is False
+        assert relay_token.authorize_azure(
+            "unknown", "get-azure-token", {"resource": "https://example.com"},
+        ) is False
+
+    @pytest.mark.parametrize("operation", ["mint", "revoke"])
+    def test_unreadable_store_is_not_replaced(self, isolated_tokens, monkeypatch, operation):
+        path = relay_token._TOKENS_FILE
+        relay_token.token_for("cs-existing")
+        original = path.read_bytes()
+        read_text = type(path).read_text
+
+        def unavailable(self, *args, **kwargs):
+            if self == path:
+                raise PermissionError("synthetic persistent access failure")
+            return read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(type(path), "read_text", unavailable)
+        with pytest.raises(OSError):
+            if operation == "mint":
+                relay_token.token_for("cs-new")
+            else:
+                relay_token.revoke("cs-existing")
+        assert path.read_bytes() == original
+        assert relay_token.validate("unknown") is False
+
+    def test_transient_windows_replace_is_retried(self, isolated_tokens, monkeypatch):
+        path = relay_token._TOKENS_FILE
+        original_token = relay_token.token_for("cs-existing")
+        replace = os.replace
+        failures = []
+
+        def sharing_violation(source, target):
+            if os.fspath(target) == os.fspath(path) and not failures:
+                error = PermissionError("synthetic sharing violation")
+                error.winerror = 32
+                failures.append(True)
+                raise error
+            return replace(source, target)
+
+        monkeypatch.setattr(os, "replace", sharing_violation)
+        new_token = relay_token.token_for("cs-new")
+        assert failures == [True]
+        assert relay_token.validate(new_token)
+        assert relay_token.token_for("cs-existing") == original_token
+        assert not list(path.parent.glob("*.tmp"))
+        assert not list(path.parent.glob(".*.tmp"))
+
     def test_mint_is_stable_per_codespace(self, isolated_tokens):
         a = relay_token.token_for("cs-1")
         b = relay_token.token_for("cs-1")
