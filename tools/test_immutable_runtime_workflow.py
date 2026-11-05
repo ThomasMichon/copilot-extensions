@@ -73,7 +73,10 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         "dispatch_delegation": {"dispatch-delegation-linux", "dispatch-delegation-windows"},
         "pr_service": {"pr-service-linux", "pr-service-windows"},
         "ssh_service": {"ssh-service-linux", "ssh-service-windows"},
-        "pr_artifacts": {"pr-artifacts-linux", "pr-artifacts-windows"},
+        "pr_artifacts": {
+            "pr-artifacts-linux", "pr-artifacts-windows", "gateway-role-tunnels",
+            "gateway-host-application-linux", "gateway-host-application-windows",
+        },
         "dependency_compile": {
             "dependency-compile-linux", "dependency-compile-windows",
             "source-build-linux", "source-build-windows",
@@ -97,9 +100,10 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         "update_diagnostics": {"update-diagnostics-linux", "update-diagnostics-windows"},
         "native_launch": {
             "native-launch-windows", "native-seed-reply-linux", "native-seed-reply-macos",
+            "worktree-entry-sync-linux", "worktree-entry-sync-windows",
         },
         "ssh_headless": {"ssh-headless-linux", "ssh-headless-windows"},
-        "runtime_removal": {"runtime-removal-macos"},
+        "runtime_removal": {"runtime-removal-macos", "runtime-removal-windows"},
         "windows_broker_probe": {
             "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
         },

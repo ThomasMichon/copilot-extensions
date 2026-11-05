@@ -2465,6 +2465,15 @@ confirmation; live unknown, ambiguous and changed-identity observations still
 refuse inspection. The existing native birth check and retirement pins remain
 separate, and the census never signals a process.
 
+Candidate ownership uses a query-only native process/token handle when
+available, binding the token user SID to the census row's creation time before
+accepting it. This avoids a separate CIM method round trip for every readable
+candidate. Native handles close on success and failure. Hosts that cannot
+compile the in-process helper, and candidates whose native query is unavailable,
+retain the existing CIM ownership query and its exit/refusal behavior.
+A changed process identity is a refusal, not a reason to use the fallback.
+No owner result is retained across census calls.
+
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
 containment path. On Windows, a hidden child with only implicit OS stream

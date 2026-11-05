@@ -88,7 +88,7 @@ on:
         type: boolean
         default: false
       runtime_removal:
-        description: Qualify bounded native macOS runtime removal and process inspection
+        description: Qualify bounded native macOS and Windows runtime removal and process inspection
         type: boolean
         default: false
       windows_broker_probe:
@@ -397,6 +397,54 @@ jobs:
         run: |
           python -m pytest -q tools/test_logger_runtime_uninstall.py -k command_removal_preserves_publication
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  runtime-removal-windows:
+    if: ${{ inputs.runtime_removal }}
+    name: Native Windows ownership and finite runtime removal
+    runs-on: windows-latest
+    timeout-minutes: 12
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify exact-source ownership and positive removal without skips
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+
+          assert subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True,
+          ).strip() == os.environ["GITHUB_SHA"]
+          reports = Path(".validation/windows-removal-results")
+          subprocess.run([
+              sys.executable, "tools/run-plugin-tests.py", "agent-worktrees",
+              "--test-file", "tests/native/test_uninstall_windows_owner.py",
+              "--test-file", "tests/test_native_uninstall_footprint.py",
+              "-k", "native_owner_preserves_fallback_and_identity or native_default_uninstall_removes_writer_footprint",
+              "--allow-explicit-tiers", "--junit-dir", str(reports),
+          ], check=True)
+          cases = [
+              case for report in reports.rglob("*.xml")
+              for case in ET.parse(report).iter("testcase")
+          ]
+          assert len(cases) == 11, f"Expected eleven controls, observed {len(cases)}"
+          assert all(
+              child.tag not in {"failure", "error", "skipped"}
+              for case in cases for child in case
+          ), "Hosted qualification requires positive, non-skipped controls"
 
   runtime-removal-macos:
     if: ${{ inputs.runtime_removal }}

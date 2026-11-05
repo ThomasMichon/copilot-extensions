@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare bounded generation-scoped advisory hook facts and finite native-test captures",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

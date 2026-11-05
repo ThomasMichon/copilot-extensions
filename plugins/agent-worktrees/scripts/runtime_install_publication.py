@@ -24,7 +24,7 @@ HOOKS = (
     "hook_lifecycle_runtime.py", "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
     "managed_session.py", "tool_call_forms.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py",
     "managed_project_identity.py", "remote_identity.py",
-    "hook-read-policy.json", "versioned_runtime_native.ps1", "pre-tool-hook.ps1", "post-tool-hook.ps1", "terminal_probe.py", "bind-nudge.sh", "bind-nudge.ps1",
+    "hook-read-policy.json", "versioned_runtime_native.ps1", "pre-tool-hook.ps1", "post-tool-hook.ps1", "hook-facts.ps1", "terminal_probe.py", "bind-nudge.sh", "bind-nudge.ps1",
 )
 SETUP = (
     "default-setup.ps1", "default-setup.sh", "launch-command.ps1", "launch-command.sh",

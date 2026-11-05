@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from native_shell_support import admit_native_bash, bash_path, run_headless
+from agent_procutil.owned_process import run_owned
+from native_shell_support import admit_native_bash, bash_path
 from runtime_install_fixture import isolate_account_profile
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -52,9 +53,9 @@ def _run(arguments, home, *, env=None, input=None, timeout=60, cwd=None):
         PYTHONDONTWRITEBYTECODE="1", COPILOT_EXTENSIONS_TEST_CONTAINED="1",
     )
     environment.update(env or {})
-    return run_headless(
-        arguments, cwd=home if cwd is None else cwd, env=environment, input=input,
-        capture_output=True, text=True, encoding="utf-8", timeout=timeout,
+    return run_owned(
+        arguments, cwd=home if cwd is None else cwd, env=environment, input_text=input,
+        timeout=timeout,
     )
 
 
