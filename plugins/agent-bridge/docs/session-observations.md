@@ -11,7 +11,7 @@ The owning payload CLI exposes:
 
 ```text
 agent-bridge --project example observe-session SESSION \
-  --worktree-id FULL_WORKTREE_ID --contract-version 1 --json [--follow] [--after POSITION]
+  --worktree-id FULL_WORKTREE_ID --contract-version 1 --json [--follow] [--after POSITION] [--current-requests]
 agent-bridge --project example session-observation-history SESSION \
   --worktree-id FULL_WORKTREE_ID --contract-version 1 --json [--before POSITION] [--limit 64]
 ```
@@ -136,12 +136,51 @@ pending. Unknown native kinds remain `source-event`, without prose inference.
 Reported lifecycle/tool/subagent events do not allocate, settle or release
 canonical resources.
 
-The internal `acp_current_requests.py` helper separately qualifies actual local
-manual permission/form waiters, with bounded view-only identities and explicit
-connection/session invalidation. It is not connected to this wire contract:
-there is no current-state query, CLI flag or advertised optional capability yet.
-The [implementation contract](../../../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-current-requests.md)
-retains provider/parser negotiation and consumer validation as separate work.
+## Optional current input and permissions
+
+The executing CLI declares `bridge-session-current-requests-v1`, version 1,
+through the existing passive `version --contracts-json` command. The running
+daemon independently advertises it through `/health`. The opt-in
+`observe-session --current-requests` negotiates the actual provider before
+sending `current_requests=true` on the existing observation route. Missing,
+malformed or unsupported capability support refuses the optional read; it never
+guesses an empty set. Provider rollback retains the original no-flag read.
+Neither package versions nor a newer payload prove selected CLI/daemon support.
+
+Absent or `current_requests=false` preserves the original response exactly.
+History rejects the option, including false. Its immutable records, hashes and
+positions remain unchanged. The optional block is `current_request_state`:
+version, producer `client_incarnation` and `revision`, `availability`,
+`completeness`, fixed `reason`, `observed_at`, and bounded `requests` containing
+only view-only `occurrence_id` and input/permission `kind`.
+
+Only the exact current initialized local-stdio ACP callback producer, connection,
+owned process and admitted session can qualify waiters. Stopped/stopping/failed,
+missing/mismatched, host-mode, represented and remote sources remain unknown.
+Unknown has no positive requests; an unavailable client may have null incarnation
+and revision. A qualified complete empty set establishes no supported local
+waiter at that observation, not actor progress or permission to answer it.
+Partial coverage proves only the listed occurrences; overwritten/reset permission
+slots remain partial until their omitted actual Futures complete.
+
+The block is at most 8 KiB, with at most 32 occurrences from at most 64 candidate
+slots. It is added before selecting the event tail, preserving 32 KiB bodies and
+35 KiB frames. No question, schema, offered option, response or answering selector
+crosses this projection. Automatically resolved/forwarded permissions are not
+local manual waiters. View-only occurrence IDs are never answering selectors.
+
+Current-state changes use the same held reader and EventLog wake channel, without
+appending history or advancing event positions. Empty logs may carry a qualified
+current snapshot without inventing journal continuity. Clock-only changes and
+heartbeats do not create state updates. Connection/session qualification loss
+invalidates the projection; exact producer subscriptions and log waiters are
+released on cancellation/replacement. The existing bounded lifecycle backstop
+remains, without another permanent worker or per-panel poller.
+
+Manager's conditional consumer and rendered attention validation remain separate
+work in the [implementation contract](../../../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-current-requests.md).
+
+## Compaction diagnostics
 
 Actual translated compaction starts carry `bridge-compaction-evidence-v1`
 records, including optional direct total usage, attempt, model, execution,

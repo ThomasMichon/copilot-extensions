@@ -19,6 +19,17 @@ with a new independent HTTP-52 vector. Retained test-function names do not
 select capture identity: the owning generation, source-bound request, protocol
 assertion, vector and evidence family all require 52.
 
+The optional `bridge-session-current-requests-v1` expansion retains HTTP
+generation 52, prior feature floors, input vector and every earlier case.
+Fourteen additional explicit source cases bring this capture portfolio to 59:
+actual local callback/Future-to-HTTP state, strict opt-in/history exclusion,
+selected CLI declaration and actual-provider negotiation/rollback, unchanged
+event positions, before-wait invalidation, independent shared-log followers,
+optional-follow heartbeats, producer/session retirement and
+byte-reserved history paging. The owning writer binds the five additional
+producer/projection/declaration modules as semantic sources. No historical
+HTTP-51 packet is refreshed and no SDK/model actor or installed service is used.
+
 Membership transcript cases use a virtual private-reader clock so host scheduling
 does not replace their expected snapshots with legitimate budget gaps. Separate
 probes exercise deadline expiry and actual SQLite VM exhaustion. The production

@@ -10,6 +10,7 @@ from urllib.parse import quote, urlencode
 from .client import BridgeClientError, BridgeConnectionError, SseStream
 from .session_observation_contract import (
     HISTORY,
+    CURRENT_REQUESTS,
     MAX_BODY,
     MAX_FRAME,
     OBSERVATIONS,
@@ -77,12 +78,13 @@ def read(client: Any, request: ReadRequest) -> ObservationStream:
     """Negotiate with the actual daemon, then open only the dedicated read route."""
     capability = HISTORY if request.history else OBSERVATIONS
     capabilities = client.health().get("capabilities")
-    if (
-        not isinstance(capabilities, dict)
-        or type(capabilities.get(capability)) is not int
-        or capabilities[capability] != 1
-    ):
-        raise ObservationError("unsupported", f"selected daemon does not support {capability}")
+    for required in (capability, *([CURRENT_REQUESTS] if request.current_requests else [])):
+        if (
+            not isinstance(capabilities, dict)
+            or type(capabilities.get(required)) is not int
+            or capabilities[required] != 1
+        ):
+            raise ObservationError("unsupported", f"selected daemon does not support {required}")
     query: dict[str, str] = {
         "contract_version": "1",
         "worktree_id": request.selection.worktree_id,
@@ -97,6 +99,8 @@ def read(client: Any, request: ReadRequest) -> ObservationStream:
             query["before"] = request.position
     else:
         query["follow"] = "true" if request.follow else "false"
+        if request.current_requests:
+            query["current_requests"] = "true"
         if request.position is not None:
             query["after"] = request.position
     route = "session-observation-history" if request.history else "session-observations"
@@ -118,6 +122,8 @@ def _cmd(args: argparse.Namespace) -> None:
         pairs.append(("before" if history else "after", args.position))
     if not history:
         pairs.append(("follow", "true" if args.follow else "false"))
+        if getattr(args, "current_requests", False):
+            pairs.append(("current_requests", "true"))
     try:
         request = ReadRequest.parse(args.session_id, pairs, history=history)
         with read(core._get_client(ensure=False), request) as stream:
@@ -155,7 +161,8 @@ def register_commands(sub: argparse._SubParsersAction) -> None:
     """Register distinct strict known-source reads; JSON is mandatory."""
     for command in ("observe-session", "session-observation-history"):
         parser = sub.add_parser(
-            command, help="Read bounded semantic evidence for an exact known session"
+            command, help="Read bounded semantic evidence for an exact known session",
+            allow_abbrev=False,
         )
         parser.add_argument("session_id")
         parser.add_argument("--contract-version", type=int, required=True, choices=[1])
@@ -165,6 +172,7 @@ def register_commands(sub: argparse._SubParsersAction) -> None:
         parser.add_argument("--limit", type=int, default=64)
         if command == "observe-session":
             parser.add_argument("--follow", action="store_true")
+            parser.add_argument("--current-requests", action="store_true")
             parser.add_argument("--after", dest="position")
         else:
             parser.add_argument("--before", dest="position")
