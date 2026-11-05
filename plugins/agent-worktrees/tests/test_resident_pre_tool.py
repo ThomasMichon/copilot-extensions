@@ -36,7 +36,7 @@ def test_resident_pre_tool_contract(case, tmp_path):
     scripts.mkdir()
     for name in (
         "hook-read-policy.json", "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py",
-        "anchor_write_guard.py", "pr_supersede_guard.py",
+        "anchor_write_guard.py", "pr_supersede_guard.py", "tool_call_forms.py",
         "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py",
     ):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)

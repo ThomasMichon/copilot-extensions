@@ -43,6 +43,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+from tool_call_forms import write_targets
 
 # --- Personal-state paths that must never be written into a stateless harness -
 FORBIDDEN_PREFIXES = ("efforts/", "logs/", "weekly-updates/", "icm/")
@@ -265,8 +266,7 @@ def decide(payload: dict, *, env=None, home=None) -> dict | None:
                     else payload.get("tool_input"))
 
     if tool in WRITE_TOOLS:
-        raw = _pick(args, PATH_ARG_KEYS)
-        if raw:
+        for raw in write_targets(tool, args):
             abs_path = _resolve(raw, cwd)
             if path_is_personal_state_in_harness(abs_path, root):
                 return {"permissionDecision": "deny",

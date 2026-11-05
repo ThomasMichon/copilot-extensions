@@ -387,7 +387,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                  "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",
                  "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
-                 "managed_session.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py",
+                 "managed_session.py", "tool_call_forms.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py",
                  "managed_project_identity.py", "remote_identity.py",
                  "hook-read-policy.json", "versioned_runtime_native.ps1", "pre-tool-hook.ps1", "post-tool-hook.ps1", "terminal_probe.py"):
         src = scripts / name
@@ -1527,7 +1527,13 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
                     lines.append(f"    {k}: {_format_yaml_value(v)}")
         lines.append("")
     from .pr_authority import write_registry
-    write_registry(path, "\n".join(lines) + "\n")
+    content = "\n".join(lines) + "\n"
+    if path == projects_yaml_path():
+        from .guarded_anchors import managed_write
+
+        managed_write(lambda: write_registry(path, content))
+    else:
+        write_registry(path, content)
 
 
 def require_project_hosting(project: str, repo_dir: Path | str | None = None) -> None:

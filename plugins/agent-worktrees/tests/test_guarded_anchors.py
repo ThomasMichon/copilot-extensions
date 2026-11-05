@@ -964,9 +964,29 @@ def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, mo
         p.module.refresh(registry_root=p.root)
     assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
     assert p.reader.read_map(p.callers[1], p.root).status == "ready"
+    assert p.reader.read_map(p.callers[1], p.root).posture_errors == ["target"]
     monkeypatch.setattr(repos, "registered_entry_root", original_root)
     assert p.module.refresh(registry_root=p.root)["published"] == 2
     assert p.reader.read_map(p.callers[0], p.root).roots[0]["name"] == "target"
+
+
+def test_project_posture_changes_refresh_prepared_facts(producer, monkeypatch):
+    from agent_worktrees import installer
+
+    p = producer
+    p.registry.repos["first"].repo_class = "worktree"
+    p.registry.repos["second"].repo_class = "singleton"
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: p.root / "projects.yaml")
+    p.module.refresh(p.callers, registry_root=p.root)
+    before = p.reader.read_map(p.callers[0], p.root)
+    assert any(row["name"] == "first" for row in before.postures)
+    installer.write_projects_registry({
+        "projects": {"first": {"base_repo": True}, "second": {"elevated": True}},
+    })
+    after = p.reader.read_map(p.callers[0], p.root)
+    assert not any(row["name"] == "first" for row in after.postures)
+    assert next(row for row in after.postures if row["name"] == "second")["elevated"]
 
 
 @pytest.mark.parametrize("consumer", ["hook", "withdraw", "refresh"])

@@ -77,6 +77,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+from tool_call_forms import write_targets
 from anchor_shell_parser import (
     GIT_INTRINSIC_NONWRITE_COMMANDS as _GIT_READ_BUILTINS,
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
@@ -908,16 +909,12 @@ def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | Non
     canon_anchor = {_canon(a["path"]): a for a in anchors if a.get("path")}
 
     if tool in WRITE_TOOLS:
-        raw = _pick(args, PATH_ARG_KEYS)
-        if not raw:
-            return None
-        abs_path = _resolve(raw, cwd)
-        root = find_repo_root(abs_path)
-        if root is None or is_linked_worktree(root):
-            return None  # not a checkout, or a linked worktree -> always fine
-        a = canon_anchor.get(_canon(str(root)))
-        if a is not None:
-            return {**a, "reason": _deny_reason(a["name"], a["path"])}
+        for raw in write_targets(tool, args):
+            root = find_repo_root(_resolve(raw, cwd))
+            if root is not None and not is_linked_worktree(root):
+                a = canon_anchor.get(_canon(str(root)))
+                if a is not None:
+                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
         return None
 
     if tool in SHELL_TOOLS:
@@ -971,13 +968,14 @@ def decide(payload: dict, *, env=None, home=None,
 
     args = _as_args(payload.get("toolArgs") if "toolArgs" in payload
                     else payload.get("tool_input"))
-    hit = evaluate(tool, args, cwd, anchors)
-    if hit is None:
-        return None
-    # A live break-glass grant for the anchor repo lets the write through.
-    if active_break_glass(hit.get("name", ""), home):
-        return None
-    return _hit_to_output(hit, mode)
+    while anchors:
+        hit = evaluate(tool, args, cwd, anchors)
+        if hit is None:
+            return None
+        if not active_break_glass(hit.get("name", ""), home):
+            return _hit_to_output(hit, mode)
+        anchors = [row for row in anchors if row.get("name") != hit.get("name")]
+    return None
 
 
 def main() -> int:

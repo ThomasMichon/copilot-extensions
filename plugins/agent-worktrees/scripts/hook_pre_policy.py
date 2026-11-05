@@ -103,6 +103,27 @@ def decide(
     settlement_deadline: float | None = None,
 ) -> dict:
     combined: dict = dict(initial_decision or {})
+    if "toolCalls" in payload:
+        deadline = min(
+            time.monotonic() + budget_seconds - 2.0,
+            settlement_deadline if settlement_deadline is not None else float("inf"),
+        )
+        try:
+            forms = load_sibling("tool_call_forms.py")
+            events = forms.tool_events(payload)
+        except (AttributeError, ValueError):
+            return merge_decisions(combined, unavailable("native tool batch is invalid"))
+        for event in events:
+            combined = decide(
+                event, home=home, load_sibling=load_sibling,
+                merge_decisions=merge_decisions, budget_seconds=budget_seconds,
+                require_policy=require_policy, observe_pr=observe_pr,
+                only_observations=only_observations, initial_decision=combined,
+                settlement_deadline=deadline,
+            )
+            if combined.get("permissionDecision") == "deny":
+                break
+        return combined
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     if contextual:
         helper = load_sibling("registry_root.py")

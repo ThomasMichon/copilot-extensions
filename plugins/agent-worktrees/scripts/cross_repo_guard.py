@@ -58,6 +58,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+from tool_call_forms import write_targets
 
 try:
     import guarded_anchor_map as _guard_map
@@ -291,6 +292,21 @@ def _channel_hint(g: dict) -> str:
 
 def _deny_reason(g: dict, detail: str) -> str:
     name, delegate, path = g.get("name", ""), g.get("delegate", ""), g.get("path", "")
+    posture = g.get("posture")
+    if posture:
+        guidance = {
+            "reference": "is registered read-only; inspect it without editing",
+            "worktree": f"is a shared anchor; create a linked worktree with `agent-worktrees -p {name} create --json` and edit there",
+            "elevated": f"requires an elevated execution venue; resolve its owner with `agent-worktrees related resolve {name}`",
+        }[posture]
+        return (
+            f"repository-write-guidance: '{name}' {guidance}. {detail} "
+            f"Honor its own repository instructions. For an already-authorized "
+            f"targeted maintenance exception, acknowledge this guidance using "
+            f"`agent-worktrees repos allow-edits {name} --reason \"<why>\" "
+            f"--minutes 10`, then retry. The grant is repo-scoped and time-bounded; "
+            f"it does not grant access or elevation."
+        )
     return (
         f"cross-repo-guard: '{name}' is an agent-guarded repo (delegate: "
         f"{delegate}). Do NOT edit its checkout ({path}) directly from the "
@@ -319,7 +335,32 @@ def load_guarded_roots(
             "Run agent-worktrees refresh-guards or prepare this checkout.",
             file=sys.stderr,
         )
-    return result.roots
+    if result.status != "ready":
+        return []
+    if getattr(result, "posture_errors", None):
+        print(
+            "repository-write-guidance: supplemental posture inventory is partial; "
+            "confirmed roots remain usable. Run agent-worktrees refresh-guards to retry.",
+            file=sys.stderr,
+        )
+    return result.roots + (getattr(result, "postures", None) or [])
+
+
+def _is_elevated() -> bool:
+    if os.name == "nt":
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    return os.geteuid() == 0
+
+
+def _posture_mode(row: dict, env, default: str) -> str:
+    if row.get("posture") != "worktree":
+        return default
+    if _truthy_off(env.get("ANCHOR_WRITE_GUARD")):
+        return "off"
+    mode = (env.get("ANCHOR_WRITE_GUARD_MODE") or "").strip().lower()
+    return mode if mode in {"deny", "ask", "warn", "off"} else "deny"
 
 
 # --- Core evaluation ----------------------------------------------------------
@@ -370,15 +411,13 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | Non
     if not guarded or _guard_map is None:
         return None
     if tool in WRITE_TOOLS:
-        raw = _pick(args, PATH_ARG_KEYS)
-        if not raw:
-            return None
-        abs_path = _resolve(raw, cwd)
         identity_cache = {}
-        for g in guarded:
-            if g.get("path") and _guard_map.matches(abs_path, g, identity_cache=identity_cache):
-                return {**g, "reason": _deny_reason(
-                    g, f"('{tool}' targeting {raw}).")}
+        for raw in write_targets(tool, args):
+            abs_path = _resolve(raw, cwd)
+            for g in guarded:
+                if g.get("path") and _guard_map.matches(abs_path, g, identity_cache=identity_cache):
+                    return {**g, "reason": _deny_reason(
+                        g, f"('{tool}' targeting {raw}).")}
         return None
     if tool in SHELL_TOOLS:
         cmd = _pick(args, CMD_ARG_KEYS)
@@ -438,14 +477,26 @@ def decide(payload: dict, *, env=None, home=None,
         guarded = guarded_roots
     if not guarded:
         return None
+    if any(row.get("elevated") for row in guarded):
+        elevated = _is_elevated()
+        guarded = [
+            {**row, "posture": "elevated"}
+            if row.get("elevated") and not elevated and row.get("posture") != "reference"
+            else row
+            for row in guarded
+            if row.get("delegate") != "none" or row.get("posture")
+            or row.get("elevated") and not elevated
+        ]
+    guarded = [row for row in guarded if _posture_mode(row, env, mode) != "off"]
 
-    hit = evaluate(tool, args, cwd, guarded)
-    if hit is None:
-        return None
-    # A live break-glass grant for the target repo lets the write through.
-    if active_break_glass(hit.get("name", ""), home, registry_root=selected_root):
-        return None
-    return _hit_to_output(hit, mode)
+    while guarded:
+        hit = evaluate(tool, args, cwd, guarded)
+        if hit is None:
+            return None
+        if not active_break_glass(hit.get("name", ""), home, registry_root=selected_root):
+            return _hit_to_output(hit, _posture_mode(hit, env, mode))
+        guarded = [row for row in guarded if row.get("name") != hit.get("name")]
+    return None
 
 
 def main() -> int:

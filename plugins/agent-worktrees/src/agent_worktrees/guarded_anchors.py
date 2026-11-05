@@ -78,6 +78,46 @@ def _require_configuration_observations(observations) -> None:
         raise GuardPublicationError("configuration acquisition unavailable: " + ", ".join(sorted(reasons)))
 
 
+def _posture_rows(registry, reader) -> tuple[list[dict], list[str]]:
+    from . import installer
+
+    projects = installer.read_projects_registry()["projects"]
+    rows = []
+    unavailable = []
+    for name, registered in sorted(registry.repos.items()):
+        project = projects.get(name, {})
+        if not isinstance(project, dict):
+            unavailable.append(name)
+            continue
+        posture = (
+            "reference" if registered.repo_class == "reference"
+            else "worktree" if registered.repo_class in {"worktree", "knowledge"}
+            and not project.get("base_repo")
+            else ""
+        )
+        elevated = project.get("elevated") is True
+        if not posture and not elevated:
+            continue
+        try:
+            path = repos.registered_entry_root(registered)
+        except repos.RepositoryResolutionError as exc:
+            if not registered.local_path() or isinstance(exc.__cause__, FileNotFoundError):
+                continue
+            unavailable.append(name)
+            continue
+        identity = reader.repository_identity(path)
+        if identity is None:
+            unavailable.append(name)
+            continue
+        rows.append({
+            "name": name, "delegate": "none", "posture": posture,
+            "elevated": elevated, "path": reader.canonical(path),
+            "registered_path": os.path.abspath(registered.local_path()),
+            "identity": identity,
+        })
+    return rows, unavailable
+
+
 def build_snapshot(caller: str, root: Path, generation: str, prior_project: str | None = None) -> dict:
     """Acquire one caller's effective overlays; never union other callers."""
     from . import config as cfg
@@ -157,7 +197,8 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         })
     if registry._baseline != (str(registry_path.resolve()), revision(read_bytes(registry_path))):
         raise GuardPublicationError("repository registry changed during guard publication")
-    if len(rows) > reader.MAX_ROOTS:
+    postures, posture_errors = _posture_rows(registry, reader)
+    if len(rows) + len(postures) > reader.MAX_ROOTS:
         raise GuardPublicationError("guarded anchor inventory exceeds its bound")
     return {
         "schema": reader.SCHEMA, "version": reader.VERSION,
@@ -168,7 +209,9 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         # AcquisitionReport has no reusable owner-input closure. This is a
         # managed-boundary observation, not dependency-fingerprint freshness.
         "qualification": "managed-observation",
-        "roots": rows,
+        "roots": rows, "postures": postures,
+        "posture_authority": "partial" if posture_errors else "complete",
+        "posture_errors": posture_errors,
     }
 
 

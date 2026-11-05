@@ -100,6 +100,10 @@ An unreadable declared guarded checkout also makes its caller view unavailable,
 not complete empty. A nonlocal registration or positively absent checkout is
 distinct from an unreadable local path.
 
+Managed project-mode writes also withdraw and refresh prepared views: changing
+`base_repo` or required-elevation configuration must not leave the previous
+posture active. Out-of-band writes still require the explicit refresh above.
+
 ## Reader contract
 
 Version 1 uses schema `agent-worktrees.guarded-anchors`, canonical `source_root`
@@ -116,6 +120,17 @@ and relevant event targets. A valid complete empty list
 means no guarded local anchors were observed. Missing, foreign, malformed,
 oversized, unsupported-version, incomplete or otherwise unusable maps fail open;
 they never cause acquisition or an infrastructure-shaped deny.
+
+New version-1 publications add optional `postures` for registered
+read-only, worktree/knowledge and elevation-required repositories. Base-repo
+projects are excluded. `posture_authority` and `posture_errors`
+describe this supplemental inventory independently of the delegated-root
+inventory. An unavailable unrelated repository can make postures partial while
+confirmed delegated roots and posture rows remain usable; an unavailable
+explicitly declared delegated target still makes its caller view unavailable.
+Older maps without posture fields remain readable. Worktree reminders apply
+to the registered anchor, not its linked worktrees; delegation continues to
+cover linked targets by repository identity.
 
 Git identity uses bounded filesystem metadata reads, including ordinary `.git`
 directories, relative/absolute gitdir pointers, linked worktree `commondir`,
@@ -139,7 +154,18 @@ write classification rather than acquiring live Git configuration.
 
 Current kill switches, policy modes and selected-installation `allow-edits.json`
 grant expiry remain live; permission decisions are never precomputed. The
-separate anchor-write guard is unchanged.
+separate anchor-write guard retains its own policy. Supplemental worktree
+reminders honor that owner's mode and kill switch. A scoped grant
+removes only its matching repository from the current decision; other targets
+in the same patch or batch are still checked. Denial names the required
+workflow and the existing time-bounded `allow-edits` recovery route.
+
+The composed command policy accepts both legacy single-call events and native
+`toolCalls[]` batches with one shared deadline. Direct-write targets include
+structured path aliases and native freeform patch add/update/delete/move
+directives. Patch contents are not scanned for paths. Unknown or malformed
+forms retain the existing fail-open behavior; supported target extraction
+does not claim exhaustive shell/process interception.
 
 ## Observation and deployment limits
 
@@ -150,7 +176,8 @@ closure are not promoted into dependency proof. Out-of-band changes require
 explicit refresh/preparation; the reader neither checks those inputs nor
 pretends a timestamp proves them unchanged.
 
-The stdlib reader `guarded_anchor_map.py` deploys alongside its importer through
+The stdlib readers `guarded_anchor_map.py` and `tool_call_forms.py` deploy
+alongside their importers through
 all existing installer/publication paths and participates in deployment drift
 reconciliation. Mixed older/newer payloads must be reconciled normally; absent
 reader/map facts do not authorize a foreground installation. Source delivery,

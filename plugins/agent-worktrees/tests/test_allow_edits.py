@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,8 @@ from agent_worktrees import allow_edits
 def home(tmp_path: Path, monkeypatch) -> Path:
     """Redirect ~ so the grant store reads/writes under a tmp dir."""
     monkeypatch.setattr(allow_edits.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     return tmp_path
 
 
@@ -82,6 +85,22 @@ def test_revoke(home: Path, clock):
     assert allow_edits.revoke("a") is True
     assert allow_edits.is_active("a") is False
     assert allow_edits.revoke("a") is False
+
+
+def test_selected_grant_store_matches_the_command_guard(home: Path, monkeypatch):
+    selected_home = home / "selected"
+    monkeypatch.setenv("AGENT_HOME", str(selected_home))
+    script = Path(__file__).resolve().parents[1] / "scripts" / "cross_repo_guard.py"
+    spec = importlib.util.spec_from_file_location("grant_consumer_guard", script)
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    root = selected_home / ".agent-worktrees"
+    allow_edits.grant("example", "isolated native consumer validation", 10)
+    assert guard.active_break_glass("example", home, registry_root=root)
+    assert not guard.active_break_glass("other", home, registry_root=root)
+    assert not (home / ".agent-worktrees" / "allow-edits.json").exists()
+    assert allow_edits.revoke("example")
+    assert not guard.active_break_glass("example", home, registry_root=root)
 
 
 def test_corrupt_store_is_ignored(home: Path):
