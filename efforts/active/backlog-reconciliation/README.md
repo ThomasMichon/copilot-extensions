@@ -330,6 +330,34 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The following ten-disposition wave completes #8951/#9758's finite source
+contracts and adopts eight unfinished trackers under OPEN #3979, #5003
+and #5245 with explicit Plan/Validation and unchanged source/resource
+custody. #3985's broader runtime-core architecture stays separate; actual
+native-coverage uncertainty is transferred, not waived. Two equal complete
+13:45 PST ten-page scans observe 961 whole OPEN: 687 creator-eligible,
+274 excluded, 647 original-cohort and 314 inflow. Ten audited departures
+and one external departure explain the net reduction of eleven; external
+work receives no campaign credit. Verified dispositions are 833, still
+232 above the fixed 729 checkpoint. The [journal](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
+also records reviewed delivery of the preceding 28-disposition wave in
+#10781. This campaign remains Active with every completion state unchanged.
+
+The next applied cohort wave delivers 28 audited dispositions: #7171 and
+#10739 are completed finite fixes; 26 unfinished child trackers are
+subsumed only after complete direct Plan/Validation and original-scope
+intake into OPEN #4050, #10377, #9448, #5665 and #2709. Implementation
+owners, claims, resource duties and actual qualification gates remain.
+Two equal complete 13:28 PST metadata scans observe 972 whole OPEN:
+698 creator-eligible, 274 excluded, 655 original-cohort and 317 inflow.
+One arrival and two external departures reconcile the net reduction of
+29 since the prior census; external actions receive no campaign credit.
+Verified campaign dispositions are 823, still 243 above the fixed 729
+whole-queue checkpoint. The [applied-cohort journal](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
+records all five receiving groups and the coordinator's rejected
+source-only completion recommendations. This campaign remains Active;
+the remaining returned cohorts, inflow and stabilization work continue.
+
 The 2026-11-05 cohort-parent direction is executing through a complete
 1,006-identity metadata snapshot, 667 whole qualified Markdown research
 packets and 339 metadata-only placeholders. Eight disjoint Luna batches

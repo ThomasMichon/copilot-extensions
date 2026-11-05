@@ -2370,6 +2370,22 @@ Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.
 
+## Optional native worktree-state durability
+
+The manual `installation-context-full.yml` portfolio `worktree-state` selects
+the native Windows allocation/exact-retry control and the final project-root
+barrier-failure control from Worktrees' `test_worktree_data_store.py`, followed
+by Efforts' `test_agenda_export.py` native complete-export/readback control.
+The source-stamped job uses only private temporary homes and real filesystem
+barriers. Allocation retries retain the exact descriptor; an injected failed
+acknowledgment refuses until the actual final barrier succeeds. Export preserves
+all declared table rows, original accepted requests, immutable records and
+delivery status across three revisions and a separately copied readback.
+An actual Windows pass is required: Linux skips and API doubles do not qualify
+this boundary. It does not prove hardware power-loss recovery, unsupported
+filesystems, live relocation, installed collection or remote archive durability.
+This explicit five-minute job does not expand required unit-only CI.
+
 ## Optional native Mux Companion navigation
 
 The manual `installation-context-full.yml` portfolio `mux-companion` runs

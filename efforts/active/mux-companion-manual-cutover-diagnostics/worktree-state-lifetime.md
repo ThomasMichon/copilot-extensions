@@ -268,6 +268,10 @@ not consequences of a reviewed design.
   and record actual filesystem barriers separately from Linux API-double
   coverage. Hardware power-loss behavior and unsupported filesystems are not
   inferred from source tests.
+  The manual `installation-context-full.yml` `worktree-state` portfolio selects
+  real allocation, final-barrier failure/retry and complete export/copy/readback
+  controls in private temporary homes. A source change or Linux skip is not
+  native execution; this item remains open until the selected Windows run passes.
 - [x] Qualify efforts-owned new managed initialization and complete local export/
   readback in isolated processes, preserving declared identity and every
   accepted operation/record under concurrent mutation. #10238 covers malformed
