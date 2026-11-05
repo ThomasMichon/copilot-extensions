@@ -187,6 +187,8 @@ def candidate(
             process_retention=True, reuse_generations=identity is None,
             expected_source_identity=runtime_source.manifest_fields(identity),
         )
+        if identity is not None:
+            arguments["construction_data"] = {"source_payload": str(prepared)}
         if wheel_inputs is not None:
             arguments.update(wheel_inputs=wheel_inputs, local_packages=local_packages)
         if validate_candidate is not None:

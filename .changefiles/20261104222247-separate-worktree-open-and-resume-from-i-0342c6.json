@@ -1,0 +1,9 @@
+{
+  "comment": "Separate worktree Open and Resume from installation and paired plugin synchronization",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

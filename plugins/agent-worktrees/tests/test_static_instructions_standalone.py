@@ -324,11 +324,12 @@ def test_manager_reaps_foreground_git_descendants(tmp_path, failure):
 
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.parametrize("inherited", [None, "1"])
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
 def test_native_resolve_remains_compatible_with_older_runtime(
-    standalone_workspace, request, shell,
+    standalone_workspace, request, shell, inherited,
 ):
     from native_shell_support import bash_path, run_headless
 
@@ -343,7 +344,10 @@ def test_native_resolve_remains_compatible_with_older_runtime(
         "print(json.dumps({'deferred':os.environ.get('AGENT_WORKTREES_DEFER_PROJECTIONS')}))\n",
         encoding="utf-8",
     )
-    env["AGENT_WORKTREES_DEFER_PROJECTIONS"] = "previous"
+    if inherited is None:
+        env.pop("AGENT_WORKTREES_DEFER_PROJECTIONS", None)
+    else:
+        env["AGENT_WORKTREES_DEFER_PROJECTIONS"] = inherited
     root = Path(__file__).resolve().parents[3] / "worktree-manager" / "bin"
     if shell == "powershell":
         executable = request.getfixturevalue("native_powershell")
@@ -355,7 +359,7 @@ def test_native_resolve_remains_compatible_with_older_runtime(
             "function Write-SetupLog {}\nfunction Write-LaunchTrace {}\n"
             + block
             + "\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
-            + "if ($env:AGENT_WORKTREES_DEFER_PROJECTIONS -ne 'previous') { throw 'environment leaked' }\n"
+            + f"if ([string]$env:AGENT_WORKTREES_DEFER_PROJECTIONS -ne '{inherited or ''}') {{ throw 'environment leaked' }}\n"
             + "$jsonOutput\n"
         )
         command = [executable, "-NoProfile", "-NonInteractive", "-Command", script]
@@ -368,20 +372,20 @@ def test_native_resolve_remains_compatible_with_older_runtime(
             f"PYTHON='{bash_path(executable, Path(sys.executable))}'; LAUNCH_PROJECT=''\n"
             "set -- --json\n" + block
             + "\n[[ $RC -eq 0 ]] || exit \"$RC\"\n"
-            + "[[ $AGENT_WORKTREES_DEFER_PROJECTIONS == previous ]] || exit 99\n"
+            + f'[[ "${{AGENT_WORKTREES_DEFER_PROJECTIONS-}}" == "{inherited or ""}" ]] || exit 99\n'
             + "printf '%s' \"$JSON\"\n"
         )
         command = [executable, "-c", script]
     result = run_headless(command, cwd=standalone, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"deferred": "1"}
+    assert json.loads(result.stdout) == {"deferred": inherited}
 
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_native_final_preflight_copies_knowledge_only_provider(
+def test_native_explicit_composition_copies_knowledge_only_provider(
     standalone_workspace, tmp_path, request, shell,
 ):
     from agent_worktrees.static_instructions import NAMESPACE
@@ -398,59 +402,28 @@ def test_native_final_preflight_copies_knowledge_only_provider(
     }
     knowledge_settings.write_text(json.dumps(settings), encoding="utf-8")
     harness_settings.unlink()
-    report = tmp_path / "report.json"
-    root = Path(__file__).resolve().parents[3]
     if shell == "powershell":
         executable = request.getfixturevalue("native_powershell")
-        source = (root / "worktree-manager" / "bin" / "launch-session.ps1").read_text(encoding="utf-8-sig")
-        start = source.index("$knowledgeArgs = @")
-        end = source.index("\n\n$marketplaceArgs", start)
-        function_start = source.index("function Invoke-RuntimePreflight {")
-        function_end = source.index("\n$VenvPython = $AwPy", function_start)
-        block = source[start:end].replace(
-            "Invoke-RuntimePreflight -Label",
-            f"$knowledgeArgs += @('--harness-path', '{repo}', '--knowledge-path', '{knowledge}')\n"
-            "Invoke-RuntimePreflight -Label",
-        )
         script = (
-            f"$VenvPython = '{sys.executable}'; $knowledgeCwd = '{repo}'; "
-            "$script:LaunchProject = $null\n"
-            f"function Resolve-RuntimePython {{ '{sys.executable}' }}\n"
-            "function Write-SetupLog { param($Message, $Level)\n"
-            " $prefix = 'Knowledge plugin preflight completed: '\n"
-            f" if ($Message.StartsWith($prefix)) {{ $Message.Substring($prefix.Length) | Out-File -Encoding utf8 '{report}' }}\n"
-            "}\n" + source[function_start:function_end] + "\n" + block
+            f"& '{sys.executable}' -m agent_worktrees knowledge compose-plugins "
+            f"--harness-path '{repo}' --knowledge-path '{knowledge}' --prepare-projections --json\n"
+            "exit $LASTEXITCODE\n"
         )
         command = [executable, "-NoProfile", "-NonInteractive", "-Command", script]
     else:
         executable = request.getfixturevalue("native_bash")
-        source = (root / "worktree-manager" / "bin" / "launch-session.sh").read_text(encoding="utf-8")
-        start = source.index('    _KNOWLEDGE_CWD="')
-        end = source.index("\n\n    _MARKETPLACE_ARGS", start)
-        function_start = source.index("run_runtime_preflight() {")
-        function_end = source.index('\nif [[ -n "$PYTHON"', function_start)
-        block = source[start:end].replace(
-            '    run_runtime_preflight "Knowledge plugin preflight"',
-            f"    _KNOWLEDGE_ARGS+=(--harness-path '{bash_path(executable, repo)}' "
-            f"--knowledge-path '{bash_path(executable, knowledge)}')\n"
-            '    run_runtime_preflight "Knowledge plugin preflight"',
-        )
         script = (
-            "set -euo pipefail\n"
-            f"PYTHON='{bash_path(executable, Path(sys.executable))}'\n"
-            f"STATUS_PATH='{bash_path(executable, repo)}'\nLAUNCH_PROJECT=''\n"
-            "resolve_runtime_python() { printf '%s' \"$PYTHON\"; }\n"
-            "setup_log() { shift; local prefix='Knowledge plugin preflight completed: ';\n"
-            f" if [[ \"$1\" == \"$prefix\"* ]]; then printf '%s' \"${{1#\"$prefix\"}}\" > '{bash_path(executable, report)}'; fi\n"
-            " printf '%s\\n' \"$1\" >&2\n"
-            "}\n" + source[function_start:function_end] + "\n" + block
+            f"exec '{bash_path(executable, Path(sys.executable))}' -m agent_worktrees "
+            "knowledge compose-plugins "
+            f"--harness-path '{bash_path(executable, repo)}' "
+            f"--knowledge-path '{bash_path(executable, knowledge)}' --prepare-projections --json"
         )
         command = [executable, "-c", script]
     result = run_headless(command, cwd=standalone, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "launch/Preparing-instruction-projections starting [elapsed " in result.stderr
     assert "launch/Copying-declared-instructions done [duration " in result.stderr
-    summary = json.loads(report.read_text(encoding="utf-8-sig"))
+    summary = json.loads(result.stdout)
     assert summary["projections"]["status"] == "ready"
     assert summary["projections"]["changed"] == 1
     output = repo / NAMESPACE / "example" / "guidance" / "nested" / "body.local.instructions.md"

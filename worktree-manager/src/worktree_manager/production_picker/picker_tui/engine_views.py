@@ -503,7 +503,7 @@ class WorktreesView:
             txt.stylize("grey35")   # outside the net set
         elif preview and not focused and not (
             eng._cleanable(rec) if preview == "clean"
-            else rec.get("ff_eligible")
+            else rec.get("sync_eligible", rec.get("ff_eligible"))
         ):
             txt.stylize("grey35")   # out of this action's scope
         # Focus / selection highlight, layered last so it reads as one state

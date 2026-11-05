@@ -263,7 +263,10 @@ class PickerScreenMaintenanceActionsMixin:
         p = self.progress
         ex = self.executor
         for it in p["items"]:
-            it["state"] = ex.state(it.get("key", it["id4"]))
+            key = it.get("key", it["id4"])
+            it["state"] = ex.state(key)
+            if p.get("op") == "sync":
+                it["result"] = ex.result(key)
         if ex.is_done():
             p["done"] = True
     def _scope_union(self, dlg):

@@ -3029,6 +3029,19 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     assert registration["resident_environment"] is True
 
 
+def test_session_start_keeps_existing_paired_plugin_overlay(monkeypatch, tmp_path):
+    from agent_worktrees import knowledge_plugins
+
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair",
+                        lambda **kwargs: pytest.fail("SessionStart must not recompose plugins"))
+    snapshots = []
+    monkeypatch.setattr(main, "_write_session_lifecycle_snapshot",
+                        lambda *args: snapshots.append(args))
+    payload = {"sessionId": "fixture-session"}
+    main._reconcile_knowledge_plugin_overlay(payload, str(tmp_path))
+    assert snapshots == [("knowledge-plugin-overlay", payload, "{}")]
+
+
 def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
     monkeypatch, tmp_path
 ):

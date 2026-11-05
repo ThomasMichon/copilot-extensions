@@ -317,6 +317,32 @@ def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
         assert b"HANDOFF-RENDERED" in console.output
 
 
+def test_manager_new_mux_first_launch_survives_shell_owned_handoff(tmp_path):
+    from _terminal_console_fixture import Console
+
+    argv, _ = _scripts(tmp_path, "first-launch", "helper")
+    environment = dict(
+        os.environ, WORKTREE_MANAGER_ROOT=str(tmp_path / "manager"),
+        FIXTURE_KEPT="original", FIXTURE_REMOVED="original", TEMP=str(tmp_path), TMP=str(tmp_path),
+    )
+    for name in ("CE_TERMINAL_LAUNCH", "WORKTREE_NO_MUX"):
+        environment.pop(name, None)
+    with Console(argv, env=environment, cwd=tmp_path) as console:
+        ready = _wait(tmp_path / "prepared.json", console)
+        pinned = console.pin_descendants()
+        (tmp_path / "release").touch()
+        attached = _wait(tmp_path / "attached.json", console)
+        assert attached["arguments"] == [
+            "--project", "fixture", "--worktree-id", "created-wt", "--first-launch",
+        ]
+        assert attached["pid"] == console.process.pid
+        assert not attached["redirected"] and not attached["channel"]
+        assert all(console.exited(handle, 5000) for _, handle in pinned.values())
+        assert not Path(ready["request"]).parent.exists()
+        console.send(b"done\r")
+        assert console.wait() == 23
+
+
 def test_real_launcher_refusal_preserves_exit_journal_and_original_diagnostics(tmp_path):
     from _terminal_console_fixture import Console
     from test_launch_admission_ordering import _calls, _fixture

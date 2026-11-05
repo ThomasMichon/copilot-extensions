@@ -656,23 +656,25 @@ DEFAULT_FETCH_TIMEOUT = 30.0
 
 def fetch(
     remote: str, *, cwd: str | Path, timeout: float | None = DEFAULT_FETCH_TIMEOUT,
-    isolated_repository: bool = False, no_hooks: bool = False,
+    isolated_repository: bool = False, no_hooks: bool = False, branch: str | None = None,
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
     Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`): a stall past it is a
     :class:`GitError` (returncode 124), a best-effort fetch failure to every caller;
-    ``timeout=None`` is unbounded.
+    ``timeout=None`` is unbounded. ``branch`` explicitly refreshes that tracking
+    ref even when the remote's configured fetch refspec excludes it.
     """
+    refspec = [f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"] if branch else []
     try:
         git(
-            *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet",
+            *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet", *refspec,
             cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
             auth_acquisition=True, **({"no_hooks": True} if no_hooks else {}),
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(
-            ["git", "fetch", remote, "--quiet"], 124,
+            ["git", "fetch", remote, "--quiet", *refspec], 124,
             f"fetch from '{remote}' timed out after {timeout}s "
             "(remote unreachable?)",
         ) from exc

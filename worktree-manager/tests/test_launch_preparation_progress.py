@@ -46,7 +46,7 @@ def test_foreground_plan_waits_without_aggregate_deadline(monkeypatch, selection
 
 
 @pytest.mark.parametrize("route", ["shell", "shell-resume", "direct", "ahp", "persisted-ahp", "remote"])
-def test_manager_defers_only_shell_delegated_preparation(tmp_path, monkeypatch, route):
+def test_manager_prepares_new_before_handoff_and_defers_only_existing_shell_entry(tmp_path, monkeypatch, route):
     from worktree_manager import __main__ as entrypoint
     from worktree_manager import ahp_provider, launcher
 
@@ -92,7 +92,7 @@ def test_manager_defers_only_shell_delegated_preparation(tmp_path, monkeypatch, 
     monkeypatch.setattr(ec, "run_json", query)
     monkeypatch.setattr(
         entrypoint, "_run_relocated_mux_launch",
-        lambda *a: events.extend(["maintenance", "final-publication", "shell-handoff"]) or 0,
+        lambda *a: events.append("shell-handoff") or 0,
     )
     monkeypatch.setattr(launcher, "launch", lambda *a, **kw: events.append("direct-handoff") or 0)
     monkeypatch.setattr(ahp_provider, "ensure_session", lambda *a: events.append("ahp-ensure"))
@@ -108,7 +108,7 @@ def test_manager_defers_only_shell_delegated_preparation(tmp_path, monkeypatch, 
     if route in {"shell", "shell-resume"}:
         assert events == (
             (["inspect-leg"] if resumed else [])
-            + ["resolve-deferred", "maintenance", "final-publication", "shell-handoff"]
+            + ["resolve-deferred" if resumed else "resolve-prepared", "shell-handoff"]
         )
     else:
         assert events.count("resolve-prepared") == 1

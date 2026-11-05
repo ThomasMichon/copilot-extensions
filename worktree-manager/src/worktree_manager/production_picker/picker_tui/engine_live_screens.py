@@ -110,10 +110,14 @@ class ProgressScreen(ModalScreen[None]):
             substyle = C_HEADER
         body.append(sub + "\n\n", style=substyle)
         # Item rows, windowed around the running item when the list is long.
-        maxr = 12
+        sync_details = p.get("op") == "sync" and any(it.get("result") for it in items)
+        maxr = 3 if sync_details else 12
+        focus_state = "failed" if p["done"] and failed else "running"
         run = next((j for j, it in enumerate(items)
-                    if it["state"] == "running"), len(items) - 1)
+                    if it["state"] == focus_state), len(items) - 1)
         lo = max(0, min(run - maxr // 2, max(0, len(items) - maxr)))
+        if sync_details and p["done"]:
+            lo = p.setdefault("result_top", lo)
         for it in items[lo:lo + maxr]:
             st = it["state"]
             if st == "done":
@@ -133,8 +137,15 @@ class ProgressScreen(ModalScreen[None]):
             row.append(title, style="white" if st != "pending" else C_MUTED)
             body.append_text(row)
             body.append("\n")
+            if sync_details:
+                from .maintenance import sync_diagnostics
+
+                for diagnostic in sync_diagnostics(it.get("result")):
+                    body.append(f"    {diagnostic}\n", style=C_WARN if st == "failed" else C_META)
         if len(items) > maxr:
-            body.append(f" … {len(items)} total\n", style=C_MUTED)
+            body.append(f" … {lo + 1}-{min(lo + maxr, len(items))} of {len(items)}\n", style=C_MUTED)
+            if sync_details and p["done"]:
+                body.append(" Up/Down · PgUp/PgDn · Home/End: browse results\n", style=C_META)
         if p.get("op") == "profiles" and p["done"]:
             # #1368: after Apply the fragment is regenerated, but the terminal
             # app only re-reads it on a FULL restart -- spell out what changed

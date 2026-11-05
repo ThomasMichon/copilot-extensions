@@ -38,7 +38,9 @@ def prepare_runtime_candidate(data: dict) -> None:
     from .self_install_payload import _copy_payload
 
     if not (slot / "application.json").is_file():
-        source = Path(data["frozen_plugin"])
+        # Retained build metadata may rewrite editable dependencies. The engine
+        # separately pins the original prepared source before and after health.
+        source = Path(data.get("source_payload", data["frozen_plugin"]))
         _copy_payload(
             source, slot / "payload",
             mark_complete=not (source / "runtime-source.json").exists(),
