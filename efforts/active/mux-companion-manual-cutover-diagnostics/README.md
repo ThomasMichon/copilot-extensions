@@ -532,6 +532,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       source and Manager codec, including invalid-display-text fallback and
       refreshed source-bound HTTP-52 evidence. It does not qualify current
       concurrency, allocated custody, lifetime totals or whole-source coverage.
+      #10686 gives valid reported subagent IDs distinct source-scoped lanes,
+      with reporter fallback and no inferred parent edge or current state.
+      This is finite consumer attribution, not accumulated-statistics or
+      whole-S2 qualification.
+      The [known-output presentation follow-up](sidecar-output-presentation.md)
+      addresses actual message/thought bursts that still overwhelm normal
+      work rows. It is proposed review-first source work, not new effect
+      authority or closure of the retained source/native/manual gates.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
