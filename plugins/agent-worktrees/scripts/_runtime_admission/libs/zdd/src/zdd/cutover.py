@@ -1,0 +1,995 @@
+"""Active/passive cutover orchestration for graceful or best-effort redeploys.
+
+Adapters may opt into exact-owner retirement when predecessor drain or shutdown
+fails. That cleanup is separate from successor readiness: a healthy incoming
+generation stays authoritative, with unresolved retirement reported durably.
+
+OS-agnostic orchestration injects spawning, health, control and port collaborators
+for isolated tests; the application wires the real lifecycle implementations.
+
+Default sequence (each step before the commit point is reversible)::
+
+    1. resolve the current active endpoint (routing table)         [reversible]
+    2. pick a free port for the new daemon                          [reversible]
+    3. spawn the passive daemon (--passive: no self-route, no relay)[reversible]
+    4. wait until the new daemon is healthy                         [reversible]
+    5. flip the routing table -> new active, old demoted to previous[reversible]
+    6. drain the old daemon (busy-oracle wait, optional force)      [reversible]
+    -- COMMIT POINT --
+    7. shut the old daemon down (clean exit; systemd won't resurrect)
+    8. adopt the credential relay on the new daemon (best effort)
+
+Precommit failure normally restores and undrains the old route and terminates
+the passive. Postcommit retirement is irreversible.
+
+With ``self_retirement``, publication commits before ``activate_successor``
+can admit work. Serving readiness completes installation independently of
+predecessor retirement; an explicit bounded fallback may then clean up old owners.
+"""
+
+from __future__ import annotations
+
+import logging
+import socket
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Protocol
+
+from zdd import breadcrumb, routing
+from zdd.routing import Endpoint
+from . import routing_persistence
+from .cutover_result import CutoverResult as CutoverResult
+
+if TYPE_CHECKING:
+    from zdd.cutover_lock import CutoverLock
+
+log = logging.getLogger("zdd")
+
+if TYPE_CHECKING:
+    from .conditional import ConditionalCutover, PreparedCutover
+
+
+class CutoverError(Exception):
+    """A recoverable cutover failure that triggers rollback."""
+
+
+class _Handle(Protocol):
+    """Minimal surface the orchestrator needs from a spawned daemon process."""
+
+    @property
+    def pid(self) -> int | None: ...
+
+    def terminate(self) -> None: ...
+
+    def poll(self) -> int | None: ...
+
+
+class _Client(Protocol):
+    """Minimal HTTP surface used against the old/new daemons."""
+
+    def health(self) -> dict[str, Any]: ...
+
+    def drain(self, *, timeout: float, poll: float, force: bool) -> dict[str, Any]: ...
+
+    def undrain(self) -> dict[str, Any]: ...
+
+    def shutdown(self) -> dict[str, Any]: ...
+
+    def adopt_relay(self) -> dict[str, Any]: ...
+
+
+class _NeverRaised(Exception):
+    """Stands in for a refusal a routing module can't raise."""
+
+
+class _UnguardedRouting(Exception):
+    """A refusal hook was given, but the routing module can't publish guarded."""
+
+
+class CutoverOrchestrator:
+    """Drive one active/passive cutover. See module docstring for the sequence."""
+
+    def __init__(
+        self,
+        config_dir: str | Path,
+        *,
+        bind: str,
+        version: str | None,
+        spawn_passive: Callable[[int], _Handle],
+        health_check: Callable[[str, int], bool],
+        make_client: Callable[[str], _Client],
+        pick_free_port: Callable[[], int],
+        refuse_old: Callable[[dict[str, Any] | None], str | None] | None = None,
+        service: str | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        routing_mod: Any = routing,
+        drain_before_publish: bool = False,
+        expected_old: Endpoint | None = None,
+        on_published: Callable[[Endpoint], None] | None = None,
+        predecessor_health_check: Callable[[str, int], bool] | None = None,
+        self_retirement: bool = False,
+        activate_successor: Callable[[Endpoint], None] | None = None,
+        serving_health_check: Callable[[str, int], bool] | None = None,
+        retire_failed_predecessor: Callable[[Endpoint], dict[str, Any]] | None = None,
+        drain_predecessor: bool = True,
+        refuse_restoration: Callable[[dict[str, Any] | None], str | None] | None = None,
+    ) -> None:
+        if expected_old is not None and refuse_old is None:
+            raise ValueError("an expected predecessor also requires a publication refusal guard")
+        if on_published is not None and expected_old is None:
+            raise ValueError("publication notification requires an observed predecessor")
+        if self_retirement and (activate_successor is None or drain_before_publish):
+            raise ValueError("self-retirement requires successor activation without predecessor drain")
+        if activate_successor is not None and not self_retirement:
+            raise ValueError("successor activation requires self-retirement")
+        self.config_dir = Path(config_dir)
+        self.bind = bind
+        self.version = version
+        self.spawn_passive = spawn_passive
+        self.health_check = health_check
+        self.predecessor_health_check = predecessor_health_check
+        self.make_client = make_client
+        self.pick_free_port = pick_free_port
+        self.refuse_old = refuse_old
+        self.refuse_restoration = refuse_restoration if refuse_restoration is not None else refuse_old
+        self.sleep = sleep
+        self.clock = clock
+        self.routing = routing_mod
+        self.drain_before_publish = drain_before_publish
+        self.expected_old = expected_old
+        self.on_published = on_published
+        self.self_retirement = self_retirement
+        self.activate_successor = activate_successor
+        self.serving_health_check = serving_health_check
+        self.retire_failed_predecessor = retire_failed_predecessor
+        if retire_failed_predecessor is not None and expected_old is None:
+            raise ValueError("best-effort retirement requires an exact observed predecessor")
+        if type(drain_predecessor) is not bool or (
+            not drain_predecessor and retire_failed_predecessor is None
+        ):
+            raise ValueError("skipping predecessor drain requires bounded native retirement")
+        self.drain_predecessor = drain_predecessor
+        # Uniform lifecycle log context. ``service`` defaults to the config-dir
+        # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
+        # source machine. Both are captured once for every emitted record.
+        from zdd import lifecycle
+
+        self.service = service or lifecycle.service_from_config_dir(self.config_dir)
+        self._node = socket.gethostname()
+
+    # -- lifecycle logging ---------------------------------------------------
+
+    def _emit(
+        self,
+        action: str,
+        outcome: str,
+        *,
+        port: int | None = None,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Append one durable cutover lifecycle record (fail-open).
+
+        Kept entirely separate from ``result.steps`` and the control flow: it
+        records *what happened* to a durable log so an aborted cutover (the
+        "new daemon never bound" incident) is diagnosable after the fact,
+        without ever perturbing the cutover it observes.
+        """
+        from zdd import lifecycle
+
+        lifecycle.record(
+            self.config_dir,
+            action,
+            service=self.service,
+            outcome=outcome,
+            version=self.version,
+            port=port,
+            node=self._node,
+            detail=detail,
+        )
+
+    # -- helpers -------------------------------------------------------------
+
+    def _client_host(self) -> str:
+        if self.bind in ("0.0.0.0", "", None):
+            return "127.0.0.1"
+        if self.bind == "::":
+            return "::1"
+        return self.bind
+
+    def _base_url(self, port: int) -> str:
+        return f"http://{routing.format_authority(self._client_host(), port)}"
+
+    def _await_health(
+        self, port: int, timeout: float, poll: float,
+        check: Callable[[str, int], bool] | None = None,
+    ) -> bool:
+        from .cutover_drain import await_health
+
+        return await_health(self, port, timeout, poll, check)
+
+    def _await_exit(self, handle: _Handle, timeout: float = 10.0, poll: float = 0.2) -> bool:
+        from .cutover_rollback import _await_exit
+
+        return _await_exit(self, handle, timeout=timeout, poll=poll)
+
+    def _raw_active(self) -> dict | None:
+        """The routing table's own ``active`` row -- never healed to ``previous``."""
+        table = self.routing.read_table(self.config_dir)
+        active_raw = table.get("active") if isinstance(table, dict) else None
+        return active_raw if isinstance(active_raw, dict) else None
+
+    def _refuse_current_old(self, result: CutoverResult) -> bool:
+        if self.refuse_old is None:
+            return False
+        refusal = self.refuse_old(self._raw_active())
+        if not refusal:
+            return False
+        result.error = refusal
+        result.steps.append(f"refused: {refusal}")
+        return True
+
+    # -- main ----------------------------------------------------------------
+
+    def run(
+        self,
+        *,
+        health_timeout: float = 60.0,
+        drain_timeout: float = 300.0,
+        force: bool = False,
+        poll: float = 0.5,
+        lock_timeout: float | None = None,
+        conditional: ConditionalCutover | None = None,
+        held_lock: CutoverLock | None = None,
+    ) -> CutoverResult:
+        """Drive one cutover attempt, serialized against concurrent attempts.
+
+        Two invocations against the same ``config_dir`` (two operators, a
+        ``restart`` racing an installer-driven ``deploy``, or a fast second
+        update triggered while a first is still draining) must never run this
+        sequence at once -- both would read the same predecessor breadcrumb/
+        routing state and race. A lock
+        (:class:`zdd.cutover_lock.CutoverLock`) scoped to exactly this call
+        serializes them -- but a *contended* lock is not refused outright:
+        the second caller **waits** (bounded by ``lock_timeout``, which
+        defaults to ``health_timeout + drain_timeout + 60`` -- generous
+        enough to cover a full cutover it may be queued behind) so a
+        legitimate back-to-back trigger (a fast second update superseding a
+        first) still succeeds once the first completes, instead of being
+        flatly rejected. Only exhausting the full wait without ever
+        acquiring the lock is reported as a failure -- and even then the
+        same way a caller already handles every other ``CutoverResult``
+        failure (``ok=False``, a populated ``error``), not raised -- see the
+        Phase 2 checklist in ``efforts/active/agent-bridge-unified-zdd-cutover``.
+
+        ``held_lock`` lets a caller serialize selection and recovery in the
+        same transaction. It must be held for this exact routing directory;
+        the caller remains responsible for releasing it after reconciliation.
+        """
+        from zdd.cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError, lock_path
+
+        if self.self_retirement and conditional is not None:
+            return CutoverResult(ok=False, error="conditional cutover cannot defer retirement", conditional=True)
+        if self.drain_before_publish and conditional is not None:
+            reason = "conditional cutover cannot use pre-publication drain"
+            log.error(reason)
+            return CutoverResult(ok=False, error=reason, conditional=True)
+        if self.drain_before_publish and force:
+            return CutoverResult(
+                ok=False, error="pre-publication drain cannot force unfinished work",
+            )
+        if held_lock is not None:
+            if (
+                not isinstance(held_lock, CutoverLock)
+                or not held_lock.held
+                or held_lock.path.resolve() != lock_path(self.config_dir).resolve()
+            ):
+                return CutoverResult(
+                    ok=False, error="a held cutover lock for this installation is required",
+                )
+            try:
+                with held_lock.borrow():
+                    return self._prepare_and_run_locked(
+                        health_timeout=health_timeout, drain_timeout=drain_timeout,
+                        force=force, poll=poll, conditional=conditional,
+                    )
+            except CutoverBorrowError as exc:
+                return CutoverResult(ok=False, error=str(exc))
+
+        if lock_timeout is None:
+            lock_timeout = health_timeout + drain_timeout + 60.0
+
+        try:
+            lock = CutoverLock(self.config_dir)
+            lock.acquire(timeout=lock_timeout)
+            try:
+                return self._prepare_and_run_locked(
+                    health_timeout=health_timeout,
+                    drain_timeout=drain_timeout,
+                    force=force,
+                    poll=poll,
+                    conditional=conditional,
+                )
+            finally:
+                lock.release()
+        except CutoverLockedError as exc:
+            result = CutoverResult(ok=False, error=str(exc), conditional=conditional is not None)
+            result.steps.append(f"refused: {exc}")
+            log.warning("Cutover refused -- already in progress: %s", exc)
+            return result
+
+    def _prepare_and_run_locked(
+        self, *, health_timeout: float, drain_timeout: float, force: bool,
+        poll: float, conditional: ConditionalCutover | None,
+    ) -> CutoverResult:
+        record = breadcrumb.read_breadcrumb(self.config_dir)
+        reason = breadcrumb.recovery_refusal(self.config_dir, record)
+        if reason is not None:
+            log.error("Cutover refused: %s", reason)
+            return CutoverResult(
+                ok=False, error=reason, steps=[f"refused: {reason}"],
+                conditional=conditional is not None,
+            )
+        prepared = None
+        if conditional is not None:
+            from .conditional import PreparedCutover
+
+            try:
+                if force:
+                    raise CutoverError("conditional repair cannot force predecessor retirement")
+                prepared = PreparedCutover(self, conditional)
+            except (CutoverError, routing.ActivePublicationRefused, routing.RoutingLockTimeout) as exc:
+                log.warning("Conditional cutover refused: %s", exc)
+                return CutoverResult(
+                    ok=False, error=str(exc), steps=[f"refused: {exc}"], conditional=True,
+                )
+            except Exception as exc:
+                reason = f"conditional preparation failed ({type(exc).__name__})"
+                log.error(reason)
+                return CutoverResult(
+                    ok=False, error=reason, steps=[reason], conditional=True,
+                )
+        return self._run_locked(
+            health_timeout=health_timeout, drain_timeout=drain_timeout,
+            force=force, poll=poll, conditional=prepared,
+        )
+
+    def _run_locked(
+        self,
+        *,
+        health_timeout: float = 60.0,
+        drain_timeout: float = 300.0,
+        force: bool = False,
+        poll: float = 0.5,
+        conditional: PreparedCutover | None = None,
+    ) -> CutoverResult:
+        from zdd import lifecycle
+
+        result = CutoverResult(ok=False, conditional=conditional is not None)
+        publication_witness = None
+        new_process_start_time = None
+        def write_breadcrumb(**kwargs: Any) -> dict:
+            if conditional:
+                kwargs["state"] = "conditional-" + kwargs["state"]
+            kwargs["publication_witness"] = publication_witness
+            kwargs["new_process_start_time"] = new_process_start_time
+            kwargs["requires_writer_reconciliation"] = self.drain_before_publish or self.expected_old is not None
+            if self.self_retirement:
+                kwargs["self_retirement"] = True
+            try:
+                return breadcrumb.write_breadcrumb(self.config_dir, _routing_deadline=conditional.routing_deadline() if conditional else None, **kwargs)
+            except routing.RoutingLockTimeout:
+                if not conditional or not result.error or result.ok:
+                    raise
+                result.error += "; recovery witness retained: routing authority unavailable"
+                log.error(result.error)
+                return breadcrumb.read_breadcrumb(self.config_dir) or {}
+
+        spawn_passive = conditional.spawn if conditional else self.spawn_passive
+        health_check = conditional.healthy if conditional else self.health_check
+        make_client = conditional.snapshot.make_client if conditional else self.make_client
+        if self._refuse_current_old(result):
+            return result
+        # Exact-predecessor callers own recovery; preserve their route witness
+        # even when the observed native predecessor exited before selection.
+        if conditional is None and not self.drain_before_publish and self.expected_old is None:
+            try:
+                self.routing.reap_stale_active(self.config_dir, service=self.service)
+            except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
+                pass
+        if self._refuse_current_old(result):
+            return result
+        if self.routing is routing and conditional is None:
+            try:
+                publication_witness = routing.publication_witness(
+                    self.config_dir, deadline=time.monotonic() + 5.0,
+                )
+            except (routing.ActivePublicationRefused, OSError, ValueError) as exc:
+                result.error = f"native publication custody unavailable ({type(exc).__name__})"
+                result.steps.append(f"refused: {result.error}")
+                log.error(result.error)
+                return result
+        # CAS uses raw active, not the previous row left by a clean shutdown.
+        old_for_cas = None
+        selection_table = None
+        if conditional is not None:
+            old_for_cas = conditional.old
+        elif self.drain_before_publish:
+            selection_table = self.routing.read_table(self.config_dir)
+            try:
+                routing._validate_endpoint_rows(selection_table)
+            except routing.ActivePublicationRefused as exc:
+                result.error = str(exc)
+                result.steps.append(f"refused: {result.error}")
+                return result
+            raw_active = selection_table.get("active") if selection_table else None
+            old_for_cas = Endpoint.from_dict(raw_active) if isinstance(raw_active, dict) else None
+        elif self.refuse_old is not None:
+            raw_active = self._raw_active()
+            old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
+        old = (
+            conditional.old if conditional else old_for_cas
+            if self.retire_failed_predecessor is not None
+            else self.routing.read_active_endpoint(self.config_dir)
+        )
+        result.old_endpoint = old
+        if self.expected_old is not None and old != self.expected_old:
+            result.error = "selected predecessor differs from the observed serving daemon"
+            result.steps.append(f"refused: {result.error}")
+            return result
+        if self.drain_before_publish:
+            selected_raw = selection_table.get("active") if selection_table else None
+            if selected_raw is None and old is not None and selection_table:
+                # A retained previous row is a generation witness, not proof
+                # that the adapter selected an incumbent to drain.
+                selected_raw = selection_table.get("previous")
+            selected = Endpoint.from_dict(selected_raw) if isinstance(selected_raw, dict) else None
+            if (
+                self.routing.read_table(self.config_dir) != selection_table
+                or old != selected
+            ):
+                result.error = "predecessor route changed during selection; refusing before drain"
+                result.steps.append(f"refused: {result.error}")
+                return result
+
+        from .cutover_selection import candidate_port
+
+        new_port = candidate_port(self, old, conditional, result)
+        if new_port is None:
+            return result
+        # Record custody before drain; preserve started_at across later updates.
+        old_dict = (
+            old.to_dict() if (conditional or self.expected_old is not None or self.self_retirement) and old is not None else
+            {"bind": old.bind, "port": old.port} if old is not None else None
+        )
+        try:
+            started_at = write_breadcrumb(state="started", old=old_dict, new_port=new_port)["started_at"]
+        except routing.RoutingLockTimeout:
+            result.error = "cutover witness unavailable: routing authority acquisition timed out"
+            return result
+        self._emit(
+            lifecycle.CUTOVER_BEGIN, lifecycle.BEGIN, port=new_port,
+            detail={"old_port": old.port if old is not None else None},
+        )
+
+        try:
+            handle = spawn_passive(new_port)
+            if conditional:
+                publication_witness = conditional.publication_witness
+        except Exception as exc:
+            if conditional is None:
+                raise
+            result.error = f"conditional spawn failed ({type(exc).__name__})"
+            result.steps.append(result.error)
+            log.error(result.error)
+            write_breadcrumb(
+                state="started", old=old_dict, new_port=new_port,
+                error=result.error, started_at=started_at,
+            )
+            return result
+        from .diagnostics import process_start_time
+
+        new_pid = getattr(handle, "pid", None)
+        if type(new_pid) is int and new_pid > 0:
+            new_process_start_time = process_start_time(new_pid)
+        result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
+                            f"port={new_port}")
+        # Record the passive PID before health, publication or drain (#5195).
+        flipped = False
+        drain_started = False
+
+        def mark_drain_started() -> None:
+            nonlocal drain_started
+            if self.drain_before_publish and self.routing.read_table(self.config_dir) != selection_table:
+                raise CutoverError("predecessor route changed before drain")
+            drain_started = True
+
+        new_for_cas = None
+        phase = "started"
+        try:
+            if isinstance(new_pid, int):
+                write_breadcrumb(
+                    state="started", old=old_dict,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
+                )
+            healthy = self._await_health(new_port, health_timeout, poll, health_check)
+            if self.expected_old is not None or self.self_retirement:
+                new_pid = getattr(handle, "pid", None)
+                captured_start = getattr(handle, "process_start_time", None)
+                observed_start = process_start_time(new_pid) if new_pid else None
+                if isinstance(captured_start, str) and captured_start != observed_start:
+                    raise CutoverError("healthy successor native identity changed")
+                new_process_start_time = (
+                    captured_start if isinstance(captured_start, str)
+                    else observed_start
+                )
+                write_breadcrumb(
+                    state="started", old=old_dict, new_port=new_port,
+                    new_pid=new_pid, started_at=started_at,
+                )
+            if not healthy:
+                # The durable signal that is otherwise missing: a record that
+                # the new daemon never bound its port -- the failure that, left
+                # untraced, strands a client re-dialing a dead advertised port.
+                self._emit(
+                    lifecycle.CUTOVER_NEW_BOUND, lifecycle.FAIL, port=new_port,
+                    detail={"health_timeout": health_timeout},
+                )
+                raise CutoverError(
+                    f"new daemon did not become healthy on port {new_port} "
+                    f"within {health_timeout:.0f}s"
+                )
+            result.steps.append("new daemon healthy")
+            if self.expected_old is not None or self.self_retirement:
+                from .darwin_identity import valid_start_time
+
+                if type(new_pid) is not int or new_pid <= 0 or not valid_start_time(new_process_start_time):
+                    raise CutoverError("healthy successor native identity unavailable")
+            self._emit(
+                lifecycle.CUTOVER_NEW_BOUND, lifecycle.OK, port=new_port,
+                detail={"pid": getattr(handle, "pid", None)},
+            )
+
+            if (
+                self.drain_before_publish and self.drain_predecessor
+                and old is not None and old.port != new_port
+            ):
+                phase = "draining"
+                write_breadcrumb(
+                    state="draining", old=old_dict,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
+                    requires_writer_reconciliation=self.drain_before_publish,
+                )
+                self._drain_old(
+                    old, result, drain_timeout=drain_timeout, force=False,
+                    on_drain=mark_drain_started,
+                )
+
+            # Publication directs new readers at the successor. Guarded adopters
+            # compare the route under its write lease. For self-retirement this
+            # frontier is irreversible even if readiness or recording later fails.
+            refused = _NeverRaised
+            try:
+                if self.refuse_old is None and conditional is None and not self.drain_before_publish:
+                    new_for_cas = self.routing.publish_active(
+                        self.config_dir, bind=self.bind, port=new_port,
+                        pid=getattr(handle, "pid", None), version=self.version,
+                        demote_existing=True,
+                        **({"process_start_time": new_process_start_time} if self.self_retirement else {}),
+                    )
+                else:
+                    import inspect
+
+                    if inspect.getattr_static(
+                        self.routing, "publish_active_with_previous_guarded", None,
+                    ) is None:
+                        raise _UnguardedRouting(
+                            "the routing module can't publish guarded; refusing to flip "
+                            "a route that must be re-checked first"
+                        )
+                    refused = self.routing.ActivePublicationRefused
+                    conditional_kwargs = {}
+                    if conditional:
+                        candidate = conditional.new
+                        if candidate is None or not candidate.process_start_time:
+                            raise CutoverError("candidate publication identity unavailable")
+                        conditional_kwargs = {
+                            "lock_deadline": conditional.routing_deadline(),
+                            "process_start_time": candidate.process_start_time,
+                        }
+                    elif self.expected_old is not None or self.self_retirement:
+                        conditional_kwargs = {"process_start_time": new_process_start_time}
+                    publication = self.routing.publish_active_with_previous_guarded(
+                        self.config_dir, bind=self.bind, port=new_port,
+                        pid=new_pid if self.expected_old is not None else getattr(handle, "pid", None),
+                        version=self.version,
+                        demote_existing=True, expected_active=old_for_cas,
+                        refuse_current=conditional.refuse_current if conditional else self.refuse_old,
+                        **conditional_kwargs,
+                    )
+                    if conditional:
+                        published, _ = publication
+                        conditional.new = published
+                        result.serving_endpoint = published
+                    if self.drain_before_publish or self.expected_old is not None or self.self_retirement:
+                        new_for_cas = (
+                            publication[0]
+                            if isinstance(publication, tuple) and len(publication) == 2
+                            else publication
+                        )
+                if self.self_retirement:
+                    result.committed = True
+                    result.retirement_pending = old is not None and old.port != new_port
+            except (refused, _UnguardedRouting, routing.RoutingLockTimeout) as exc:
+                result.error = str(exc)
+                result.steps.append(f"refused: {exc}")
+                if conditional:
+                    conditional.rollback(handle, result, flipped=False)
+                    if result.rolled_back:
+                        breadcrumb.clear_breadcrumb(self.config_dir)
+                    else:
+                        write_breadcrumb(
+                            state="started", old=old_dict,
+                            new_port=new_port, new_pid=new_pid,
+                            error=result.error, started_at=started_at,
+                        )
+                    return result
+                terminated = False
+                try:
+                    handle.terminate()
+                    result.steps.append("refusal: terminated new daemon")
+                    # terminate() only requests exit; keep the breadcrumb (the
+                    # durable PID reap_abandoned_passive needs) until it's confirmed.
+                    terminated = self._await_exit(handle)
+                    if not terminated:
+                        result.steps.append(
+                            "refusal: new daemon exit unconfirmed; breadcrumb kept"
+                        )
+                except Exception as term_exc:  # noqa: BLE001
+                    result.steps.append(
+                        f"refusal: new daemon termination failed: {term_exc}"
+                    )
+                    log.error(
+                        "Cutover refusal could not terminate passive daemon: %s",
+                        term_exc,
+                    )
+                if terminated:
+                    restored = True
+                    if self.drain_before_publish and old is not None and drain_started:
+                        current = self._raw_active()
+                        restored = (
+                            (Endpoint.from_dict(current) if current else None) == old_for_cas
+                            and self._undrain(old, result)
+                        )
+                    if restored:
+                        breadcrumb.clear_breadcrumb(self.config_dir)
+                        return result
+                    result.steps.append("refusal: predecessor restoration unconfirmed")
+                if not terminated or not restored:
+                    write_breadcrumb(
+                        state=phase,
+                        old=old_dict,
+                        new_port=new_port, new_pid=new_pid,
+                        error=result.error, started_at=started_at,
+                        requires_writer_reconciliation=self.drain_before_publish,
+                    )
+                return result
+            flipped = True
+            phase = "flipped"
+            if self.on_published is not None:
+                if not isinstance(new_for_cas, Endpoint):
+                    raise CutoverError("successor publication notification lacks an exact endpoint")
+                self.on_published(new_for_cas)
+            if self.drain_before_publish and not isinstance(new_for_cas, Endpoint):
+                raise CutoverError("guarded publication did not return the exact successor endpoint")
+            result.steps.append("routing table flipped -> new active")
+            write_breadcrumb(
+                state="flipped", old=old_dict,
+                new_port=new_port, new_pid=new_pid, started_at=started_at,
+                requires_writer_reconciliation=self.drain_before_publish,
+            )
+            self._emit(
+                lifecycle.CUTOVER_FLIP, lifecycle.OK, port=new_port,
+                detail={"old_port": old.port if old is not None else None},
+            )
+
+            if self.self_retirement:
+                if not isinstance(new_for_cas, Endpoint) or new_for_cas.process_start_time != new_process_start_time:
+                    raise CutoverError("published successor native identity unavailable")
+                write_breadcrumb(
+                    state="committed", old=old_dict, new_port=new_port,
+                    new_pid=new_pid, started_at=started_at,
+                )
+                from .cutover_drain import complete_self_retirement
+
+                return complete_self_retirement(
+                    self, new_for_cas, old, result, health_timeout=health_timeout,
+                    poll=poll, health_check=self.serving_health_check or health_check,
+                )
+
+            if conditional and conditional.snapshot.activate_successor is not None:
+                conditional.activate_successor()
+                result.steps.append("published successor activated and ready")
+
+            if old is not None and old.port != new_port:
+                if conditional is None:
+                    old_client = make_client(old.base_url)
+                # About to open the old daemon's drain gate -- record it first
+                # so an abort during the (possibly long) drain is traceable.
+                if not self.drain_before_publish and self.drain_predecessor:
+                    phase = "draining"
+                    write_breadcrumb(
+                        state=phase, old=old_dict,
+                        new_port=new_port, new_pid=new_pid, started_at=started_at,
+                    )
+                    self._drain_old(
+                        old, result, drain_timeout=drain_timeout, force=force,
+                        conditional=conditional,
+                        on_drain=mark_drain_started if self.expected_old is not None else None,
+                    )
+
+                # Verify before retirement: an unhealthy successor must not
+                # strand clients by retiring the still-serving predecessor.
+                new_live = False
+                try:
+                    new_live = bool(
+                        health_check(self._client_host(), new_port)
+                    )
+                except Exception:  # noqa: BLE001 -- verification is observational
+                    new_live = False
+                self._emit(
+                    lifecycle.CUTOVER_VERIFY,
+                    lifecycle.OK if new_live else lifecycle.FAIL,
+                    port=new_port,
+                )
+                if not new_live:
+                    raise CutoverError(
+                        f"new daemon unhealthy on port {new_port} at the "
+                        f"verify-before-retire gate; refusing to retire the old "
+                        f"daemon (rolling back to keep it serving)"
+                    )
+                if conditional:
+                    conditional.verify_before_retire()
+
+                # COMMIT POINT: retire the old daemon. Past here the new daemon
+                # is the only one, so we never roll back.
+                result.committed = True
+                write_breadcrumb(
+                    state="draining" if conditional else "committed", old=old_dict,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
+                    requires_writer_reconciliation=self.drain_before_publish,
+                )
+                result.retirement_requested = self.drain_before_publish
+                if conditional:
+                    conditional.retire_predecessor()
+                    result.retirement_requested = True
+                else:
+                    from .cutover_drain import shutdown_predecessor
+
+                    shutdown_predecessor(self, old, old_client, result)
+                result.steps.append("old daemon shutdown requested" if result.predecessor_cleanup is None
+                                    else "old daemon best-effort retirement attempted")
+                if conditional:
+                    conditional.confirm_retired()
+                    result.retirement_confirmed = True
+                    result.steps.append("old daemon exit confirmed")
+                detail = {"new_port": new_port}
+                if result.predecessor_cleanup is not None:
+                    detail.update(old_endpoint=old_dict, predecessor_cleanup=result.predecessor_cleanup)
+                self._emit(
+                    lifecycle.CUTOVER_RETIRE,
+                    lifecycle.FAIL if result.predecessor_cleanup and not result.retirement_confirmed else lifecycle.OK,
+                    port=old.port, detail=detail,
+                )
+            else:
+                result.committed = True
+                write_breadcrumb(
+                    state="committed", old=old_dict,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
+                    requires_writer_reconciliation=self.drain_before_publish,
+                )
+                result.steps.append("no prior active daemon -- nothing to retire")
+                # Cold start: nothing was retired; the new port is what now serves.
+                self._emit(
+                    lifecycle.CUTOVER_RETIRE, lifecycle.OK, port=new_port,
+                    detail={"note": "no prior active daemon"},
+                )
+
+            if conditional and conditional.snapshot.activate_successor is not None:
+                conditional.adopt_successor()
+                result.steps.append("successor resource adoption confirmed")
+            else:
+                self._adopt_relay(
+                    new_port, result, make_client=make_client,
+                    adopt_relay=conditional.adopt_successor if conditional else None,
+                )
+
+            if conditional:
+                conditional.complete(result)
+            else:
+                if not breadcrumb.clear_breadcrumb(self.config_dir):
+                    result.error = "post-commit error (new daemon is live): committed recovery record retained; retry cleanup"
+                    return result
+                result.ok = True
+            return result
+
+        except Exception as exc:  # noqa: BLE001 -- convert to a rollback
+            if conditional and isinstance(exc, routing.RoutingLockTimeout):
+                result.error = "conditional cutover routing authority unavailable; recovery witness retained"
+                result.serving_endpoint = None
+                return result
+            if isinstance(exc, routing_persistence.PublicationCommitUncertain):
+                if self.self_retirement and not result.committed:
+                    try:
+                        active = Endpoint.from_dict(self._raw_active())
+                        result.committed = active is not None and (
+                            active.bind, active.port, active.pid, active.version, active.process_start_time,
+                        ) == (self.bind, new_port, new_pid, self.version, new_process_start_time) and (
+                            active.generation > (old.generation if old is not None else 0)
+                        )
+                    except (OSError, ValueError, RuntimeError):
+                        pass
+                if self.self_retirement and result.committed:
+                    result.retirement_pending = old is not None and old.port != new_port
+                result.publication_uncertain = True
+                result.error = "publication commit uncertain; generations retained"
+                result.serving_endpoint = None
+                result.steps.append(result.error)
+                log.error(result.error)
+                write_breadcrumb(
+                    state="publication-uncertain", old=old_dict, new_port=new_port,
+                    new_pid=new_pid, started_at=started_at, error=result.error,
+                )
+                return result
+            if result.committed:
+                # Unconfirmed retirement retains the owner's reconciliation fence.
+                result.error = (
+                    f"post-commit conditional error ({type(exc).__name__})" if conditional
+                    else f"post-commit error (new daemon is live): {exc}"
+                )
+                result.ok = conditional is None and self.expected_old is None and not self.self_retirement
+                if conditional:
+                    result.serving_endpoint = None
+                log.error("Cutover post-commit error: %s", result.error)
+                if conditional:
+                    write_breadcrumb(
+                        state="draining", old=old_dict,
+                        new_port=new_port, new_pid=new_pid, started_at=started_at,
+                        error=result.error,
+                    )
+                elif self.drain_before_publish or self.expected_old is not None or self.self_retirement:
+                    try:
+                        write_breadcrumb(
+                            state="committed", old=old_dict,
+                            new_port=new_port, new_pid=new_pid, started_at=started_at,
+                            error=result.error,
+                        )
+                    except (OSError, ValueError, RuntimeError) as persistence_error:
+                        if not self.self_retirement:
+                            raise
+                        result.error += f"; committed recovery record unavailable: {persistence_error}"
+                        result.steps.append(result.error)
+                        log.error(result.error)
+                else:
+                    breadcrumb.clear_breadcrumb(self.config_dir)
+                self._emit(
+                    lifecycle.ROLLBACK, lifecycle.OK, port=new_port,
+                    detail={"committed_forward": True, "error": result.error},
+                )
+                return result
+            result.error = (
+                str(exc) if not conditional or isinstance(exc, CutoverError)
+                else f"conditional cutover failed ({type(exc).__name__})"
+            )
+            if conditional:
+                conditional.rollback(handle, result, flipped=flipped)
+            elif self.drain_before_publish or self.expected_old is not None:
+                self._rollback(
+                    old, handle, new_port, result, flipped=flipped,
+                    expected_old=old_for_cas, expected_new=new_for_cas,
+                    drain_started=drain_started,
+                )
+            else:
+                self._rollback(
+                    old, handle, new_port, result, flipped=flipped,
+                    expected_old=old_for_cas, expected_new=new_for_cas,
+                    drain_started=not self.self_retirement,
+                )
+            # Record the terminal outcome durably. On a clean rollback (or
+            # commit-forward) no daemon is left stranded; the breadcrumb marks
+            # the attempt as resolved rather than lingering as "aborted".
+            if result.ok and self.drain_before_publish:
+                write_breadcrumb(
+                    state="committed", old=old_dict,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
+                    error=result.error,
+                )
+            elif result.ok or (
+                (conditional or self.expected_old is not None) and result.rolled_back
+            ):
+                breadcrumb.clear_breadcrumb(self.config_dir)
+            else:
+                state = "rolled_back" if result.rolled_back else phase
+                if result.publication_uncertain:
+                    state = "publication-uncertain"
+                if conditional and not result.rolled_back:
+                    state = "flipped" if flipped else "started"
+                write_breadcrumb(
+                    state=state,
+                    old=old_dict,
+                    new_port=new_port, new_pid=new_pid, error=result.error,
+                    started_at=started_at,
+                    requires_writer_reconciliation=self.drain_before_publish,
+                )
+            # Availability is separate from cutover success: verify a restored
+            # predecessor too. An unavailable probe is conservatively non-serving.
+            serving = result.ok
+            if not serving:
+                try:
+                    active = self.routing.read_active_endpoint(self.config_dir)
+                    serving = bool(active and (
+                        conditional.matches(active) if conditional else
+                        self.health_check(active.client_host, active.port)
+                    ))
+                except Exception:  # noqa: BLE001 -- availability probe is best-effort
+                    serving = False
+            self._emit(
+                lifecycle.ROLLBACK,
+                lifecycle.OK if serving else lifecycle.FAIL,
+                port=new_port,
+                detail={"rolled_back": result.rolled_back, "serving": serving,
+                        "error": result.error},
+            )
+            return result
+
+    def _drain_old(
+        self, old: Endpoint, result: CutoverResult, *, drain_timeout: float, force: bool,
+        conditional: PreparedCutover | None = None,
+        on_drain: Callable[[], None] | None = None,
+    ) -> None:
+        from .cutover_drain import _drain_old
+
+        _drain_old(
+            self, old, result, drain_timeout=drain_timeout, force=force,
+            conditional=conditional, on_drain=on_drain,
+        )
+
+    def _adopt_relay(
+        self, new_port: int, result: CutoverResult,
+        *, make_client: Callable[[str], _Client] | None = None,
+        adopt_relay: Callable[[], dict] | None = None,
+    ) -> None:
+        """Best-effort: bind the credential relay on the new daemon (non-fatal)."""
+        try:
+            if adopt_relay is not None:
+                adopt = adopt_relay()
+            else:
+                new_client = (make_client or self.make_client)(self._base_url(new_port))
+                adopt = new_client.adopt_relay()
+            adopted = adopt.get("adopted")
+            if adopted is not None and type(adopted) is not bool:
+                raise CutoverError("relay adoption response has an invalid boolean")
+            result.steps.append(f"relay adopt: {adopted}")
+        except Exception as exc:  # noqa: BLE001 -- relay is non-fatal
+            failure = type(exc).__name__
+            result.steps.append(f"relay adopt failed (non-fatal): {failure}")
+            log.warning("Relay adoption failed after cutover (%s)", failure)
+
+    def _undrain(self, old: Endpoint, result: CutoverResult) -> bool:
+        from .cutover_rollback import _undrain
+
+        return _undrain(self, old, result)
+
+    def _rollback(
+        self, old: Endpoint | None, handle: _Handle, new_port: int,
+        result: CutoverResult, *, flipped: bool,
+        expected_old: Endpoint | None = None, expected_new: Endpoint | None = None,
+        drain_started: bool = True,
+    ) -> None:
+        from .cutover_rollback import _rollback
+
+        _rollback(
+            self, old, handle, new_port, result, flipped=flipped,
+            expected_old=expected_old, expected_new=expected_new,
+            drain_started=drain_started,
+        )
