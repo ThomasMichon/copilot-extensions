@@ -48,7 +48,11 @@ Native/manual/Relay, qualified PRE and whole-parent acceptance remain separate.
 
 ## Plan and validation
 
-- [ ] Review this amendment before changing recovery behavior.
+- [x] Review this amendment before changing recovery behavior.
+  #10741 merged as `431e2506ba50836d481b66efc81156afadec7358` after
+  independent current-head approval and green CI, before implementation.
+  The full parent, three original contracts and this amendment were read
+  immediately after actual merge and confirmed unchanged by reconciliation.
 - [ ] Reuse the maintenance signals and normal ensure boundary, with one brief
   pre-start retry and a maintenance recheck at wake.
 - [ ] Align effort-binding's normal CLI wake policy without changing passive

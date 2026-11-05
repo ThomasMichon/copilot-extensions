@@ -113,6 +113,31 @@ def cli_env(tmp_path, tmp_tracking_dir, monkeypatch_config, monkeypatch):
     return repo, record, tmp_tracking_dir
 
 
+@pytest.mark.parametrize("json_output", [False, True])
+def test_bind_maintenance_refusal_keeps_record_and_cli_output(
+    cli_env, monkeypatch, capfd, json_output,
+):
+    import json
+    from agent_worktrees import tracking_write
+    repo, record, records = cli_env
+    path = _effort(repo)
+    yaml = records / f"{record.worktree_id}.yaml"
+    before = yaml.read_bytes()
+    def held(*args, **kwargs):
+        raise tracking_write.ResidentRecoveryHeld("active maintenance")
+    monkeypatch.setattr(tracking_write, "dispatch", held)
+    assert m.cmd_effort_focus(_args(
+        "bind", path=path, participant="Driver",
+        effort_slice="Phase 2 - Bind active effort", json=json_output,
+    )) == 1
+    captured = capfd.readouterr()
+    assert "maintenance" in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
+    if json_output:
+        assert "maintenance" in json.loads(captured.out)["error"]
+    assert yaml.read_bytes() == before
+
+
 def test_binding_round_trips_and_legacy_record_stays_lean(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

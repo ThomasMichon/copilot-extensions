@@ -17,6 +17,29 @@ current semantic graph, receiving fit or consolidation has already happened.
 The numerical checkpoint and every original author, requirement, ownership
 and safety constraint remain.
 
+## Cohort-parent direction, 2026-11-05
+
+The operator clarified that related originals should be researched together,
+organized into cohort-sized bugs whose parent encompasses the planned work,
+and then resolved against that parent. A report that is no longer actionable
+may be retired without pretending a fix landed. A recovered CI incident may
+be closed while retaining its signature label and history for recurrence
+analysis. A completed outcome should not remain open merely because a broader
+effort or an unrelated refinement is unfinished.
+
+The operator also requested a rate-aware whole-list API snapshot, Markdown
+files containing context and metadata, and parallel Luna research using
+semantic retrieval for candidate close-out PRs and commits or bug-quality
+assessment. The collector owns bulk acquisition; independent researchers
+return recommendations and the coordinator owns actual tracker effects.
+Metadata-only exclusions remain represented rather than silently omitted.
+
+The principal deliverable is an actionable canonical parent and audited
+individual dispositions, not a growing collection of leaf research documents.
+A citation alone is not an operator hold on an otherwise eligible original.
+Actual source/owner holds, author and discussion eligibility, unique unfinished
+requirements and resource custody remain independent boundaries.
+
 ## Agent-recommended execution
 
 1. **Build a current guarded corpus.** Keep every open issue as a graph node,
@@ -46,17 +69,25 @@ and safety constraint remain.
    source date and scope. Report corpus/time coverage explicitly. Separate
    implementation, planning, release and installed evidence; a documentation
    merge or similar commit title cannot demonstrate technical completion.
-6. **Create effort-sized consolidation packets.** Select the strongest existing
-   suitable effort before proposing a new one. List the group's actual issues,
-   common unfinished outcome, unique residuals, dependencies, current custodian,
-   completed credit and recommended first slice. Keep rejected/uncertain members
-   and independent OPEN tokens visible. Deliver a coherent group, not another
-   inventory of unrelated leaf amendments.
+6. **Make cohort-sized canonical bugs.** Select the strongest existing suitable
+   parent and effort before proposing a new one. The actual parent must state
+   the common actionable problem, planned work, unique residuals, dependencies,
+   acceptance and current ownership. Map each retired child's unfinished
+   requirement to that plan before resolving it against the parent. Do not
+   require the parent implementation to be complete merely to consolidate
+   duplicate tracking; distinguish that disposition from a completed fix.
+   Keep genuinely independent outcomes separate. Deliver a coherent actionable
+   group and individual decisions, not another inventory of leaf amendments.
 7. **Adjudicate before effects.** Independently verify high-scoring duplicate or
    resolved-work candidates against complete current requirements and real
    evidence. Review and read back complete receiving acceptance before any
    supersession. Existing source-specific conditions and custody survive;
    similarity, density, a theme label or an issue list alone grants no closure.
+   Use the appropriate stated reason: actual completion, superseded tracking
+   under a named encompassing parent, or a no-longer-actionable/retired report.
+   Keep issue history and useful labels. Explicit newer maintainer acceptance
+   is acceptance evidence; do not silently override it with an invented
+   qualification obligation or an older keep-open instruction.
 
 ## Validation and useful outputs
 

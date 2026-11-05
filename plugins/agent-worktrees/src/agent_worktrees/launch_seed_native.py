@@ -14,7 +14,7 @@ from uuid import uuid4
 from . import agent_policy, config as cfg, launch_execution, locks
 from . import tracking_write
 
-_ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome)
+_ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld)
 NUL_REPLY_SCHEMA = "agent-worktrees.native-seed-reply.v1"
 
 
