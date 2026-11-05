@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eleven native/identity/transaction contracts](finite-native-identity-transaction-contracts.md)
+retain thirty-three ranked relationships without confusing repaired source
+with complete exact-host acceptance, a later pass with an explained timeout,
+or per-file atomicity with a caught-failure marker-set transaction.
+All eleven stay OPEN; the
+[journal](<journal/2026/11.05 finite-native-identity-transaction-contracts.md>)
+preserves actual partials, protected whole evidence and independent custodians.
+
 The [eight obligation/preview/staging contracts](finite-obligation-preview-staging-contracts.md)
 retain twenty-four ranked relationships without confusing local lease cleanup
 with originating obligation settlement, payload entrypoint attribution with

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-05 - Eleven finite native, identity and transaction contracts](<journal/2026/11.05 finite-native-identity-transaction-contracts.md>)
+
 - [2026-11-05 - Eight finite obligation, preview and staging contracts](<journal/2026/11.05 finite-obligation-preview-staging-contracts.md>)
 
 - [2026-11-05 - Eleven finite recovery, reclamation and callback contracts](<journal/2026/11.05 finite-recovery-reclamation-callback-contracts.md>)
