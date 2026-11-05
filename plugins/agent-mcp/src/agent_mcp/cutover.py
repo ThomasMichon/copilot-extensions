@@ -208,10 +208,9 @@ class CutoverClient:
     def drain(self, *, timeout: float, poll: float, force: bool) -> dict[str, Any]:
         """Poll the ``drain`` control op until 0 attached sessions or timeout.
 
-        Matches ``zdd.cutover``'s exact expected shape: ``drained`` (bool --
-        did it reach 0 busy, with or without being forced), ``clean`` (bool --
-        reached 0 busy *without* forcing), ``forced``, ``busy_sessions`` (the
-        last observed count, for its error message on failure).
+        Matches ``zdd.cutover``'s expected result shape. Only an observed
+        zero counts as drained; the protocol's ``force`` argument cannot
+        authorize retirement of attached sessions.
         """
         deadline = time.monotonic() + timeout
         busy_sessions: int | None = None
@@ -245,9 +244,6 @@ class CutoverClient:
             if time.monotonic() >= deadline:
                 break
             time.sleep(poll)
-        if force:
-            return {"drained": True, "clean": False, "forced": True,
-                   "busy_sessions": busy_sessions}
         return {"drained": False, "clean": False, "forced": False,
                "busy_sessions": busy_sessions}
 
@@ -917,6 +913,14 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
             "drain": None,
         }
     result = res.to_dict()
+    if (
+        not res.ok and res.drain and res.drain.get("busy_sessions")
+        and not res.drain.get("drained") and not res.drain.get("error")
+    ):
+        result["error"] = (
+            f"old daemon did not drain (busy: {res.drain['busy_sessions']}); "
+            "attached sessions cannot be forcibly retired"
+        )
     if res.ok:
         result["data_socket"] = str(ctx.new_socket_path)
         if current is None:

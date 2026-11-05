@@ -1,0 +1,9 @@
+{
+  "comment": "Keep attached MCP sessions protected when a legacy forced drain times out",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

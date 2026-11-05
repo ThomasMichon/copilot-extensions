@@ -498,6 +498,103 @@ def test_drain_client_treats_missing_busy_sessions_on_ok_reply_as_not_drained(
     assert "error" in result
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attached", [0, 2])
+async def test_forced_drain_requires_zero_attached_sessions(tmp_path, attached):
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False,
+                    control_port=0, control_token="tok")
+    server._attached = attached
+    await server._start_control_listener()
+    try:
+        port = server._control_server.sockets[0].getsockname()[1]
+        ctx = _cutover._CutoverContext(
+            data_root=tmp_path, new_socket_path=tmp_path / "new.sock",
+            new_log_path=tmp_path / "new.log", new_control_token="tok",
+            old_control_token=None, token_by_port={port: "tok"},
+        )
+        client = _cutover.CutoverClient(f"http://127.0.0.1:{port}", ctx)
+        result = await asyncio.to_thread(
+            client.drain, timeout=0, poll=0, force=True)
+        assert result["drained"] is (attached == 0)
+        assert result["clean"] is (attached == 0)
+        assert result["forced"] is False
+        assert result["busy_sessions"] == attached
+        assert server.attached == attached
+        assert not server._stop.is_set()
+    finally:
+        await server._stop_control_listener()
+
+
+def test_forced_busy_mcp_drain_rolls_back_without_shutdown(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from zdd.cutover import CutoverOrchestrator
+
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False,
+                    control_token="tok")
+    server._attached = 2
+    ctx = _cutover._CutoverContext(
+        data_root=tmp_path, new_socket_path=tmp_path / "new.sock",
+        new_log_path=tmp_path / "new.log", new_control_token="tok",
+        old_control_token=None, token_by_port={9281: "tok"},
+    )
+    client = _cutover.CutoverClient("http://127.0.0.1:9281", ctx)
+    operations = []
+
+    def request(payload):
+        operations.append(payload["op"])
+        return server._control_dispatch({**payload, "token": "tok"})
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(routing, "_listening", lambda *args, **kwargs: True)
+    monkeypatch.setattr("agent_mcp.serve.flip_data_handle", lambda *args, **kwargs: None)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=os.getpid())
+    retired = []
+    passive = SimpleNamespace(pid=None, poll=lambda: None,
+                              terminate=lambda: retired.append("passive"))
+    orchestrator = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="incoming",
+        spawn_passive=lambda port: passive,
+        health_check=lambda host, port: True,
+        make_client=lambda base_url: client,
+        pick_free_port=lambda: 9290,
+    )
+    result = orchestrator.run(health_timeout=1, drain_timeout=0, force=True)
+    assert not result.ok and not result.committed and result.rolled_back
+    assert "shutdown" not in operations
+    assert "undrain" in operations
+    assert retired == ["passive"]
+    assert routing.read_table(tmp_path)["active"]["port"] == 9281
+    assert server.attached == 2 and not server.draining and not server._stop.is_set()
+
+
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("control_error", [None, "control request rejected"])
+def test_busy_cutover_diagnostic_does_not_recommend_force(
+    tmp_path, monkeypatch, force, control_error,
+):
+    from zdd.cutover import CutoverOrchestrator
+    from zdd.cutover_result import CutoverResult
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    monkeypatch.setattr(_cutover, "_fixed_handle_has_live_listener", lambda root: False)
+    observed = CutoverResult(
+        ok=False, rolled_back=True, error="old daemon did not drain; rerun with force",
+        drain={"drained": False, "clean": False, "forced": False, "busy_sessions": 2},
+    )
+    if control_error:
+        observed.drain["error"] = control_error
+    monkeypatch.setattr(CutoverOrchestrator, "run", lambda self, **kwargs: observed)
+    result = _cutover.run_cutover(force=force)
+    assert not result["ok"] and result["rolled_back"]
+    assert result["drain"]["busy_sessions"] == 2
+    if control_error:
+        assert result["error"] == observed.error
+        assert result["drain"]["error"] == control_error
+    else:
+        assert "attached sessions cannot be forcibly retired" in result["error"]
+        assert "rerun with force" not in result["error"]
+
+
 # ── token-path pid keying (the cross-attempt collision fix) ───────────────
 
 

@@ -1470,3 +1470,50 @@ claiming a concrete remaining gap. Ordinary-command and explicit-installer
 adoption, U13 fresh settlement, existing fenced queues, macOS and affected-host
 acceptance retain their separate owners and gates. This release observation
 does not update any installation or authorize rollout.
+
+### 2026-11-05 - U15 held-session drain protocol selected
+
+After #10734 merges and managed source sync passes, current Dev still has
+the concrete #10653 timeout branch: the MCP control client reports a
+nonzero attached-session count as `drained: true` when force is requested.
+The [bounded claim](https://github.com/ThomasMichon/copilot-extensions/issues/10653#issuecomment-6662663871)
+selects only this protocol truthfulness correction and its direct
+orchestrator consumer. This closes an existing protected-session invariant,
+not a new retirement architecture.
+
+The original current source and containing release #10732 are retained as
+the before-state. Add red-on-old loopback control and direct orchestrator
+tests before changing the timeout branch; retain the zero-session success
+control, ordinary rollback and truthful malformed/unauthorized refusals.
+The planned correction does not change native installer/watchdog paths,
+publication readiness, reaping, adopted-client handover or live hosts.
+Those broader #10653/#10652/#10486/#6928 gates remain separately tracked.
+
+The bounded pre-fix packet reproduces two real failures: the loopback client
+reports two held sessions as drained, and its actual orchestrator consumer
+commits and requests shutdown. The zero-session control passes. After removing
+the false forced-success branch, all 36 applicable cutover controls pass with
+eight platform skips in 4.77 seconds. This includes ordinary rollback, truthful
+unauthorized/malformed replies and preserved zero-session behavior.
+
+A separate real native attached-session control passes in 1.83 seconds. It
+starts a private Server and synthetic stdio echo upstream, initializes an
+actual MCP attach, refuses forced drain while that attach is live, and
+successfully exchanges another tool call over the same connection. The runner
+retains its normal process and cleanup limits. The counter-only loopback
+fixture and synthetic passive orchestration remain distinct from that real
+session-consumer proof.
+
+CLI help retains `--force` syntax without promising session destruction; the
+MCP timeout diagnostic no longer recommends a force retry. Existing control
+errors are not replaced with the busy-timeout message. Fatal Ruff and the
+thirteen-plugin install-contract gate pass. The canonical refresh changes only
+MCP's source digest and keeps footprint revision 36; a patch changefile is
+generated without hand-editing any version.
+
+These are source/private-process tests in fresh isolated profiles, not an
+installer migration or full incoming-publication test. Native Linux/macOS and
+live external installation are unperformed: the available hosted bootstrap
+lifetime portfolio is a different contract, and no new venue or installed
+host is activated for this slice. U13 and the remaining #10653 acceptance
+retain their owners. Current-head CI, review, merge and release remain required.

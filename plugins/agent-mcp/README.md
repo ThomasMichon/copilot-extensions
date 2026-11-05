@@ -49,6 +49,13 @@ retains the instance admission and singleton lease until upstream/session,
 listener and background-task teardown settles, including repeated caller
 cancellation and partial control-listener startup failure.
 
+Legacy control-channel cutover also requires an observed zero attached-session
+count before retiring its predecessor. `--force` remains accepted for caller
+compatibility but cannot turn a timed-out busy drain into retirement permission.
+An incomplete drain rolls back that legacy cutover without shutting down the
+attached-session holder. Independent incoming publication, reaping and full
+adopted-client handover retain their separate acceptance boundaries.
+
 Installed ordinary serving rechecks its selected generation under the existing
 MCP cutover transaction before changing the fixed handle and again before
 publishing its control route. That transaction ends after listener publication,
