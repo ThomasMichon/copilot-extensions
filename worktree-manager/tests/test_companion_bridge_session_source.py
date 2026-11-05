@@ -43,7 +43,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     events = importlib.import_module("agent_bridge.events")
     membership = importlib.import_module("agent_bridge.owner_membership")
     wire = importlib.import_module("agent_bridge.session_observation_contract")
-    observations = importlib.import_module("agent_bridge.session_observations")
+    routes = importlib.import_module("agent_bridge.routes.session_observations")
     db = db_module.Database(tmp_path / "bridge.sqlite3")
     db.create_session(
         "child", "fixture", None, str(tmp_path), "local", "starting", 1.0,
@@ -70,6 +70,11 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     counts = {"held": 0, "max_held": 0}
     unsupported = tmp_path / "unsupported-session"
     history_entered, block_history = Event(), Event()
+    old_cli, old_provider = tmp_path / "old-current-cli", tmp_path / "old-current-provider"
+    declaration_override, reject_flag = tmp_path / "cli-declaration.json", tmp_path / "reject-current-flag"
+    owner_loop = asyncio.new_event_loop()
+    owner_thread = Thread(target=owner_loop.run_forever)
+    owner_thread.start()
 
     def connection(peer: socket.socket) -> None:
         held = False
@@ -102,22 +107,25 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                             return
 
                 async def serve() -> None:
-                    known = observations.admit(state, read)
-                    cursor, prior_source = read.position, None
-                    while not stop.is_set():
-                        if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
-                            return
-                        body = observations.frame(known, read, after=cursor)
-                        if prior_source is None or prior_source != body["source"] or body["entries"]:
-                            peer.sendall(wire.sse(body))
-                        if held:
-                            following.set()
-                        if not held:
-                            return
-                        cursor, prior_source = body["position"], body["source"]
-                        await log.wait_for_observation(body["retained"]["head"], timeout=0.1)
+                    async def disconnected() -> bool:
+                        try:
+                            return stop.is_set() or bool(
+                                select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK)
+                            )
+                        except OSError:
+                            return True
 
-                asyncio.run(serve())
+                    request = SimpleNamespace(app=SimpleNamespace(state=state), is_disconnected=disconnected)
+                    stream = routes.observations(request, read)
+                    try:
+                        async for chunk in stream:
+                            await asyncio.to_thread(peer.sendall, chunk)
+                            if held:
+                                following.set()
+                    finally:
+                        await stream.aclose()
+
+                asyncio.run_coroutine_threadsafe(serve(), owner_loop).result(timeout=80)
         except (BrokenPipeError, ConnectionResetError):
             pass
         except BaseException as error:
@@ -149,12 +157,15 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "sys.modules['agent_bridge.__main__']=core\n"
         "from agent_bridge.session_observation_cli import register_commands\n"
         "from agent_bridge.owner_membership_cli import register_commands as membership\n"
+        "from agent_bridge.resume_cli_contract import cli_contracts\n"
         "from agent_worktrees.locks import process_start_time\n"
         "assert os.environ.get('AGENT_BRIDGE_NO_SELFPROVISION')=='1'\n"
         "class Client:\n"
         "    def health(self): return {'capabilities':{'bridge-owner-membership-v1':1,"
         f"**({{}} if os.path.exists({str(unsupported)!r}) else "
-        "{'bridge-session-observations-v1':1,'bridge-session-observation-history-v1':1})}}\n"
+        "{'bridge-session-observations-v1':1,'bridge-session-observation-history-v1':1}),"
+        f"**({{}} if os.path.exists({str(old_provider)!r}) else "
+        "{'bridge-session-current-requests-v1':1})}}\n"
         "    def _stream_sse(self,path,*,request_timeout,stream_factory):\n"
         f"        peer=socket.create_connection(('127.0.0.1',{listener.getsockname()[1]}),timeout=2)\n"
         "        peer.settimeout(15)\n"
@@ -175,6 +186,15 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "parser.add_argument('--project',default=None)\n"
         "sub=parser.add_subparsers(dest='command',required=True)\n"
         "register_commands(sub); membership(sub)\n"
+        "def version(args):\n"
+        "    body=cli_contracts()\n"
+        f"    if os.path.exists({str(old_cli)!r}): body['contracts'].pop('bridge-session-current-requests-v1')\n"
+        f"    if os.path.exists({str(declaration_override)!r}): body=json.load(open({str(declaration_override)!r}))\n"
+        "    print(json.dumps(body,indent=2))\n"
+        "ver=sub.add_parser('version'); ver.add_argument('--contracts-json',action='store_true')\n"
+        "ver.set_defaults(func=version)\n"
+        f"if os.path.exists({str(reject_flag)!r}) and '--current-requests' in sys.argv:\n"
+        "    parser.error('unrecognized arguments: --current-requests')\n"
         "args=parser.parse_args(); args.func(args)\n",
         encoding="utf-8",
     )
@@ -185,6 +205,8 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "counts": counts, "unsupported": unsupported,
         "history_entered": history_entered, "block_history": block_history,
         "manager": manager,
+        "owner_loop": owner_loop, "old_cli": old_cli, "old_provider": old_provider,
+        "declaration_override": declaration_override, "reject_flag": reject_flag,
     }
     try:
         yield result
@@ -198,12 +220,18 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 pass
         for worker in workers:
             worker.join(timeout=3)
+        owner_loop.call_soon_threadsafe(owner_loop.stop)
+        owner_thread.join(timeout=3)
+        owner_loop.run_until_complete(owner_loop.shutdown_default_executor())
+        owner_loop.close()
         listener.close()
         owner.close()
         getattr(db, "_owner_membership_source", owner).close()
         db.flush()
         db.close()
-        assert not thread.is_alive() and not any(worker.is_alive() for worker in workers)
+        assert not thread.is_alive() and not owner_thread.is_alive() and not any(
+            worker.is_alive() for worker in workers
+        )
         assert not failures, failures
         assert session.subscriber_count == 0
         locks = importlib.import_module("agent_worktrees.locks")
@@ -386,7 +414,7 @@ def test_keyboard_selected_session_replaces_membership_reader_and_retains_indepe
             assert app._data.error is None
             app.query_one("#views", TabbedContent).active = "summary-tab"
             await until(pilot, lambda: app._bridge_attachment.controller is None)
-            assert semantic_peer["session"].subscriber_count == 0
+            await until(pilot, lambda: semantic_peer["session"].subscriber_count == 0)
             requests = len(semantic_peer["requests"])
             await app._bridge_attachment.choose("owned:child")
             await pilot.pause()

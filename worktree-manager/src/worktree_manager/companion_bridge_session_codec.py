@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from .companion_bridge_codec import MembershipCodec, offset
+from .companion_bridge_current_requests import CurrentRequestState, decode_current_requests
 from .companion_timeline_contract import (
     ActorKind, Availability, Completeness, EvidenceKind, HistoryPage, Provider, Qualification,
     RelationKind, SourceIdentity, SourcePosition, SourceToken, TimelineActor, TimelineContractError,
@@ -56,6 +57,7 @@ class SessionCodec:
         self.member = json.loads(encoded(member))
         self.hosting_generation = hosting_generation
         self.source: dict[str, Any] | None = None
+        self.current_state: CurrentRequestState | None = None
 
     @property
     def selection(self) -> dict[str, Any]:
@@ -64,7 +66,9 @@ class SessionCodec:
             "worktree_id": self.member["worktree_id"], "head_session_id": None,
         }
 
-    def decode(self, raw: dict[str, Any], *, history: bool = False) -> dict[str, Any]:
+    def decode(
+        self, raw: dict[str, Any], *, history: bool = False, current_requests: bool = False,
+    ) -> dict[str, Any]:
         # Preserve provider field order: its entry hash covers its compact JSON encoding.
         frame = decode_wire_frame(json.dumps(raw, ensure_ascii=True, allow_nan=False).encode())
         check_wire_body(frame)
@@ -109,7 +113,9 @@ class SessionCodec:
             if frame["position"] is not None:
                 offset(frame["position"], source)
             return frame
-        object_fields(frame, FRAME_FIELDS)
+        optional = current_requests and not history
+        object_fields(frame, FRAME_FIELDS | ({"current_request_state"} if optional else set()))
+        current_state = decode_current_requests(frame["current_request_state"]) if optional else None
         if (
             kind not in ({"history-page"} if history else {"snapshot", "delta"})
             or frame["availability"] != ("observed" if source["journal_incarnation"] else "unknown")
@@ -192,6 +198,8 @@ class SessionCodec:
         ) or (kind == "delta" and frame["has_more"] != (position < retained["head"])):
             raise TimelineContractError("Bridge history omitted or invented retained range")
         self.source = source
+        if not history:
+            self.current_state = current_state
         return frame
 
     def token(self, frame: dict[str, Any], epoch: int) -> SourceToken:

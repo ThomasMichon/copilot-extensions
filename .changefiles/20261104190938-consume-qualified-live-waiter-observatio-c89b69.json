@@ -1,0 +1,9 @@
+{
+  "comment": "Consume qualified live waiter observations independently of retained session history and add current-input visual comparisons.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
