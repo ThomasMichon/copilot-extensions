@@ -168,9 +168,15 @@ def request_context() -> dict[str, str]:
 
 @contextmanager
 def _request_environment(context, *, killswitch_path: str | None = None, cwd: str | None = None):
+    from .source_config import SOURCE_ANCHOR_ENV
+
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
+    if cwd:
+        if not Path(cwd).is_absolute():
+            raise ValueError("update request source anchor must be absolute")
+        values[SOURCE_ANCHOR_ENV] = cwd
     if cwd is not None and values.get("WORKTREE_MANAGER_ROOT"):
         try:
             root = Path(values["WORKTREE_MANAGER_ROOT"]).expanduser()
@@ -183,7 +189,7 @@ def _request_environment(context, *, killswitch_path: str | None = None, cwd: st
             if not root.is_absolute():
                 raise ValueError("Manager root cannot resolve against request cwd")
         values["WORKTREE_MANAGER_ROOT"] = str(root)
-    keys = _CONTEXT_KEYS
+    keys = (*_CONTEXT_KEYS, SOURCE_ANCHOR_ENV)
     if killswitch_path is not None:
         keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
         if killswitch_path:

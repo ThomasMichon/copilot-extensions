@@ -1,5 +1,5 @@
 """Immutable Manager inputs retain source and constructor custody."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import base64
 import hashlib
 import json
@@ -123,8 +123,45 @@ def test_source_input_discovery_has_no_installation_or_old_runtime_dependency(mo
     assert refusal.value.code == 2
 
 
-def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(snapshot, monkeypatch):
+def test_current_bootstrap_uses_its_driver_to_install_a_legacy_source(snapshot, monkeypatch):
     installer = self_install._runtime_installer()
+    import bootstrap_update
+
+    selected = inputs.select(snapshot)
+    observed = []
+    driver = object()
+    monkeypatch.setattr(
+        installer, "_execution_driver", lambda payload: observed.append(payload) or driver,
+    )
+    monkeypatch.setattr(installer, "_automatic_bootstrap_refusal", lambda args: None)
+    monkeypatch.setattr(installer, "_installation_custody", lambda: nullcontext(None))
+
+    def execute(args, actual_driver, *, source_digest):
+        assert actual_driver is driver and args.payload == selected.payload
+        assert args.install_source == snapshot and len(source_digest) == 64
+        return 23
+
+    monkeypatch.setattr(bootstrap_update, "execute", execute)
+    assert installer.main([
+        "--root", str(snapshot / "installed"), "--install-source", str(snapshot),
+        "--", "update", "--supervised-debug",
+    ]) == 23
+    assert observed == [SCRIPTS.parent]
+    assert not (selected.payload / "scripts").exists()
+
+
+@pytest.mark.parametrize("failure", [None, "source", "context"])
+def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
+    snapshot, monkeypatch, failure,
+):
+    installer = self_install._runtime_installer()
+    from worktree_manager import update_driver_cli
+
+    current_source = ["admitted-source"]
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: current_source[0])
+    caller = snapshot / "caller"
+    caller.mkdir()
+    monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", str(caller))
     selected = inputs.select(snapshot)
     root = snapshot / "installed"
     slot = root / "versions" / selected.identity.runtime_version
@@ -142,6 +179,10 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
         assert options["_local_packages"] == ("copilot-extensions-worktree-manager",)
         assert options["_application"] == app
         assert options["_transactional_activation"] is True
+        if failure == "source":
+            current_source[0] = "changed-source"
+        elif failure == "context":
+            caller.rmdir()
         options["_before_publish"]()
         options["_after_activate"](slot)
         return SimpleNamespace(action="installed", slot=str(slot))
@@ -150,8 +191,17 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
     args = SimpleNamespace(
         payload=selected.payload, root=root, install_source=snapshot,
         skip_instance_reconcile=True, repair_update=False, recover_adopted=None,
-        source_digest=None,
+        source_digest=None, admitted_source="admitted-source",
     )
+    if failure:
+        error = RuntimeError if failure == "source" else ValueError
+        with pytest.raises(error):
+            installer._install_payload(
+                args, wheel_inputs=wheels, local_packages=("copilot-extensions-worktree-manager",),
+                application=app,
+            )
+        assert activated == []
+        return
     assert installer._install_payload(
         args, wheel_inputs=wheels, local_packages=("copilot-extensions-worktree-manager",),
         application=app,

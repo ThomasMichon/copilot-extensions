@@ -717,6 +717,44 @@ observes the finished files rather than restamping their inventory identities.
 the actual UV stage entry; its native POSIX controls are separate from Windows
 execution and the required unit-only CI packet.
 
+The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
+and for relevant PR paths on Linux and Windows. Its packet is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers`.
+The real shell acquisition, canonical freezing, queue, finite worker, runtime
+adapter and borrowed participant remain intact; only constructor and suite
+bodies use finite fixtures with a minimal declared source graph and a real
+native venv. It covers equivalent pending coalescing, separate active arrivals
+and arguments, changed SDK inputs, preserved nonzero whole-operation results and birth-pinned loss of the
+waiting Python caller. A prepared legacy payload without bootstrap scripts
+separately exercises current-controller compatibility and a saved acquisition
+budget. The caller-loss case uses a relative configured source through real
+acquisition, participant validation and the suite's source locator.
+An independent case verifies that detached acceptance removes only that caller's acquisition
+checkout while the retained worker continues to its recorded final result.
+The detached control runs twice and observes native Windows windows and focus
+changes without weakening the enclosing test lifecycle.
+An ordinary two-request control delays only the second executor entry until
+the successful first caller has removed its acquisition checkout, then runs the
+canonical executor and verifies retained process-utility imports and both results.
+A separate inherited-anchor case distinguishes the configured relative source
+from an equally named repository under the shell's working directory.
+Authentication inspection retains valid caller-stdout JSON without
+installation, and request controls preserve an interrupted fence until explicit
+recovery outside the install transaction. A POSIX-only non-update entry resolves source dependencies without creating a
+queue. Runner-owned containment
+and daemon-instance leases retain cleanup. This is source-boundary evidence,
+not full-graph performance, escape from a caller-owned cleanup Job, actual
+runtime installation, installed rollout or migration of an existing queue.
+A separate full-repository retention control records real input count, bytes
+and blocking retention time as test properties. It exercises canonical
+freezing/readback against the complete declared Manager/SDK graph, not the
+full acquisition/installation latency of an ordinary update.
+Required unit-only CI does not gain these process controls.
+The actor-free bootstrap packet additionally submits a caller-relative Manager
+source, removes the submitting directory, and validates/acquires its locator
+from the retained controller directory. The saved source anchor does not change
+the runner's retained working directory; changed source policy still refuses.
+
 The optional `agent-worktrees --test-file tests/test_update_write_activity_native.py
 --allow-explicit-tiers` packet uses private synthetic Windows writers under the
 real strict Job and finite stream owner. It distinguishes useful silent writes,

@@ -26,6 +26,12 @@ if [ "$#" -eq 1 ] && [ "${1-}" = --describe-source-inputs ]; then
     exit 0
 fi
 
+source_anchor="${WORKTREE_MANAGER_SOURCE_ANCHOR:-$(pwd -P)}"
+case "$source_anchor" in
+    /*) ;;
+    *) printf '%s\n' 'Update request source anchor must be absolute.' >&2; exit 2 ;;
+esac
+
 _bootstrap_progress() {
     local message="$1" state="${2:-running}" stamp line
     stamp="$(date -u '+%H:%M:%SZ' 2>/dev/null)" || stamp="time unavailable"
@@ -152,14 +158,20 @@ source_prefix="${REPO%%:*}"
 case "$REPO:$source_prefix" in
     /*:*|*://*:*) ;;
     *:*) case "$source_prefix" in
-        *[/\\]*|"$REPO") REPO="$(pwd -P)/$REPO" ;;
+        *[/\\]*|"$REPO") REPO="$source_anchor/$REPO" ;;
     esac ;;
 esac
 
+update_staging=""
 if [ "$recovery_only" -eq 1 ]; then
     recovery_staging="$(mktemp -d -t manager-repair.XXXXXXXX)"
     STAGING="$recovery_staging/source"
     trap 'rm -rf -- "$recovery_staging"' EXIT
+elif [ -z "$install_source" ] && [ "${1-}" = update ]; then
+    mkdir -p "$ROOT/bootstrap-acquisition"
+    update_staging="$(mktemp -d "$ROOT/bootstrap-acquisition/update.XXXXXXXX")"
+    STAGING="$update_staging/source"
+    trap 'status=$?; if [ "$status" -eq 0 ]; then rm -rf -- "$update_staging"; fi' EXIT
 fi
 
 _bootstrap_progress 'Worktree Manager bootstrap'
@@ -254,6 +266,7 @@ else
 fi
 
 cd "$payload_parent/worktree-manager"
+export WORKTREE_MANAGER_SOURCE_ANCHOR="$source_anchor"
 # Version-install the fetched payload (idempotent, version-gated): publishes the
 # versions/<ver> slot + current-version marker + ~/.local/bin binstub.
 if ! PYTHON="$(uv python find --no-project '>=3.11' 2>/dev/null)"; then
@@ -269,6 +282,10 @@ esac
 # Then run whatever the caller asked for through the freshly-installed app.
 if [ "$recovery_only" -eq 1 ]; then
     "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}"
+    exit "$?"
+fi
+if [ -n "$update_staging" ]; then
+    "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}" -- "$@"
     exit "$?"
 fi
 if [ "$#" -eq 0 ]; then
