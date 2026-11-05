@@ -477,12 +477,14 @@ def test_protocol_caller_preserves_os_profile_context_but_never_arbitrary_creden
         "LocalAppData": r"C:\fixture-profile\AppData\Local",
         "ProgramFiles": r"C:\Program Files",
         "PSModulePath": r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules",
+        "ComputerName": "fixture-native-host",
         "GITHUB_TOKEN": "must-not-cross",
         "UNRELATED_CREDENTIAL": "must-not-cross",
     }
     assert protocol_probe.fixture_environment(source, control=True) == {
         key: value for key, value in source.items() if "must-not-cross" != value
     }
+    assert "ComputerName" not in protocol_probe.fixture_environment(source, control=False)
     assert protocol_probe.fixture_environment(source, control=False) == {}
 
 

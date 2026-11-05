@@ -245,26 +245,41 @@ if ($identity.name -isnot [string] -or
     $invocation.version -ne 2 -or $installer -isnot [string] -or $installer -cne $expectedInstaller) {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
-# Admission is already in stock PowerShell; additional interpreter startups exceed hook budgets.
+# MCP batches read-only SDK queries, retaining the canonical caller-owned adapter.
 $modeRunner = Join-Path $Payload 'scripts\installation-context\installation-context.ps1'
 $previousPayload = $env:COPILOT_PLUGIN_ROOT
 try {
     $env:COPILOT_PLUGIN_ROOT = $Payload
-    $document = @(& $modeRunner -Action probe-plugin-publication `
-        -PayloadRoot $Payload -PluginId $plugin -LegacyRoot $RuntimeRoot -ProjectRoot $Project)
-    $code = $LASTEXITCODE
-    if ($code -ne 0) { throw 'Owning installation refused first-use publication.' }
-    $sourceDocument = @(& $modeRunner -Action resolve `
-        -PayloadRoot $Payload -PluginId $plugin -ProjectRoot $Project)
-    if ($LASTEXITCODE -ne 0) { throw 'Owning payload provenance could not be resolved.' }
+    if ($plugin -ceq 'agent-mcp') {
+        $worker = Join-Path $PSScriptRoot 'mcp-admission.py'
+        if (-not [IO.File]::Exists($worker)) { throw 'Packaged MCP admission support is unavailable.' }
+        $packet = @{
+            payload = $Payload; runtime = $RuntimeRoot; project = $Project
+        }
+        $document = @(& (Join-Path $Payload 'scripts\installation-context\shell-caller-owned.ps1') `
+            -Worker $worker -Request $packet -DiagnosticPrefix installation-context)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw 'Owning installation refused first-use publication.' }
+        $inspection = ($document -join "`n") | ConvertFrom-Json
+        $admission = $inspection.admission
+        $provenance = $inspection.provenance
+    } else {
+        $document = @(& $modeRunner -Action probe-plugin-publication `
+            -PayloadRoot $Payload -PluginId $plugin -LegacyRoot $RuntimeRoot -ProjectRoot $Project)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw 'Owning installation refused first-use publication.' }
+        $sourceDocument = @(& $modeRunner -Action resolve `
+            -PayloadRoot $Payload -PluginId $plugin -ProjectRoot $Project)
+        if ($LASTEXITCODE -ne 0) { throw 'Owning payload provenance could not be resolved.' }
+        $admission = ($document -join "`n") | ConvertFrom-Json
+        $provenance = ($sourceDocument -join "`n") | ConvertFrom-Json
+    }
 } finally {
     if ($null -eq $previousPayload) {
         Remove-Item Env:COPILOT_PLUGIN_ROOT -ErrorAction SilentlyContinue
     } else { $env:COPILOT_PLUGIN_ROOT = $previousPayload }
 }
 if ($code -ne 0) { throw 'Owning installation refused first-use publication.' }
-$admission = ($document -join "`n") | ConvertFrom-Json
-$provenance = ($sourceDocument -join "`n") | ConvertFrom-Json
 $selectedRoot = if ($admission.runtimeRoot) { $admission.runtimeRoot } else { $admission.legacy.root }
 if ($admission.status -cne 'ready' -or $admission.actualMode -cne 'legacy' -or
     $admission.deployment.allowPluginPublication -isnot [bool] -or

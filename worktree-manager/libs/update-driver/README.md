@@ -855,8 +855,16 @@ absence is not permission to download another interpreter or reuse a compiled
 fallback. The manual `mcp-recipes` portfolio separates admission, materialized
 stamp, cold construction, installed consumers and failed-candidate preservation.
 Its contained caller-process-loss case is not production caller-Job escape
-proof. Ordinary MCP bootstrap/command/explicit-installer publishers are not
-adopted, and #10499's Job-lifetime and other-plugin migration gates remain open.
+proof. MCP's legacy bootstrap now submits these fixed actions and validates
+the packaged `mcp-recipes-v1` contract before invocation. Its Windows receiver
+batches read-only publication and source queries through the same SDK under
+one existing caller-owned adapter; it does not duplicate that lifetime
+handshake for each query. Effect-side recipe, source and publication checks
+remain intact. This is admission, not a second installer executor or a new
+queue. The actual hook retains its 15-second deadline and distinguishes launch
+from ordinary acceptance/completion. MCP commands and explicit initializers
+are separate adoption boundaries; #10499's production Job-lifetime and
+other-plugin migration gates remain open.
 
 CodeSpaces' fixed `stamp`/`provision` prerequisite admits only its canonical
 installed payload and default legacy root. It retains its snapshot-default

@@ -996,6 +996,10 @@ to break away and survive its earlier frontend's exit. Bounded children remain
 caller-owned. Such fixtures still require every caller Job to close, retained
 native identity/exit evidence, renewal and exact instance cleanup; this is not
 permission to launch an untracked detached test process.
+The disposable PowerShell shell guard applies the same policy to its own
+expiry Job: kill-on-close remains mandatory, while explicitly non-contained
+mode permits independently admitted daemon breakaway. It does not change any
+caller Job's limits or let bounded descendants escape.
 One local lifecycle thread handles renewal/expiry per process.
 
 The default discovery root comes from the OS user's profile rather than an

@@ -3,9 +3,11 @@
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +24,74 @@ pytestmark = pytest.mark.skipif(
     reason="native MCP recipes are qualified only on Windows and Linux",
 )
 REPOSITORY = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_mcp_batches_read_only_admission_under_one_caller_owner(
+    tmp_path, monkeypatch, capsys, allowed,
+):
+    worker = runpy.run_path(str(REPOSITORY / "libs/update-driver/scripts/mcp-admission.py"))["main"]
+    profile = tmp_path / "profile"
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("HOME", str(tmp_path / "distinct-home"))
+    payload = profile / ".copilot/installed-plugins/fixture-market/agent-mcp"
+    sdk = payload / "scripts/installation-context"
+    sdk.mkdir(parents=True)
+    (sdk / "daemon_instance_runtime.pyz").write_bytes(b"fixture archive, import is doubled")
+    admission = {
+        "status": "ready", "actualMode": "legacy",
+        "deployment": {"allowPluginPublication": allowed, "reason": "fixture-policy"},
+    }
+    calls = []
+
+    def publication(**arguments):
+        calls.append(("publication", arguments))
+        return admission
+
+    def provenance(**arguments):
+        calls.append(("source", arguments))
+        return {"sourceFingerprint": "sha256:" + "a" * 64}
+
+    def load(path):
+        assert Path(path) == sdk / "installation_context.py"
+        calls.append(("load", path))
+        return {"resolve_runtime_deployment": publication, "resolve_payload_source": provenance}
+
+    def serve(invoke, **lifetime):
+        assert lifetime == {"nonce": "fixture"}
+        return invoke()
+
+    monkeypatch.setattr(runpy, "run_path", load)
+    monkeypatch.setitem(sys.modules, "agent_procutil._shell_caller_owned", SimpleNamespace(serve=serve))
+    previous = sys.path[:]
+    request = {
+        "payload": str(payload), "runtime": str(profile / ".agent-mcp"),
+        "project": str(tmp_path), "lifetime": {"nonce": "fixture"},
+    }
+    try:
+        if allowed:
+            assert worker(request) == 0
+            result = json.loads(capsys.readouterr().out)
+            assert result["admission"] == admission
+            assert result["provenance"]["sourceFingerprint"] == "sha256:" + "a" * 64
+        else:
+            with pytest.raises(RuntimeError, match="refused first-use publication"):
+                worker(request)
+            assert capsys.readouterr().out == ""
+    finally:
+        sys.path[:] = previous
+    expected = ["load", "publication", "source"] if allowed else ["load", "publication"]
+    assert [name for name, _ in calls] == expected
+    assert calls[1][1] == {
+        "payload_root": str(payload), "plugin_id": "agent-mcp",
+        "project_root": str(tmp_path), "legacy_root": str(profile / ".agent-mcp"),
+        "copilot_home": profile / ".copilot", "durable_home": profile / ".copilot-extensions",
+    }
+    if allowed:
+        assert calls[2][1] == {
+            "payload_root": str(payload), "plugin_id": "agent-mcp",
+            "project_root": str(tmp_path), "copilot_home": profile / ".copilot",
+        }
 
 
 @pytest.fixture
@@ -75,6 +145,10 @@ def test_mcp_recipe_runs_own_init_under_same_queue_and_preserves_result(
     owning_mcp, area, monkeypatch, action,
 ):
     payload, installation, project = owning_mcp
+    if os.name == "nt":
+        home = area / "distinct-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
     root = area / "queue"
     request = provision.enqueue(payload, installation, project, root=root, installer_action=action)
     repeated = provision.enqueue(payload, installation, project, root=root, installer_action=action)
@@ -100,8 +174,14 @@ def test_mcp_recipe_runs_own_init_under_same_queue_and_preserves_result(
 
 
 @pytest.mark.parametrize("action", ["stamp", "provision"])
-def test_mcp_native_admits_own_recipe_before_source_comparison(owning_mcp, area, action):
+def test_mcp_native_admits_own_recipe_before_source_comparison(
+    owning_mcp, area, action, monkeypatch,
+):
     payload, installation, project = owning_mcp
+    if os.name == "nt":
+        home = area / "distinct-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
     root = area / "cold"
     command = native_command(root, payload, installation, project)
     command += (

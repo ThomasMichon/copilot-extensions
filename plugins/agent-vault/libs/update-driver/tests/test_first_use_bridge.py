@@ -358,6 +358,7 @@ def native_recipe_runner(area):
     def start(
         command, *, env, cwd, root, diagnostic, contain_caller=False,
         stdin=subprocess.DEVNULL, stdout=None,
+        acknowledgement_prefix="[installation-driver] launch acknowledgement: ",
     ):
         path = area / f"native-recipe-{len(calls)}.log"
         output = path.open("wb")
@@ -378,7 +379,7 @@ def native_recipe_runner(area):
                 caller_jobs[process] = None
         calls.append((process, output, path))
         roots[root] = diagnostic
-        prefix = "[installation-driver] launch acknowledgement: "
+        prefix = acknowledgement_prefix
 
         def acknowledgement():
             return next((line.partition(prefix)[2]

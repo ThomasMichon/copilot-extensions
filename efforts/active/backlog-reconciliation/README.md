@@ -222,6 +222,16 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [four preparation/containment/liveness contracts](finite-preparation-containment-liveness-contracts.md)
+retain twelve ranked relationships and all four independent OPEN outcomes.
+Actual promoted preparation failure, test-global containment, pending-seed
+diagnostics and honest clean-exit liveness remain distinct from credited
+partials. Three changed-closed identities and protected whole evidence
+supply no new completion credit or custody release.
+The [journal](<journal/2026/11.05 finite-preparation-containment-liveness-contracts.md>)
+records the actual final fixed-graph group, 420, not campaign completion;
+fresh whole-queue/inflow coverage and the original checkpoint remain.
+
 The [eleven automatic-update/observation/compatibility contracts](finite-automatic-observation-compatibility-contracts.md)
 retain thirty-three ranked relationships and independently verify #9704,
 #10057 and #10078's finite source completions through actual current
@@ -290,6 +300,18 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The eleven automatic-update/observation/compatibility contracts are actually
+delivered in #10727 after genuine exact-head approval, no review threads
+and nine complete successful/skipped pre-merge contexts. Post-merge readback
+adds one successful attribution-refresh context; all ten are retained.
+All eight actual merged/current blobs equal the reviewed head.
+Only the serial publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-automatic-observation-compatibility-contracts.md>)
+records the result. The next four OPEN contracts finish the fixed graph's
+actual group 420, not the campaign. Current metadata identifies further
+eligible inflow outside that snapshot, requiring fresh whole admission.
+The parent remains Active; its Plan and Validation stay open.
 
 The eight installer/hook/account/recovery contracts are actually delivered
 in #10725 after genuine exact-head approval, the resolved aggregate-count

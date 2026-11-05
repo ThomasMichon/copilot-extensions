@@ -1149,3 +1149,271 @@ U12's contained caller-process-loss evidence is not substituted. No production
 hook was run, no source implementation or native acceptance is claimed, and no
 shared installation, queue, credential, service or rollout effect is authorized.
 The parent remains Active; the next gate is review of this bounded proposal.
+
+The proposal subsequently merged through #10658 at 08:25:00 UTC as
+`ff1ae2a9fb9a818dbd905af7e77c2ceff13f9017`. Its final head
+`c43e52a4875ada22ff16b99594f74aacff5e663c` received genuine approval
+`5781807321`, with no review threads and both required source CI runs green.
+The preserving rebase retains the separate U13/#10652 fresh-settlement plan;
+this bootstrap slice is U14. All six plan files match the merge.
+
+The parent Plan and Validation Plan remain unresolved. The next source step
+implements only the reviewed MCP bootstrap adapter, preserving the original
+queue, real readiness and all incumbent custodians, before exact-candidate
+hook and production-lifetime qualification. A plan merge is neither a source
+fix nor native/affected-host acceptance; no updater or live repair ran.
+
+### 2026-11-05 - MCP bootstrap functional result and native lifetime candidate
+
+The local adapter implements the reviewed U14 proposal: fixed stamp/provision
+handoff, real source-qualified readiness, preserved controls and guidance,
+unchanged deadline/output and removal of this hook's direct installer/PID-age
+custody. The actual Windows functional packet passes in 686.14 seconds. All
+twelve original lifecycle records settle and final inventory is empty; restoring
+the fixture's original source identity before canonical teardown fixes the
+earlier test-only missing-runtime-root hold. That result is contained functional
+and cleanup evidence, not production caller-Job loss.
+
+The candidate now includes an explicit ephemeral hosted Windows/Linux lifetime
+packet through the existing native owner. It holds the ordinary execution lock,
+invokes the real hook, pins acknowledged owners, destroys every fixture caller
+boundary while work is pending and requires completion without resubmission.
+The existing restrictive shared-outer negative and qualified Windows desktop
+witness remain separate controls. An explicit renewed lifecycle, bounded-child
+controls, ordinary/coalesced work and exact cleanup remain required.
+
+Seven local admission/filter/CLI controls pass; the bounded shared cold-environment
+packet passes three checks and correctly skips the hosted-only native item.
+Focused Ruff and the install-contract gate pass. No actual hosted result is
+claimed yet. The new lane retains the existing item/step/portfolio bounds and
+uploads only receipts and logs. Exact-candidate Windows/Linux native results,
+implementation review/CI, merge and containing release remain open. The parent
+Plan and Validation Plan remain Active; no updater or shared installation ran.
+The live declaration-age audit checked 548 declarations but could not verify
+four npm metadata reads because their TLS handshakes failed with certificate
+validation enabled. It is not recorded as passing; no trust/verification
+setting was weakened. Hosted CI must resolve that validation boundary.
+
+The first hosted candidate, #10700 at `12b71e11466e`, fails run
+`42016085082` before either production-lifetime step executes. Linux reports
+five PowerShell repaired-readiness failures (37 passed, seven skipped); its
+assertion truncates the subprocess diagnostic. Windows completes the actual
+functional body in 208.10 seconds but fails strict teardown on one
+`process-reused` lifecycle hold. The earlier twelve-settled local packet is
+not substituted for this exact candidate's failed result.
+
+The next diagnostic revision retains the Windows functional JUnit properties,
+remaining original records and read-only native birth observations, and prints
+the complete Linux subprocess error. It changes neither production cleanup
+policy nor the all-settled assertion and does not skip the failing cases.
+Both roots require diagnosis before another native acceptance claim.
+
+The diagnostic run `42018348269` at `b7d9d68d25b7` identifies the Linux
+failure: PowerShell resolves both `/usr/bin/bash` and `/bin/bash`, then tries
+to invoke their combined `Source` array as one executable. The adapter now
+selects the first application, retaining the existing native POSIX path.
+Windows passes the functional packet and reaches native qualification, where
+the generic control reports three scope identities: the runner's inherited
+Job plus both fixture Jobs, not a missing caller ancestor. Scope validation
+now requires the exact inherited prefix, the returned outer Job name and one
+additional inner Job. All tracked scopes remain checked for daemon escape;
+both fixture Jobs, bounded-control death, pinned-daemon survival and the
+restrictive shared-outer negative remain required.
+
+Nine local lane/scope guards pass, including inherited-scope preservation and
+missing/reordered-boundary refusals. The Windows hook contract packet passes
+42 cases with seven platform skips in 85.77 seconds; focused Ruff and whitespace
+checks pass. These are source corrections, not native lifetime qualification.
+The first run's original `process-reused` hold remains unmodified and is not
+retroactively settled by the second run's functional pass. Exact revised-head
+Windows/Linux proof, review/required CI, merge and release remain open.
+
+Run `42020741107` at `b947f06d92f7` clears all functional packets on both
+platforms, including Linux's previously failing readiness cases. Native proof
+still fails before the actual MCP hook. The exact-scope check exposes an
+incorrect attribution in the preceding diagnostic: the third Windows scope
+comes from the leased intermediate's own expiry Job, not an established
+runner Job. The fixture had launched a bounded intermediate through
+`spawn_daemon(breakaway=False)`. It now uses ordinary headless `Popen`, retaining
+the outer Job and unchanged inner caller-owned Job without introducing another
+daemon lifetime. A regression rejects using daemon admission for that bounded
+intermediate; exact inherited/outer/inner validation remains.
+
+Linux's native entry creates `libs/update-driver/.venv` before materialization,
+which refuses symlinks in canonical input. Its assertion did not print the full
+materializer result. The hosted step now declares its UV environment under the
+runner's temporary root instead of the canonical library, and the fixture prints
+every materialization finding on refusal. This does not change materialization
+policy or treat a skipped source as successful.
+
+The same head's required CI fails the daemon census: the removed MCP
+`Start-Process`/`nohup` sites remained listed and the new bounded MCP control was
+unclassified. The census now removes those retired sites and classifies both
+bounded fixture launches as caller-contained. Ten focused lane controls pass,
+as does the actual materialized stamp consumer (55.26 seconds). Native
+qualification and required CI must pass on the revised head; no failed result
+is waived or credited as acceptance.
+
+Run `42022964161` at `93066796f1b4` passes both functional packets and gets
+past the preceding materializer and two-caller-Job failures. Linux reaches the
+real hook and acknowledges its owner, then the fixture incorrectly requires
+the log pathname in `/proc/<pid>/cmdline`; native launch redirects stdout to
+that log instead. The identity check now compares the acknowledged live
+pidfd-pinned owner's actual stdout descriptor with the unique acknowledged log,
+with liveness checks before and after the descriptor observation.
+
+Windows retains exactly both caller Jobs and an admitted daemon with a
+different expiry Job. Its control incorrectly requires no Job metadata at all,
+rejecting the daemon's own renewed-lease custody. It now rejects any retained
+caller identity and checks the daemon's native nonmembership in every pinned
+caller Job. It does not confuse an independent expiry Job with caller
+dependence. Both fixture Job closures, bounded-control death, pinned-daemon
+survival and restrictive-outer refusal remain mandatory. Neither failed run
+is native acceptance; the revised exact-head lane still owes actual MCP work
+completion and exact cleanup on both platforms.
+
+Run `42024316058` at `b15bf45f37d9` fails Windows' functional coalescing
+assertion, with all nine lifecycle records settled, and Linux's native item
+deadline while waiting for its first ordinary receipt. Windows' two sequential
+hook calls did not guarantee pending overlap. An attempted execution-lock
+barrier also blocks the native foundation producer, so that local validation
+times out and is not acceptance. It is removed rather than extending a deadline.
+The functional and native assertions now require identical identities for
+equivalent overlapping requests; distinct identities require durable proof
+that the earlier request finished before the next was accepted. Actual
+coalescing is recorded, not assumed for sequential non-overlap.
+
+The Linux fixture pre-created its ordinary queue before cold foundation
+admission. Both native producers require an existing queue to have its existing
+foundation, so that setup entered the separately owned existing-queue recovery
+boundary instead of genuine first touch. The unrelated ordinary request now
+joins only the later provision cycle after the real cold hook establishes the
+foundation. The actual caller-boundary destruction and post-loss completion
+requirements are unchanged.
+
+Failed/interrupted foundation state and an acknowledged owner exiting without
+an ordinary receipt now fail promptly. Bounded owner-log tails are retained
+before waits and on teardown; Linux uses the existing signal timeout so finally
+and exact cleanup diagnostics can run. Item/step/portfolio deadlines are not
+increased. Neither failed validation is credited as a source or native pass.
+
+The corrected local Windows actual functional packet passes in 631.51 seconds
+(660.66 seconds including preparation and cleanup). Hook times are
+8.328/6.609/5.594/6.813 seconds against the unchanged 15-second deadline.
+Installed consumers, healthy repeats, incoming-failure preservation,
+source-independent consumers, all original lifecycle settlements and empty
+final inventory pass. This remains contained functional evidence, not native
+caller-Job/group proof. Ten lane guards, focused Ruff and whitespace pass.
+
+A bounded npm-only metadata retry still fails all four public TLS handshakes
+with certificate validation enabled. Normal PR CI skipped declaration age
+because this diff changes no dependency declaration, so its green result is
+not substituted for that audit. The existing CI workflow's explicit manual
+dispatch audits all declarations and can qualify the hosted metadata lane
+without changing a manifest or trust setting. Exact-head native results,
+required CI/review, merge and release remain open.
+
+Exact-head full manual CI `42029890331` at `c3a3024c1c64` passes, including
+all 548 live dependency declarations with zero violations, source guards and
+eligible units. That hosted result does not claim the local npm TLS problem
+was repaired. Native run `42029879542` still fails both platforms; its functional
+packets pass, while native lifetime acceptance remains open.
+
+Windows' generic controls qualify two normal cycles and the restrictive outer
+negative, with both caller Jobs closed, bounded controls retired and independent
+daemons surviving. The desktop witness observes zero new windows/foreground
+changes. The actual MCP owner then fails nested native admission. Source tracing
+finds that disposable PowerShell shell custody always creates a restrictive
+expiry Job, unlike the Python guard. The correction retains kill-on-close and
+normal contained-mode prohibition, permitting breakaway only in the existing
+explicitly non-contained mode. No caller Job limit, native nonmembership check,
+external restriction or fallback policy is changed. Thirty-eight focused
+custody/protocol tests pass, and a real contained Windows original-shell-loss
+case still retires the exact helper and bounded child.
+
+The canonical lifecycle archive is regenerated through its owner tool for all
+consumers; an additional changefile names the four archive consumers not covered
+by the existing eleven-consumer changefile. The MCP producer digest is refreshed
+without a footprint contract-revision change.
+
+Linux's retained diagnostics now show both cold callers coalesced to one
+ordinary pending request, followed by worker-launch refusal. The restricted
+native PATH omits the real `systemd-run` required under the host's cleanup unit,
+and replaces native runtime inputs with the cold profile's directory. The
+explicit hosted fixture now preserves that prerequisite and configured runtime/
+bus inputs, without exposing product Python or installing a user manager.
+An unavailable real scope remains a failure. An exited acknowledged owner with
+an accepted-but-incomplete request also fails promptly rather than consuming
+the whole item deadline. The prior Linux signal-timeout cleanup settles both
+original lifecycle records; Windows retains four settled records plus one
+`launch-outcome-unknown` hold. Neither historical hold is modified or waived.
+
+Run `42034236248` at `a9b14b243917` qualifies the full Linux portfolio. Actual
+native stamp/provision completes in 98.97 seconds after all caller groups are
+destroyed; both cold callers coalesce, bounded controls die, acknowledged
+owners survive and all six original lifecycle records settle with empty final
+inventory. Hook times are 1.104/1.134/1.115 seconds. This is native Linux
+caller-group proof, not another contained substitute.
+
+Windows' native stamp also completes after both caller Jobs close, with two
+coalesced callers and acknowledged-owner survival. The generic restrictive
+negative and desktop witness pass; no visible windows or foreground changes
+are observed. Provision then fails after runtime/command publication because
+the fixture's credential-free OS map omitted `COMPUTERNAME`, which the existing
+deployment metadata writer requires. All eleven original lifecycle records
+settle. The map now preserves that required native metadata; the production
+installer is not changed to hide a missing prerequisite. Full exact-head
+Windows qualification, current CI/review, merge and release remain open.
+
+Run `42036393829` at `1766f0fd6dae` passes both complete native portfolios.
+Current source CI `42036372710` separately refuses the changed SDK module's
+stale unit-source admission and missing transitive changefiles for Fleet Manager
+and Chat. Neither failure is waived or replaced with the older full-CI pass.
+The SDK change is reviewed against the packet's existing import/fixture closure:
+it adds only the existing `contained_test_mode` read and a Job flag conditional,
+with no new module, test node, coverage target, effect permission or budget.
+Only that reviewed source's declared digest is refreshed, and the unchanged
+unit packet still owes actual bounded execution and effect/coverage verification.
+The two transitive consumers receive their own ordinary patch changefile.
+These are admission/version metadata corrections; native consumer code and
+qualification inputs remain unchanged from the successful native head.
+
+The first current-head review at `22fea15261` is `COMMENTED` with one blocking
+Medium finding: Windows batching inherited the Python SDK's `HOME` default
+instead of the PowerShell SDK's `USERPROFILE` roots. The receiver already
+validates the MCP runtime as a direct child of that profile. The batched worker
+now derives the profile from that validated runtime root, explicitly supplies
+its Copilot home to both SDK reads and its durable home to deployment resolution,
+without changing global SDK defaults or adding a protocol field.
+
+Both batch outcomes and the real native admission controls exercise distinct
+`HOME`/`USERPROFILE`; all four pass in 11.02 seconds with the declared existing
+Python prerequisite on PATH. The first local invocation lacked that PATH prefix
+and stopped at the prerequisite instead; no installer or test assertion changed
+to hide it. The hosted Windows caller-loss packet now uses the same distinct
+home case, so new exact-candidate native qualification is still required.
+
+Current guard CI also identifies the separate canonical installation-context
+caller archive as stale. Its owner regenerates that archive and all thirteen
+SDK copies; the MCP producer digest is refreshed with contract revision 36
+unchanged. This completes the already reviewed SDK source propagation rather
+than changing the lifetime policy again. Archive sync, source admission,
+install-contract and lint checks remain required before the new push.
+
+Head `7793205431` passes all current source CI, including the canonical SDK
+vendoring check. Its fresh review resolves the launch-time Medium finding
+but identifies a related High gap in ordinary `_inspect_payload`: the SDK
+defaults could still select `HOME` after the native launch. The distinct-home
+Windows native packet reproduces that provenance refusal before ordinary
+acceptance; Linux passes.
+
+Ordinary inspection now explicitly uses the same native `Path.home()` profile
+already used by its canonical-root checks, supplies its Copilot root to both
+SDK reads and its durable root to deployment resolution. Execution-time
+revalidation uses this same function, so the profile remains coherent before
+enqueue and before effects. The environment and generic SDK defaults are not
+rewritten. Existing stamp/provision recipe controls now retain distinct homes
+through both ordinary acceptance and execution. All six batching, native
+admission and real recipe controls pass in 38.17 seconds; Ruff, source-admission
+and whitespace checks pass. The full distinct-home native lane remains required
+on the new source head; the earlier successful packet is supporting history.

@@ -308,14 +308,15 @@ def _inspect_payload(
     sys.modules[spec.name] = primitive
     spec.loader.exec_module(primitive)
     environment = _environment(payload)
+    profile = Path.home()
     arguments = dict(
-        payload_root=payload, plugin_id=plugin, legacy_root=runtime_root,
-        project_root=project, environment=environment,
+        payload_root=payload, plugin_id=plugin, project_root=project,
+        environment=environment, copilot_home=profile / ".copilot",
     )
-    source = primitive.resolve_payload_source(
-        **{key: value for key, value in arguments.items() if key != "legacy_root"},
+    source = primitive.resolve_payload_source(**arguments)
+    resolution = primitive.resolve_runtime_deployment(
+        **arguments, legacy_root=runtime_root, durable_home=profile / ".copilot-extensions",
     )
-    resolution = primitive.resolve_runtime_deployment(**arguments)
     selected_root = resolution["runtimeRoot"] or resolution["legacy"]["root"]
     if (
         resolution["status"] != "ready"

@@ -96,7 +96,9 @@ def test_changed_child_birth_never_yields_control_or_signals(api, monkeypatch):
         owner.close()
 
 
-def test_disposable_job_assigns_retained_shell_and_stays_until_owner_close(api):
+@pytest.mark.parametrize("contained", [True, False])
+def test_disposable_job_assigns_retained_shell_and_stays_until_owner_close(api, monkeypatch, contained):
+    monkeypatch.setattr(native, "contained_test_mode", lambda: contained)
     owner = native.ShellProcessOwner(ProcessIdentity(4200, "windows:123"), 51)
     try:
         scope = owner.contain({})
@@ -104,6 +106,8 @@ def test_disposable_job_assigns_retained_shell_and_stays_until_owner_close(api):
         api.AssignProcessToJobObject.assert_called_once_with(71, 41)
         assert owner.contain({}) == scope
         api.CreateJobObjectW.assert_called_once()
+        limits = api.SetInformationJobObject.call_args.args[2]._obj
+        assert limits.BasicLimitInformation.LimitFlags == (0x2000 if contained else 0x2800)
         api.CloseHandle.assert_not_called()
     finally:
         owner.close()
