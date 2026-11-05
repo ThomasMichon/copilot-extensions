@@ -8,7 +8,7 @@ import time
 from contextlib import ExitStack
 
 from . import agent_policy, config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
-from . import launch_seed_state, embody_resume, embody_completion
+from . import launch_admission, launch_seed_state, embody_resume, embody_completion
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
 from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
@@ -318,7 +318,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
             exit_code=3,
         )
     acquisition = getattr(args, "bridge_acquisition", None)
-    native_resume = acquisition if acquisition != "fresh" else None
     if acquisition and already:
         return output._json_error("bridge acquisition target already has a live mux", exit_code=3)
     seed = getattr(args, "seed", None)
@@ -329,6 +328,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return output._json_error(launch_preflight.error, exit_code=3)
 
     record = None
+    profile_resume = None
     selection = profile_assignment.LaunchProfileSelection(profile=None)
     explicit_seed = bool(seed)
     if not already:
@@ -350,14 +350,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
             if backend_error:
                 return output._json_error(backend_error, exit_code=3)
             try:
+                profile_resume = embody_resume.resume_target(args, record, seed, make_new=make_new)
                 selection = _launch_profile_selection(
                     config,
                     args,
                     record,
                     lane="new",
                     generation_key=f"new:{wt_id}",
-                    resume_session=native_resume,
-                    allocate_new=not native_resume and not getattr(args, "dry_run", False),
+                    resume_session=profile_resume,
+                    allocate_new=not profile_resume and not getattr(args, "dry_run", False),
                 )
                 _reflect_assignment(record, selection)
             except profile_assignment.ProfileAssignmentError as exc:
@@ -395,14 +396,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return 0
 
     deferred = {}
-    if getattr(args, "bridge_seed_operation", None) and not already:
-        try:
-            deferred = bridge_seed_delivery.claim(args, cfg.tracking_dir() / f"{wt_id}.yaml")
-            if not seed and deferred["deferred_creation_seed"].get("seed"):
-                seed = deferred["deferred_creation_seed"]["seed"]["text"]
-        except (ValueError, OSError, TimeoutError) as exc:
-            return output._json_error(str(exc), exit_code=3)
-
     if already:
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
@@ -452,18 +445,12 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return 3
         return output._json_error(str(exc), exit_code=3)
     native_seed_id = None
-    if seed and not acquisition and not deferred:
-        try:
-            launch_cmd, native_seed_id = embody_completion.prepare_startup_seed(
-                launch_cmd, cfg.tracking_dir() / f"{wt_id}.yaml", seed, explicit=explicit_seed,
-                environment=env,
-            )
-        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
-            return output._json_error(f"Could not prepare native startup prompt: {exc}", exit_code=3)
     admission = ExitStack()
     try:
+        # Seed writers acquire admission themselves. Hold lifecycle while preparing
+        # startup text, then acquire admission for process creation, not around an RPC.
         admission.enter_context(bridge_acquisition_launch.launch_fence(
-            repo, cfg.tracking_dir() / f"{wt_id}.yaml",
+            repo, cfg.tracking_dir() / f"{wt_id}.yaml", include_launch_admission=False,
         ))
     except (TimeoutError, ValueError) as exc:
         admission.close()
@@ -507,6 +494,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     "work_dir": work_dir,
                     "created": False,
                     "resumed": True,
+                    "seeded": False,
                     "new_pane": (
                         sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
                     ),
@@ -533,6 +521,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
         # a head that advanced (or a process that started) during preflight or
         # the lock wait is what's resumed -- or refused.
         resume_target = embody_resume.resume_target(args, launch_record, seed, make_new=make_new)
+        if selection.assignment is not None and resume_target != profile_resume:
+            return output._json_error(
+                "Head changed after profile selection; refresh before resuming in a different context",
+                exit_code=3,
+            )
         refusal = embody_resume.live_head_refusal(resume_target, wt_id)
         if refusal:
             return output._json_error(refusal, exit_code=3)
@@ -543,6 +536,25 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return 3
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
+        if getattr(args, "bridge_seed_operation", None):
+            try:
+                deferred = bridge_seed_delivery.claim(args, cfg.tracking_dir() / f"{wt_id}.yaml")
+                if not seed and deferred["deferred_creation_seed"].get("seed"):
+                    seed = deferred["deferred_creation_seed"]["seed"]["text"]
+            except (ValueError, OSError, TimeoutError) as exc:
+                return output._json_error(str(exc), exit_code=3)
+        if seed and not acquisition and not deferred:
+            try:
+                launch_cmd, native_seed_id = embody_completion.prepare_startup_seed(
+                    launch_cmd, cfg.tracking_dir() / f"{wt_id}.yaml", seed, explicit=explicit_seed,
+                    environment=env,
+                )
+            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+                return output._json_error(f"Could not prepare native startup prompt: {exc}", exit_code=3)
+        try:
+            admission.enter_context(launch_admission.guard(cfg.tracking_dir() / f"{wt_id}.yaml"))
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
         from .launch_seed_exec import copied_setup_command
 
         try:
@@ -655,11 +667,6 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         })
         return 0
 
-    if getattr(args, "bridge_seed_operation", None):
-        try:
-            deferred = bridge_seed_delivery.claim(args)
-        except ValueError as exc:
-            return output._json_error(str(exc), exit_code=3)
     launch_cmd = _build_launch_cmd(
         config, args, work_dir, profile=None, preflight=launch_preflight,
     )
@@ -692,6 +699,12 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         return refusal
     if getattr(args, "ensure_mux", False):
         sessions.ensure_mux_available()
+
+    if getattr(args, "bridge_seed_operation", None):
+        try:
+            deferred = bridge_seed_delivery.claim(args)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
     result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     if not result.get("ok"):
         return output._json_error(

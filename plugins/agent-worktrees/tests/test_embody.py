@@ -914,6 +914,68 @@ class TestCmdEmbody:
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         monkeypatch.setattr(sessions, "resolve_resume_target", lambda rec: "head-1")
 
+    @pytest.mark.parametrize("options", [
+        {"bridge_seed_operation": "operation", "bridge_scope_id": "scope"},
+        {"seed": "next turn"},
+    ])
+    def test_mux_appearing_during_preflight_does_not_claim_or_stage_startup_text(
+        self, monkeypatch, capfd, tmp_path, options,
+    ):
+        from agent_worktrees import bridge_seed_delivery, embody_completion
+
+        self._stub_existing(monkeypatch, tmp_path)
+        live = {"value": False}
+        monkeypatch.setattr(sessions, "has_mux_session", lambda _: live["value"])
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda _: "%3")
+
+        def preflight(*args):
+            live["value"] = True
+            return m.LaunchPreflight()
+
+        monkeypatch.setattr(m, "_preflight_launch", preflight)
+        monkeypatch.setattr(bridge_seed_delivery, "claim", lambda *a: pytest.fail("no claim"))
+        monkeypatch.setattr(
+            embody_completion, "prepare_startup_seed", lambda *a, **k: pytest.fail("no staging"),
+        )
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **k: pytest.fail("no spawn"))
+        assert m.cmd_embody(_ns(worktree_id="wtR", **options)) == 0
+        result = json.loads(capfd.readouterr().out)
+        assert result["created"] is False and result["seeded"] is False
+        assert result["new_pane"] == "%3"
+
+    def test_seed_writer_runs_inside_lifecycle_but_outside_its_own_admission_lock(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from agent_worktrees import bridge_seed_delivery, launch_admission, worktree_lifecycle
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
+        path = tmp_path / "wtR.yaml"
+        events = []
+
+        def claim(*args):
+            with pytest.raises(TimeoutError), worktree_lifecycle.guard(path, timeout=0):
+                pytest.fail("lifecycle must remain held during seed preparation")
+            with launch_admission.guard(path):
+                events.append("claim")
+            return {"bridge_seed_deferred": True, "deferred_creation_seed": {"seed": None}}
+
+        def spawn(*args):
+            with pytest.raises(launch_admission.LaunchAdmissionBusy), launch_admission.guard(path):
+                pytest.fail("process creation must hold admission")
+            events.append("spawn")
+            return {"ok": True, "session": "wt-wtR", "new_pane": "%3"}
+
+        monkeypatch.setattr(bridge_seed_delivery, "claim", claim)
+        monkeypatch.setattr(sessions, "mux_new_session", spawn)
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", bridge_seed_operation="operation", bridge_scope_id="scope",
+        )) == 0
+        assert json.loads(capfd.readouterr().out)["created"] is True
+        assert events == ["claim", "spawn"]
+        with launch_admission.guard(path):
+            pass
+
     @pytest.mark.parametrize(
         "extra, resumed",
         [
@@ -936,6 +998,54 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["resume_session"] == resumed
         assert out["cmd"] == (["copilot", "--resume=head-1"] if resumed else ["copilot"])
+
+    def test_seeded_default_replays_the_head_profile_instead_of_allocating_another(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from agent_worktrees import profile_assignment
+
+        self._stub_existing(monkeypatch, tmp_path)
+        selected = {}
+
+        def select(*args, **kwargs):
+            selected.update(kwargs)
+            return profile_assignment.LaunchProfileSelection(profile=None)
+
+        monkeypatch.setattr(m, "_launch_profile_selection", select)
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", seed="next turn", dry_run=True,
+        )) == 0
+        assert selected["resume_session"] == "head-1" and selected["allocate_new"] is False
+        assert json.loads(capfd.readouterr().out)["resume_session"] == "head-1"
+
+    def test_changed_profile_bound_head_refuses_before_claiming_startup_text(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from types import SimpleNamespace
+        from agent_worktrees import embody_completion
+
+        self._stub_existing(monkeypatch, tmp_path)
+        loads = {"count": 0}
+
+        def load(path):
+            loads["count"] += 1
+            return SimpleNamespace(
+                worktree_path="/w/wtR", head="head-1" if loads["count"] <= 2 else "head-2",
+            )
+
+        monkeypatch.setattr(m.tracking, "load_record", load)
+        monkeypatch.setattr(sessions, "resolve_resume_target", lambda record: record.head)
+        monkeypatch.setattr(m, "_launch_profile_selection", lambda *a, **k: SimpleNamespace(
+            profile=None, assignment=object(),
+        ))
+        monkeypatch.setattr(m, "_reflect_assignment", lambda *a: None)
+        monkeypatch.setattr(m, "_apply_assignment_env", lambda env, selection: env)
+        monkeypatch.setattr(
+            embody_completion, "prepare_startup_seed", lambda *a, **k: pytest.fail("no staging"),
+        )
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **k: pytest.fail("no spawn"))
+        assert m.cmd_embody(_ns(worktree_id="wtR", seed="next turn")) == 3
+        assert "Head changed after profile selection" in capfd.readouterr().out
 
     @pytest.mark.parametrize("state", ["live", "unknown"])
     def test_native_dry_run_checks_real_liveness_before_reporting_admission(
@@ -1156,6 +1266,7 @@ class TestCmdEmbody:
         from agent_worktrees import launch_admission
 
         self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
         monkeypatch.setattr(
             sessions, "mux_new_session", lambda *a, **k: pytest.fail("ACP owner still holds admission"),
         )

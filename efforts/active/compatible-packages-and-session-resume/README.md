@@ -229,3 +229,13 @@ claims, and recover partial/unknown results without blindly replaying actions.
 - Final live-no-op audit included anchor joins and dry-run previews: neither
   now claims Bridge-deferred startup text. The expanded Worktrees packet passed
   129 tests, with touched-source lint and module-size checks green.
+- Further review covered a false-to-true mux transition during preflight.
+  Bridge claims and native startup staging now occur only after the
+  lifecycle-locked live check. The seed writer acquires its own admission
+  lease; process creation takes admission afterward. A real non-reentrant
+  lease control verifies both boundaries without a running model.
+- Exact tool-list detection now handles a distribution literally named
+  `package`, including verbose output. Package regression total: 349 passed.
+  Ordinary resumed heads also select their saved launch profile rather than
+  allocating a different context; a profile-bound head change refuses before
+  startup-text custody changes. Expanded Worktrees total: 169 passed.

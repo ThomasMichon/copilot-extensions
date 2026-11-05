@@ -33,7 +33,10 @@ def parse_tool_list(out: RunOutcome, package_id: str) -> dict[str, Any]:
         return {"known": False, "present": False, "version": None}
     for line in out.stdout.splitlines():
         fields = line.split()
-        if fields and fields[0] == "package":
+        if (
+            len(fields) > 1 and fields[0] == "package"
+            and _name(fields[1]) == _name(package_id)
+        ):
             fields = fields[1:]
         if fields and _name(fields[0]) == _name(package_id):
             version = fields[1].removesuffix(",") if len(fields) > 1 else None

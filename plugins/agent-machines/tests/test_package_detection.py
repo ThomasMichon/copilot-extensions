@@ -54,6 +54,21 @@ def test_a_substring_package_name_is_not_presence(manager, tmp_path):
     assert observed["known"] and not observed["present"]
 
 
+@pytest.mark.parametrize("manager, text", [
+    ("pipx", "package 3.4.0\n"),
+    ("uv-tool", "package v3.4.0\n- package\n"),
+    ("pipx", "package package 3.4.0, installed using Python 3.13\n"),
+])
+def test_distribution_named_package_is_not_confused_with_a_verbose_prefix(
+    manager, text, tmp_path,
+):
+    observed = resources.HANDLERS["package"]._detect(
+        ResourceContext(tmp_path, {}, "windows", lambda argv: RunOutcome(0, text)),
+        resources.MANAGERS[manager], "package",
+    )
+    assert observed == {"known": True, "present": True, "version": "3.4.0"}
+
+
 @pytest.mark.parametrize("manager, platform, absent", [
     ("apt", "linux", "dpkg-query: no packages found matching example-tool"),
     ("pip", "windows", "WARNING: Package(s) not found: example-tool"),
