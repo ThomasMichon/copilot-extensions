@@ -139,6 +139,12 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-078: existing requested branches and receiving Git membership | 2 admitted | Existing generic resume and explicitly claimed checkout-membership contributors | [Two-contract study](branch-membership-boundaries-cohort.md); five whole texts and six noncompletion relations preserve fetched-head OR tracking, local-work safety and receiving registration rather than creation-root locality. |
 | group-079: per-unit supervision and caller-independent native lifetime | 2 admitted | Existing supervised-lane/fleet lifecycle and explicitly claimed Linux launch-boundary owners | [Two-contract study](supervision-native-lifetime-cohort.md); four whole texts and six relations retain the complete child/registration contract, matching Linux source credit and separate migration. One known description stays protected; the exact Linux description separately failed whole preflight. |
 | group-080: healthy replacement and stale-slot session recovery | 2 admitted | Existing Bridge create/reconcile/watchdog and Session-Host lifecycle custodians | [Two-contract study](bridge-replacement-recovery-cohort.md); three whole texts and six noncompletion relations preserve actual causal uncertainty, current-pointer/activation, schema alternatives and host survival without shared live-fire or whole incident acceptance. |
+| group-081: monitor restart exclusivity and exit-aware transfer | 1 admitted; 1 wholly withheld | Existing singleton-correctness sole owner and accepted sequential phase handoff | [One-contract study](monitor-restart-exclusivity-cohort.md); two whole texts and three noncompletion comparisons credit truthful spawn-failure reporting without settling all three restart hazards or failure/reader/platform duties. No protected-neighbor retry. |
+| group-082: caller-owned async transport settlement | 2 admitted | Existing Bridge cache/Session Host and CodeSpaces preparation/launch/cancellation custodians | [Two-contract study](async-transport-cleanup-cohort.md); five whole texts and six noncompletion comparisons distinguish resource lifetime from verified process/consumer success while preserving durable Owner/worker survival. |
+| group-083: explicit integration and truthful payload provenance | 2 admitted | Existing installer/integration scopes and explicitly claimed light-review-only Git-provenance repair | [Two-contract study](install-integration-provenance-cohort.md); three whole texts and six noncompletion comparisons preserve HOME-route counterevidence, source integration reachability, Git error alternatives and the actual TLS-blocked isolated-install result. |
+| group-084: unknown ownership and confirmed-dead route observation | 2 admitted; 1 finite completed | Existing endpoint-file cleanup and retained repair/source owners | [Two-contract study](ownership-observation-dead-route-cohort.md); six whole texts and six nonmatching ranked messages. Independent actual #9284 source/review/CI/promotion verification completes #9283; #5904's present-unknown cleanup gap remains. |
+| group-085: independent cleanup and audited terminal recovery | 2 admitted | Existing transport/API/registry and selected cleanup-recovery/adoption owners | [Two-contract study](cleanup-recovery-evidence-cohort.md); six whole texts, four message comparisons and two unchanged invalid-scope relations preserve error/handle fidelity, actual #6542 credit and unknown native Git-wait cause. |
+| group-086: deploy applicability and mixed-version launch | 2 admitted | Existing architecture decision and bounded launch-compatibility scopes | [Two-contract study](deploy-architecture-launch-compatibility-cohort.md); five whole texts and four message comparisons retain finite full-flow/narrow-engine adjudication and actual parser/second-hop negotiation. Two protected descriptions remain excluded. |
 
 ### Qualification/cache core
 
@@ -472,6 +478,18 @@ capture evidence. The [public disposition](https://github.com/ThomasMichon/copil
 does not claim installation/rollout or resolve separate #10188 policy work.
 
 ## Continue from the graph
+
+**Further verified finite result:** [#9283/#9284](ownership-observation-dead-route-cohort.md)
+is closed completed after independently checking the whole original, exact merged
+and current implementation, seven regression bodies, complete final review/CI
+and actual promoted runtime equality. Its three ranked messages remain
+noncompletion comparisons; the extra exact #9284 evidence is recorded separately.
+No new test/native execution, rollout, source/resource acceptance or custody
+release is claimed. The complete **2026-11-04 20:40:47 PST** census is
+**1,007 whole open**, 278 above the fixed 729 target: 733 eligible, 274
+excluded, 672 original-cohort and 335 inflow. One finite campaign completion
+raises campaign credit to 775; external #10575 supplies none, with no changed
+closed-body read or arrivals.
 
 Work the coherent cohorts and high-value completed-work candidates, refreshing
 only changed metadata/text and source evidence. Turn accepted groups into actual
