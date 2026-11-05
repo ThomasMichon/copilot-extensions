@@ -844,7 +844,7 @@ _install_service() {
         )" || handoff_json=""
     fi
 
-    service_configuration="$("$LINK_PYTHON" -I -X utf8 -c \
+    service_configuration="$("$LINK_PYTHON" -I -B -X utf8 -c \
         'import sys; from agent_vault.configuration import service_configuration_snapshot; value=service_configuration_snapshot(sys.argv[1]); print(value["root"]); print(value["config"])' \
         "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}")" || {
             _fail 'Vault service configuration context could not be captured'

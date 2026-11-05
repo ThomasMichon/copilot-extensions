@@ -1034,7 +1034,7 @@ function Register-AgentVaultTask {
     $configurationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
-    $serviceConfigurationJson = & $LinkPython -I -c `
+    $serviceConfigurationJson = & $LinkPython -I -B -c `
         'import json,sys; from agent_vault.configuration import service_configuration_snapshot; print(json.dumps(service_configuration_snapshot(sys.argv[1]),ensure_ascii=True))' `
         $configurationProject
     if ($LASTEXITCODE -ne 0 -or -not $serviceConfigurationJson) {
@@ -1074,7 +1074,7 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not `$_pyt
         '\\?\UNC\' + `$_pythonCache.Substring(2)
     } else { '\\?\' + `$_pythonCache }
 }
-`$_supportsContext = & `$_py -I -c "import importlib.util; print(int(importlib.util.find_spec('agent_vault.service_arguments') is not None))"
+`$_supportsContext = & `$_py -I -B -c "import importlib.util; print(int(importlib.util.find_spec('agent_vault.service_arguments') is not None))"
 if (`$LASTEXITCODE -ne 0) { throw 'Vault service argument capability could not be read' }
 `$_serviceArguments = @('--foreground', '--persistent')
 if (([string]`$_supportsContext).Trim() -ceq '1') {
