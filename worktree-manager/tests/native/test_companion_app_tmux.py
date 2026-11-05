@@ -42,6 +42,7 @@ class AttachedClient:
         self.master, slave = pty.openpty()
         self.process = None
         self.received = 0
+        self.recent = bytearray()
         try:
             self.resize(120, 45, notify=False)
             self.process = subprocess.Popen(
@@ -76,6 +77,8 @@ class AttachedClient:
             if not data:
                 return
             self.received += len(data)
+            self.recent.extend(data)
+            del self.recent[:-262144]
 
     def send(self, value: bytes) -> None:
         self.drain()
@@ -144,6 +147,8 @@ def fixture_engine(root: Path, checkout: Path) -> tuple[Path, Path]:
         "summary": "Native client source fixture",
     }
     dispatch = f'''
+    with (ROOT/"invocations.jsonl").open("a") as out:
+        out.write(json.dumps(sys.argv[1:])+"\\n")
     args=sys.argv[1:]
     responses={{
         "status-segment":{status!r},

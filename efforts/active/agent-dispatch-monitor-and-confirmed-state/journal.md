@@ -6,6 +6,7 @@ Canonical append-only history of [this same Active effort](README.md). Relocatio
 
 ## Dated entries
 
+- [11.05-submission-resubmission](journal/2026/11.05-submission-resubmission.md)
 - [11.04-container-native-source](journal/2026/11.04-container-native-source.md)
 - [11.04-effort-navigation](journal/2026/11.04-effort-navigation.md)
 - [11.04-submission-preparation](journal/2026/11.04-submission-preparation.md)

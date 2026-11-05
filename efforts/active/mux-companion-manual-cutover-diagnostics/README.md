@@ -266,17 +266,27 @@ full popup qualification.
 
 #### Plan
 
-- [ ] Choose and document the Companion's Escape policy. IF Escape should dismiss, bind
+- [x] Choose and document the Companion's Escape policy. IF Escape should dismiss, bind
   it explicitly; Textual has no default Escape-to-quit behavior. Preserve the
   conditional choice rather than inventing a requirement that every key must exit.
-- [ ] Deliberately define/document Ctrl+C, Ctrl+Q and keyboard/button activation.
+  The existing explicit Escape binding is retained and documented in the
+  [Manager guide](../../../worktree-manager/README.md#in-session-mux-companion);
+  the [current source controls](journal/2026/11.05-companion-popup-input.md)
+  do not qualify installed or Windows clients.
+- [x] Deliberately define/document Ctrl+C, Ctrl+Q and keyboard/button activation.
   Preserve the empirical Ctrl+C-toast versus Ctrl+Q/Exit clean-exit distinction unless
   an actual reviewed behavior change supersedes it; a stale relay comment is not proof
   of the chosen input contract.
+  The same guide now records the unchanged Ctrl+C quit hint, Ctrl+Q clean quit,
+  Tab/Shift+Tab and Enter/Space button activation. Actual attached-client source
+  tests exercise Ctrl+C followed by Escape, Ctrl+Q or Exit keyboard activation.
 - [ ] Ensure all chosen clean exit paths terminate only the on-demand Companion, retain
   no persistent Companion state and allow the owning display-popup -E to close without
   another key. Preserve focus/pane return and error/cancellation behavior; dismissal
   never invokes Cut over, consumes a baton or retires a worktree/session.
+  Private POSIX source controls cover ready, blocked and failed owner reads,
+  clean zero exit, held-reader retirement and original CLI input/focus return.
+  They are not installed/native Windows or complementary Relay acceptance.
 - [ ] Coordinate the boundary with the relay ROOT's direct2696 wrapper/popup lane under
   the existing owners. No change to explicit human-gated cutover, source/target
   identity, held reservations or provider lifetime is implied; normal source review and
@@ -510,6 +520,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       with history/live browsing, resize, pane/PID retention and owned cleanup.
       The wire-valid synthetic owner and server-buffer captures do not qualify
       installed behavior, Windows/PSMux, popup or native-frame performance.
+      #10642 delivers the requested sparse presentation correction, truthful
+      pause/error/recovery indicators and healthy ordinary/narrow source
+      demonstrations with twelve reviewed rendered comparisons. This closes
+      only the linked presentation-correction items, not S2-S5 or this root.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
@@ -521,6 +535,12 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       history/viewport, native and bounded-performance acceptance in
       [the linked plan](sidecar-live-timeline.md#validation-plan). Unsupported
       evidence stays unknown/open; original manual/head/Relay gates remain.
+
+- [x] Step 7 presentation correction: distinguish paused, missing and genuinely
+      failed sources; preserve actual diagnostics and qualified recovery;
+      demonstrate sparse healthy/full/narrow and separately degraded views.
+      #10642 qualifies source/private-process/Textual comparisons, not installed
+      behavior, native performance or the original popup/manual/head gates.
 
 - [x] Purpose-first: confirm the captured continuation preserves the request
       and distinguishes requested intent from agent-recommended sequencing.
@@ -590,6 +610,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Sparse presentation correction and truthful source diagnostics](journal/2026/11.05-sidecar-sparse-presentation.md)
 - [2026-11-04 - Actual Companion through an isolated native tmux client](journal/2026/11.04-sidecar-native-client.md)
 - [2026-11-04 - Bounded rendering source qualification and performance observations](journal/2026/11.04-sidecar-bounded-render.md)
 - [2026-11-04 - Joined history/live and observer lifecycle source qualification](journal/2026/11.04-sidecar-joined-lifecycle.md)

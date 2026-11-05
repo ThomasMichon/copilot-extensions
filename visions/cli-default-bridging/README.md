@@ -10,7 +10,7 @@
   one stance of a sibling Active vision — see Non-Goals and Provenance)
 - **Status:** Draft — pre-validation. Nothing here authorizes changing any
   default today; see *default-promotion-requires-proof* in Behaviors.
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/mux.md`](../../plugins/agent-worktrees/docs/mux.md) ·
   upstream `github/copilot-agent-runtime` (`src/cli/acp/server.ts`,
@@ -101,21 +101,24 @@ any sibling vision's "opt-in, never ambient-default" language is revisited.
 
 ## Concepts & Components
 
-### Remote-driver extension (user-global, not bridge-bundled)
+### Standalone remote-driver and scoped managed delivery
 
-A standalone, marketplace-installable extension distinct from anything
-agent-bridge ships today. Installed once per machine/image at the user-global
-level (not per-repo, not per-worktree), it gives baseline drivability —
-attach to the live event stream, send/steer, abort — to **any** `copilot`
-process that launches with it present, independent of which (if any)
-coordination plugin is also installed. agent-bridge's own existing CLI-side
-extension (`extensions/agent-bridge/`) is narrower than this by design today:
-it was built for **reporting on and lightly steering sessions a human
-already launched**, not for creating, fully driving, and gracefully ending
-one — the capability this vision is actually about. agent-bridge may still
-ship that narrower companion extension for its own niche needs, but the
-floor capability — "can this session be driven end-to-end" — belongs to
-this standalone extension, not to agent-bridge's existing one.
+A standalone, marketplace-installable extension provides baseline drivability:
+attach to the live event stream, send/steer and abort. User-global installation
+makes that floor available to ordinary `copilot` launches independently of any
+coordination plugin. The extension remains independently usable rather than
+becoming a Bridge-only runtime dependency.
+
+A Bridge-managed launch may carry the same selected compatible plugin from
+session creation, together with canonical mux launch support, without requiring
+the guest's full suite or rewriting its global plugin configuration. This
+composes [host-selected receiving support](../plugins/agent-bridge/README.md#host-selected-receiving-support),
+not a second driver or launcher. It does not promote CLI mode as the default.
+
+Bridge may retain its narrower reporting/light-steering companion, but the
+end-to-end floor belongs to the standalone remote-driver in either delivery
+form. Both retain launch-time presence, exclusive driver custody and the
+receiving repository's hosting policy.
 
 ### Launch-time presence, not join-time injection
 

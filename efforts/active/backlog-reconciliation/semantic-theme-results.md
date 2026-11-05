@@ -5,6 +5,22 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [ten live-consumer/policy contracts](live-consumer-policy-contracts.md)
+integrate thirty ranked relationships with actual running-consumer,
+remote-lifetime, five-operation and all-site policy acceptance intact.
+Current changed umbrella text, credited source-only cancellation, independent
+custodians and later publication/cache refinements survive. All ten stay OPEN;
+the [journal](<journal/2026/11.05 live-consumer-policy-contracts.md>)
+distinguishes fresh descriptions, reused whole proof and protected exclusions.
+
+The [twelve portable lifecycle/owner contracts](portable-lifecycle-owner-contracts.md)
+integrate thirty-six ranked relationships without conflating adjacent startup,
+queue, installer and process-lifetime work. Actual assignees, complete direct
+umbrellas, OR alternatives, native uncertainty and root coordination survive.
+All twelve remain OPEN; the
+[journal](<journal/2026/11.05 portable-lifecycle-owner-contracts.md>)
+records zero new completion credit and four protected whole descriptions.
+
 The [eight conditional native/read contracts](conditional-native-read-authority-contracts.md)
 integrate twenty-four ranked relationships while retaining literal native
 specimens, direct inherited intake, tri-state/trust reads and a conditional

@@ -252,6 +252,52 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [ten live-consumer/policy contracts](live-consumer-policy-contracts.md)
+integrate forty whole texts and thirty ranked relationships, including the
+newly qualified complete current PR-operations canonical and all eleven
+comments. All ten remain OPEN. Actual remote outcomes, same live consumers,
+complete direct acceptance, independent source/effect tokens and whole reap
+adoption remain distinct from narrower fixes or documentary plans. Two other
+whole originals and one whole ranked message remain protected; the
+[research journal](<journal/2026/11.05 live-consumer-policy-contracts.md>)
+records no new receiving agreement or campaign credit.
+
+The twelve-contract checkpoint is actually delivered in #10675 after genuine
+exact-head approval, no review issues/threads and nine complete successful/
+skipped checks, including the required PR gate. All seven merged blobs equal
+the approved head; only its publication child finalized, retained. The
+[delivery journal](<journal/2026/11.05 portable-lifecycle-owner-contracts.md>)
+records two equal complete 00:57 PST scans: 1,011 whole open, 282 above 729;
+736 creator-eligible, 275 excluded, 672 original-cohort and 339 inflow.
+External #10601 supplies the sole departure and no campaign credit; dispositions
+remain 777 and the parent stays Active. Ten following whole contracts and thirty
+ranked relationships are researched for integration, including the newly
+qualified complete current PR-operations canonical. Two separate whole
+originals and one whole ranked message remain protected without retry.
+
+The [twelve portable lifecycle/owner contracts](portable-lifecycle-owner-contracts.md)
+integrate 46 whole originals/refinements and thirty-six ranked relationships.
+All twelve stay OPEN: complete umbrellas, actual assignees, conditional native
+witnesses, best-effort replacement, acknowledged transfer and the existing
+Declarative root retain their separate obligations. Four whole descriptions
+remain protected; no new fix, receiving agreement or closure credit is claimed.
+The [research journal](<journal/2026/11.05 portable-lifecycle-owner-contracts.md>)
+records the unchanged census and publication boundary.
+
+The eight-contract checkpoint is actually delivered in #10666 after genuine
+exact-head approval, no review issues/threads and ten complete successful/
+skipped checks. All seven actual merged blobs equal the approved head;
+only its publication child finalized, retained. The
+[delivery journal](<journal/2026/11.05 conditional-native-read-authority-contracts.md>)
+records two equal complete 00:39 PST scans: 1,012 whole open, 283 above
+729; 737 creator-eligible, 275 excluded, 672 original-cohort and 340 inflow.
+There are no arrivals, departures or new campaign credit; dispositions
+remain 777 and the parent stays Active. Twelve following whole contracts
+and thirty-six ranked relationships are researched for the next integration.
+Preserve actual assigned custody, credited partial delivery, full inherited
+umbrella acceptance, best-effort replacement and exact native uncertainty;
+four whole ranked descriptions are protected without retry.
+
 The [eight conditional native/read contracts](conditional-native-read-authority-contracts.md)
 retain exact installed-version authority, solo/native specimens, complete
 direct title/slice intake, both guard gaps, leased capture, canonical tri-state
