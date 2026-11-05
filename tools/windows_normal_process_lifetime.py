@@ -252,6 +252,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
     admit(root, True)
     sys.path.insert(0, str(SOURCE))
     import agent_procutil as pu
+    from agent_procutil import _job_scopes
     cycles = []
     python, python_env = pu.direct_python(sys.executable)
     for cycle, restrictive in enumerate((False, False, True), 1):
@@ -289,8 +290,13 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
                     lambda: json.loads((directory / "daemon-ready.json").read_text())
                     if (directory / "daemon-ready.json").is_file() else None, process,
                 )
-                if ready != {"scopes": None, "pid": daemon.pid}:
+                daemon_scopes = _job_scopes.scope_names({_job_scopes.ENVIRONMENT_KEY: ready["scopes"]})
+                if ready["pid"] != daemon.pid or set(scopes).intersection(daemon_scopes):
                     raise RuntimeError("admitted daemon retained escaped scope metadata")
+                with _job_scopes.query_scopes({
+                    _job_scopes.ENVIRONMENT_KEY: ";".join(scopes),
+                }) as outside_callers:
+                    outside_callers(daemon._handle)
             job.close()
             process.wait(timeout=5)
             ordinary.wait(timeout=5)

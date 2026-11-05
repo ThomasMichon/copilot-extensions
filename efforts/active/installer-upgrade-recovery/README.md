@@ -1253,3 +1253,21 @@ bounded fixture launches as caller-contained. Ten focused lane controls pass,
 as does the actual materialized stamp consumer (55.26 seconds). Native
 qualification and required CI must pass on the revised head; no failed result
 is waived or credited as acceptance.
+
+Run `42022964161` at `93066796f1b4` passes both functional packets and gets
+past the preceding materializer and two-caller-Job failures. Linux reaches the
+real hook and acknowledges its owner, then the fixture incorrectly requires
+the log pathname in `/proc/<pid>/cmdline`; native launch redirects stdout to
+that log instead. The identity check now compares the acknowledged live
+pidfd-pinned owner's actual stdout descriptor with the unique acknowledged log,
+with liveness checks before and after the descriptor observation.
+
+Windows retains exactly both caller Jobs and an admitted daemon with a
+different expiry Job. Its control incorrectly requires no Job metadata at all,
+rejecting the daemon's own renewed-lease custody. It now rejects any retained
+caller identity and checks the daemon's native nonmembership in every pinned
+caller Job. It does not confuse an independent expiry Job with caller
+dependence. Both fixture Job closures, bounded-control death, pinned-daemon
+survival and restrictive-outer refusal remain mandatory. Neither failed run
+is native acceptance; the revised exact-head lane still owes actual MCP work
+completion and exact cleanup on both platforms.

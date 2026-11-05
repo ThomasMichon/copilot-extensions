@@ -181,9 +181,11 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                             assert os.getpgid(outcome["ordinary"]) == process.pid
                             assert not _pidfd_exited(leader), diagnostic()
                             receipt_log = Path(frame.partition(" log:")[2])
-                            assert os.fsencode(str(receipt_log)) in (
-                                Path("/proc") / str(owner_pid) / "cmdline"
-                            ).read_bytes().split(b"\0"), diagnostic()
+                            assert not _pidfd_exited(owner), diagnostic()
+                            assert os.path.samefile(
+                                Path("/proc") / str(owner_pid) / "fd/1", receipt_log,
+                            ), diagnostic()
+                            assert not _pidfd_exited(owner), diagnostic()
                             assert os.getpgid(owner_pid) != process.pid
                         requests.append((process, job, owner, bounded, leader, receipt_log, outcome))
 
