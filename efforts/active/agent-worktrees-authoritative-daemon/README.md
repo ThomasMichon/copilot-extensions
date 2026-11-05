@@ -106,9 +106,15 @@ Phase 2+ scope is broken into concrete, assignable pieces.
 | Participant | Scope | Coordination |
 |-------------|-------|--------------|
 | Streaming recovery owner | Phase 6d.3a client startup/reconnect acceptance only | #6832; independent, sequential plan and implementation PRs |
+| Ordinary-hook recovery source owner | Proposed finite P8388 missing-endpoint receiver and eligible hook consumers only | #3761; reviewed proposal before implementation, no installed activation |
 
 This participant does not take ownership of the remaining daemon phases,
 singleton transitions, central fleet exporter, or other pivots.
+
+The ordinary-hook source contribution preserves that independent streaming
+participant and all installer, singleton, publisher, mutation and resource
+custodians. Its [proposed plan](ordinary-hook-endpoint-recovery.md) does not
+receive the whole P8388 tracker or authorize installed activation.
 
 ## Coordination
 
@@ -988,6 +994,15 @@ within the already-requested Phase 6d.3 real-consumer acceptance.
 - [ ] Journal the result and return the remaining parent acceptance to #3761;
       completing this narrow repair does not complete the whole effort.
 
+### Phase 6d.3b - Proposed ordinary-hook missing-endpoint recovery
+
+- [ ] Review the [bounded owner-mediated recovery proposal](ordinary-hook-endpoint-recovery.md)
+      before implementation; preserve all incumbent phases and finite scopes.
+- [ ] Implement and qualify the selected-runtime receiver and actual eligible
+      hook fallback consumers, without current-packet replay or a new daemon.
+- [ ] Record exact source/release evidence separately from installed, live
+      ordinary-session/model/ACP and composed-throughput acceptance.
+
 <!-- backlog-reconciliation:7556:transfer:4120:to:efforts/active/agent-worktrees-authoritative-daemon/README.md -->
 
 ### Direct retained #4120 acceptance: canonical PR state and precomputed Picker consumption
@@ -1355,6 +1370,14 @@ _(Agent-recommended direct selection/list case; all rows unchecked.)_
 
 ## Validation Plan
 
+### Proposed ordinary-hook recovery source slice
+
+- [ ] Complete the [paired receiver/consumer, compatibility, identity, deadline,
+      concurrency and cleanup checks](ordinary-hook-endpoint-recovery.md#paired-validation)
+      through the real isolated consumer path, not helper counts alone.
+- [ ] Preserve independent roster-client, installer/singleton, publication and
+      resource ownership; no installed or whole-daemon acceptance from source.
+
 ### Direct finite tracking-integrity acceptance
 
 - [ ] **GLOBAL-2558** Qualify ALL direct #2558 Plan/local Validation/continuing
@@ -1454,6 +1477,16 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-11-04 - Proposed finite ordinary-hook recovery source slice
+
+The retained P8388 missing-endpoint case at #3761 has a bounded source
+contribution, [claimed publicly](https://github.com/ThomasMichon/copilot-extensions/issues/3761#issuecomment-6649260548).
+The [proposal](ordinary-hook-endpoint-recovery.md) expands the existing lifecycle
+receiver before capability-qualified fallback consumers use it. It preserves
+strict-local/healthy paths, unknown owners, no replay and all independent
+custodians. This entry and plan are proposed, not implementation, activation,
+tracker receiving or a completion claim. Review precedes execution.
 
 ### 2026-10-30 - Proposed semantic archive default-list case
 
