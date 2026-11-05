@@ -168,6 +168,11 @@ inventing current state or hierarchy. The
 [source readback](journal/2026/11.05-sidecar-reported-actors.md) retains
 authoritative totals, full coverage, native and original parent gates.
 
+#10689 merged as `e608ec4ba8163eab26f5db56b4b753a200c4cae9`, admitting
+the [bounded source-output presentation amendment](sidecar-output-presentation.md)
+before implementation. The [plan readback](journal/2026/11.05-sidecar-output-plan.md)
+retains all source, native and original parent completion gates.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than

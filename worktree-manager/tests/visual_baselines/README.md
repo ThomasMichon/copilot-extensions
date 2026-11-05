@@ -31,6 +31,14 @@ details. These four use fixed synthetic observations and reject owner reads,
 not actual provider integration. All deterministic comparisons use an explicit
 UTC display zone; the ordinary presenter uses the machine's local zone.
 
+`companion-output.svg` and `companion-output-narrow.svg` compare 46 fixed
+three-provider records as eight overview blocks, including two separate
+20-record output groups and an unknown diagnostic that stays visible.
+The narrow/fault fixtures also require live-following after automatic layout
+clamps: resize is not user browsing, and the newest row retains selection.
+The output fixtures are synthetic rendered comparisons; the separate actual
+EventLog/codec/widget packet checks raw-history and actor boundaries.
+
 These are rendered fixture screens, not native tmux/PSMux screenshots,
 installed-runtime evidence or complete application acceptance. Only remote
 font-loading declarations and blank-line indentation are omitted; text, styles,
