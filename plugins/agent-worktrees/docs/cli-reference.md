@@ -543,6 +543,65 @@ against the new read-only default does not deliver its prompt; a new callback
 against an old parser is unsupported. In either case staged text must remain
 recoverable, not replayed through another delivery path on a guess.
 
+### Ordinary embodiment state receipt
+
+Ordinary `embody` always emits one JSON envelope on stdout (with or without
+`--json`); diagnostics use stderr. Legacy `version: 1`, `created`, `resumed`,
+`session`, `new_pane`, resume selection and seed fields retain their meanings:
+`created`/`resumed` describe mux creation/reuse, not native conversation success.
+Native restart retains its separately owned receipt and acknowledgement contract.
+
+The additive `embody_receipt` descriptor identifies `schema:
+"agent-worktrees.embody"`, receipt `version: 1` and
+`supports_wait_session: true`. Receipt v1 is the only supported generation;
+readers ignore additional fields. No prior fields or forms are retired.
+
+| Field | Meaning |
+|-------|---------|
+| `worktree_id`, `work_dir`, `session`, `new_pane` | Resolved target and legacy mux/pane identity when available, including post-launch failures |
+| `launch_action` | `create`, `resume` (cold launch of `resume_session`), `reuse`, `dry-run`, `attempted` (launch failed with possible effects), or `not-started` |
+| `state` | `live` only with positive native-to-target-mux binding; otherwise `starting` (unregistered or old/incompatible head), `unknown`, `dry-run`, `not-started`, or `launch-failed` |
+| `session_id`, `session_verified`, `session_reason` | Observed registered native head, positive confirmation and reason. Fresh launches do not report an incompatible older head as their new session. `resume_session` separately identifies a selected conversation, not proof it booted |
+| `native_process` | Confirmed binding's mux/pane identity, pane/Copilot PIDs and process birth identities; `null` without confirmation |
+| `session_wait` | `not-requested`, `confirmed`, or `timeout` |
+
+Default behavior does not sleep: it performs one target-local observation.
+If `--new` allocates a worktree but seed staging fails before mux launch,
+the legacy recovery payload's `created: true` still means worktree allocation.
+The receipt reports `launch_action`/`state: "not-started"`, preserves that payload
+and identifies the allocated target; do not repeat `--new`.
+Only a compatible, positively live native candidate triggers the existing
+process/mux binding probe; neither cached head/PID nor heuristic active pane
+alone proves native liveness. No history scan or additional launch journal is
+created. Anchor receipts remain `unknown` because the ordinary worktree record
+does not establish their native owner.
+
+`--wait-session-timeout <finite-nonnegative-seconds>` opts into repeated
+target-local registration/liveness checks up to an observation deadline.
+Zero retains one observation. Each compatible live candidate is process/mux
+corroborated once, not censused on every poll; unavailable binding remains
+unconfirmed for that candidate in this invocation. The deadline bounds polling,
+not launch/preparation time or the final already-running bounded identity probe.
+This option cannot be combined with native restart, even when zero.
+`--verify-timeout` remains mux-only.
+
+Requested native confirmation that times out returns exit 3 and `ok: false`
+without killing, relaunching or replaying a seed. It retains target identity,
+legacy launch fields and observed uncertainty. A launch or seed may already have
+occurred: inspect that target and its existing receipts before any retry.
+`live` is a sampled native conversation/process observation, **not** input-ready,
+prompt acknowledgement, completed recovery or task completion.
+
+This is provider-first expansion: ordinary callers need no new argument.
+New callers treat a missing receipt descriptor as legacy/unknown support.
+Before opting into waiting, inspect the **selected executable's** existing
+`embody --help` parser surface, not a newer installed payload's docs or package
+version. Receipt v1 also declares support on ordinary results/dry-runs.
+Prior providers retain the existing no-wait path and reject the optional argument;
+provider rollback therefore removes waiting, not the baseline command.
+Never probe support with an effectful launch and replay an older form after an
+error; retain the original target and possible effects.
+
 ### Cold embodiment startup prompts
 
 Windows PSMux new-session creation removes inherited mux-nesting selectors from

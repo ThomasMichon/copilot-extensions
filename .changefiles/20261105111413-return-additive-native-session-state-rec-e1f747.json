@@ -1,0 +1,9 @@
+{
+  "comment": "Return additive native-session state receipts and optional bounded confirmation from ordinary embody",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

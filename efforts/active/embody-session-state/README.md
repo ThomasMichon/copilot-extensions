@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Reviewed proposal and implementation PRs against `dev`
 - **Created:** 2026-11-05
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `agent-fabric` / `legible-live-state`, `planned-maintenance-windows`
 - **Umbrella issue:** #10745
 
@@ -55,18 +55,18 @@ Existing source-only repository hosting policy remains unchanged.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Land this proposal through automated review before implementation.
-- [ ] Finalize the additive receipt fields and their evidence boundaries.
+- [x] Land this proposal through automated review before implementation.
+- [x] Finalize the additive receipt fields and their evidence boundaries.
 
 ### Phase 2 - Caller-visible session state
 
-- [ ] Preserve existing mux fields and return explicit launch action, native
+- [x] Preserve existing mux fields and return explicit launch action, native
   session identity and observed state for create, resume and live reuse.
-- [ ] Preserve unknown/unregistered state instead of inventing a native ID or
+- [x] Preserve unknown/unregistered state instead of inventing a native ID or
   claiming recovery completion from launch, registration or seed submission.
-- [ ] Add an optional bounded native-session wait while keeping default
+- [x] Add an optional bounded native-session wait while keeping default
   no-wait behavior and existing mux-only verification semantics.
-- [ ] Keep JSON stdout parseable through the real command entrypoint and
+- [x] Keep JSON stdout parseable through the real command entrypoint and
   diagnostics on stderr; preserve existing launch and prompt custody.
 - [ ] Document fields, optional support detection, uncertainty and safe retries;
   add the plugin changefile and land the validated implementation.
@@ -78,17 +78,17 @@ Existing source-only repository hosting policy remains unchanged.
 
 ## Validation Plan
 
-- [ ] Cover fresh launch, original-head resume, already-live reuse, concurrent
+- [x] Cover fresh launch, original-head resume, already-live reuse, concurrent
   late reuse, stale/unregistered heads and unavailable liveness.
-- [ ] Prove bounded waiting, registration timeout and late registration without
+- [x] Prove bounded waiting, registration timeout and late registration without
   duplicating processes or replaying startup text.
-- [ ] Exercise parser and captured stdout/stderr with isolated native-state
+- [x] Exercise parser and captured stdout/stderr with isolated native-state
   fixtures; reject unknown CLI options and invalid timeout values.
-- [ ] Preserve old-reader/new-provider fields and explicit legacy behavior;
+- [x] Preserve old-reader/new-provider fields and explicit legacy behavior;
   document unsupported optional wait behavior on provider rollback.
 - [ ] Run focused tests, touched-source lint, type admission and relevant
   module/install/documentation guards; require published-head CI and review.
-- [ ] Record unavailable native/model/platform lanes honestly; no installed or
+- [x] Record unavailable native/model/platform lanes honestly; no installed or
   completed-recovery acceptance is inferred from synthetic fixtures.
 
 ## Proposal
@@ -121,8 +121,61 @@ validation documentation. Existing visions need no intent amendment.
 
 ## Journal
 
+### 2026-11-05 - Source validation
+
+- Added receipt v1, native head/process/mux observation, opt-in waiting and
+  failure target retention without changing seed or restart ownership.
+- Final focused isolated packet: 144 passed, including three real Python
+  CLI/stdio subprocess controls. A missing tracking-directory fixture in the
+  first native run was corrected; the final packet passed.
+- Touched Python F/E9 lint, install contract, module size, docs consistency,
+  headless-launch and runbook-reference guards passed. Type inventory classifies
+  Worktrees and the touched Python files as pending, not strict-admitted;
+  this change does not alter admission or claim a strict pass.
+- Unit and simple process-seam tiers exercised. Real mux/Copilot/model startup,
+  clean-machine installation, installed qualification and other-platform/live
+  external lanes were not exercised: they are outside this source-only approval.
+  No runtime rollout or completed-recovery claim is made.
+- Owning CLI/validation docs and the mandatory patch changefile are ready.
+  Remaining gate: published-head CI/review, merge, then source closeout.
+
+### 2026-11-05 - Review corrections
+
+- Corrected canonical mux-name confirmation for dotted target IDs, unavailable
+  YAML registration evidence and anchor failure identity/effect retention.
+- Added six focused regressions, including invalidation of a sampled binding
+  after a post-census read failure. Revised packet: 150 passed; F/E9 lint passed.
+- Shortened the verification docstring to retain the existing CLI module cap.
+  Review and CI remain publication gates; no runtime or scope change.
+
+### 2026-11-05 - Implementation gate
+
+- Proposal #10746 merged after approval on its current head and required CI.
+- Began Phase 2. Preserve legacy fields, identify the additive receipt, and
+  distinguish confirmed native liveness from mux launch and completed recovery.
+
+### 2026-11-05 - Remaining receipt edge cases
+
+- The next review confirmed the original three corrections and identified
+  schema-decoding failures plus allocation-only staging failure classification.
+- Added initial/post-census KeyError and TypeError controls and a regression
+  through the existing `--new` staging-failure handler. Legacy allocation
+  recovery remains intact; the receipt does not claim a mux launch.
+- Revised focused packet: 155 passed. F/E9 lint, module cap and docs checks
+  passed. Required current-head review/CI and source closeout remain.
+
 ### 2026-11-05 - Proposal
 
 - Captured the operator request verbatim and established #10745.
 - Confirmed the existing mux-only result and missing native identity.
 - Qualified target-owned effort adoption. No runtime changes or rollout yet.
+
+### 2026-11-05 - Attended consumer compatibility
+
+- The core receipt corrections received current-head approval.
+- Strengthened the existing attended attachment test to consume the actual
+  receipt wrapper rather than only a legacy-shaped fake output. All 24
+  attended consumer tests passed; combined focused validation is 179 cases.
+- Captured receipt JSON stays off the attached terminal's stdout; no real
+  Copilot session or production mux was launched. Publish this regression
+  before final merge; exact-head review and CI remain required.

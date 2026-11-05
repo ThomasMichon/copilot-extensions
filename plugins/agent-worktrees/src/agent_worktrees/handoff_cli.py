@@ -8,7 +8,7 @@ import time
 from contextlib import ExitStack
 
 from . import agent_policy, config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
-from . import launch_admission, launch_seed_state, embody_resume, embody_completion
+from . import launch_admission, launch_seed_state, embody_resume, embody_completion, embody_receipt
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
 from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
@@ -103,6 +103,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="Terminal fallback only: idle window before typing --seed (default 180); native startup does not scrape or wait for an input prompt")
     p.add_argument("--driver", default=None, help="Label of the agent steering this session; stamps the 'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so a human taking over in Neuron Forge sees who's at the wheel")
     p.add_argument("--verify-timeout", dest="verify_timeout", type=float, default=0.0, metavar="SECONDS", help="Wait up to N seconds for the mux session to come up before returning (default 0: don't wait)")
+    p.add_argument("--wait-session-timeout", type=embody_receipt.wait_timeout, default=None, metavar="SECONDS", help="Opt-in bounded wait for native session liveness bound to this mux (default 0: observe once); not prompt acknowledgement or recovery proof; not supported with native restart")
     p.add_argument("--recovery", action="store_true", help="Use the repo's recovery launch command")
     p.add_argument("--ensure-mux", dest="ensure_mux", action="store_true", help="Best-effort self-heal a missing tmux/psmux before creating the session (apt-get/dnf/yum/apk, POSIX only). Explicit opt-in only: an operator running a BYO terminal/session manager instead of tmux must never have tmux installed underneath them by an ordinary embody call. Set this only when preparing a venue that has nothing else already managing sessions (e.g. a CLI-mode launch).")
     p.add_argument("--dry-run", action="store_true", help="Print the resolved plan without spawning anything")
@@ -195,6 +196,14 @@ def _resolve_codename_anywhere(codename_arg: str) -> tuple[str | None, str | Non
 
 
 def cmd_embody(args: argparse.Namespace) -> int:
+    if native_restart_launch.is_restart_intent(args):
+        if getattr(args, "wait_session_timeout", None) is not None:
+            return output._json_error("--wait-session-timeout cannot be combined with native restart", 2)
+        return native_restart_launch.cmd_embody(args)
+    return embody_receipt.run(args, lambda target: _cmd_embody(args, target))
+
+
+def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
     """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
 
     The agent-facing "embodiment" verb: spawn a durable, mux-wrapped interactive
@@ -219,13 +228,12 @@ def cmd_embody(args: argparse.Namespace) -> int:
     Ordinary live embodiment never injects text; only the explicit
     ``--deliver-pending-seed`` startup callback settles staged New text.
 
-    Verification: ``agent-bridge live-sessions?worktree_id=<id>`` reports
-    registration. ``--verify-timeout`` waits for mux existence, not native proof.
+    Verification: mux-only via ``--verify-timeout``; native state via the receipt.
     """
-    if native_restart_launch.is_restart_intent(args):
-        return native_restart_launch.cmd_embody(args)
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
+    if raw_id:
+        target["worktree_id"] = raw_id
     if error := bridge_acquisition_launch.intent_error(args, raw_id):
         return output._json_error(error, exit_code=3)
     codename_arg = getattr(args, "codename", None)
@@ -278,7 +286,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return refusal
 
     if anchor_mode:
-        return _cmd_embody_anchor(args, config)
+        return _cmd_embody_anchor(args, config, target)
 
     # Resolve target worktree id + path (creating a fresh worktree for --new).
     if make_new:
@@ -301,10 +309,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
         work_dir = created["worktree"]["path"]
     else:
         wt_id = worktree_identity._resolve_worktree_id(raw_id)
+        target["worktree_id"] = wt_id
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         if not yaml_path.exists():
             return output._json_error(f"Worktree not found: {wt_id}")
         work_dir = tracking.load_record(yaml_path).worktree_path
+
+    target.update(worktree_id=wt_id, work_dir=work_dir, session=sessions.mux_session_name(wt_id))
 
     if refusal := agent_policy.json_refusal(work_dir):
         return refusal
@@ -555,8 +566,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
             )
         except (OSError, ValueError) as exc:
             return output._json_error(f"Could not prepare launch-owned setup: {exc}", exit_code=3)
+        target.update(launch_attempted=True, resume_session=resume_target)
         result = sessions.mux_new_session(
             wt_id, work_dir, mux_command, env)
+        if result.get("ok"):
+            target.update(created=result.get("created", True), new_pane=result.get("new_pane"))
     finally:
         admission.close()
     if not result.get("ok"):
@@ -575,7 +589,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     )
 
 
-def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
+def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config, target: dict | None = None) -> int:
     """The ``--anchor`` half of :func:`cmd_embody`: create-or-resume a
     detached mux+Copilot session directly in the active project's anchor
     checkout, with no worktree involved at all.
@@ -616,6 +630,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         )
     deferred = {}
     wt_id = f"anchor-{repo_name}"
+    target = target if target is not None else {}
+    target.update(anchor=True, worktree_id=wt_id, work_dir=work_dir, session=sessions.mux_session_name(wt_id))
     seed = getattr(args, "seed", None)
 
     already = sessions.has_mux_session(wt_id)
@@ -696,12 +712,14 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             deferred = bridge_seed_delivery.claim(args)
         except ValueError as exc:
             return output._json_error(str(exc), exit_code=3)
+    target["launch_attempted"] = True
     result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     if not result.get("ok"):
         return output._json_error(
             f"failed to create session wt-{wt_id}: {result.get('error')}",
             exit_code=4,
         )
+    target.update(created=result.get("created", True), new_pane=result.get("new_pane"))
     if result.get("created") is False:
         output._json_output({
             "ok": True, "worktree_id": wt_id, "anchor": True, **deferred,
