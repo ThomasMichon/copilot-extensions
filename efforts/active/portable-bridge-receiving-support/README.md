@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial, independently reviewed functional slices targeting `dev`
 - **Created:** 2026-11-05
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [agent-bridge](../../../visions/plugins/agent-bridge/README.md#host-selected-receiving-support) - portable receiving support; [cli-default-bridging](../../../visions/cli-default-bridging/README.md#standalone-remote-driver-and-scoped-managed-delivery) - independent driving capability
 - **Umbrella issue:** #10636
 
@@ -88,15 +88,15 @@ requires its own applicable authority and is recorded separately.
 ### Phase 1 - Reviewed contract and composition boundary
 - [x] Reserve the public issue, confirm compatible effort adoption and deduplicate existing owners.
 - [x] Trace both guest-policy consumers and identify the canonical policy, Session Host, remote-driver and Manager launch assets.
-- [ ] Review the standing-intent clarification and this plan before implementation.
-- [ ] Inventory supported local, SSH, Codespace and container receiving paths in ACP and muxed modes; reuse their owners rather than add a venue runtime or transport.
-- [ ] Specify the portable receiver's selected marketplace/context and compatibility boundary without weakening negative policy or adding a mandatory guest-owner RPC.
+- [x] Review the standing-intent clarification and this plan before implementation.
+- [x] Inventory supported local, SSH, Codespace and container receiving paths in ACP and muxed modes; reuse their owners rather than add a venue runtime or transport.
+- [x] Specify the portable receiver's selected marketplace/context and compatibility boundary without weakening negative policy or adding a mandatory guest-owner RPC.
 
 ### Phase 2 - Complete ACP flow without a guest suite
-- [ ] Deliver canonical policy support through the existing Bridge transport/bundle, independent of absent, old or current guest Worktrees/Bridge installations.
-- [ ] Check the actual execution checkout and selected overlays freshly at preflight and launch/resume/successor boundaries; a preflight answer is not a launch grant.
-- [ ] Preserve managed workspace identity through its existing allocation/resolution owner. Do not reinterpret a worktree ID as a path or replace allocation with raw Git operations; distinguish a genuinely unavailable managed operation from ordinary provider-workspace launch.
-- [ ] Separate no-wake inspection from an authorized activating launch through the venue owner; preserve claim, relay readiness and original-attempt cancellation.
+- [x] Deliver canonical policy support through the existing Bridge transport/bundle, independent of absent, old or current guest Worktrees/Bridge installations.
+- [x] Check the actual execution checkout and selected overlays freshly at preflight and launch/resume/successor boundaries; a preflight answer is not a launch grant.
+- [x] Preserve managed workspace identity through its existing allocation/resolution owner. Do not reinterpret a worktree ID as a path or replace allocation with raw Git operations; distinguish a genuinely unavailable managed operation from ordinary provider-workspace launch.
+- [x] Separate no-wake inspection from an authorized activating launch through the venue owner; preserve claim, relay readiness and original-attempt cancellation.
 - [ ] Prove the complete ACP consumer flow, publish it through required gates and steward its PR to merge before extending it.
 
 ### Phase 3 - Complete the existing muxed flow
@@ -148,3 +148,71 @@ implementation. The exact support closure follows the consumer trace and tests.
 - Compared Request, Guiding Intent and Plan: retained conditional packaging,
   launch-owner compatibility and guest-suite independence without adding a
   default-mode change or deployment grant. Implementation awaits review.
+
+### 2026-11-05 - Reviewed plan accepted
+
+- #10676 received approval with no active findings, passed required CI and
+  merged as `f4929d2f2f22d60a6c05431e1c897b3e3973afbb`.
+- Re-read the complete effort after pull-forward. Continue Phase 1's supported
+  receiving-path inventory and context/compatibility contract before the first
+  ACP implementation slice. Source and installed acceptance remain separate.
+
+### 2026-11-05 - Portable policy receiving implementation
+
+- The receiving-path inventory and version-1 selected-context contract are in
+  the [hosting reference](../../../plugins/agent-bridge/docs/repository-hosting.md#host-selected-portable-policy-contract).
+  Local, remote managed-workspace and SSH ownership remain distinct.
+- Implemented the two separate policy consumers using the existing canonical
+  archive and host bundle. No guest-suite command selects portable policy;
+  unbound prior callers retain their original enforcing adapter.
+- Initial controls passed: 87 focused receiver cases, then 223 host/container
+  cases with five platform-specific skips. The wider activation packet found
+  one expected stopped-refresh call-shape assertion; corrected it and retained
+  the real activation/no-wake controls.
+- Complete bundled ACP-peer, final source gates and review are still in
+  progress. These source-fixture results are not release, installed, native
+  Copilot, muxed or external-venue acceptance.
+
+### 2026-11-05 - Actual provider composition
+
+- The real CodeSpace child declaration retained a guest-owner shell guard;
+  trusted-container preparation independently checked the guest owner before
+  projecting credentials. Addressed both consumers rather than treating the
+  unwrapped bundle fixture as a complete provider flow.
+- Added provider-first version-1 handoff declarations. Old callers retain the
+  guarded commands. New callers select only advertised receiving support;
+  they do not strip shell text, probe/replay an effectful command, or shadow
+  the installed Worktrees executable.
+- The explicit canonical adapter now belongs to `repository_policy.receiving`.
+  Container preparation uses its bounded text transport and pinned
+  instance/user before credential projection. Bridge archive construction and
+  selected-context reads stay off the serving event loop.
+- The shared policy packet passed 41 cases, the expanded Bridge packet passed
+  242 with one platform skip, and CodeSpace provider compatibility passed 45.
+  Pure context units pass seven cases. Final container process/parser controls,
+  source gates and review remain open; the source effort and umbrella issue
+  stay Active.
+
+### 2026-11-05 - ACP source candidate validated
+
+- Corrected the activation consumer against the real provider contract:
+  `ensure_ready` does not wake a CodeSpace. Only a typed stopped-venue result
+  and the advertised `activation: start` handoff permit the admitted launch
+  to call its existing provider owner. An available repository denial is
+  separately tested to refuse without readiness or activation.
+- Prior providers keep their guest-owner preflight as well as their guarded
+  child command. A missing/incompatible owner refuses before preparation;
+  no failed installed-owner invocation selects the portable receiver.
+- Final changed-boundary packet: 127 Bridge admission/receiver cases, 45
+  CodeSpace provider cases and 41 canonical policy cases pass. The real Host/
+  provider packet passed 242 with one platform skip; container preparation
+  passed 53 with one platform skip, plus the actual CLI parser control.
+- Seven pure context units pass. Ruff, install contract, documentation,
+  headless launch and current-source contract evidence pass. Preparing the
+  declared checker environments exposed two new library typing issues;
+  corrected both and passed the library on Linux/Windows targets. The other
+  39 admitted projects passed their unchanged scopes.
+- These are isolated source results, including the shipped Host with a mock
+  ACP peer, not native Copilot or installed/external acceptance. Publish and
+  merge this ACP slice next; mux composition, compatibility closeout and the
+  umbrella issue remain open. No runtime rollout or guest upgrade.

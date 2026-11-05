@@ -47,6 +47,19 @@ qualifies shallow Git transport independently. It disables client updates and
 uses no provider credentials or model session; trust establishment, cold-machine
 construction and live credential/relay acceptance remain separate.
 
+Bridge's opt-in `--test-file tests/test_portable_receiving_policy.py
+--test-file tests/test_repository_hosting_receivers.py
+--test-file tests/test_codespace_spawner.py
+--test-file tests/test_container_session_host.py --allow-explicit-tiers` packet
+checks the selected portable policy receiver through isolated Python, existing
+provider stdin transports and the actual shipped Session Host bundle. It
+covers sparse/incompatible guest-suite fixtures, selected overlay denial,
+malformed/unreadable policy, late denial and no-wake versus launch activation.
+A real bundled Host drives a mock ACP peer through one prompt and reconnects
+to the same child/conversation. These are source/private-process controls,
+not native Copilot, installed services, live remote transports or muxed-mode
+acceptance. Required unit-only CI is unchanged.
+
 Manager's opt-in `--test-file tests/native/test_companion_app_tmux.py
 --test-file tests/native/test_companion_pane_tmux.py --allow-explicit-tiers`
 packet distinguishes the original observer-stub pane test from the actual

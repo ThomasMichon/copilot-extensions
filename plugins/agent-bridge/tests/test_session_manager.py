@@ -4178,7 +4178,7 @@ class TestResumeSession:
         ):
             resumed = await session_manager.resume_session(session.session_id)
 
-        resolver.resolve_async.assert_awaited_once_with("codespace:example")
+        resolver.resolve_async.assert_awaited_once_with("codespace:example", activate=True)
         assert resumed.target.type == "ssh"
         assert resumed.target.host == "new-host"
         assert resumed.target.venue == {

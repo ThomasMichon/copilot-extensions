@@ -688,7 +688,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             )
         try:
             target = await resolver.resolve_async(
-                agent_name, sender_repo=req.sender_repo,
+                agent_name, sender_repo=req.sender_repo, activate=True,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

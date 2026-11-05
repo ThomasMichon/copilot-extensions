@@ -11,6 +11,20 @@ from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.session_host_context import resolve_context
 
 
+def test_current_prepare_parser_accepts_only_the_declared_optional_context(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        cli, "_cmd_session_host_prepare",
+        lambda args: seen.append((args.name, args.repository_policy_context)) or 0,
+    )
+    context = '{"schema":"agent-bridge.receiving-policy","version":1,"marketplaceId":"selected"}'
+    assert cli.main(["session-host-prepare", "example-1", "--repository-policy-context", context]) == 0
+    assert seen == [("example-1", context)]
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["session-host-prepare", "example-1", "--unknown-receiving-option"])
+    assert refused.value.code == 2 and len(seen) == 1
+
+
 @pytest.mark.parametrize(("configured", "observed"), [
     ("external", None), ("agent-containers", "external"),
 ])
@@ -71,7 +85,8 @@ def test_replaced_instance_refuses_before_any_projection(monkeypatch, replacemen
         inspection.assert_not_called()
 
 
-def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, capsys):
+@pytest.mark.parametrize("portable", [False, True])
+def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, capsys, portable):
     selected = "a" * 64
     config = ContainersConfig(copilot_auth_mode="legacy")
     config.forward_gh_token = False
@@ -104,12 +119,27 @@ def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, cap
         effects.append("policy")
 
     monkeypatch.setattr("agent_containers.hosting_policy.require_container_checkout", hosting)
+    if portable:
+        def read_policy(target, command, *, input_text):
+            assert target.container_id == selected and target.user == "vscode"
+            assert "python3 -I -S" in command and "agent-policy" not in command
+            assert input_text
+            effects.append("policy")
+            return SimpleNamespace(stdout=json.dumps({
+                "version": 1, "allowed": True, "repository": target.workspace_folder,
+                "expose_agent": None, "sources": [], "denied_by": [],
+            }))
+
+        monkeypatch.setattr("agent_containers.hosting_policy._run", read_policy)
     monkeypatch.setattr(cli, "prepare_ssh_config", operation("ssh", ssh))
     monkeypatch.setattr(cli, "cleanup_remote_envs", operation("cleanup", None))
     monkeypatch.setattr(cli, "container_environment", operation("environment", {}))
     monkeypatch.setattr(cli, "write_remote_env", operation("write", None))
     assert cli._cmd_session_host_prepare(SimpleNamespace(
         name="example-1", expected_instance=selected, host_relay_port=None,
+        repository_policy_context=json.dumps({
+            "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "selected",
+        }) if portable else None,
     )) == 0
     result = json.loads(capsys.readouterr().out)
     assert effects == ["policy", "ssh", "cleanup", "environment", "write"]
@@ -118,9 +148,15 @@ def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, cap
         "--expected-instance", selected, "--expected-runtime", "docker",
     ]
     assert result["execution_runtime"] == "docker"
+    if portable:
+        assert "agent-policy check" not in result["acp_command"]
+    else:
+        assert "portable_receiving_policy" not in result
+        assert "agent-policy check" in result["acp_command"]
 
 
-def test_repository_denial_precedes_session_host_projection(monkeypatch):
+@pytest.mark.parametrize("portable", [False, True])
+def test_repository_denial_precedes_session_host_projection(monkeypatch, portable):
     from agent_containers.session_host_context import TrustedContext
 
     config = ContainersConfig()
@@ -129,17 +165,22 @@ def test_repository_denial_precedes_session_host_projection(monkeypatch):
     monkeypatch.setattr(cli, "_trusted_session_host_context", lambda *args: context)
     effects = []
 
-    def denied(*args):
+    def denied(*args, **kwargs):
         effects.append("policy")
         raise RuntimeError("expose_agent: false")
 
     monkeypatch.setattr("agent_containers.hosting_policy.require_container_checkout", denied)
+    if portable:
+        monkeypatch.setattr("agent_containers.hosting_policy._run", denied)
     for name in ("prepare_ssh_config", "cleanup_remote_envs", "container_environment",
                  "host_gh_token", "write_remote_env"):
         monkeypatch.setattr(cli, name, lambda *args, **kwargs: effects.append("projection"))
     with pytest.raises(RuntimeError, match="expose_agent: false"):
         cli._cmd_session_host_prepare(SimpleNamespace(
             name="example-1", expected_instance="a" * 64, host_relay_port=None,
+            repository_policy_context=json.dumps({
+                "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "selected",
+            }) if portable else None,
         ))
     assert effects == ["policy"]
 

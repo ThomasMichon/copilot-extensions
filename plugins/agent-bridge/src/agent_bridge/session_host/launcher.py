@@ -444,10 +444,9 @@ def _resolve_child_exe(argv: list[str], path: str | None) -> list[str]:
 async def _spawn_child(
     argv: list[str], cwd: str | None, env: dict[str, str] | None,
     *, pass_fds: tuple[int, ...] = (),
+    policy_context: str | None = None,
 ) -> asyncio.subprocess.Process:
-    from ..hosting_policy import require_path_hosting
-
-    require_path_hosting(cwd or os.getcwd())
+    _require_receiving_policy(cwd, policy_context)
     child_env = os.environ.copy()
     if env:
         child_env.update(env)
@@ -504,6 +503,7 @@ async def run_host(
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
     local_birth_evidence: bool = False,
+    policy_context: str | None = None,
 ) -> None:
     """Spawn the child, serve the reattachable endpoint, run until closed.
 
@@ -515,31 +515,35 @@ async def run_host(
     child is held after an unexpected disconnect before the host lets it go (0
     disables -- an active child then lives until its own stop).
     """
-    from ..hosting_policy import require_path_hosting
-
-    require_path_hosting(cwd or os.getcwd())
+    _require_receiving_policy(cwd, policy_context)
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
     admission = (env or {}).get(_ACQUISITION_ENV) or os.environ.get(_ACQUISITION_ENV)
-    before_exec = None
-    if admission is not None:
-        from ..local_host_admission import require_child_admission
+    def before_exec() -> None:
+        _require_receiving_policy(cwd, policy_context)
+        if admission is not None:
+            from ..local_host_admission import require_child_admission
 
-        def before_exec() -> None:
             require_child_admission(admission, cwd=cwd or os.getcwd(), session_id=session_id, argv=child_argv)
 
+    if admission is not None:
         before_exec()
     from ..preference_attestation import SHELL_MARKER
 
+    spawn = _spawn_child
+    if policy_context is not None:
+        from functools import partial
+
+        spawn = partial(_spawn_child, policy_context=policy_context)
     if child_argv and child_argv[0] == SHELL_MARKER:
         from .preference_spawn import spawn_attested
 
         child, preference_receipt = await spawn_attested(
-            child_argv, cwd, env, _spawn_child,
-            **({"before_exec": before_exec} if before_exec is not None else {}),
+            child_argv, cwd, env, spawn,
+            before_exec=before_exec,
         )
     else:
-        child = await _spawn_child(child_argv, cwd, env)
+        child = await spawn(child_argv, cwd, env)
         preference_receipt = execution_receipt(child_argv, env, child.pid or 0)
     state_path = Path(state_file) if state_file is not None else None
     state: dict[str, Any] = {}
@@ -673,6 +677,17 @@ def _write_host_state(
             os.unlink(temp)
 
 
+def _require_receiving_policy(cwd: str | None, context: str | None) -> None:
+    if context is None:
+        from ..hosting_policy import require_path_hosting
+
+        require_path_hosting(cwd or os.getcwd())
+    else:
+        from .receiver_policy import require_portable_path_hosting
+
+        require_portable_path_hosting(cwd or os.getcwd(), context)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:2] == ["--preference-exec", "--"]:
@@ -693,6 +708,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--unexpected-reap-seconds", type=float, default=60.0)
     ap.add_argument("--active-reap-seconds", type=float, default=0.0)
     ap.add_argument("--local-birth-evidence", action="store_true")
+    ap.add_argument("--repository-policy-context", default=None)
     ap.add_argument("child", nargs=argparse.REMAINDER,
                     help="child command after `--` (e.g. -- copilot --acp --stdio)")
     args = ap.parse_args(argv)
@@ -715,6 +731,7 @@ def main(argv: list[str] | None = None) -> int:
             unexpected_reap_seconds=args.unexpected_reap_seconds,
             active_reap_seconds=args.active_reap_seconds,
             local_birth_evidence=args.local_birth_evidence,
+            policy_context=args.repository_policy_context,
         ))
     except KeyboardInterrupt:
         return 0

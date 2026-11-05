@@ -1,0 +1,425 @@
+"""Real isolated policy consumers do not select an installed guest suite."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from agent_procutil import no_window_flags
+from repository_policy import AgentHostingError
+
+from agent_bridge import hosting_policy, portable_policy
+from agent_bridge.agent_registry import AgentResolver, CliNamespaceResolver
+from agent_bridge.session_host import bundle, receiver_policy
+from agent_bridge.session_host.client import SessionHostClient
+
+
+@pytest.fixture(autouse=True)
+def scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hosting_policy, "marketplace_id", lambda: "selected-source")
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    root = tmp_path / "actual checkout"
+    root.mkdir()
+    (root / ".git").mkdir()
+    return root
+
+
+def _policy(repo: Path, text: str, *, overlay: bool = False) -> Path:
+    path = repo / ".copilot-extensions" / "agent-worktrees"
+    if overlay:
+        path /= "marketplaces/selected-source"
+    path /= "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _read(repo: Path, env: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+    command, payload = portable_policy.guest_policy_check("/actual checkout", "resume")
+    argv = shlex.split(command.split(" && ", 1)[1])
+    assert argv[:4] == ["python3", "-I", "-S", "-c"]
+    argv[0] = sys.executable
+    argv[-4] = str(repo)
+    return subprocess.run(
+        argv, input=payload, capture_output=True, timeout=30, env=env,
+        creationflags=no_window_flags(),
+    )
+
+
+@pytest.mark.parametrize("guest_suite", ["absent", "old", "current"])
+@pytest.mark.parametrize("policy", ["allow", "base-deny", "overlay-deny", "invalid", "unreadable"])
+def test_isolated_preflight_uses_selected_canonical_policy(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    guest_suite: str, policy: str,
+) -> None:
+    guest = tmp_path / "guest-bin"
+    guest.mkdir()
+    if guest_suite != "absent":
+        (guest / "agent-worktrees").write_text(
+            "#!/bin/sh\nprintf 'must not select guest suite' >&2\nexit 91\n", encoding="utf-8",
+        )
+    env = {
+        **os.environ, "PATH": str(guest),
+        "COPILOT_EXTENSIONS_CONTEXT": '{"marketplaceId":"unrelated-guest"}',
+    }
+    if policy == "base-deny":
+        _policy(repo, "expose_agent: false\n")
+    elif policy == "overlay-deny":
+        _policy(repo, "expose_agent: true\n")
+        _policy(repo, "expose_agent: false\n", overlay=True)
+    elif policy == "invalid":
+        _policy(repo, "expose_agent: 'true'\n")
+    elif policy == "unreadable":
+        path = _policy(repo, "expose_agent: true\n")
+        path.unlink()
+        path.mkdir()
+    result = _read(repo, env)
+    answer = json.loads(result.stdout)
+    assert result.returncode == (0 if policy == "allow" else 3), result.stderr.decode()
+    if policy == "allow":
+        assert answer["allowed"] is True and answer["repository"] == str(repo)
+    else:
+        assert answer["code"].startswith("repository-agent-exposure-")
+        assert "allowed" not in answer
+
+
+def test_policy_change_after_preflight_refuses_the_actual_bundle(
+    repo: Path, tmp_path: Path,
+) -> None:
+    assert _read(repo, dict(os.environ)).returncode == 0
+    archive, _hash = bundle.build_session_host_bundle(tmp_path / "bundles")
+    _policy(repo, "expose_agent: false\n", overlay=True)
+    marker = tmp_path / "child-started"
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", str(archive),
+            "--cwd", str(repo), "--repository-policy-context", portable_policy.selected_context(),
+            "--", sys.executable, "-c", f"open({str(marker)!r}, 'w').close()",
+        ],
+        capture_output=True, timeout=30, creationflags=no_window_flags(),
+    )
+    assert result.returncode != 0
+    assert b"expose_agent: false" in result.stderr
+    assert not marker.exists()
+
+
+def test_portable_receiver_rechecks_selected_overlay_without_guest_owner(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(receiver_policy.shutil, "which", lambda _name: None)
+    context = portable_policy.selected_context()
+    receiver_policy.require_portable_path_hosting(repo, context)
+    _policy(repo, "expose_agent: false\n", overlay=True)
+    for operation in ("launch", "resume", "successor"):
+        with pytest.raises(AgentHostingError, match="expose_agent: false"):
+            receiver_policy.require_portable_path_hosting(repo, context, operation=operation)
+    with pytest.raises(ValueError, match="receiver is unavailable"):
+        receiver_policy.require_path_hosting(repo)
+
+
+@pytest.mark.parametrize("context", [
+    "", "{}", "[]",
+    '{"schema":"agent-bridge.receiving-policy","version":true,"marketplaceId":""}',
+    '{"schema":"agent-bridge.receiving-policy","version":2,"marketplaceId":""}',
+    '{"schema":"agent-bridge.receiving-policy","version":1,"marketplaceId":"../other"}',
+])
+def test_invalid_portable_context_never_downgrades_to_legacy(repo: Path, context: str) -> None:
+    with pytest.raises(AgentHostingError):
+        receiver_policy.require_portable_path_hosting(repo, context)
+
+
+def test_context_comes_from_validated_host_not_request_environment(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId":"other"}')
+    _policy(repo, "expose_agent: false\n", overlay=True)
+    with pytest.raises(AgentHostingError, match="selected-source"):
+        receiver_policy.require_portable_path_hosting(repo, portable_policy.selected_context())
+
+
+@pytest.mark.asyncio
+async def test_codespace_selects_declared_raw_command_without_stripping_legacy_guard() -> None:
+    from agent_bridge.session_host.codespace_transport import resolve_execution_workspace
+
+    guarded = "repository_policy_launch() { legacy-owner-check; }; repository_policy_launch"
+    prior = {"acp_command": guarded, "workspace_folder": "/actual"}
+    assert await resolve_execution_workspace(prior, None) == "/actual"
+    assert prior["acp_command"] == guarded
+    current = {
+        **prior, "portable_receiving_policy": {
+            "version": 1, "acp_command": "cd /actual && copilot --acp --stdio",
+        },
+    }
+    assert await resolve_execution_workspace(current, None) == "/actual"
+    assert current["acp_command"] == "cd /actual && copilot --acp --stdio"
+    current["portable_receiving_policy"]["version"] = True
+    with pytest.raises(AgentHostingError, match="Unsupported CodeSpace"):
+        await resolve_execution_workspace(current, None)
+
+
+@pytest.mark.asyncio
+async def test_prior_provider_cannot_pass_portable_preflight_then_fail_its_legacy_guard(monkeypatch) -> None:
+    from agent_bridge import provider_hosting
+    from agent_bridge.transport import SpawnTarget
+
+    guest = SimpleNamespace(
+        is_running=AsyncMock(return_value=True), close=AsyncMock(),
+        run=AsyncMock(return_value=(2, "", "unknown command: agent-policy")),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
+    monkeypatch.setattr(
+        portable_policy, "guest_policy_check",
+        lambda *_a: pytest.fail("unadvertised portable support or fallback after owner failure"),
+    )
+    with pytest.raises(AgentHostingError, match="no portable receiving handoff"):
+        await provider_hosting.query_provider_policy(SpawnTarget(type="command", codespace={
+            "name": "selected", "workspace_folder": "/actual", "acp_command": "legacy-guard",
+        }), operation="launch")
+    guest.run.assert_awaited_once()
+    assert "agent-policy check" in guest.run.await_args.args[0]
+    assert "input_bytes" not in guest.run.await_args.kwargs
+    guest.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declaration", [None, {"version": 1}, {"version": True}])
+async def test_container_preparation_negotiates_exact_selected_provider_before_new_syntax(
+    monkeypatch: pytest.MonkeyPatch, declaration,
+) -> None:
+    from agent_bridge.session_host import container_transport
+
+    calls = []
+
+    async def run(command, *, timeout):
+        calls.append(command)
+        return 0, json.dumps({
+            "name": "selected", "execution_instance": "instance",
+            "ssh": {"host_alias": "selected"}, "remote_command": "copilot --acp",
+            **({"portable_receiving_policy": {"version": 1}} if declaration else {}),
+        }).encode(), b""
+
+    monkeypatch.setattr(container_transport, "_run_provider", run)
+    target = {
+        "name": "selected", "instance_id": "instance", "provider_command": ["provider"],
+        **({"portable_receiving_policy": declaration} if declaration is not None else {}),
+    }
+    if declaration == {"version": True} and type(declaration["version"]) is bool:
+        with pytest.raises(RuntimeError, match="Unsupported container"):
+            await container_transport.prepare_container_session_host(target, None)
+        assert calls == []
+        return
+    await container_transport.prepare_container_session_host(target, None)
+    assert len(calls) == 1
+    assert ("--repository-policy-context" in calls[0]) is (declaration is not None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("activate", [False, True])
+@pytest.mark.parametrize("denied", [False, True])
+async def test_only_launch_entry_activates_then_checks_before_staging(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, activate: bool, denied: bool,
+) -> None:
+    resolver = AgentResolver({}, {})
+    provider = CliNamespaceResolver("codespace", "agent-codespaces")
+    specification = {
+        "type": "command", "spawn_command": ["provider"],
+        "codespace": {
+            "name": "selected", "workspace_folder": "/actual",
+            "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
+        },
+    }
+    resolver.register_namespace_resolver(provider)
+    monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
+    events: list[str] = []
+    running = False
+
+    async def provider_call(arguments):
+        nonlocal running
+        if arguments == ["start", "selected"]:
+            events.append("activate")
+            running = True
+            if denied:
+                _policy(repo, "expose_agent: false\n", overlay=True)
+        return 0, json.dumps(specification), ""
+
+    provider._run = AsyncMock(side_effect=provider_call)
+
+    async def ready(name: str) -> None:
+        assert name == "selected"
+        events.append("ready")
+        # The real provider admits a Shutdown target here without waking it.
+
+    async def gate(target) -> None:
+        assert target.codespace["name"] == "selected"
+        events.append("launch-policy")
+
+    async def run(command, *, timeout, input_bytes) -> tuple[int, str, str]:
+        events.append("policy")
+        from repository_policy import require_agent_hosting
+
+        answer = require_agent_hosting(repo, marketplace_id="selected-source")
+        return 0, json.dumps({**answer.to_dict(), "allowed": True}), ""
+
+    guest = SimpleNamespace(
+        is_running=AsyncMock(side_effect=lambda: running), run=run, close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
+    monkeypatch.setattr("agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", gate)
+    staging = AsyncMock(side_effect=lambda *_a: events.append("staging") or [])
+    monkeypatch.setattr(resolver, "_related_plugins_for", staging)
+    provider.ensure_ready = AsyncMock(side_effect=ready)
+    if not activate:
+        with pytest.raises(AgentHostingError, match="without waking"):
+            await resolver.resolve_async("codespace:selected")
+        assert events == []
+        provider.ensure_ready.assert_not_awaited()
+    elif denied:
+        with pytest.raises(AgentHostingError, match="expose_agent: false"):
+            await resolver.resolve_async("codespace:selected", activate=True)
+        assert events == ["launch-policy", "activate", "ready", "policy"]
+        staging.assert_not_awaited()
+    else:
+        target = await resolver.resolve_async("codespace:selected", activate=True)
+        assert target.codespace["name"] == "selected"
+        assert events == ["launch-policy", "activate", "ready", "policy", "staging", "policy"]
+        provider.ensure_ready.assert_awaited_once_with("selected")
+
+
+@pytest.mark.asyncio
+async def test_available_policy_denial_is_not_a_stopped_venue_activation(monkeypatch) -> None:
+    resolver = AgentResolver({}, {})
+    provider = CliNamespaceResolver("codespace", "agent-codespaces")
+    provider._run = AsyncMock(return_value=(0, json.dumps({
+        "type": "command", "spawn_command": ["provider"],
+        "codespace": {
+            "name": "selected", "workspace_folder": "/actual",
+            "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
+        },
+    }), ""))
+    provider.ensure_ready = AsyncMock()
+    resolver.register_namespace_resolver(provider)
+    monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
+    monkeypatch.setattr("agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", AsyncMock())
+    guest = SimpleNamespace(
+        is_running=AsyncMock(return_value=True), close=AsyncMock(),
+        run=AsyncMock(return_value=(3, "", "expose_agent: false")),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
+    with pytest.raises(AgentHostingError, match="expose_agent: false"):
+        await resolver.resolve_async("codespace:selected", activate=True)
+    provider.ensure_ready.assert_not_awaited()
+    assert not any(call.args[0][0] == "start" for call in provider._run.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_shipped_receiver_launches_observes_sends_and_reattaches_without_guest_suite(
+    repo: Path, tmp_path: Path,
+) -> None:
+    archive, _hash = bundle.build_session_host_bundle(tmp_path / "bundles")
+    state = tmp_path / "authority" / "host.json"
+    transcript = tmp_path / "peer.jsonl"
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-I", "-S", str(archive),
+        "--cwd", str(repo), "--state-file", str(state), "--session-id", "portable-fixture",
+        "--repository-policy-context", portable_policy.selected_context(),
+        "--", sys.executable, str(Path(__file__).with_name("mock_acp_peer.py")),
+        "--acp", "--stdio", "--no-auto-update",
+        env={
+            **os.environ, "PATH": str(tmp_path / "no-guest-suite"),
+            "MOCK_ACP_TRANSCRIPT": str(transcript),
+            "AGENT_BRIDGE_SESSION_HOST_NONCE": "fixture-nonce",
+        },
+        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, creationflags=no_window_flags(),
+    )
+    client = None
+    try:
+        async def wait_ready() -> None:
+            while not state.exists():
+                if process.returncode is not None:
+                    _out, error = await process.communicate()
+                    pytest.fail(error.decode(errors="replace"))
+                await asyncio.sleep(0.02)
+        await asyncio.wait_for(wait_ready(), 15)
+        authority = json.loads(state.read_text())
+        client = await SessionHostClient.connect(port=authority["port"])
+        hello = await client.attach(0, nonce=b"fixture-nonce")
+        frames = client.frames()
+        cursor = 0
+
+        async def request(number: int, method: str, params: dict) -> dict:
+            nonlocal cursor
+            await client.write(json.dumps({
+                "jsonrpc": "2.0", "id": number, "method": method, "params": params,
+            }).encode() + b"\n")
+            async def response() -> dict:
+                nonlocal cursor
+                while True:
+                    cursor, raw = await anext(frames)
+                    await client.ack(cursor)
+                    message = json.loads(raw)
+                    if message.get("id") == number:
+                        return message["result"]
+            return await asyncio.wait_for(response(), 10)
+
+        assert (await request(1, "initialize", {"protocolVersion": 1}))["protocolVersion"] == 1
+        conversation = (await request(2, "session/new", {"cwd": str(repo), "mcpServers": []}))["sessionId"]
+        result = await request(3, "session/prompt", {
+            "sessionId": conversation, "prompt": [{"type": "text", "text": "fixture turn"}],
+        })
+        assert result["stopReason"] == "end_turn"
+        await client.detach(False)
+        await client.close()
+        client = await SessionHostClient.connect(port=authority["port"])
+        resumed = await client.attach(cursor, nonce=b"fixture-nonce")
+        assert resumed.child_pid == hello.child_pid == authority["child_pid"]
+        records = [json.loads(line) for line in transcript.read_text().splitlines()]
+        boots = [row for row in records if row["kind"] == "boot"]
+        prompts = [
+            row["message"] for row in records
+            if row["kind"] == "inbound" and row["message"].get("method") == "session/prompt"
+        ]
+        assert len(boots) == len(prompts) == 1
+        assert boots[0]["session_id"] == prompts[0]["params"]["sessionId"] == conversation
+    finally:
+        if client is not None:
+            with contextlib.suppress(ConnectionError, OSError):
+                await client.terminate()
+            await client.close()
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=10)
+        except asyncio.TimeoutError:
+            from agent_bridge.transport import AgentProcess, SpawnTarget
+
+            await AgentProcess(process, SpawnTarget(type="command")).kill()
+        assert process.returncode is not None
+
+
+@pytest.mark.asyncio
+async def test_container_provider_transport_delivers_original_stdin_bytes() -> None:
+    from agent_bridge.session_host.container_transport import _run_provider
+
+    payload = b"portable policy archive\x00\n"
+    code = "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"
+    rc, output, error = await _run_provider(
+        [sys.executable, "-I", "-S", "-c", code], timeout=10, input_bytes=payload,
+    )
+    assert rc == 0 and output == payload and error == b""

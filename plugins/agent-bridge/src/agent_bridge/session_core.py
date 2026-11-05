@@ -305,7 +305,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 "session to adopt the current provider configuration"
             )
         try:
-            resolved = await self._resolver.resolve_async(session.agent_name)
+            resolved = await self._resolver.resolve_async(session.agent_name, activate=True)
         except Exception as exc:
             log.warning(
                 "Could not refresh provider target for session %s (%s)",
