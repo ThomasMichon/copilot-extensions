@@ -1,0 +1,9 @@
+{
+  "comment": "Serve labeled saved roster bootstrap while the resident starts and current publication refreshes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

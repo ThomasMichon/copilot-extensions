@@ -18,7 +18,7 @@ ARGUMENTS = (
     ("--classify", {"action": "store_true",
                     "help": "Include git state classification (state/ahead/behind/dirty; JSON only). Slower: ~5 git calls per worktree."}),
     ("--cache-only", {"action": "store_true",
-                      "help": "Cache-only fast paint from session-render fields, without session history or git classification."}),
+                      "help": "Cache-only fast paint without caller-side live probes. With --follow, allow labeled saved rows while the resident starts, then follow current publications."}),
     ("--profile-assignment-history", {"action": "store_true",
                                       "help": "Include bounded profile_assignments history and the latest assignment in each JSON worktree row. Ordinary and cache-polled rows include only current_profile_assignment."}),
     ("--stream", {"action": "store_true",

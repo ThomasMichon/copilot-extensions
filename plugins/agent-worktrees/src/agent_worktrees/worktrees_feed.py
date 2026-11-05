@@ -11,6 +11,7 @@ from .worktrees_runtime import CONTRACT_VERSION, request_selection
 
 FEED_ACTION = "worktrees-feed"
 FEED_CAPABILITY = "worktrees-feed-v1"
+BOOTSTRAP_CAPABILITY = "worktrees-feed-bootstrap-v1"
 MAX_SUBSCRIBERS = 32
 HEARTBEAT_SECONDS = 2.0
 
@@ -126,6 +127,7 @@ class WorktreesFeed:
             return
         try:
             previous = None
+            bootstrapped = False
             while not disconnected():
                 with self._condition:
                     reason = subscriber["closed"]
@@ -139,6 +141,34 @@ class WorktreesFeed:
                     yield self._notice(reason, previous)
                     return
                 if result.get("ok") is not True:
+                    if (
+                        payload.get("bootstrap") is True
+                        and previous is None
+                        and result.get("error", {}).get("code") == "unready"
+                    ):
+                        if not bootstrapped:
+                            from .worktrees_client import saved_result
+                            from .worktrees_projection_index import ProjectionUnavailable
+
+                            try:
+                                saved = saved_result(
+                                    payload, "Resident refreshing; showing saved worktrees",
+                                    db_path=self._owner.store.db_path,
+                                )
+                            except (ProjectionError, ProjectionUnavailable):
+                                pass
+                            else:
+                                yield from publication_frames(saved)
+                            bootstrapped = True
+                        yield {"type": "pending", "reason": "Waiting for the resident's first current roster"}
+                        with self._condition:
+                            self._condition.wait_for(
+                                lambda seen=stamp: (
+                                    subscriber["closed"] is not None or self._stamps[project] != seen
+                                ), timeout=HEARTBEAT_SECONDS,
+                            )
+                            stamp = self._stamps[project]
+                        continue
                     with self._condition:
                         reason = subscriber["closed"]
                     yield self._notice(reason, previous) if reason is not None else {
