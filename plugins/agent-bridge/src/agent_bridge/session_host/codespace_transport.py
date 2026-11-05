@@ -26,7 +26,7 @@ import re
 import shlex
 import subprocess
 import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from agent_procutil import no_window_flags
@@ -445,10 +445,27 @@ def codespace_child_preparer(target, transport, *, prelude, controller_cwd,
     return prepare_codespace_child
 
 
-@contextmanager
-def codespace_launch_ownership(manager, session_id, target, owner, core, *,
-                              holder_ref=None, replace_session_id=None, retain_on_error=False,
-                              claim_metadata=None, persist_claim_metadata=None):
+@asynccontextmanager
+async def codespace_provider_call(function, *args, **kwargs):
+    """Settle one bounded provider call and its local receipt before cancellation."""
+    operation = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    cancellation = None
+    while not operation.done():
+        try:
+            await asyncio.shield(operation)
+        except asyncio.CancelledError as exc:
+            cancellation = exc
+    # The body runs on the owner loop, without an intervening cancellation point.
+    # It must persist the result before cancellation is allowed to unwind custody.
+    yield operation.result()
+    if cancellation is not None:
+        raise cancellation
+
+
+@asynccontextmanager
+async def codespace_launch_ownership(manager, session_id, target, owner, core, *,
+                                    holder_ref=None, replace_session_id=None, retain_on_error=False,
+                                    claim_metadata=None, persist_claim_metadata=None):
     """Rollback only this start's resources, including preflight/cancellation failures."""
     from ..session_manager import CodespaceClaimConflictError, CodespaceCoordinationRejectedError
     from .spawner import RemoteSpawnCleanupPendingError
@@ -462,6 +479,12 @@ def codespace_launch_ownership(manager, session_id, target, owner, core, *,
         nonlocal connect_started
         connect_started = True
 
+    def restore_lock():
+        if transferred:
+            manager._transfer_codespace_lock(session_id, replace_session_id, name)
+        elif locked and not already_held:
+            manager._release_codespace_lock(session_id)
+
     if claim_metadata is not None and not already_held and not replace_session_id:
         claim_metadata["codespace_claim"] = None
         if persist_claim_metadata is not None:
@@ -473,20 +496,20 @@ def codespace_launch_ownership(manager, session_id, target, owner, core, *,
         else:
             manager._acquire_codespace_lock(session_id, name)
         locked = True
-        status, detail = core._claim_codespace(
-            name, owner, holder_ref=holder_ref,
-        )
-        if status == "conflict":
-            raise CodespaceClaimConflictError(name, owner, detail)
-        if status == "coordination-rejected":
-            raise CodespaceCoordinationRejectedError(name, owner, detail)
-        claimed = status != "skipped"
-        if claim_metadata is not None:
-            inherited_receipt = (already_held or transferred) and "codespace_claim" in claim_metadata
-            if claimed or not inherited_receipt:
-                claim_metadata["codespace_claim"] = {"name": name, "owner": owner} if claimed else None
-            if persist_claim_metadata is not None:
-                persist_claim_metadata()
+        async with codespace_provider_call(
+            core._claim_codespace, name, owner, holder_ref=holder_ref,
+        ) as (status, detail):
+            if status == "conflict":
+                raise CodespaceClaimConflictError(name, owner, detail)
+            if status == "coordination-rejected":
+                raise CodespaceCoordinationRejectedError(name, owner, detail)
+            claimed = status != "skipped"
+            if claim_metadata is not None:
+                inherited_receipt = (already_held or transferred) and "codespace_claim" in claim_metadata
+                if claimed or not inherited_receipt:
+                    claim_metadata["codespace_claim"] = {"name": name, "owner": owner} if claimed else None
+                if persist_claim_metadata is not None:
+                    persist_claim_metadata()
         yield enter_connect
     except RemoteSpawnCleanupPendingError:
         raise
@@ -495,23 +518,24 @@ def codespace_launch_ownership(manager, session_id, target, owner, core, *,
             if claimed and not already_held and not transferred:
                 detail = "release was not confirmed"
                 try:
-                    released = core._release_codespace_claim(name, owner) is True
+                    async with codespace_provider_call(
+                        core._release_codespace_claim, name, owner,
+                    ) as released:
+                        if released is not True:
+                            raise RuntimeError("release was not confirmed")
+                        if claim_metadata is not None:
+                            claim_metadata["codespace_claim"] = None
+                            if persist_claim_metadata is not None:
+                                persist_claim_metadata()
+                        restore_lock()
                 except Exception as cleanup_error:
-                    released = False
                     detail = f"release raised {type(cleanup_error).__name__}"
-                if not released:
                     raise RuntimeError(
                         f"CodeSpace claim cleanup is unconfirmed ({detail}); "
                         "retaining the failed session's claim and TargetLock"
                     ) from failure
-                if claim_metadata is not None:
-                    claim_metadata["codespace_claim"] = None
-                    if persist_claim_metadata is not None:
-                        persist_claim_metadata()
-            if transferred:
-                manager._transfer_codespace_lock(session_id, replace_session_id, name)
-            elif locked and not already_held:
-                manager._release_codespace_lock(session_id)
+            else:
+                restore_lock()
         raise
 
 

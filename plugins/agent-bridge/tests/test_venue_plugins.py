@@ -658,7 +658,7 @@ async def test_session_manager_callback_preserves_controller_context(
     monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", provider)
     claim = MagicMock(return_value=("ok", ""))
     monkeypatch.setattr("agent_bridge.session_manager._claim_codespace", claim)
-    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", lambda *a, **kw: None)
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", lambda *a, **kw: True)
     monkeypatch.setattr(session_manager, "_acquire_codespace_lock", lambda *a: None)
     monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env", lambda *a: ("", None))
     transport = SimpleNamespace(

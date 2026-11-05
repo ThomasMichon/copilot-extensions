@@ -770,8 +770,9 @@ class TestCodespaceSessionHostAcpCommand:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("relay_fails", [False, True])
 async def test_codespace_replacement_factory_receives_configured_readiness(
-    tmp_db, monkeypatch,
+    tmp_db, monkeypatch, relay_fails,
 ):
     manager = SessionManager(tmp_db)
     manager._timeouts.session_host_ready = 150.0
@@ -788,15 +789,23 @@ async def test_codespace_replacement_factory_receives_configured_readiness(
         "agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        "agent_bridge.session_manager._resolve_relay_launch_env", lambda *args: ("", None),
+        "agent_bridge.session_manager._resolve_relay_launch_env",
+        Mock(side_effect=RuntimeError("relay provider failed")) if relay_fails
+        else lambda *args: ("", None),
     )
     monkeypatch.setattr(manager, "_acquire_codespace_lock", Mock())
     monkeypatch.setattr(manager, "_release_codespace_lock", Mock())
-    with pytest.raises(RuntimeError, match="factory boundary reached"):
+    with pytest.raises(
+        RuntimeError, match="relay provider failed" if relay_fails else "factory boundary reached",
+    ):
         await manager._resume_via_new_remote_host(
             session, on_acp_event=None, permission_callback=None,
         )
-    assert factory.call_args.kwargs["ready_timeout"] == 150.0
+    if relay_fails:
+        factory.assert_not_called()
+        manager._release_codespace_lock.assert_called_once_with("synthetic")
+    else:
+        assert factory.call_args.kwargs["ready_timeout"] == 150.0
 
 
 @pytest.mark.asyncio
@@ -1419,13 +1428,16 @@ async def test_failed_handshake_provider_cleanup_retains_container_lock(
 
 
 @pytest.mark.asyncio
-async def test_failed_handshake_claim_release_failure_retains_session(
+@pytest.mark.parametrize("released", [False, True])
+async def test_failed_handshake_claim_release_settles_receipt_before_session_removal(
     tmp_db,
     monkeypatch,
+    released,
 ) -> None:
+    release = Mock(return_value=released)
     monkeypatch.setattr(
         "agent_bridge.session_manager._release_codespace_claim",
-        lambda *_args: False,
+        release,
     )
     manager = SessionManager(tmp_db)
     target = SpawnTarget(
@@ -1472,11 +1484,16 @@ async def test_failed_handshake_claim_release_failure_retains_session(
         FAILED_ACP_HANDSHAKE_FAULT,
     )
 
-    assert result["cleanup_confirmed"] is False
-    assert result["codespace_claim_removed"] is False
-    assert result["ownership_retained"] is True
-    assert result["durable_session_retained"] is True
-    assert manager.get_session(session.session_id) is session
+    release.assert_called_once_with("example-codespace", "venue-parity:test")
+    assert result["cleanup_confirmed"] is released
+    assert result["codespace_claim_removed"] is released
+    assert result["ownership_retained"] is not released
+    if released:
+        assert manager.get_session(session.session_id) is None
+        assert tmp_db.get_session(session.session_id) is None
+    else:
+        assert result["durable_session_retained"] is True
+        assert manager.get_session(session.session_id) is session
 
 
 @pytest.mark.asyncio
@@ -5249,6 +5266,7 @@ class TestCodespaceExclusiveClaim:
         caller_id=None,
         caller_owner_ref=None,
         acp_command=None,
+        relay_fails=False,
     ):
         if caller_owner_ref is not None:
             machine, project, worktree = caller_owner_ref.partition("#")[0].split("/")
@@ -5266,6 +5284,11 @@ class TestCodespaceExclusiveClaim:
         monkeypatch.setattr(
             "agent_bridge.venue_plugins.prepare_venue_plugins",
             AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr(
+            "agent_bridge.session_manager._resolve_relay_launch_env",
+            Mock(side_effect=RuntimeError("relay provider failed")) if relay_fails
+            else lambda *a: ("", None),
         )
         claim_calls: list[tuple[str, str, str | None]] = []
 
@@ -5312,6 +5335,24 @@ class TestCodespaceExclusiveClaim:
             ("example-codespace", str(tmp_db.db_path.parent), None)
         ]
         assert session.status == SessionStatus.IDLE
+
+    @pytest.mark.asyncio
+    async def test_relay_provider_failure_cleans_claim_without_connecting(
+        self, tmp_db, monkeypatch,
+    ) -> None:
+        release = Mock(return_value=True)
+        monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+        manager, session, _calls = await self._start(
+            tmp_db, monkeypatch, claim_result=("ok", ""),
+            caller_worktree=str(tmp_db.db_path.parent), relay_fails=True,
+        )
+        assert session.status == SessionStatus.FAILED
+        assert not manager._codespace_lock_sessions
+        release.assert_called_once_with("example-codespace", str(tmp_db.db_path.parent))
+        assert any(
+            event.event == "error" and "relay provider failed" in event.data["message"]
+            for event in session.event_log.get_events()
+        )
 
     @pytest.mark.asyncio
     async def test_claim_owner_falls_back_to_caller_id(
@@ -5407,7 +5448,7 @@ class TestCodespaceExclusiveClaim:
         released: list[tuple[str, str]] = []
         monkeypatch.setattr(
             "agent_bridge.session_manager._release_codespace_claim",
-            lambda name, owner: released.append((name, owner)),
+            lambda name, owner: released.append((name, owner)) or True,
         )
         manager, session, _calls = await self._start(
             tmp_db, monkeypatch,
@@ -5416,6 +5457,76 @@ class TestCodespaceExclusiveClaim:
         )
         await manager.end_session(session.session_id, force=True)
         assert released == [("example-codespace", str(tmp_db.db_path.parent))]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("release_ok", [False, True])
+    @pytest.mark.parametrize("legacy_target", [False, True])
+    async def test_cancelled_teardown_settles_release_before_receipt_or_lock_removal(
+        self, tmp_db, monkeypatch, release_ok, legacy_target,
+    ) -> None:
+        import threading
+        from agent_bridge.session_manager import (
+            RemoteHostRecoveryPendingError, _REQUEST_OVERRIDES_KEY,
+        )
+
+        manager, session, _calls = await self._start(
+            tmp_db, monkeypatch, claim_result=("ok", ""),
+            caller_worktree=str(tmp_db.db_path.parent),
+        )
+        session.client.shutdown = AsyncMock()
+        if legacy_target:
+            session.target.venue = None
+            tmp_db.update_session_target(
+                session.session_id, session.target.to_json(), session.target.cwd,
+            )
+        entered = threading.Event()
+        finish = threading.Event()
+        calls = []
+
+        def release(name, owner):
+            calls.append((name, owner))
+            entered.set()
+            assert finish.wait(5)
+            return release_ok
+
+        monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+        operation = asyncio.create_task(manager.end_session(session.session_id, force=True))
+        try:
+            async with asyncio.timeout(5):
+                while not entered.is_set():
+                    await asyncio.sleep(0.01)
+            operation.cancel()
+            await asyncio.sleep(0)
+            operation.cancel()
+            await asyncio.sleep(0)
+            assert not operation.done()
+            assert session.session_id in manager._codespace_lock_sessions
+            finish.set()
+            expected = asyncio.CancelledError if release_ok else RemoteHostRecoveryPendingError
+            with pytest.raises(expected):
+                await operation
+            assert len(calls) == 1
+            assert tmp_db.get_session(session.session_id) is not None
+            persisted = SpawnTarget.from_json(tmp_db.get_session(session.session_id)["target_json"])
+            identity = (
+                persisted.venue[_REQUEST_OVERRIDES_KEY]["codespace_claim"]
+                if persisted.venue is not None
+                else {"name": "example-codespace", "owner": str(tmp_db.db_path.parent)}
+            )
+            assert (identity is None) is release_ok
+            assert (session.session_id in manager._codespace_lock_sessions) is not release_ok
+            monkeypatch.setattr(
+                "agent_bridge.session_manager._release_codespace_claim",
+                lambda *a: calls.append(a) or True,
+            )
+            await manager.end_session(session.session_id, force=True)
+            assert len(calls) == (1 if release_ok else 2)
+            assert tmp_db.get_session(session.session_id) is None
+        finally:
+            finish.set()
+            with contextlib.suppress(BaseException):
+                await operation
+            manager._release_codespace_lock(session.session_id)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("restart", [False, True])
@@ -5577,7 +5688,7 @@ class TestClaimCodespaceHelper:
         monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
         monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
         monkeypatch.setattr(
-            sm.subprocess, "run",
+            sm, "run_captured",
             lambda *a, **k: SimpleNamespace(returncode=75, stdout="", stderr="[BUSY] x"),
         )
         status, detail = sm._claim_codespace("cs", "/wt/a")
@@ -5590,7 +5701,7 @@ class TestClaimCodespaceHelper:
         monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
         monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
         monkeypatch.setattr(
-            sm.subprocess, "run",
+            sm, "run_captured",
             lambda *a, **k: SimpleNamespace(returncode=0, stdout="[OK]", stderr=""),
         )
         assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
@@ -5601,7 +5712,7 @@ class TestClaimCodespaceHelper:
         monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
         monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
         monkeypatch.setattr(
-            sm.subprocess, "run",
+            sm, "run_captured",
             lambda *a, **k: SimpleNamespace(returncode=2, stdout="", stderr="boom"),
         )
         assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
@@ -5621,7 +5732,7 @@ class TestClaimCodespaceHelper:
                 stderr="[BLOCKED] knowledge_binding_required",
             )
 
-        monkeypatch.setattr(sm.subprocess, "run", run)
+        monkeypatch.setattr(sm, "run_captured", run)
         result = sm._claim_codespace(
             "cs",
             "/wt/a",
@@ -5642,7 +5753,7 @@ class TestClaimCodespaceHelper:
             called["ran"] = True
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(sm.subprocess, "run", _run)
+        monkeypatch.setattr(sm, "run_captured", _run)
         assert sm._claim_codespace("cs", "") == ("skipped", "")
         assert called["ran"] is False
 
@@ -5663,7 +5774,7 @@ class TestClaimCodespaceHelper:
             called["ran"] = True
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(sm.subprocess, "run", _run)
+        monkeypatch.setattr(sm, "run_captured", _run)
         assert sm._claim_codespace("cs", "/wt/a") == ("skipped", "")
         assert called["ran"] is False
 
@@ -5684,7 +5795,7 @@ class TestClaimCodespaceHelper:
                 stderr="[BLOCKED] knowledge_binding_required",
             )
 
-        monkeypatch.setattr(sm.subprocess, "run", run)
+        monkeypatch.setattr(sm, "run_captured", run)
         status, detail = sm._claim_codespace(
             "cs",
             "/wt/a",
@@ -5704,12 +5815,18 @@ class TestReleaseCodespaceClaimHelper:
 
         assert sm._release_codespace_claim("cs", "/wt/a") is False
 
-    def test_disabled_claim_needs_no_release(self, monkeypatch) -> None:
+    def test_disabled_new_admission_cannot_skip_an_acquired_claim_release(self, monkeypatch) -> None:
         from agent_bridge import session_manager as sm
 
         monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+        monkeypatch.setattr(sm, "_codespace_provider_command", lambda: ["/provider/present"])
+        run = Mock(return_value=SimpleNamespace(returncode=0))
+        monkeypatch.setattr(sm, "run_captured", run)
 
         assert sm._release_codespace_claim("cs", "/wt/a") is True
+        run.assert_called_once_with(
+            ["/provider/present", "release-claim", "cs", "--owner", "/wt/a"], timeout=30,
+        )
 
 
 class TestCodespaceClaimKey:
@@ -5787,7 +5904,7 @@ class TestClaimContainerHelper:
         monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
         monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-containers")
         monkeypatch.setattr(
-            sm.subprocess, "run",
+            sm, "run_captured",
             lambda *a, **k: SimpleNamespace(returncode=75, stdout="", stderr="[BUSY] x"),
         )
         status, detail = sm._claim_container("box", "/wt/a")
@@ -5805,7 +5922,7 @@ class TestClaimContainerHelper:
             seen["command"] = command
             return SimpleNamespace(returncode=0, stdout="box", stderr="")
 
-        monkeypatch.setattr(sm.subprocess, "run", run)
+        monkeypatch.setattr(sm, "run_captured", run)
         assert sm._claim_container("box", "/wt/a") == ("ok", "")
         assert seen["command"] == [
             "/usr/bin/agent-containers", "borrow", "/wt/a",
@@ -5818,7 +5935,7 @@ class TestClaimContainerHelper:
         monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
         monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-containers")
         monkeypatch.setattr(
-            sm.subprocess, "run",
+            sm, "run_captured",
             lambda *a, **k: SimpleNamespace(returncode=2, stdout="", stderr="boom"),
         )
         assert sm._claim_container("box", "/wt/a") == ("ok", "")
@@ -5832,7 +5949,7 @@ class TestClaimContainerHelper:
             called["ran"] = True
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(sm.subprocess, "run", _run)
+        monkeypatch.setattr(sm, "run_captured", _run)
         assert sm._claim_container("box", "") == ("ok", "")
         assert called["ran"] is False
 
@@ -5853,7 +5970,7 @@ class TestClaimContainerHelper:
             called["ran"] = True
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(sm.subprocess, "run", _run)
+        monkeypatch.setattr(sm, "run_captured", _run)
         assert sm._claim_container("box", "/wt/a") == ("ok", "")
         assert called["ran"] is False
 

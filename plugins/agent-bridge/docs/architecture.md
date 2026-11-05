@@ -1007,6 +1007,23 @@ and `transport.spawn` asks the same policy before any raw-transport CodeSpace
 spawn (a resync, or a resume without a Session Host),
 advertised as HTTP generation 26 (`codespace_launch_policy`).
 
+Codespace admission and teardown run finite claim/release provider commands
+off the serving loop, using the existing contained process runner and 30-second
+provider deadline. Relay launch-environment resolution uses the same boundary
+with its 15-second deadline, both on fresh start and cold recovery. These calls
+prefer the active registered provider command, preserving its installation
+context; `PATH` is the legacy fallback.
+
+Cancellation waits for the original provider call to settle, including repeated
+cancellation during rollback. The owning loop persists the exact claim receipt
+before unwinding, and clears it before releasing the local TargetLock only after
+confirmed provider release. Unconfirmed release retains the session, receipt and
+lock for reconciliation instead of deleting the session. No create or prompt is
+replayed by this boundary. Relay-provider absence, timeout, failure or malformed
+output stops authenticated preparation explicitly; successful existing
+`{"prelude": "", "port": null}` output still represents relay opt-out. The
+provider CLI syntax, JSON fields and watchdog grace are unchanged.
+
 ## Ordinary native startup admission receipts
 
 HTTP protocol 45 adds an opt-in keyed native prompt endpoint and a receipt-only

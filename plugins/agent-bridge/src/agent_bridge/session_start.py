@@ -598,10 +598,10 @@ class _SessionStartMixin:
                 # dispatching to an already-claimed CodeSpace is bounced instead
                 # of clobbering the incumbent. Degrade-safe: no owner / disabled
                 # / binstub absent -> proceed unclaimed, today's behavior.
-                from .session_host.codespace_transport import codespace_launch_ownership
+                from .session_host.codespace_transport import codespace_launch_ownership, codespace_provider_call
                 claim_owner = getattr(target, "caller_worktree", None) or caller_id or controller_cwd
                 core = _core()
-                with codespace_launch_ownership(
+                async with codespace_launch_ownership(
                     self, session_id, cs_target, claim_owner or "", core,
                     holder_ref=getattr(target, "caller_owner_ref", None),
                     replace_session_id=replace_session_id, retain_on_error=parity_fault,
@@ -611,9 +611,10 @@ class _SessionStartMixin:
                     ),
                 ) as enter_connect:
                     from .relay_state import get_live_relay_port
-                    relay_prelude, relay_port = core._resolve_relay_launch_env(
-                        cs_target["name"], get_live_relay_port(),
-                    )
+                    async with codespace_provider_call(
+                        core._resolve_relay_launch_env, cs_target["name"], get_live_relay_port(),
+                    ) as (relay_prelude, relay_port):
+                        pass
                     cs_spawner = build_codespace_spawner(
                         cs_target["name"], cs_target["repo"], relay_port=relay_port,
                         ready_timeout=self._timeouts.session_host_ready,
@@ -944,23 +945,31 @@ class _SessionStartMixin:
         session_id = session.session_id
         claim_key = _codespace_claim_key(session.target)
         core = _core()
-        claim_removed = (
-            True
-            if claim_key is None
-            else core._release_codespace_claim(*claim_key)
-        )
-        result["codespace_claim_removed"] = claim_removed
-        if not claim_removed:
-            result.update({
-                "cleanup_confirmed": False,
-                "ownership_retained": True,
-                "durable_session_retained": (
-                    self._db.get_session(session_id) is not None
-                ),
-            })
-            return result
-        self._release_container_lock(session_id)
-        self._release_codespace_lock(session_id)
+        from .session_host.codespace_transport import codespace_provider_call
+        async with codespace_provider_call(
+            lambda: True if claim_key is None else core._release_codespace_claim(*claim_key),
+        ) as claim_removed:
+            result["codespace_claim_removed"] = claim_removed
+            if not claim_removed:
+                result.update({
+                    "cleanup_confirmed": False,
+                    "ownership_retained": True,
+                    "durable_session_retained": (
+                        self._db.get_session(session_id) is not None
+                    ),
+                })
+                return result
+            if claim_key is not None:
+                if session.target.venue is None:
+                    session.target.venue = {}
+                session.target.venue.setdefault(
+                    _REQUEST_OVERRIDES_KEY, {},
+                )["codespace_claim"] = None
+                self._db.update_session_target(
+                    session_id, session.target.to_json(), session.target.cwd,
+                )
+            self._release_container_lock(session_id)
+            self._release_codespace_lock(session_id)
         await self.end_session(session_id, force=True)
         host_index_removed = (
             self._host_index is None

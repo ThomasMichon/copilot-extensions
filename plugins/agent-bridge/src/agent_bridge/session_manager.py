@@ -23,6 +23,7 @@ from agent_procutil import no_window_flags
 
 from .events import EventLog
 from .models import SessionStatus
+from .provider_process import run_captured
 from .session_host_liveness import _HostLivenessMixin
 from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
 from .session_recovery_dormancy import (
@@ -103,6 +104,16 @@ def _format_optional_hours(value_s: float | None) -> str:
     return f"{value_s / 3600.0:.1f}h"
 
 
+def _codespace_provider_command() -> list[str] | None:
+    from .provider_sources import discover_provider_manifests
+
+    manifest = discover_provider_manifests().get("codespace")
+    if manifest is not None and manifest.command:
+        return list(manifest.command)
+    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
+    return [binstub] if binstub else None
+
+
 def _resolve_relay_launch_env(
     codespace_name: str, relay_port: int | None
 ) -> tuple[str, int | None]:
@@ -116,38 +127,38 @@ def _resolve_relay_launch_env(
 
     There is **no** in-process ``agent_codespaces`` import fallback: the daemon
     runs from its own isolated venv where a provider package is neither importable
-    nor on ``PATH`` (see :mod:`agent_bridge.provider_sources`). When the binstub is
-    absent or the CLI fails, returns ``("", None)`` and the launch proceeds
-    auth-light (fine for ACP + non-ADO turns).
+    nor on ``PATH`` (see :mod:`agent_bridge.provider_sources`). Prefer the
+    registered provider command and its installation context. When that provider
+    is unavailable or fails, preparation fails explicitly rather than silently losing
+    authentication. A successful provider's explicit ``("", None)`` still
+    supports relay opt-out without a new wire field.
     """
-    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
-    if not binstub:
-        log.info(
-            "agent-codespaces binstub absent -- launching Session Host "
-            "auth-light for %s", codespace_name,
-        )
-        return "", None
-    argv = [binstub, "relay-launch-env", codespace_name]
+    command = _codespace_provider_command()
+    if not command:
+        raise RuntimeError("Required CodeSpace relay provider is unavailable")
+    argv = [*command, "relay-launch-env", codespace_name]
     if relay_port is not None:
         argv += ["--relay-port", str(relay_port)]
     try:
-        r = subprocess.run(
-            argv, capture_output=True, text=True, timeout=15,
-            creationflags=no_window_flags(),
+        r = run_captured(argv, timeout=15)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Required CodeSpace relay preparation failed ({type(exc).__name__})"
+        ) from exc
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"Required CodeSpace relay preparation exited {r.returncode}"
         )
-        if r.returncode == 0 and r.stdout.strip():
-            data = json.loads(r.stdout)
-            return data.get("prelude", ""), data.get("port")
-        log.warning(
-            "agent-codespaces relay-launch-env exited %s -- launching Session "
-            "Host auth-light for %s", r.returncode, codespace_name,
-        )
-    except Exception:
-        log.warning(
-            "agent-codespaces relay-launch-env CLI failed -- launching Session "
-            "Host auth-light for %s", codespace_name, exc_info=True,
-        )
-    return "", None
+    try:
+        data = json.loads(r.stdout)
+        prelude, port = data["prelude"], data["port"]
+        if not isinstance(prelude, str) or (
+            port is not None and (type(port) is not int or not 1 <= port <= 65535)
+        ):
+            raise ValueError("invalid relay environment")
+        return prelude, port
+    except (ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError("Required CodeSpace relay provider returned invalid output") from exc
 
 
 def _resolve_codespace_ai_plugin_dirs(
@@ -354,11 +365,7 @@ def _run_venue_claim(
     plumbing lives in one place rather than being copy-pasted per venue kind.
     """
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True, text=True, timeout=30,
-            creationflags=no_window_flags(),
-        )
+        result = run_captured(command, timeout=30)
     except Exception as exc:
         log.info("%s claim skipped for %s: %s", kind, target_name, exc)
         return "ok", ""
@@ -405,10 +412,10 @@ def _claim_codespace(
         return "skipped", ""
     if not codespace_name or (not owner and not holder_ref):
         return "skipped", ""
-    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
-    if not binstub:
+    provider = _codespace_provider_command()
+    if not provider:
         return "skipped", ""
-    command = [binstub, "claim", codespace_name]
+    command = [*provider, "claim", codespace_name]
     if owner:
         command.extend(["--owner", owner])
     if holder_ref:
@@ -419,25 +426,24 @@ def _claim_codespace(
 def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
     """Release a Session-Host CodeSpace claim and report success.
 
-    Ordinary teardown remains best-effort, while destructive parity rollback
-    uses the return value to avoid claiming cleanup before ownership is gone.
+    Callers retain the session, receipt and TargetLock until this confirms
+    release, including ordinary teardown and destructive parity rollback.
     """
-    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
-        return True
     if not owner or not codespace_name:
         return True
-    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
-    if not binstub:
+    command = _codespace_provider_command()
+    if not command:
+        log.warning("CodeSpace claim release provider is unavailable")
         return False
-    creationflags = no_window_flags()
     try:
-        result = subprocess.run(
-            [binstub, "release-claim", codespace_name, "--owner", owner],
-            capture_output=True, text=True, timeout=30,
-            creationflags=creationflags,
+        result = run_captured(
+            [*command, "release-claim", codespace_name, "--owner", owner], timeout=30,
         )
-    except Exception:
+    except Exception as exc:
+        log.warning("CodeSpace claim release failed (%s)", type(exc).__name__)
         return False
+    if result.returncode:
+        log.warning("CodeSpace claim release exited %s", result.returncode)
     return result.returncode == 0
 
 

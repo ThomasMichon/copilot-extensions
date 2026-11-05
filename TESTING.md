@@ -18,6 +18,21 @@ container skips this packet when its image lacks tmux; that skip is not a pass.
 Use the bounded host runner on an explicitly enrolled POSIX tmux host for this
 native fixture. Required unit-only CI is unchanged.
 
+Bridge's opt-in `--test-file tests/test_codespace_admission.py
+--test-file tests/test_codespace_transport.py
+--test-file tests/test_codespace_spawner.py
+--test-file tests/test_decoupling_seams.py
+--test-file tests/test_session_manager.py --allow-explicit-tiers` packet checks
+responsive claim, relay resolution and rollback/release. Caller-contained
+synthetic provider processes overlap the real loopback health route and serving
+watchdog; repeated cancellation must settle the original attempt and owning-loop
+receipt before releasing custody. Failed release retains the durable session and
+exact claim identity. Registered-provider context, legacy JSON, explicit opt-out,
+failure-before-preparation and cold recovery have focused controls. The new
+process packet is explicitly selected integration work, not an addition to
+required unit-only CI. These isolated source controls do not qualify installed
+services, live credentials, SSO or a real external venue.
+
 Manager's opt-in `--test-file tests/test_companion_timeline_scale.py
 --test-file tests/test_companion_timeline_layout.py
 --test-file tests/test_companion_timeline_widget.py --allow-explicit-tiers`

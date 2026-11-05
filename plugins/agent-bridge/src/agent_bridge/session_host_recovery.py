@@ -839,7 +839,7 @@ class _SessionHostRecoveryMixin:
             affinity_id=getattr(session, "caller_id", None),
         )
         from .relay_state import get_live_relay_port
-        from .session_host.codespace_transport import build_codespace_spawner
+        from .session_host.codespace_transport import build_codespace_spawner, codespace_provider_call
         from .session_host.spawner import RemoteSpawnCleanupPendingError
 
         # Same-machine mirror of the container lock reclaim above
@@ -849,10 +849,10 @@ class _SessionHostRecoveryMixin:
         self._acquire_codespace_lock(session.session_id, cs_target["name"])
         try:
             core = _core()
-            relay_prelude, relay_port = core._resolve_relay_launch_env(
-                cs_target["name"],
-                get_live_relay_port(),
-            )
+            async with codespace_provider_call(
+                core._resolve_relay_launch_env, cs_target["name"], get_live_relay_port(),
+            ) as (relay_prelude, relay_port):
+                pass
             spawner = build_codespace_spawner(
                 cs_target["name"],
                 cs_target.get("repo") or "",

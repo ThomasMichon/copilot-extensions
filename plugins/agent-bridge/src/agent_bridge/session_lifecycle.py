@@ -12,6 +12,7 @@ from .session_manager import (
     RemoteHostRecoveryPendingError,
     Session,
     SessionBusyError,
+    _REQUEST_OVERRIDES_KEY,
     _cleanup_worktree,
     _codespace_claim_key,
     _container_claim_key,
@@ -520,19 +521,31 @@ class _SessionLifecycleMixin:
         ):
             self._release_container_lock(session_id)
 
+        claim_key = _codespace_claim_key(session.target)
+        if claim_key is not None:
+            from .session_host.codespace_transport import codespace_provider_call
+            core = _core()
+            async with codespace_provider_call(
+                core._release_codespace_claim, *claim_key,
+            ) as released:
+                if released is not True:
+                    self._mark_session_failed(session, trigger="codespace_release_unconfirmed")
+                    raise RemoteHostRecoveryPendingError(
+                        "CodeSpace claim release is unconfirmed; retained session "
+                        f"{session_id}, claim receipt and TargetLock"
+                    )
+                if session.target.venue is None:
+                    session.target.venue = {}
+                session.target.venue.setdefault(
+                    _REQUEST_OVERRIDES_KEY, {},
+                )["codespace_claim"] = None
+                self._db.update_session_target(
+                    session_id, session.target.to_json(), session.target.cwd,
+                )
+                self._release_codespace_lock(session_id)
         session.status = SessionStatus.ENDED
         with contextlib.suppress(Exception):
             self._clear_pending_queue(session, reason="ended")
-        # #897: release the exclusive CodeSpace claim this session held, so the
-        # box is immediately re-dispatchable by another worktree instead of
-        # waiting for the liveness/TTL sweep. Best-effort and idempotent (the
-        # CLI only releases a claim this owner actually holds). Keyed off the
-        # persisted target, so it is correct even after a daemon restart.
-        with contextlib.suppress(Exception):
-            claim_key = _codespace_claim_key(session.target)
-            if claim_key is not None:
-                core = _core()
-                core._release_codespace_claim(*claim_key)
         # codespace-venue-pool Phase 2b: same release, container-keyed.
         with contextlib.suppress(Exception):
             claim_key = _container_claim_key(session.target)

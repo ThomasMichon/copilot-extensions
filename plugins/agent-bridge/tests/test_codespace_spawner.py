@@ -468,7 +468,7 @@ async def test_cancellation_after_submission_requires_confirmed_identity_cleanup
     monkeypatch.setattr(owner, "_poll_state", poll)
 
     async def start():
-        with codespace_launch_ownership(
+        async with codespace_launch_ownership(
             session_manager, "cancelled", {"name": "synthetic"}, "/task/owner", core,
             retain_on_error=retain_on_error,
         ) as enter_connect:
