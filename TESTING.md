@@ -738,10 +738,19 @@ the successful first caller has removed its acquisition checkout, then runs the
 canonical executor and verifies retained process-utility imports and both results.
 Its second request uses the actual detached bootstrap to acquire changed SDK
 inputs while the first worker continues from its original retained controller.
+It observes committed admission for up to 60 seconds before its unchanged
+20-second suite-start observation, within the original case and job limits.
+The second detached caller also has a 60-second exit wait; consumer waits and
+the case and job limits remain unchanged.
 A separate inherited-anchor case distinguishes the configured relative source
 from an equally named repository under the shell's working directory.
 Its caller wait allows 60 seconds within the unchanged 90-second case and
 five-minute job limits; production timeouts remain unchanged.
+Actual installed-CLI admission and queue draining separately preserve a
+caller-relative active hold across differing source/worker directories, allowing
+manual work while inhibiting automatic work. Real directory-link-plus-parent
+anchors qualify filesystem normalization where supported; unavailable native
+Windows symlinks are explicit skips, not passes.
 Authentication inspection retains valid caller-stdout JSON without
 installation, and request controls preserve an interrupted fence until explicit
 recovery outside the install transaction. A POSIX-only non-update entry resolves source dependencies without creating a

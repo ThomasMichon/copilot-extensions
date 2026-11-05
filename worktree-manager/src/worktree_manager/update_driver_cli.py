@@ -172,7 +172,7 @@ def request_source_anchor() -> str:
     anchor = os.environ.get(SOURCE_ANCHOR_ENV) or str(Path.cwd().resolve())
     if not Path(anchor).is_absolute():
         raise ValueError("update request source anchor must be absolute")
-    return anchor
+    return str(Path(anchor).resolve())
 
 
 @contextmanager
@@ -394,6 +394,8 @@ def cmd_update_request(rest: list[str]) -> int:
         _update_context_directory(context)
         cwd = Path.cwd().resolve()
         source_anchor = request_source_anchor()
+        hold_override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
+        hold_path = os.path.abspath(os.path.expanduser(hold_override)) if hold_override else ""
         arguments = list(forwarded)
         budget = options.engine_acquisition_timeout
         if budget is None and options.target is None:
@@ -405,6 +407,7 @@ def cmd_update_request(rest: list[str]) -> int:
             backend="manager", argv=tuple(arguments), project=project or "",
             cwd=source_anchor, source=_source_key(), context=tuple(context.items()),
             repair=not options.auto,
+            killswitch_path=hold_path,
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(

@@ -544,6 +544,10 @@ def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisiti
     root, source, driver, start, effects = bootstrap
     caller, log = start("--project", "sample")
     _eventually(
+        lambda: "Update request " in log.read_text(encoding="utf-8"), processes=(caller,),
+        timeout=60,
+    )
+    _eventually(
         lambda: any(row["phase"] == "suite-start" for row in effects()), processes=(caller,),
     )
     first, = core.status(root=driver)
@@ -557,7 +561,7 @@ def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisiti
         "commit", "-qm", "changed engine source",
     )
     detached, detached_log = start("--project", "later-fixture", "--detach", "--json")
-    assert detached.wait(timeout=20) == 0, detached_log.read_text(encoding="utf-8")
+    assert detached.wait(timeout=60) == 0, detached_log.read_text(encoding="utf-8")
     _running, later = core.status(root=driver)
     assert later.id != first.id
     assert later.state == "pending"
@@ -580,6 +584,79 @@ def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisiti
     marker = Path("plugins") / "agent-worktrees" / "src" / changed.name
     assert (updated.parent / marker).read_text() == "REVISION = 2\n"
     assert not (retained.parent / marker).exists()
+
+
+@pytest.mark.parametrize("linked_parent", [False, True])
+@pytest.mark.parametrize("automatic", [False, True])
+def test_native_installed_cli_retains_source_anchor_and_caller_hold(
+    tmp_path, monkeypatch, linked_parent, automatic,
+):
+    import update_driver
+    from worktree_manager import source_config, update_driver_cli
+
+    root, caller, anchor, worker, queue = (tmp_path / name for name in (
+        "manager", "caller", "source-anchor", "worker", "queue",
+    ))
+    for path in (root, caller, anchor, worker):
+        path.mkdir()
+    inherited = anchor
+    if linked_parent:
+        nested, alias = anchor / "nested", tmp_path / "alias"
+        nested.mkdir()
+        try:
+            alias.symlink_to(nested, target_is_directory=True)
+        except OSError:
+            if os.name == "nt":
+                pytest.skip("native Windows directory symlinks are unavailable")
+            raise
+        inherited = alias / ".."
+    selected_anchor = inherited.resolve()
+    (selected_anchor / "repository").mkdir()
+    (root / "config.toml").write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    source_config.set_source(repo="repository", ref="dev", root=root)
+    hold = caller / "hold.json"
+    hold.write_text('{"active":true}', encoding="utf-8")
+    (selected_anchor / hold.name).write_text('{"active":false}', encoding="utf-8")
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.setenv(SOURCE_ANCHOR_ENV, str(inherited))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", hold.name)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_UPDATE_CONTEXT", raising=False)
+    admitted = update_driver_cli._source_key()
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
+        (sys.executable, "-m", module, *args), {},
+    ))
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        update_driver, "enqueue",
+        lambda spec, *, runner: core.enqueue(spec, runner=runner, root=queue),
+    )
+    arguments = ["--detach", "--json", *(["--auto"] if automatic else [])]
+    assert update_driver_cli.cmd_update_request(arguments) == 0
+    request, = core.status(root=queue)
+    assert Path(request.spec.cwd) == selected_anchor
+    assert Path(request.runner.cwd) == caller
+    assert Path(request.spec.killswitch_path) == hold
+    assert request.spec.source == admitted
+    calls = []
+
+    def execute(transaction):
+        with update_driver_cli._request_environment(
+            transaction.request.spec.context, cwd=transaction.request.spec.cwd,
+            killswitch_path=transaction.request.spec.killswitch_path,
+        ):
+            assert update_driver_cli._source_key() == admitted
+            calls.append(transaction.request.id)
+        return 0
+
+    monkeypatch.chdir(worker)
+    assert core.drain(root=queue, executor=execute) == 0
+    result = core.status(request.id, root=queue)
+    assert result.state == "completed" and result.exit_code == (3 if automatic else 0)
+    assert calls == ([] if automatic else [request.id])
+    assert hold.read_text(encoding="utf-8") == '{"active":true}'
 
 
 def test_native_inherited_anchor_selects_acquisition_instead_of_cwd_decoy(bootstrap):

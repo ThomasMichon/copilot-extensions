@@ -2122,9 +2122,11 @@ write an Autorun entry, require an open Picker or create another scheduler.
 Unattended credential prompts are disabled; authentication failures remain
 observable. A direct Manager request retains its configured source identity
 and refuses a changed source selection at execution rather than silently
-substituting it. Relative filesystem sources retain their effective inherited
+substituting it. Relative filesystem sources retain their resolved inherited
 source anchor, or otherwise their submitting directory, for validation and
 acquisition. This anchor is separate from the runner's working directory.
+Relative hold-file overrides remain anchored to the actual submitting directory,
+not the source anchor.
 Bootstrap workers still run from the retained controller, so the submitting
 directory need not remain present unless it is also an explicitly required
 invocation context.
