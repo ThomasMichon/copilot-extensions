@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed plan and source PRs against `dev`
 - **Created:** 2026-11-05
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `agent-fabric` / `discover-before-duplicate`, `recover-not-lose`,
   `single-current-session-per-worktree`; `installer` / authoritative runtime replacement
 - **Umbrella issue:** #10657
@@ -73,15 +73,15 @@ window, shutdown policy and recovery custody.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Land this proposal through normal review before implementation.
-- [ ] Confirm package constraint compatibility and existing launch intent callers.
+- [x] Land this proposal through normal review before implementation.
+- [x] Confirm package constraint compatibility and existing launch intent callers.
 
 ### Phase 2 - Compatible package admission
 
-- [ ] Add a minimum-plus-denylist package contract that preserves acceptable
+- [x] Add a minimum-plus-denylist package contract that preserves acceptable
   installed versions, rejects unknown/incompatible results, retains exact pins,
   and never bypasses process guards.
-- [ ] Keep old engines from silently ignoring a new compatibility declaration;
+- [x] Keep old engines from silently ignoring a new compatibility declaration;
   document manifest compatibility and contributor merge behavior.
 - [ ] Publish focused validation and land the package source change.
 
@@ -112,9 +112,9 @@ window, shutdown policy and recovery custody.
 
 ## Validation Plan
 
-- [ ] Package cases cover floor, denylist, newer/future versions, malformed or
+- [x] Package cases cover floor, denylist, newer/future versions, malformed or
   missing live versions, exact-pin compatibility, conflicts and process deferral.
-- [ ] Exercise the real package resource/CLI consumer with synthetic package-manager
+- [x] Exercise the real package resource/CLI consumer with synthetic package-manager
   responses; no actual host package installation or removal.
 - [ ] Launch cases cover existing head with/without seed, explicit fresh,
   new worktree, explicit resume arguments, already-live targets and unknown liveness.
@@ -196,3 +196,17 @@ claims, and recover partial/unknown results without blindly replaying actions.
   mixed-version/rollback tests, provider-first package schema fence and
   documentation/contract impact assessments. Preserved the independently
   updated effort-index entry during rebase.
+- Plan #10659 received an approving review and merged with green required CI.
+  Continued in the same source workspace after dropping only the confirmed
+  squash-merged planning commits. Package baseline: 185 passed; launch baseline:
+  107 passed through the contained repository runner.
+- Implemented schema-5 numeric floors, accumulated release exclusions and
+  explicit scoped WinGet pin removal, preserving compatible installed versions
+  and all existing process/maintenance gates. Legacy schemas remain readable.
+  The package handler also refuses an unsatisfiable merged exact pin before
+  probing or mutating through direct resource application.
+- Package validation: 333 passed before the final direct-conflict regression;
+  includes a real isolated package-manager shim lookup/upgrade/idempotence
+  witness. Lint, module-size, install-contract and docs-consistency checks passed.
+  Real host package replacement and full fresh-machine provisioning are not
+  authorized by this source scope; those installed lanes remain unexercised.

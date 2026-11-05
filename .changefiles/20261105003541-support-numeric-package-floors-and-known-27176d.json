@@ -1,0 +1,9 @@
+{
+  "comment": "Support numeric package floors and known-bad exclusions without replacing compatible versions; explicitly migrate obsolete WinGet pins.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

@@ -77,6 +77,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from .authority import contributor, effective_authority, sort_decisions
+from . import package_versions
 from .registry_values import parse_reg_query as _parse_reg_query, registry_values_equal
 from .resource_file_ownership import (
     conflicting_git_config_files,
@@ -163,6 +164,10 @@ class ResolvedResource:
         if self.type == "package":
             state = self.desired.get("state", "present")
             ver = self.desired.get("version")
+            minimum = self.desired.get("minimum_version")
+            if minimum:
+                blocked = self.desired.get("blocked_versions", [])
+                return f"{state}>={minimum}" + (f" except {', '.join(blocked)}" if blocked else "")
             pinned = " pinned" if self.desired.get("pin") else ""
             return f"{state}{('@' + ver) if ver else ''}{pinned}"
         if self.type == "file":
@@ -451,68 +456,7 @@ class PackageResourceHandler(ResourceHandler):
     def merge(
         self, members: list[ResourceContribution]
     ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
-        findings: list[ResourceFinding] = []
-        decisions: list[dict[str, Any]] = []
-        decls = [member.declaration for member in members]
-        ident = self.identity(decls[0])
-        state, selected, _, conflict, decision, info = _select_field(
-            members,
-            ident,
-            "state",
-            lambda member: str(member.declaration.get("state", "present")),
-        )
-        if conflict:
-            findings.append(
-                ResourceFinding(
-                    "error",
-                    "resource-conflict",
-                    f"package '{ident[2]}' ({ident[1]}) is declared both present and "
-                    f"absent across packages: "
-                    f"{', '.join(sorted(member.owner for member in selected))}.",
-                )
-            )
-        if decision:
-            decisions.append(decision)
-            findings.append(info)
-        version, selected, _, conflict, decision, info = _select_field(
-            members,
-            ident,
-            "version",
-            lambda member: str(member.declaration["version"]),
-            include=lambda member: bool(member.declaration.get("version")),
-        )
-        if conflict:
-            versions = sorted({str(member.declaration["version"]) for member in selected})
-            findings.append(
-                ResourceFinding(
-                    "error",
-                    "resource-conflict",
-                    f"package '{ident[2]}' ({ident[1]}) is pinned to conflicting "
-                    f"versions {versions} across packages: "
-                    f"{', '.join(sorted(member.owner for member in selected))}.",
-                )
-            )
-        if decision:
-            decisions.append(decision)
-            findings.append(info)
-        pin = any(bool(d.get("pin")) for d in decls)
-        guard_names = sorted(
-            {
-                str(name).strip().casefold()
-                for d in decls
-                for name in (d.get("process_guard") or {}).get("names", [])
-            }
-        )
-        desired = {
-            "manager": ident[1],
-            "id": ident[2],
-            "state": state,
-            "version": version,
-            "pin": pin,
-            "maintenance_safe": any(bool(d.get("maintenance_safe")) for d in decls),
-            "process_guard": {"names": guard_names} if guard_names else None,
-        }
-        return desired, findings, decisions
+        return package_versions.merge(members, self.identity(members[0].declaration))
 
     # -- detect / apply -----------------------------------------------------
     def _detect(self, ctx: ResourceContext, mgr: dict, pkg_id: str) -> dict[str, Any]:
@@ -550,6 +494,14 @@ class PackageResourceHandler(ResourceHandler):
             and (not version or live.get("version") == version)
         )
 
+    def _matches_package(self, live: dict[str, Any], desired: dict[str, Any]) -> bool:
+        if not self._matches_desired(live, desired.get("version")):
+            return False
+        minimum = desired.get("minimum_version")
+        return not minimum or package_versions.compatible(
+            live.get("version"), minimum, desired.get("blocked_versions", []),
+        )
+
     def maintenance_safe_decision(
         self, resolved: ResolvedResource, ctx: ResourceContext
     ) -> tuple[bool, str | None]:
@@ -571,8 +523,11 @@ class PackageResourceHandler(ResourceHandler):
             verb = "uninstall"
         elif not live.get("present"):
             verb = "install"
-        elif version and live.get("version") != version:
+        elif not self._matches_package(live, d):
             verb = "mutate"
+        elif d.get("unpin") and mgr.get("unpin"):
+            pin = self._detect_pin(ctx, mgr, pkg_id)
+            verb = "mutate" if not pin.get("known", True) or pin["present"] else ""
         elif d.get("pin") and mgr.get("pin"):
             pin = self._detect_pin(ctx, mgr, pkg_id)
             if not self._matches_desired(pin, version):
@@ -657,6 +612,11 @@ class PackageResourceHandler(ResourceHandler):
                 skipped_reason=f"manager binary '{mgr['bin']}' not on PATH",
             )
 
+        if package_versions.conflicts(d):
+            return ResourceResult(
+                self.TYPE, pkg_id, False, dry_run, "blocked",
+                blocked_reason="exact pin conflicts with package compatibility constraints",
+            )
         live = self._detect(ctx, mgr, pkg_id)
         ver = d.get("version")
         want_absent = d.get("state") == "absent"
@@ -677,6 +637,18 @@ class PackageResourceHandler(ResourceHandler):
                 ),
             )
 
+        if not want_absent and d.get("minimum_version"):
+            if not live.get("known", True):
+                return ResourceResult(
+                    self.TYPE, pkg_id, False, dry_run, "defer",
+                    deferred_reason="package compatibility cannot be established: installed state is unknown",
+                )
+            if live["present"] and package_versions.version_parts(live.get("version")) is None:
+                return ResourceResult(
+                    self.TYPE, pkg_id, False, dry_run, "blocked",
+                    blocked_reason="package compatibility cannot be established: installed version is not numeric",
+                )
+
         if want_absent:
             if not live["present"]:
                 return ResourceResult(
@@ -686,7 +658,10 @@ class PackageResourceHandler(ResourceHandler):
             action = "uninstall"
         else:
             needs_install = not live["present"]
-            needs_update = bool(live["present"] and ver and live.get("version") != ver)
+            needs_update = bool(
+                live["present"] and (ver or d.get("minimum_version"))
+                and not self._matches_package(live, d)
+            )
             if needs_install:
                 commands.append(mgr["install"](pkg_id, ver))
             elif needs_update:
@@ -695,6 +670,20 @@ class PackageResourceHandler(ResourceHandler):
                 pin = self._detect_pin(ctx, mgr, pkg_id)
                 if not self._matches_desired(pin, ver):
                     commands.append(mgr["pin"](pkg_id, ver))
+            elif d.get("unpin"):
+                if not mgr.get("unpin"):
+                    return ResourceResult(
+                        self.TYPE, pkg_id, False, dry_run, "blocked",
+                        blocked_reason=f"pin removal is not supported for manager '{manager}'",
+                    )
+                pin = self._detect_pin(ctx, mgr, pkg_id)
+                if not pin.get("known", True):
+                    return ResourceResult(
+                        self.TYPE, pkg_id, False, dry_run, "defer",
+                        deferred_reason="package pin state is unknown",
+                    )
+                if pin["present"]:
+                    commands.insert(0, mgr["unpin"](pkg_id))
             if not commands:
                 return ResourceResult(
                     self.TYPE,
@@ -702,9 +691,15 @@ class PackageResourceHandler(ResourceHandler):
                     False,
                     dry_run,
                     "none",
-                    detail=f"present{('@' + ver) if ver else ''}",
+                    detail=(
+                        f"present@{live.get('version')} (compatible)"
+                        if d.get("minimum_version")
+                        else f"present{('@' + ver) if ver else ''}"
+                    ),
                 )
-            action = "install" if needs_install else ("update" if needs_update else "pin")
+            action = "install" if needs_install else (
+                "update" if needs_update else ("unpin" if d.get("unpin") else "pin")
+            )
 
         guarded_replacement = action in {"update", "uninstall"}
         if guarded_replacement and guard.get("names"):
@@ -751,8 +746,11 @@ class PackageResourceHandler(ResourceHandler):
                 )
                 satisfied = (
                     bool(postcondition.get("known", True) and not postcondition["present"])
-                    if operation == "uninstall"
-                    else self._matches_desired(postcondition, ver)
+                    if operation == "uninstall" or (operation == "pin" and argv[2] == "remove")
+                    else (
+                        self._matches_desired(postcondition, ver)
+                        if operation == "pin" else self._matches_package(postcondition, d)
+                    )
                 )
                 if satisfied:
                     if out.returncode != 0:
@@ -761,7 +759,11 @@ class PackageResourceHandler(ResourceHandler):
                 command_detail = (
                     f"exited {out.returncode}: {(out.stderr or out.stdout).strip()[:200]}"
                     if out.returncode != 0
-                    else "completed without satisfying the exact postcondition"
+                    else (
+                        "completed without satisfying the compatibility postcondition"
+                        if d.get("minimum_version")
+                        else "completed without satisfying the exact postcondition"
+                    )
                 )
                 return ResourceResult(
                     self.TYPE,
@@ -784,6 +786,12 @@ class PackageResourceHandler(ResourceHandler):
                     f"{(out.stderr or out.stdout).strip()[:200]}",
                 )
         detail = "applied"
+        if d.get("minimum_version") and manager != "winget" and not want_absent:
+            if not self._matches_package(self._detect(ctx, mgr, pkg_id), d):
+                return ResourceResult(
+                    self.TYPE, pkg_id, True, False, "error", commands=commands,
+                    detail="package operation did not satisfy compatibility constraints",
+                )
         if verified_nonzero:
             detail += f" (verified {' and '.join(verified_nonzero)} postcondition)"
         return ResourceResult(
@@ -1771,6 +1779,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
             *(["--version", v] if v else []),
             "--force",
         ],
+        "unpin": lambda i: ["winget", "pin", "remove", "--id", i, "--exact"],
         "uninstall": lambda i, v: ["winget", "uninstall", "--id", i, "--exact"],
     },
     "apt": {
