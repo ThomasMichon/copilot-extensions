@@ -252,6 +252,23 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The eleven-contract checkpoint is actually delivered in #10715 after genuine
+exact-head approval, no active findings, all eight resolved threads and nine
+complete successful/skipped checks before normal managed merge.
+All eight actual merged/current blobs equal the approved head.
+Only the reused publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-native-identity-transaction-contracts.md>)
+records all eight valuable source-faithfulness corrections.
+The parent Plan and Validation remain open, not completed by that PR.
+Two equal complete 05:08 PST metadata-only scans show 1,009 whole open:
+734 creator-eligible, 275 excluded, 672 original-cohort and 337 inflow.
+The separately audited finite #8876 closure is the only departure; there
+are no arrivals or unrelated departures. Verified dispositions are 778
+and the parent stays Active, 280 issues above the fixed whole-queue 729.
+Six following contracts/eighteen comparisons and a further nine-contract
+study are integrated for reviewed publication, not accepted transfers.
+Protected whole evidence and all source/resource custodians remain.
+
 The eight-contract checkpoint is actually delivered in #10713 after genuine
 exact-head approval, no active findings, both resolved threads and successful
 required CI before normal managed merge.
@@ -268,6 +285,13 @@ contracts/eighteen comparisons are integrated for reviewed publication.
 Nine further admitted originals have been read whole; their ranked evidence
 comparison is not yet a published or completed outcome.
 Protected whole evidence and all source/resource custodians remain.
+
+The [six release/stamp/inventory contracts](finite-release-stamp-inventory-contracts.md)
+retain 27 whole texts and eighteen ranked relationships.
+All six admitted originals stay OPEN; exact released-model, real stamp,
+affected-feed, anchor, trusted-gate and production-wave outcomes remain.
+The [journal](<journal/2026/11.05 finite-release-stamp-inventory-contracts.md>)
+credits actual partials and preserves protected/changed-closed exclusions.
 
 The [eleven native/identity/transaction contracts](finite-native-identity-transaction-contracts.md)
 retain 38 whole texts and thirty-three ranked relationships.
@@ -1858,6 +1882,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [release/stamp/inventory study](finite-release-stamp-inventory-contracts.md)
+separates fourteen whole-message, one protected-message, one fresh
+whole-description, one reused whole-description and one protected relation.
+Passed calendar dates, a prospective merge, source-only foundations and
+unrelated green checks do not substitute for the original finite acceptance.
+Five protected originals and one changed-closed identity add no completion credit.
 
 The [native/identity/transaction study](finite-native-identity-transaction-contracts.md)
 separates nineteen whole-message, four protected-message, three fresh
