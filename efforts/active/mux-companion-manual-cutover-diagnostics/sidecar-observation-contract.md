@@ -301,6 +301,11 @@ per-entry answerability fields remain unknown; retained events do not establish
 current waiters. Unsupported sources retain the original observation/history
 path with explicit unknown live input.
 
+#10595 qualifies the supported private three-owner/selected-session join during
+blocked backward paging, live updates and actual waiter clearing, plus
+hide/head-loss retirement and explicit retention-gap/Refresh recovery. It does
+not extend source coverage, installed support or native-client qualification.
+
 ## Pre-compaction evidence and viewer policy
 
 Current usage translation alone is insufficient. A qualified producer record

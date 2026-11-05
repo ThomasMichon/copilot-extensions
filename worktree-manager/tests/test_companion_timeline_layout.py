@@ -1,11 +1,18 @@
 """Pure line-index geometry without Textual renderable materialization."""
 
-from rich.cells import cell_len
+from dataclasses import replace
+from datetime import datetime, timezone
 
-from worktree_manager.companion_timeline_contract import MAX_DETAIL_LINES, ViewportAnchor
+from rich.cells import cell_len
+import pytest
+
+from worktree_manager.companion_timeline_contract import (
+    EventRef, LiveDelta, MAX_DETAIL_LINES, Qualification, RelationKind,
+    TimelineRelation, ViewportAnchor,
+)
 from worktree_manager.companion_timeline_layout import TimelineLayout, wrap_lines
 from worktree_manager.companion_timeline_model import TimelineWindow
-from _companion_timeline_fixtures import event, snapshot, token
+from _companion_timeline_fixtures import event, position, snapshot, token
 
 
 def test_wide_combining_and_literal_controls_wrap_by_cells():
@@ -70,3 +77,71 @@ def test_wrapped_character_anchor_preserves_the_exact_row_until_width_changes():
     assert restored is not None
     recovered = layout.row(restored, model)
     assert recovered is not None and recovered.character_offset <= row.character_offset
+
+
+def test_live_append_reuses_unchanged_geometry_without_revalidating_immutable_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = tuple(event(source, number, actor="same-actor") for number in range(64))
+    model.apply_snapshot(snapshot(source, rows))
+    layout = TimelineLayout()
+    layout.rebuild(model, 80)
+    incoming = event(source, 64, actor="same-actor")
+    assert model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-1"), (incoming,),
+    )).applied
+    counts = {"wraps": 0, "references": 0}
+    original_count, original_reference = TimelineLayout._count, EventRef.__post_init__
+
+    def count(text: str, width: int, limit: int) -> tuple[int, bool]:
+        counts["wraps"] += 1
+        return original_count(text, width, limit)
+
+    def reference(value: EventRef) -> None:
+        counts["references"] += 1
+        original_reference(value)
+
+    monkeypatch.setattr(TimelineLayout, "_count", staticmethod(count))
+    monkeypatch.setattr(EventRef, "__post_init__", reference)
+    layout.rebuild(model, 80)
+    assert counts == {"wraps": 1, "references": 0}
+    counts["wraps"] = 0
+    layout.rebuild(model, 80)
+    for index in range(min(12, layout.height)):
+        assert layout.row(index, model) is not None
+    assert counts == {"wraps": 0, "references": 0}
+    layout.rebuild(model, 80, now=datetime(2026, 1, 2, tzinfo=timezone.utc))
+    assert counts["wraps"] == len(model.events)
+    counts["wraps"] = 0
+    layout.rebuild(model, 40, now=datetime(2026, 1, 2, tzinfo=timezone.utc))
+    assert counts == {"wraps": len(model.events), "references": 0}
+
+
+def test_reused_geometry_updates_expansion_and_newly_loaded_relationship_details() -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    parent = event(source, 0)
+    model.apply_snapshot(snapshot(source, (parent,)))
+    layout = TimelineLayout()
+    layout.rebuild(model, 80)
+    model.toggle_expansion(parent.ref)
+    layout.rebuild(model, 80)
+    original = layout._refs[parent.ref]
+    assert original.detail_rows > 0 and "Linked child event" not in original.detail_text
+    child = replace(event(source, 1), relations=(
+        TimelineRelation(RelationKind.PARENT, Qualification.REPORTED, parent.ref),
+    ))
+    assert model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-1"), (child,),
+    )).applied
+    layout.rebuild(model, 80)
+    assert "Linked child event" in layout._refs[parent.ref].detail_text
+    assert child.event_id in layout._refs[parent.ref].detail_text
+    model.toggle_expansion(parent.ref)
+    layout.rebuild(model, 80)
+    assert layout._refs[parent.ref].detail_rows == 0
+    assert layout._refs[parent.ref].detail_text == ""

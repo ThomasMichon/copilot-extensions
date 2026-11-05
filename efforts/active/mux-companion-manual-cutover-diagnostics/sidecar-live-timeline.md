@@ -123,6 +123,13 @@ CLI and actual Manager display. The [source readback](journal/2026/11.04-sidecar
 retains qualified PRE, complete source coverage, joined/native/performance and
 every original parent gate.
 
+#10595 merged as `71d213e1964dbea3ce0f8f161520a4734b75fe2c`, qualifying
+supported private-source browsing, blocked history/live overlap, actual waiter
+clearing, gap recovery and observer retirement on the joined app. The
+[source readback](journal/2026/11.04-sidecar-joined-lifecycle.md) preserves
+complete source coverage, qualified PRE, installed/native/performance and
+every original parent gate.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -449,15 +456,15 @@ publication and installed support retain their separate qualification.
   committed agenda update and an owner-linked Bridge child on the real widget.
   #10392 qualifies this isolated source join; the Bridge carrier/root binding
   are fixture substitutions, not installed or native-client qualification.
-- [ ] Demonstrate older-page prepend and live append while browsing, current
+- [x] Demonstrate older-page prepend and live append while browsing, current
   head changes, reconnection/gaps and complete observer cancellation.
   The opt-in `test_companion_joined_lifecycle.py` source packet now exercises
   the private three-owner/selected-session join with a blocked backward page,
   live events, committed purpose/agenda updates and actual waiter clearing.
   It checks retained viewport/selection/focus, hide/head-loss cancellation,
-  an expired actual page boundary and explicit Refresh recovery. Publication,
-  current-head review and required CI remain pending; this does not qualify
-  an installed runtime or native mux client.
+  an expired actual page boundary and explicit Refresh recovery. #10595 merged
+  after current-head independent approval and required green CI; this closes
+  the supported private-source demonstration, not installed or native acceptance.
 - [ ] Drive every source PR through current-head review, required CI and actual
   merge; reread the entire parent gate and journal the exact closed items.
 
@@ -497,6 +504,13 @@ publication and installed support retain their separate qualification.
 - [ ] Enforce the resource limits in the contract structurally; exercise a long
   logical history without materializing it all. Report repaint/CPU/RSS benchmarks
   separately from deterministic CI correctness.
+  The opt-in `test_companion_timeline_scale.py` source packet now selects 5,000
+  rows from a synthetic 1,000,000-event logical source, checks bounded real
+  Textual paint/update/resize behavior and retains separate raw paint and
+  delta-to-Pilot-idle samples. Repeated immutable-reference validation and
+  unchanged text wrapping are removed from the hot path. Source publication
+  and review remain pending; native-frame, installed and tail qualification
+  remain separate.
 - [x] At configured 65: 28, 35 and 64.99 are premature; 65 and 75 are not by this
   rule. Test rounding traps, invalid/bool/zero capacity, absent/stale/estimated/
   wrong-session/uncorrelated/model-only/post-only samples and context replacement.

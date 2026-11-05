@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse bounded timeline geometry and immutable references; preserve upward wheel history intent on short views.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

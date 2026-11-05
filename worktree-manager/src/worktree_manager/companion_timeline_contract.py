@@ -331,6 +331,7 @@ class TimelineEvent:
     durability: Durability = Durability.UNKNOWN
     data_json: str | None = None
     _encoded_size: int = field(init=False, repr=False, compare=False)
+    _ref: EventRef = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, SourceIdentity) or not isinstance(self.position, SourcePosition) or not self.position.matches(self.source):
@@ -353,10 +354,13 @@ class TimelineEvent:
         if size > MAX_WINDOW_BYTES:
             raise TimelineContractError("event exceeds its display-window bound")
         object.__setattr__(self, "_encoded_size", size)
+        object.__setattr__(self, "_ref", EventRef(
+            self.source.source_key, self.source.generation, self.event_id,
+        ))
 
     @property
     def ref(self) -> EventRef:
-        return EventRef(self.source.source_key, self.source.generation, self.event_id)
+        return self._ref
 
     @property
     def encoded_size(self) -> int:
