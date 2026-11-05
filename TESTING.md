@@ -118,7 +118,7 @@ The optional `installation-context-acceptance.yml` selector `pr_artifacts=true`
 also runs Fleet's `test_gateway_host_distribution.py` packet on native Linux
 and Windows. It builds a noneditable selected-Gateway application from actual
 first-party wheels and an offline fixture of installed dependency bytes, then
-exercises stage, a known no-child log refusal and retry, first install,
+exercises stage, known no-child and post-creation listener refusals with retry, first install,
 source-independent repeat, failed candidate
 preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot

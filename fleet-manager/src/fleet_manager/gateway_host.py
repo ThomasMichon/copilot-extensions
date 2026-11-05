@@ -158,15 +158,25 @@ def write_private(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _listener(selection: dict):
+    from .gateway_service_listener import Listener
+
+    path = Path(selection["tls"])
+    read_private_file(path, MAX_BYTES)
+    listener = Listener.load(path)
+    for value in (listener.certificate, listener.key):
+        if not isinstance(value, str) or not Path(value).is_absolute() or ".." in Path(value).parts:
+            raise PlanError("Gateway host TLS references require absolute ordinary paths")
+    return listener
+
+
 def prepare(root: Path, selection: dict) -> tuple[object, object]:
     from .gateway_enrollment import EnrollmentPolicy
-    from .gateway_service_listener import Listener
     from .ledger import OperationLedger
 
-    policy_path, tls_path, journal_path = (Path(selection[key]) for key in ("policy", "tls", "journal"))
+    policy_path, journal_path = (Path(selection[key]) for key in ("policy", "journal"))
     policy = decode(read_private_file(policy_path, MAX_BYTES))
-    read_private_file(tls_path, MAX_BYTES)
-    listener = Listener.load(tls_path)
+    listener = _listener(selection)
     if listener.port == 0:
         raise PlanError("Installed Gateway hosting requires a non-ephemeral listener")
     read_private_file(Path(listener.key), MAX_BYTES)
@@ -248,12 +258,10 @@ def selection_digest(selection: dict) -> str:
 
 
 def startup_digest(selection: dict, *, listener=None) -> str:
-    from .gateway_service_listener import Listener, read_bounded
+    from .gateway_service_listener import read_bounded
 
     if listener is None:
-        path = Path(selection["tls"])
-        read_private_file(path, MAX_BYTES)
-        listener = Listener.load(path)
+        listener = _listener(selection)
     return digest({
         "listener": asdict(listener),
         "certificate": hashlib.sha256(read_bounded(Path(listener.certificate))).hexdigest(),

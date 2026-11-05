@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import sys
 import time
 import zipfile
@@ -236,6 +237,14 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(tmp_pat
         assert not (root / host.STATE / "launch.json").exists()
         assert not (root / host.STATE / host.RUNTIME).exists()
         refused_log.rmdir()
+        listener = json.loads(Path(selection["tls"]).read_bytes())
+        with socket.socket() as occupied:
+            occupied.bind((listener["host"], listener["port"]))
+            occupied.listen(1)
+            failed_start = invoke(first, "install")
+            assert failed_start.returncode != 0
+            assert not (root / host.STATE / "launch.json").exists()
+            assert not (root / host.STATE / host.RUNTIME).exists()
         installed = invoke(first, "install")
         if installed.returncode:
             diagnostic = run([

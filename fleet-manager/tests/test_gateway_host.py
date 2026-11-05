@@ -121,6 +121,26 @@ def test_host_preflight_uses_existing_enrollment_journal_without_publishing_a_fl
         assert connection.execute("SELECT count(*) FROM operations").fetchone() == (0,)
 
 
+@pytest.mark.parametrize("reference", ["certificate", "key"])
+def test_host_preflight_refuses_cwd_dependent_tls_before_state_creation(tmp_path, monkeypatch, reference):
+    from fleet_manager.planning import decode
+
+    root = tmp_path / "i"
+    selection = selected(root)
+    path = Path(selection["tls"])
+    listener = decode(path.read_bytes())
+    listener[reference] = Path(listener[reference]).name
+    host.write_private(path, listener)
+    monkeypatch.chdir(root)
+    assert Path(listener[reference]).is_file()
+    with pytest.raises(PlanError, match="TLS references require absolute ordinary paths"):
+        host.prepare(root, selection)
+    with pytest.raises(PlanError, match="TLS references require absolute ordinary paths"):
+        host.startup_digest(selection)
+    assert not Path(selection["journal"]).exists()
+    assert not (root / host.STATE).exists()
+
+
 def test_candidate_preflight_refuses_prior_policy_without_republishing_or_enrolling(tmp_path):
     from fleet_manager.gateway_service_policy import ServiceAuthority
     from fleet_manager.planning import decode

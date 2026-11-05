@@ -41,7 +41,10 @@ physical installation root (`FLEET_MANAGER_HOME` when explicitly configured):
 ```
 
 These are references, not embedded credentials. Listener, policy and private-key
-custody are checked before startup. The policy must use the existing
+custody are checked before startup. The listener's certificate and key references must
+also be absolute; installed hosting never resolves them against an installer's
+working directory or the resident's different working directory.
+The policy must use the existing
 `fleet-manager.gateway-enrollment-policy` contract; the original operation
 journal retains its accepted policy floor across restart. Preflight checks that
 floor without publishing a new policy or enrolling a machine. An absent,
@@ -124,8 +127,8 @@ private references, the existing durable policy floor and the actual TLS/control
 consumer. The opt-in `test_gateway_host_distribution.py` packet constructs a
 noneditable application from real first-party wheels and a fixture closure of
 installed external dependency bytes. It exercises the original application
-installer, definite no-child launch failure and retry, source-independent
-execution, unchanged repeat, failed candidate
+installer, definite no-child and post-creation listener failures with retry,
+source-independent execution, unchanged repeat, failed candidate
 preflight, a distinct updated profile generation and exact native stop. That fixture is
 not release-feed acquisition, provider authentication, deployment or fleet
 adoption evidence.
