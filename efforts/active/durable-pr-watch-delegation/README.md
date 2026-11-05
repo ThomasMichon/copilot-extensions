@@ -941,6 +941,17 @@ callback an implicit credential store.
   cleanup verified. Strict service typing passes Linux and Windows analysis.
   Actual process boundaries and the default installed TLS/PoP fixture retain
   synthetic provider inputs; they do not qualify a live native/provider host.
+- Review of #10609 identified nested credential-scope and POSIX cleanup-retry
+  gaps. The repair stays at the canonical owners: exporter capability-negotiated
+  enclosing-scope credential execution, and complete retained process/stream
+  retries with the original caller's settlement callback. Actual credential
+  timeout controls pin all descendants and require exit before the native
+  operation returns; no writer release is inferred from a killed exporter.
+- After that repair, 166 native/workspace/journal/lifecycle, 118 canonical
+  process-owner (five platform skips), 76 exporter/credential and 63 standalone
+  cases pass. Bounded cleanup is verified; strict Python 3.10 service analysis
+  passes Linux and Windows. This is not a Windows native execution or deployed
+  provider qualification.
 - These controls close a source prerequisite, not the full P1/P2/P3 gate.
   Shared selection/IO, durable attention/handled semantics, coordinated
   retention, three-provider qualification, installed adoption, container and

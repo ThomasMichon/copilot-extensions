@@ -193,6 +193,10 @@ Missing/incompatible support makes this optional read unavailable, not a
 fallback or a reason to disable legacy watches. Acquisition stays
 `configured_native_provider`, separately advertised as `read_acquisition`;
 it is never relabeled `owner_executed_review_evidence/v1`.
+The selected exporter must additionally advertise `enclosing_scope_credentials`.
+The host selects its contained-worker form so credential children remain in the
+same actually confirmed native scope, not a nested independent POSIX session
+whose caller-exit watcher might finish after Gateway drain.
 
 The existing authenticated `/v2/review/<target>/...` route provides load, sync,
 lookup/chunk materialization, inspect and body-free conversation events. No
@@ -222,6 +226,9 @@ Cache publication and journal commit remain separate: after an ambiguous error,
 lookup/materialize the retained generation and read the journal's existing
 cursor before deciding what remains. Neither a cache conflict nor a lost
 response authorizes an automatic re-read or a new operation identity.
+Canonical POSIX cleanup errors retain an identity-safe retry over the original
+unreaped leader and remaining streams; retry never rediscovers a process by PID
+after reaping or delivers settlement before complete cleanup.
 
 Focused source tests exercise real native/exporter/credential processes and
 the existing Gateway/disk boundary using synthetic provider inputs. Those are

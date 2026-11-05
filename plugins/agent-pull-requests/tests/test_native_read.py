@@ -30,6 +30,7 @@ CONTRACT = {
     "capabilities": [
         "finite_acquisition", "renewable_observe_credentials",
         "principal_binding", "credential_budget",
+        "enclosing_scope_credentials",
     ],
     "effects": "none", "submission": False, "source_attachment": False,
 }
@@ -47,6 +48,7 @@ else:
     parser=argparse.ArgumentParser(allow_abbrev=False)
     for name in ('repo','number','endpoint','expected-principal','credential-command','budget'):
         parser.add_argument('--'+name,required=True)
+    parser.add_argument('--contained-worker',action='store_true',required=True)
     args=parser.parse_args(sys.argv[3:])
     assert args.repo=='project/repository' and int(args.number)==42
     assert args.expected_principal==value['evidence']['scope']['principal_id'] or value.get('mismatch')
@@ -125,11 +127,13 @@ def test_native_process_keeps_distinct_profile_and_partial_evidence(native):
     assert path.with_suffix(".calls").read_text().splitlines() == ["capabilities", "read"]
 
 
-@pytest.mark.parametrize("change", ["prior", "missing", "version", "effects"])
+@pytest.mark.parametrize("change", ["prior", "enclosing", "missing", "version", "effects"])
 def test_unsupported_executing_contract_never_issues_read(native, change):
     reader, request, path, value = native
     if change == "prior":
         value["contract"]["capabilities"].remove("principal_binding")
+    elif change == "enclosing":
+        value["contract"]["capabilities"].remove("enclosing_scope_credentials")
     elif change == "missing":
         value["contract"] = {}
     elif change == "version":

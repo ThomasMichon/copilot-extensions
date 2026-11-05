@@ -22,6 +22,8 @@ def main(argv: list[str] | None = None) -> int:
     read.add_argument("--credential-command", required=True, help="trusted non-secret JSON argv")
     read.add_argument("--budget", required=True, type=float, help="finite positive operation seconds")
     read.add_argument("--expected-principal", default=None)
+    read.add_argument("--contained-worker", action="store_true",
+                      help="borrow the verified enclosing native owner for credential children")
     args = parser.parse_args(argv)
     if args.command == "capabilities":
         print(json.dumps({
@@ -30,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
             "capabilities": [
                 "finite_acquisition", "renewable_observe_credentials",
                 "principal_binding", "credential_budget",
+                "enclosing_scope_credentials",
             ],
             "effects": "none", "submission": False, "source_attachment": False,
         }))
@@ -47,10 +50,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     started = time.monotonic()
     try:
+        from agent_procutil.owned_budget import OwnedExecutionBudget
+        enclosing = (
+            OwnedExecutionBudget.from_timeout(
+                args.budget, cleanup_reserve=min(.25, args.budget / 4),
+            ) if args.contained_worker else None
+        )
         result = acquire_evidence(
             args.repo, args.number, args.endpoint,
             credential_source_factory=lambda remaining: command_source(
                 args.credential_command, remaining=remaining,
+                **({"enclosing_budget": enclosing} if enclosing is not None else {}),
             ),
             budget=args.budget, expected_principal=args.expected_principal,
         )

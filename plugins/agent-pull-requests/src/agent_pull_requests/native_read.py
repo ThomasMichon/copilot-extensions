@@ -25,6 +25,7 @@ PROFILE = "configured_native_provider"
 _CAPABILITIES = {
     "finite_acquisition", "renewable_observe_credentials",
     "principal_binding", "credential_budget",
+    "enclosing_scope_credentials",
 }
 
 
@@ -144,6 +145,7 @@ class NativeReadHandler:
             "--endpoint", self.scope["endpoint"],
             "--expected-principal", self.scope["principal_id"],
             "--credential-command", json.dumps(self.credential_command),
+            "--contained-worker",
             "--budget", str(remaining()),
         ], remaining, MAX_BYTES)
         remaining()
