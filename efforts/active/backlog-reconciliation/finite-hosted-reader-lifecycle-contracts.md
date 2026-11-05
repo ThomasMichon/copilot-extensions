@@ -107,8 +107,15 @@ elevation is not the requirement.
 
 When enrolled, route through the selected owner, or retain explicit temporary
 provenance and eventual handoff. Health, PPID and a marker are not adoption.
-Verified readiness, drain and birth safety precede authorized retirement;
-age/TTL creates no permission. #5225's Bridge cutover, #5215's outcome
+Compatible handoffs preserve incoming readiness, drain and birth-safe
+retirement. When handoff is unavailable, incompatible or cannot settle within
+its bound, retain identity-checked owned-scope cold takeover through the same
+lifecycle owner; incoming readiness is not a universal retirement veto.
+Cold recovery still requires truthful subsequent readiness and coherent native
+tracking. The [receiving plan](../versioned-singleton-manager/README.md)
+and [lifecycle pattern](../../../docs/patterns/service-lifecycle-supervision.md)
+retain both alternatives. Age/TTL creates no permission.
+#5225's Bridge cutover, #5215's outcome
 telemetry and #5066's markers remain separate. The previously whole-read
 #10290 description, #9359's guard and #9542's native Jobs do not establish
 the original selected-service ownership. No cgroup, environment, process or
