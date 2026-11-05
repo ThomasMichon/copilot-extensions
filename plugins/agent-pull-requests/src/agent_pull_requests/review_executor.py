@@ -153,6 +153,7 @@ def _check_selected_ownership(action, actual, principal):
 def execute_review(
     store, selected, generation, source_attachment, *, context_factory, checkpoint,
     expires_at: int, budget_seconds: float, clock=time.monotonic, feedback=None,
+    feedback_position=None,
 ):
     """Existing owner factory supplies actual pinned auth/input/transport, not caller labels."""
     from agent_worktrees.providers.azure_owned_review import (
@@ -215,6 +216,7 @@ def execute_review(
     if feedback is not None:
         tracking = ReviewFeedback(
             store, generation, feedback, expires_at=expires_at, checkpoint=checkpoint,
+            position=feedback_position,
         )
         result["stage"] = "feedback_capture"
         try:
@@ -235,17 +237,21 @@ def execute_review(
                 },
                 actions=operation["actions"], elapsed_seconds=clock() - start,
             )
-            return result
+            if all(row["state"] == "unattempted" for row in operation["actions"]):
+                return result
     try:
         for index, action in enumerate(selected["actions"]):
             operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
             state = operation["actions"][index]
             if state["state"] == "confirmed":
                 continue
+            if tracking is not None and tracking.capture is None and state["state"] == "unattempted":
+                result["status"] = "retained"
+                break
             with protected_review_context(context_factory, scope, remaining) as context:
                 result["stage"] = "preflight"
                 current = context.read_state()
-                if tracking is not None:
+                if tracking is not None and tracking.capture is not None and state["state"] != "unknown":
                     tracking.check_target(current)
                 if state["state"] == "unknown":
                     result["stage"] = "reconciliation"
@@ -262,7 +268,7 @@ def execute_review(
                         result["status"] = "unknown"
                         break
                     current = context.read_state()
-                    if tracking is not None:
+                    if tracking is not None and tracking.capture is not None:
                         tracking.check_target(current)
                     _check_candidate(current, operation, baseline)
                     continue

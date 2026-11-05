@@ -6,7 +6,7 @@ import copy
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from .attention import Interest
+from .attention import Cursor, Interest
 from .attention_state import MAX_INTERESTS
 from .conversation_journal import ConversationJournal, Observation, _meaning
 from .feedback_capture import FeedbackCaptures
@@ -44,12 +44,15 @@ class ReviewFeedback:
 
     def __init__(
         self, owner: ReplayStore, generation: dict, inputs: FeedbackInputs, *,
-        expires_at: int, checkpoint: Callable[[], None],
+        expires_at: int, checkpoint: Callable[[], None], position: Cursor | None = None,
     ) -> None:
         if type(inputs) is not FeedbackInputs or inputs.generation_id != generation["id"]:
             raise ValueError("feedback inputs differ from the selected generation")
+        if position is not None and type(position) is not Cursor:
+            raise ValueError("actual acquisition position required")
         self.owner, self.generation, self.inputs = owner, copy.deepcopy(generation), inputs
         self.expires_at, self.checkpoint = expires_at, checkpoint
+        self.position = position
         self.capture: dict | None = None
 
     def _transaction(self, operation: Callable[[dict], dict]) -> dict:
@@ -107,6 +110,8 @@ class ReviewFeedback:
             ):
                 raise FeedbackUnavailable("selected_acquisition_unavailable")
             cursor = {"epoch": record["epoch"], "sequence": record["sequence"]}
+            if self.position is None or asdict(self.position) != cursor:
+                raise FeedbackUnavailable("generation_position_unavailable")
             scoped = [
                 row for row in document["attention"]["records"]
                 if row["facts"]["key"] == asdict(key)

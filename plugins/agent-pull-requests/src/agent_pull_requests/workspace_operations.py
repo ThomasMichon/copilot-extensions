@@ -13,6 +13,7 @@ import threading
 import time
 
 from .generation_cache import GenerationCache
+from .attention import Cursor
 from .attention_acquisition import AttentionInputs
 from .native_read import NativeReadHandler
 from .workspace_conversation import conversation_key as conversation_key
@@ -78,6 +79,7 @@ class WorkspaceOperations:
         self.attention_owner = attention_owner
         self.feedback_owner = feedback_owner
         self._materializations = OrderedDict()
+        self._generation_positions: OrderedDict[str, dict | None] = OrderedDict()
         self._materialization_lock = threading.Lock()
 
     def validate_storage(self, *, expires_at: int, checkpoint: Callable[[], None]) -> None:
@@ -148,7 +150,6 @@ class WorkspaceOperations:
             raise ValueError("positive workspace PR number required")
         scope = _scope({**self.scope, "number": number})
         if operation == "events":
-            from .attention import Cursor
             from .conversation_store import ConversationStore
             if not self.conversations:
                 raise WorkspaceUnavailable("conversation operation not enabled by the existing owner")
@@ -207,6 +208,17 @@ class WorkspaceOperations:
                     if publication["status"] == "published"
                     else {"status": "not_observed", "reason": "cache_publication_not_confirmed"}
                 )
+                observation = result["conversation"]
+                if self.feedback_owner is not None and observation["status"] in ("observed", "unchanged"):
+                    acquired_position = copy.deepcopy(observation["cursor"])
+                    with self._materialization_lock:
+                        previous_position = self._generation_positions.get(generation["id"])
+                        if generation["id"] in self._generation_positions and previous_position != acquired_position:
+                            acquired_position = None
+                        self._generation_positions[generation["id"]] = acquired_position
+                        self._generation_positions.move_to_end(generation["id"])
+                        while len(self._generation_positions) > self.cache.max_generations:
+                            self._generation_positions.popitem(last=False)
             if previous is not None:
                 result["comparison"] = compare_generations(generation, previous)
                 result["comparison"].pop("generation")
@@ -231,14 +243,20 @@ class WorkspaceOperations:
             if generation is None:
                 raise WorkspaceUnavailable("reviewed generation unavailable")
             feedback = None
+            feedback_position = None
             if self.feedback_owner is not None:
                 feedback = self.feedback_owner(copy.deepcopy(generation))
                 if type(feedback) is not FeedbackInputs:
                     raise ValueError("actual feedback owner inputs required")
+                with self._materialization_lock:
+                    acquired = self._generation_positions.get(generation["id"])
+                    if acquired is not None:
+                        feedback_position = Cursor(**acquired)
             result = execute_review(
                 self.store, intent, generation, payload["source_attachment"],
                 context_factory=lambda: self.write_context(number), checkpoint=check,
                 expires_at=expires_at, budget_seconds=seconds, feedback=feedback,
+                feedback_position=feedback_position,
             )
         check()
         return {"protocol": PROTOCOL, "scope": scope, "result": copy.deepcopy(result)}

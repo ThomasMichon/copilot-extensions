@@ -11,7 +11,7 @@ import pytest
 
 from test_review_executor import environment as environment, writes
 
-from agent_pull_requests.attention import Interest
+from agent_pull_requests.attention import Cursor, Interest
 from agent_pull_requests.attention_acquisition import AttentionInputs
 from agent_pull_requests.attention_store import AttentionStore
 from agent_pull_requests.conversation_store import ConversationStore
@@ -47,10 +47,11 @@ def feedback_environment(environment: tuple) -> tuple:
     AttentionStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
     FeedbackCaptureStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
     interests = (Interest("maintainer", True, "consumer-a"), Interest("codeowner", True, "consumer-b"))
-    ConversationStore(store).observe_workspace(
+    observation = ConversationStore(store).observe_workspace(
         generation, expires_at=expires,
         attention=AttentionInputs(generation["id"], interests, True, False, False, False, False),
     )
+    backend.positions = {generation["id"]: Cursor(**observation["cursor"])}
     return store, selected, generation, attachment, backend, now, expires, interests
 
 
@@ -60,6 +61,7 @@ def run(value: tuple, *, interests: tuple[Interest, ...] | None = None) -> dict:
         store, selected, generation, attachment, context_factory=backend.context,
         checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
         feedback=FeedbackInputs(generation["id"], interests or admitted[:1], 60),
+        feedback_position=backend.positions.get(generation["id"]),
     )
 
 
@@ -87,15 +89,19 @@ def observe(value: tuple, *, change: str = "reply", second: int = 10) -> dict:
         sections["pull_request"]["data"].pop("lastMergeTargetCommit")
     elif change in ("completed", "active"):
         sections["pull_request"]["data"]["status"] = change
+    elif change == "different_title":
+        sections["pull_request"]["data"]["title"] = "Independent title change"
     newer = build_generation({
         "schema": "agent-pull-requests.review-evidence", "version": 1,
         "scope": generation["scope"], "sections": sections,
     })["generation"]
     now[0] = observation_interval(newer["sections"])[1] + 1
-    ConversationStore(store).observe_workspace(
+    observation = ConversationStore(store).observe_workspace(
         newer, expires_at=expires,
         attention=AttentionInputs(newer["id"], interests, True, False, False, False, False),
     )
+    if observation["status"] in ("observed", "unchanged"):
+        backend.positions[newer["id"]] = Cursor(**observation["cursor"])
     return newer
 
 
@@ -114,6 +120,7 @@ def test_original_capture_restart_and_all_confirmed_retry_readback_without_resen
         store.root, store.namespace, clock=store.clock, service_identity=store.service_identity,
     )
     value = (restarted, *value[1:])
+    backend.positions.clear()
     calls = len(backend.calls)
     retry = run(value)
     assert retry["status"] == "complete" and retry["entered_writes"] == 0
@@ -384,9 +391,12 @@ def test_original_reply_and_owned_edit_use_exact_native_object_readback(
     assert run(value)["entered_writes"] == 0 and len(writes(backend)) == 1
 
 
-def test_workspace_selects_feedback_from_embedding_not_request_json(feedback_environment: tuple) -> None:
+@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound"])
+def test_workspace_selects_feedback_from_embedding_not_request_json(
+    feedback_environment: tuple, mode: str,
+) -> None:
     from agent_pull_requests.generation_cache import GenerationCache
-    from agent_pull_requests.owner_read import OwnerReadHandler
+    from agent_pull_requests.owner_read import OwnerReadBinding, OwnerReadHandler, PROFILE, PRINCIPAL_SEMANTICS
     from agent_pull_requests.workspace_operations import WorkspaceOperations
 
     value = feedback_environment
@@ -396,21 +406,36 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(feedback_env
         service_identity=store.service_identity,
     )
     cache.provision()
-    cache.publish(generation, expected_current=None)
-    reader = OwnerReadHandler(lambda ref, remaining: None, max_work_seconds=10, max_payload_bytes=2 * 1024 * 1024)
     scope = dict(generation["scope"])
     scope.pop("number")
+    evidence = {
+        "schema": "agent-pull-requests.review-evidence", "version": 1,
+        "scope": generation["scope"], "sections": copy.deepcopy(generation["sections"]),
+        "acquisition": {"source": PROFILE, "effects": "none", "principal_semantics": PRINCIPAL_SEMANTICS},
+    }
+    reader = OwnerReadHandler(
+        lambda ref, remaining: OwnerReadBinding(
+            scope, "existing-context", backend.checkpoint,
+            lambda number, budget: copy.deepcopy(evidence),
+        ), max_work_seconds=10, max_payload_bytes=2 * 1024 * 1024,
+    )
     called = []
 
     def actual_inputs(current: dict) -> FeedbackInputs:
         called.append(current["id"])
         return FeedbackInputs(current["id"], interests[:1], 60)
 
-    operations = WorkspaceOperations(
-        store, cache, scope=scope, read_owner=reader, binding_ref="selected",
-        write_context=lambda number: backend.context(), checkpoint=backend.checkpoint,
-        max_work_seconds=10, conversations=True, feedback_owner=actual_inputs,
-    )
+    def make_operations() -> WorkspaceOperations:
+        return WorkspaceOperations(
+            store, cache, scope=scope, read_owner=reader, binding_ref="selected",
+            write_context=lambda number: backend.context(), checkpoint=backend.checkpoint,
+            max_work_seconds=10, conversations=True, feedback_owner=actual_inputs,
+            attention_owner=lambda current: AttentionInputs(
+                current["id"], interests, True, False, False, False, False,
+            ),
+        )
+
+    operations = make_operations()
     payload = {
         "number": selected["scope"]["number"], "intent": selected,
         "source_attachment": attachment, "budget_seconds": 10,
@@ -423,9 +448,105 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(feedback_env
     assert called == [] and writes(backend) == []
     with pytest.raises(ValueError, match="serving contract unavailable"):
         operations.validate_storage(expires_at=expires, checkpoint=backend.checkpoint)
+    loaded = operations.execute(
+        "load", {"number": 42, "expected_current": None, "budget_seconds": 10},
+        expires_at=expires, checkpoint=backend.checkpoint,
+    )
+    assert loaded["result"]["descriptor"]["id"] == generation["id"]
+    if mode == "reopen":
+        for state, second in (("completed", 10), ("active", 12)):
+            evidence["sections"]["pull_request"]["data"]["status"] = state
+            for section in evidence["sections"].values():
+                section.update(
+                    observed_from=f"2026-10-30T00:00:{second:02d}Z",
+                    observed_to=f"2026-10-30T00:00:{second + 1:02d}Z",
+                )
+            value[5][0] = observation_interval(evidence["sections"])[1] + 1
+            loaded = operations.execute(
+                "load", {
+                    "number": 42, "expected_current": loaded["result"]["descriptor"]["id"],
+                    "budget_seconds": 10,
+                }, expires_at=expires, checkpoint=backend.checkpoint,
+            )
+        refused = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
+        assert refused["result"]["feedback"]["reason"] == "generation_position_unavailable"
+        assert writes(backend) == []
+        generation = cache.lookup(selected["scope"])["generation"]
+        selected.update(generation_id=generation["id"], operation_id="reopened-selected-operation")
+        attachment["generation_id"] = generation["id"]
+    elif mode == "unbound":
+        operations = make_operations()
+        refused = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
+        assert refused["result"]["feedback"]["reason"] == "generation_position_unavailable"
+        assert writes(backend) == []
+        operations.execute(
+            "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
+            expires_at=expires, checkpoint=backend.checkpoint,
+        )
     result = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
-    assert result["result"]["feedback"]["status"] == "handled" and called == [generation["id"]]
+    assert result["result"]["feedback"]["status"] == "handled", result
+    assert called[-1] == generation["id"]
+    assert result["result"]["feedback"]["cursor"]["epoch"] == (2 if mode == "reopen" else 1)
+    operations = make_operations()
+    retry = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
+    assert retry["result"]["entered_writes"] == 0 and retry["result"]["feedback"]["status"] == "handled"
     operations.feedback_owner = lambda current: None
     with pytest.raises(ValueError, match="actual feedback owner"):
         operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
     assert len(writes(backend)) == 1
+
+
+@pytest.mark.parametrize("change", ["reopen", "roundtrip"])
+def test_old_generation_cannot_capture_a_later_equal_meaning_position(
+    feedback_environment: tuple, change: str,
+) -> None:
+    value = feedback_environment
+    if change == "reopen":
+        observe(value, change="completed", second=10)
+        observe(value, change="active", second=12)
+    else:
+        observe(value, change="different_title", second=10)
+        observe(value, change="baseline", second=12)
+    result = run(value)
+    assert result["status"] == "retained" and result["feedback"]["status"] == "unavailable"
+    assert writes(value[4]) == []
+    assert document(value)["feedback_captures"]["records"] == []
+    assert document(value)["attention"]["records"][0]["handled"] is None
+
+
+def test_target_motion_does_not_block_original_unknown_receipt_recovery(feedback_environment: tuple) -> None:
+    value = feedback_environment
+    backend = value[4]
+    backend.lose_reply = True
+    assert run(value)["actions"][0]["state"] == "unknown"
+    backend.lose_reply = False
+    backend.pr["lastMergeTargetCommit"]["commitId"] = "e" * 40
+    result = run(value)
+    assert result["actions"][0]["state"] == "confirmed"
+    assert result["status"] == "candidate_changed" and result["feedback"]["status"] == "unavailable"
+    assert result["entered_writes"] == 0 and len(writes(backend)) == 1
+
+
+def test_missing_acquisition_binding_refuses_new_capture(feedback_environment: tuple) -> None:
+    value = feedback_environment
+    value[4].positions.clear()
+    result = run(value)
+    assert result["status"] == "retained" and result["feedback"]["reason"] == "generation_position_unavailable"
+    assert writes(value[4]) == []
+
+
+def test_missing_capture_allows_receipt_recovery_but_not_remaining_effects(feedback_environment: tuple) -> None:
+    value = feedback_environment
+    store, selected, generation, attachment, backend, _, expires, _ = value
+    selected["actions"].append({"id": "verdict", "kind": "verdict", "verdict": "APPROVED"})
+    backend.lose_reply = True
+    execute_review(
+        store, selected, generation, attachment, context_factory=backend.context,
+        checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
+    )
+    backend.lose_reply = False
+    result = run(value)
+    assert result["actions"][0]["state"] == "confirmed"
+    assert result["actions"][1]["state"] == "unattempted" and backend.vote is None
+    assert result["feedback"]["reason"] == "capture_missing_after_attempt"
+    assert result["entered_writes"] == 0 and len(writes(backend)) == 1

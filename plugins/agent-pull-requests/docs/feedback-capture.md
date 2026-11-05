@@ -31,6 +31,14 @@ The optional trusted `WorkspaceOperations.feedback_owner` supplies typed
 consumer/role interests and an explicit acquisition freshness bound. Request
 JSON cannot provide or override them. The default embedding has no feedback
 owner; constructing one never adopts storage or enables serving support.
+The workspace also retains the generation's actual successful journal-acquisition
+position in its bounded in-process metadata. Matching content alone cannot bind
+an older generation to a later equal-content position or reopened epoch.
+Unbound/evicted acquisition metadata refuses a new capture; after restart, the
+embedding must reacquire before admitting new effects. An existing durable
+capture remains sufficient for its original retry. Direct protected embeddings
+likewise supply the position returned by that generation's actual acquisition,
+never a cursor fetched from whatever happens to be current at submission.
 
 `ReviewFeedback` reserves the capture under ReplayStore's existing complete-
 envelope transaction before the first native attempt. Complete selected
@@ -40,7 +48,8 @@ candidate, cursor and observation time. Stale/future acquisition, a newer
 unavailable watermark, missing interests and exhausted capture capacity refuse
 before effects. A retry retains the original capture rather than the newest
 cursor. An attempted operation without a capture stays tracking-unavailable:
-there is no backfill or resend to manufacture one.
+there is no backfill or resend to manufacture one. Read-only recovery of its
+original native receipt remains possible, but cannot start remaining actions.
 
 The existing protected executor additionally checks the actual current PR
 target tip against the capture, independently of source head/common/iteration.
@@ -63,6 +72,9 @@ Remaining pending age uses the earliest retained unhandled event; a retention
 gap conservatively retains the old age. Readback or tracking-replacement
 failure preserves confirmed native receipts and reports tracking unavailable.
 Retry reconciles that same operation without resending confirmed effects.
+Target motion cannot block original unknown-receipt attribution: reconciliation
+precedes that target guard, which still blocks subsequent effects and handled
+progress against a changed target.
 Permission denial still propagates through the existing owner and never
 rolls back a retained effect.
 

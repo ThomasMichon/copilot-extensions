@@ -103,6 +103,12 @@ perform fresh protected readback without another send; exact vote-event
 attribution and later echo coverage remain unavailable. This source seam
 does not advertise a new serving capability: the current conversation
 descriptor still refuses v4/v5, and default hosts supply no feedback owner.
+Only a successful load/sync journal acquisition binds a retained generation
+to its actual epoch/cursor in the existing workspace's bounded in-process
+metadata. A bare cache lookup, equal current contents, missing binding after
+restart or failed publication cannot manufacture a new feedback capture.
+Already captured retries retain their original durable position and may
+reconcile without that ephemeral acquisition metadata.
 
 Oversized submit envelopes refuse locally before dispatch. Large immutable read
 generations are framed, but this first wire does **not** upload arbitrarily large
