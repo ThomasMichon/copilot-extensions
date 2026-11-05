@@ -54,6 +54,8 @@ def test_observation_is_read_only_and_preserves_qualified_names(selected, monkey
     assert [(row["source"], row["state"]) for row in result["entries"]] == [
         ("sample@first", "ready"), ("sample@second", "needed"),
     ]
+    assert Path(result["entries"][0]["payloadRoot"]).is_dir()
+    assert result["entries"][1]["payloadRoot"] is None
     assert before == sorted(path.relative_to(home) for path in home.rglob("*"))
 
 

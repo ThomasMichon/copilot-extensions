@@ -1,0 +1,9 @@
+{
+  "comment": "Provide exact selected-engine setup context, source-qualified native configuration trust, and qualified preparation payload roots",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
