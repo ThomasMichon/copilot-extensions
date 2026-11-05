@@ -17,6 +17,8 @@ from worktree_manager.companion_timeline_contract import (
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
 from worktree_manager.companion_agenda_attachment import AgendaTimelineAttachment
+from worktree_manager.companion_timeline_attachment import TimelineAttachment
+from worktree_manager.companion_timeline_controller import TimelineSourceError
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
@@ -453,6 +455,71 @@ def test_unbound_agenda_failure_is_visible_but_ordinary_wait_is_not_an_error(fai
                 assert "Agenda: error" in str(app.query_one(".timeline-health", Static).content)
                 assert details == str(app.query_one(".timeline-state", Static).content)
             await attachment.close()
+
+    asyncio.run(check())
+
+
+def test_history_retry_retains_failure_until_a_fresh_observed_snapshot_is_admitted(tmp_path) -> None:
+    from worktree_manager.companion_timeline_contract import Provider
+
+    async def check() -> None:
+        refreshed = asyncio.Event()
+
+        class Source:
+            reads = 0
+
+            async def prepare(self, epoch, *, stop):
+                self.initial = snapshot(token(epoch), (event(token(epoch), 0),))
+                return self.initial
+
+            async def observe(self, _token, *, stop):
+                yield self.initial
+                await refreshed.wait()
+                if not stop.is_set():
+                    yield self.initial
+                await stop.wait()
+
+            async def history(self, source, before, *, stop):
+                self.reads += 1
+                if self.reads == 1:
+                    raise TimelineSourceError("transient history read failed")
+                return HistoryPage(source, before, None, (event(source, -1),), Completeness.COMPLETE)
+
+        app = TimelineApp(TimelineWindow())
+        async with app.run_test(size=(80, 24)) as pilot:
+            panel = app.query_one(CompanionTimelinePanel)
+            source = Source()
+            attachment = TimelineAttachment(
+                panel, cwd=str(tmp_path), source_factory=lambda _selection: source,
+            )
+            try:
+                await attachment.set_selection(("example", "selected", "head-a"))
+                await pilot.pause()
+                selected = source.initial.token
+                before = source.initial.before
+                assert before is not None
+                for _ in range(2):
+                    assert panel.window.request_history(selected, before).applied
+                    attachment.history(SubwayTimeline.HistoryRequested(selected, before))
+                    await attachment.controller._pages[Provider.WORKTREES]
+                    await pilot.pause()
+                state = panel.window.sources[selected.identity.source_key]
+                assert source.reads == 2 and state.before is None
+                assert state.availability is Availability.UNAVAILABLE
+                assert "Worktrees: error" in str(panel.query_one(".timeline-health", Static).content)
+                retained = tuple(panel.window.events)
+                refreshed.set()
+                for _ in range(40):
+                    if panel.window.sources[selected.identity.source_key].availability is Availability.OBSERVED:
+                        break
+                    await pilot.pause(0.025)
+                assert panel.window.sources[selected.identity.source_key].availability is Availability.OBSERVED
+                assert panel.window.events == retained
+                assert Provider.WORKTREES not in panel._provider_notices
+                assert "error" not in str(panel.query_one(".timeline-health", Static).content)
+            finally:
+                refreshed.set()
+                await attachment.close()
 
     asyncio.run(check())
 

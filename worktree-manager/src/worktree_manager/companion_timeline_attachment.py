@@ -241,6 +241,8 @@ class TimelineAttachment:
                     )
                     if not result.applied:
                         raise TimelineSourceError(result.reason)
+                    if isinstance(value, TimelineSnapshot) and value.availability is Availability.OBSERVED:
+                        self.panel.provider_notice(self.provider, None)
                     if self._status is not None and isinstance(value, TimelineSnapshot):
                         self._status(getattr(source, "status_message",
                             "partial owner-linked membership; liveness, head and answerability unknown; "
