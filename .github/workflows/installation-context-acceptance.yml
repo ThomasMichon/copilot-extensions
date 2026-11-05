@@ -2034,6 +2034,38 @@ jobs:
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
       - name: Retained source to complete profile and actual offline construction
         run: python -m pytest -q tools/test_runtime_source_wheels.py
+      - name: Copied application retention without legacy payload helpers
+        shell: python
+        run: |
+          import os, shutil, sys
+          from pathlib import Path
+          repo = Path.cwd()
+          sys.path.insert(0, str(repo / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          if shutil.which("uv") is None:
+              raise RuntimeError("Copied application acceptance requires real UV")
+          tests = [
+              "tools/test_local_install_source.py::test_application_adapter_runs_real_install_repeat_and_retains_failed_start[no-legacy-bootstrap]",
+              "tools/test_local_install_source.py::test_copied_application_qualifies_after_the_prepared_source_is_removed",
+          ]
+          owner = TestSandbox(prefix="app-bootstrap-")
+          with owner as directory:
+              temporary = Path(directory)
+              environment = isolated_environment(os.environ, temporary)
+              environment.update(
+                  PYTHONPATH=str(repo / "tools"), UV_PYTHON=sys.executable,
+                  UV_PYTHON_DOWNLOADS="never", UV_OFFLINE="1",
+              )
+              code = run_contained(
+                  [sys.executable, "-m", "pytest", "-q", *tests,
+                   "--basetemp", str(temporary / "pytest")],
+                  cwd=repo, env=environment, sandbox=temporary,
+                  limits=Limits(wall_seconds=300),
+              )
+          if owner.retained or temporary.exists():
+              raise RuntimeError("Copied application test cleanup did not settle")
+          print(f"APPLICATION_BOOTSTRAP_NATIVE_CLEANUP=TRUE EXIT={code}", flush=True)
+          raise SystemExit(code)
 
   source-profiles-windows:
     if: ${{ inputs.wheel_inputs }}

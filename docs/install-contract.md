@@ -4932,6 +4932,13 @@ existing selected generation and invoke its slot-local UV project without
 dependency synchronization. Construction and reuse retain the canonical
 health, completion, retention and rollback checks.
 
+For a prepared application, numbered construction copies its retention
+bootstrap from the emitted application's canonical `runtime/` closure into
+the slot-local `.runtime-bootstrap`. It does not require the source plugin to
+adopt the legacy shared Python installer or carry those helpers in `scripts/`.
+Historical non-application construction continues using its declared payload
+helpers; missing application resources are not a reason to fall back to them.
+
 Flat historical slots remain supported alongside nested applications.
 Manager wheels carry the launchers' complete operational bin-resource closure,
 including pane helpers and mux configuration. Shell callbacks and companion

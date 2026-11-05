@@ -4136,7 +4136,10 @@
         "tools/promotion_unit_tests/test_launch_freshness.py::test_missing_evidence_is_not_standalone_permission[selector-source]",
         "tools/promotion_unit_tests/test_launch_freshness.py::test_missing_evidence_is_not_standalone_permission[effective-version]",
         "tools/promotion_unit_tests/test_launch_freshness.py::test_missing_evidence_is_not_standalone_permission[resolved-manifest]",
-        "tools/promotion_unit_tests/test_launch_freshness.py::test_missing_evidence_is_not_standalone_permission[cached-shape]"
+        "tools/promotion_unit_tests/test_launch_freshness.py::test_missing_evidence_is_not_standalone_permission[cached-shape]",
+        "tools/promotion_unit_tests/test_source_profile_derivation.py::test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fallback[application]",
+        "tools/promotion_unit_tests/test_source_profile_derivation.py::test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fallback[legacy]",
+        "tools/promotion_unit_tests/test_source_profile_derivation.py::test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fallback[missing-application-resource]"
     ],
     "sources": {
         "libs/payload-invocation/runtime_admission.py": "81505ec47141476df07f42aef3ce36b80ce99c1655e8604c96c5a6c83d8c72a2",
@@ -4178,7 +4181,7 @@
         "tools/runtime_profile_bundle.py": "436bf9b190c87f2c5a09f9355081cf488ce1f7c4e12a77174a9b00c4be088c42",
         "tools/runtime_profile_delivery.py": "260065872c36e6ddd4e68d6604b45b7c77cabc5e01e3a6d432edccb9d834cd7c",
         "worktree-manager/scripts/install_source.py": "b64c0d521901346c2fb92f2ede98266de297b2e90851b0ef82346fc7a49ad4b0",
-        "worktree-manager/scripts/installer_engine.py": "8c38de4ba0ecc20db11ad3b264c8e50976844d1b0394d138e0913292188ceac4",
+        "worktree-manager/scripts/installer_engine.py": "b48b0bec304114519830a26aa6b043cdc3d9fe6301aa7a24027aef9927a63dbf",
         "worktree-manager/scripts/installer_engine_health.py": "37b5ed64b847858fb3cb130dee5d0002db929b83641e3fa8fccc8f16b0473115",
         "worktree-manager/scripts/installer_engine_process.py": "88e40cd277d18daba227d95f3f81d576442f7c2cc4260d7f1e2c91f04ebf6c2c",
         "worktree-manager/scripts/installer_source_build.py": "877ec6a495bc63472770cdffc0ee1776c4ec5e4b02877ef0d4f6d0abb3121ce7",
@@ -4320,7 +4323,7 @@
         "libs/installer-engine/installer_dependency_config.py": "8fbc9cf6ac0da5bed36678a3523385e95855fa7744afc2ebd003bd5fadbe19c7",
         "libs/installer-engine/installer_dependency_arguments.py": "d6b464c3d46f828089992b9da2fed7e30551861863de94c5a9869827f1791bb2",
         "libs/installer-engine/installer_dependency_policy.py": "740a29ec0062facf179d0d44d61f64bdf2d010643691b665b7626e29abcefb28",
-        "libs/installer-engine/installer_engine.py": "8c38de4ba0ecc20db11ad3b264c8e50976844d1b0394d138e0913292188ceac4",
+        "libs/installer-engine/installer_engine.py": "b48b0bec304114519830a26aa6b043cdc3d9fe6301aa7a24027aef9927a63dbf",
         "libs/installer-engine/installer_engine_process.py": "88e40cd277d18daba227d95f3f81d576442f7c2cc4260d7f1e2c91f04ebf6c2c",
         "libs/installer-engine/installer_feed_policy.py": "529d45bd6d72cf36ac9b2c75dc56c98d63ad2b0364a26073ed8e355fd02b3c7d",
         "libs/installer-engine/installer_native_feed.py": "2816a406fdd74c59414e65b8a79b41a682df993a4a2bb14790da20b40ed08af8",
@@ -4584,7 +4587,7 @@
         "tools/promotion_unit_tests/test_selection.py": "876bc590beb057366b26d729dc340a72a399143c8e2636dbcd21b6b5bf1ebe61",
         "tools/promotion_unit_tests/test_shell_caller_owned.py": "0723f365986fc1e537f4507ab681a290b22abe99fd4a688eddfd02861df6cb5a",
         "tools/promotion_unit_tests/test_source_objects.py": "5ce3712690ed49ac00d0866aaa6a6cb5a162ba5aedefdad326578907af1eb701",
-        "tools/promotion_unit_tests/test_source_profile_derivation.py": "299c7e04925b9f932b5cfd302c47362bee52bfed98ca25c274fa86696991251d",
+        "tools/promotion_unit_tests/test_source_profile_derivation.py": "8eb86e277a0222b085df9091f239fde8aa5fdf37cc804cba08c8726d4f1b3c47",
         "tools/promotion_unit_tests/test_ssh_hosting_policy.py": "17ff731c310384634012290712ce5ad96ae1f6b7c4b1343179a663975793b919",
         "tools/promotion_unit_tests/test_standalone_artifacts.py": "e931681d1d4b94f1543926bb36018822b1f268765d50576fd4033b9ef0b011c4",
         "tools/promotion_unit_tests/test_state_root_read.py": "53bf31651afa639058e1a16115da39b32f3f99ece4bc42d8c6be918984dd6a43",
