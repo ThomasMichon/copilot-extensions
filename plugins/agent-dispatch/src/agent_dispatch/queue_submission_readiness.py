@@ -106,15 +106,17 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id:
     }
 
 
-def observe(queue: TaskQueue, task_id: str, *, request_id: str) -> dict:
-    """Internal point-in-time read, not a persisted permission to submit later."""
+def read_preparation(queue: TaskQueue, task_id: str, request_id: str) -> dict:
     with queue._connect() as conn:
         conn.execute("BEGIN")
-        original = _state(queue, conn, task_id, request_id)
+        return _state(queue, conn, task_id, request_id)
+
+
+def observe_owner_state(task_id: str, original: dict) -> dict:
     from .submission_readiness_observation import observe as observe_owner
 
     allocation = original["allocation"]
-    observation = observe_owner(
+    return observe_owner(
         original["preparation"]["request"],
         {
             "task_id": task_id,
@@ -127,6 +129,12 @@ def observe(queue: TaskQueue, task_id: str, *, request_id: str) -> dict:
         },
         original["relationship"]["receipt"]["ref"],
     )
+
+
+def observe(queue: TaskQueue, task_id: str, *, request_id: str) -> dict:
+    """Internal point-in-time read, not a persisted permission to submit later."""
+    original = read_preparation(queue, task_id, request_id)
+    observation = observe_owner_state(task_id, original)
     with queue._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         if _encoded(_state(queue, conn, task_id, request_id)) != _encoded(original):

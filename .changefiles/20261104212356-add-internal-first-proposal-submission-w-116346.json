@@ -1,0 +1,9 @@
+{
+  "comment": "Add internal first-proposal submission with fresh readiness, atomic admission consumption and retained task custody",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

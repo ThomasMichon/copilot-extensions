@@ -23,7 +23,7 @@ submission = preparation_controls.submission
 
 
 @pytest.fixture
-def ready(tmp_path, monkeypatch):
+def ready(tmp_path, monkeypatch, request):
     owner = GroundOwner()
     queue = TaskQueue(
         tmp_path / "queue.db", relationship_writer=owner, relationship_authority="local"
@@ -60,7 +60,7 @@ def ready(tmp_path, monkeypatch):
         expected_generation=task.generation,
         expected_owner_session_id="native",
         workspace=workspace,
-        result={"answer": "done"},
+        result=getattr(request, "param", {"answer": "done"}),
     )
     allocation = {
         "task_id": task.id,

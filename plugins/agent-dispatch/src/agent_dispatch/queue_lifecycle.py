@@ -145,7 +145,6 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 raise TaskError(f"cannot expect {expected_status!r} when completing a task")
             allowed = {expected_status}
         ts = self._now(now)
-        wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -160,6 +159,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
 
+            from .queue_submission_preparation import require_unprepared_submission
+            require_unprepared_submission(conn, task_id)
             if task.status in {Status.SUBMITTED, Status.COMPLETED} and encoded_result is not None:
                 completing_owner = task.completed_by
                 if completing_owner is None:
@@ -235,75 +236,74 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
-            from .queue_submission_preparation import require_unprepared_submission
-            require_unprepared_submission(conn, task_id)
-            retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
-            if callable(retire_waiters):
-                wake_enqueued = retire_waiters(
-                    conn,
-                    task,
-                    to_status=Status.SUBMITTED if task.require_verification else Status.COMPLETED,
-                    worker=worker_id,
-                    ts=ts,
-                ) or wake_enqueued
+            outcome, wake_enqueued = self._write_submission(
+                conn, task, worker_id=worker_id, encoded_result=encoded_result,
+                result_ref=result_ref, ts=ts,
+            )
+            conn.execute("COMMIT")
+        self._notify_submission(outcome, wake_enqueued=wake_enqueued)
+        return outcome
 
+    def _write_submission(
+        self,
+        conn: sqlite3.Connection,
+        task: Task,
+        *,
+        worker_id: str,
+        encoded_result: str | None,
+        result_ref: str | None,
+        ts: float,
+    ) -> tuple[CompletionOutcome, bool]:
+        """Share result, review and waiter writes inside the caller's transaction."""
+        wake_enqueued = False
+        retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
+        if callable(retire_waiters):
+            wake_enqueued = bool(retire_waiters(
+                conn, task,
+                to_status=Status.SUBMITTED if task.require_verification else Status.COMPLETED,
+                worker=worker_id, ts=ts,
+            ))
+        conn.execute(
+            "UPDATE tasks SET status = ?, updated_at = ?, activity = NULL,"
+            " activity_updated_at = ?, completed_at = ?, result_ref = ?,"
+            " result = ?, completed_by = ?, owner = NULL,"
+            " lease_expires_at = NULL WHERE id = ?",
+            (
+                Status.SUBMITTED, ts, ts, ts, result_ref, encoded_result,
+                worker_id, task.id,
+            ),
+        )
+        self._audit(
+            conn, task.id, ts=ts, from_status=task.status, to_status=Status.SUBMITTED,
+            worker=worker_id, note="complete",
+        )
+        event_type = "task.submitted"
+        if not task.require_verification:
             conn.execute(
-                "UPDATE tasks SET status = ?, updated_at = ?, activity = NULL,"
-                " activity_updated_at = ?, completed_at = ?, result_ref = ?,"
-                " result = ?, completed_by = ?, owner = NULL,"
-                " lease_expires_at = NULL WHERE id = ?",
-                (
-                    Status.SUBMITTED,
-                    ts,
-                    ts,
-                    ts,
-                    result_ref,
-                    encoded_result,
-                    worker_id,
-                    task_id,
-                ),
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+                (Status.COMPLETED, ts, task.id),
             )
             self._audit(
-                conn,
-                task_id,
-                ts=ts,
-                from_status=task.status,
-                to_status=Status.SUBMITTED,
-                worker=worker_id,
-                note="complete",
+                conn, task.id, ts=ts, from_status=Status.SUBMITTED,
+                to_status=Status.COMPLETED, worker=worker_id,
+                note="confirmed by self-attestation",
             )
-            event_type = "task.submitted"
-            if not task.require_verification:
-                conn.execute(
-                    "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-                    (Status.COMPLETED, ts, task_id),
-                )
-                self._audit(
-                    conn,
-                    task_id,
-                    ts=ts,
-                    from_status=Status.SUBMITTED,
-                    to_status=Status.COMPLETED,
-                    worker=worker_id,
-                    note="confirmed by self-attestation",
-                )
-                event_type = "task.completed"
-            elif task.evaluator_ref:
-                self._insert_verification_request(
-                    conn,
-                    task_id,
-                    task.generation,
-                    "submitted",
-                    ts,
-                )
-            completed = self._fetch(conn, task_id)
-            assert completed is not None
-            conn.execute("COMMIT")
-        if event_type == "task.submitted" and task.evaluator_ref:
+            event_type = "task.completed"
+        elif task.evaluator_ref:
+            self._insert_verification_request(
+                conn, task.id, task.generation, "submitted", ts,
+            )
+        completed = self._fetch(conn, task.id)
+        assert completed is not None
+        return CompletionOutcome(completed, event_type), wake_enqueued
+
+    def _notify_submission(
+        self, outcome: CompletionOutcome, *, wake_enqueued: bool,
+    ) -> None:
+        if outcome.event_type == "task.submitted" and outcome.task.evaluator_ref:
             self._notify_verification()
         if wake_enqueued:
             self._notify_wake()
-        return CompletionOutcome(completed, event_type)
 
     @staticmethod
     def _completion_event_workers(conn: sqlite3.Connection, task_id: str) -> list[str]:
