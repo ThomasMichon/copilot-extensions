@@ -384,12 +384,14 @@ def test_rejected_attention_update_cannot_commit_its_journal(
     assert store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("status", ["active", "completed", "abandoned"])
 def test_lost_commit_response_reconciles_both_sections_once(
-    acquired: tuple, monkeypatch: pytest.MonkeyPatch,
+    acquired: tuple, monkeypatch: pytest.MonkeyPatch, status: str,
 ) -> None:
     import agent_pull_requests.watch_replay_store as module
 
     store, evidence = acquired
+    evidence["sections"]["pull_request"]["data"]["status"] = status
     value = generation(evidence)
     write = module._atomic_write_json
 
@@ -404,6 +406,7 @@ def test_lost_commit_response_reconciles_both_sections_once(
     restarted = ReplayStore(store.root, store.namespace, clock=store.clock)
     result = ConversationStore(restarted).observe_workspace(value, attention=inputs(value), expires_at=100)
     assert result["status"] == "unchanged" and result["cursor"] == {"epoch": 1, "sequence": 1}
+    assert result["attention"] == {"status": "observed", "interests": 1}
     assert len(rows(restarted)) == 1
 
 

@@ -163,7 +163,10 @@ class ConversationStore:
                     default=0,
                 )
                 watermark = max(watermark, previous.observed_to if previous is not None else 0)
-                same = value is not None and record is not None and value.document() == record["current"]
+                current = value.document() if value is not None else None
+                if current is not None and value is not None and value.terminal:
+                    current["sections"] = {}
+                same = current is not None and record is not None and current == record["current"]
                 if interval[0] < watermark and not (same and interval[1] >= watermark):
                     return {
                         "status": "stale_observation",
