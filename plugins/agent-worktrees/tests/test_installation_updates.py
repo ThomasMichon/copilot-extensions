@@ -209,6 +209,58 @@ _deploy_python_runtime
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX installer function")
+@pytest.mark.parametrize("selected", [True, False])
+def test_posix_prepared_wheel_runtime_uses_the_preflight_python(tmp_path, selected):
+    from agent_procutil import no_window_kwargs
+
+    payload = Path(__file__).resolve().parents[1]
+    text = (payload / "scripts" / "install.sh").read_text()
+    function = "_deploy_python_runtime() {" + text.split(
+        "_deploy_python_runtime() {", 1,
+    )[1].split("\n}\n", 1)[0] + "\n}\n"
+    (tmp_path / "runtime_install.py").write_text(
+        "import json, pathlib, sys\n"
+        "assert pathlib.Path(sys.executable).resolve() == pathlib.Path(sys.argv[sys.argv.index('--base-python') + 1]).resolve()\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--result') + 1]).write_text(json.dumps({"
+        "'runtime_version': 'fixture', 'runtime_python': sys.executable, "
+        "'deployment_manifest_published': True, 'helpers_published': True}))\n",
+    )
+    script = function + r"""
+set -eu
+ACTION=update
+OWNER_ARG=
+INSTALL_SOURCE_ARG="$FIXTURE_ROOT/snapshot"
+CONTEXTUAL_INSTALL=false
+PLUGIN_DIR="$FIXTURE_ROOT"
+SCRIPT_DIR="$FIXTURE_ROOT"
+INSTALL_DIR="$FIXTURE_ROOT/root"
+VENV_DIR="$INSTALL_DIR/versions/fixture"
+_bootstrap_python() { printf '%s\n' '/unexpected-python'; }
+_ensure_uv() { :; }
+_ensure_uv_index() { :; }
+_assert_source_runtime() { :; }
+ok() { :; }
+err() { printf '%s\n' "$*" >&2; }
+if _deploy_python_runtime; then
+    [[ "$FIXTURE_SELECTED" == 1 ]]
+else
+    [[ "$FIXTURE_SELECTED" == 0 ]]
+fi
+"""
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, timeout=20,
+        env={
+            **os.environ, "FIXTURE_ROOT": str(tmp_path), "FIXTURE_SELECTED": str(int(selected)),
+            "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION": "{}",
+            "COPILOT_EXTENSIONS_NATIVE_WHEEL_BASE_PYTHON": sys.executable if selected else "",
+            "AGENT_WORKTREES_TARGETED_UPDATE": "1",
+        },
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_installer_branches_preserve_unrelated_finishing_effects():
     root = Path(__file__).resolve().parents[1] / "scripts"
     for ext, start, finish in (

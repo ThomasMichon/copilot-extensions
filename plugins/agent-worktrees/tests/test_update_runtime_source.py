@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import reconcile, update_runtime, update_runtime_plan
+from agent_worktrees import reconcile, update_runtime, update_runtime_plan, update_runtime_target
 from agent_worktrees.update_runtime_source import PIN_ENV, PreparedRuntimeSource
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -53,6 +53,10 @@ def selected(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: owner)
     monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *args: False)
+    monkeypatch.setattr(
+        update_runtime_target, "preflight_wheel_target",
+        lambda *_args: str(Path(sys.executable).resolve()),
+    )
     return owner, artifact, runtime, source
 
 
@@ -112,9 +116,12 @@ def test_engine_update_routes_exact_prepared_wheels_to_the_installed_owner(
     assert not step.blocked, step.status
     assert step.source_target == target and step.target_version == target.version
     assert step.environment[update_runtime_target.WHEEL_SELECTION_ENV] == target.document
+    assert step.environment[update_runtime_plan.WHEEL_BASE_ENV] == str(Path(sys.executable).resolve())
     assert step.environment[PIN_ENV] == source.identity
     assert step.argv[step.argv.index(option) + 1] == str(snapshot)
     assert json.loads(step.argv[step.argv.index(descriptor_option) + 1]) == selection["source_descriptor"]
+    if platform_name == "windows":
+        assert step.argv[step.argv.index("-BootstrapPython") + 1] == step.environment[update_runtime_plan.WHEEL_BASE_ENV]
     assert step.payload == owner and step.artifact == artifact and step.runtime_root == runtime
 
 
@@ -143,6 +150,57 @@ def test_wheel_update_lifecycle_uses_the_selected_source_descriptor(selected, tm
     argv = captured[0]
     assert argv[argv.index("--source-payload-root") + 1] == str(owner)
     assert json.loads(argv[argv.index("--source-descriptor") + 1]) == descriptor
+
+
+def test_wheel_target_mismatch_refuses_before_lifecycle_reservation(selected, tmp_path, monkeypatch):
+    from agent_worktrees import update_runtime_target
+
+    owner, _, runtime, original = selected
+    snapshot = tmp_path / "wheel-inputs"
+    snapshot.mkdir()
+    source = dataclasses.replace(original, install_source=snapshot)
+    target = update_runtime_target.SourceWheelTarget(json.dumps({
+        "runtime_version": source.version + ".profile." + "d" * 16,
+        "payload_hash": "e" * 64,
+        "source_descriptor": {"kind": "github", "canonical": "github:example/repo", "ref": ""},
+    }, sort_keys=True))
+    monkeypatch.setattr(update_runtime_target, "_wheel_target", lambda *args: target)
+    monkeypatch.setattr(update_runtime_plan, "_shell_prefix", lambda *args: ([sys.executable, "installer"], True))
+
+    def refuse(*_args, **_kwargs):
+        raise ValueError("native wheel target differs")
+
+    monkeypatch.setattr(update_runtime_target, "preflight_wheel_target", refuse, raising=False)
+    monkeypatch.setattr(update_runtime, "_run_human_installer", lambda *a, **kw: pytest.fail(
+        "mismatched target reached the lifecycle owner",
+    ))
+    step = update_runtime_plan.plan_engine(owner, "windows", force=True, source=source)
+    status = step.status if step.blocked else update_runtime._execute_runtime_step(step)
+    assert "native wheel target differs" in status
+    assert not runtime.exists()
+
+
+def test_wheel_interpreter_change_refuses_before_lifecycle_reservation(selected, tmp_path, monkeypatch):
+    owner, _, runtime, original = selected
+    snapshot = tmp_path / "wheel-inputs"
+    snapshot.mkdir()
+    source = dataclasses.replace(original, install_source=snapshot)
+    target = update_runtime_target.SourceWheelTarget(json.dumps({
+        "runtime_version": source.version + ".profile." + "d" * 16,
+        "payload_hash": "e" * 64,
+        "source_descriptor": {"kind": "github", "canonical": "github:example/repo", "ref": ""},
+    }, sort_keys=True))
+    monkeypatch.setattr(update_runtime_target, "_wheel_target", lambda *args: target)
+    monkeypatch.setattr(update_runtime_plan, "_shell_prefix", lambda *args: ([sys.executable, "installer"], True))
+    selected_bases = iter((str(Path(sys.executable).resolve()), str(tmp_path / "different-python")))
+    monkeypatch.setattr(update_runtime_target, "preflight_wheel_target", lambda *_args: next(selected_bases))
+    monkeypatch.setattr(update_runtime, "_run_human_installer", lambda *a, **kw: pytest.fail(
+        "changed interpreter reached the lifecycle owner",
+    ))
+    step = update_runtime_plan.plan_engine(owner, "windows", force=True, source=source)
+    assert not step.blocked
+    assert "interpreter changed" in update_runtime._execute_runtime_step(step)
+    assert not runtime.exists()
 
 
 def test_engine_rechecks_wheel_selection_before_launch(selected, tmp_path, monkeypatch):

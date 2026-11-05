@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent_procutil import no_window_kwargs
 from agent_worktrees import reconcile, update_runtime, update_runtime_plan
 from agent_worktrees.update_runtime_source import PIN_ENV, PreparedRuntimeSource
 from agent_worktrees.update_runtime_target import TARGET_ENV, plan_target
@@ -247,7 +248,7 @@ def test_installed_planner_response_is_bound_to_root_and_full_source(selected, m
 
 @pytest.mark.parametrize("fault", [
     "", "identity", "version", "hash", "extras", "packages", "descriptor",
-    "missing-owner", "missing-source", "provider-skew",
+    "environment", "missing-owner", "missing-source", "provider-skew",
 ])
 def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_path, monkeypatch, fault):
     from test_update_runtime_sources import packet
@@ -264,7 +265,7 @@ def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_pat
     scripts.mkdir(parents=True)
     (scripts / "install_source.py").write_text("# installed owner\n", encoding="utf-8")
     provider = {
-        "schema": "copilot-extensions.runtime-wheel-source-provider", "version": 1,
+        "schema": "copilot-extensions.runtime-wheel-source-provider", "version": 2,
         "selection_env": "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION",
     }
     for payload in (owner, source.payload):
@@ -277,7 +278,7 @@ def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_pat
         (source.payload / "runtime-wheel-source.json").unlink()
     elif fault == "provider-skew":
         (source.payload / "runtime-wheel-source.json").write_text(
-            json.dumps(provider | {"version": 2}), encoding="utf-8",
+            json.dumps(provider | {"version": 1}), encoding="utf-8",
         )
     selection = {
         "identity": json.loads(source.identity),
@@ -297,11 +298,14 @@ def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_pat
         selection["local_packages"] = ["another"]
     elif fault == "descriptor":
         selection["source_descriptor"] = None
+    environment = {} if fault == "environment" else {"python_version": "3.11"}
     calls = []
 
     def run(argv, **kwargs):
         calls.append(argv)
-        return SimpleNamespace(returncode=0, stdout=json.dumps(selection), stderr="")
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"selection": selection, "environment": environment}), stderr="",
+        )
 
     monkeypatch.setattr(subprocess, "run", run)
     if fault:
@@ -312,12 +316,76 @@ def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_pat
         assert target.version == selection["runtime_version"]
         assert target.payload_hash == selection["payload_hash"]
         assert json.loads(target.document) == selection
+        assert json.loads(target.environment) == environment
     if fault in ("missing-owner", "missing-source", "provider-skew"):
         assert not calls
     else:
         assert len(calls) == 1
         assert Path(calls[0][3]) == scripts / "install_source.py"
-        assert "--native-inputs" in calls[0] and str(snapshot) in calls[0]
+        assert "--native-inputs-with-target" in calls[0] and str(snapshot) in calls[0]
+
+
+@pytest.mark.parametrize("fault", ["", "target", "helper", "inside-runtime"])
+def test_wheel_preflight_checks_the_actual_base_without_runtime_writes(tmp_path, monkeypatch, fault):
+    from packaging.markers import default_environment
+    from agent_worktrees.update_runtime_target import SourceWheelTarget, preflight_wheel_target
+
+    owner, payload = tmp_path / "owner", tmp_path / "payload"
+    marker = Path(__file__).resolve().parents[1] / "scripts" / "installer_marker_environment.py"
+    for path in (owner, payload):
+        (path / "scripts").mkdir(parents=True)
+        shutil.copyfile(marker, path / "scripts" / marker.name)
+    if fault == "helper":
+        (payload / "scripts" / marker.name).write_text("# changed\n", encoding="utf-8")
+    environment = default_environment()
+    if fault == "target":
+        environment["python_version"] = "0.0"
+    target = SourceWheelTarget("{}", json.dumps(environment))
+    runtime = Path(sys.executable).resolve().parent.parent if fault == "inside-runtime" else tmp_path / "runtime"
+    monkeypatch.setattr(sys, "_base_executable", sys.executable)
+    source = SimpleNamespace(payload=payload)
+
+    if fault:
+        with pytest.raises(ValueError, match="target differs|support differs|outside the runtime"):
+            preflight_wheel_target(source, target, owner, runtime, dict(os.environ), "linux")
+    else:
+        assert preflight_wheel_target(source, target, owner, runtime, dict(os.environ), "linux") == str(
+            Path(os.path.abspath(sys.executable))
+        )
+    if fault != "inside-runtime":
+        assert not runtime.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows signed interpreter selection")
+def test_wheel_preflight_uses_the_installed_signed_python_owner(tmp_path, monkeypatch):
+    from agent_worktrees.update_runtime_target import SourceWheelTarget, preflight_wheel_target
+
+    owner, payload = tmp_path / "owner", tmp_path / "payload"
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    from installer_marker_environment import MARKER_ENVIRONMENT_QUERY
+
+    for path in (owner, payload):
+        (path / "scripts").mkdir(parents=True)
+        for name in ("runtime-python.ps1", "installer_marker_environment.py"):
+            shutil.copyfile(scripts / name, path / "scripts" / name)
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    assert shell
+    selected = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+         str(owner / "scripts" / "runtime-python.ps1"), "-Probe"],
+        capture_output=True, text=True, timeout=30, check=True, **no_window_kwargs(),
+    )
+    base = Path(os.path.abspath(json.loads(selected.stdout)["python"] or sys._base_executable))
+    probe = subprocess.run(
+        [str(base), "-I", "-S", "-B", "-c", MARKER_ENVIRONMENT_QUERY],
+        capture_output=True, text=True, timeout=30, check=True, **no_window_kwargs(),
+    )
+    target = SourceWheelTarget("{}", json.dumps(json.loads(probe.stdout)))
+    assert preflight_wheel_target(
+        SimpleNamespace(payload=payload), target, owner, tmp_path / "runtime", dict(os.environ), "windows",
+    ) == str(base)
+    assert not (tmp_path / "runtime").exists()
 
 
 def test_execution_rechecks_profile_before_launch_and_on_retry(selected, monkeypatch):

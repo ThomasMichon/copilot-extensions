@@ -1293,12 +1293,20 @@ _deploy_python_runtime() {
             ;;
     esac
     [[ -z "$OWNER_ARG" ]] || mode_args+=(--owner "$OWNER_ARG")
-    [[ -z "$INSTALL_SOURCE_ARG" ]] || mode_args+=(--install-source "$INSTALL_SOURCE_ARG")
+    [[ -z "${INSTALL_SOURCE_ARG:-}" ]] || mode_args+=(--install-source "$INSTALL_SOURCE_ARG")
     [[ "$ACTION" != update || "${AGENT_WORKTREES_TARGETED_UPDATE:-}" == "1" ]] || mode_args+=(--recover-adopted-manager)
-    base="$(_bootstrap_python exclude-venv-dir)" || {
-        err "The Python-owned installer requires a base Python 3.11+ outside the target slot"
-        return 1
-    }
+    if [[ -n "${INSTALL_SOURCE_ARG:-}" && -n "${COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION:-}" ]]; then
+        base="${COPILOT_EXTENSIONS_NATIVE_WHEEL_BASE_PYTHON:-}"
+        if [[ "$base" != /* || ! -x "$base" ]]; then
+            err "Prepared wheel construction requires its selected base Python"
+            return 1
+        fi
+    else
+        base="$(_bootstrap_python exclude-venv-dir)" || {
+            err "The Python-owned installer requires a base Python 3.11+ outside the target slot"
+            return 1
+        }
+    fi
     if [[ "$ACTION" == repair || "$ACTION" == dev || "$ACTION" == dev-release ||
           ! -f "$VENV_DIR/.install-complete.json" ]]; then
         _ensure_uv || return 1

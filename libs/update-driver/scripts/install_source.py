@@ -413,6 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--payload", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--native-inputs", action="store_true")
+    mode.add_argument("--native-inputs-with-target", action="store_true")
     mode.add_argument("--native-session", action="store_true")
     parser.add_argument("--root", type=Path)
     parser.add_argument("--uv", type=Path)
@@ -442,9 +443,16 @@ def main(argv: list[str] | None = None) -> int:
         )
     if any(value is not None for value in construction) or args.repair:
         parser.error("construction arguments require --native-session")
-    if args.native_inputs:
+    if args.native_inputs or args.native_inputs_with_target:
         with project_inputs(args.install_source, args.component) as (selected, inputs):
-            print(json.dumps(native_selection(selected, inputs), sort_keys=True, separators=(",", ":")))
+            result = native_selection(selected, inputs)
+            if args.native_inputs_with_target:
+                target = inputs.receipt()["binding"].get("target")
+                environment = target.get("environment") if isinstance(target, dict) else None
+                if not isinstance(environment, dict) or not environment:
+                    raise ValueError("native wheel profile requires its target environment")
+                result = {"selection": result, "environment": environment}
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     print(json.dumps({
         "identity": sources.manifest_fields(selected.identity),

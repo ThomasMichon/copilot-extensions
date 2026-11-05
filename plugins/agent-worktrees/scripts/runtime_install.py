@@ -590,7 +590,10 @@ def install(
             if recover_adopted_manager:
                 argv.append("--recover-adopted-manager")
             environment = install_driver.child_environment()
-            for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", install_driver.SOURCE_SELECTION_ENV):
+            for name in (
+                "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+                install_driver.SOURCE_SELECTION_ENV, install_driver.WHEEL_BASE_ENV,
+            ):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
             process = subprocess.Popen(

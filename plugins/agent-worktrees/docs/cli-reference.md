@@ -1600,15 +1600,15 @@ record may add an absolute `install_source` directory; other records retain
 their version 1 shape. Both the installed and prepared Worktrees payloads must
 declare matching `runtime-wheel-source.json` support. The installed owner
 inspects the selected source and wheel profile, computes the exact target and
-construction hash, and rechecks that selection before execution. The native
-installer compares the same selection and candidate hash before publication;
-its actual construction and candidate interpreters must also match the selected
-profile's marker environment. Currentness requires the source, selected slot,
-interpreter and completion hash to agree. A missing or older provider refuses
-rather than ignoring the wheel selection. This explicit packet is not source,
-profile or feed authorization: its caller must retain and recheck those
-existing authorities through cutover. No ordinary update selects or downloads a
-bundle automatically.
+construction hash, and checks its chosen base interpreter against the profile
+before reserving the lifecycle. It rechecks and pins that interpreter at launch;
+the native installer checks the candidate interpreter and construction hash
+before publication. The installed and prepared interpreter helpers must match.
+Currentness requires the source, selected slot, interpreter and completion hash
+to agree. A missing or older provider refuses rather than ignoring the wheel
+selection. This explicit packet is not source, profile or feed authorization:
+its caller must retain and recheck those existing authorities through cutover.
+No ordinary update selects or downloads a bundle automatically.
 
 Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or

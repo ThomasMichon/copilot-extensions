@@ -89,6 +89,7 @@ def test_wheel_update_hands_the_same_source_to_shell_and_lifecycle(
     ))
     monkeypatch.setattr(plan_owner, "_deployed_version", lambda _step: None)
     monkeypatch.setattr(plan_owner, "_shell_prefix", lambda *_args: ([sys.executable, "installer"], True))
+    monkeypatch.setattr(target_owner, "preflight_wheel_target", lambda *_args: sys.executable)
     monkeypatch.setattr(source_owner.shutil, "which", lambda _name: sys.executable)
 
     step = plan_owner.plan_engine(owner, platform, force=True, source=source)
@@ -97,6 +98,81 @@ def test_wheel_update_hands_the_same_source_to_shell_and_lifecycle(
     assert json.loads(step.argv[step.argv.index(descriptor_option) + 1]) == descriptor
     command = source.lifecycle_argv(owner, "agent-worktrees", runtime, tmp_path, step.argv, target=target)
     assert json.loads(command[command.index("--source-descriptor") + 1]) == descriptor
+
+
+@pytest.mark.parametrize("fault", ["", "target", "helper", "inside-runtime", "probe"])
+def test_wheel_interpreter_preflight_is_read_only_and_fail_closed(tmp_path, monkeypatch, fault):
+    owner, payload, runtime = (tmp_path / name for name in ("owner", "payload", "runtime"))
+    for path in (owner, payload):
+        (path / "scripts").mkdir(parents=True)
+        (path / "scripts" / "installer_marker_environment.py").write_text(
+            "MARKER_ENVIRONMENT_QUERY = 'probe'\n", encoding="utf-8",
+        )
+    if fault == "helper":
+        (payload / "scripts" / "installer_marker_environment.py").write_text("changed\n", encoding="utf-8")
+    python = tmp_path / "python"
+    python.touch()
+    monkeypatch.setattr(sys, "_base_executable", str(python))
+    expected = {"python_version": "3.11"}
+    target = target_owner.SourceWheelTarget("{}", json.dumps(expected))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        observed = {"python_version": "3.12" if fault == "target" else "3.11"}
+        return SimpleNamespace(returncode=1 if fault == "probe" else 0, stdout=json.dumps(observed))
+
+    monkeypatch.setattr(target_owner.subprocess, "run", run)
+    if fault == "inside-runtime":
+        runtime = tmp_path
+    arguments = (SimpleNamespace(payload=payload), target, owner, runtime, {}, "linux")
+    if fault:
+        with pytest.raises(ValueError):
+            target_owner.preflight_wheel_target(*arguments)
+    else:
+        assert target_owner.preflight_wheel_target(*arguments) == str(python.resolve())
+        assert calls[0][0][:5] == [str(python.resolve()), "-I", "-S", "-B", "-c"]
+    if fault != "inside-runtime":
+        assert not runtime.exists()
+
+
+@pytest.mark.parametrize("choice", ["signed", "fallback", "invalid", "skew"])
+def test_wheel_interpreter_preflight_uses_the_installed_signed_selector(tmp_path, monkeypatch, choice):
+    owner, payload = tmp_path / "owner", tmp_path / "payload"
+    for path in (owner, payload):
+        (path / "scripts").mkdir(parents=True)
+        (path / "scripts" / "installer_marker_environment.py").write_text(
+            "MARKER_ENVIRONMENT_QUERY = 'probe'\n", encoding="utf-8",
+        )
+        (path / "scripts" / "runtime-python.ps1").write_text("# signed selector\n", encoding="utf-8")
+    signed = tmp_path / "signed-python"
+    signed.touch()
+    fallback = tmp_path / "fallback-python"
+    fallback.touch()
+    monkeypatch.setattr(sys, "_base_executable", str(fallback))
+    if choice == "skew":
+        (payload / "scripts" / "runtime-python.ps1").write_text("# changed\n", encoding="utf-8")
+    monkeypatch.setattr(target_owner.shutil, "which", lambda *_args, **_kwargs: "shell")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        selected = str(signed) if choice == "signed" else None if choice == "fallback" else 7
+        value = {"python": selected} if len(calls) == 1 else {"python_version": "3.12"}
+        return SimpleNamespace(returncode=0, stdout=json.dumps(value))
+
+    monkeypatch.setattr(target_owner.subprocess, "run", run)
+    target = target_owner.SourceWheelTarget("{}", json.dumps({"python_version": "3.12"}))
+    arguments = (SimpleNamespace(payload=payload), target, owner, tmp_path / "runtime", {}, "windows")
+    if choice in ("invalid", "skew"):
+        with pytest.raises(ValueError):
+            target_owner.preflight_wheel_target(*arguments)
+        assert len(calls) == (0 if choice == "skew" else 1)
+    else:
+        chosen = signed if choice == "signed" else fallback
+        assert target_owner.preflight_wheel_target(*arguments) == str(chosen.resolve())
+        assert Path(calls[0][5]) == owner / "scripts" / "runtime-python.ps1"
+        assert calls[1][0] == str(chosen.resolve())
 
 
 @pytest.mark.parametrize("fault", ["", "v1", "foreign", "missing-provider", "changed-selection"])
@@ -121,7 +197,7 @@ def test_prepared_wheel_packet_requires_both_owner_capabilities_and_exact_select
         return
     source = source_owner.parse_sources(json.dumps(packet))["agent-worktrees"]
     provider = {
-        "schema": target_owner.WHEEL_PROVIDER_SCHEMA, "version": 1,
+        "schema": target_owner.WHEEL_PROVIDER_SCHEMA, "version": 2,
         "selection_env": target_owner.WHEEL_SELECTION_ENV,
     }
     for path in (payload, owner):
@@ -141,7 +217,10 @@ def test_prepared_wheel_packet_requires_both_owner_capabilities_and_exact_select
     def run(argv, **_kwargs):
         calls.append(argv)
         value = selection | ({"payload_hash": "f" * 64} if fault == "changed-selection" and len(calls) > 1 else {})
-        return SimpleNamespace(returncode=0, stdout=json.dumps(value), stderr="")
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"selection": value, "environment": {"python_version": "3.11"}}),
+            stderr="",
+        )
 
     monkeypatch.setattr(target_owner.subprocess, "run", run)
     if fault == "missing-provider":

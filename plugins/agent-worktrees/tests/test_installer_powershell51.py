@@ -437,7 +437,8 @@ function Assert-SourceRuntime { }
 function Assert-ContextPublication { $script:publicationChecked = $true }
 function Write-ServiceOk { }
 function Invoke-Hidden {
-    param($FilePath, $ArgList, $ErrorOutput)
+    param($FilePath, $ArgList, [switch]$StreamErrorOutput)
+    if (-not $StreamErrorOutput) { throw 'stderr was not streamed' }
     $uvIndex = [Array]::IndexOf($ArgList, '--uv')
     if ($uvIndex -lt 0 -or $ArgList[$uvIndex + 1] -ne $before[0] -or
         $ArgList[$uvIndex + 2] -ne '--base-python') { throw 'uv argument is not scalar' }
@@ -459,7 +460,7 @@ function Invoke-Hidden {
         deployment_manifest_published = $true; reused = $true
     } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText($ArgList[$resultIndex + 1], $result)
-    $ErrorOutput.Value = 'fixture construction diagnostic'
+    [Console]::Error.WriteLine('fixture construction diagnostic')
     $global:LASTEXITCODE = [int]$env:FIXTURE_EXIT
 }
 Deploy-PythonRuntime
@@ -496,6 +497,100 @@ if (@((Get-Command uv -CommandType Application).Source).Count -ne $before.Count)
     if exit_code:
         assert "Python runtime lifecycle failed (exit 7)" in result.stderr
     assert not list((tmp_path / "root" / ".installer-inputs").glob("result-*.json"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows prepared-wheel installation")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("case", ["signed", "fallback", "changed"])
+def test_prepared_wheel_runtime_uses_preflight_python(tmp_path: Path, host: str, case: str):
+    shell = shutil.which(host)
+    if not shell:
+        pytest.skip("PowerShell host is unavailable")
+    other = tmp_path / "other-python.exe"
+    other.touch()
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($env:INSTALLER, [ref]$tokens, [ref]$errors)
+$node = $ast.Find({
+    param($n)
+    $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Deploy-PythonRuntime'
+}, $true)
+Invoke-Expression $node.Extent.Text
+$InstallDir = $env:FIXTURE_ROOT
+$VenvDir = Join-Path $InstallDir 'versions\fixture'
+$PluginDir = Get-Item -LiteralPath $env:FIXTURE_PLUGIN
+$RuntimeInputPlugin = $env:FIXTURE_PLUGIN
+$ScriptDir = Join-Path $PluginDir 'scripts'
+$InstallSource = 'selected-snapshot'
+$BootstrapPython = $env:FIXTURE_PYTHON
+$ContextualInstall = $false
+$Action = 'update'
+$Owner = $null
+$SourceRuntimeIdentity = $null
+function Get-SignedBasePython {
+    if ($env:FIXTURE_CASE -eq 'fallback') { return $null }
+    if ($env:FIXTURE_CASE -eq 'changed') { return $env:FIXTURE_OTHER }
+    return $env:FIXTURE_PYTHON
+}
+function Get-BootstrapPython { throw 'unexpected fallback' }
+function Get-ApplicationPath { param($Name) return $env:FIXTURE_PYTHON }
+function Ensure-Uv { return $true }
+function Ensure-UvIndex { }
+function Ensure-InstallDir { param($Path) [void][IO.Directory]::CreateDirectory($Path) }
+function Assert-SourceRuntime { }
+function Invoke-Hidden {
+    param($FilePath, $ArgList, $ErrorOutput)
+    $index = [Array]::IndexOf($ArgList, '--base-python')
+    if ($FilePath -ne $env:FIXTURE_PYTHON -or $ArgList[$index + 1] -ne $env:FIXTURE_PYTHON) {
+        throw 'wrong construction interpreter'
+    }
+    throw 'selected base reached'
+}
+try { Deploy-PythonRuntime; throw 'unexpected success' }
+catch {
+    $message = $_.Exception.Message
+    if ($env:FIXTURE_CASE -eq 'changed') {
+        if ($message -notmatch 'Signed base Python changed') { throw }
+    } elseif ($message -notmatch 'selected base reached') { throw }
+}
+"""
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        env={
+            **os.environ, "INSTALLER": str(INSTALLER), "FIXTURE_ROOT": str(tmp_path / "root"),
+            "FIXTURE_PLUGIN": str(tmp_path), "FIXTURE_PYTHON": sys.executable,
+            "FIXTURE_OTHER": str(other), "FIXTURE_CASE": case,
+            "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION": "{}",
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows signed interpreter selection")
+def test_signed_python_probe_does_not_run_interpreter_startup_hooks(tmp_path: Path):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if not shell:
+        pytest.skip("PowerShell host is unavailable")
+    hook = tmp_path / "hooks"
+    hook.mkdir()
+    marker = tmp_path / "startup-ran"
+    (hook / "sitecustomize.py").write_text(
+        "import os,pathlib; pathlib.Path(os.environ['FIXTURE_MARKER']).write_text('ran')\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+         str(PLUGIN / "scripts" / "runtime-python.ps1"), "-Probe"],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        env={
+            **os.environ, "PYTHONPATH": str(hook), "FIXTURE_MARKER": str(marker),
+            "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not marker.exists()
 
 
 def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv():

@@ -112,10 +112,13 @@ def test_native_source_installation_retains_selection_through_the_driver(
 
     assert adapter.SOURCE_SELECTION_ENV == update_runtime_plan.WHEEL_SELECTION_ENV
     assert adapter.SOURCE_SELECTION_ENV == update_runtime_target.WHEEL_SELECTION_ENV
+    assert adapter.WHEEL_BASE_ENV == update_runtime_plan.WHEEL_BASE_ENV
+    assert adapter.WHEEL_BASE_ENV == update_runtime_target.WHEEL_BASE_ENV
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
     monkeypatch.setenv(adapter.SOURCE_SELECTION_ENV, '{"selection":"fixture"}')
+    monkeypatch.setenv(adapter.WHEEL_BASE_ENV, str(Path(sys.executable).resolve()))
     snapshot = tmp_path / "source inputs"
     descriptor = {"kind": "github", "canonical": "github:example/suite", "ref": ""}
     args = _arguments(
@@ -131,6 +134,8 @@ def test_native_source_installation_retains_selection_through_the_driver(
     spec, runner = queued[0]
     assert dict(spec.context)[adapter.SOURCE_SELECTION_ENV] == '{"selection":"fixture"}'
     assert adapter.SOURCE_SELECTION_ENV in runner.context_keys
+    assert dict(spec.context)[adapter.WHEEL_BASE_ENV] == str(Path(sys.executable).resolve())
+    assert adapter.WHEEL_BASE_ENV in runner.context_keys
     index = spec.argv.index("-InstallSource")
     assert spec.argv[index + 1] == str(snapshot)
     index = runner.argv.index("--install-source")

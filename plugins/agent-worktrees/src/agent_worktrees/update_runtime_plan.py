@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from . import reconcile
 
 WHEEL_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION"
+WHEEL_BASE_ENV = "COPILOT_EXTENSIONS_NATIVE_WHEEL_BASE_PYTHON"
 
 if TYPE_CHECKING:
     from .update_runtime import _RegisteredPluginTarget
@@ -47,6 +48,7 @@ class RuntimeUpdateStep:
     source: PreparedRuntimeSource | None = None
     source_target: SourceRuntimeTarget | SourceWheelTarget | None = None
     project_root: Path | None = None
+    native_platform: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "environment", MappingProxyType(dict(self.environment)))
@@ -106,6 +108,7 @@ def _select_inputs(
         environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
         environment = dict(environment)
         environment.pop(WHEEL_SELECTION_ENV, None)
+        environment.pop(WHEEL_BASE_ENV, None)
         source_target = None
         if source is not None:
             from . import update_runtime as runtime
@@ -495,16 +498,26 @@ def plan_engine(
     argv = [*shell_prefix, "update", "-InstallDir" if platform_name == "windows" else "--install-dir",
             str(root)]
     if source is not None and source.install_source is not None:
-        from .update_runtime_target import SourceWheelTarget
+        from .update_runtime_target import SourceWheelTarget, preflight_wheel_target
 
         if not isinstance(step.source_target, SourceWheelTarget):
             return dataclasses.replace(step, status="prepared wheel target is unavailable")
+        try:
+            base = preflight_wheel_target(
+                source, step.source_target, step.payload, root, environment, platform_name,
+            )
+        except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
+            return dataclasses.replace(step, status=f"prepared wheel target invalid: {error}")
+        environment[WHEEL_BASE_ENV] = base
+        step = dataclasses.replace(step, environment=environment, native_platform=platform_name)
         argv.extend([
             "-InstallSource" if platform_name == "windows" else "--install-source",
             str(source.install_source),
             "-RuntimeSourceDescriptor" if platform_name == "windows" else "--runtime-source-descriptor",
             json.dumps(step.source_target.source_descriptor, sort_keys=True),
         ])
+        if platform_name == "windows":
+            argv.extend(["-BootstrapPython", base])
     try:
         deadline = max(600, update_cli._installer_timeout("agent-worktrees", environment, plugin_dir))
     except (OSError, ValueError) as error:

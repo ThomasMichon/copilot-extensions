@@ -579,12 +579,18 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
                 assert step.runtime_root is not None
                 assert step.project_root is not None
                 step.source.validate(step.name, step.payload, step.environment)
-                from .update_runtime_target import check_target
+                from .update_runtime_target import SourceWheelTarget, check_target, preflight_wheel_target
 
                 check_target(
                     step.source_target, step.source, step.name, step.payload,
                     step.runtime_root, step.environment,
                 )
+                if isinstance(step.source_target, SourceWheelTarget):
+                    if step.native_platform is None or preflight_wheel_target(
+                        step.source, step.source_target, step.payload, step.runtime_root,
+                        step.environment, step.native_platform,
+                    ) != step.environment.get(update_runtime_plan.WHEEL_BASE_ENV):
+                        raise ValueError("Native wheel interpreter changed after update planning")
                 command = step.source.lifecycle_argv(
                     step.payload, step.name, step.runtime_root, step.project_root, argv,
                     target=step.source_target,

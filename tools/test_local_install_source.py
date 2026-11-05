@@ -1238,6 +1238,28 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert probe.stdout.strip() == "prepared application ready"
 
 
+@pytest.mark.parametrize("native_source", [False], indirect=True)
+def test_native_inspection_returns_the_selected_profile_target(native_source):
+    source, snapshot = native_source
+    selected = source.select_project(snapshot, "demo-app")
+    command = [
+        sys.executable, "-I", "-B", str(Path(source.__file__).resolve()),
+        "--install-source", str(snapshot), "--component", "demo-app",
+        "--payload", str(selected.payload),
+    ]
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    old = subprocess.run(
+        [*command, "--native-inputs"], capture_output=True, text=True, timeout=60, creationflags=flags,
+    )
+    extended = subprocess.run(
+        [*command, "--native-inputs-with-target"], capture_output=True, text=True, timeout=60, creationflags=flags,
+    )
+    assert old.returncode == extended.returncode == 0, old.stderr + extended.stderr
+    result = json.loads(extended.stdout)
+    profile = json.loads((snapshot / selected.project["profile"]).read_text(encoding="utf-8"))
+    assert result == {"selection": json.loads(old.stdout), "environment": profile["target"]["environment"]}
+
+
 @pytest.mark.parametrize("repair", [False, True])
 @pytest.mark.parametrize("native_source", [False, True], indirect=True)
 def test_native_candidate_wheel_handoff(

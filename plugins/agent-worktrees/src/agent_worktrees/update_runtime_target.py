@@ -1,11 +1,14 @@
 """Read a source target using the installed owner's declared profile policy."""
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
 TARGET_SCHEMA = "copilot-extensions.runtime-source-target"
 TARGET_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET"
 WHEEL_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION"
+WHEEL_BASE_ENV = "COPILOT_EXTENSIONS_NATIVE_WHEEL_BASE_PYTHON"
 WHEEL_PROVIDER_SCHEMA = "copilot-extensions.runtime-wheel-source-provider"
 WHEEL_PROVIDER_FILE = "runtime-wheel-source.json"
 PROVIDER_SCHEMA = "copilot-extensions.runtime-source-target-provider"
@@ -69,6 +73,7 @@ class SourceRuntimeTarget:
 @dataclasses.dataclass(frozen=True)
 class SourceWheelTarget:
     document: str
+    environment: str = "{}"
 
     @property
     def source_descriptor(self) -> dict[str, str]:
@@ -107,7 +112,7 @@ def _wheel_provider(payload: Path) -> dict | None:
     if (
         not isinstance(value, dict) or set(value) != {"schema", "version", "selection_env"}
         or value["schema"] != WHEEL_PROVIDER_SCHEMA or type(value["version"]) is not int
-        or value["version"] != 1 or value["selection_env"] != WHEEL_SELECTION_ENV
+        or value["version"] != 2 or value["selection_env"] != WHEEL_SELECTION_ENV
     ):
         raise ValueError("Unsupported wheel source support declaration")
     scripts = payload / "scripts"
@@ -134,7 +139,7 @@ def _wheel_target(source: PreparedRuntimeSource, name: str, owner: Path, environ
         [
             sys.executable, "-I", "-B", str(validator),
             "--install-source", str(source.install_source), "--component", name,
-            "--payload", str(source.payload), "--native-inputs",
+            "--payload", str(source.payload), "--native-inputs-with-target",
         ],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         stdin=subprocess.DEVNULL, env=dict(environment), timeout=60, check=False,
@@ -142,7 +147,15 @@ def _wheel_target(source: PreparedRuntimeSource, name: str, owner: Path, environ
     )
     if result.returncode:
         raise ValueError(f"Installed wheel selection failed: {result.stderr.strip() or result.returncode}")
-    value = json.loads(result.stdout, object_pairs_hook=strict_json_object)
+    packet = json.loads(result.stdout, object_pairs_hook=strict_json_object)
+    if (
+        not isinstance(packet, dict) or set(packet) != {"selection", "environment"}
+        or not isinstance(packet["environment"], dict) or not packet["environment"]
+        or any(not isinstance(key, str) or not isinstance(value, str)
+               for key, value in packet["environment"].items())
+    ):
+        raise ValueError("Installed wheel selection has an invalid target environment")
+    value = packet["selection"]
     descriptor = value.get("source_descriptor") if isinstance(value, dict) else None
     local = value.get("local_packages") if isinstance(value, dict) else None
     if (
@@ -163,7 +176,77 @@ def _wheel_target(source: PreparedRuntimeSource, name: str, owner: Path, environ
         or not descriptor["kind"] or not descriptor["canonical"]
     ):
         raise ValueError("Installed wheel selection differs from the prepared source")
-    return SourceWheelTarget(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False))
+    return SourceWheelTarget(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False),
+        json.dumps(packet["environment"], sort_keys=True, separators=(",", ":"), allow_nan=False),
+    )
+
+
+def preflight_wheel_target(
+    source: PreparedRuntimeSource, target: SourceWheelTarget, owner: Path, root: Path,
+    environment: Mapping[str, str], platform_name: str,
+) -> str:
+    """Select and check the native interpreter before lifecycle reservation."""
+    def matching_script(name: str) -> Path:
+        installed, prepared = owner / "scripts" / name, source.payload / "scripts" / name
+        if (
+            not _ordinary(installed) or not _ordinary(prepared)
+            or installed.stat().st_size > 65536 or prepared.stat().st_size > 65536
+            or installed.read_bytes().replace(b"\r\n", b"\n") != prepared.read_bytes().replace(b"\r\n", b"\n")
+        ):
+            raise ValueError("Prepared wheel interpreter support differs from the installed owner")
+        return installed
+
+    clean = {key: value for key, value in environment.items()
+             if key.upper() not in {"PYTHONPATH", "PYTHONHOME"}}
+    base = Path(getattr(sys, "_base_executable", None) or sys.executable)
+    if platform_name == "windows":
+        selector = matching_script("runtime-python.ps1")
+        shell = shutil.which("pwsh", path=clean.get("PATH")) or shutil.which("powershell", path=clean.get("PATH"))
+        if shell is None:
+            raise ValueError("Prepared wheel target needs the installed PowerShell owner")
+        result = subprocess.run(
+            [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(selector), "-Probe"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=30, check=False, env=clean, **no_window_kwargs(),
+        )
+        if result.returncode or len(result.stdout) > 16384:
+            raise ValueError("Native wheel interpreter selection failed")
+        selected = json.loads(result.stdout, object_pairs_hook=strict_json_object)
+        if not isinstance(selected, dict) or set(selected) != {"python"} or (
+            selected["python"] is not None and not isinstance(selected["python"], str)
+        ):
+            raise ValueError("Native wheel interpreter selection is invalid")
+        if selected["python"] is not None:
+            base = Path(selected["python"])
+    if not base.is_absolute():
+        raise ValueError("Native wheel interpreter must be absolute")
+    base = Path(os.path.abspath(base))
+    physical = base.resolve(strict=True)
+    if not physical.is_file() or physical.is_relative_to(root.resolve()):
+        raise ValueError("Native wheel interpreter must be outside the runtime")
+    marker = matching_script("installer_marker_environment.py")
+    declaration = ast.parse(marker.read_text(encoding="utf-8"))
+    queries = [
+        node.value.value for node in declaration.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(item, ast.Name) and item.id == "MARKER_ENVIRONMENT_QUERY" for item in node.targets)
+        and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    ]
+    if len(queries) != 1:
+        raise ValueError("Installed wheel target probe is invalid")
+    result = subprocess.run(
+        [str(base), "-I", "-S", "-B", "-c", queries[0]],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=30, check=False, env=clean, **no_window_kwargs(),
+    )
+    if result.returncode or len(result.stdout) > 16384:
+        raise ValueError("Native wheel target probe failed")
+    observed = json.loads(result.stdout, object_pairs_hook=strict_json_object)
+    expected = json.loads(target.environment, object_pairs_hook=strict_json_object)
+    if not isinstance(observed, dict) or not expected or observed != expected:
+        raise ValueError("Native wheel target differs from the selected interpreter")
+    return str(base)
 
 
 def plan_target(
