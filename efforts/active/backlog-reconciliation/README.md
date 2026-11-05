@@ -330,6 +330,19 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The following ten-disposition wave completes #8951/#9758's finite source
+contracts and adopts eight unfinished trackers under OPEN #3979, #5003
+and #5245 with explicit Plan/Validation and unchanged source/resource
+custody. #3985's broader runtime-core architecture stays separate; actual
+native-coverage uncertainty is transferred, not waived. Two equal complete
+13:45 PST ten-page scans observe 961 whole OPEN: 687 creator-eligible,
+274 excluded, 647 original-cohort and 314 inflow. Ten audited departures
+and one external departure explain the net reduction of eleven; external
+work receives no campaign credit. Verified dispositions are 833, still
+232 above the fixed 729 checkpoint. The [journal](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
+also records reviewed delivery of the preceding 28-disposition wave in
+#10781. This campaign remains Active with every completion state unchanged.
+
 The next applied cohort wave delivers 28 audited dispositions: #7171 and
 #10739 are completed finite fixes; 26 unfinished child trackers are
 subsumed only after complete direct Plan/Validation and original-scope
