@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 
-from .attention import Cursor, Facts, Handled, Interest
+from .attention import Cursor, Facts, Handled, Interest, PRKey
 from .attention_state import AttentionState, MAX_INTERESTS, _scoped
 from .conversation_journal import Observation
 from .review_intent import identifier
@@ -40,6 +40,31 @@ class AttentionInputs:
             ))
         ):
             raise ValueError("bounded unique interests and explicit policy evidence required")
+
+
+def unavailable_attention(
+    state: AttentionState,
+    key: PRKey,
+    generation: dict,
+    inputs: AttentionInputs,
+) -> dict:
+    """Invalidate retained work without inventing a missing observation or cursor."""
+    if type(inputs) is not AttentionInputs or inputs.generation_id != generation["id"]:
+        raise ValueError("attention inputs differ from the acquired generation")
+    current = {(value.consumer, value.role): value for value in inputs.interests}
+    scoped_key = asdict(key)
+    updated = 0
+    for row in state.records:
+        if row["facts"]["key"] != scoped_key:
+            continue
+        old_interest = Interest(**row["interest"])
+        interest = current.get(
+            (old_interest.consumer, old_interest.role), replace(old_interest, matches=None),
+        )
+        row["interest"] = asdict(interest)
+        row["facts"]["complete"] = False
+        updated += 1
+    return {"status": "unavailable", "interests": updated}
 
 
 def observe_attention(

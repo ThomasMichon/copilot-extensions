@@ -98,6 +98,53 @@ def test_missing_actual_policy_draft_or_selection_is_unavailable_not_empty_succe
         ).status == "unavailable"
 
 
+@pytest.mark.parametrize("cause", ["status", "head", "target", "terminal_partial"])
+def test_missing_observation_invalidates_retained_work_without_inventing_progress(
+    acquired: tuple, cause: str,
+) -> None:
+    store, evidence = acquired
+    journal = ConversationStore(store)
+    if cause == "terminal_partial":
+        evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+    first = generation(evidence)
+    journal.observe_workspace(first, attention=inputs(first), expires_at=100)
+    original = copy.deepcopy(rows(store)[0])
+    foreign = copy.deepcopy(evidence)
+    foreign["scope"]["principal_id"] = "other-principal"
+    other = generation(foreign, 2)
+    journal.observe_workspace(other, attention=inputs(other), expires_at=100)
+    unrelated = copy.deepcopy(rows(store)[1])
+    before = json.loads(store.path.read_bytes())["conversations"]
+    pull = evidence["sections"]["pull_request"]["data"]
+    if cause == "status":
+        pull.pop("status")
+    elif cause == "head":
+        pull.pop("lastMergeSourceCommit")
+    elif cause == "target":
+        pull.pop("lastMergeTargetCommit")
+    else:
+        evidence["sections"].pop("reviewers")
+    current = generation(evidence, 4)
+    omitted = cause in ("status", "head")
+    result = journal.observe_workspace(
+        current, attention=inputs(current, interests=() if omitted else inputs(current).interests, complete=False),
+        expires_at=100,
+    )
+    assert result["status"] == "unavailable"
+    assert result["attention"] == {"status": "unavailable", "interests": 1}
+    restarted = ReplayStore(store.root, store.namespace, clock=store.clock)
+    row = rows(restarted)[0]
+    assert row["facts"] == {**original["facts"], "complete": False}
+    assert row["interest"]["matches"] is (None if omitted else True)
+    assert row["handled"] == original["handled"] and row["provenance"] == original["provenance"]
+    assert rows(restarted)[1] == unrelated
+    assert json.loads(store.path.read_bytes())["conversations"] == before
+    facts = Facts(**_scoped(row["facts"]))
+    assert project(
+        facts, Interest(**row["interest"]), now=facts.observed_at, max_age_seconds=30,
+    ).status == "unavailable"
+
+
 def test_handled_data_survives_poll_and_new_input_starts_its_own_age(acquired: tuple) -> None:
     store, evidence = acquired
     first = generation(evidence)

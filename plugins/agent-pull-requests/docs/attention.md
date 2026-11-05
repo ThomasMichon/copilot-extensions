@@ -111,6 +111,10 @@ Recovery from unknown or temporarily omitted selection preserves pending age;
 only a confirmed excluded-to-selected admission starts a new selection age.
 Missing native draft evidence, incomplete policy and unknown path selection
 are unavailable rather than a positive queue decision.
+If missing candidate, state or interval evidence prevents a new journal
+observation, retained scoped rows become unavailable and omitted interests
+become selection-unknown. Their last real candidate, cursor, pending age and
+handled provenance remain intact; no journal progress is invented.
 
 This source composition is not A2's complete exit. It introduces no confirmed
 feedback writer or self-echo suppression, and never derives handled progress

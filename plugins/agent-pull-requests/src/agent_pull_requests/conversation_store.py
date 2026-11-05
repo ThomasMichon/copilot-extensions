@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .attention import Cursor, PRKey
-from .attention_acquisition import AttentionInputs, observe_attention
+from .attention_acquisition import AttentionInputs, observe_attention, unavailable_attention
 from .attention_state import AttentionState
 from .conversation_journal import ConversationJournal, Observation, PROTOCOL
 from .watch_replay_store import ReplayStore, ReplayStoreInvalid
@@ -148,10 +148,17 @@ class ConversationStore:
             record = journal._find(key)
             previous = Observation.restore(record["current"]) if record is not None else None
             value = project_generation(generation, self.owner.namespace, previous)
-            if value is None:
-                return {"status": "unavailable", "reason": "candidate_state_or_interval_missing"}
-            if previous is not None and previous.terminal and not value.complete:
-                return {"status": "unavailable", "reason": "terminal_requires_complete_observation"}
+            if value is None or previous is not None and previous.terminal and not value.complete:
+                result = {
+                    "status": "unavailable",
+                    "reason": "candidate_state_or_interval_missing" if value is None
+                    else "terminal_requires_complete_observation",
+                }
+                if attention is not None:
+                    state = AttentionState(document["attention"])
+                    result["attention"] = unavailable_attention(state, key, generation, attention)
+                    document["attention"] = state.snapshot()
+                return result
             expected = Cursor(record["epoch"], record["sequence"]) if record else None
             result = journal.observe(
                 value, expected=expected,
