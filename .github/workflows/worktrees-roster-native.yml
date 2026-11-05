@@ -24,14 +24,38 @@ permissions:
   contents: read
 
 jobs:
-  roster:
-    name: Cold roster (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  roster-linux:
+    name: Cold roster (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    env:
+      UV_PYTHON: "3.12"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Current roster, cold bootstrap and native API/CLI recovery
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_worktrees_client.py
+          --test-file tests/test_worktrees_feed.py
+          --test-file tests/test_worktrees_runtime.py
+          --test-file tests/test_worktrees_recovery.py
+      - name: Actual Manager consumer, saved continuity and negotiated transport
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/production_picker/test_current_worktrees_feed.py
+          --test-file tests/production_picker/test_resident_transport.py
+  roster-windows:
+    name: Cold roster (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
     env:
       UV_PYTHON: "3.12"
       PYTHONUTF8: "1"
