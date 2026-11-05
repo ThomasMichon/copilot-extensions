@@ -5,7 +5,7 @@
   Copilot execution.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -53,12 +53,16 @@ AHP does not forgo Mux, and choosing Mux does not forgo AHP. Treating Mux and
 AHP as if they were exclusive peers understates this composability; the
 contract must let a caller select a backend and a presentation independently.
 
-For now, both the Mux presentation layer and the AHP backend are owned and
-driven by the **Worktree Manager** control-plane app (see
-[installer](../installer/README.md)) rather than by agent-worktrees or by a
-separate per-technology plugin. This is a near-term consolidation, not a
-permanent exclusivity rule: a future execution technology may still ship as
-its own installable provider package under the same contract.
+The [Copilot Driver](../plugins/agent-remote-driver/README.md) owns the minimal
+direct-Copilot execution substrate: Session Host and mux wrapping. Its
+independently installable, quickly hoistable app supplies one ACP-compatible
+Session Host broker for headless children and interactive CLI sessions whose
+launch-injected extension connects to that broker.
+
+Worktree Manager selects and presents hosting providers as a client, including
+native AHP backends and the Driver; it does not contain the Driver's mux or
+Session Host implementation. AHP, SDK, application and third-party hosts keep
+their own native semantics and may compose with presentation independently.
 
 ### Provider resolution
 
@@ -341,7 +345,9 @@ continuation.
 - Parent vision: [agent-fabric](../agent-fabric/README.md)
 - Durable agency state:
   [plugins/agent-worktrees](../plugins/agent-worktrees/README.md)
-- Current host of the Mux and AHP execution mechanics:
+- Minimal direct-Copilot execution provider:
+  [Copilot Driver](../plugins/agent-remote-driver/README.md)
+- Hosting selection and presentation client:
   [installer](../installer/README.md) — the Worktree Manager control-plane app
 - Hosted coordination provider:
   [plugins/agent-bridge](../plugins/agent-bridge/README.md)

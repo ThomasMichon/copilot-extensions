@@ -2,10 +2,10 @@
 
 - **Subject:** Whether a **user-global, launch-time-loaded remote-driver
   extension riding an ordinary muxed `copilot` CLI session** should become the
-  **default** control surface agent-bridge and agent-dispatch drive
-  agent-to-agent work and delegation through — in place of today's default
-  (ACP + Session Host) — once a bounded set of open risks is proven out by
-  controlled testing.
+  **default** presentation agent-bridge and agent-dispatch drive
+  agent-to-agent work and delegation through, with both presentations using
+  the Copilot Driver's common Session Host broker, once controlled validation
+  establishes lifecycle, input and ownership parity.
 - **Scope:** leaf (cross-cutting capability within the agent fabric; contests
   one stance of a sibling Active vision — see Non-Goals and Provenance)
 - **Status:** Draft — pre-validation. Nothing here authorizes changing any
@@ -18,99 +18,34 @@
 
 ## Purpose & Intent
 
-Today's default mechanism for driving a Copilot session programmatically is
-ACP, wrapped by agent-bridge's own **Session Host** — a purpose-built,
-reattachable-ACP-wire layer with generation-based claim arbitration, durable
-frame replay, and bespoke cross-venue spawners, built specifically because a
-bare `--acp` child has none of that on its own. It works, but it was built to
-compensate for two things ACP mode does not give a driving program for free:
-survivability across a frontend disconnect, and a transport at all for a
-process with no attached terminal.
+The [Copilot Driver](../plugins/agent-remote-driver/README.md) supplies one
+Session Host broker for direct headless ACP children and extension-connected
+interactive mux sessions. Both presentations preserve durable execution,
+exclusive input custody, native identity and caller-independent reconnection.
+Factoring that common app is independent of choosing a default presentation.
 
-An ordinary interactive, muxed `copilot` session already has both of those —
-from different owners. The multiplexer (`tmux`/`psmux`) keeps the process
-alive across detach/reattach; that is its entire purpose, confirmed durable in
-practice (`agent-worktrees`' own `docs/mux.md`). A loaded extension inside
-that real interactive process already has a live, bidirectional SDK
-connection to it. The sibling
-[remote-interactive-sessions](../remote-interactive-sessions/README.md)
-vision already established this for the **human-attended, operator-opted-in**
-case: "a Session Host exists to give a headless `copilot --acp` child two
-things it cannot provide itself... a muxed, interactive CLI session already
-has both, from different owners," and deliberately scoped CLI mode as
-**opt-in, never an ambient or default execution mode** a coordinating agent
-reaches for on its own.
+This vision asks whether muxed interactive Copilot should become the preferred
+presentation for agent-to-agent and delegated work. Such a choice must earn
+full lifecycle, extension presence, input/permission handling and exclusive
+driver parity against the headless mode. A working mux or SDK connection is not
+proof that a caller can create, drive, restore and retire the complete session.
 
-This vision asks whether that scoping should **change** for agent-to-agent
-and delegated work specifically — not because the attended case's reasoning
-was wrong, but because **full end-to-end programmatic drive via mux was not
-previously verified as achievable**. The existing `remote-interactive-sessions`
-scoping is correct about what it covers: it was built for observation and
-limited steering of a session a human already started, not for an agent
-being able to create a session, fully control it, and cleanly end it the way
-ACP + Session Host already can. That is a real, important distinction this
-draft must not blur: the proposed path must provide explicit session
-creation or fresh-context lifecycle and owned, deliberate termination,
-comparable to the existing **ACP + Session Host flow**. Those guarantees are
-not a claim that downstream termination uses a particular native ACP method.
-The gap this vision is actually about is narrower and
-more concrete: **agent-bridge's own CLI-side extension today only supports
-reporting on user-launched sessions and offering limited steering** — it was
-never built to create a session, drive it end-to-end, and gracefully end it.
-This session's research turned up concrete facts suggesting that gap may now
-be closable:
-
-- **Launch-time SDK-extension presence must be proven independently.**
-  Extension availability depends on the selected launch mechanism and supported
-  native version floor. The proposed path must establish the extension presence,
-  permissions and routing it depends on rather than assume them from a working
-  command or transport. Absence of ambient SDK-extension loading does not
-  establish absence of plugin-provided skills, agents or MCP composition.
-- **`--plugin-dir` is not an ACP-exclusive advantage.** Both the ACP branch
-  and the ordinary interactive-startup path in `src/cli/index.ts`
-  independently call the identical `scanPluginDirs()` →
-  `setAdditionalPlugins()` wiring. Arbitrary, caller-composed plugin
-  arrangements are equally available to a mux-launched interactive session —
-  the gap above is specifically about *ambient, launch-time extension
-  auto-load*, not plugin/skill/MCP composition generally.
-- **The programmatic capability gap is narrower than assumed.** A joined
-  extension gets real streamed tool-call/tool-result events (not just
-  hook-level visibility), and `session.abort()` is reachable and not
-  host-only-gated. The genuine, confirmed gap is session **creation** (a
-  joined extension cannot call an equivalent of `session/new`) and the
-  **ask_user/elicitation routing**, both detailed in Concepts below.
-- **Creation and owned termination require full lifecycle parity.**
-  Reporting/steering an existing CLI session does not supply those guarantees.
-  A narrow `/clear`/`/exit` bridge is a candidate mechanism for fresh context
-  and deliberate termination; its identity, outcome and safety must be validated
-  against the existing ACP + Session Host flow, not inferred from command names.
-
-The north star, if validation succeeds: a `copilot` process launched *anywhere*
-— any machine, any repo checkout, any CodeSpace, any container, any Dev Box —
-is drivable the moment a single, user-global extension install is present on
-that machine or image, with **no per-venue install of agent-worktrees,
-agent-bridge, or any other plugin required just to make driving possible**.
-That is a strictly stronger venue-independence story than today's ACP+Session
-Host default, which still requires agent-bridge's own daemon/spawner
-infrastructure to exist wherever it drives from.
-
-This is deliberately **not yet a decision**. It is a bounded set of claims this
-session's research supports, paired with the concrete open risks that must be
-closed — through the careful, controlled tests this vision calls for — before
-any sibling vision's "opt-in, never ambient-default" language is revisited.
+The north star is venue-independent driving with the selected minimal Driver
+package, without a receiving coordination suite or a second launcher. Changing
+the default remains a separate controlled decision; the explicit per-request
+mode contract stays intact until that decision clears its validation gate.
 
 ## Concepts & Components
 
 ### Standalone remote-driver and scoped managed delivery
 
-A standalone, marketplace-installable extension provides baseline drivability:
-attach to the live event stream, send/steer and abort. User-global installation
-makes that floor available to ordinary `copilot` launches independently of any
-coordination plugin. The extension remains independently usable rather than
-becoming a Bridge-only runtime dependency.
+A standalone extension supplies interactive Copilot's native connection to
+the Driver. Its independently installed or hoisted core app owns Session Host
+and mux wrapping. Headed extension integration and direct headless ACP children
+expose the same broker; the extension does not make Bridge its mandatory host.
 
-A Bridge-managed launch may carry the same selected compatible plugin from
-session creation, together with canonical mux launch support, without requiring
+A Bridge- or Worktrees-requested launch can carry the same selected compatible
+redistributable, including scoped launch-time extension trust, without requiring
 the guest's full suite or rewriting its global plugin configuration. This
 composes [host-selected receiving support](../plugins/agent-bridge/README.md#host-selected-receiving-support),
 not a second driver or launcher. It does not promote CLI mode as the default.
@@ -133,15 +68,12 @@ target session" must therefore mean **wired into the launch command**
 already-running session after the fact. This is a correction to this
 vision's own working premise at the start of the research that produced it.
 
-### Driver exclusivity arbitration (new work, not inherited for free)
+### Driver exclusivity arbitration
 
-Session Host's `host_index.py` solves "exactly one driver at a time" through
-generation-based claims — a real problem it was built to close. A raw mux
-session does the opposite by design: it allows multiple simultaneous
-attaches. Betting the default mechanism on mux without an equivalent
-exclusivity primitive reopens the split-brain risk Session Host exists to
-prevent. This vision treats that primitive as required new work, not an
-inherited property of switching to mux.
+The common Driver broker preserves exclusive mutation custody for both
+presentations while permitting independent observation. Terminal attachment
+does not grant another programmatic writer, and changing presentation cannot
+fork the native conversation or bypass human takeover.
 
 ### The blocked-interaction escalation ladder
 
@@ -183,15 +115,15 @@ flags honestly for whatever caller depends on it.
 
 ### user-global-remote-driver-install
 
-A single marketplace/global install gives any `copilot` process on that
-machine or image baseline drivability, independent of whether agent-bridge,
-agent-worktrees, or any other coordination plugin is also present.
+An independent Driver app installation makes the core hosting capability
+available on a machine or image; selected interactive launches carry its
+extension from creation. No coordination plugin is required on that target.
 
 ### venue-independent-driving
 
-A CodeSpace, container, or Dev Box needs no agent-bridge daemon, Session
-Host, or agent-worktrees install just to become programmatically drivable —
-only the remote-driver extension present at the image/machine level.
+A CodeSpace, container, or machine needs no Bridge, Worktrees or Manager install
+just to become programmatically drivable. The selected Driver package supplies
+Session Host and the chosen presentation's support as one receiving app.
 
 ### launch-time-extension-presence
 
@@ -201,9 +133,8 @@ retrofitted into an already-running one.
 
 ### mux-native-driver-exclusivity
 
-A generation/claim-style primitive equivalent to Session Host's
-`host_index`, built for mux-hosted sessions specifically, so multiple
-driving processes cannot race the same session.
+The Driver's common broker retains generation/claim custody for mux-hosted
+sessions, so multiple driving processes cannot race the same conversation.
 
 ### tty-command-bridge-for-session-lifecycle
 
@@ -260,11 +191,9 @@ editing any sibling vision's default-mechanism language.
 
 ## Non-Goals / Boundaries
 
-- **Not a replacement for Session Host everywhere.** Headless, no-peek venues
-  where exclusivity and reliability matter more than plugin/feature parity
-  keep ACP + Session Host as the default unless and until validation proves
-  otherwise for that case too. This vision does not assert blanket
-  superiority.
+- **Not removal of Session Host.** Both Driver modes use its common broker;
+  headless mode keeps direct ACP child hosting. Selecting a different
+  presentation does not remove ownership, replay or lifecycle guarantees.
 - **Not a generic TTY automation framework.** The TTY command bridge is
   scoped to a small, explicitly named set of recognized slash-commands, not
   arbitrary keystroke injection or screen-scraping as a steady-state
@@ -273,10 +202,9 @@ editing any sibling vision's default-mechanism language.
   The escalation ladder's rungs 2-3 are named as best-guess/terminal-decline
   specifically so no caller mistakes them for a real human-equivalent
   answer.
-- **Not editing `remote-interactive-sessions` or `session-hosting`'s current
-  status or feature set.** This vision's job is to *prove or disprove*
-  whether their attended-only, opt-in framing should extend to unattended/
-  delegated work too — not to assert that extension already holds.
+- **Not default promotion through architectural factoring.** The Driver's
+  common broker does not itself change the explicit per-request mode contract
+  or assert that unattended interactive driving has met its validation gate.
 - **Not a specification.** This vision fixes the claims, the risks, and the
   validation gate — not the concrete extension package name, wire format,
   or exclusivity-primitive implementation. That belongs to the effort that
@@ -288,6 +216,8 @@ editing any sibling vision's default-mechanism language.
 - Sibling vision: [session-hosting](../session-hosting/README.md) — the
   provider-neutral hosting boundary this vision's mux-hosted provider class
   already has a named slot under (`CLI/mux` in *session-host-provider*).
+- Execution app: [Copilot Driver](../plugins/agent-remote-driver/README.md) —
+  owns Session Host, mux wrapping and standalone receiving distribution.
 - Sibling vision: [remote-interactive-sessions](../remote-interactive-sessions/README.md) —
   establishes the human-attended, opt-in case this vision asks whether to
   extend to unattended/delegated work; its `opt-in-not-ambient-default` and
@@ -297,10 +227,9 @@ editing any sibling vision's default-mechanism language.
   `--plugin-dir` resolution as a venue-agnostic core concern; this vision's
   venue-independent-driving feature extends that same principle to the
   extension-loading mechanism itself.
-- Plugin vision: [agent-bridge](plugins/agent-bridge/README.md) — owns the
-  coordination layer and Session Host whose default-mechanism role this
-  vision asks whether to change.
-- Plugin vision: [agent-dispatch](plugins/agent-dispatch/README.md) — the
+- Plugin vision: [agent-bridge](../plugins/agent-bridge/README.md) — owns the
+  coordination layer consuming the Driver's broker.
+- Plugin vision: [agent-dispatch](../plugins/agent-dispatch/README.md) — the
   delegation layer named in this vision's Subject as a second consumer of
   whichever mechanism becomes default.
 
