@@ -5,6 +5,13 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [six release/stamp/inventory contracts](finite-release-stamp-inventory-contracts.md)
+retain eighteen ranked relationships without confusing native diagnostics
+with repair, a passed calendar date with feed success, or an unwired
+foundation with production integration. All six stay OPEN; the
+[journal](<journal/2026/11.05 finite-release-stamp-inventory-contracts.md>)
+credits actual progression while retaining independent finite acceptance.
+
 The [eleven native/identity/transaction contracts](finite-native-identity-transaction-contracts.md)
 retain thirty-three ranked relationships without confusing repaired source
 with complete exact-host acceptance, a later pass with an explained timeout,
