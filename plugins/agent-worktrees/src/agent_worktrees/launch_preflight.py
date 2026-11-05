@@ -36,6 +36,16 @@ class LaunchPreflightError(RuntimeError):
     """A launch plan cannot be built without mutating unsafe state."""
 
 
+def new_knowledge_error(config, *, source: str) -> str | None:
+    """Read the knowledge owner before New allocation or initial request admission."""
+    from .state_root import coordination_readiness
+
+    readiness = coordination_readiness(config, cwd=source)
+    if not readiness.ready:
+        return "New authoring requires knowledge readiness before allocation. " + readiness.error
+    return None
+
+
 def require_repository_hosting(path: str | Path) -> None:
     """Translate repository denial into the launch planner's existing refusal."""
     from repository_policy import AgentHostingError

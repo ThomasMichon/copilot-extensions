@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -29,6 +29,7 @@ class NativeReviewResponse:
 class NativeActionOutcome:
     receipt: dict
     confirmed: bool
+    response: dict | None = field(default=None, repr=False)
 
 
 def _native_id(value, *, numeric=False):
@@ -248,7 +249,11 @@ class AdoReviewContext:
         usable = {key: value for key, value in ids.items() if _native_id(value, numeric=key != "reviewer_id")}
         verified = verified and len(usable) == len(ids)
         ids = usable
-        return NativeActionOutcome({"origin": "response", "platform_ids": ids, "proof": None}, verified and not result.late)
+        confirmed = verified and not result.late
+        return NativeActionOutcome(
+            {"origin": "response", "platform_ids": ids, "proof": None}, confirmed,
+            copy.deepcopy(result.body) if confirmed else None,
+        )
 
     def reconcile(self, operation, action):
         """Native create-thread markers only; current vote/content is never proof."""

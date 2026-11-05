@@ -55,13 +55,14 @@ def feedback_environment(environment: tuple) -> tuple:
     return store, selected, generation, attachment, backend, now, expires, interests
 
 
-def run(value: tuple, *, interests: tuple[Interest, ...] | None = None) -> dict:
+def run(value: tuple, *, interests: tuple[Interest, ...] | None = None, current=None) -> dict:
     store, selected, generation, attachment, backend, _, expires, admitted = value
     return execute_review(
         store, selected, generation, attachment, context_factory=backend.context,
         checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
         feedback=FeedbackInputs(generation["id"], interests or admitted[:1], 60),
         feedback_position=backend.positions.get(generation["id"]),
+        feedback_current=current,
     )
 
 
@@ -389,11 +390,16 @@ def test_original_reply_and_owned_edit_use_exact_native_object_readback(
     assert result["status"] == "complete" and result["feedback"]["status"] == "handled"
     assert result["feedback"]["cursor"] == {"epoch": 1, "sequence": 2}
     assert run(value)["entered_writes"] == 0 and len(writes(backend)) == 1
+    later = observe(value, change="echo", second=12)
+    retry = run(value, current=lambda: (later, backend.positions[later["id"]]))
+    assert retry["feedback"]["echo"] == {
+        "status": "unavailable", "reason": "action_response_version_unavailable",
+    }
 
 
-@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound"])
+@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound", "echo", "echo_timeout", "echo_setup_timeout"])
 def test_workspace_selects_feedback_from_embedding_not_request_json(
-    feedback_environment: tuple, mode: str,
+    feedback_environment: tuple, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
     from agent_pull_requests.generation_cache import GenerationCache
     from agent_pull_requests.owner_read import OwnerReadBinding, OwnerReadHandler, PROFILE, PRINCIPAL_SEMANTICS
@@ -436,6 +442,27 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
         )
 
     operations = make_operations()
+    if mode in ("echo", "echo_timeout", "echo_setup_timeout"):
+        backend.versioned_reply = True
+        backend.pr["reviewers"] = copy.deepcopy(generation["sections"]["reviewers"]["data"])
+    if mode in ("echo_timeout", "echo_setup_timeout"):
+        import agent_pull_requests.workspace_operations as workspace_module
+        import agent_worktrees.providers.azure_owned_evidence as owned_module
+        started = time.monotonic()
+        elapsed = [0.0]
+        clock = lambda: started + elapsed[0]
+        executor = workspace_module.execute_review
+        acquire = owned_module.acquire_owned_evidence
+        monkeypatch.setattr(workspace_module.time, "monotonic", clock)
+        monkeypatch.setattr(
+            owned_module, "acquire_owned_evidence",
+            lambda *args, **kwargs: acquire(*args, **kwargs, clock=clock),
+        )
+        def delayed_executor(*args, **kwargs):
+            if mode == "echo_setup_timeout":
+                elapsed[0] += 0.2
+            return executor(*args, **kwargs, clock=clock)
+        monkeypatch.setattr(workspace_module, "execute_review", delayed_executor)
     payload = {
         "number": selected["scope"]["number"], "intent": selected,
         "source_attachment": attachment, "budget_seconds": 10,
@@ -483,10 +510,55 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
             "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
             expires_at=expires, checkpoint=backend.checkpoint,
         )
+    if mode in ("echo_timeout", "echo_setup_timeout"):
+        def acquire_echo(current: object) -> None:
+            evidence["sections"]["discussions"]["data"] = copy.deepcopy(backend.threads)
+            for section in evidence["sections"].values():
+                section.update(observed_from="2026-10-30T00:00:10Z", observed_to="2026-10-30T00:00:11Z")
+            value[5][0] = observation_interval(evidence["sections"])[1] + 1
+            operations.execute(
+                "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
+                expires_at=expires, checkpoint=backend.checkpoint,
+            )
+            if mode == "echo_setup_timeout":
+                elapsed[0] += 9.7
+
+        def exhaust_optional_budget(current: object, remaining: float) -> None:
+            assert document(value)["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 1
+            assert 0 < remaining <= 5
+            if mode == "echo_setup_timeout":
+                assert remaining < 0.1
+            elapsed[0] += remaining + 0.001
+            backend.on_changes = None
+
+        backend.after_write = acquire_echo
+        backend.on_changes = exhaust_optional_budget
     result = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
     assert result["result"]["feedback"]["status"] == "handled", result
     assert called[-1] == generation["id"]
     assert result["result"]["feedback"]["cursor"]["epoch"] == (2 if mode == "reopen" else 1)
+    if mode in ("echo_timeout", "echo_setup_timeout"):
+        assert result["result"]["status"] == "complete"
+        assert result["result"]["feedback"]["echo"] == {
+            "status": "unavailable", "reason": "echo_readback_unavailable",
+        }
+        assert document(value)["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 1
+        recovered = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
+        assert recovered["result"]["feedback"]["echo"]["status"] == "covered"
+        assert recovered["result"]["entered_writes"] == 0
+    if mode == "echo":
+        evidence["sections"]["discussions"]["data"] = copy.deepcopy(backend.threads)
+        for section in evidence["sections"].values():
+            section.update(observed_from="2026-10-30T00:00:10Z", observed_to="2026-10-30T00:00:11Z")
+        value[5][0] = observation_interval(evidence["sections"])[1] + 1
+        operations.execute(
+            "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
+            expires_at=expires, checkpoint=backend.checkpoint,
+        )
+        covered = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
+        assert covered["result"]["feedback"]["echo"]["status"] == "covered", covered
+        assert covered["result"]["entered_writes"] == 0
+        assert document(value)["attention"]["records"][1]["handled"] is None
     operations = make_operations()
     retry = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
     assert retry["result"]["entered_writes"] == 0 and retry["result"]["feedback"]["status"] == "handled"

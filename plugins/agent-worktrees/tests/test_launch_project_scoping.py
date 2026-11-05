@@ -129,7 +129,7 @@ def _stub_create_worktree_core_internals(
     monkeypatch.setattr(
         m.state_root_mod,
         "resolve_state_root",
-        lambda config, cwd=None: m.state_root.StateRoot(
+        lambda config, cwd=None: m.state_root_mod.StateRoot(
             path=None, source="knowledge_repo", repo="", stateless=False,
             requires_external=False, bound=False, error=None,
         ),
