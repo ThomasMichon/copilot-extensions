@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-05 - Final fixed-graph preparation, containment and liveness contracts](<journal/2026/11.05 finite-preparation-containment-liveness-contracts.md>)
+
 - [2026-11-05 - Eleven finite automatic-update, observation and compatibility contracts](<journal/2026/11.05 finite-automatic-observation-compatibility-contracts.md>)
 
 - [2026-11-05 - Eight finite installer, hook, account and recovery contracts](<journal/2026/11.05 finite-installer-hook-account-recovery-contracts.md>)

@@ -5,6 +5,16 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [four preparation/containment/liveness contracts](finite-preparation-containment-liveness-contracts.md)
+retain twelve ranked relationships and all four independent OPEN outcomes.
+Actual promoted preparation failure, test-global containment, pending-seed
+diagnostics and honest clean-exit liveness remain distinct from credited
+partials. Three changed-closed identities and protected whole evidence
+supply no new completion credit or custody release.
+The [journal](<journal/2026/11.05 finite-preparation-containment-liveness-contracts.md>)
+records the actual final fixed-graph group, 420, not campaign completion;
+fresh whole-queue/inflow coverage and the original checkpoint remain.
+
 The [eleven automatic-update/observation/compatibility contracts](finite-automatic-observation-compatibility-contracts.md)
 retain thirty-three ranked relationships and independently verify #9704,
 #10057 and #10078's finite source completions through actual current
