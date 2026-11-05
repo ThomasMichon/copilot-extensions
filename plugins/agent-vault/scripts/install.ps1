@@ -1082,7 +1082,7 @@ if (([string]`$_supportsContext).Trim() -ceq '1') {
 }
 & `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service @_serviceArguments @args
 exit `$LASTEXITCODE
-"@, $utf8NoBom)
+"@, [Text.UTF8Encoding]::new($true))
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `

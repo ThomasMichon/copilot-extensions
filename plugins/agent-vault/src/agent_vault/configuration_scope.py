@@ -23,3 +23,5 @@ def bind_service_configuration(root: str) -> None:
         raise ValueError("service configuration root must be an existing absolute directory")
     global _SERVICE_CONFIGURATION_ROOT
     _SERVICE_CONFIGURATION_ROOT = str(path)
+    # A launch projection is data for the caller, not resident-time authority.
+    os.environ.pop("AGENT_CONFIGURATION_CONTEXT", None)
