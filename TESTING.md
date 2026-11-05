@@ -48,7 +48,9 @@ first-use adapter; #7030 retains those acceptance boundaries.
 The same focused packet separately exercises preexisting selector/manifest
 disagreement, actual canonical last-known-good/newest-complete recovery, named
 and packaged helper layouts, unchanged valid-current selection despite a newer
-unselected slot, constructor/helper-only changes and same-package repair serving.
+unselected slot, constructor/helper-only changes, external transitive local
+dependency changes or loss (including cyclic declarations), and same-package
+repair serving. Generated dependency environments do not invalidate cached work.
 Completion/interpreter records in these lookup fixtures are synthetic observations;
 the real canonical resolver is executed, not the selected fixture interpreter.
 They do not certify package health or installed serving. Own successful acquisition

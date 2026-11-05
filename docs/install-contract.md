@@ -1702,8 +1702,10 @@ selected-runtime manifest does not qualify as that legacy case.
 
 Newly prepared actions retain their payload manifest, complete construction-input
 fingerprint, runtime source receipt, deployment manifest, selector and relevant
-serving identity facts. Generated environments/caches/build output are excluded;
-ordinary staging keeps its existing curated staleness fingerprint. Versioned
+serving identity facts. Construction inputs include transitive declared local
+package sources outside the payload directory; missing declared inputs refuse.
+Generated environments/caches/build output are excluded; ordinary staging keeps
+its existing curated staleness fingerprint. Versioned
 roots additionally use the owning payload's canonical `resolve-python` primitive
 to observe current, last-known-good or newest-complete selection. Its caller-owned
 read-only child has a fifteen-second deadline and 64 KiB per-stream limit;

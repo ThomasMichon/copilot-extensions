@@ -193,6 +193,37 @@ def discover_plugin_dir(home: Path | None = None) -> tuple[Path | None, str]:
     return None, ""
 
 
+def _construction_roots(plugin_dir: Path) -> set[Path]:
+    import tomllib
+
+    pending = [plugin_dir]
+    roots: set[Path] = set()
+    while pending:
+        declared = pending.pop()
+        if declared.is_symlink():
+            raise ValueError(f"Construction input is a symlink: {declared}")
+        root = declared.resolve(strict=True)
+        if root in roots:
+            continue
+        roots.add(root)
+        if root.is_file():
+            continue
+        manifest = root / "pyproject.toml"
+        if root == plugin_dir.resolve() and not manifest.exists():
+            continue
+        sources = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        for section in ("tool", "uv", "sources"):
+            sources = sources.get(section, {})
+            if not isinstance(sources, dict):
+                raise ValueError(f"Invalid local construction sources: {manifest}")
+        for source in sources.values():
+            path = source.get("path") if isinstance(source, dict) else None
+            if not isinstance(path, str) or not path:
+                raise ValueError(f"Unsupported local construction source: {manifest}")
+            pending.append(root / path)
+    return roots
+
+
 def fingerprint(plugin_dir: Path, *, construction_inputs: bool = False) -> str:
     """Hash the version/launcher/installer files plus the actual application
     source (#2609) to detect a real change.
@@ -222,9 +253,9 @@ def fingerprint(plugin_dir: Path, *, construction_inputs: bool = False) -> str:
     different file set for a different purpose (a persisted, cross-run
     completion-marker comparison) and are unaffected by this choice.
 
-    ``construction_inputs`` captures the whole payload for cached installer
-    actions, excluding generated environments, caches and build output.
-    Ordinary staging retains its existing curated staleness fingerprint.
+    ``construction_inputs`` captures the payload and its transitive declared
+    local sources for cached installer actions, excluding generated environments,
+    caches and build output. Ordinary staging retains its curated fingerprint.
     """
     import hashlib
 
@@ -246,15 +277,19 @@ def fingerprint(plugin_dir: Path, *, construction_inputs: bool = False) -> str:
             raise error
 
         generated = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
-        for directory, directories, names in os.walk(plugin_dir, onerror=scan_error):
-            project = (Path(directory) / "pyproject.toml").is_file()
-            directories[:] = [
-                name for name in directories
-                if name not in generated and not name.endswith((".egg-info", ".dist-info"))
-                and not (project and name in {"build", "dist"})
-            ]
-            files.extend(Path(directory) / name for name in names)
-        files.sort()
+        for root in _construction_roots(plugin_dir):
+            if root.is_file():
+                files.append(root)
+                continue
+            for directory, directories, names in os.walk(root, onerror=scan_error):
+                project = (Path(directory) / "pyproject.toml").is_file()
+                directories[:] = [
+                    name for name in directories
+                    if name not in generated and not name.endswith((".egg-info", ".dist-info"))
+                    and not (project and name in {"build", "dist"})
+                ]
+                files.extend(Path(directory) / name for name in names)
+        files = sorted(set(files))
     else:
         source_roots = [plugin_dir / "src"]
         libs_dir = plugin_dir / "libs"
@@ -267,7 +302,7 @@ def fingerprint(plugin_dir: Path, *, construction_inputs: bool = False) -> str:
             if root.is_dir():
                 files.extend(sorted(root.rglob("*")))
     for fp in files:
-        relative = fp.relative_to(plugin_dir)
+        relative = fp.relative_to(plugin_dir) if fp.is_relative_to(plugin_dir) else fp
         if (
             not fp.is_file() or fp.suffix in (".pyc", ".pyo")
             or "__pycache__" in relative.parts

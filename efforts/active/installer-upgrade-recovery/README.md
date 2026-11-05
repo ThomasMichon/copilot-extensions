@@ -745,3 +745,29 @@ unit runs and initial-head hosted success remain separate evidence.
 Current-head hosted CI and a fresh review must qualify this revision before
 merge; containing release is still due. #7030, #7028 and this parent remain
 open with their existing native and construction owners.
+
+### 2026-11-04 - External construction-input review correction
+
+Exact head `2b739eb101ceb268a5b97b4ff5b3d53ac14e6bc3` passed required
+CI 41935837433, including 4,108 executed units in 94.401 seconds with coverage
+recorded once and fresh evidence uploaded. Review 5777656241 confirmed all five
+prior findings resolved, but identified another input-closure gap: declared
+local dependencies outside the payload were not fingerprinted.
+
+Three actual cached-action controls reproduced that gap before correction.
+The construction-only fingerprint now follows transitive declared local
+sources, handles cycles, includes external file inputs, and refuses missing
+declared inputs. It does not import dependency code, execute another process
+or grant installer admission. Generated dependency environments remain excluded,
+and ordinary staging keeps its existing curated fingerprint.
+
+All forty-three new freshness consumer cases pass in 147.48 seconds of pytest
+(191.17 seconds including preparation and cleanup). The staging/monotonic
+compatibility packet passes 75 cases in 13.85 seconds (21.81 seconds total).
+Python lint, unchanged module ceilings, documentation consistency and all four
+source AST guards pass. The earlier 109 retained cases and seventeen pure units
+are separate retained evidence; their admitted production sources are unchanged
+by this correction. No test limit or required gate was weakened.
+The revised head still needs its own hosted CI and passing review before merge;
+the previous head's green result is not substituted. Parent, native acceptance,
+release and rollout boundaries remain unchanged.

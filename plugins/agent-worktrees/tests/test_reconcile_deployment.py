@@ -267,6 +267,62 @@ def test_cached_action_includes_constructor_inputs(deployment, monkeypatch, part
     assert _snapshot(deployment.root) == before
 
 
+@pytest.mark.parametrize("change", ["direct", "transitive", "missing"])
+def test_cached_action_includes_external_local_dependencies(deployment, monkeypatch, change):
+    from agent_worktrees import update_launch_cli
+
+    dependency = deployment.payload.parent / "example-dependency"
+    dependency.mkdir()
+    (deployment.payload / "pyproject.toml").write_text(
+        '[project]\nname = "example-plugin"\nversion = "2.0.0"\n'
+        '[tool.uv.sources]\nexample-dependency = { path = "../example-dependency" }\n',
+        encoding="utf-8",
+    )
+    (dependency / "pyproject.toml").write_text(
+        '[project]\nname = "example-dependency"\nversion = "1.0.0"\n',
+        encoding="utf-8",
+    )
+    if change == "transitive":
+        transitive = deployment.payload.parent / "example-transitive"
+        transitive.mkdir()
+        (dependency / "pyproject.toml").write_text(
+            (dependency / "pyproject.toml").read_text(encoding="utf-8")
+            + '[tool.uv.sources]\nexample-transitive = { path = "../example-transitive" }\n',
+            encoding="utf-8",
+        )
+        (transitive / "pyproject.toml").write_text(
+            '[project]\nname = "example-transitive"\nversion = "1.0.0"\n'
+            '[tool.uv.sources]\nexample-dependency = { path = "../example-dependency" }\n',
+            encoding="utf-8",
+        )
+        dependency = transitive
+    source = dependency / "example.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    stage_fingerprint = update_stage.fingerprint(deployment.payload)
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    assert reconcile_deployment.execution_diagnostic(step) is None
+    generated = dependency / ".venv"
+    generated.mkdir()
+    (generated / "generated.py").write_text("GENERATED = True\n", encoding="utf-8")
+    assert reconcile_deployment.execution_diagnostic(step) is None
+    if change == "missing":
+        (dependency / "pyproject.toml").unlink()
+    else:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+    assert update_stage.fingerprint(deployment.payload) == stage_fingerprint
+    before = _snapshot(deployment.home)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step", lambda *args, **kwargs: pytest.fail("installer executed"),
+    )
+    result = update_launch_cli._apply(step)
+    assert result["diagnostic"]["reason"] == (
+        "runtime-freshness-unavailable" if change == "missing" else "runtime-freshness-changed"
+    )
+    assert _snapshot(deployment.home) == before
+
+
 def test_apply_replans_after_its_own_successful_payload_acquisition(deployment, monkeypatch):
     calls = []
     monkeypatch.setattr(reconcile, "resolve_copilot", lambda: "fixture-copilot")
