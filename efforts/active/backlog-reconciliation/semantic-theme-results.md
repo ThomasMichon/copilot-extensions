@@ -5,6 +5,15 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [twelve whole consumer/ownership contracts](whole-consumer-ownership-contracts.md)
+integrate thirty-six ranked comparisons without substituting neighboring
+source progress for complete consumer acceptance. Both project-selection
+surfaces/all nine slugs, exact same-attempt consume, acquisition-through-GC
+ownership, ordered tracking-only closeout and finite warning attribution
+remain explicit. All twelve stay OPEN; the
+[journal](<journal/2026/11.05 whole-consumer-ownership-contracts.md>)
+records no receiving transfer or new campaign credit.
+
 The [ten live-consumer/policy contracts](live-consumer-policy-contracts.md)
 integrate thirty ranked relationships with actual running-consumer,
 remote-lifetime, five-operation and all-site policy acceptance intact.

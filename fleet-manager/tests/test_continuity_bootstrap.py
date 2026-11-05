@@ -27,6 +27,18 @@ from gateway_service_transport_fixtures import Rig
 from test_gateway_enrollment import EnrollmentHarness, GRANT
 
 
+def _prepared_engine_python() -> Path | None:
+    root = os.environ.get("COPILOT_EXTENSIONS_TEST_VENV_ROOT")
+    return Path(root) / "agent-worktrees" / "bin" / "python" if root else None
+
+
+def test_engine_consumer_uses_explicit_prepared_environment(tmp_path, monkeypatch):
+    prepared = tmp_path / "prepared"
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_VENV_ROOT", str(prepared))
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "unrelated-sandbox"))
+    assert _prepared_engine_python() == prepared / "agent-worktrees" / "bin" / "python"
+
+
 @pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine"])
 def test_real_cli_first_touch_check_restart_and_same_private_key(
     tmp_path: Path, consumer: str,
@@ -80,8 +92,8 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
 
             if consumer == "manager-engine":
                 repository = Path(__file__).parents[2]
-                engine_python = repository / ".test-venvs/linux/agent-worktrees/bin/python"
-                if os.name == "nt" or not engine_python.is_file():
+                engine_python = _prepared_engine_python()
+                if os.name == "nt" or engine_python is None or not engine_python.is_file():
                     if sdk_runtime:
                         pytest.fail("installed SDK qualification requires the prepared POSIX engine test environment")
                     pytest.skip("source qualification requires the prepared POSIX engine test environment")

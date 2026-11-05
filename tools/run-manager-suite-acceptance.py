@@ -121,7 +121,9 @@ def main() -> int:
     )
     if prepared.returncode:
         return prepared.returncode
-    python = REPO / ".test-venvs" / sys.platform / "worktree-manager" / "Scripts" / "python.exe"
+    from plugin_test_resources import venv_root
+
+    python = venv_root(REPO) / "worktree-manager" / "Scripts" / "python.exe"
     root.mkdir(parents=True, exist_ok=True)
     with _observe_processes(root, args.mode, fixture["_runtime_process_trace_script"]):
         return qualify(root, args.mode, python)

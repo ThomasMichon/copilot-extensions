@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import socket
+import stat
 import subprocess
 import sys
 import time
@@ -44,6 +47,18 @@ def child_command(root: Path, wait: float = 0, mode: str = "probe", ready: Path 
 
 def launch_options():
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
+@pytest.fixture(autouse=True)
+def runner_scratch(tmp_path, monkeypatch, inherited_scratch):
+    scratch = tmp_path.parent / "runner-scratch"
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch))
+    return scratch
+
+
+@pytest.fixture
+def inherited_scratch():
+    return os.environ.get("AGENT_SCRATCH_ROOT")
 
 
 @pytest.fixture
@@ -129,6 +144,198 @@ def load_runner(filename: str):
     finally:
         sys.path[:] = previous_path
     return module
+
+
+def test_external_resources_are_source_bound_and_leave_legacy_resources_untouched(
+    tmp_path, runner_scratch, monkeypatch,
+):
+    runner = load_runner("run-plugin-tests.py")
+    source = tmp_path / "source"
+    plugin = source / "plugins" / "alpha"
+    (plugin / "tests").mkdir(parents=True)
+    (plugin / "tests" / "test_example.py").touch()
+    legacy = source / ".test-venvs" / sys.platform / "alpha"
+    legacy.mkdir(parents=True)
+    sentinel = legacy / "keep"
+    sentinel.write_text("existing resource", encoding="utf-8")
+    monkeypatch.setattr(runner, "REPO", source)
+    monkeypatch.setattr(runner, "PLUGINS", source / "plugins")
+    monkeypatch.setattr(runner.shutil, "which", lambda _: "uv")
+    environment = runner._venv_python("alpha").parent.parent
+    seen = []
+
+    def prepare(*args, **kwargs):
+        assert environment.is_relative_to(runner_scratch)
+        assert probe(environment) == 3
+        return Path(sys.executable)
+
+    def run(command, **kwargs):
+        sandbox = kwargs["sandbox"]
+        assert sandbox.is_relative_to(runner_scratch)
+        assert not sandbox.is_relative_to(source)
+        assert (sandbox / "scratch-owner.json").is_file()
+        assert Path(kwargs["env"]["AGENT_SCRATCH_ROOT"]).is_relative_to(sandbox)
+        assert Path(kwargs["env"]["COPILOT_EXTENSIONS_TEST_VENV_ROOT"]) == environment.parent
+        assert Path(kwargs["env"]["PYTHONPYCACHEPREFIX"]).is_relative_to(sandbox)
+        assert f"cache_dir={sandbox / 'pytest-cache'}" in command
+        assert probe(environment) == 3
+        seen.append(sandbox)
+        return 0
+
+    monkeypatch.setattr(runner, "_ensure_venv", prepare)
+    monkeypatch.setattr(runner, "run_contained", run)
+    assert runner.main(["alpha"]) == 0
+    assert len(seen) == 1 and not seen[0].exists()
+    assert probe(environment) == 0
+    assert runner._venv_python("alpha").parent.parent == environment
+    breadcrumb = environment.parents[2] / "scratch-owner.json"
+    assert json.loads(breadcrumb.read_text(encoding="utf-8"))["source_checkout"] == str(source)
+    other_source = tmp_path / "other-source"
+    other_source.mkdir()
+    monkeypatch.setattr(runner, "REPO", other_source)
+    assert runner._venv_python("alpha").parent.parent != environment
+    assert sentinel.read_text(encoding="utf-8") == "existing resource"
+    assert not (source / ".test-runs").exists()
+
+
+@pytest.mark.parametrize("invalid", ["file", "relative", "inside-source", "linked", "linked-dotdot"])
+def test_invalid_explicit_scratch_fails_without_fallback_or_legacy_mutation(
+    cache, monkeypatch, invalid,
+):
+    runner = load_runner("run-plugin-tests.py")
+    source = cache / "source"
+    source.mkdir()
+    legacy = source / ".test-venvs"
+    legacy.mkdir()
+    sentinel = legacy / "keep"
+    sentinel.touch()
+    root = cache / "scratch"
+    if invalid == "file":
+        root.touch()
+    elif invalid == "relative":
+        root = Path("relative-scratch")
+    elif invalid == "inside-source":
+        root = source / "scratch"
+    else:
+        target = cache / "target"
+        target.mkdir()
+        if os.name == "nt":
+            subprocess.run(
+                [os.environ["COMSPEC"], "/c", "mklink", "/J", str(root), str(target)],
+                check=True, capture_output=True, timeout=10, **launch_options(),
+            )
+        else:
+            root.symlink_to(target, target_is_directory=True)
+        if invalid == "linked-dotdot":
+            root = root / ".." / "nested"
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(root))
+    monkeypatch.setattr(runner, "REPO", source)
+    monkeypatch.setattr(runner.shutil, "which", lambda _: "uv")
+    monkeypatch.setattr(runner, "run_plugin", lambda *a, **k: pytest.fail("unsafe run"))
+    assert runner.main(["alpha"]) == 1
+    assert sentinel.exists()
+
+
+def test_scratch_os_temp_fallback_and_canonical_checkout_alias(cache, monkeypatch):
+    runner = load_runner("run-plugin-tests.py")
+    import plugin_test_resources as resources
+
+    monkeypatch.delenv("AGENT_SCRATCH_ROOT")
+    monkeypatch.setattr(resources.tempfile, "gettempdir", lambda: str(cache / "os-temp"))
+    source = cache / "source"
+    source.mkdir()
+    monkeypatch.setattr(runner, "REPO", source)
+    python = runner._venv_python("alpha")
+    assert python.is_relative_to(cache / "os-temp")
+    assert python.relative_to(cache / "os-temp").parts[0].startswith("ce-")
+    monkeypatch.setattr(runner, "REPO", source / ".." / source.name)
+    assert runner._venv_python("alpha") == python
+    assert runner._venv_python("beta") != python
+
+
+def test_os_temporary_alias_is_canonical_but_explicit_alias_is_refused(cache, monkeypatch):
+    runner = load_runner("run-plugin-tests.py")
+    import plugin_test_resources as resources
+
+    parent = cache / "actual-temp"
+    parent.mkdir()
+    alias = cache / "os-temp-alias"
+    if os.name == "nt":
+        subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(alias), str(parent)],
+            check=True, capture_output=True, timeout=10, **launch_options(),
+        )
+    else:
+        alias.symlink_to(parent, target_is_directory=True)
+    monkeypatch.setattr(resources.tempfile, "gettempdir", lambda: str(alias))
+    monkeypatch.delenv("AGENT_SCRATCH_ROOT")
+    source = cache / "source"
+    source.mkdir()
+    monkeypatch.setattr(runner, "REPO", source)
+    assert runner._venv_python("alpha").is_relative_to(parent)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(alias))
+    with pytest.raises(ValueError, match="not ordinary"):
+        runner._venv_python("alpha")
+
+
+@pytest.mark.parametrize("owner,mode,accepted", [
+    (42, 0o700, True), (43, 0o700, False), (42, 0o770, False), (42, 0o707, False),
+])
+def test_fallback_root_rejects_foreign_or_shared_metadata(owner, mode, accepted):
+    load_runner("run-plugin-tests.py")
+    import plugin_test_resources as resources
+
+    metadata = os.stat_result((stat.S_IFDIR | mode, 0, 0, 1, owner, 0, 0, 0, 0, 0))
+    if accepted:
+        resources._validate_fallback_root(metadata, 42)
+    else:
+        with pytest.raises(ValueError, match="private and owned"):
+            resources._validate_fallback_root(metadata, 42)
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="native Unix sockets unavailable")
+def test_disposable_pytest_layout_can_bind_unix_socket(cache, monkeypatch, inherited_scratch):
+    runner = load_runner("run-plugin-tests.py")
+    if inherited_scratch is None:
+        monkeypatch.delenv("AGENT_SCRATCH_ROOT")
+    else:
+        monkeypatch.setenv("AGENT_SCRATCH_ROOT", inherited_scratch)
+    import tempfile
+    base = (
+        Path(inherited_scratch).expanduser().resolve()
+        if inherited_scratch else Path(tempfile.gettempdir()).resolve()
+    )
+    if len(os.fsencode(str(base))) > 50:
+        pytest.skip("caller temporary parent already exceeds this short-path socket lane")
+    parent = runner.runs_root(cache)
+    with runner._TestSandbox(prefix=runner.run_prefix("alpha"), dir=parent) as raw:
+        sandbox = Path(raw)
+        runner.record_owner(sandbox, cache, retention="disposable native socket regression")
+        temporary = sandbox / "t" / "g1" / "test_socket_address0"
+        temporary.mkdir(parents=True)
+        address = temporary / "rpc.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            server.bind(str(address))
+        assert address.exists()
+
+
+def test_standalone_preparation_refuses_other_managed_target_and_legacy_cache(
+    cache, monkeypatch,
+):
+    runner = load_runner("run-standalone-tests.py")
+    monkeypatch.setattr(runner, "REPO", cache)
+    monkeypatch.setattr(runner, "acquire", lambda *a: pytest.fail("unmanaged preparation admitted"))
+    other_target = runner.default_python("services/chat")
+    legacy = cache / ".test-venvs" / sys.platform / "services/index" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    for python in (other_target, legacy):
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.touch()
+        with pytest.raises(SystemExit) as failure:
+            runner.main(["services/index", "--prepare", "--python", str(python)])
+        assert failure.value.code == 2
+        assert python.is_file()
 
 
 @pytest.mark.parametrize("mode", [
@@ -220,7 +427,7 @@ def test_standalone_managed_environment_protects_prepare_and_use(cache, monkeypa
     runner = load_runner("run-standalone-tests.py")
     monkeypatch.setattr(runner, "REPO", cache)
     (cache / "services/index" / "tests").mkdir(parents=True)
-    environment = cache / ".test-venvs" / sys.platform / "services/index"
+    environment = runner.default_python("services/index").parent.parent
     environment.mkdir(parents=True)
     events = []
 
@@ -272,8 +479,10 @@ def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cach
 
 @pytest.mark.parametrize("custom", [False, pytest.param(True, marks=EXHAUSTIVE)], ids=["managed", "custom-venv"])
 @pytest.mark.parametrize("wait", [0, 3], ids=["busy", "bounded-wait"])
-def test_missing_interpreter_during_rebuild_obeys_environment_lease(cache, custom, wait):
-    environment = cache / ".test-venvs" / sys.platform / "services/index"
+def test_missing_interpreter_during_rebuild_obeys_environment_lease(cache, monkeypatch, custom, wait):
+    runner = load_runner("run-standalone-tests.py")
+    monkeypatch.setattr(runner, "REPO", cache)
+    environment = runner.default_python("services/index").parent.parent
     environment.mkdir(parents=True)
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     ready = cache / "holder-ready"
@@ -395,6 +604,8 @@ def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeyp
     assert uv, "runner contract requires uv"
     runner = load_runner("run-plugin-tests.py")
     monkeypatch.setattr(runner, "VENV_ROOT", cache / "venvs")
+    monkeypatch.setattr(runner, "PLUGINS", cache / "plugins")
+    (runner.PLUGINS / "alpha").mkdir(parents=True)
     monkeypatch.setattr(runner, "_dep_fingerprint", lambda _: "current")
     monkeypatch.setattr(runner, "_has_pyproject", lambda _: False)
     monkeypatch.setenv("UV_VENV_CLEAR", "true")
@@ -443,7 +654,7 @@ def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeyp
     invocations = []
 
     def run(command, **kwargs):
-        if command[:2] == [uv, "pip"]:
+        if Path(command[0]).resolve() == Path(uv).resolve() and command[1] == "pip":
             assert python.is_file()
             return subprocess.CompletedProcess(
                 command, 0, stdout=UV_SETTINGS if "--show-settings" in command else "", stderr="",
@@ -469,14 +680,19 @@ def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeyp
     lease = admission.acquire(0, root)
     monkeypatch.setattr(runner.subprocess, "run", run)
     try:
-        assert runner._ensure_venv("alpha", uv, reinstall=mode == "reinstall") == python
+        if mode == "root-alias":
+            with pytest.raises(ValueError, match="not ordinary"):
+                runner._ensure_venv("alpha", uv, reinstall=False)
+            assert (root / "stale-package").is_dir()
+        else:
+            assert runner._ensure_venv("alpha", uv, reinstall=mode == "reinstall") == python
         after = root.stat()
         assert (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
         assert admission.admission_dir(root) == before_key
         assert probe(root) == 3
     finally:
         lease.release()
-    assert invocations == ["uv"]
+    assert invocations == ([] if mode == "root-alias" else ["uv"])
     assert sentinel.exists()
     assert probe(root) == 0
 
@@ -630,58 +846,44 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
         lease.release()
 
 
-def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
-    import re
+def test_ci_runner_portfolio_keeps_unit_impact_gating_without_integration_fallback():
     import yaml
 
     workflow = yaml.safe_load(
         (TOOLS.parent / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
     )
-    for platform in ("linux", "windows"):
-        job = workflow["jobs"][f"test-runner-{platform}"]
-        detector = next(step for step in job["steps"] if step.get("id") == "runner-contracts")
-        tests = next(step for step in job["steps"] if step.get("name") == "Test runner admission and isolation")
-        assert tests["run"].split().count("tools/test_environment_admission.py") == 1
-        assert tests["if"] == "steps.runner-contracts.outputs.run == 'true'"
-        assert tests["env"]["PYTEST_ADDOPTS"] == (
-            """${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}"""
-        )
-        assert '"$EVENT_NAME" = "workflow_dispatch"' in detector["run"]
-        assert "run=true" in detector["run"] and "run=false" in detector["run"]
-        assert "github.event.pull_request.head.sha" in detector["env"]["HEAD_SHA"]
-        pattern = re.search(r"'(\^\(.*)'", detector["run"]).group(1)
-        for path in (
-            "tools/run-plugin-tests.py", "tools/test_environment_admission.py",
-            "tools/full_worktrees_worker_contract.py",
-            "tools/_admission_protocol.py", "tools/conftest.py",
-            "libs/single-instance-lease/src/single_instance_lease/lease.py",
-            ".github/workflows/ci.yml",
-            ".github/workflows/validate-and-promote.yml",
-            "plugins/agent-worktrees/pyproject.toml",
-            ".devcontainer/test-isolation/devcontainer.json",
-            ".devcontainer/test-isolation/Dockerfile",
-        ):
-            assert re.search(pattern, path)
-        assert not re.search(pattern, "plugins/voice-announcer/README.md")
+    job = workflow["jobs"]["unit-tests"]
+    detector = next(step for step in job["steps"] if step.get("id") == "impact")
+    tests = next(step for step in job["steps"] if step.get("id") == "units")
+    assert "ci_requires_units(" in detector["run"]
+    assert "github.event.pull_request.head.sha" in detector["env"]["HEAD"]
+    assert tests["if"] == "steps.impact.outputs.run == 'true'"
+    assert "ci_pr_unit_reuse.py" in tests["run"]
+    assert set(workflow["jobs"]["pr-gate"]["needs"]) == {"checks", "unit-tests"}
+    assert not any(
+        "run-plugin-tests.py" in step.get("run", "")
+        or "test_environment_admission.py" in step.get("run", "")
+        for row in workflow["jobs"].values() for step in row.get("steps", [])
+    )
 
 
 @pytest.mark.parametrize("workflow", worker_contract.WORKFLOWS)
-def test_worktrees_full_steps_use_exactly_two_workers_without_narrowing(workflow: str) -> None:
-    worker_contract.assert_full_step_uses_exactly_two_workers_without_narrowing_tests(workflow)
+def test_required_unit_steps_preserve_coverage_and_failure_gates(workflow: str) -> None:
+    worker_contract.assert_unit_step_preserves_coverage_and_failure_gates(workflow)
 
 
 @pytest.mark.parametrize("workflow", worker_contract.WORKFLOWS)
-def test_worktrees_workers_do_not_leak_into_other_steps(workflow: str) -> None:
-    worker_contract.assert_workers_do_not_leak_into_guards_collection_or_baselines(workflow)
+def test_required_workflows_do_not_enable_xdist_workers(workflow: str) -> None:
+    worker_contract.assert_no_workers_in_required_workflow(workflow)
 
 
 def test_worktrees_xdist_is_test_only() -> None:
     worker_contract.assert_xdist_is_a_worktrees_test_dependency_not_a_runtime_requirement()
 
 
-def test_candidate_bridge_workers_share_the_existing_job_and_limits() -> None:
-    worker_contract.assert_candidate_bridge_workers_share_the_existing_job_and_limits()
+def test_bridge_xdist_stays_test_only_without_ci_worker_override() -> None:
+    worker_contract.assert_bridge_xdist_stays_test_only_without_ci_worker_override()
 
 
-def test_worktrees_manual_main_bootstrap_stays_serial() -> None:
-    worker_contract.assert_manual_main_validation_does_not_need_unshipped_test_dependencies()
+def test_manual_ci_uses_serial_units_without_legacy_promotion_inputs() -> None:
+    worker_contract.assert_manual_ci_uses_serial_units_without_legacy_promotion_inputs()

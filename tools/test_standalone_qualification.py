@@ -6,6 +6,7 @@ import pytest
 
 from _promotion_workflow_test_support import source_workflow
 from test_run_standalone_tests import SCRIPT, runner
+from test_run_standalone_tests import runner_scratch as runner_scratch
 
 
 def test_fleet_client_portfolio_is_manual_exact_source_and_native_only():
@@ -327,7 +328,8 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
     monkeypatch.setattr(runner, "acquire", lambda *_: type("Lease", (), {"release": lambda _: None})())
 
     def run(command, **kwargs):
-        assert command[5] == str(root / "tests")
+        selected = command[command.index("-q") + 1:command.index("--basetemp")]
+        assert selected == [str(root / "tests")]
         assert kwargs["env"]["AGENT_CHAT_TEST_SUITE"] == profile
         assert kwargs["limits"].wall_seconds == timeout
         report = kwargs["sandbox"] / "pytest" / "chat-membership.json"

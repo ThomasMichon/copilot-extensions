@@ -21,8 +21,8 @@ Design notes:
 * **uv-based.** Uses ``uv`` for the venv + editable install so plugins that
   vendor path dependencies via ``[tool.uv.sources]`` (agent-containers,
   agent-codespaces, ...) resolve correctly -- plain ``pip`` cannot.
-* **Cached venvs** live under ``.test-venvs/<platform>/<plugin>`` (git-ignored)
-  and are reused across runs; ``--reinstall`` rebuilds one.
+* **Cached venvs** live in external scratch, isolated by checkout, platform
+  and plugin, and are reused across runs; ``--reinstall`` rebuilds one.
 * **Environment exclusion.** Preparation and use share one lease per resolved
   cached venv. Independent environments run concurrently with per-job bounds.
 * **State isolation.** Default suites receive runner-owned home, XDG, Copilot,
@@ -51,7 +51,7 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
+import tempfile as tempfile  # Preserve the cleanup adapter used by runner contracts.
 import time
 import tomllib
 from collections.abc import Iterator
@@ -63,6 +63,7 @@ from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 from plugin_test_cache import clear_cache_contents, dependency_fingerprint, ordinary_cache_root
+from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
@@ -81,7 +82,7 @@ from plugin_test_containment import (
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
-VENV_ROOT = REPO / ".test-venvs" / sys.platform
+VENV_ROOT: Path | None = None
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 EXTERNAL_TEST_DEPENDENCIES = {
@@ -271,8 +272,12 @@ def changed_plugins(base: str) -> list[str]:
     return sorted(n for n in names if _has_suite(n))
 
 
+def _venv_root() -> Path:
+    return VENV_ROOT if VENV_ROOT is not None else venv_root(REPO)
+
+
 def _venv_python(name: str) -> Path:
-    base = VENV_ROOT / name
+    base = _venv_root() / name
     if os.name == "nt":
         return base / "Scripts" / "python.exe"
     return base / "bin" / "python"
@@ -292,7 +297,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     The caller must establish the environment directory and hold its
     environment-scoped lease throughout preparation and subsequent test use.
     """
-    venv = ordinary_cache_root(VENV_ROOT / name)
+    venv = ordinary_cache_root(_venv_root() / name)
     py = _venv_python(name)
     stamp = venv / ".dep-fingerprint"
     fingerprint = _dep_fingerprint(name)
@@ -557,9 +562,7 @@ def run_plugin(
         # A fresh plugin directory prevents retries from overwriting prior evidence.
         report_directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     py = _ensure_venv(name, uv, reinstall=reinstall)
-    sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
-    sandbox_parent.mkdir(parents=True, exist_ok=True)
-    sandbox_parent = sandbox_parent.resolve(strict=True)
+    sandbox_parent = runs_root(REPO)
     with _TestSandbox(
         # Deliberately short: this sandbox root sits at the top of a path
         # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/
@@ -568,10 +571,11 @@ def run_plugin(
         # (coverage-guided-ci effort, 2026-10-05) -- every char saved here
         # is real headroom, and this prefix is purely a disposable
         # per-run temp dir, never read by anything outside this process.
-        prefix=f"ce-{name[:4]}-",
+        prefix=run_prefix(name),
         dir=sandbox_parent,
     ) as raw_sandbox, _group_cleanup_worker() as (cleanup_pool, cleanups):
         sandbox = Path(raw_sandbox)
+        record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         basetemp = sandbox / "t"
         env = isolated_environment(
             os.environ,
@@ -581,6 +585,7 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
+        env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(_venv_root())
         # Ambient profile state must never silently relax an ordinary run.
         env.pop(_CODESPACES_PROFILE_ENV, None)
         if test_profile != "standard":
@@ -624,6 +629,7 @@ def run_plugin(
                 "pytest",
                 "-q",
                 f"--basetemp={group_temp}",
+                "-o", f"cache_dir={sandbox / 'pytest-cache'}",
                 "-p",
                 PORTFOLIO_PLUGIN,
                 f"--timeout={test_timeout:g}",
@@ -863,7 +869,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in targets:
         lease: SingleInstance | None = None
         try:
-            environment_root = ordinary_cache_root(VENV_ROOT / name)
+            environment_root = ordinary_cache_root(_venv_root() / name)
             environment_root.mkdir(parents=True, exist_ok=True)
             if args.admission_wait:
                 print(f"Waiting up to {args.admission_wait:g}s for {environment_root} ...")

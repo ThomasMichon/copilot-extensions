@@ -38,6 +38,11 @@ finally:
     sys.path[:] = _previous_path
 
 
+@pytest.fixture(autouse=True)
+def runner_scratch(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path.parent / "runner-scratch"))
+
+
 def test_unreaped_tree_retains_sandbox_without_cleanup(monkeypatch, tmp_path, capsys):
     plugin = tmp_path / "alpha"
     sandbox_paths = []
@@ -139,7 +144,7 @@ def test_junit_reporting_refuses_non_execution_modes(arguments, tmp_path: Path) 
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows short TEMP alias")
+@pytest.mark.skipif(os.name != "nt", reason="native Windows short scratch alias")
 def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cleanup_runner):
     import ctypes
 
@@ -147,7 +152,7 @@ def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cl
     length = ctypes.windll.kernel32.GetShortPathNameW(str(tmp_path), buffer, len(buffer))
     if not length or length >= len(buffer) or Path(buffer.value) == tmp_path:
         pytest.skip("filesystem has no short alias for the temporary parent")
-    monkeypatch.setenv("TEMP", buffer.value)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", buffer.value)
     observed = []
 
     def run_contained(*args, **kwargs):
@@ -175,7 +180,7 @@ def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
     nested = tmp_path / "nested"
     nested.mkdir()
     requested = nested / ".." if noncanonical else tmp_path
-    monkeypatch.setenv("TEMP", str(requested))
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(requested))
     original = runner._TestSandbox
     parents = []
 
@@ -194,7 +199,7 @@ def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
     monkeypatch.setattr(runner, "_TestSandbox", CanonicalSandbox)
     monkeypatch.setattr(runner, "run_contained", admitted)
     assert cleanup_runner() == 0
-    assert parents == [tmp_path.resolve()]
+    assert parents == [runner.runs_root(runner.REPO)]
 
 
 def test_plugin_budget_includes_final_sandbox_cleanup(
@@ -306,7 +311,7 @@ def test_reaped_group_cleanup_overlaps_the_next_group(
     assert len(calls) == 2
     assert [path.name for path in removed[:2]] == ["g1", "g2"]
     assert len(workers) == 1
-    assert not list(tmp_path.glob("ce-alph-*"))
+    assert removed and not any(path.exists() for path in removed)
     assert "including preparation and cleanup" in capsys.readouterr().out
 
 
@@ -445,9 +450,11 @@ def test_final_sandbox_cleanup_failure_cannot_mask_cancellation_or_report_pass(
     monkeypatch, tmp_path, capsys, cleanup_runner, cancellation,
 ):
     original_remove = runner.tempfile.TemporaryDirectory._rmtree
+    roots = set()
 
     def remove(name, *args, **kwargs):
-        if Path(name).name.startswith("ce-alph-"):
+        if Path(name).name.startswith(runner.run_prefix("alpha")):
+            roots.add(Path(name))
             assert not kwargs.get("ignore_errors", False)
             raise OSError("final sandbox removal refused")
         return original_remove(name, *args, **kwargs)
@@ -466,8 +473,9 @@ def test_final_sandbox_cleanup_failure_cannot_mask_cancellation_or_report_pass(
         if cancellation is not None:
             assert "Sandbox cleanup failed: final sandbox removal refused" in output.err
     finally:
-        for root in tmp_path.glob("ce-alph-*"):
-            shutil.rmtree(root)
+        for root in roots:
+            if root.exists():
+                shutil.rmtree(root)
 
 
 @pytest.mark.parametrize("seam", ["wait", "shutdown"])
@@ -956,21 +964,29 @@ def test_manager_acceptance_retains_unsettled_sandbox(
 @pytest.mark.portfolio_tier("T1")
 @pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("returncode", [0, 7])
+@pytest.mark.parametrize("contract", ["runtime", "callbacks", "updater", "uninstall", "source", "engine-source"])
 def test_manager_acceptance_cleans_settled_sandbox(
-    manager_acceptance, monkeypatch, returncode,
+    manager_acceptance, monkeypatch, returncode, contract,
 ):
     acceptance, releases = manager_acceptance
+    monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", contract])
     observed = []
 
     def settled(command, **kwargs):
         sandbox = kwargs["sandbox"]
+        assert not sandbox.is_relative_to(acceptance.REPO)
+        with monkeypatch.context() as nested:
+            nested.setenv("AGENT_SCRATCH_ROOT", kwargs["env"]["AGENT_SCRATCH_ROOT"])
+            nested.setattr(runner, "REPO", acceptance.REPO)
+            assert runner._venv_python("worktree-manager").is_relative_to(sandbox)
         observed.append(sandbox)
         (sandbox / "settled.txt").write_text("disposable evidence", encoding="utf-8")
         return returncode
 
     monkeypatch.setattr(acceptance, "run_contained", settled)
     assert acceptance.main() == returncode
-    assert len(observed) == (2 if returncode == 0 else 1)
+    expected = {"updater": 4, "uninstall": 3}.get(contract, 2) if returncode == 0 else 1
+    assert len(observed) == expected
     assert not any(sandbox.exists() for sandbox in observed)
     assert releases == [True]
 
@@ -1963,6 +1979,7 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
         {
             "PATH": os.environ.get("PATH", ""),
             "HOME": "/real/home",
+            "AGENT_SCRATCH_ROOT": "/real/scratch",
             "AGENT_WORKTREES_HOME": "/real/agent-worktrees",
             "AGENT_WORKTREES_PROJECTS_YAML": "/real/projects.yaml",
             "GH_TOKEN": "not-a-real-token",
