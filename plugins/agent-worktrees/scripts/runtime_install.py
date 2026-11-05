@@ -448,12 +448,9 @@ def install(
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")
         wheel_inputs.verify()
         receipt = wheel_inputs.receipt()
-        profile = receipt["binding"]
-        if profile.get("component") != "agent-worktrees" or profile.get("release") != {
-            "identity": "source:" + source_identity.source_commit,
-            "sha256": "sha256:" + source_identity.assembly_hash,
-        } or profile.get("mode") != "source":
-            raise InstallationRefused("Closed wheel profile differs from its Worktrees source")
+        profile = publication_recheck.wheel_profile(
+            receipt["binding"], source_identity, _before_publish, expected_wheel_selection, InstallationRefused,
+        )
         version += ".profile." + receipt["lock_id"][7:23]
         wheel_options = {
             "wheel_inputs": wheel_inputs,

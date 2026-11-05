@@ -14,6 +14,28 @@ class HandoverError(RuntimeError):
     """The construction owner did not authorize a publication boundary."""
 
 
+def wheel_profile(binding, source, verify_owner, selection, refused):
+    nested = "profile" in binding
+    if nested and (
+        set(binding) != {"profile", "source_lock", "build_toolchain", "build_profile"}
+        or not isinstance(binding["source_lock"], dict)
+        or binding["source_lock"].get("source") != source.document()
+        or not isinstance(binding["build_toolchain"], dict)
+        or not isinstance(binding["build_profile"], dict)
+        or verify_owner is None or selection is None
+    ):
+        raise refused("Source-built wheels require their retained source owner")
+    profile = binding["profile"] if nested else binding
+    if not isinstance(profile, dict) or profile.get("component") != "agent-worktrees" or profile.get("release") != {
+        "identity": "source:" + source.source_commit,
+        "sha256": "sha256:" + source.assembly_hash,
+    } or profile.get("mode") != "source":
+        raise refused("Closed wheel profile differs from its Worktrees source")
+    if nested:
+        verify_owner()
+    return profile
+
+
 def wheel_marker_environment(python, refused) -> dict:
     from installer_marker_environment import MARKER_ENVIRONMENT_QUERY
 

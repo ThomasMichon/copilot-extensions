@@ -25,7 +25,7 @@ MODE_OWNER_ABI = 1
 _LIFECYCLE_FILES = (
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py", "installer_engine_health.py",
-    "runtime_install_driver.py", "runtime_install_recheck.py",
+    "runtime_install_driver.py", "runtime_install_recheck.py", "runtime_install_source.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_marker_environment.py",
     "installer_wheel_snapshot.py", "installer_wheel_inputs.py",

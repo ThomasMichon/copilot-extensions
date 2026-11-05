@@ -556,6 +556,112 @@ def test_authenticated_source_builds_and_reuses_independent_closed_environments(
     assert all(call["offline"] and call["build_profile"] is not None for call in completed)
 
 
+@pytest.mark.parametrize("revoke", [False, True])
+def test_worktrees_native_constructor_consumes_the_live_source_owner(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch, revoke,
+):
+    import importlib.util
+    from types import SimpleNamespace
+
+    project = source_with_process_owner(configured_source)
+    worktrees = project.with_name("agent-worktrees")
+    project.rename(worktrees)
+    manifest = worktrees / "pyproject.toml"
+    manifest.write_text(manifest.read_text().replace('name="agent-example"', 'name="agent-worktrees"'))
+    (worktrees / "plugin.json").write_text('{"name":"agent-worktrees","version":"1.0.0"}')
+    (worktrees / "src" / "agent_example").rename(worktrees / "src" / "agent_worktrees")
+    select_source(configured_source)
+    installation = adopter[1]
+    root = tmp_path / "worktrees"
+    payload = installation["payload_root"].with_name("agent-worktrees")
+    payload.mkdir()
+    installation.update(plugin_id="agent-worktrees", legacy_root=root, payload_root=payload)
+    settings = json.loads(adopter[2].read_text())
+    settings["enabledPlugins"] = {
+        key.replace("agent-example@", "agent-worktrees@"): value
+        for key, value in settings["enabledPlugins"].items()
+    }
+    adopter[2].write_text(json.dumps(settings))
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    env = environment(adopter, state, tmp_path)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    scripts = Path(__file__).resolve().parents[1] / "plugins" / "agent-worktrees" / "scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    spec = importlib.util.spec_from_file_location("runtime_install", scripts / "runtime_install.py")
+    native = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, native)
+    spec.loader.exec_module(native)
+    spec = importlib.util.spec_from_file_location("_worktrees_source_adapter", scripts / "runtime_install_source.py")
+    adapter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(adapter)
+    (root / ".installer-inputs").mkdir(parents=True)
+
+    @contextmanager
+    def held(**_kwargs):
+        yield
+
+    monkeypatch.setattr(native, "Governance", lambda requested, selected: SimpleNamespace(
+        root=requested, payload=selected, held=held, signature=lambda: {}, recheck=lambda: None,
+    ))
+    monkeypatch.setattr(native.runtime_source, "publish_source_snapshot", lambda selected, *_args: selected)
+    real_candidate = native.engine.numbered_candidate
+    real_python = native.runtime.slot_python
+    effects = []
+
+    @contextmanager
+    def candidate(*args, **kwargs):
+        if kwargs["health_module"] != "agent_worktrees.runtime_candidate":
+            with real_candidate(*args, **kwargs) as result:
+                yield result
+            return
+        effects.append("construct")
+        packages = native.engine._package_roots(kwargs["plugin"])
+        payload_hash = native.engine._wheel_construction_hash(
+            native.engine._construction_hash(
+                native.engine._source_files(packages), (), kwargs["local_packages"],
+            ), kwargs["wheel_inputs"],
+        )
+        yield SimpleNamespace(
+            payload_hash=payload_hash, slot=root / "versions" / args[1], reused=False,
+        )
+
+    monkeypatch.setattr(native.engine, "numbered_candidate", candidate)
+    monkeypatch.setattr(
+        native.runtime, "slot_python",
+        lambda candidate_root, version: (
+            Path(sys.executable) if candidate_root == root else real_python(candidate_root, version)
+        ),
+    )
+    config = Path(env["UV_CONFIG_FILE"])
+
+    def publish(argv, _environment, verify):
+        verify("helpers")
+        effects.append("helpers")
+        original = config.read_bytes()
+        try:
+            if revoke:
+                config.write_text("system-certs=true\n")
+            verify("selector")
+            effects.append("selector")
+        finally:
+            config.write_bytes(original)
+        Path(argv[argv.index("--result") + 1]).write_text('{"runtime_version":"candidate"}')
+
+    monkeypatch.setattr(native.publication_recheck, "run", publish)
+    arguments = {
+        **options(adopter, target, env), "component": "agent-worktrees",
+        "deadline": time.monotonic() + 180,
+    }
+    if revoke:
+        with pytest.raises(ValueError, match="source configuration changed"):
+            adapter.install_source_runtime(plan(adopter), **arguments)
+        assert effects == ["construct", "helpers"]
+    else:
+        assert adapter.install_source_runtime(plan(adopter), **arguments)["runtime_version"] == "candidate"
+        assert effects == ["construct", "helpers", "selector"]
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_tools_interpreter_target_drift_refuses_before_backend(
     adopter, configured_source, target, feeds, tmp_path, monkeypatch, reuse,

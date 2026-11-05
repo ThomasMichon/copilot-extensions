@@ -595,6 +595,120 @@ def test_wheel_candidate_refuses_changed_inputs_before_publication(driver, tmp_p
             assert len(probes) == 2 and reached
 
 
+@pytest.mark.parametrize("outcome", [
+    "accepted", "revoked", "stale-owner", "no-owner", "no-selection", "foreign-profile", "foreign-lock",
+])
+def test_source_builder_wheels_keep_their_owner_through_publication(
+    driver, tmp_path, monkeypatch, outcome,
+):
+    from types import SimpleNamespace
+    from installer_wheel_snapshot import retain_wheel_inputs
+
+    root, plugin = tmp_path / "runtime", tmp_path / "payload"
+    plugin.mkdir()
+    (root / ".installer-inputs").mkdir(parents=True)
+    (plugin / "plugin.json").write_text('{"name":"agent-worktrees","version":"1.0.0"}', encoding="utf-8")
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    source = driver.runtime_source
+    digest = source.assembly_hash(plugin)
+    identity = source.SourceIdentity(
+        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, digest,
+        source.runtime_version("1.0.0", "a" * 40, digest),
+    )
+    (plugin / source.SOURCE_FILE).write_text(json.dumps(identity.document()), encoding="utf-8")
+    events = []
+
+    @contextmanager
+    def held(**_kwargs):
+        yield
+
+    @contextmanager
+    def candidate(*_args, **options):
+        events.append("construct")
+        assert options["wheel_inputs"] is wheels
+        yield SimpleNamespace(payload_hash="e" * 64, slot=tmp_path / "candidate", reused=False)
+
+    monkeypatch.setattr(driver, "Governance", lambda requested, payload: SimpleNamespace(
+        root=requested, payload=payload, held=held, signature=lambda: {}, recheck=lambda: None,
+    ))
+    monkeypatch.setattr(source, "publish_source_snapshot", lambda *_args: plugin)
+    monkeypatch.setattr(driver.engine, "numbered_candidate", candidate)
+    monkeypatch.setattr(driver.runtime, "slot_python", lambda *_args: tmp_path / "candidate-python")
+    monkeypatch.setattr(driver, "_wheel_marker_environment", lambda _python: {"python_version": "3.11"})
+
+    def run(argv, _environment, verify):
+        for phase in ("helpers", "selector"):
+            verify(phase)
+            events.append(phase)
+        Path(argv[argv.index("--result") + 1]).write_text('{"runtime_version":"candidate"}')
+
+    monkeypatch.setattr(driver.publication_recheck, "run", run)
+    archive = tmp_path / "agent_worktrees-1.0.0-py3-none-any.whl"
+    archive.write_bytes(b"wheel fixture")
+    wheel_digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+    with retain_wheel_inputs(
+        {archive.name: archive}, {archive.name: wheel_digest}, max_wheels=1,
+        max_archive_bytes=1024, max_total_bytes=1024, max_snapshot_bytes=4096,
+        deadline=time.monotonic() + 30,
+    ) as snapshot:
+        profile = {
+            "component": "other" if outcome == "foreign-profile" else "agent-worktrees",
+            "mode": "source",
+            "release": {
+                "identity": "source:" + identity.source_commit,
+                "sha256": "sha256:" + identity.assembly_hash,
+            },
+            "target": {"environment": {"python_version": "3.11"}},
+        }
+        binding = {
+            "profile": profile,
+            "source_lock": {"source": {} if outcome == "foreign-lock" else identity.document()},
+            "build_toolchain": {}, "build_profile": {},
+        }
+        wheels = driver.engine.WheelInstallInputs(
+            snapshot, json.dumps(binding, sort_keys=True, separators=(",", ":")),
+            (("agent-worktrees", "1.0.0", archive.name, wheel_digest),),
+        )
+        selection = {
+            "identity": source.manifest_fields(identity), "source_descriptor": None,
+            "runtime_version": identity.runtime_version + ".profile." + wheels.receipt()["lock_id"][7:23],
+            "payload_hash": "e" * 64, "extras": [], "local_packages": ["agent-worktrees"],
+        }
+
+        def verify_owner():
+            events.append("owner")
+            if outcome == "stale-owner" or outcome == "revoked" and events.count("owner") == 3:
+                raise ValueError("owner revoked the source")
+
+        options = {
+            "wheel_inputs": wheels,
+            **({"expected_wheel_selection": selection} if outcome != "no-selection" else {}),
+            **({"_before_publish": verify_owner} if outcome != "no-owner" else {}),
+        }
+        if outcome in ("no-owner", "no-selection", "foreign-profile", "foreign-lock"):
+            with pytest.raises(driver.InstallationRefused):
+                driver.install(root, plugin, payload=plugin, uv=tmp_path / "uv",
+                               base_python=Path(sys.executable), **options)
+            assert events == []
+        elif outcome == "stale-owner":
+            with pytest.raises(ValueError, match="owner revoked"):
+                driver.install(root, plugin, payload=plugin, uv=tmp_path / "uv",
+                               base_python=Path(sys.executable), **options)
+            assert events == ["owner"]
+        elif outcome == "revoked":
+            with pytest.raises(ValueError, match="owner revoked"):
+                driver.install(root, plugin, payload=plugin, uv=tmp_path / "uv",
+                               base_python=Path(sys.executable), **options)
+            assert events == ["owner", "construct", "owner", "helpers", "owner"]
+        else:
+            result = driver.install(root, plugin, payload=plugin, uv=tmp_path / "uv",
+                                    base_python=Path(sys.executable), **options)
+            assert result["runtime_version"] == "candidate"
+            assert events == ["owner", "construct", "owner", "helpers", "owner", "selector"]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows installer argument admission")
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
 def test_native_frontend_refuses_source_inputs_for_status_before_touching_installation(
