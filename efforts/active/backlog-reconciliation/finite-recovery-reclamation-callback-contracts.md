@@ -102,7 +102,8 @@ No desktop, process, test or replacement session runs.
 **#6660** credits #6666's unknown-versus-absence protection, #6680's
 owner-fenced positively-sessionless same-key replay, #6696's exact read-only
 owner API and #7360's actual merged integration.
-Do not describe the historical #6704 integration as still OPEN.
+Preserve #6704's OPEN/unmerged state; credit #7360's merged integration
+separately rather than treating the original PR as delivered.
 Cache-only resident display is intentional; a caller-side tracking scan is
 not its missing fix.
 Preserve the allocation key, workspace reservation and session, nonce/path/
@@ -121,9 +122,10 @@ No allocation, replay, journal reset, session or ownership mutation runs.
 
 **#6675** credits #6682's exact fixture repair, its reported 186 related
 cases and exact fast guard. The shared reader is not still missing.
-Only the expressly retained fifteen registration-family groups after the
-failed eleven-of-fifteen run, or an attributed narrowing of that obligation,
-remain unresolved. Do not add a whole-plugin deployment gate.
+Only the expressly retained registration-authority family and remaining groups
+after the run stopped at group eleven of fifteen, or an attributed narrowing
+of that obligation, remain unresolved. Do not require all fifteen groups again
+or add a whole-plugin deployment gate.
 #9995's shared receipt types, #9932's strict DropinRegistry fixture and
 #10330's Bridge legacy-migration fixture concern different qualification.
 No registration suite, bootstrap or native rerun occurs.
@@ -154,9 +156,15 @@ No kick, launch, pause, steering or session operation runs.
 cases with sixteen opt-in skips.
 Native Linux was reported complete; the recorded Windows run was still
 running, not completed. Its source owner's qualification remains retained.
-The saved original, live provider ref and source destination must agree;
-the selected action must be backed by valid synchronization.
-Settlement bookkeeping must not rewrite source history.
+Keep the original saved publication distinct from the current provider/ref-
+agreed head, source and destination; the live head may legitimately have advanced.
+Valid independently attributable backed-sync proof permits bookkeeping-only
+settlement without rewriting source history.
+Missing, malformed or unusable optional settlement evidence disables settlement,
+not the explicitly confirmed rewrite alternative.
+The exact rewrite plan binds the original authority, source, agreed live head,
+destination and available evidence state, retaining both source/published
+objects and the original-record audit.
 Preserve exact-plan approval, compare-and-swap, immediate revalidation and
 the actual audited objects.
 #4130 is a dependency, not receiving consent, source ownership or effect
