@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import json
 from pathlib import Path
 import runpy
 import sys
@@ -21,24 +22,45 @@ sys.path.insert(0, str(SCRIPT.parent))
 @pytest.fixture(autouse=True)
 def retained_inputs(tmp_path, monkeypatch):
     import bootstrap_inputs
+    import runtime_install
 
     monkeypatch.delenv(TIMEOUT_ENV, raising=False)
     monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_UPDATE_CONTEXT", raising=False)
     monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, root, **kwargs: (payload, True))
+    monkeypatch.setattr(runtime_install, "_source_digest", lambda payload: "a" * 64)
 
 
 @pytest.mark.parametrize("exit_code", [0, 23])
 @pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize("materialize", [False, True])
 def test_bootstrap_update_journals_scope_and_waits_for_the_whole_result(
-    tmp_path, monkeypatch, capsys, exit_code, automatic,
+    tmp_path, monkeypatch, capsys, exit_code, automatic, materialize,
 ):
+    import bootstrap_inputs
+    import runtime_install
+
     execute = runpy.run_path(str(SCRIPT))["execute"]
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
     payload, root = tmp_path / "source", tmp_path / "manager"
     payload.mkdir()
     seen = {}
+    if materialize:
+        (tmp_path / "tools").mkdir()
+        (tmp_path / "tools" / "prepare_runtime_source.py").write_text("value = 1\n")
+        (payload / "packaged-assets.json").write_text(json.dumps({
+            "schema": "copilot-extensions.packaged-assets", "version": 1,
+            "canonicalDir": "tools", "payloadDir": "scripts/runtime-source-tools",
+            "files": ["prepare_runtime_source.py"],
+        }))
+        monkeypatch.setattr(runtime_install, "_source_digest", lambda path: "b" * 64)
+
+    def retain(payload, root, **kwargs):
+        seen["retention"] = kwargs
+        return payload, True
+
+    monkeypatch.setattr(bootstrap_inputs, "retain", retain)
     events = []
     command = [
         "--", "update", "--supervised-debug", "--project", "sample",
@@ -76,7 +98,10 @@ def test_bootstrap_update_journals_scope_and_waits_for_the_whole_result(
     assert dict(spec.context)["WORKTREE_MANAGER_ROOT"] == str(root)
     assert runner.argv[-len(command):] == tuple(command)
     assert "--update-participant" in runner.argv
-    assert runner.argv[runner.argv.index("--source-digest") + 1] == "a" * 64
+    assert seen["retention"]["expected_payload_digest"] == ("a" * 64 if materialize else None)
+    assert runner.argv[runner.argv.index("--source-digest") + 1] == (
+        "b" * 64 if materialize else "a" * 64
+    )
     assert "--install-only" not in runner.argv
     assert not capsys.readouterr().out
 
@@ -306,7 +331,8 @@ def test_bootstrap_source_identity_is_captured_before_retention(tmp_path, monkey
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: current[0])
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
 
-    def retain(payload, root):
+    def retain(payload, root, *, expected_payload_digest):
+        assert expected_payload_digest is None
         current[0] = "changed-source"
         return payload, True
 

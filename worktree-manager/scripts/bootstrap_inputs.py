@@ -13,8 +13,43 @@ import installer_engine as engine
 import versioned_runtime as runtime
 
 
+def _preparation_assets(payload: Path) -> dict[Path, Path]:
+    manifest = payload / "packaged-assets.json"
+    if not manifest.is_file():
+        return {}
+    declaration = json.loads(manifest.read_text(encoding="utf-8"))
+    if (
+        not isinstance(declaration, dict)
+        or declaration.get("schema") != "copilot-extensions.packaged-assets"
+        or type(declaration.get("version")) is not int or declaration["version"] != 1
+        or declaration.get("canonicalDir") != "tools"
+        or declaration.get("payloadDir") != "scripts/runtime-source-tools"
+        or not isinstance(declaration.get("files"), list) or not declaration["files"]
+    ):
+        raise ValueError("Unsupported Manager source preparation assets")
+    assets = {}
+    names = set()
+    for name in declaration["files"]:
+        if not isinstance(name, str) or name in {"", ".", ".."} or Path(name).name != name:
+            raise ValueError("Invalid Manager source preparation asset name")
+        if "/" in name or "\\" in name or ":" in name:
+            raise ValueError("Invalid Manager source preparation asset name")
+        if name in names:
+            raise ValueError("Duplicate Manager source preparation asset name")
+        names.add(name)
+        target = Path(declaration["payloadDir"]) / name
+        if (payload / target).is_file():
+            continue
+        source = payload.parent / "tools" / name
+        if source.resolve() != source or not source.is_file():
+            raise ValueError(f"Manager source preparation asset is unavailable: {name}")
+        assets[target] = source
+    return assets
+
+
 def retain(
     payload: Path, execution_root: Path, *, include_sdk: bool = True,
+    expected_payload_digest: str | None = None,
 ) -> tuple[Path, bool]:
     from worktree_manager.runtime_source import _git
     from worktree_manager.runtime_source_config import configured_source
@@ -28,10 +63,20 @@ def retain(
     }))
     common = Path(os.path.commonpath(roots))
     digest = runtime.fingerprint_source(engine._source_files(roots))
+    assets = _preparation_assets(payload)
+    if expected_payload_digest is not None and runtime.fingerprint_source(
+        engine._source_files(engine._package_roots(payload)),
+    ) != expected_payload_digest:
+        raise RuntimeError("Manager installation source changed before retention")
+    asset_bytes: dict[Path, bytes] = {}
+    asset_digest = runtime.fingerprint_source(
+        tuple(assets.values()), on_file=lambda path, data: asset_bytes.__setitem__(path, data),
+    ) if assets else None
     revision = _git(source, "rev-parse", "--verify", "HEAD") if (source / ".git").is_dir() else None
     share = include_sdk and revision is not None and configured_source().channel == "marketplace"
     key = hashlib.sha256(json.dumps(
-        {"inputs": digest, "revision": revision, "unshared": None if share else uuid.uuid4().hex},
+        {"inputs": digest, "assets": asset_digest, "revision": revision,
+         "unshared": None if share else uuid.uuid4().hex},
         sort_keys=True,
     ).encode()).hexdigest()
     directory = execution_root / "bootstrap-inputs"
@@ -51,6 +96,12 @@ def retain(
                 )
                 if frozen.payload_hash != digest:
                     raise RuntimeError("Bootstrap source changed before retention")
+                for relative_asset, source_asset in assets.items():
+                    target = frozen.plugin / relative_asset
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(asset_bytes[source_asset])
+                if assets and runtime.fingerprint_source(tuple(assets.values())) != asset_digest:
+                    raise RuntimeError("Manager source preparation assets changed during retention")
                 if revision is not None and _git(source, "rev-parse", "--verify", "HEAD") != revision:
                     raise RuntimeError("Bootstrap revision changed during retention")
                 prepared.rename(destination)
@@ -60,6 +111,12 @@ def retain(
         retained_roots = tuple(sorted({
             package for application in retained for package in engine._package_roots(application)
         }))
-        if runtime.fingerprint_source(engine._source_files(retained_roots)) != digest:
+        added = {retained[0] / path for path in assets}
+        if runtime.fingerprint_source(tuple(
+            path for path in engine._source_files(retained_roots) if path not in added
+        )) != digest:
             raise RuntimeError("Retained bootstrap inputs differ from their addressed source")
+        for relative_asset, source_asset in assets.items():
+            if (retained[0] / relative_asset).read_bytes() != asset_bytes[source_asset]:
+                raise RuntimeError("Retained source preparation assets differ from their addressed source")
     return retained[0], share

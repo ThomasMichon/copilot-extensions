@@ -747,6 +747,9 @@ controller's declared driver dependencies before either platform branch.
 
 Each update acquisition has its own staging directory. Before submission, the
 bootstrap freezes Manager and SDK inputs through the canonical source freezer.
+Unmaterialized sources also retain the Manager's declared source-preparation
+tools inside that controller, with their bytes included in snapshot identity
+and readback validation.
 Successful callers remove only their acquisition checkout, including detached
 callers after acceptance; the worker continues from its retained inputs.
 Detached callers first launch the worker through a finite retained controller,
@@ -2119,10 +2122,12 @@ write an Autorun entry, require an open Picker or create another scheduler.
 Unattended credential prompts are disabled; authentication failures remain
 observable. A direct Manager request retains its configured source identity
 and refuses a changed source selection at execution rather than silently
-substituting it. Relative filesystem sources retain their submitting directory
-as a resolution anchor for validation and acquisition. Bootstrap workers still
-run from the retained controller, so the submitting directory need not remain
-present unless it is also an explicitly required invocation context.
+substituting it. Relative filesystem sources retain their effective inherited
+source anchor, or otherwise their submitting directory, for validation and
+acquisition. This anchor is separate from the runner's working directory.
+Bootstrap workers still run from the retained controller, so the submitting
+directory need not remain present unless it is also an explicitly required
+invocation context.
 Credential-bearing source URLs are refused before journaling;
 use the existing source credential helper.
 

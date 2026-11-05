@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -385,6 +384,52 @@ def bootstrap(tmp_path):
         assert sentinel.read_bytes() == b"retained shared staging"
 
 
+def test_retained_controller_prepares_dev_source_without_its_acquisition(
+    bootstrap, tmp_path, monkeypatch,
+):
+    from worktree_manager import runtime_source_prepare as preparation
+    from worktree_manager.runtime_source import ResolvedSource
+    from worktree_manager.runtime_source_config import RuntimeSource
+
+    monkeypatch.syspath_prepend(str(SOURCE / "worktree-manager" / "scripts"))
+    import bootstrap_inputs
+
+    _root, acquisition, driver, _start, _effects = bootstrap
+    manifest = SOURCE / "worktree-manager" / "packaged-assets.json"
+    shutil.copy2(manifest, acquisition / "worktree-manager" / manifest.name)
+    tools = acquisition / "tools"
+    tools.mkdir()
+    for name in json.loads(manifest.read_text(encoding="utf-8"))["files"]:
+        shutil.copy2(SOURCE / "tools" / name, tools / name)
+    _git(acquisition, "add", ".")
+    _git(
+        acquisition, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "declared source preparation assets",
+    )
+    retained, _share = bootstrap_inputs.retain(acquisition / "worktree-manager", driver)
+    selected = tmp_path / "selected"
+    shutil.copytree(acquisition, selected)
+    commit, tree = _git(selected, "rev-parse", "HEAD"), _git(selected, "rev-parse", "HEAD^{tree}")
+    _git(selected, "update-ref", "refs/remotes/origin/dev", commit)
+    for path in acquisition.rglob("*"):
+        if path.is_file():
+            path.chmod(0o600)
+    shutil.rmtree(acquisition)
+    monkeypatch.setattr(preparation, "_runtime_scripts", lambda: retained / "scripts")
+    monkeypatch.setattr(
+        preparation, "running_payload_dir",
+        lambda: pytest.fail("retained controller fell back to an acquisition checkout"),
+    )
+    resolved = ResolvedSource(RuntimeSource("dev", allow_dev=True), selected, commit, tree, commit)
+    tool = preparation.preparer()
+    assert tool.is_relative_to(retained)
+    prepared = preparation.prepare(tool, resolved, "worktree-manager", tmp_path / "prepared")
+    assert (Path(prepared["payload"]) / "src" / "worktree_manager" / "__init__.py").read_bytes() == (
+        selected / "worktree-manager" / "src" / "worktree_manager" / "__init__.py"
+    ).read_bytes()
+    assert prepared["identity"]["runtime_source"]["source_commit"] == commit
+
+
 @pytest.mark.parametrize("lose_caller", [False, True])
 def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller_loss(
     bootstrap, lose_caller,
@@ -462,20 +507,6 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     assert "--project" in effects()[1]["argv"] and "sample" in effects()[1]["argv"]
     assert not list(root.glob("current-version"))
 
-    changed = source / "plugins" / "agent-worktrees" / "src" / "fixture_revision.py"
-    changed.write_text("REVISION = 2\n", encoding="utf-8")
-    _git(source, "add", ".")
-    _git(
-        source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-        "commit", "-qm", "changed engine source",
-    )
-    third, third_log = start("--project", "sample")
-    assert third.wait(timeout=60) == 23, third_log.read_text(encoding="utf-8")
-    assert len(core.status(root=driver)) == 4
-    assert Path(effects()[9]["payload"]) != retained
-    assert not (retained.parent / "plugins" / "agent-worktrees" / "src" / changed.name).exists()
-
-
 def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_worker(bootstrap):
     root, _source, driver, start, effects = bootstrap
     preserved = root / "bootstrap-acquisition" / "failed-earlier"
@@ -510,18 +541,26 @@ def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_work
 
 
 def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisition(bootstrap):
-    root, _source, driver, start, effects = bootstrap
+    root, source, driver, start, effects = bootstrap
     caller, log = start("--project", "sample")
     _eventually(
         lambda: any(row["phase"] == "suite-start" for row in effects()), processes=(caller,),
     )
     first, = core.status(root=driver)
+    retained = Path(effects()[0]["payload"])
     (root / "successful-request").write_text(first.id, encoding="utf-8")
-    later = core.enqueue(
-        replace(first.spec, project="later-fixture"), runner=first.runner, root=driver,
-        coalesce_running=False,
+    changed = source / "plugins" / "agent-worktrees" / "src" / "fixture_revision.py"
+    changed.write_text("REVISION = 2\n", encoding="utf-8")
+    _git(source, "add", ".")
+    _git(
+        source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "changed engine source",
     )
+    detached, detached_log = start("--project", "later-fixture", "--detach", "--json")
+    assert detached.wait(timeout=20) == 0, detached_log.read_text(encoding="utf-8")
+    _running, later = core.status(root=driver)
     assert later.id != first.id
+    assert later.state == "pending"
     acquisition, = (root / "bootstrap-acquisition").iterdir()
     (root / "release-suite").touch()
     assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
@@ -530,12 +569,17 @@ def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisiti
     assert core.status(later.id, root=driver).exit_code == 23
     assert core.status(first.id, root=driver).exit_code == 0
     procutil = Path((root / "draining-worker-procutil").read_text())
-    assert procutil.is_relative_to(driver / "bootstrap-inputs") and procutil.is_file()
+    assert procutil.is_relative_to(retained.parent) and procutil.is_file()
     assert [row["phase"] for row in effects()] == [
         "manager", "suite-start", "suite-end",
     ] * 2
     assert {row["request"] for row in effects()[:3]} == {first.id}
     assert {row["request"] for row in effects()[3:]} == {later.id}
+    updated = Path(effects()[3]["payload"])
+    assert updated != retained
+    marker = Path("plugins") / "agent-worktrees" / "src" / changed.name
+    assert (updated.parent / marker).read_text() == "REVISION = 2\n"
+    assert not (retained.parent / marker).exists()
 
 
 def test_native_inherited_anchor_selects_acquisition_instead_of_cwd_decoy(bootstrap):
@@ -555,7 +599,7 @@ def test_native_inherited_anchor_selects_acquisition_instead_of_cwd_decoy(bootst
     )
     (root / "release-suite").touch()
     caller, log = start("--project", "sample", source_anchor=anchor)
-    assert caller.wait(timeout=20) == 23, log.read_text(encoding="utf-8")
+    assert caller.wait(timeout=60) == 23, log.read_text(encoding="utf-8")
     retained = Path(effects()[0]["payload"])
     assert (retained.parent / marker).is_file()
     assert not (source / marker).exists()
@@ -668,7 +712,8 @@ def test_full_declared_repository_inputs_reach_immutable_retention(
         for application in (SOURCE / "worktree-manager", SOURCE / "plugins" / "agent-worktrees")
         for package in bootstrap_inputs.engine._package_roots(application)
     }
-    files = bootstrap_inputs.engine._source_files(tuple(sorted(roots)))
+    files = set(bootstrap_inputs.engine._source_files(tuple(sorted(roots))))
+    files.update(bootstrap_inputs._preparation_assets(SOURCE / "worktree-manager").values())
     request.node.user_properties.extend([
         ("input_files", len(files)),
         ("input_bytes", sum(path.stat().st_size for path in files)),

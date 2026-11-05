@@ -736,8 +736,12 @@ changes without weakening the enclosing test lifecycle.
 An ordinary two-request control delays only the second executor entry until
 the successful first caller has removed its acquisition checkout, then runs the
 canonical executor and verifies retained process-utility imports and both results.
+Its second request uses the actual detached bootstrap to acquire changed SDK
+inputs while the first worker continues from its original retained controller.
 A separate inherited-anchor case distinguishes the configured relative source
 from an equally named repository under the shell's working directory.
+Its caller wait allows 60 seconds within the unchanged 90-second case and
+five-minute job limits; production timeouts remain unchanged.
 Authentication inspection retains valid caller-stdout JSON without
 installation, and request controls preserve an interrupted fence until explicit
 recovery outside the install transaction. A POSIX-only non-update entry resolves source dependencies without creating a
@@ -749,11 +753,16 @@ A separate full-repository retention control records real input count, bytes
 and blocking retention time as test properties. It exercises canonical
 freezing/readback against the complete declared Manager/SDK graph, not the
 full acquisition/installation latency of an ordinary update.
+The source-preparation control removes its disposable acquisition checkout,
+then executes the retained controller's real preparer against a clean selected
+Dev source and validates the resulting payload and source identity.
 Required unit-only CI does not gain these process controls.
 The actor-free bootstrap packet additionally submits a caller-relative Manager
 source, removes the submitting directory, and validates/acquires its locator
 from the retained controller directory. The saved source anchor does not change
 the runner's retained working directory; changed source policy still refuses.
+Installed CLI admission separately exercises an inherited source anchor distinct
+from both the submitting directory and the worker's directory.
 
 The optional `agent-worktrees --test-file tests/test_update_write_activity_native.py
 --allow-explicit-tiers` packet uses private synthetic Windows writers under the

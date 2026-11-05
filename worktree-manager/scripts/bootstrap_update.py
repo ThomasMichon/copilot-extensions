@@ -17,13 +17,12 @@ def _request_control(options, forwarded) -> bool:
 
 
 def execute(args, driver, *, source_digest: str) -> int:
-    from runtime_install import _bootstrap_hold_path, engine
+    from runtime_install import _bootstrap_hold_path, _source_digest, engine
     from worktree_manager.update_driver_cli import (
         _CONTEXT_KEYS, _report, _source_key, _update_context_directory, parse_options,
-        request_context,
+        request_context, request_source_anchor,
     )
     from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
-    from worktree_manager.source_config import SOURCE_ANCHOR_ENV
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     options, forwarded = parse_options(command[1:])
@@ -36,19 +35,23 @@ def execute(args, driver, *, source_digest: str) -> int:
         selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
         if options.engine_acquisition_timeout is None:
             command = [*command, "--engine-acquisition-timeout", selected_budget]
-    source_anchor = os.environ.get(SOURCE_ANCHOR_ENV) or str(Path.cwd().resolve())
-    if not Path(source_anchor).is_absolute():
-        raise ValueError("update request source anchor must be absolute")
+    source_anchor = request_source_anchor()
     context = {**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
     _update_context_directory(context)
     admitted_source = _source_key()
     hold_path = _bootstrap_hold_path()
     selected_payload = args.payload.resolve()
-    from bootstrap_inputs import retain
+    from bootstrap_inputs import _preparation_assets, retain
 
     if args.install_source is None:
-        payload, _shared = retain(selected_payload, driver.default_root())
+        materialized_assets = _preparation_assets(selected_payload)
+        payload, _shared = retain(
+            selected_payload, driver.default_root(),
+            expected_payload_digest=source_digest if materialized_assets else None,
+        )
         selected_payload = payload
+        if materialized_assets:
+            source_digest = _source_digest(selected_payload)
     else:
         payload, _shared = retain(
             Path(__file__).resolve().parents[1], driver.default_root(), include_sdk=False,

@@ -166,6 +166,15 @@ def request_context() -> dict[str, str]:
     return context
 
 
+def request_source_anchor() -> str:
+    from .source_config import SOURCE_ANCHOR_ENV
+
+    anchor = os.environ.get(SOURCE_ANCHOR_ENV) or str(Path.cwd().resolve())
+    if not Path(anchor).is_absolute():
+        raise ValueError("update request source anchor must be absolute")
+    return anchor
+
+
 @contextmanager
 def _request_environment(context, *, killswitch_path: str | None = None, cwd: str | None = None):
     from .source_config import SOURCE_ANCHOR_ENV
@@ -384,6 +393,7 @@ def cmd_update_request(rest: list[str]) -> int:
         context = request_context()
         _update_context_directory(context)
         cwd = Path.cwd().resolve()
+        source_anchor = request_source_anchor()
         arguments = list(forwarded)
         budget = options.engine_acquisition_timeout
         if budget is None and options.target is None:
@@ -393,7 +403,7 @@ def cmd_update_request(rest: list[str]) -> int:
             arguments.extend(["--engine-acquisition-timeout", selected_budget])
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(arguments), project=project or "",
-            cwd=str(cwd), source=_source_key(), context=tuple(context.items()),
+            cwd=source_anchor, source=_source_key(), context=tuple(context.items()),
             repair=not options.auto,
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
