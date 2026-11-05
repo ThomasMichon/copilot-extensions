@@ -876,3 +876,45 @@ Windows/Linux construction, installed consumers and original-caller loss.
 Ordinary bootstrap adoption follows separately. No production code, runtime,
 queue, service or host state is changed by this proposal, and the parent
 remains Active.
+
+### 2026-11-05 - MCP prerequisite review and first source controls
+
+#10558 merged as `ac9ac7c03ef2e740871696755438434cd1ee9cd8` after
+current-head approval and required green CI. The canonical README was reread;
+this is a reviewed plan, not completed recipe or bootstrap adoption.
+
+Four regressions failed against the unchanged source at unsupported MCP recipe
+admission. The bounded adapter adds its actual init-backed actions to the
+existing Python/native front doors and retained queue. Those four controls now
+pass in 93.35 seconds under an explicit 60-second native item bound. The first
+default-30-second receipt attempt timed out; its isolated stamp subsequently
+passed in 29.94 seconds. The combined refusal packet also exceeded its
+unchanged 300-second group limit and is being qualified in disjoint groups,
+not reported as passing.
+
+Native qualification also reconciles the plan's overly broad Python-free
+wording with the existing setup-owned prerequisite amendment. Windows lifetime
+admission requires supported `python` on PATH before a plugin runtime exists.
+Preserve and test that current boundary; do not add another acquisition path
+or claim a fully Python-free machine. The Python-free Budget hook remains
+outside this MCP slice. Materialized native qualification, failed-candidate
+preservation, source review, release and affected-host recovery remain open.
+
+The latest declaration/protocol packet passes eight controls, including the
+four lifecycle/CMD admission cases. Actual materialized missing-Python refusal
+and corrected CMD stamp both pass. The first cold native attempt failed while
+the fixture read queue status before observing a durable ordinary receipt;
+foundation readiness alone was not a request-acceptance signal. The observer
+now waits for that existing public receipt before querying its request and
+still propagates schema/terminal failures afterward. This is a fixture
+correction, not queue recovery or a relaxation of schema admission. Cold native
+qualification remains pending under the same budgets.
+
+The corrected cold observer's next run failed honestly at the unchanged native
+foundation builder's five-minute owned-process deadline. Source wheel assembly
+completed, but foundation construction did not finish and no ordinary MCP
+receipt was accepted. This is neither MCP qualification nor evidence that a
+larger test deadline would repair production construction. Preserve the actual
+failure and existing foundation owner; run the explicit Windows/Linux recipe
+portfolio against the candidate before merge. No constructor, queue, recovery
+policy or process deadline was changed to obtain a passing result.

@@ -27,7 +27,7 @@ Windows bootstrap launch or complete its other four plugin migrations.
 
 ## Implementation plan
 
-1. Extend the existing Python and Python-free native fixed-recipe admission for
+1. Extend the existing Python and native shell fixed-recipe admission for
    MCP's literal `stamp` and `provision` actions. Require its actual `init`
    declaration, command/module, required context, direct mode, own controls and
    complete materialized native/lifecycle dependencies. Preserve the exact
@@ -45,9 +45,14 @@ Windows bootstrap launch or complete its other four plugin migrations.
    custody, or change constructor/retirement behavior to make tests pass.
    Unavailable permission, acquisition, build or incoming readiness remains an
    honest failure; do not prompt unattended or fabricate success.
-4. Reuse the qualified Python-free acquisition, native caller-independent
+4. Reuse the qualified acquisition, native caller-independent
    supervision, ordinary coalescing, observed wait and durable progress/result.
-   The original caller may lack Python, UV, Manager and MCP. Its loss must not
+   The caller may lack UV, Manager and the MCP runtime. Preserve the
+   [setup-owned Python prerequisite](../lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary):
+   a cold plugin runtime is not a Python-free machine, and Windows lifetime
+   admission currently requires Python 3.10+ as `python` on PATH. Missing or
+   unsupported prerequisites must fail visibly before launch, without a second
+   downloader, interpreter attestation or fallback. Losing the caller must not
    cancel accepted work or require another submission. Do not add a conhost,
    WMI, scheduled-task or service-based alternate launcher.
 5. Add bounded recipe controls and an explicitly selected native Windows/Linux
@@ -67,7 +72,8 @@ Windows bootstrap launch or complete its other four plugin migrations.
   Preserve configuration and existing command/source ownership. Do not start an
   MCP server, fetch credentials, connect to a backend, register a host service
   or use a shared runtime as a fixture.
-- Exercise Python-free native Windows/Linux cold callers, launch acknowledgement,
+- Exercise native Windows/Linux cold callers with their declared setup
+  prerequisites, launch acknowledgement,
   original caller Job/group loss before a follower, concurrent equivalent
   requests and later safe installed use. Require the ordinary durable
   receipt/result and confirmed worker cleanup. Verify headless launch through

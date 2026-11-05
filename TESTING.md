@@ -2242,6 +2242,28 @@ does not adopt ordinary command publishers, unreceipted copies, explicit
 installers, cells/custom roots or macOS. Exhaustive native qualification stays
 manual, outside required PR CI.
 
+## Optional MCP fixed recipes
+
+The manual `installation-context-full.yml` portfolio `mcp-recipes` selects
+the MCP prerequisite on native Windows and Ubuntu, separately from ordinary
+publisher adoption. Three bounded packets exercise init-backed queue protocol,
+Python admission refusals and native-shell refusals. Each keeps the
+300-second group limit and explicit 60-second native item bound. Materialized
+stamp and Windows missing-setup-Python refusal use a separate 180-second item
+packet; cold construction/installed consumers use the existing 900-second item
+and 1080-second group envelope. Process, memory and 2 GiB storage caps remain
+unchanged; no matrix is added to required unit-only CI.
+
+The cold case retains the runner's containment, setup-provided Python
+prerequisite, private foundation/queue and actual MCP initializer. It loses the
+original caller process before a follower, then checks concurrent provision,
+immutable reuse, a real incoming module-health failure, preserved configuration/
+selection and installed command/module/distribution use after payload removal.
+Persistent-environment effects use the installer's existing contained-test
+adapter. No MCP server, backend, credentials or host service is exercised.
+Caller-process exit is not cleanup-Job escape; the latter remains a separate
+#10499 acceptance requirement, not an inference from this portfolio.
+
 ## Optional Bridge command adoption
 
 The manual `installation-context-full.yml` portfolio `bridge-commands` qualifies
