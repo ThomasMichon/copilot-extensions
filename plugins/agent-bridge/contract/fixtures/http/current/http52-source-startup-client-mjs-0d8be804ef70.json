@@ -1,0 +1,16 @@
+{
+  "evidence_family": "http52-shared-asgi-v1",
+  "shared_operation_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
+    "sha256": "122c6263f4fc13b7cfe6097b6992399ecd4d9b084295ab086e90bb93da9ac6a6"
+  },
+  "scope": "shared named ASGI portfolio, not an independent capture",
+  "captured_from": {
+    "commit": "b9d56fdb83825fb44114e38072cc53b81e1356cd",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 52,
+    "source_path": "plugins/agent-remote-driver/extensions/agent-remote-driver/startup-client.mjs",
+    "source_git_blob": "d6c3f9bb83723738a7d3376ee386a1c36bf4db6d",
+    "source_sha256": "5b005c1ff7aab95ab0aa257a2a032aa5974135608279ba953b2a6a6585d54051"
+  }
+}

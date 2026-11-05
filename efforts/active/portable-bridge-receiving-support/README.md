@@ -608,3 +608,26 @@ implementation. The exact support closure follows the consumer trace and tests.
   SSH, Owner, claims, forwards and its POSIX state namespace explicitly.
   Current capture execution, required review/CI, native/installed qualification
   and this effort's remaining Plan/Validation items are still open.
+
+### 2026-11-05 - Published checkpoint and executed portable evidence
+
+- Published draft #10748 through the managed flow after preserving the one
+  upstream effort-index conflict. The published source checkpoint is
+  `b9d56fdb83825fb44114e38072cc53b81e1356cd`; every changed production source
+  byte is retained across the rebase.
+- The actual source-bound HTTP-52 capture passes all 116 cases. Its no-write
+  verification independently passes the same portfolio, and the contract
+  audit passes both contracts and 1,018 fixtures. Retained exact capture
+  metadata protects the original source declaration through squash publication.
+  Historical evidence and provenance prefixes remain unchanged.
+- Hosted eligible-unit, dependency-seasoning, strict-type, install,
+  attribution and identifier checks pass on the checkpoint. Its contract gate
+  correctly refuses declarations without the subsequently executed fixtures;
+  fresh CI on the evidence update remains required.
+- The local all-declaration age audit cannot reach four public npm packages
+  through validated TLS; the independent native HTTP client confirms the
+  handshake failure. Python-only declarations pass. Hosted dependency
+  seasoning passes; no TLS policy or global configuration was weakened.
+- Review, fresh final-head CI and native/installed/external acceptance remain
+  open. The source and parent efforts remain Active; no rollout or live
+  product worker was started.
