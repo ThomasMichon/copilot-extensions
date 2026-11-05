@@ -939,6 +939,27 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-05 - Remove the caller-relative bootstrap prerequisite
+
+- The finite caller-directory correction merged in #10772 at
+  `f23139f2a9ccfb1821948ac882a5898f1199c5e6`, after current-head Copilot
+  approval and required CI. Its source workspace finalized through native
+  landing checks. It does not replace #10559's whole-bootstrap transaction
+  or retained worker/source-lifetime scope.
+- Thirty-four selected Manager checks exercised real request/child source
+  resolution, unchanged configuration bytes, bounded receipts, automatic
+  holds and legacy Manager-to-engine custody. Construction alone was
+  substituted in the small regression; full source construction is not
+  credited by that result.
+- Draft #10671 now consumes the merged correction on current Dev. Its four
+  separately contained source constructions and final assertions still need
+  qualification under the shared 1,200-second ceiling, unchanged production
+  deadlines, test-item limits and original witnesses.
+- The complete current Plan and Validation Plan were read after the merge.
+  Remaining installed, provider, service/client, image and fleet acceptance
+  stays open; neither this prerequisite nor source-workspace finalization
+  completes the effort or grants rollout.
+
 ### 2026-11-05 - Qualify the first conservative comment-echo leaf
 
 - The optional native outcome now supplies original confirmed response data
