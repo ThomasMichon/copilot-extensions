@@ -20,6 +20,7 @@ from ..session_observation_contract import (
     sse,
 )
 from ..session_observations import admit, frame
+from ..session_current_requests import content_key, current_client
 
 router = APIRouter(prefix="/api/v1", tags=["session-observations"])
 
@@ -46,6 +47,9 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
     subscribed = False
     cursor = read.position
     prior_source = None
+    prior_requests = None
+    producer = None
+    unsubscribe = None
     last_sent = time.monotonic()
     try:
         while True:
@@ -78,13 +82,24 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                 current = admit(state, read)
                 if known is not None and (
                     current.log is not known.log or current.source != known.source
+                    or current.session is not known.session
                 ):
                     raise ObservationError("source-changed", "admitted session source changed")
                 known = current
                 if read.follow and known.registry == "owned" and not subscribed:
                     known.session.subscriber_count += 1
                     subscribed = True
+                if read.current_requests and read.follow:
+                    client = current_client(known)
+                    tracker = client.current_requests if client is not None else None
+                    if tracker is not producer:
+                        if unsubscribe is not None:
+                            unsubscribe()
+                        producer = tracker
+                        unsubscribe = tracker.subscribe(known.log.wake_observers) if tracker else None
+                wake_revision = known.log.observation_revision
                 body = frame(known, read, after=cursor)
+                requests_key = content_key(body.get("current_request_state"))
                 if prior_source is not None and body["source"] != prior_source:
                     if prior_source["journal_incarnation"] is not None:
                         raise ObservationError(
@@ -92,6 +107,7 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                         )
                 send = (
                     prior_source is None or prior_source != body["source"] or bool(body["entries"])
+                    or requests_key != prior_requests
                 )
                 if send:
                     yield sse(body)
@@ -108,6 +124,7 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                     )
                     last_sent = time.monotonic()
                 prior_source = body["source"]
+                prior_requests = requests_key
                 cursor = body["position"]
                 if not read.follow:
                     return
@@ -118,6 +135,7 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                 await known.log.wait_for_observation(
                     body["retained"]["head"],
                     timeout=0.5,
+                    revision=wake_revision,
                 )
             except CompactionEvidenceError:
                 yield sse(
@@ -145,6 +163,8 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                 )
                 return
     finally:
+        if unsubscribe is not None:
+            unsubscribe()
         if subscribed and known is not None:
             # Retain exact object custody if the registry replaces this handle.
             # Match the existing remove_subscriber idle-clock policy, without

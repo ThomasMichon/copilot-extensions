@@ -1,6 +1,18 @@
 # Testing copilot-extensions
 
 Bridge's opt-in `--test-file tests/test_acp_current_requests.py
+--test-file tests/test_session_observations.py
+--test-file tests/test_session_observation_transport.py
+--test-file tests/test_contract_registry.py --allow-explicit-tiers` packet checks
+the optional current-request HTTP/CLI expansion, current-state-only delivery and
+capture-before-wait races on the existing held reader. It covers exact producer/
+session replacement, cancellation, strict schemas, unchanged history, reserved
+frame bytes and actual private ASGI/Future joins. The existing HTTP-52 capture
+owner separately includes those source controls without changing the generation,
+historical HTTP-51 evidence or required unit-only CI. Manager and installed/native
+acceptance remain separate.
+
+Bridge's opt-in `--test-file tests/test_acp_current_requests.py
 --test-file tests/test_acp_client.py --test-file tests/test_attention_current.py
 --test-file tests/test_attention_wait.py --allow-explicit-tiers` packet checks
 actual local callback/Future lifetime, bounded candidate/output counts, privacy,

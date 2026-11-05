@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -18,6 +19,7 @@ from agent_bridge.routes.session_observations import router
 from agent_bridge.session_observation_cli import ObservationStream, read
 from agent_bridge.session_observation_contract import (
     HISTORY,
+    CURRENT_REQUESTS,
     OBSERVATIONS,
     ObservationError,
     ReadRequest,
@@ -71,6 +73,104 @@ def test_actual_snapshot_and_history_routes_are_distinct_finite_reads(endpoint):
     assert page["schema"] == HISTORY and page["kind"] == "history-page"
     assert page_response.content.count(b"data: ") == 1
     assert page["entries"][0]["kind"] == "permission-request"
+
+
+def test_optional_wire_is_explicit_and_never_added_to_old_or_history_reads(endpoint):
+    baseline = _body(_read(endpoint))
+    assert "current_request_state" not in baseline
+    assert _body(_read(endpoint, current_requests="false")) == baseline
+    opted = _body(_read(endpoint, current_requests="true"))
+    assert opted["current_requests"] == "unknown"
+    assert opted["entries"] == baseline["entries"] and opted["position"] == baseline["position"]
+    assert opted["current_request_state"]["availability"] == "unknown"
+    assert opted["current_request_state"]["client_incarnation"] is None
+    for history in (False, True):
+        assert _read(endpoint, history=history, current_requests="True").status_code == 422
+    assert _read(endpoint, history=True, current_requests="true").status_code == 422
+    assert _read(endpoint, history=True, current_requests="false").status_code == 422
+
+
+def test_actual_local_callback_future_reaches_http_without_history_inference(endpoint):
+    from test_acp_current_requests import ask, client
+
+    async def start_waiter():
+        owner = client()
+        session = endpoint.app.state.session_manager.get_session("session-1")
+        session.client, session.acp_session_id = owner, owner.acp_session_id
+        session.status = "idle"
+        return owner, await ask(owner)
+
+    owner, task = endpoint.portal.call(start_waiter)
+    try:
+        pending = _body(_read(endpoint, current_requests="true"))
+        current = pending["current_request_state"]
+        assert current["availability"] == "observed" and current["completeness"] == "complete"
+        assert current["requests"][0]["kind"] == "input"
+        assert pending["entries"][0]["kind"] == "permission-request"
+        assert "Private question" not in str(current) and "tool-1" not in str(current)
+        endpoint.portal.call(lambda: owner.resolve_elicitation("tool-1", {}, action="cancel"))
+        cleared = _body(_read(endpoint, current_requests="true"))
+        assert cleared["position"] == pending["position"]
+        assert cleared["entries"] == pending["entries"]
+        assert cleared["current_request_state"]["requests"] == []
+        assert cleared["current_request_state"]["revision"] > current["revision"]
+    finally:
+        async def settle():
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        endpoint.portal.call(settle)
+
+
+@pytest.mark.parametrize("support", [None, True, 2, 1])
+def test_optional_cli_negotiates_actual_provider_before_sending_new_query(support):
+    client = MagicMock()
+    capabilities = {OBSERVATIONS: 1}
+    if support is not None:
+        capabilities[CURRENT_REQUESTS] = support
+    client.health.return_value = {"capabilities": capabilities}
+    query = [("contract_version", "1"), ("worktree_id", "worktree-1")]
+    selected = ReadRequest.parse("session-1", [*query, ("current_requests", "true")], history=False)
+    if type(support) is int and support == 1:
+        read(client, selected)
+        assert "current_requests=true" in client._stream_sse.call_args.args[0]
+    else:
+        with pytest.raises(ObservationError, match=CURRENT_REQUESTS):
+            read(client, selected)
+        client._stream_sse.assert_not_called()
+        # A supported rollback still permits the original baseline.
+        read(client, ReadRequest.parse("session-1", query, history=False))
+        assert "current_requests" not in client._stream_sse.call_args.args[0]
+
+
+def test_actual_cli_optional_parser_declaration_and_http_frame_join(endpoint, monkeypatch, capsys):
+    from agent_bridge import session_observation_cli
+
+    client = MagicMock()
+    client.health.return_value = {"capabilities": {OBSERVATIONS: 1, CURRENT_REQUESTS: 1}}
+    payload = _read(endpoint, current_requests="true").content
+    client._stream_sse.side_effect = lambda *args, **kwargs: kwargs["stream_factory"](
+        io.BytesIO(payload)
+    )
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    parser = cli.build_parser()
+    base = ["observe-session", "session-1", "--contract-version", "1",
+            "--worktree-id", "worktree-1", "--json"]
+    args = parser.parse_args(["--project", "demo", *base, "--current-requests"])
+    session_observation_cli._cmd(args)
+    body = decode(capsys.readouterr().out.encode())
+    assert body["current_request_state"]["reason"] == "no-current-client"
+    assert "current_requests=true" in client._stream_sse.call_args.args[0]
+    with pytest.raises(SystemExit):
+        parser.parse_args([*base, "--current-request"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["session-observation-history", *base[1:], "--current-requests"])
+    declaration = parser.parse_args(["version", "--contracts-json"])
+    declaration.func(declaration)
+    contracts = decode(capsys.readouterr().out.encode())
+    assert contracts["contracts"][CURRENT_REQUESTS]["version"] == 1
+    assert contracts["contracts"]["agent-bridge.resume"]["version"] == 1
 
 
 def test_authentication_cannot_be_replaced_by_a_caller_label(endpoint):

@@ -123,12 +123,16 @@ class CurrentRequests:
             except Exception:
                 log.warning("Current request observer callback failed", exc_info=True)
 
-    def snapshot(self, client: Any) -> CurrentRequestSnapshot:
+    def snapshot(
+        self, client: Any, *, unavailable_reason: str | None = None,
+    ) -> CurrentRequestSnapshot:
         """Read at most 64 candidate slots synchronously on the producer loop."""
         availability, completeness, reason = "unknown", "unknown", "client-disconnected"
         pending: list[PendingOccurrence] = []
         seen: set[asyncio.Future[Any]] = set()
-        if client._remote_transport is not None or client._host_mode:
+        if unavailable_reason is not None:
+            reason = unavailable_reason
+        elif client._remote_transport is not None or client._host_mode:
             reason = "unsupported-transport"
         elif (
             self._connection is not None

@@ -594,6 +594,7 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         health_route.LIVE_EXACT_NOTIFY_CAPABILITY: 1,
         health_route.OBSERVATIONS: 1,
         health_route.HISTORY: 1,
+        health_route.CURRENT_REQUESTS: 1,
         health_route.OWNER_MEMBERSHIP: 1,
     }
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION

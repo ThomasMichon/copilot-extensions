@@ -42,10 +42,28 @@ from test_session_observations import (
     test_observation_cancellation_preserves_other_subscription
     as test_observation_cancellation_preserves_other_subscription,
     test_observation_http_resource_boundary as test_observation_http_resource_boundary,
+    test_live_waiters_change_without_changing_event_positions
+    as test_live_waiters_change_without_changing_event_positions,
+    test_waiter_capture_before_wait_race_does_not_wait_for_backstop
+    as test_waiter_capture_before_wait_race_does_not_wait_for_backstop,
+    test_live_qualification_replacement_terminal_and_reader_cleanup
+    as test_live_qualification_replacement_terminal_and_reader_cleanup,
+    test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_custody
+    as test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_custody,
+    test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends
+    as test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends,
 )
 from test_session_observation_transport import (
     endpoint as endpoint,
     test_observer_cli_http_eof as test_observer_cli_http_eof,
+    test_actual_local_callback_future_reaches_http_without_history_inference
+    as test_actual_local_callback_future_reaches_http_without_history_inference,
+    test_optional_wire_is_explicit_and_never_added_to_old_or_history_reads
+    as test_optional_wire_is_explicit_and_never_added_to_old_or_history_reads,
+    test_optional_cli_negotiates_actual_provider_before_sending_new_query
+    as test_optional_cli_negotiates_actual_provider_before_sending_new_query,
+    test_actual_cli_optional_parser_declaration_and_http_frame_join
+    as test_actual_cli_optional_parser_declaration_and_http_frame_join,
 )
 from test_owner_membership import (
     test_adopted_writable_connection_preserves_membership_commits

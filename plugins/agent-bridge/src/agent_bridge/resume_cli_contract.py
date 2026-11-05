@@ -47,6 +47,8 @@ def confirmed_resume(result: Any, worktree_id: str, *, cli: bool) -> bool:
 
 def cli_contracts() -> dict[str, Any]:
     """Describe this executing CLI, not an installed payload or live daemon."""
+    from .session_observation_contract import CURRENT_REQUESTS
+
     return {
         "schema": "agent-bridge.cli-contracts",
         "version": 1,
@@ -55,5 +57,6 @@ def cli_contracts() -> dict[str, Any]:
                 "version": 1,
                 "capabilities": ["exact-worktree-target"],
             },
+            CURRENT_REQUESTS: {"version": 1, "capabilities": ["observe-session-current-requests"]},
         },
     }

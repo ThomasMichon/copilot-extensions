@@ -4,7 +4,8 @@ Parent: [Step 7, S3](sidecar-live-timeline.md#s3---bridge-relationships-and-prob
 Shared boundary: [Sidecar observation contract](sidecar-observation-contract.md).
 Canonical effort: [README.md](README.md).
 
-**Status: reviewed source amendment in #10545; no runtime support claimed.** This is the
+**Status: reviewed amendment in #10545; local producer merged in #10551;
+optional provider expansion in progress; no installed support claimed.** This is the
 coordinator's implementation proposal within the accepted input-observability
 scope, not a new operator request or rollout grant. It targets the existing
 [compaction-and-input-observability](../../../visions/mux-companion/README.md#compaction-and-input-observability)
@@ -169,3 +170,11 @@ The bounded producer helper and actual callback/Future controls are the first
 implementation slice. No optional HTTP block, CLI flag, capability advertisement
 or Manager display is implemented by that helper alone; existing external reads
 still report current requests unknown.
+
+The follow-on provider source adds the optional block, strict opt-in parser,
+selected-CLI declaration through existing `version --contracts-json`, actual
+provider health negotiation and state-only delivery on the same held reader.
+Its focused producer/HTTP/CLI packet passes 216 cases; the expanded current
+HTTP-52 probe/guard packet passes 69. Source-bound declaration preparation,
+published capture, independent review and required CI remain pending; Manager
+consumption and rendered attention validation have not started.

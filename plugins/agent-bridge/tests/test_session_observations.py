@@ -31,14 +31,29 @@ from agent_bridge.session_observation_contract import (
 from agent_bridge.session_observations import admit, frame
 
 
-def request(*, history=False, after=None, before=None, limit=64, project="demo", follow=False):
+def request(
+    *, history=False, after=None, before=None, limit=64, project="demo", follow=False,
+    current=False,
+):
     return ReadRequest(
         Selection("session-1", project, "worktree-1", None),
         history,
         follow,
         before if history else after,
         limit,
+        current,
     )
+
+
+def local_waiters(source):
+    from test_acp_current_requests import client
+
+    owner = client()
+    session = source.session_manager.get_session("session-1")
+    session.client = owner
+    session.acp_session_id = owner.acp_session_id
+    session.status = "idle"
+    return owner
 
 
 @pytest.fixture
@@ -94,6 +109,179 @@ def test_snapshot_delta_and_backward_page_do_not_move_delivery_cursor(source):
     assert source.db.get_cursor("observer", "session-1") == 0
     assert delta["current_requests"] == "unknown"
     assert delta["entries"][0]["answerability"] == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_history", [False, True])
+async def test_live_waiters_change_without_changing_event_positions(source, with_history):
+    from test_acp_current_requests import ask
+
+    owner = local_waiters(source)
+    if with_history:
+        append(source, 1)
+    log = source.session_manager.get_session("session-1").event_log
+    original_head = log.latest_id
+    selected = request(follow=True, current=True)
+    reader = observations(_http_request(source), selected)
+
+    async def next_body():
+        return decode((await anext(reader)).split(b"data: ", 1)[1].strip())
+
+    first = await next_body()
+    validate_frame(first, selected)
+    assert first["current_request_state"]["requests"] == []
+    task = await ask(owner)
+    pending = await next_body()
+    validate_frame(pending, selected)
+    assert pending["current_request_state"]["requests"][0]["kind"] == "input"
+    assert pending["position"] == first["position"] and pending["entries"] == []
+    assert pending["current_requests"] == "unknown"
+    assert len(encode(pending)) <= MAX_BODY and len(sse(pending)) <= MAX_FRAME
+    owner.resolve_elicitation("tool-1", {}, action="cancel")
+    cleared = await next_body()
+    assert cleared["current_request_state"]["requests"] == []
+    assert cleared["position"] == first["position"]
+    assert log.latest_id == original_head
+    assert source.db.get_cursor("observer", "session-1") == 0
+    await task
+    await reader.aclose()
+    assert not owner.current_requests._listeners and log._waiters == []
+
+
+@pytest.mark.asyncio
+async def test_waiter_capture_before_wait_race_does_not_wait_for_backstop(source, monkeypatch):
+    from test_acp_current_requests import ask
+
+    owner = local_waiters(source)
+    log = source.session_manager.get_session("session-1").event_log
+    reader = observations(_http_request(source), request(follow=True, current=True))
+    await anext(reader)
+    original = log.wait_for_observation
+    tasks = []
+
+    async def race(after, timeout, *, revision):
+        if not tasks:
+            tasks.append(await ask(owner))
+        await original(after, timeout=timeout, revision=revision)
+
+    monkeypatch.setattr(log, "wait_for_observation", race)
+    result = await asyncio.wait_for(anext(reader), timeout=0.25)
+    assert decode(result.split(b"data: ", 1)[1].strip())["current_request_state"]["requests"]
+    tasks[0].cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await reader.aclose()
+    assert not owner.current_requests._listeners and log._waiters == []
+
+
+@pytest.mark.asyncio
+async def test_live_qualification_replacement_terminal_and_reader_cleanup(source):
+    owner = local_waiters(source)
+    session = source.session_manager.get_session("session-1")
+    reader = observations(_http_request(source), request(follow=True, current=True))
+
+    async def next_state():
+        body = decode((await anext(reader)).split(b"data: ", 1)[1].strip())
+        return body["current_request_state"]
+
+    first = await next_state()
+    replacement = local_waiters(source)
+    new = await next_state()
+    assert new["client_incarnation"] != first["client_incarnation"]
+    assert not owner.current_requests._listeners
+    assert len(replacement.current_requests._listeners) == 1
+    session.status = "stopped"
+    terminal = await next_state()
+    assert terminal["availability"] == "unknown" and terminal["requests"] == []
+    assert terminal["revision"] > new["revision"]
+    pending = asyncio.create_task(anext(reader))
+    for _ in range(50):
+        if session.event_log._waiters:
+            break
+        await asyncio.sleep(0)
+    assert session.event_log._waiters
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    await reader.aclose()
+    assert not replacement.current_requests._listeners
+    assert session.event_log._waiters == [] and session.subscriber_count == 0
+
+
+@pytest.mark.asyncio
+async def test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_custody(source):
+    owner = local_waiters(source)
+    original = source.session_manager.get_session("session-1")
+    reader = observations(_http_request(source), request(follow=True, current=True))
+    await anext(reader)
+    replacement = copy.copy(original)
+    replacement.subscriber_count = 5
+    source.session_manager._sessions["session-1"] = replacement
+    body = decode((await anext(reader)).split(b"data: ", 1)[1].strip())
+    assert body["kind"] == "gap" and body["code"] == "source-changed"
+    await reader.aclose()
+    assert original.subscriber_count == 0 and replacement.subscriber_count == 5
+    assert not owner.current_requests._listeners and original.event_log._waiters == []
+
+
+@pytest.mark.asyncio
+async def test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends(source):
+    from test_acp_current_requests import ask
+
+    owner = local_waiters(source)
+    tasks = [await ask(owner, f"tool-{i}") for i in range(32)]
+    log = source.session_manager.get_session("session-1").event_log
+    for index in range(80):
+        log.append("tool_call_update", {"tool_call_id": f"tool-{index}", "title": "x" * 512})
+    selected = request(current=True)
+    try:
+        body = frame(admit(source, selected), selected)
+        validate_frame(body, selected)
+        assert len(body["current_request_state"]["requests"]) == 32
+        assert body["entries"][-1]["native_event_id"] == 80 and body["has_more"]
+        assert len(encode(body)) <= MAX_BODY and len(sse(body)) <= MAX_FRAME
+        page = request(history=True, before=body["next_before"])
+        older = frame(admit(source, page), page)
+        assert "current_request_state" not in older
+        assert older["entries"][-1]["native_event_id"] + 1 == body["entries"][0]["native_event_id"]
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["extra-selector", "bad-id", "duplicate", "overflow", "unknown-positive",
+     "bool-version", "bool-revision", "naive-time", "unknown-reason"],
+)
+def test_optional_current_block_rejects_malformed_or_answer_bearing_data(source, change):
+    from agent_bridge.session_current_requests import validate
+
+    local_waiters(source)
+    selected = request(current=True)
+    body = frame(admit(source, selected), selected)["current_request_state"]
+    item = {"occurrence_id": "a" * 32, "kind": "input"}
+    if change == "extra-selector":
+        body["question"] = "private"
+    elif change == "bad-id":
+        body["requests"] = [{**item, "occurrence_id": " x "}]
+    elif change == "duplicate":
+        body["requests"] = [item, item]
+    elif change == "overflow":
+        body["requests"] = [item] * 33
+    elif change == "unknown-positive":
+        body.update(availability="unknown", completeness="unknown", reason="client-disconnected",
+                    requests=[item])
+    elif change == "bool-version":
+        body["version"] = True
+    elif change == "bool-revision":
+        body["revision"] = True
+    elif change == "naive-time":
+        body["observed_at"] = "2026-01-01T00:00:00"
+    else:
+        body["reason"] = "looks-idle"
+    with pytest.raises(ObservationError):
+        validate(body)
 
 
 @pytest.mark.parametrize("change", ["unknown", "alias", "worktree", "project", "head"])
