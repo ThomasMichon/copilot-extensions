@@ -154,6 +154,16 @@ validation documentation. Existing visions need no intent amendment.
 - Began Phase 2. Preserve legacy fields, identify the additive receipt, and
   distinguish confirmed native liveness from mux launch and completed recovery.
 
+### 2026-11-05 - Remaining receipt edge cases
+
+- The next review confirmed the original three corrections and identified
+  schema-decoding failures plus allocation-only staging failure classification.
+- Added initial/post-census KeyError and TypeError controls and a regression
+  through the existing `--new` staging-failure handler. Legacy allocation
+  recovery remains intact; the receipt does not claim a mux launch.
+- Revised focused packet: 155 passed. F/E9 lint, module cap and docs checks
+  passed. Required current-head review/CI and source closeout remain.
+
 ### 2026-11-05 - Proposal
 
 - Captured the operator request verbatim and established #10745.

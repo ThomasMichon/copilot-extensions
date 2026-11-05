@@ -71,7 +71,8 @@ def _observe(result: dict, bindings: dict) -> dict:
         return {**observation, "state": "live", "session_verified": True,
                 "session_reason": "native-mux-binding",
                 "native_process": {**binding, "worktree_id": wt_id}}
-    except (OSError, ValueError, AttributeError, RuntimeError, subprocess.SubprocessError, YAMLError):
+    except (OSError, ValueError, AttributeError, KeyError, TypeError, RuntimeError,
+            subprocess.SubprocessError, YAMLError):
         for key in bindings:
             bindings[key] = None
         return observation
@@ -87,17 +88,23 @@ def run(args, operation) -> int:
     result = json.loads(captured.getvalue())
     result = {**target, **result}
     result.setdefault("ok", rc == 0)
+    if isinstance(result.get("worktree"), dict):
+        result.setdefault("worktree_id", result["worktree"].get("id"))
+        result.setdefault("work_dir", result["worktree"].get("path"))
     action = (
         "dry-run" if result.get("dry_run") else
         "reuse" if result.get("created") is False else
-        ("resume" if result.get("resume_session") else "create") if result.get("created") else
+        ("resume" if result.get("resume_session") else "create") if (
+            result.get("created") and result.get("session")
+        ) else
         "attempted" if result.get("launch_attempted") else "not-started"
     )
+    state = "not-started" if action == "not-started" else "launch-failed" if rc else "dry-run"
     receipt = {"embody_receipt": {"schema": "agent-worktrees.embody", "version": 1,
                                  "supports_wait_session": True},
-               "launch_action": action, "state": "launch-failed" if rc else "dry-run",
+               "launch_action": action, "state": state,
                "session_id": None, "session_verified": False,
-               "session_reason": "launch-failed" if rc else "dry-run",
+               "session_reason": state,
                "native_process": None, "session_wait": "not-requested"}
     if action in ("reuse", "resume", "create"):
         deadline = time.monotonic() + (timeout if not rc else 0)

@@ -178,13 +178,16 @@ def test_dotted_target_is_confirmed_by_its_canonical_mux_name(native, capfd, mon
 
 
 @pytest.mark.parametrize("read_failure", [1, 2])
-def test_yaml_failure_after_launch_preserves_an_unknown_receipt(native, capfd, monkeypatch, read_failure):
+@pytest.mark.parametrize("error", [YAMLError, KeyError, TypeError])
+def test_decode_failure_after_launch_preserves_an_unknown_receipt(
+    native, capfd, monkeypatch, read_failure, error,
+):
     native.record = _record("original")
     reads = [0]
     def load(_):
         reads[0] += 1
         if reads[0] == read_failure:
-            raise YAMLError("malformed fixture record")
+            raise error("malformed fixture record")
         return native.record
     monkeypatch.setattr(receipt.tracking, "load_record", load)
     rc, result = _run(capfd)
@@ -264,6 +267,28 @@ def test_post_launch_error_preserves_launch_and_native_observation(native, capfd
     assert result["created"] is True and result["launch_action"] == "create"
     assert result["session_verified"] and result["state"] == "live"
     assert result["session_wait"] == "not-requested"
+
+
+def test_new_seed_staging_failure_is_allocation_not_mux_launch(native, capfd, monkeypatch, tmp_path):
+    from agent_worktrees import agent_policy
+    from agent_worktrees.worktree_creation import LaunchSeedStagingFailure
+    config = SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path)))
+    record = SimpleNamespace(worktree_id="allocated", worktree_path=str(tmp_path),
+                             branch="worktree/allocated", repo="example")
+    failure = LaunchSeedStagingFailure(record, "fixture-seed", ValueError("unconfirmed staging"))
+    monkeypatch.setattr(receipt.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(agent_policy, "json_refusal", lambda *a: None)
+    def allocate(*a, **k):
+        raise failure
+    monkeypatch.setattr(main, "_create_worktree_core", allocate)
+    monkeypatch.setattr(receipt.sessions, "mux_new_session", lambda *a, **k: pytest.fail("no mux launch"))
+    rc = handoff_cli.cmd_embody(argparse.Namespace(new=True))
+    result = json.loads(capfd.readouterr().out)
+    assert rc == 3 and result["created"] is True and result["ok"] is False
+    assert result["worktree_id"] == "allocated" and result["work_dir"] == str(tmp_path)
+    assert result["launch_action"] == "not-started" and result["state"] == "not-started"
+    assert result["worktree"] == failure.worktree and result["recovery"]["repeat_new"] is False
+    assert result["launch_seed"]["seed_id"] == "fixture-seed" and native.bindings == 0
 
 
 def test_dry_run_does_not_observe_or_wait(native, capfd, monkeypatch):

@@ -560,12 +560,16 @@ readers ignore additional fields. No prior fields or forms are retired.
 |-------|---------|
 | `worktree_id`, `work_dir`, `session`, `new_pane` | Resolved target and legacy mux/pane identity when available, including post-launch failures |
 | `launch_action` | `create`, `resume` (cold launch of `resume_session`), `reuse`, `dry-run`, `attempted` (launch failed with possible effects), or `not-started` |
-| `state` | `live` only with positive native-to-target-mux binding; otherwise `starting` (unregistered or old/incompatible head), `unknown`, `dry-run`, or `launch-failed` |
+| `state` | `live` only with positive native-to-target-mux binding; otherwise `starting` (unregistered or old/incompatible head), `unknown`, `dry-run`, `not-started`, or `launch-failed` |
 | `session_id`, `session_verified`, `session_reason` | Observed registered native head, positive confirmation and reason. Fresh launches do not report an incompatible older head as their new session. `resume_session` separately identifies a selected conversation, not proof it booted |
 | `native_process` | Confirmed binding's mux/pane identity, pane/Copilot PIDs and process birth identities; `null` without confirmation |
 | `session_wait` | `not-requested`, `confirmed`, or `timeout` |
 
 Default behavior does not sleep: it performs one target-local observation.
+If `--new` allocates a worktree but seed staging fails before mux launch,
+the legacy recovery payload's `created: true` still means worktree allocation.
+The receipt reports `launch_action`/`state: "not-started"`, preserves that payload
+and identifies the allocated target; do not repeat `--new`.
 Only a compatible, positively live native candidate triggers the existing
 process/mux binding probe; neither cached head/PID nor heuristic active pane
 alone proves native liveness. No history scan or additional launch journal is
