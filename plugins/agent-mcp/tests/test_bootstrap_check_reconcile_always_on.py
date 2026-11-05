@@ -15,10 +15,8 @@ checkbox. This test proves:
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -85,114 +83,41 @@ def test_sh_has_no_opt_in_gate():
     assert "background reconcile SKIPPED" not in text
 
 
-def _make_fake_install(home: Path, name: str) -> Path:
-    """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1.
-
-    Multi-line, indented JSON: budget-guidance's bootstrap-check (the
-    'pythonless' family member) parses the manifest with a line-oriented awk
-    script, not a real JSON parser, so it needs 'source'/'version' on their
-    own lines the way a real ``ConvertTo-Json``/``json.dump(indent=...)``
-    deploy would produce -- a compact single-line dump silently fails to
-    match its patterns.
-    """
-    install_dir = home / f".{name}"
-    install_dir.mkdir(parents=True, exist_ok=True)
-    (install_dir / "deploy-manifest.json").write_text(
-        json.dumps(
-            {"source": {"version": "1.0.0", "path": str(install_dir / "src")}},
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    # No .venv/venv/current-version -- provisioned stays False, so the drift
-    # branch is reached regardless of the version comparison.
-    return install_dir
-
-
-def _make_fake_plugin(root: Path, name: str) -> Path:
-    """An isolated copy of the plugin dir shape bootstrap-check.sh expects,
-    with a harmless stub installer so a spawned reconcile does no real work
-    (never invoke the REAL install.sh from a test -- it does a live install)."""
-    plugin_dir = root / "plugin"
-    scripts_dir = plugin_dir / "scripts"
-    scripts_dir.mkdir(parents=True)
-    (plugin_dir / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
-    (plugin_dir / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")
-    shutil.copyfile(_SH, scripts_dir / "bootstrap-check.sh")
-    (scripts_dir / "install.sh").write_text(
-        "#!/usr/bin/env bash\necho stub-install-ran\n", encoding="utf-8"
-    )
-    (scripts_dir / "install.sh").chmod(0o755)
-    (scripts_dir / "bootstrap-check.sh").chmod(0o755)
-    return plugin_dir
-
-
-def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
-    """A subprocess env with the Windows Store's python3.exe alias stub (a
-    no-op unless Python is installed via the Store) removed from PATH -- it
-    can shadow the real interpreter ahead of it, which would make bash's
-    ``command -v python3`` resolve to a dud and silently short-circuit this
-    hook before it ever reaches the gate under test."""
-    env = dict(os.environ)
-    if "PATH" in env:
-        parts = env["PATH"].split(os.pathsep)
-        env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
-    env.update(overrides)
-    return env
-
-
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(
+    os.name != "nt" and _BASH is None, reason="native shell not available",
+)
 def test_sh_reconciles_without_any_opt_in_config(tmp_path):
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
-    home = tmp_path / "home"
-    home.mkdir()
-    project = tmp_path / "project"
-    project.mkdir()
-    plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
-    _make_fake_install(home, _PLUGIN_NAME)
+    from .test_bootstrap_driver import bootstrap_fixture, run_hook
 
-    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
-
-    result = subprocess.run(
-        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
-        cwd=str(project),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    plugin_dir, _, project, _, env = bootstrap_fixture(tmp_path, phase="drift")
+    result = run_hook(plugin_dir, project, env)
+    assert result.returncode == 0, result.stderr
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert "bootstrap provision supervision launched" in result.stderr, result.stderr
+    assert (project / "handoff").is_file()
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(
+    os.name != "nt" and _BASH is None, reason="native shell not available",
+)
 def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is
     now inert."""
-    home = tmp_path / "home"
-    home.mkdir()
-    project = tmp_path / "project"
+    from .test_bootstrap_driver import bootstrap_fixture, run_hook
+
+    plugin_dir, _, project, _, env = bootstrap_fixture(tmp_path, phase="drift")
     (project / ".copilot-extensions").mkdir(parents=True)
     (project / ".copilot-extensions" / "config.yaml").write_text(
         f"{_OPT_IN_KEY}: false\n", encoding="utf-8"
     )
-    plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
-    _make_fake_install(home, _PLUGIN_NAME)
-
-    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
-
-    result = subprocess.run(
-        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
-        cwd=str(project),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    result = run_hook(plugin_dir, project, env)
+    assert result.returncode == 0, result.stderr
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert "bootstrap provision supervision launched" in result.stderr, result.stderr
+    assert (project / "handoff").is_file()
 
 
 if __name__ == "__main__":

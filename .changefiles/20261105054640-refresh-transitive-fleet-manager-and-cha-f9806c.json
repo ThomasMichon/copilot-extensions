@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh transitive Fleet Manager and Chat releases for the shared disposable shell-custody dependency correction.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

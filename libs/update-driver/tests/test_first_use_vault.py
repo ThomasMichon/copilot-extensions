@@ -217,9 +217,11 @@ def test_actual_cold_payload_command_uses_packaged_owner_or_refuses_without_plug
         assert not root.exists(), result.stdout + result.stderr
 
 
-def cold_environment(installation, project, area, *, python_prerequisite=False):
+def cold_environment(
+    installation, project, area, *, python_prerequisite=False, lifecycle_environment=None,
+):
     profile = installation.parent
-    env = dict(os.environ)
+    env = {**os.environ, **(lifecycle_environment or {})}
     for key, relative in {
         "APPDATA": "AppData/Roaming", "LOCALAPPDATA": "AppData/Local",
         "PROGRAMDATA": "ProgramData", "PSModulePath": "powershell-modules",
@@ -281,12 +283,23 @@ def cold_environment(installation, project, area, *, python_prerequisite=False):
     os.name != "nt" and sys.platform != "linux",
     reason="native cold environment is qualified only on Windows and Linux",
 )
-def test_cold_environment_preserves_runner_lifetime_and_hides_product_python(area, monkeypatch):
-    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
-    monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "fixture-context")
+@pytest.mark.parametrize("explicit_lifecycle", [False, True])
+def test_cold_environment_preserves_runner_lifetime_and_hides_product_python(
+    area, monkeypatch, explicit_lifecycle,
+):
+    lifetime = {
+        "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
+        "COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT": "fixture-context",
+    }
+    if not explicit_lifecycle:
+        for key, value in lifetime.items():
+            monkeypatch.setenv(key, value)
     project = area / "project"
     project.mkdir()
-    env = cold_environment(area / "profile/.agent-vault", project, area)
+    env = cold_environment(
+        area / "profile/.agent-vault", project, area,
+        lifecycle_environment=lifetime if explicit_lifecycle else None,
+    )
     assert env["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
     assert env["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"] == "fixture-context"
     assert shutil.which("python", path=env["PATH"]) is None

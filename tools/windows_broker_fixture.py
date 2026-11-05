@@ -30,7 +30,7 @@ def fixture_environment(source: dict[str, str], *, control: bool) -> dict[str, s
             "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
             "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432",
             "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432",
-            "SYSTEMDRIVE", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
+            "SYSTEMDRIVE", "OS", "COMPUTERNAME", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
             "PSMODULEPATH",
         })
     return {name: value for name, value in source.items() if name.upper() in allowed}

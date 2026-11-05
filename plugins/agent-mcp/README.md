@@ -1533,6 +1533,27 @@ from a checkout, run the installer directly; for a cheap first-use setup, pass
 No daemon is required for a Copilot agent. `agent-mcp serve` is only an optional
 warmth tier for repeated shell `call`/materialized-stub use.
 
+The legacy session-start hook submits `stamp` when no deployment manifest
+exists and `provision` when the selected, completed runtime is not ready for
+the payload's source. It uses the packaged installation driver's
+`mcp-recipes-v1` contract and ordinary durable queue, not a direct initializer,
+PID lock or age-based process reaper. Historical reconciliation files are left
+untouched. A healthy selected generation is a read-only no-op; an unrelated
+healthy fallback is not readiness for the selected source.
+
+The hook retains its 15-second budget and emits exactly `{}` on stdout.
+Stderr identifies the launched supervisor and its diagnostics under
+`~/.copilot-extensions/update-driver`; launch acknowledgement is not durable
+acceptance, successful construction or usable MCP. Unsupported/missing driver
+support refuses before installation rather than falling back to an old
+initializer. The killswitch, own no-self/pinned controls, publication admission
+and installation-cell boundary remain independent of the guidance/catalog hook.
+Automatic bootstrap is limited to the canonical installed payload and default
+legacy root on native Windows and qualified Linux. Windows requires setup
+Python 3.10+ as `python` on PATH for the lifetime adapter; cold MCP/UV/Manager
+does not imply a Python-free machine. Commands, explicit initializers, custom
+roots, selected snapshots and macOS are separate adoption boundaries.
+
 The Windows installer supports Windows PowerShell 5.1 and PowerShell 7. Native
 arguments, including Python's isolated-mode flag and paths containing spaces,
 are forwarded literally without opening console windows. Failed native commands

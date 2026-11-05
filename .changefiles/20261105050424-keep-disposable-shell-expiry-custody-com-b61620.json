@@ -1,0 +1,21 @@
+{
+  "comment": "Keep disposable shell expiry custody compatible with explicitly uncontained native daemon children while preserving ordinary test containment; refresh the shared lifecycle source archive.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}
