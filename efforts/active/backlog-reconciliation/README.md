@@ -330,6 +330,23 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The next fifteen child trackers are administratively subsumed after direct
+Plan/Validation intake and OPEN parent readback across module discipline,
+critical-connectivity retention, delegated operation lifetime, peer-message
+feedback, settings packs, exact engine profiles, project registration, seed
+diagnostics, Windows forwarding tests and launch compatibility. Exact
+implementation claims, privacy/retention, uncertainty and native/resource
+gates remain. The [journal](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
+records all fifteen mappings and rejects two worker recommendations where
+the original retains a specific custodian-mapping condition or investigation
+claim. Two equal complete ten-page metadata scans at 14:09 PST observe
+944 whole OPEN: 670 creator-eligible, 274 excluded, 636 original-cohort
+and 308 inflow. Seventeen audited departures since the prior census include
+the two already-recorded later closures; there are no arrivals or external
+departures. Verified campaign dispositions are 850, still 215 above the
+fixed whole-queue checkpoint. The campaign remains Active with every
+Plan/Validation completion state unchanged.
+
 The following ten-disposition wave completes #8951/#9758's finite source
 contracts and adopts eight unfinished trackers under OPEN #3979, #5003
 and #5245 with explicit Plan/Validation and unchanged source/resource
