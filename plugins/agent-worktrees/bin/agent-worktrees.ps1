@@ -1,3 +1,5 @@
+$_awUpdateCaller = $PSCommandPath
+$_awUpdatePayload = $false
 . (Join-Path $PSScriptRoot 'agent-worktrees-update-entry.ps1') @args
 if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $env:PYTHONUTF8 = '1'
@@ -106,6 +108,7 @@ print(json.dumps(prefix, ensure_ascii=True))
 }
 $_py = _resolve_aw_py
 if ($_py) { $_cache = Get-AwPythonCache $_py; Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_cache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
+if ($env:AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME) { exit 127 }
 if ($_awUpdateDiagnostic) {
     [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
     exit 127

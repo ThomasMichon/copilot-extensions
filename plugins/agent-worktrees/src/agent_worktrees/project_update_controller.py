@@ -23,19 +23,24 @@ def dispatch_update(args, auth, manager, standalone) -> int:
     return handed_off if handed_off is not None else standalone()
 
 
+def configured_script(repo) -> str:
+    controllers = getattr(repo, "update_controller", {})
+    platform = cfg.detect_platform()
+    return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
+
+
 def run_project_update(args) -> int | None:
     """Return None only when this request does not select a project controller."""
     if (
         getattr(args, "no_project_controller", False)
         or getattr(args, "phase", None)
         or getattr(args, "target", None) is not None
-        or getattr(args, "runtime_sources", None) is not None
         or not cfg.active_project()
     ):
         return None
     try:
         repo = cfg.load_config().default_repo
-        script = getattr(repo, "update_controller", {}).get(cfg.detect_platform())
+        script = configured_script(repo)
     except (OSError, KeyError, ValueError) as error:
         output.err(f"Cannot resolve the project update controller: {error}")
         return 1
@@ -56,9 +61,12 @@ def run_project_update(args) -> int | None:
             raise ValueError("the update driver did not provide controller custody")
         flags = (["--no-manager"] if getattr(args, "no_manager", False) else [])
         flags.extend(update_options.update_flags(args))
+        options = no_window_kwargs()
+        if os.name == "nt":
+            options.update(stdout=sys.stdout, stderr=sys.stderr)
         return subprocess.run(
             [sys.executable, "-I", "-B", str(path), *flags], cwd=root,
-            env={**os.environ, **custody}, check=False, **no_window_kwargs(),
+            env={**os.environ, **custody}, check=False, **options,
         ).returncode
     except (OSError, ValueError) as error:
         output.err(f"Project update controller failed: {error}")

@@ -2,13 +2,80 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 import subprocess
+from pathlib import Path
 
 import pytest
+from agent_procutil import owned_process
+from native_shell_support import bash_path
 from test_update_entry import PLUGIN, _arguments
 from test_update_entry import update_entry_case as shared_update_entry_case
 
 update_entry_case = shared_update_entry_case
+
+
+@pytest.mark.parametrize("project_position", ["before", "after"])
+def test_posix_project_controller_precedes_manager_bootstrap(
+    tmp_path, native_bash, project_position,
+) -> None:
+    home = tmp_path / "home"
+    tools = tmp_path / "tools"
+    runtime = home / ".agent-worktrees"
+    (runtime / "bin").mkdir(parents=True)
+    tools.mkdir()
+    (runtime / "current-version").write_text("selected\n")
+    engine = tools / "engine"
+    engine.write_text(
+        '#!/bin/sh\n'
+        'case " $* " in\n'
+        '  *" get update-controller "*) printf "%s\\0" "$@" > "$PROBE_ARGS"; '
+        'printf "tools/update.py\\n"; exit 0 ;;\n'
+        'esac\n'
+        'printf "%s\\0" "$@" > "$UPDATE_ARGS"\nexit 47\n'
+    )
+    engine.chmod(0o755)
+    (runtime / "bin" / "resolve-runtime.sh").write_text(
+        "AW_PY=" + shlex.quote(bash_path(native_bash, engine)) + "\n",
+    )
+    uname = tools / "uname"
+    uname.write_text('#!/bin/sh\nprintf "Linux\\n"\n')
+    uname.chmod(0o755)
+    startup = tmp_path / "bash-env"
+    startup.write_text('uname() { printf "Linux\\n"; }\n')
+    for name in ("curl", "git", "pwsh", "powershell.exe"):
+        unavailable = tools / name
+        unavailable.write_text('#!/bin/sh\nexit 96\n')
+        unavailable.chmod(0o755)
+    arguments = (
+        ["--project", "sample", "update", "--force", "--skip-modules", "a b"]
+        if project_position == "before"
+        else ["update", "--force", "--project", "sample", "--skip-modules", "a b"]
+    )
+    env = os.environ.copy()
+    env.update({
+        "HOME": bash_path(native_bash, home),
+        "USERPROFILE": str(home),
+        "PATH": os.pathsep.join([str(tools), str(Path(native_bash).parent), env["PATH"]]),
+        "BASH_ENV": bash_path(native_bash, startup),
+        "PROBE_ARGS": bash_path(native_bash, tmp_path / "probe.args"),
+        "UPDATE_ARGS": bash_path(native_bash, tmp_path / "update.args"),
+        "AGENT_WORKTREES_NO_SELFPROVISION": "1",
+        "WORKTREE_MANAGER_ROOT": bash_path(native_bash, home / ".worktree-manager"),
+        "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR": bash_path(
+            native_bash, home / "providers",
+        ),
+    })
+    result = owned_process.run_owned(
+        [native_bash, bash_path(native_bash, PLUGIN / "bin" / "agent-worktrees"), *arguments],
+        timeout=20, env=env,
+    )
+    assert result.returncode == 47, result.stderr
+    assert _arguments(tmp_path / "probe.args")[-4:] == [
+        "--project", "sample", "get", "update-controller",
+    ]
+    assert _arguments(tmp_path / "update.args")[-len(arguments):] == arguments
 
 
 def _windows_shell_double(tmp, monkeypatch) -> None:
@@ -25,12 +92,15 @@ def _windows_shell_double(tmp, monkeypatch) -> None:
     host = tools / "pwsh"
     host.write_text(
         '#!/bin/sh\nprintf "%s\\0" "$@" > "$WINDOWS_ENTRY_ARGS"\n'
-        'printf "%s" "$MSYS2_ARG_CONV_EXCL" > "$WINDOWS_CONVERSION"\nexit 37\n',
+        'printf "%s" "$MSYS2_ARG_CONV_EXCL" > "$WINDOWS_CONVERSION"\n'
+        'printf "%s" "$AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD" > "$WINDOWS_PAYLOAD_MODE"\n'
+        'exit 37\n',
     )
     host.chmod(0o755)
     monkeypatch.setenv("CYGPATH_ARGS", str(tmp / "cygpath.args"))
     monkeypatch.setenv("WINDOWS_ENTRY_ARGS", str(tmp / "windows.args"))
     monkeypatch.setenv("WINDOWS_CONVERSION", str(tmp / "windows.conversion"))
+    monkeypatch.setenv("WINDOWS_PAYLOAD_MODE", str(tmp / "windows-payload-mode"))
 
 
 @pytest.mark.parametrize("front", ["global", "payload"])
@@ -62,6 +132,7 @@ def test_update_entry_git_sh_delegates_before_windows_provider_parsing(
         "-w", "--", str(PLUGIN / "bin/agent-worktrees-update-entry.ps1"),
     ]
     assert (tmp / "windows.conversion").read_text() == "*"
+    assert (tmp / "windows-payload-mode").read_text() == ("1" if front == "payload" else "0")
     assert not (tmp / "resolved").exists()
     assert not (tmp / "python.args").exists()
     assert not (tmp / "manager-called").exists()

@@ -336,12 +336,27 @@ def cmd_update_request(rest: list[str]) -> int:
                     options.engine_acquisition_timeout,
                 ):
                     _update_context_directory(os.environ)
+                    from .project_update_controller import handoff
+
+                    controlled = handoff(forwarded)
+                    if controlled is not None:
+                        return controlled
                     if request.spec.backend == "manager" and request.spec.source != _source_key():
                         raise driver.StateError("Manager source changed after submission; submit a new request")
                     custody.assert_owned()
                     from . import __main__ as manager
 
                     return manager._cmd_update(forwarded)
+        from .project_update_controller import handoff
+
+        observer = [
+            "--" + name.replace("_", "-")
+            for name in ("detach", "wait", "supervised_debug", "json")
+            if getattr(options, name)
+        ]
+        controlled = handoff(forwarded, observer=observer)
+        if controlled is not None:
+            return controlled
         if options.target is not None and options.target != "worktree-manager":
             from . import engine_client
             from .runtime_source_config import require_marketplace

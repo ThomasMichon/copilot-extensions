@@ -24,7 +24,9 @@ def project(monkeypatch, tmp_path):
         update_controller={"windows": "tools/update.py"},
     )
     monkeypatch.setattr(config, "active_project", lambda: "example")
-    monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(default_repo=repo))
+    monkeypatch.setattr(
+        config, "load_config", lambda **_kwargs: SimpleNamespace(default_repo=repo),
+    )
     monkeypatch.setattr(config, "detect_platform", lambda: "windows")
     return repo, script
 
@@ -55,10 +57,67 @@ def test_ordinary_update_runs_controller_under_driver_custody(project, monkeypat
     {"no_project_controller": True},
     {"phase": "runtimes"},
     {"target": "agent-bridge"},
-    {"runtime_sources": "{}"},
 ])
 def test_explicit_partial_or_standalone_requests_skip_controller(project, selection):
     assert project_update_controller.run_project_update(args(**selection)) is None
+
+
+def test_wsl_uses_linux_controller_when_not_overridden(project, monkeypatch):
+    import update_driver
+
+    repo, script = project
+    configured = config.RepoConfig(
+        anchor=repo.anchor, worktree_root=repo.worktree_root,
+        update_controller={"linux": "tools/update.py"},
+    )
+    monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(default_repo=configured))
+    monkeypatch.setattr(config, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "test"},
+    )
+    calls = []
+    monkeypatch.setattr(
+        project_update_controller.subprocess, "run",
+        lambda argv, **_kwargs: calls.append(argv) or SimpleNamespace(returncode=0),
+    )
+    assert project_update_controller.run_project_update(args()) == 0
+    assert calls[0][3] == str(script.resolve())
+
+
+def test_explicit_runtime_sources_are_forwarded_to_controller(project, monkeypatch):
+    import update_driver
+
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "test"},
+    )
+    calls = []
+    monkeypatch.setattr(
+        project_update_controller.subprocess, "run",
+        lambda argv, **_kwargs: calls.append(argv) or SimpleNamespace(returncode=0),
+    )
+    result = project_update_controller.run_project_update(
+        args(no_manager=True, runtime_sources="{}"),
+    )
+    assert result == 0
+    assert calls[0][-3:] == ["--no-manager", "--runtime-sources", "{}"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows inherited stream handling")
+def test_windows_controller_preserves_stdout_and_stderr(project, monkeypatch, capfd):
+    import update_driver
+
+    _repo, script = project
+    script.write_text(
+        "import sys\nprint('controller stdout')\nprint('controller stderr', file=sys.stderr)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "test"},
+    )
+    assert project_update_controller.run_project_update(args()) == 0
+    output = capfd.readouterr()
+    assert "controller stdout" in output.out
+    assert "controller stderr" in output.err
 
 
 def test_missing_or_escaping_controller_fails_without_fallback(project, monkeypatch, tmp_path):
@@ -138,3 +197,10 @@ def test_config_and_standalone_option_round_trip(tmp_path):
     update_options.add_update_options(parser)
     parsed = parser.parse_args(["--no-project-controller"])
     assert update_options.forwarded_flags(parsed) == ["--no-project-controller"]
+
+
+def test_controller_get_key_uses_project_configuration(project, capsys):
+    from agent_worktrees import context_cli
+
+    assert context_cli.cmd_get(args(key="update-controller")) == 0
+    assert capsys.readouterr().out.strip() == "tools/update.py"

@@ -1393,7 +1393,9 @@ runs it inside the existing update-driver request and forwards update options;
 an absent or failing configured script fails the request rather than running a
 different updater. Targeted and phase-specific requests keep their existing
 behavior. `--no-project-controller` explicitly selects the standalone suite
-updater instead.
+updater instead. The controller owns source selection and must honor configured
+runtime-source policy and any explicit prepared-source input; selection happens
+before Manager acquisition, without changing that policy.
 
 The public command submits a durable request before Manager or standalone
 execution. `--wait` observes it by default; `--detach --json` returns an

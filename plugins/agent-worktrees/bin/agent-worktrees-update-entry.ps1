@@ -1,6 +1,21 @@
 # Dot-sourced before runtime resolution by the installed and payload front doors.
 $_awUpdateHandled = $false
 $_awUpdateDiagnostic = $false
+$_awUpdateStandalone = $null -ne [Environment]::GetEnvironmentVariable(
+    'AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD'
+)
+if ($_awUpdateStandalone) {
+    $_awUpdatePayload = $env:AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD -ceq '1'
+    $_awUpdateCaller = if ($_awUpdatePayload) {
+        Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\invoke-payload-runtime.ps1'
+    } else { Join-Path $PSScriptRoot 'agent-worktrees.ps1' }
+    Remove-Item Env:AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD -ErrorAction SilentlyContinue
+}
+if ($env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP -ceq '1') {
+    Remove-Item Env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP -ErrorAction SilentlyContinue
+    return
+}
+$_originalUpdateArgs = @($args)
 $_updateArgs = @($args)
 $_updateProject = ''
 $_updateHasProject = $false
@@ -26,6 +41,93 @@ if (@($_updateArgs | Where-Object {
         '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
+if (-not $_updateHasProject) {
+    for ($_index = 1; $_index -lt $_updateArgs.Count; $_index++) {
+        $_argument = $_updateArgs[$_index]
+        if ($_argument -cin @('--project', '-p') -and $_index + 1 -lt $_updateArgs.Count) {
+            $_updateProject = $_updateArgs[$_index + 1]
+            $_updateHasProject = $true
+            break
+        }
+        if ($_argument.StartsWith('--project=')) {
+            $_updateProject = $_argument.Substring(10)
+            $_updateHasProject = $true
+            break
+        }
+    }
+}
+$_probeExcluded = @($_updateArgs | Where-Object {
+    $_ -cin @('--no-project-controller', '--repair-engine') -or $_.StartsWith('--repair-engine=')
+}).Count -gt 0
+$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
+$_probePossible = @('current-version', 'last-known-good', 'versions') |
+    Where-Object { Test-Path -LiteralPath (Join-Path $_runtimeRoot $_) }
+if ($_awUpdatePayload -and (
+    $env:COPILOT_EXTENSIONS_CONTEXT -or
+    (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.copilot-extensions\installation-mode.json'))
+)) { $_probePossible = $true }
+if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
+    $_probeArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $_awUpdateCaller)
+    if ($_updateHasProject) { $_probeArguments += @('--project', $_updateProject) }
+    $_probeArguments += @('get', 'update-controller')
+    $_start = [Diagnostics.ProcessStartInfo]::new()
+    $_start.FileName = (Get-Process -Id $PID).Path
+    $_start.WorkingDirectory = (Get-Location).Path
+    $_start.UseShellExecute = $false
+    $_start.CreateNoWindow = $true
+    $_start.RedirectStandardOutput = $true
+    $_start.RedirectStandardError = $true
+    foreach ($_name in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUAL_ENV',
+        'UV_INTERNAL__PYTHONHOME', '__PYVENV_LAUNCHER__', 'AGENT_RT_ROOT',
+        'AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP')) {
+        $_start.EnvironmentVariables.Remove($_name)
+    }
+    $_start.EnvironmentVariables['AGENT_WORKTREES_NO_SELFPROVISION'] = '1'
+    $_start.EnvironmentVariables['AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME'] = '1'
+    if ($_start.PSObject.Properties['ArgumentList']) {
+        foreach ($_part in $_probeArguments) { [void]$_start.ArgumentList.Add($_part) }
+    } else {
+        $_start.Arguments = @(foreach ($_part in $_probeArguments) {
+            $_escaped = [regex]::Replace($_part, '(\\*)"', '$1$1\"')
+            '"' + [regex]::Replace($_escaped, '(\\+)$', '$1$1') + '"'
+        }) -join ' '
+    }
+    $_process = [Diagnostics.Process]::new()
+    $_process.StartInfo = $_start
+    $_controller = ''
+    try {
+        if ($_process.Start()) {
+            $_stdout = $_process.StandardOutput.ReadToEndAsync()
+            $_stderr = $_process.StandardError.ReadToEndAsync()
+            if ($_process.WaitForExit(30000)) {
+                $_probeOutput = $_stdout.GetAwaiter().GetResult()
+                [void]$_stderr.GetAwaiter().GetResult()
+                if ($_process.ExitCode -eq 0) { $_controller = $_probeOutput.Trim() }
+            } else {
+                Stop-Process -Id $_process.Id -ErrorAction SilentlyContinue
+                $_process.WaitForExit()
+            }
+        }
+    } catch {
+        $_controller = ''
+    } finally { $_process.Dispose() }
+    if ($_controller) {
+        $_previousSkip = $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP
+        try {
+            $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP = '1'
+            & $_awUpdateCaller @_originalUpdateArgs
+            $_controllerRc = $LASTEXITCODE
+        } finally {
+            if ($null -eq $_previousSkip) {
+                Remove-Item Env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP -ErrorAction SilentlyContinue
+            } else { $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP = $_previousSkip }
+        }
+        if ($_awUpdateStandalone) { exit $_controllerRc }
+        $_awUpdateHandled = $true
+        $global:LASTEXITCODE = $_controllerRc
+        return
+    }
+}
 $_awUpdateHandled = $true
 $ErrorActionPreference = 'Stop'
 # The Git-sh handoff disables conversion for this native invocation only.

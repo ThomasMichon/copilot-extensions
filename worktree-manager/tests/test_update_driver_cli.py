@@ -236,6 +236,7 @@ def test_credential_bearing_source_is_not_written_to_queue(tmp_path, monkeypatch
 def queued(monkeypatch, tmp_path):
     import update_driver
     from worktree_manager import __main__ as manager
+    from worktree_manager import engine_client
 
     seen = {}
     request = SimpleNamespace(
@@ -263,8 +264,82 @@ def queued(monkeypatch, tmp_path):
     monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: seen.update(worker=args))
     monkeypatch.setattr(update_driver, "wait", wait)
     monkeypatch.setattr(driver, "source_identity", lambda: {"repo": "synthetic-source", "ref": "fixed"})
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "")
     monkeypatch.setattr(manager, "_cmd_update", forbidden)
     return seen, request
+
+
+@pytest.mark.parametrize("observer", [
+    [], ["--detach", "--json"], ["--wait"], ["--supervised-debug"],
+])
+def test_project_controller_routes_before_manager_source(queued, monkeypatch, observer):
+    from worktree_manager import engine_client
+
+    calls = []
+    monkeypatch.setattr(
+        engine_client, "get_value",
+        lambda project, key: "tools/update.py" if (project, key) == (
+            "example", "update-controller",
+        ) else pytest.fail("unexpected controller probe"),
+    )
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda project, args, **kwargs: calls.append((project, args, kwargs)) or 47,
+    )
+    monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
+    assert driver.cmd_update_request(["--project", "example", "--force", *observer]) == 47
+    assert calls == [(
+        "example", ["update", "--force", *observer],
+        {"headless": True} if "--detach" in observer else {},
+    )]
+
+
+def test_project_controller_preserves_explicit_manager_skip(queued, monkeypatch):
+    from worktree_manager import engine_client
+
+    calls = []
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda project, args, **kwargs: calls.append((project, args)) or 0,
+    )
+    assert driver.cmd_update_request(["--project", "example", "--no-manager", "--force"]) == 0
+    assert calls == [("example", ["update", "--no-manager", "--force"])]
+
+
+def test_project_controller_routes_borrowed_request_before_manager_source(
+    queued, monkeypatch, tmp_path,
+):
+    import update_driver
+    from worktree_manager import engine_client
+
+    class Custody:
+        request_id = "synthetic-request"
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+    request = SimpleNamespace(
+        state="running",
+        spec=SimpleNamespace(
+            backend="manager", context=(), killswitch_path=None, cwd=str(tmp_path),
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
+    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda project, args, **kwargs: calls.append((project, args)) or 47,
+    )
+    monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
+    assert driver.cmd_update_request(["--project", "example", "--force"]) == 47
+    assert calls == [("example", ["update", "--force"])]
 
 
 def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):

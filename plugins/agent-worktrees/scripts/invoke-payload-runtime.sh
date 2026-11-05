@@ -9,6 +9,8 @@ PAYLOAD_ROOT="${AGENT_WORKTREES_PAYLOAD_ROOT:-}"
 
 SCRIPT_DIR="$PAYLOAD_ROOT/scripts"
 _aw_update_entry_dir="$PAYLOAD_ROOT/bin"
+_aw_update_caller="$0"
+_aw_update_payload=1
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 _aw_passive_observation=0
 _aw_skip_project=0

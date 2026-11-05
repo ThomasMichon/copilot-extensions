@@ -1,5 +1,47 @@
 #!/bin/sh
 # Sourced by both front doors before runtime resolution. Non-update calls return.
+if [ "${AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP:-}" = 1 ]; then
+    unset AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP
+    return 0
+fi
+_aw_project_controller_selected() (
+    _runtime_root="$HOME/.agent-worktrees"
+    if [ ! -e "$_runtime_root/current-version" ] && [ ! -e "$_runtime_root/last-known-good" ] &&
+       [ ! -d "$_runtime_root/versions" ]; then
+        if [ "${_aw_update_payload:-0}" != 1 ] || {
+            [ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ] &&
+            [ ! -f "$HOME/.copilot-extensions/installation-mode.json" ]
+        }; then
+            return 1
+        fi
+    fi
+    _probe_project=""
+    _probe_has_project=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --no-project-controller|--repair-engine|--repair-engine=*) return 1 ;;
+            --project|-p)
+                if [ "$_probe_has_project" = 0 ] && [ "$#" -gt 1 ]; then
+                    _probe_project="$2"; _probe_has_project=1; shift
+                fi ;;
+            --project=*)
+                if [ "$_probe_has_project" = 0 ]; then
+                    _probe_project="${1#*=}"; _probe_has_project=1
+                fi ;;
+        esac
+        shift
+    done
+    unset PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV UV_INTERNAL__PYTHONHOME \
+        __PYVENV_LAUNCHER__ AGENT_RT_ROOT AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP
+    export AGENT_WORKTREES_NO_SELFPROVISION=1
+    export AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME=1
+    if [ "$_probe_has_project" = 1 ]; then
+        _controller="$(bash "$_aw_update_caller" --project "$_probe_project" get update-controller 2>/dev/null)" || return 1
+    else
+        _controller="$(bash "$_aw_update_caller" get update-controller 2>/dev/null)" || return 1
+    fi
+    [ -n "$_controller" ]
+)
 _aw_update_entry() (
     # The global sh front door also serves Git's bundled Windows shell. Use
     # its matching native entry before interpreting Windows registration data.
@@ -29,10 +71,15 @@ _aw_update_entry() (
                 printf '%s\n' '[agent-worktrees] Windows Git-sh update requires PowerShell; no POSIX fallback.' >&2
                 exit 127
             }
-            MSYS2_ARG_CONV_EXCL='*' exec "$_windows_host" -NoProfile -ExecutionPolicy Bypass \
+            AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD="${_aw_update_payload:-0}" \
+                MSYS2_ARG_CONV_EXCL='*' exec "$_windows_host" -NoProfile -ExecutionPolicy Bypass \
                 -File "$_windows_entry" "$@"
             ;;
     esac
+    if _aw_project_controller_selected "$@"; then
+        AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP=1 \
+            exec bash "$_aw_update_caller" "$@"
+    fi
     _project=""
     _has_project=0
     case "${1-}" in
