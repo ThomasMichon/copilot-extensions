@@ -771,3 +771,31 @@ by this correction. No test limit or required gate was weakened.
 The revised head still needs its own hosted CI and passing review before merge;
 the previous head's green result is not substituted. Parent, native acceptance,
 release and rollout boundaries remain unchanged.
+
+### 2026-11-05 - Python 3.10 construction-observer compatibility
+
+Head `0d1df88228f1c67dc59aa2f02db4a0a7417db280` passed required CI
+41938167466, but review 5777812790 correctly identified that importing stdlib
+`tomllib` unconditionally broke the declared Python 3.10 floor. Three
+missing-stdlib consumer regressions failed before correction. The observer
+now falls back to `tomli`, declared as a conditional runtime dependency below
+Python 3.11. The dev extra also supplies the real backport on newer test
+interpreters; no supported Python floor or fallback failure is hidden.
+
+All six direct/transitive/missing-input controls pass under actual CPython
+3.10.22 in 23.70 seconds (84.88 seconds including canonical isolated preparation
+and cleanup). Installed runtime metadata selects the backport on 3.10 and its
+real import succeeds. After restoring the ordinary CPython 3.12 test environment,
+all forty-six freshness consumer controls pass in 121.07 seconds (158.72 total),
+including real backport parsing with stdlib TOML explicitly unavailable.
+This is contained test-runtime qualification, not an installed-host update.
+
+Lint, module ceilings, thirteen-plugin install contract and whitespace checks
+pass. The Python-only dependency-age audit covers 541 declarations with zero
+violations at the unchanged seven-day minimum. The local all-ecosystem audit
+remains failed: four public npm metadata TLS handshakes failed with certificate
+validation enabled. The attempted plugin-directory audit found zero declarations
+and is not evidence; the repository-root Python audit is the counted result.
+TLS and age policy remain unchanged. The new head must pass its actual complete
+hosted declaration audit, required CI and fresh review before merge. Earlier
+green heads do not clear those gates; parent and rollout boundaries remain open.

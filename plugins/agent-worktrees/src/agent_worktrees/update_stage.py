@@ -194,7 +194,10 @@ def discover_plugin_dir(home: Path | None = None) -> tuple[Path | None, str]:
 
 
 def _construction_roots(plugin_dir: Path) -> set[Path]:
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
 
     pending = [plugin_dir]
     roots: set[Path] = set()

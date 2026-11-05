@@ -51,6 +51,8 @@ and packaged helper layouts, unchanged valid-current selection despite a newer
 unselected slot, constructor/helper-only changes, external transitive local
 dependency changes or loss (including cyclic declarations), and same-package
 repair serving. Generated dependency environments do not invalidate cached work.
+External dependency controls exercise both the stdlib TOML parser and the real
+backport with `tomllib` unavailable, preserving the declared Python 3.10 floor.
 Completion/interpreter records in these lookup fixtures are synthetic observations;
 the real canonical resolver is executed, not the selected fixture interpreter.
 They do not certify package health or installed serving. Own successful acquisition

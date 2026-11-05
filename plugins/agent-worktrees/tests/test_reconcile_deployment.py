@@ -268,9 +268,14 @@ def test_cached_action_includes_constructor_inputs(deployment, monkeypatch, part
 
 
 @pytest.mark.parametrize("change", ["direct", "transitive", "missing"])
-def test_cached_action_includes_external_local_dependencies(deployment, monkeypatch, change):
+@pytest.mark.parametrize("parser", ["stdlib", "backport"])
+def test_cached_action_includes_external_local_dependencies(
+    deployment, monkeypatch, change, parser,
+):
     from agent_worktrees import update_launch_cli
 
+    if parser == "backport":
+        monkeypatch.setitem(sys.modules, "tomllib", None)
     dependency = deployment.payload.parent / "example-dependency"
     dependency.mkdir()
     (deployment.payload / "pyproject.toml").write_text(
