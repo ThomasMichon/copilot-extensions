@@ -995,3 +995,34 @@ queue custody. All three acquisition/stamp/refusal controls pass in 33.13
 seconds of pytest (52.97 total). The unsuccessful text-flag attempt remains
 failed evidence. Actual Windows native convergence still needs qualification;
 neither completed installer output nor the passing focused test clears it.
+
+### 2026-11-05 - Native functional pass and participant-handoff review gap
+
+Run `41969056781` at `c4c7de194e4ed158516bccc451e2e1c46d4401ea`
+passes the complete native recipe portfolio on both Windows and Linux.
+Required CI `41969027369` and the later same-head `41969073865` also pass.
+The draft hold was removed for review; no merge or release was inferred.
+
+Review `5780027744` correctly identifies a high-severity production handoff
+gap. The contained installer path bypasses native-driver admission, so its
+functional pass did not prove that the real initializer would join the outer
+request instead of submitting another request against its held lock.
+Two actual-native-admission regressions fail before the correction, and the
+explicit-root case independently reproduces the receiver's default-root
+assumption after supplying the missing witness.
+
+Windows MCP provision now explicitly re-exports the existing authenticated
+participant witness and native re-entry marker. The shared native receiver
+addresses the execution root carried in the bounded witness, authenticates
+that original IPC owner, and retains exact running-request/backend checks.
+No new root override, queue, protocol, launcher, installer or containment
+exception is introduced. Invalid witness metadata remains a refusal.
+Canonical synchronization updates only the declared helper copies.
+
+Both materialized native-admission cases pass in 89.33 seconds of pytest
+(115.19 total), with runner containment unchanged and exactly the original
+queue request retained. Eighteen focused shared-receiver controls pass in
+5.40 seconds (96.58 total), including malformed/oversized/missing-root/
+foreign-root refusal and retained participant contracts. Current revised
+native portfolio, required CI and a fresh review must still qualify this
+correction; the earlier head's passing results do not close this finding.

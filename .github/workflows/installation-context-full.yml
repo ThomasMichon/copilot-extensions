@@ -1124,6 +1124,12 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_mcp_materialized.py
           -k "not cold_recipe" --test-timeout 180
+      - name: Preserve shared native participant admission
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_native_installer_driver.py
+          -k "native_handoff or native_participant_checks or native_custody_refuses or reentry_marker"
+          --test-timeout 60
       - name: Qualify cold MCP construction, consumers and failure preservation
         run: >-
           python tools/run-plugin-tests.py update-driver

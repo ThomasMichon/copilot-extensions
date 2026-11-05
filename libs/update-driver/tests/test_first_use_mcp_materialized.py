@@ -75,6 +75,40 @@ def test_actual_mcp_stamp_publishes_deferred_command_without_runtime(
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == source
 
 
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows native installer admission")
+@pytest.mark.parametrize("default_root", [True, False])
+def test_mcp_native_installer_admission_joins_original_queue(
+    materialized_mcp, area, default_root,
+):
+    payload, installation, project = materialized_mcp
+    scripts = payload / "scripts"
+    (scripts / "installer-engine.ps1").write_text(
+        "function Ensure-Uv { param([string]$InstallRoot)\n"
+        "return (Get-Command python -CommandType Application).Source\n}\n",
+        encoding="utf-8",
+    )
+    (scripts / "init.ps1").write_text(
+        "param([string]$Action,[string]$InstallDir)\n$ErrorActionPreference = 'Stop'\n"
+        "if (-not $env:UPDATE_DRIVER_WITNESS) { throw 'missing native participant handoff' }\n"
+        ". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')\n"
+        "$result = Enter-NativeInstallerDriver -Payload (Split-Path $PSScriptRoot) "
+        "-Root $InstallDir -Plugin agent-mcp -Action $Action\n"
+        "if (-not $result.Participant -or $result.ExitCode -ne 0) {\n"
+        "  throw 'native installer admission did not join the original request'\n}\n"
+        "[IO.File]::WriteAllText((Join-Path $InstallDir 'native-admitted'), $Action)\n"
+        "exit 0\n", encoding="utf-8",
+    )
+    root = installation.parent / ".copilot-extensions/update-driver" if default_root else area / "queue"
+    request = provision.enqueue(payload, installation, project, root=root)
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
+    assert (installation / "native-admitted").read_text() == "provision"
+    assert [item.id for item in status(root=root)] == [request.id]
+    if not default_root:
+        assert not (installation.parent / ".copilot-extensions/update-driver").exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows lifetime SDK PATH prerequisite")
 def test_actual_mcp_missing_setup_python_refuses_before_supervisor_or_plugin(
     materialized_mcp, area,

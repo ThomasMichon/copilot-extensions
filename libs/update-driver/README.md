@@ -845,6 +845,11 @@ fallthrough without adding another downloader or changing its constructor.
 The Windows adapter uses a fixed native command body with path values encoded
 as data, preserving plain-text initializer output instead of serializing
 PowerShell host/warning records into the queue's forwarded streams.
+Windows provision explicitly re-exports its scoped participant witness and
+native re-entry marker. The native installer receiver takes its execution-root
+address from that bounded witness frame, then authenticates the existing IPC
+owner before admission. Missing or invalid custody never becomes a new request
+or an ambient execution-root override.
 Windows native lifetime admission retains the setup-owned Python prerequisite;
 absence is not permission to download another interpreter or reuse a compiled
 fallback. The manual `mcp-recipes` portfolio separates admission, materialized

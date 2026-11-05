@@ -2257,6 +2257,12 @@ Three queue/native-process controls separately verify canonical UV handoff for
 provision, acquisition failure before init and acquisition-free deferred stamp.
 Only their acquisition helper and installer bodies are synthetic; the cold
 materialized case retains actual acquisition and construction.
+Two additional Windows materialized controls call the actual native installer
+admission from a synthetic initializer while retaining runner containment.
+They require the original authenticated queue owner at both default and
+explicit execution roots, with no second request or fallback queue. A focused
+shared-receiver packet retains direct/scoped participant checks and refuses
+malformed, oversized, missing-root and foreign-root witness metadata.
 
 The cold case retains the runner's containment, setup-provided Python
 prerequisite, private foundation/queue and actual MCP initializer. It loses the
