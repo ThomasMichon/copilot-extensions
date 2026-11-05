@@ -1417,3 +1417,56 @@ through both ordinary acceptance and execution. All six batching, native
 admission and real recipe controls pass in 38.17 seconds; Ruff, source-admission
 and whitespace checks pass. The full distinct-home native lane remains required
 on the new source head; the earlier successful packet is supporting history.
+
+### 2026-11-05 - U14 source merged after exact-head native qualification
+
+#10700 merges to `dev` at 15:17:16 UTC as
+`b1e7f13079e3cd6968e6967ba878a684064b35c1`, from final runtime head
+`ed8cfa89a5e88fd2a754362294e2278970cf2a2a`. Its fresh current-head Copilot
+`COMMENTED` verdict lists no open issues and resolves both profile findings.
+The review's remaining qualification caution predates the completed native run;
+[the final proof comment](https://github.com/ThomasMichon/copilot-extensions/pull/10700#issuecomment-6661652661)
+records those results before managed role-scoped self-merge. All required
+source CI and both reviewed threads pass their independent gates; no CI bypass
+is used.
+
+Exact-head native run `42051032188` passes both full Windows/Linux portfolios.
+Actual caller-loss packets pass in 94.955/87.222 seconds, including the complete
+Windows `HOME != USERPROFILE` path through ordinary admission and execution.
+Both stamp/provision cycles complete after caller-boundary destruction,
+coalesced cold callers share the original work, bounded controls die and the
+same acknowledged owners survive. All eleven Windows and six Linux original
+records settle with empty inventories. Windows records zero new visible windows
+or foreground changes over 8,123 samples. The restrictive shared-outer negative
+remains passing.
+
+This closes U14's source, review and contained/native consumer slice, not its
+containing-release observation or the parent's remaining Plan/Validation items.
+The next action watches the normal Dev CI/promotion pipeline for a containing
+Main release and verifies shipped implementation bytes before selecting another
+bounded source unit. Commands, explicit-installer adoption, existing fenced-
+queue recovery, macOS and affected-host rollout remain with their original
+objectives. No installed updater, service repair, credential operation or rollout
+ran, and no earlier failed/held record is retroactively settled.
+
+### 2026-11-05 - U14 containing release verified
+
+Normal promotion `42054939302` succeeds with admitted Dev
+`b1e7f13079e3cd6968e6967ba878a684064b35c1`. Its generated candidate
+#10732 merges at 15:44:48 UTC as Main
+`be5f4c9991e3726f90eba0c1c035eb7403ee5595`, publishing MCP `0.2.185-dev1`
+and Worktrees `1.24.482-dev1`. The preceding #10730 release instead qualifies
+older Dev `556f5d8da862bc2257d9dd187bfa514faf9f8576` and is not credited.
+
+Raw Git-object comparison confirms all 35 changed production files match
+the qualified source merge. The four packaged MCP receiver bodies
+(`first-use.ps1`, `first-use.sh`, `mcp-admission.py` and `first_use.py`)
+also match their qualified canonical bodies.
+
+The direct ROOT U14 Plan and Validation items are reconciled to the completed
+exact-head native proof. This effort and the ROOT remain Active. The next
+source unit must recheck current issues, owners and the supported entry before
+claiming a concrete remaining gap. Ordinary-command and explicit-installer
+adoption, U13 fresh settlement, existing fenced queues, macOS and affected-host
+acceptance retain their separate owners and gates. This release observation
+does not update any installation or authorize rollout.
