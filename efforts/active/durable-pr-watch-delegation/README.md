@@ -959,6 +959,12 @@ callback an implicit credential store.
   refused the two changed, previously admitted source digests. Refresh only
   those source entries; the exact unit nodes, effect restrictions and execution
   budget remain unchanged.
+- The repaired head received exact-head Copilot approval with no open issues;
+  its eligible-unit CI job also passed. The remaining required gate exposed
+  stale generated caller-lifetime archives. Regenerate the canonical source
+  archive and its installation-context/installer copies with the existing
+  synchronizers, retaining all consumer changefiles and fresh-head review/CI.
+  No installer policy, activation or production authority changes.
 - These controls close a source prerequisite, not the full P1/P2/P3 gate.
   Shared selection/IO, durable attention/handled semantics, coordinated
   retention, three-provider qualification, installed adoption, container and

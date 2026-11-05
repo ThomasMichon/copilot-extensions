@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh generated caller-lifetime archives after canonical native cleanup repair.",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}
