@@ -1047,3 +1047,36 @@ declared server is never started and no authentication provider is consulted.
 The corrected Windows synthetic protocol packet passes five focused controls
 in 91.10 seconds of pytest (117.45 total). Revised configuration preservation
 still needs actual native qualification before completion is credited.
+
+### 2026-11-05 - MCP fixed-recipe source merged; containing release next
+
+#10574 merged at 05:39:20 UTC as
+`322a4e5adebcd066a920ca52c5e808d41fe1d617`. Exact head
+`5834222f8a6cab0b286d96bcd8582921169104a1` received clean Copilot
+review `5780289807`, with no open findings and both prior threads resolved.
+Required CI `41973744346` passed; the later same-head metadata-triggered
+`41973863391` also passed before the managed merge. The configured
+Maintainer review-rule exception did not bypass CI.
+
+Native run `41973788482` passes every selected Windows/Linux step, including
+the actual native participant handoff, shared receiver controls, real cold
+construction, installed command/module/distribution and configuration loading,
+healthy reuse, incoming-health failure preservation and native settlement.
+The installed loader reads the unchanged synthetic configuration from the
+actual `bridges` directory without starting a server or authentication provider.
+Earlier failed runs remain failed evidence; their eventual corrections do not
+retroactively qualify those runs.
+
+All twenty-five non-shared authored files and the complete MCP testing section
+match the actual squash merge; unrelated peer additions in `TESTING.md` are
+retained. Managed pull-forward safely aborted a replay conflict. After verifying
+the clean tip, backup and already-merged content, continuation skipped only
+that confirmed merged range and managed sync succeeded on the squash merge.
+No unmerged work was discarded.
+
+The canonical README has been reread in full and remains Active. U12 records
+this bounded source/contained-consumer result, not ordinary publisher adoption,
+production caller-Job survival, existing queue repair or affected-host recovery.
+Containing release is the immediate next gate; existing first-foundation,
+execution/coalescing, MCP construction/application and broader hook owners
+retain their remaining scope. No updater, host integration or rollout ran.
