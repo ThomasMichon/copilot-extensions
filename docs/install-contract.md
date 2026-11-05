@@ -4917,6 +4917,15 @@ compiler and acquisition owners. Supply `--component worktree-manager` or
 Consume the returned `snapshot` path, not an inferred output directory.
 Existing feed policy, artifact seasoning, source identity and installation
 custody still apply; a local snapshot is not independent authorization.
+Worktrees' Windows-native source entry accepts optional `-InputTimeout` with
+`-InstallSource`; its existing native driver and Python consumer forward this
+as `--input-timeout`. The positive finite duration defaults to 600 seconds.
+At closed-input custody opening, the consumer converts it once to an absolute
+monotonic deadline and passes it to `project_inputs`. Retention, inspection,
+construction and health retain that same deadline: progress cannot renew it,
+and an expired handle cannot be extended. This selects only the closed-input
+lifetime; preparation, child/lock waits, inactivity and outer-runner budgets
+are independent and unchanged. Manager and generic consumer defaults are unchanged.
 Native feed capture may retain repeated default/configuration references to
 one selected index. The source-profile comparison accepts them only when
 both the index URI and captured credential identity are identical, preserving

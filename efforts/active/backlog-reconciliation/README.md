@@ -252,6 +252,30 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [native Komodo compatibility](native-komodo-compatibility-cohort.md),
+[Bridge process identity](bridge-process-identity-cohort.md) and
+[hosted selector](hosted-selector-refresh-cohort.md) studies preserve six
+originals through seven whole texts/7,171 characters and eighteen ranked
+relations. Independent actual merged/current source, regressions and final
+review/CI support #10105's finite COMPLETED closure, not any graph-score
+shortcut or parent/adopter completion. Optional-image native acceptance,
+real-console reconciliation, existing watchdog adoption/owner duties and
+the later direct-read renderer refinement remain distinct. Five originals
+stay OPEN; protected descriptions, message and whole owner source receive
+no subset retry. Verified campaign dispositions are 777; all parent gates
+and source/resource custodians remain unchanged.
+
+The five-contract bootstrap/provider/fixture checkpoint is delivered in
+#10629. All eleven actual merged bodies equal the reviewed head after genuine
+exact-head approval with no findings and passing required checks; only its
+publication child finalized, retained. The
+[delivery journal](<journal/2026/11.04 bootstrap-configuration-tuple-contracts.md>)
+records two equal complete 22:38 PST metadata-only scans: 1,007 whole open,
+278 above 729. One eligible arrival stays metadata-only, with no departure
+or new campaign credit; verified dispositions remain 776. Continue groups
+108-110 and independent finite source verification, not a held-source or
+historical-cohort retry. Parent Plan/Validation and all custodians remain.
+
 The five-contract Chat/SSH/copy checkpoint is delivered in #10621.
 All eleven actual merged bodies equal the corrected reviewed head; the
 publication child is finalized and retained, with only its parent-child claim
@@ -1349,6 +1373,18 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [native compatibility](native-komodo-compatibility-cohort.md) study
+preserves optional image defaults/malformed-value refusal and the distinct
+finite Compose parser correction. Actual current/merged equality, complete
+review/CI and guarded provider readback support only #10105's completion.
+The [Bridge identity](bridge-process-identity-cohort.md) study credits actual
+source/native-regression definitions without claiming replayed installed
+recovery or whole protected-owner closeout. The
+[hosted selector](hosted-selector-refresh-cohort.md) study retains the later
+renderer/hosted refinement after credited roster repair. Original acceptance,
+reported versus independently verified results and all custody remain separate;
+three protected ranked relations receive no source or subset retry.
 
 The [provider-check](provider-check-evidence-cohort.md) study preserves named
 diagnostic/completeness and identified-series supersession separately from

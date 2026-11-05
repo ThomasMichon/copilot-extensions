@@ -20,9 +20,20 @@ def remember_checkout_free_pr(bindings, name, machine_repo, related_pr):
         bindings[name] = cfg._parse_pr(raw.get("pr"))
 
 
+def control_plane_pr_map():
+    """Share discovery only within an explicitly scoped config acquisition."""
+    from . import config as cfg
+
+    return cfg.memoize_in_scope(
+        cfg.config_acquisition.owner_call,
+        cfg._control_plane_related_pr_map, cfg._CONTROL_PLANE_PR_OWNER,
+        source="control-plane-related-pr",
+    )
+
+
 def resolve_related_binding(config, repo_slug, *, include_control_plane=True):
     from . import config as cfg
-    entries = cfg._control_plane_related_pr_map() if include_control_plane else {}
+    entries = control_plane_pr_map() if include_control_plane else {}
     targets = dict(config.repos)
     targets.update({
         name: cfg.RepoConfig(anchor="", worktree_root="", default_branch="", pr=pr)

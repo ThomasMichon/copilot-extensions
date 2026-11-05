@@ -284,10 +284,14 @@ _Operator-required outcome; agent-recommended slices and validation._
   standalone-host adoption remain distinct prerequisites.
   Exact native target-tip metadata merged in #10599. The bounded
   [existing-owner native workspace host](native-workspace-host-slice.md)
-  contract merged in #10602. Its optional source adapter composes the existing
-  finite exporter, cache and journal; thin watch metadata alone is not full
+  contract merged in #10602 and its optional source adapter in #10609. It composes
+  the existing finite exporter, cache and journal; thin watch metadata alone is not full
   workspace acquisition. Operational configuration, installed/provider/shadow
   qualification and the remaining P1/P2 acceptance remain separate gates.
+  The next review-first [durable attention contract](durable-attention-slice.md)
+  separates explicit owner-layout expansion, actual observation/feedback
+  integration and the optional authenticated reader; it is not implemented
+  by the inert projection or conversation ACK.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -925,6 +929,53 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Continue from composed-host qualification to durable attention
+
+- #10631 merged as `d60196aa408aff2c1e8dc821636dcb912296b5a2`
+  after exact-head Copilot approval with no findings and successful required
+  CI. Its 64-case standalone packet and strict service analysis retain their
+  stated source-only bounds. Managed completion reconciled the same worktree.
+- Re-read the parent Plan/Validation and workspace companion after merge.
+  The next bounded proposal expands the existing storage owner for durable
+  interest age and confirmed handled progress, then composes actual acquisition,
+  protected feedback and an optional authenticated read-only consumer.
+- The [attention contract](durable-attention-slice.md) requires review before
+  a strict v4 adoption or runtime change. Journal hashes, watch ACK, current
+  votes and configuration labels cannot manufacture selection, feedback or
+  effect authority. Concurrent input and unclassified self-echoes cannot be
+  swallowed by a handled update.
+- Global body-bearing retention, shared selection/IO, driver qualification,
+  full CLI/Dispatch, installed and shadow/pane acceptance remain open. No
+  production state, credential, service or action policy changed.
+
+### 2026-11-04 - Qualify the composed native workspace foreground path
+
+- #10609 merged as `9e1c3e20622e41669c1baa1ede9028182129575c`
+  after fresh exact-head Copilot approval with no findings and successful
+  required CI. The base movement conflicted only in a generated producer
+  digest; canonical regeneration preserved the contract revision, and the
+  first four source commits were content-identical after rebase.
+- Re-read the parent Plan/Validation and workspace companion after merge.
+  The remaining composed-host qualification now extends the existing actual
+  foreground-process fixture rather than supplying a different service handler.
+  Explicit configuration/provisioning creates the real native workspace owner;
+  CLI parsing and its supplied client cross real Gateway TLS/PoP to that host,
+  which launches the finite synthetic exporter process.
+- The fixture covers full metadata materialization, same-head dialogue, an
+  unchanged semantic poll, capability discovery once per selected reader,
+  read-only event cursors, connection reattachment and retained-volume restart.
+  Restarted reads preserve the generation/cursor and frozen replay event without
+  another native export. Existing default watch-only operation remains covered.
+- All 64 standalone cases pass with bounded cleanup verified. The admitted
+  Python 3.10 strict service analysis passes Linux and Windows; this is not
+  Windows native execution. Synthetic export output and a forwarded credential
+  reference do not prove actual provider/credential exchange, executable client
+  binding discovery, installed rollout, a container image or live shadow.
+- Continue with the reviewed Author/Reviewer attention/handled and coordinated
+  retention gaps through the existing owner. Shared selections/IO, three-driver
+  acceptance, complete HTTP CLI parity, Dispatch and operational qualification
+  remain open. No live service, backend, credential or effect authority changed.
 
 ### 2026-11-04 - Realize the opt-in native read-only host slice
 

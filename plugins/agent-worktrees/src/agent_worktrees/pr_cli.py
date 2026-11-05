@@ -10,6 +10,7 @@ from pathlib import Path
 from . import config as cfg
 from . import git_ops, output, providers, tracking, worktree_identity
 from .pr_checks import print_check_failures
+from .pr_read_context import scoped_read_dispatch
 
 
 def _core():
@@ -435,6 +436,7 @@ def _pr_watch_review_blocking(config, args, *, actor_flow=None) -> bool:
     return pr_config.actor_review_blocking(actor_flow)
 
 
+@scoped_read_dispatch
 def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     """Route `pr-watch` verbs (wait / cursor) -- the provider-generic watcher.
 
