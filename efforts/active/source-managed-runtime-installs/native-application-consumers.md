@@ -2,7 +2,8 @@
 
 Back to the [canonical effort](README.md).
 
-**Reviewed bounded execution plan; released-consumer acceptance remains open.**
+**Bounded implementation and released payload-update acceptance are qualified.**
+Original native session activation remains separate adoption work under #7030.
 Coordination stays on #7030 under #7028. The implementation source handle is
 `weathered-diode`; existing construction, artifact/profile, application,
 command, cache and historical-migration owners retain their scopes.
@@ -78,10 +79,10 @@ and retained-wheel/profile changes are not taken over.
   owner. Preserve caching and normal non-deployment hook duties without new
   slot files, cache exemptions, site-startup hooks or deletion of prior state.
   The released cold/repeated consumer proves unchanged runtime files and
-  positive creation/reuse of all 602 external cache files. Actual changed-input
-  acceptance remains a separate unchecked validation item below.
-- [ ] Qualify the exact native consumer, then publish source changes through
-  review/CI and actual Main promotion. Record released-consumer results and
+  positive creation/reuse of all 602 external cache files. The distinct actual
+  changed-input witness also passes without backend mutation.
+- [x] Qualify the bounded native catalog/hook and application consumers, then
+  publish source changes through review/CI and actual Main promotion. Record released-consumer results and
   remaining adoption scope separately; no host rollout is included.
 
 ## Validation plan
@@ -96,25 +97,88 @@ and retained-wheel/profile changes are not taken over.
   old/new callers and providers, explicit rollback, missing or incompatible
   metadata, managed refusal and strict unknown-argument rejection. Do not add
   a whole native matrix to the required unit-only packet.
-- [ ] A fresh disposable consumer acquires Copilot content through ordinary
+- [x] A fresh disposable consumer acquires Copilot content through ordinary
   default-head or actual-local-checkout declarations and records what it
   receives, independently of backend Git inputs. Execute the exact delivered
-  catalog argv and real hook/first-use entries after canonical preparation.
+  catalog argv and real hook/first-use entries after canonical application and
+  project preparation, retaining unsupported session-admission limits separately.
   A copied snapshot or plugin-directory injection is not plain native evidence.
-- [ ] Compare complete runtime files, generations, selectors and redirects
+- [x] Compare complete runtime files, generations, selectors and redirects
   before/after the relevant consumer interval. Observe positive external
   bytecode creation/reuse; do not prewarm, disable caching or exclude new
   bytecode to manufacture slot equality. Preserve failed attempts separately.
-- [ ] Count an actual frontend-update witness only when native refresh delivers
+- [x] Count an actual frontend-update witness only when native refresh delivers
   changed payload input. An initial install or unchanged refresh is not that
   proof. Record unsupported/unavailable inputs explicitly rather than pinning
   the frontend to match its backend.
-- [ ] Retain exact guest/process cleanup and honest platform/serving limits.
+- [x] Retain exact guest/process cleanup and honest platform/serving limits.
   Source merge, release, isolated native acceptance and installed-host rollout
   remain different outcomes. This slice does not close #7028, #7030 or every
   application in the contributor matrix.
 
+## Remaining adoption qualification
+
+- [ ] Qualify original native session activation in a supported venue with its
+  canonical committed receiving authority. This remains under #7030 and the
+  broader #7028 effort, not a closed item or permission to enable container
+  epochs, infer model authorization, deploy to a host or fabricate a native
+  witness. The bounded installation/catalog/hook/update result below is not
+  full native activation or whole-toolset adoption.
+
 ## Journal
+
+### 2026-11-05 - Actual changed native input preserves the released backend
+
+The distinct fresh witness passes all four stages with zero failures and no
+jams. Stock Copilot acquires the ordinary default GitHub payload, then actually
+refreshes `1.24.466-dev1` to `1.24.467-dev1` with 23 changed payload files and
+no source-ref override. Producing run `41940018955` lands #10540 at
+`2026-11-05T00:40:24Z`, Main
+`605b288398fa11ca6c21576675a9a909fed0a050`, from admitted Dev
+`1917859251fd2f7149fad72c70b290f0a35da101`. The initial native input is actual
+Main `607bc8bb984f2c1d44f79dc8c421fba1386e41be`, independently selected for
+the Git-backed application pair.
+
+Both complete application installs, commands/imports, unavailable-source and
+argument-refusal preservation pass. The actual delivered command still reports
+the same independently selected `1.24.466-dev1+source.607bc8bb...` backend
+before and after the newer payload arrives. All 3,554 compared backend files,
+generations, selectors and redirects remain unchanged across all eight
+comparison intervals; no bytecode is excluded.
+
+Cold, repeated and post-refresh public reconciliation all launch and finish
+with canonical version-1 `ok: true` status, no failures and the actual project.
+The cold interval creates 602 external cache files and the warm interval reuses
+all 602 without rewrite. After the changed native hook, 599 entries remain
+identical and three frontend-owned cache entries are rewritten outside the
+backend. Normal cache refresh is preserved, not suppressed or mislabeled as
+immutable backend mutation.
+
+Real consumer demand preserves serving through every readiness boundary.
+After release, native exit and active-route withdrawal pass while previous
+fallback is retained. The exact guest is absent and all four watched host
+states are unchanged. Original timing bounds are unchanged; no inference,
+host rollout, prewarming or fabricated binding/adoption receipt is used.
+The container's original native-session epoch and receiving authority remain
+explicitly unqualified, as recorded in the remaining adoption item.
+
+### 2026-11-05 - Qualification journal accepted; real changed payload is pending
+
+#10536 merged at `2026-11-05T00:37:12Z`, Dev commit
+`614b4c1518f593415332f4e718f055f89cd1cd69`, after genuine Copilot approval
+`5777948907` on head `8ac7550769741128fd32cde2e9a0a1a6a5a2c313`,
+zero review threads and green required CI. The managed Maintainer path bypassed
+only the separate review-count gate, not CI or feedback. The continuing
+worktree synchronized and the actual source effort/subplan was re-read.
+
+Separately, the metadata observer identifies a pending ordinary candidate
+with changed Worktrees payload `1.24.466-dev1` to `1.24.467-dev1` under run
+`41940018955`. A fresh consumer starts promptly with unchanged fixture bytes,
+ordinary native source declarations and the original limits. Initial native
+acquisition and canonical pair construction pass; actual changed update,
+post-refresh reconciliation, complete backend comparisons and cleanup remain
+the next validation gate. Metadata readiness is scheduling data, not native
+acceptance, and neither umbrella effort is complete.
 
 ### 2026-11-05 - Released cold/warm consumer qualified; changed-input timing remains
 
