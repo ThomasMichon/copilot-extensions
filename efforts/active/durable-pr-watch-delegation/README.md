@@ -957,7 +957,9 @@ callback an implicit credential store.
   peer combinations, all-confirmed retry without resends, protected full
   metadata/policy readback, mixed input, unavailable acquisition, gaps,
   intervening round trips, restart, reopen and transaction races.
-  The coupled PR packet passes 312 cases and the native response/exporter
+  Real cache and replay-lock contention likewise preserve the original result
+  and reconcile optional coverage on retry without resending.
+  The coupled PR packet passes 315 cases and the native response/exporter
   packet passes 42, both with bounded cleanup verified. Fatal Ruff,
   documentation consistency, the install contract and admitted strict service
   Linux/Windows targets pass; these are not native Windows or live-provider

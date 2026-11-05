@@ -6,10 +6,13 @@ import copy
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
+from single_instance_lease import OperationLockedError
+
 from .attention import Cursor, Interest
 from .attention_state import MAX_INTERESTS
 from .conversation_journal import ConversationJournal, Observation, _meaning
 from .feedback_capture import FeedbackCaptures
+from .generation_cache import CacheUnavailable
 from .review_intent import identifier
 from .review_workspace import _digest, _generation, _instant, build_generation
 from .watch_replay_store import ReplayStore, ReplayStoreInvalid
@@ -208,7 +211,7 @@ class ReviewFeedback:
                 acquisition = self.current_acquisition()
         except PermissionError:
             raise
-        except (OSError, ValueError):
+        except (OSError, ValueError, OperationLockedError, CacheUnavailable):
             pass
         proven = None
         with protected_review_context(context_factory, operation["intent"]["scope"], remaining) as context:
@@ -252,7 +255,7 @@ class ReviewFeedback:
                 echo = self._record_echo(operation, *proven)
             except PermissionError:
                 raise
-            except (OSError, ValueError, FeedbackUnavailable) as error:
+            except (OSError, ValueError, FeedbackUnavailable, OperationLockedError) as error:
                 echo = {
                     "status": "unavailable",
                     "reason": str(error) if isinstance(error, FeedbackUnavailable) else "echo_storage_unavailable",

@@ -127,6 +127,8 @@ The tracking result distinguishes original `cursor`/`status` from optional
 multiple intervening positions, gaps, reopen, concurrent input and unavailable
 acquisition remain explicitly unavailable. Failure to classify or persist
 echo coverage does not undo original handled progress or resend effects.
+Optional cache lookup contention/unavailability and echo-store lock contention
+also return unavailable echo evidence without discarding the original result.
 This conservative leaf is not B3/A2's full exit or A3 serving adoption.
 
 Adoption adds an 8 MiB default reservation to the existing total owner-byte

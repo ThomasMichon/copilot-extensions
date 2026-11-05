@@ -206,6 +206,59 @@ def test_echo_storage_uncertainty_reconciles_without_resending(feedback_environm
     assert retry["entered_writes"] == 0 and len(writes(backend)) == 1
 
 
+@pytest.mark.parametrize("failure", ["locked", "missing"])
+def test_optional_cache_failure_still_records_original_handled(feedback_environment, failure):
+    from single_instance_lease import OperationLock
+    from agent_pull_requests.generation_cache import GenerationCache
+
+    value = feedback_environment
+    backend = versioned(value)
+    store = value[0]
+    cache = GenerationCache(store.root, store.namespace, max_bytes=4 * 1024 * 1024, max_generations=4)
+    if failure == "locked":
+        cache.provision()
+        cache.publish(value[2], expected_current=None)
+
+    def unavailable():
+        if failure == "locked":
+            with OperationLock(cache.lock_path):
+                cache.lookup(value[1]["scope"])
+        return cache.lookup(value[1]["scope"])
+
+    result = run(value, current=unavailable)
+    assert result["status"] == "complete" and result["actions"][0]["state"] == "confirmed"
+    assert result["feedback"]["status"] == "handled" and result["feedback"]["updated"] == 1
+    assert result["feedback"]["echo"] == {"status": "unavailable", "reason": "current_acquisition_unavailable"}
+    assert document(value)["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 1
+    later = observe(value, change="echo")
+    retry = run(value, current=current(value, later))
+    assert retry["feedback"]["echo"]["status"] == "covered"
+    assert retry["entered_writes"] == 0 and len(writes(backend)) == 1
+
+
+def test_contended_echo_transaction_preserves_native_and_original_result(feedback_environment, monkeypatch):
+    value = feedback_environment
+    backend = versioned(value)
+    run(value)
+    later = observe(value, change="echo")
+    from agent_pull_requests.review_feedback import ReviewFeedback
+    original = ReviewFeedback._record_echo
+
+    def contended(self, operation, generation, position):
+        with self.owner._lock():
+            return original(self, operation, generation, position)
+
+    monkeypatch.setattr(ReviewFeedback, "_record_echo", contended)
+    result = run(value, current=current(value, later))
+    assert result["status"] == "complete" and result["feedback"]["status"] == "handled"
+    assert result["feedback"]["echo"] == {"status": "unavailable", "reason": "echo_storage_unavailable"}
+    assert document(value)["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 1
+    monkeypatch.setattr(ReviewFeedback, "_record_echo", original)
+    retry = run(value, current=current(value, later))
+    assert retry["feedback"]["echo"]["status"] == "covered"
+    assert retry["entered_writes"] == 0 and len(writes(backend)) == 1
+
+
 def test_echo_requires_position_from_actual_acquisition_not_equal_meaning(feedback_environment):
     value = feedback_environment
     versioned(value)
