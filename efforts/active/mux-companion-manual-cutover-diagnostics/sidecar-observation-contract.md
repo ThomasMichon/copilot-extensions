@@ -293,8 +293,10 @@ content does not acquire a different timestamp when another viewer loads it.
 
 The [live-request amendment](sidecar-current-requests.md), reviewed in #10545, defines an
 optional producer-owned current input/permission projection on this same held
-reader. #10551 delivers its bounded local producer and #10557 its negotiated
-optional provider/CLI wire; Manager integration remains open. Existing v1 current-request and
+reader. #10551 delivers its bounded local producer, #10557 its negotiated
+optional provider/CLI wire and #10579 the conditional Manager source consumer.
+The same reader can deliver current state before first actual journal continuity;
+that state remains outside evictable pages and history positions. Existing v1 current-request and
 per-entry answerability fields remain unknown; retained events do not establish
 current waiters. Unsupported sources retain the original observation/history
 path with explicit unknown live input.

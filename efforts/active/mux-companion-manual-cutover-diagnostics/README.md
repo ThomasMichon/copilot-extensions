@@ -490,7 +490,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       isolated finalization without releasing the original checkout hold.
       #10551 delivers S3's bounded local ACP waiter projection; #10557 delivers
       its negotiated optional provider/CLI wire and state-only delivery.
-      Manager consumption and current-input acceptance remain open.
+      #10579 delivers its conditional Manager consumer, independent live-input
+      display and source-fixture visual comparisons. Supported local current-input
+      source acceptance closes; installed/native and unsupported-source coverage
+      remain separate.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and

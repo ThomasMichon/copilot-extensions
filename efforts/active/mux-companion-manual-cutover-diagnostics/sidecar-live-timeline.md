@@ -117,6 +117,12 @@ finalization without releasing the original data hold. The
 [source readback](journal/2026/11.04-sidecar-rescue-qualification.md) preserves
 D5's operational gates and continues S3's live input/permission evidence work.
 
+#10579 merged as `e335da6d7baee5a0569b17a4a0978f4eb9d05a29`, completing the
+supported local live-input source chain from #10551/#10557 through the selected
+CLI and actual Manager display. The [source readback](journal/2026/11.04-sidecar-live-request-contract.md)
+retains qualified PRE, complete source coverage, joined/native/performance and
+every original parent gate.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -420,7 +426,7 @@ publication and installed support retain their separate qualification.
 - [x] Consume passive owner membership in Manager with selected-head fencing,
   bounded replay and owned-reader retirement. #10392 delivers this source
   consumer; known-session event/history and installed adoption remain separate.
-- [ ] Expose actual pending/cleared input and permission evidence without answer
+- [x] Expose actual pending/cleared input and permission evidence without answer
   or control authority.
   The [live-request amendment](sidecar-current-requests.md), reviewed in #10545,
   specifies the bounded
@@ -428,8 +434,11 @@ publication and installed support retain their separate qualification.
   consumer. #10551 delivers the bounded local producer and 161 focused source
   controls. #10557 delivers the optional provider/CLI wire, exact independent
   follower retirement, heartbeat lifetime and 59-case source-bound HTTP-52
-  capture; Manager consumption remains open. Retained request history
-  remains separately qualified and unsupported sources stay unknown.
+  capture. #10579 delivers the conditional Manager consumer and independent
+  pending/cleared/partial/unknown display, including empty-history and retirement
+  controls. This closes supported local source acceptance, not installed/native
+  qualification. Retained request history remains separately qualified and
+  unsupported sources stay unknown.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
   retain direct start counts/attempt/target metadata but keep unknown until
   actual active-capacity and measurement/correlation qualification exists.
@@ -442,6 +451,13 @@ publication and installed support retain their separate qualification.
   are fixture substitutions, not installed or native-client qualification.
 - [ ] Demonstrate older-page prepend and live append while browsing, current
   head changes, reconnection/gaps and complete observer cancellation.
+  The opt-in `test_companion_joined_lifecycle.py` source packet now exercises
+  the private three-owner/selected-session join with a blocked backward page,
+  live events, committed purpose/agenda updates and actual waiter clearing.
+  It checks retained viewport/selection/focus, hide/head-loss cancellation,
+  an expired actual page boundary and explicit Refresh recovery. Publication,
+  current-head review and required CI remain pending; this does not qualify
+  an installed runtime or native mux client.
 - [ ] Drive every source PR through current-head review, required CI and actual
   merge; reread the entire parent gate and journal the exact closed items.
 
@@ -488,8 +504,11 @@ publication and installed support retain their separate qualification.
   actual producer qualification remain open under S3 and the next item.
 - [ ] Test actual producer construction of accepted evidence, not a mock beyond
   it. Unsupported measurement sources remain unknown and do not complete S3.
-- [ ] Actual input/permission clearing and read-only attention: no automatic
+- [x] Actual input/permission clearing and read-only attention: no automatic
   answer, head mutation, cutover, resource release or focus stealing.
+  #10579 qualifies the actual callback/route/CLI/Textual source chain and
+  supported local waiters, with independent history and late-callback fences.
+  Native-client and installed qualification remain separate.
 - [ ] Claims, reported contributions and known running concurrency stay distinct;
   missing native attribution or incomplete retained tool history cannot become
   zero activity, a fabricated parent relationship or lifetime totals.
