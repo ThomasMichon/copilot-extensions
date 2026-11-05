@@ -7,12 +7,15 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from importlib.metadata import distributions
 from importlib.metadata import version as distribution_version
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from packaging.version import Version
 
@@ -154,6 +157,72 @@ def verify_runtime_candidate() -> None:
         raise RuntimeError("Candidate still contains unsigned agent console trampolines")
 
 
+def _closed_wheel_distributions(slot: Path, receipt: object, *, application: bool) -> dict:
+    def ordinary(path: Path, *, directory: bool = False) -> bool:
+        try:
+            info = path.lstat()
+        except OSError:
+            return False
+        return (
+            (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
+            and not getattr(info, "st_file_attributes", 0) & 0x400
+        )
+
+    bootstrap = _native(slot / ".runtime-bootstrap")
+    helper = bootstrap / "installer_wheel_snapshot.py"
+    if not ordinary(bootstrap, directory=True) or not ordinary(helper):
+        raise RuntimeError("Retained wheel receipt validator is unavailable")
+    name = "_retained_wheel_snapshot_" + uuid.uuid4().hex
+    spec = importlib.util.spec_from_file_location(name, helper)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Retained wheel receipt validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    sys.path.insert(0, str(bootstrap))
+    try:
+        spec.loader.exec_module(module)
+        canonical = json.dumps(receipt, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        inputs = module.WheelReuseInputs(slot.name, canonical, time.monotonic() + 120)
+        if application:
+            health_name = name + "_health"
+            health_helper = bootstrap / "installer_engine_health.py"
+            if not ordinary(health_helper):
+                raise RuntimeError("Retained application wheel validator is unavailable")
+            health_spec = importlib.util.spec_from_file_location(
+                health_name, health_helper,
+            )
+            if health_spec is None or health_spec.loader is None:
+                raise RuntimeError("Retained application wheel validator is unavailable")
+            health = importlib.util.module_from_spec(health_spec)
+            sys.modules[health_name] = health
+            try:
+                health_spec.loader.exec_module(health)
+                health.verify_application_wheels(inputs, _native(slot))
+            finally:
+                del sys.modules[health_name]
+        return inputs.receipt()["distributions"]
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("Retained wheel receipt is invalid") from error
+    finally:
+        sys.path.remove(str(bootstrap))
+        del sys.modules[name]
+
+
+def _application_wheel_url(slot: Path, wheel: dict, url: object) -> bool:
+    if not isinstance(url, str):
+        return False
+    try:
+        actual = urlsplit(url)
+        expected = urlsplit((slot / "wheels" / wheel["filename"]).as_uri())
+        return (
+            actual.scheme == expected.scheme and actual.netloc == expected.netloc
+            and unquote(actual.path) == unquote(expected.path)
+            and not actual.query and not actual.fragment
+        )
+    except ValueError:
+        return False
+
+
 def verify_installed_origins() -> None:
     """Check a retained build's own graph, without consulting today's sources."""
     environment = Path(sys.prefix).resolve()
@@ -168,13 +237,21 @@ def verify_installed_origins() -> None:
         not isinstance(receipt, dict)
         or receipt.get("schema") != "installer-engine.frozen-input-origins"
         or type(receipt.get("version")) is not int
-        or receipt["version"] != 1
+        or receipt["version"] not in (1, 2)
         or not isinstance(receipt.get("packages"), dict)
         or not receipt["packages"]
     ):
         raise RuntimeError("Frozen origin evidence has an unsupported schema")
     recorded = receipt["packages"]
     source_wheels = receipt.get("source_wheels")
+    closed_wheels = receipt["version"] == 2
+    application = closed_wheels and environment != slot
+    if closed_wheels:
+        if source_wheels is not None:
+            raise RuntimeError("Closed wheels cannot also claim source-wheel origins")
+        source_wheels = _closed_wheel_distributions(
+            slot, receipt.get("wheel_inputs"), application=application,
+        )
     if source_wheels is not None and (
         not isinstance(source_wheels, dict) or not source_wheels or set(source_wheels) != set(recorded)
     ):
@@ -183,11 +260,17 @@ def verify_installed_origins() -> None:
     for distribution in distributions():
         direct_url = distribution.read_text("direct_url.json")
         if direct_url is None:
+            if closed_wheels:
+                raise RuntimeError("Closed wheel runtime has an unattributed distribution")
             continue
         origin = json.loads(direct_url)
         name = distribution.metadata["Name"]
+        if not isinstance(name, str) or not name:
+            raise RuntimeError("Installed distribution has no name")
         if source_wheels is not None:
             name = re.sub(r"[-_.]+", "-", name).lower()
+        if closed_wheels and name not in recorded:
+            raise RuntimeError("Closed wheel runtime has an unexpected distribution")
         if name not in recorded and "dir_info" not in origin:
             continue
         valid_origin = origin.get("dir_info") in ({}, {"editable": False})
@@ -202,14 +285,24 @@ def verify_installed_origins() -> None:
                 and set(archive) <= {"hash", "hashes"}
                 and archive.get("hash", "sha256=" + digest) == "sha256=" + digest
                 and (archive == {} or archive.get("hashes") == {"sha256": digest})
-                and str(origin.get("url", "")).endswith("#sha256=" + digest)
+                and (
+                    (
+                        application
+                        and _application_wheel_url(slot, wheel, origin.get("url"))
+                        and _application_wheel_url(slot, wheel, recorded.get(name))
+                    )
+                    or (
+                        not application
+                        and str(origin.get("url", "")).endswith("#sha256=" + digest)
+                    )
+                )
             )
         if (
             not Path(distribution.locate_file("")).resolve().is_relative_to(slot)
             or not valid_origin or name in observed
         ):
             raise RuntimeError(f"{name} is not an attributable non-editable installation")
-        observed[name] = origin.get("url")
+        observed[name] = recorded[name] if application else origin.get("url")
     if observed != recorded or any(
         not isinstance(url, str) or not url.startswith("file:")
         for url in recorded.values()

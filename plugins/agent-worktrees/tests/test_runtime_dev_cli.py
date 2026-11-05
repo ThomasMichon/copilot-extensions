@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -44,6 +47,77 @@ def test_original_legacy_build_without_receipt_does_not_invent_origins(tmp_path,
         lambda: pytest.fail("Legacy build must not be compared to today's dependency graph"),
     )
     runtime_candidate.verify_installed_origins()
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("fault", [
+    "none", "version", "origin", "missing-origin", "extra", "receipt", "validator", "health", "wheel",
+])
+def test_closed_wheel_receipt_qualifies_retained_control(tmp_path, monkeypatch, fault, nested):
+    if fault in ("health", "wheel") and not nested:
+        pytest.skip("Only an application retains its wheels")
+    environment = tmp_path / ".venv" if nested else tmp_path
+    environment.mkdir(exist_ok=True)
+    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(environment))
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    bootstrap = tmp_path / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    for name in (
+        *runtime_candidate._LIFECYCLE_FILES, "versioned_runtime.py",
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py", "versioned_runtime_publication.py",
+    ):
+        shutil.copyfile(scripts / name, bootstrap / name)
+    if fault == "validator":
+        (bootstrap / "installer_wheel_snapshot.py").unlink()
+    if fault == "health":
+        (bootstrap / "installer_engine_health.py").unlink()
+
+    content = b"fixture application wheel"
+    digest = hashlib.sha256(content).hexdigest()
+    filename = "example_app-1.0-py3-none-any.whl"
+    binding = {"fixture": "selected"}
+    lock_id = "sha256:" + hashlib.sha256(json.dumps(
+        binding, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    if nested:
+        wheel = tmp_path / "wheels" / filename
+        wheel.parent.mkdir()
+        wheel.write_bytes(b"changed" if fault == "wheel" else content)
+        url = wheel.as_uri()
+    else:
+        url = "file:///gone/example.whl#sha256=" + digest
+    wheels = {
+        "construction": "closed-wheels", "lock_id": lock_id, "binding": binding,
+        "distributions": {"example-app": {
+            "version": "1.0", "filename": filename,
+            "sha256": "sha256:" + digest,
+        }},
+    }
+    if fault == "receipt":
+        wheels["lock_id"] = "sha256:" + "b" * 64
+    (tmp_path / ".runtime-input-origins.json").write_text(json.dumps({
+        "schema": "installer-engine.frozen-input-origins", "version": 2,
+        "packages": {"example-app": url}, "wheel_inputs": wheels,
+    }), encoding="utf-8")
+    origin = {
+        "url": url,
+        "archive_info": {"hashes": {"sha256": "b" * 64 if fault == "origin" else digest}},
+    }
+    distribution = SimpleNamespace(
+        metadata={"Name": "Example_App"}, version="2.0" if fault == "version" else "1.0",
+        locate_file=lambda _path: tmp_path,
+        read_text=lambda _path: None if fault == "missing-origin" else json.dumps(origin),
+    )
+    installed = [distribution]
+    if fault == "extra":
+        installed.append(SimpleNamespace(metadata={"Name": "Unexpected"}, read_text=lambda _path: None))
+    monkeypatch.setattr(runtime_candidate, "distributions", lambda: installed)
+    if fault == "none":
+        runtime_candidate.verify_installed_origins()
+    else:
+        with pytest.raises((RuntimeError, ValueError)):
+            runtime_candidate.verify_installed_origins()
 
 
 @pytest.mark.parametrize("source_wheel", [False, True])
