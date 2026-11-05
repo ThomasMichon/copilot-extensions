@@ -529,6 +529,12 @@ Unrecognized/custom setup commands and `gh copilot` retain terminal fallback;
 this exclusion follows recognized wrappers recursively. Normalized setup must
 have an available standalone backend in its selected launch/session PATH or
 an explicit non-intermediary `copilot_path`; gh-only setup keeps fallback.
+Windows normalized setup prefers an existing standalone executable over
+`.cmd`/`.bat` wrappers, the VS Code forwarding shim (identified by its companion
+`vscode-copilot-launcher` script), and WindowsApps aliases. Forwarders can reject
+literal multiline prompts before Copilot starts. Explicit `copilot_path` remains
+authoritative; when no standalone candidate exists, ordinary wrapper/alias
+fallback is preserved, not certified for literal startup-prompt transport.
 An environment-priming script can change backend discovery after preparation;
 that opaque setup retains fallback rather than running the script as a probe.
 Non-UTF-8 custom PowerShell setup is unsupported for marker qualification and

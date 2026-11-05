@@ -795,6 +795,10 @@ retained history and two completed turns. No terminal input is injected and no
 installed service or retained conversation is changed. This is native CLI
 startup qualification, not real-mux, physical keyboard, installed rollout or
 whole managed-launch acceptance; platform lanes are qualified independently.
+On Windows it also runs the shipped normalized PowerShell setup with synthetic
+forwarding and batch candidates ahead of the selected standalone executable.
+The same exact user-turn/history assertions qualify PATH selection and literal
+multiline startup/resume transport without relying on process creation alone.
 
 Customizing-copilot's `tests/native/test_client_request_capture_transport.py`
 exercises exact raw-body persistence, streaming/nonstreaming replies and
