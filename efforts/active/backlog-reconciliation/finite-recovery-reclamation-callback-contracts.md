@@ -215,8 +215,9 @@ No refresh intervention, publisher, process signal or restart runs.
 background disposal, with finite feature scope and actual safety prechecks.
 Data, claims, sessions, source disposition and retained trash bytes remain
 under their existing custodians.
-The historical fourteen-GiB, nineteen-minute and four-to-five-per-minute UNC
-observations are reports, not a controlled benchmark.
+The historical 14 GB checkout, nineteen-minute and four-to-five-per-minute
+observations are reports, not a controlled benchmark; the filesystem is
+unspecified.
 Manual soft-reset/move/removal recipes are source data, not deletion approval.
 The currently reported foreground synchronous path is not a delivered owned
 deferred-disposal mechanism.
