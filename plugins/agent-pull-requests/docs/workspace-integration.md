@@ -94,6 +94,16 @@ marks a possibly dispatched submit; ordinary post-dispatch HTTP/response failure
 remain conservative. No new stage, credential issuer or speculative reconciliation
 is invented for an SDK-confirmed unattempted request.
 
+The optional trusted `feedback_owner` embedding composes the
+[captured-feedback owner](feedback-capture.md) into that same submit path.
+It selects exact-generation interests outside request JSON and requires
+explicitly adopted v5 storage. Results separately expose native execution
+and `feedback` handled/pending/unavailable disposition. Confirmed retries
+perform fresh protected readback without another send; exact vote-event
+attribution and later echo coverage remain unavailable. This source seam
+does not advertise a new serving capability: the current conversation
+descriptor still refuses v4/v5, and default hosts supply no feedback owner.
+
 Oversized submit envelopes refuse locally before dispatch. Large immutable read
 generations are framed, but this first wire does **not** upload arbitrarily large
 intents/source manifests. An oversized result remains unavailable/unknown with

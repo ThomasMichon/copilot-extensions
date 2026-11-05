@@ -18,6 +18,7 @@ from .native_read import NativeReadHandler
 from .workspace_conversation import conversation_key as conversation_key
 from .owner_read import OwnerReadBudgetExceeded, OwnerReadHandler, REQUEST_SCHEMA
 from .review_executor import execute_review
+from .review_feedback import FeedbackInputs
 from .review_intent import identifier
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope, compare_generations
 
@@ -43,7 +44,8 @@ class WorkspaceOperations:
 
     def __init__(self, store, cache, *, scope, read_owner, binding_ref,
                  write_context=None, checkpoint, max_work_seconds, conversations=False,
-                 attention_owner: Callable[[dict], AttentionInputs] | None = None) -> None:
+                 attention_owner: Callable[[dict], AttentionInputs] | None = None,
+                 feedback_owner: Callable[[dict], FeedbackInputs] | None = None) -> None:
         if (
             not isinstance(cache, GenerationCache)
             or not isinstance(read_owner, (OwnerReadHandler, NativeReadHandler))
@@ -53,6 +55,9 @@ class WorkspaceOperations:
             or not math.isfinite(max_work_seconds) or max_work_seconds <= 0
             or type(conversations) is not bool
             or attention_owner is not None and (not callable(attention_owner) or not conversations)
+            or feedback_owner is not None and (
+                not callable(feedback_owner) or not conversations or write_context is None
+            )
         ):
             raise ValueError("actual workspace owner inputs required")
         self.scope = _scope({**scope, "number": 1})
@@ -71,6 +76,7 @@ class WorkspaceOperations:
         self.max_work_seconds = max_work_seconds
         self.conversations = conversations
         self.attention_owner = attention_owner
+        self.feedback_owner = feedback_owner
         self._materializations = OrderedDict()
         self._materialization_lock = threading.Lock()
 
@@ -224,10 +230,15 @@ class WorkspaceOperations:
             generation = cache.lookup(scope, generation_id=intent.get("generation_id"))["generation"]
             if generation is None:
                 raise WorkspaceUnavailable("reviewed generation unavailable")
+            feedback = None
+            if self.feedback_owner is not None:
+                feedback = self.feedback_owner(copy.deepcopy(generation))
+                if type(feedback) is not FeedbackInputs:
+                    raise ValueError("actual feedback owner inputs required")
             result = execute_review(
                 self.store, intent, generation, payload["source_attachment"],
                 context_factory=lambda: self.write_context(number), checkpoint=check,
-                expires_at=expires_at, budget_seconds=seconds,
+                expires_at=expires_at, budget_seconds=seconds, feedback=feedback,
             )
         check()
         return {"protocol": PROTOCOL, "scope": scope, "result": copy.deepcopy(result)}
