@@ -1,0 +1,9 @@
+{
+  "comment": "Allow explicit required-module closure selection through the existing installation repair conductor.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
