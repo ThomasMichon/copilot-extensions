@@ -1,24 +1,30 @@
+function Get-ManagedWorktreesRuntimeRoot {
+    $runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        $pointer = $env:COPILOT_EXTENSIONS_CONTEXT
+        if ($pointer -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+[\\/])' -or
+            [IO.Path]::GetFileName($pointer) -cne 'install.json') { throw 'Invalid context pointer' }
+        $runtimeRoot = Split-Path -Parent ([IO.Path]::GetFullPath($pointer))
+        if ((Split-Path -Leaf $runtimeRoot) -cne 'agent-worktrees' -or
+            (Split-Path -Leaf (Split-Path -Parent $runtimeRoot)) -cne 'plugins') {
+            throw 'Invalid context layout'
+        }
+        $ancestor = $pointer
+        while ($ancestor) {
+            if ((Get-Item -LiteralPath $ancestor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Linked context path'
+            }
+            $ancestor = Split-Path -Parent $ancestor
+        }
+    }
+    return $runtimeRoot
+}
+
 function Get-ManagedWorktreesPython {
     $python = $env:AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON
     if ($python -and $python -notlike '*\WindowsApps\*' -and
         [IO.Path]::IsPathRooted($python) -and [IO.File]::Exists($python)) { return $python }
-    $runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
-    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-        $validator = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
-        if (-not [IO.File]::Exists($validator)) { return $null }
-        $owner = if ($env:AGENT_WORKTREES_PAYLOAD_ROOT) { $env:AGENT_WORKTREES_PAYLOAD_ROOT }
-                 elseif ($env:COPILOT_PLUGIN_ROOT) { $env:COPILOT_PLUGIN_ROOT }
-                 else { Split-Path -Parent $PSScriptRoot }
-        $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
-        1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
-        $validation = @(& $validator -Action validate -Context $env:COPILOT_EXTENSIONS_CONTEXT `
-            -DurableHome $durableHome -ExpectedPluginId 'agent-worktrees' -ExpectedPayloadRoot $owner)
-        if ($LASTEXITCODE -ne 0) { return $null }
-        $context = ConvertFrom-Json -InputObject ($validation -join "`n") -ErrorAction Stop
-        if ($context.pluginRoot -isnot [string] -or
-            -not [IO.Path]::IsPathRooted($context.pluginRoot)) { return $null }
-        $runtimeRoot = $context.pluginRoot
-    }
+    $runtimeRoot = Get-ManagedWorktreesRuntimeRoot
     $python = $null
     $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
     if ([IO.File]::Exists($resolver)) {
@@ -59,7 +65,7 @@ function Test-ManagedWorktreesSession {
         if (-not $python) { return $false }
         $info = [Diagnostics.ProcessStartInfo]::new()
         $info.FileName = $python
-        $info.Arguments = '-I -B -X utf8 "' + $helper + '" --base64-input'
+        $info.Arguments = '-I -S -B -X utf8 "' + $helper + '" --base64-input'
         $info.UseShellExecute = $false
         $info.CreateNoWindow = $true
         $info.RedirectStandardInput = $true

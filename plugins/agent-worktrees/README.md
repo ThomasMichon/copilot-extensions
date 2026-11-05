@@ -891,13 +891,18 @@ cached under the selected registry's `cache/managed-sessions/`. Registry and
 Git-ownership inputs invalidate reuse; the extension also checks these inputs
 before pulse, nudge or resident-policy effects. Membership is a reusable fact,
 not a cached tool permission: admitted events still evaluate current policy.
-The inputs include failed Git probes and the adopted anchor's shared metadata,
-so linked-worktree admission notices both repairs and revocation. The
-stdlib-only registry reader ignores optional fields such as repository tags.
-PowerShell resolves a healthy selected runtime read-only before PATH fallback;
-the Windows extension can use that same resolver when PATH Python is absent.
-Explicit installation cells retain the canonical validator's prerequisites;
-an invalid or unavailable context never selects an unvalidated cell interpreter.
+The inputs include failed Git probes, the adopted anchor's shared metadata and
+explicit-cell namespace/payload ownership, so reuse notices repairs and
+revocation. The stdlib-only registry reader ignores optional metadata, including
+inline and block-style tag lists. Platform selection shares the runtime's
+kernel/container-aware classifier rather than inherited WSL environment labels.
+Its standalone copy is generated with `python tools/sync-execution-platform.py`;
+`--check` audits that source delivery.
+Read-only native runtime discovery works without PATH Python. Candidate
+interpreters run admission with isolated, no-site imports; the owning payload's
+canonical validator accepts explicit-cell ownership before policy or lifecycle
+effects. SDK cold discovery shares those native owners, while warm callbacks
+reuse current dependencies without another child.
 Missing admission helpers cannot activate a legacy bootstrap fallback.
 Fresh payload/runtime installation and a new session are needed to adopt this
 behavior; an already-loaded older extension is not retroactively changed.

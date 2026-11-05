@@ -7,7 +7,7 @@ function stamp(path) {
   try {
     const info = statSync(path, { bigint: true });
     if (info.isDirectory()) return ["directory", canonical(path)];
-    return [String(info.size), String(info.mtimeNs)];
+    return ["file", canonical(path), String(info.size), String(info.mtimeNs)];
   } catch { return null; }
 }
 
@@ -59,13 +59,23 @@ export function createManagedSessionAdmission({ scriptsRoot, python, environment
     const promise = Promise.resolve().then(async () => {
       let selected = interpreter(python, environment);
       const systemRoot = environment.SystemRoot || environment.SYSTEMROOT;
-      if (selected === null && !python && process.platform === "win32" && systemRoot) {
+      if (selected === null && !python) {
         selected = await new Promise(resolve => {
-          const shell = join(systemRoot, "System32",
-            "WindowsPowerShell", "v1.0", "powershell.exe");
-          const helper = join(scriptsRoot, "managed-session.ps1").replaceAll("'", "''");
-          execFile(shell, ["-NoProfile", "-NonInteractive", "-Command",
-            `try { . '${helper}'; Get-ManagedWorktreesPython } catch { }`], {
+          let shell, args;
+          if (process.platform === "win32" && systemRoot) {
+            shell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+            const helper = join(scriptsRoot, "managed-session.ps1").replaceAll("'", "''");
+            args = ["-NoProfile", "-NonInteractive", "-Command",
+              `try { . '${helper}'; Get-ManagedWorktreesPython } catch { }`];
+          } else if (process.platform !== "win32") {
+            shell = "/bin/sh";
+            args = ["-c", '. "$1/managed-session.sh"; managed_worktrees_python "$1"',
+              "managed-session", scriptsRoot];
+          } else {
+            resolve(null);
+            return;
+          }
+          execFile(shell, args, {
             windowsHide: true, cwd: homedir(), env: environment,
             encoding: "utf8", timeout: 2000, maxBuffer: 65536,
           }, (error, stdout) => resolve(error ? null : interpreter(stdout.trim(), environment)));
@@ -75,7 +85,7 @@ export function createManagedSessionAdmission({ scriptsRoot, python, environment
       return new Promise(resolve => {
         let timer;
         const child = execFile(selected,
-          ["-I", "-B", "-X", "utf8", join(scriptsRoot, "managed_session.py"), "--base64-input"], {
+          ["-I", "-S", "-B", "-X", "utf8", join(scriptsRoot, "managed_session.py"), "--base64-input"], {
             windowsHide: true, cwd: homedir(), env: environment,
             encoding: "utf8", timeout: 2000, maxBuffer: 65536,
           }, (error, stdout) => {

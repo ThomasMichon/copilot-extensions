@@ -17,7 +17,8 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from guarded_anchor_map import canonical, repository_identity
-from registry_root import resolve_registry_root
+from execution_platform import detect_platform
+from registry_root import resolve_registry_context, resolve_registry_root
 
 _LIMIT = 1024 * 1024
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
@@ -79,17 +80,19 @@ def _entries(path: Path, section: str) -> dict:
                 continue
             indent = len(raw) - len(raw.lstrip(" "))
             key, sep, value = raw.strip().partition(":")
-            if not sep or "\t" in raw[:indent + 1]:
-                raise ValueError("unsupported registry layout")
             if indent == 0:
                 active, current = key == section, None
                 if active:
+                    if not sep or "\t" in raw[:indent + 1]:
+                        raise ValueError("unsupported registry layout")
                     if section in document:
                         raise ValueError("duplicate registry section")
                     document[section] = {}
                     if value.strip() not in {"", "{}"}:
                         raise ValueError("unsupported registry map")
             elif active and indent == 2:
+                if not sep or "\t" in raw[:indent + 1]:
+                    raise ValueError("unsupported registry layout")
                 name = _scalar(key)
                 if not isinstance(name, str) or name in document[section]:
                     raise ValueError("invalid or duplicate project name")
@@ -100,6 +103,8 @@ def _entries(path: Path, section: str) -> dict:
                 active and indent == 4 and current is not None
                 and key in ({"anchor"} if section == "projects" else {"windows", "wsl", "linux"})
             ):
+                if not sep or "\t" in raw[:indent + 1]:
+                    raise ValueError("unsupported registry layout")
                 if key in current:
                     raise ValueError("duplicate project field")
                 current[key] = _scalar(value)
@@ -115,7 +120,7 @@ def _stamp(path: str | Path) -> list[str] | None:
         info = Path(path).stat()
         if Path(path).is_dir():
             return ["directory", canonical(path)]
-        return [str(info.st_size), str(info.st_mtime_ns)]
+        return ["file", canonical(path), str(info.st_size), str(info.st_mtime_ns)]
     except OSError:
         return None
 
@@ -138,16 +143,22 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
         ):
             return result
         workspace = canonical(cwd)
-        registry = resolve_registry_root(
+        context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+        selected = resolve_registry_context() if context else None
+        registry = Path(selected["pluginRoot"]) if selected is not None else resolve_registry_root(
             legacy_root=home / ".agent-worktrees" if home is not None else None,
         )
         if not registry.is_absolute():
             return result
         sources = [registry / "projects.yaml", registry / "repos.yaml"]
         inputs = {str(path): _stamp(path) for path in sources}
-        context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
         if context:
             inputs[context] = _stamp(context)
+            for name in ("namespaceReceipt", "installReceipt", "payloadRoot", "cellRoot", "pluginRoot"):
+                value = selected[name]
+                inputs[value] = _stamp(value)
+            manifest = Path(selected["payloadRoot"]) / "plugin.json"
+            inputs[str(manifest)] = _stamp(manifest)
         source_inputs = inputs.copy()
         result.update(workspace=workspace, inputs=inputs.copy())
         scope = {"session": session, "workspace": workspace, "registry": canonical(registry), "context": context}
@@ -178,9 +189,8 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
         repos = _entries(sources[1], "repos") if inputs[str(sources[1])] is not None else {}
         workspace_inputs = result["inputs"].copy()
         ownership_inputs = workspace_inputs.copy()
-        platforms = ("windows",) if os.name == "nt" else (
-            ("wsl", "linux") if os.environ.get("WSL_DISTRO_NAME") else ("linux",)
-        )
+        platform = detect_platform()
+        platforms = ("wsl", "linux") if platform == "wsl" else (platform,)
         for name, project in projects.items():
             if not isinstance(project, dict):
                 continue

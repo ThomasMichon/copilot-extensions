@@ -612,7 +612,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     installed.mkdir(parents=True)
     helpers = (
         "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py",
-        "managed_session.py", "managed-session.ps1", "guarded_anchor_map.py", "registry_root.py",
+        "managed_session.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py", "guarded_anchor_map.py", "registry_root.py",
         "hook_lifecycle_runtime.py", "native_source_context.py",
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",
@@ -684,13 +684,36 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
             name + "() {" + text.split(name + "() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
             for name in ("_runtime_file_id", "_runtime_file_state", "_publish_runtime_file")
         )
+        for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+            shutil.copyfile(scripts / name, fixture_scripts / name)
+        monkeypatch.syspath_prepend(str(scripts))
+        publisher = hook_client._load_sibling("runtime_install_publication.py")
+        bindings = publisher.declared_copies(
+            fixture_scripts.parent, installed.parent, "wrappers", "sh", True,
+        )
+        directory = installed.parent / "publication"
+        directory.mkdir()
+        copies = directory / "copies"
+        proof = publisher.runtime._runtime_component("versioned_runtime_publication")
+        os.close(proof._created_file(copies))
         subprocess.run(
             [bash, "-eu", "-c", publishers
              + '\nSCRIPT_DIR="$1"; PLUGIN_DIR="$SCRIPT_DIR/.."; BIN_DIR="$2"; '
+             'ACTION=publish-runtime-helpers; RUNTIME_PUBLICATION_COPIES="$3"; '
+             '_publish_runtime_file "$SCRIPT_DIR/resolve-runtime.ps1" "$BIN_DIR/resolve-runtime.ps1" 1; '
+             '_publish_runtime_file "$SCRIPT_DIR/resolve-runtime.sh" "$BIN_DIR/resolve-runtime.sh" 1; '
              'ok() { :; }; err() { printf "%s\\n" "$*" >&2; }; deploy() {\n'
-             + block + "\n}; deploy", "fixture", fixture_scripts.as_posix(), installed.as_posix()],
+             + block + "\n}; deploy", "fixture", fixture_scripts.as_posix(), installed.as_posix(),
+             copies.as_posix()],
             check=True, capture_output=True, text=True, **no_window_kwargs(),
         )
+        identity = copies.stat()
+        publication = publisher.publish(
+            {"root": str(installed.parent), "copies": str(copies), "bindings": bindings},
+            directory, {copies: (identity.st_dev, identity.st_ino)}, lambda: None,
+        )
+        publication.verify()
+        publication.keep()
     elif installer.endswith(".ps1"):
         assert '$src = Join-Path $PluginDir "src/agent_worktrees/$script"' in text
         if pwsh := shutil.which("pwsh"):

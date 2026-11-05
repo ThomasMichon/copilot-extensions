@@ -116,18 +116,116 @@ def test_linked_worktree_requires_the_adopted_common_directory(tmp_path, monkeyp
     assert not module.admitted(payload, home=tmp_path)
 
 
-def test_generated_registry_admission_needs_no_yaml_install(tmp_path, monkeypatch):
+@pytest.mark.parametrize("tags", ["[selected, local]", "\n    - selected\n    - local"])
+def test_generated_registry_admission_needs_no_yaml_install(tmp_path, monkeypatch, tags):
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setitem(sys.modules, "yaml", None)
     anchor, registry = fixture_project(tmp_path)
     with (registry / "repos.yaml").open("a") as stream:
         stream.write(
-            "    tags: [selected, local]\n"
+            f"    tags: {tags}\n"
             "    metadata:\n      nested: [ignored]\n"
-            "  unrelated:\n    class: reference\n    tags: [docs]\n"
+            f"  unrelated:\n    class: reference\n    tags: {tags}\n"
         )
     assert module.admitted({"sessionId": "fresh", "cwd": str(anchor)}, home=tmp_path)
+
+
+@pytest.mark.parametrize("container", [False, True])
+@pytest.mark.parametrize("implementation", ["standalone", "runtime"])
+def test_admission_shares_kernel_and_container_platform_detection(
+    tmp_path, monkeypatch, container, implementation,
+):
+    from types import SimpleNamespace
+
+    module = load("managed_session")
+    if implementation == "runtime":
+        from machine_transport import detect_platform
+
+        monkeypatch.setattr(module, "detect_platform", detect_platform)
+    detector = sys.modules[module.detect_platform.__module__]
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    if container:
+        monkeypatch.setenv("WSL_DISTRO_NAME", "inherited")
+    else:
+        monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    monkeypatch.setattr(detector, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(detector, "os", SimpleNamespace(
+        uname=lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"),
+    ))
+
+    class Probe:
+        def __init__(self, path):
+            self.path = path
+
+        def is_file(self):
+            return False
+
+        def read_text(self, **kwargs):
+            return "0::/docker/example" if container else "0::/user.slice"
+
+    monkeypatch.setattr(detector, "Path", Probe)
+    anchor, registry = fixture_project(tmp_path)
+    other = tmp_path / "other"
+    selected = "linux" if container else "wsl"
+    paths = {name: str(anchor if name == selected else other) for name in ("windows", "linux", "wsl")}
+    (registry / "repos.yaml").write_text(json.dumps({"repos": {"example": paths}}))
+    assert module.admitted({"sessionId": "classified", "cwd": str(anchor)}, home=tmp_path)
+
+
+def test_sdk_cell_cache_revokes_changed_resolver_ownership(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import test_registry_paths as fixtures
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is unavailable")
+    native_run = subprocess.run
+    monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+        run=lambda *args, **kwargs: native_run(*args, **(kwargs | no_window_kwargs())),
+    ))
+    anchor, legacy = fixture_project(tmp_path)
+    payload = fixtures._payload(tmp_path, "selected")
+    for name in ("managed_session.py", "execution_platform.py", "guarded_anchor_map.py",
+                 "hook_policy_process.py", "hook_process_identity.py"):
+        shutil.copyfile(SCRIPTS / name, payload / "scripts" / name)
+    context, registry = fixtures._stamp(
+        tmp_path / "durable", payload, marketplace="selected", repository="example/selected",
+    )
+    for name in ("projects.yaml", "repos.yaml"):
+        shutil.copyfile(legacy / name, registry / name)
+    namespace = json.loads(context.read_text())["namespaceReceipt"]
+    driver = tmp_path / "cell-cache.mjs"
+    driver.write_text("""
+import assert from "node:assert/strict";
+import {readFileSync, unlinkSync, writeFileSync} from "node:fs";
+import {pathToFileURL} from "node:url";
+const [module, scriptsRoot, python, workingDirectory, namespace, manifest] = process.argv.slice(2);
+const {createManagedSessionAdmission} = await import(pathToFileURL(module));
+const check = createManagedSessionAdmission({scriptsRoot, python});
+const input = {sessionId: "cell-cache", workingDirectory};
+assert.equal(await check(input), true);
+for (const path of [namespace, manifest]) {
+  const saved = readFileSync(path);
+  for (const damage of ["remove", "corrupt"]) {
+    if (damage === "remove") unlinkSync(path);
+    else writeFileSync(path, "{}");
+    assert.equal(check.current(input), false, "resolver ownership invalidates warm admission");
+    assert.equal(await check(input), false);
+    writeFileSync(path, saved);
+    assert.equal(await check(input), true, "restored ownership can admit the same session");
+  }
+}
+""")
+    env = environment(tmp_path, anchor)
+    env.update(COPILOT_EXTENSIONS_CONTEXT=str(context), COPILOT_PLUGIN_ROOT=str(payload),
+               AGENT_WORKTREES_PAYLOAD_ROOT=str(payload))
+    result = subprocess.run(
+        [node, str(driver), str(SCRIPTS.parent / "extensions" / "agent-worktrees" / "managed-session.mjs"),
+         str(payload / "scripts"), sys.executable, str(anchor), namespace, str(payload / "plugin.json")],
+        capture_output=True, text=True, timeout=15, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_linked_admission_cache_tracks_failed_owner_and_common_metadata(tmp_path):
@@ -218,7 +316,7 @@ def test_real_installation_cells_do_not_share_admission_or_fall_back(tmp_path, m
     cells = []
     for label in ("first", "second"):
         payload = fixtures._payload(tmp_path, label)
-        for name in ("managed_session.py", "guarded_anchor_map.py"):
+        for name in ("managed_session.py", "execution_platform.py", "guarded_anchor_map.py"):
             shutil.copyfile(SCRIPTS / name, payload / "scripts" / name)
         context, registry = fixtures._stamp(
             tmp_path / "durable", payload,
@@ -401,9 +499,6 @@ def test_admission_resolves_healthy_selected_runtime(
     (runtime / "current-version").write_text("0.0.1\n")
     env["PATH"] = str(Path(env["SYSTEMROOT"]) / "System32")
     assert shutil.which("python", path=env["PATH"]) is None
-    if cell:
-        # The canonical cell validator retains its own PATH Python prerequisite.
-        env["PATH"] += os.pathsep + str(Path(sys.executable).parent)
     env["FIXTURE_EXPECTED_PYTHON"] = str(slot / ".venv" / "Scripts" / "python.exe")
     if consumer == "node":
         driver = tmp_path / "runtime-only.mjs"
@@ -426,7 +521,7 @@ for (const sessionId of ["runtime-only", "runtime-second"]) {
   assert.equal(await check(input), true);
   assert.equal(calls, coldCalls, "warm membership must not spawn another discovery helper");
 }
-assert.equal(calls, process.env.COPILOT_EXTENSIONS_CONTEXT ? 2 : 4,
+assert.equal(calls, 4,
   "concurrent checks share runtime discovery and the admission subprocess");
 """)
         command = [
@@ -487,6 +582,83 @@ assert.equal(calls, process.env.COPILOT_EXTENSIONS_CONTEXT ? 2 : 4,
     assert not (tmp_path / ".copilot").exists()
     if cell:
         assert not (legacy / "cache").exists(), "selected cell must not admit through legacy ownership"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Git Bash consumer on Windows")
+def test_posix_session_end_uses_runtime_without_path_python(tmp_path, native_bash):
+    import venv
+
+    anchor, runtime = fixture_project(tmp_path)
+    payload = tmp_path / "payload"
+    shutil.copytree(SCRIPTS, payload / "scripts")
+    (payload / "scripts" / "hook_client.py").write_text(
+        "import json,sys\nprint(json.dumps({'event':sys.argv[1],'payload':json.load(sys.stdin)}))\n"
+    )
+    slot = runtime / "versions" / "0.0.1"
+    venv.EnvBuilder(with_pip=False).create(slot / ".venv")
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": "0.0.1", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+    }))
+    (runtime / "current-version").write_text("0.0.1\n")
+    env = environment(tmp_path, anchor)
+    converted = subprocess.run(
+        [native_bash, "-c", 'cygpath -au "$1"', "fixture", str(tmp_path)],
+        capture_output=True, text=True, timeout=5, env=env, **no_window_kwargs(),
+    )
+    assert converted.returncode == 0, converted.stderr
+    env.update(HOME=converted.stdout.strip(), PATH="/usr/bin:/bin")
+    event = {"sessionId": "runtime-only", "cwd": str(anchor), "reason": "user_exit"}
+    result = subprocess.run(
+        [native_bash, "-c",
+         'if command -v python3 || command -v python; then exit 90; fi; bash "$1"',
+         "fixture", str(payload / "scripts" / "deregister-session.sh")],
+        input=json.dumps(event), capture_output=True, text=True, timeout=15,
+        env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {"event": "sessionEnd", "payload": event}
+    assert not result.stderr
+    assert not (runtime / "logs").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Native POSIX extension process")
+def test_posix_extension_resolves_runtime_without_path_python(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is unavailable")
+    anchor, runtime = fixture_project(tmp_path)
+    slot = runtime / "versions" / "0.0.1"
+    python = slot / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": "0.0.1", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+    }))
+    (runtime / "current-version").write_text("0.0.1\n")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("dirname", "basename", "awk", "tr", "cat", "sort", "find", "date", "head", "tail"):
+        executable = shutil.which(name)
+        assert executable, name
+        (tools / name).symlink_to(executable)
+    driver = tmp_path / "runtime-only.mjs"
+    driver.write_text("""
+import assert from "node:assert/strict";
+import {pathToFileURL} from "node:url";
+const [module, scriptsRoot, workingDirectory] = process.argv.slice(2);
+const {createManagedSessionAdmission} = await import(pathToFileURL(module));
+const check = createManagedSessionAdmission({scriptsRoot});
+assert.equal(await check({sessionId: "runtime-only", workingDirectory}), true);
+""")
+    env = environment(tmp_path, anchor)
+    env["PATH"] = str(tools)
+    result = subprocess.run(
+        [node, str(driver), str(SCRIPTS.parent / "extensions" / "agent-worktrees" / "managed-session.mjs"),
+         str(SCRIPTS), str(anchor)],
+        capture_output=True, text=True, timeout=15, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (runtime / "logs").exists()
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])

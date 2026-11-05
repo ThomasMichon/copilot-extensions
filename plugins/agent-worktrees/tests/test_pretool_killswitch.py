@@ -103,7 +103,7 @@ def test_cached_manifest_command_hot_stop_and_restore_without_restart(tmp_path):
     scripts = root / "bin"
     scripts.mkdir(parents=True)
     for name in ("hook_client.py", "hook_runtime.py", "pretool_killswitch.py", "hook_pre_policy.py",
-                 "managed_session.py", "registry_root.py", "guarded_anchor_map.py"):
+                 "managed_session.py", "execution_platform.py", "registry_root.py", "guarded_anchor_map.py"):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
     env = os.environ.copy()
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), AGENT_HOME=str(tmp_path),

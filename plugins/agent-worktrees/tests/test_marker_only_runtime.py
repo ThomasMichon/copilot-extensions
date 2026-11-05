@@ -129,7 +129,10 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     for name in ("deregister-session.sh", "deregister-session.ps1", "hook_runtime.py",
-                 "resolve-runtime.sh", "resolve-runtime.ps1"):
+                 "resolve-runtime.sh", "resolve-runtime.ps1", "managed-session.ps1",
+                 "managed-session.sh", "managed_session.py", "execution_platform.py",
+                 "guarded_anchor_map.py", "registry_root.py", "hook_policy_process.py",
+                 "hook_process_identity.py"):
         shutil.copyfile(_SCRIPTS / name, scripts / name)
     shutil.copytree(_SCRIPTS / "installation-context", scripts / "installation-context")
     shutil.copyfile(_PLUGIN / "plugin.json", payload / "plugin.json")
@@ -143,7 +146,7 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
     home = tmp_path / "home"
     home.mkdir()
     root = home / ".agent-worktrees"
-    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "AGENT_HOME": str(home),
            "COPILOT_PLUGIN_ROOT": str(payload), "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_WORKTREES_PAYLOAD_ROOT",
                 "AGENT_RT_ROOT", "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX"):
@@ -232,6 +235,13 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
         "payload_hash": probe_hash.hex(),
     }), encoding="utf-8")
     (root / "current-version").write_text(version + "\n", encoding="utf-8")
+    workspace = tmp_path / "caf\u00e9"
+    for folder in ("objects", "refs"):
+        (workspace / ".git" / folder).mkdir(parents=True)
+    (workspace / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (root / "projects.yaml").write_text(json.dumps({
+        "projects": {"example": {"anchor": str(workspace)}},
+    }))
     legacy = home / ".agent-worktrees/bin"
     legacy.mkdir(parents=True, exist_ok=True)
     for suffix in ("sh", "ps1"):
@@ -265,7 +275,7 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
     assert result.returncode == 0, result.stderr
     if context_case == "invalid":
         assert not result.stdout
-        assert "closure is unconfirmed" in result.stderr
+        assert not result.stderr
         assert not site_loaded.exists()
     else:
         assert result.stdout, result.stderr

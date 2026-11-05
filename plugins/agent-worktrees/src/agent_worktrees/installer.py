@@ -387,7 +387,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                  "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",
                  "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
-                 "managed_session.py", "managed-session.ps1",
+                 "managed_session.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py",
                  "hook-read-policy.json", "versioned_runtime_native.ps1", "pre-tool-hook.ps1", "post-tool-hook.ps1", "terminal_probe.py"):
         src = scripts / name
         if name == "native_source_context.py":
