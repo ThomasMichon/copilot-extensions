@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Reviewed proposal and implementation PRs against `dev`
 - **Created:** 2026-11-05
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `agent-fabric` / `legible-live-state`, `planned-maintenance-windows`
 - **Umbrella issue:** #10745
 
@@ -55,18 +55,18 @@ Existing source-only repository hosting policy remains unchanged.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Land this proposal through automated review before implementation.
-- [ ] Finalize the additive receipt fields and their evidence boundaries.
+- [x] Land this proposal through automated review before implementation.
+- [x] Finalize the additive receipt fields and their evidence boundaries.
 
 ### Phase 2 - Caller-visible session state
 
-- [ ] Preserve existing mux fields and return explicit launch action, native
+- [x] Preserve existing mux fields and return explicit launch action, native
   session identity and observed state for create, resume and live reuse.
-- [ ] Preserve unknown/unregistered state instead of inventing a native ID or
+- [x] Preserve unknown/unregistered state instead of inventing a native ID or
   claiming recovery completion from launch, registration or seed submission.
-- [ ] Add an optional bounded native-session wait while keeping default
+- [x] Add an optional bounded native-session wait while keeping default
   no-wait behavior and existing mux-only verification semantics.
-- [ ] Keep JSON stdout parseable through the real command entrypoint and
+- [x] Keep JSON stdout parseable through the real command entrypoint and
   diagnostics on stderr; preserve existing launch and prompt custody.
 - [ ] Document fields, optional support detection, uncertainty and safe retries;
   add the plugin changefile and land the validated implementation.
@@ -78,17 +78,17 @@ Existing source-only repository hosting policy remains unchanged.
 
 ## Validation Plan
 
-- [ ] Cover fresh launch, original-head resume, already-live reuse, concurrent
+- [x] Cover fresh launch, original-head resume, already-live reuse, concurrent
   late reuse, stale/unregistered heads and unavailable liveness.
-- [ ] Prove bounded waiting, registration timeout and late registration without
+- [x] Prove bounded waiting, registration timeout and late registration without
   duplicating processes or replaying startup text.
-- [ ] Exercise parser and captured stdout/stderr with isolated native-state
+- [x] Exercise parser and captured stdout/stderr with isolated native-state
   fixtures; reject unknown CLI options and invalid timeout values.
-- [ ] Preserve old-reader/new-provider fields and explicit legacy behavior;
+- [x] Preserve old-reader/new-provider fields and explicit legacy behavior;
   document unsupported optional wait behavior on provider rollback.
 - [ ] Run focused tests, touched-source lint, type admission and relevant
   module/install/documentation guards; require published-head CI and review.
-- [ ] Record unavailable native/model/platform lanes honestly; no installed or
+- [x] Record unavailable native/model/platform lanes honestly; no installed or
   completed-recovery acceptance is inferred from synthetic fixtures.
 
 ## Proposal
@@ -120,6 +120,30 @@ deadline. No new daemon, global history scan or per-event transport is proposed.
 validation documentation. Existing visions need no intent amendment.
 
 ## Journal
+
+### 2026-11-05 - Source validation
+
+- Added receipt v1, native head/process/mux observation, opt-in waiting and
+  failure target retention without changing seed or restart ownership.
+- Final focused isolated packet: 144 passed, including three real Python
+  CLI/stdio subprocess controls. A missing tracking-directory fixture in the
+  first native run was corrected; the final packet passed.
+- Touched Python F/E9 lint, install contract, module size, docs consistency,
+  headless-launch and runbook-reference guards passed. Type inventory classifies
+  Worktrees and the touched Python files as pending, not strict-admitted;
+  this change does not alter admission or claim a strict pass.
+- Unit and simple process-seam tiers exercised. Real mux/Copilot/model startup,
+  clean-machine installation, installed qualification and other-platform/live
+  external lanes were not exercised: they are outside this source-only approval.
+  No runtime rollout or completed-recovery claim is made.
+- Owning CLI/validation docs and the mandatory patch changefile are ready.
+  Remaining gate: published-head CI/review, merge, then source closeout.
+
+### 2026-11-05 - Implementation gate
+
+- Proposal #10746 merged after approval on its current head and required CI.
+- Began Phase 2. Preserve legacy fields, identify the additive receipt, and
+  distinguish confirmed native liveness from mux launch and completed recovery.
 
 ### 2026-11-05 - Proposal
 

@@ -24,6 +24,19 @@ checks maintenance refusal before effects and during post-spawn observations
 or seed cleanup: the launcher still owns exactly one child wait, preserves its
 actual result, retains unconfirmed receipts, and never repeats the launch.
 
+Worktrees' `--test-file tests/test_embody_receipt.py --test-file
+tests/test_embody.py --test-file tests/test_embody_resume_seed.py
+--allow-explicit-tiers` packet covers additive ordinary state receipts, fresh,
+resume and reuse semantics, incompatible/stale heads, native uncertainty,
+bounded late registration/timeouts, one census per compatible live candidate,
+strict parser handling and a frozen prior no-wait syntax subset.
+`tests/native/test_embody_receipt_native.py` adds opt-in finite Python CLI
+process/stdout controls, with synthetic launch/session evidence. These prove
+the real parser/stdio seam, not a real mux, Copilot/model startup, cold-machine
+installation, installed runtime, other-platform qualification or completed
+recovery. No native/model lane is implied by unit fixtures; required unit-only
+CI is unchanged.
+
 Manager's opt-in `--test-file tests/test_companion_tool_statistics.py
 --test-file tests/test_companion_current_requests.py --test-file
 tests/test_companion_bridge_session_source.py --allow-explicit-tiers` packet
