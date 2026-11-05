@@ -61,14 +61,18 @@ def test_read_failure_cannot_downgrade_known_head_invalidation():
     assert not model.events
 
 
-def test_unavailable_source_recovers_exact_multi_page_replay_atomically():
+@pytest.mark.parametrize("paused", [False, True])
+def test_inactive_source_recovers_exact_multi_page_replay_atomically(paused):
     source = token()
     model = TimelineWindow()
     model.bind(source)
     rows = tuple(event(source, number) for number in range(3))
     model.apply_snapshot(snapshot(source, rows[:1]))
     model.follow_live = False
-    model.source_error(source, "transient owner read failed")
+    if paused:
+        model.pause_source(source)
+    else:
+        model.source_error(source, "transient owner read failed")
     replay = (
         LiveDelta(source, position(source, "live-0"), position(source, "live-1"), rows[1:2]),
         LiveDelta(source, position(source, "live-1"), position(source, "live-2"), rows[2:]),
@@ -81,13 +85,17 @@ def test_unavailable_source_recovers_exact_multi_page_replay_atomically():
 
 
 @pytest.mark.parametrize("failure", ["gap", "head-changed", "wrong-snapshot", "immutable-conflict"])
-def test_failed_recovery_does_not_publish_a_partial_replay_or_reactivate_facts(failure):
+@pytest.mark.parametrize("paused", [False, True])
+def test_failed_recovery_does_not_publish_a_partial_replay_or_reactivate_facts(failure, paused):
     source = token()
     model = TimelineWindow()
     model.bind(source)
     first = event(source, 0)
     model.apply_snapshot(snapshot(source, (first,)))
-    model.source_error(source, "transient failure")
+    if paused:
+        model.pause_source(source)
+    else:
+        model.source_error(source, "transient failure")
     one = LiveDelta(source, position(source, "live-0"), position(source, "live-1"), (event(source, 1),))
     two = LiveDelta(source, position(source, "live-1"), position(source, "live-2"), (event(source, 2),))
     current = snapshot(source, two.events, cursor="live-2")

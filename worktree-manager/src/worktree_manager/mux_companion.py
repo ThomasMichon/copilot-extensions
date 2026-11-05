@@ -127,6 +127,7 @@ class _CompanionData:
     attention_error: str | None = "not-loaded"
     agenda: dict | None = None
     agenda_error: str | None = "not-loaded"
+    agenda_pending: bool = False
 
 
 def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
@@ -573,6 +574,7 @@ class MuxCompanionApp(App):
         self._agenda_retired = Event()
         self._agenda_retired.set()
         data.agenda_error = "awaiting provider snapshot (worktree-agendas-v1)"
+        data.agenda_pending = True
         self._update_agenda()
         self._agenda_worker = self._subscribe_agenda(
             data, self._agenda_generation, cancelled, self._agenda_retired, project, worktree, head,
@@ -590,6 +592,7 @@ class MuxCompanionApp(App):
         ):
             return
         data.agenda, data.agenda_error = frame, error
+        data.agenda_pending = False
         self._update_agenda()
         self._rich_agenda_attachment.publication(frame, error)
 
@@ -679,7 +682,8 @@ class MuxCompanionApp(App):
         if revision != self._timeline_sync_revision or data is not self._data:
             return
         await self._rich_agenda_attachment.set_selection(
-            selection, data.agenda, data.agenda_error, reconcile=reconcile, project_root=data.worktree.get("path"),
+            selection, data.agenda, None if data.agenda_pending else data.agenda_error,
+            reconcile=reconcile, project_root=data.worktree.get("path"),
         )
         if (
             revision != self._timeline_sync_revision or data is not self._data or self._loading

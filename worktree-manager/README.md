@@ -139,6 +139,9 @@ in the compact indicator even before a source token exists. Ordinary membership
 pauses retain evidence as inactive, not as invented source errors; actual errors
 and head fences remain intact. Navigation failures also remain visible outside
 the collapsed evidence area.
+Agenda startup waiting remains unknown rather than a failure. A resumed inactive
+source needs a fresh snapshot and its exact bounded retained-boundary replay;
+head changes, immutable conflicts and exhausted proof budgets still refuse it.
 
 Collapsed rows show local clocks and literal summaries, with a date at each
 local-day boundary. A `~` clock is observation time, not an occurrence claim;

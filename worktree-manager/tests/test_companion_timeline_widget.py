@@ -16,6 +16,7 @@ from worktree_manager.companion_timeline_contract import (
 )
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
+from worktree_manager.companion_agenda_attachment import AgendaTimelineAttachment
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
@@ -403,6 +404,42 @@ def test_unbound_provider_error_stays_visible_when_evidence_is_collapsed() -> No
             assert app.query_one(SubwayTimeline).size.height >= 16
             panel.provider_notice(Provider.WORKTREES, None)
             assert "error" not in str(app.query_one(".timeline-health", Static).content)
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("failure", ["publication", "missing-root", "awaiting"])
+def test_unbound_agenda_failure_is_visible_but_ordinary_wait_is_not_an_error(failure: str, tmp_path) -> None:
+    async def check() -> None:
+        app = TimelineApp(TimelineWindow())
+        async with app.run_test(size=(60, 24)) as pilot:
+            panel = app.query_one(CompanionTimelinePanel)
+            attachment = AgendaTimelineAttachment(
+                panel, cwd="/example", status=lambda _message: None,
+                validate_events=lambda _token, _events: None,
+            )
+            if failure == "missing-root":
+                await attachment.set_selection(("example", "selected", "head-a"))
+            elif failure == "awaiting":
+                await attachment.set_selection(
+                    ("example", "selected", "head-a"), project_root=str(tmp_path),
+                )
+            else:
+                attachment.selection = ("example", "selected", "head-a")
+                attachment.publication(None, "fixture disconnected")
+            await pilot.pause()
+            assert app.query_one(Collapsible).collapsed
+            assert not panel.window.sources
+            health = str(app.query_one(".timeline-health", Static).content)
+            assert ("Agenda: error" in health) == (failure != "awaiting")
+            details = str(app.query_one(".timeline-state", Static).content)
+            if failure == "publication":
+                assert "fixture disconnected" in details
+            elif failure == "missing-root":
+                assert "worktree root is unavailable" in details
+            else:
+                assert "error" not in health.lower()
+            await attachment.close()
 
     asyncio.run(check())
 

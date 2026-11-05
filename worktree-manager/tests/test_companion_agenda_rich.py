@@ -304,8 +304,14 @@ def test_rich_push_history_hide_reopen_and_reload_reuse_one_coarse_subscription(
             await pilot.press("pageup")
             anchor = timeline.capture_anchor()
             assert anchor is not None and not timeline.window.follow_live
+            app._receive_agenda(app._data, app._agenda_generation, app._agenda_cancel, None, None)
+            await pilot.pause()
+            agenda_key = app._rich_agenda_attachment.token.identity.source_key
+            assert timeline.window.sources[agenda_key].availability.value == "unknown"
+            assert "Agenda: error" not in str(app.query_one(".timeline-health", Static).content)
             publications.put(managed["update"]())
             await until(pilot, lambda: len(timeline.window.events) == 14)
+            assert timeline.window.sources[agenda_key].availability.value == "observed"
             await pilot.pause()
             assert len(timeline.window.unread) == 1
             row = timeline.layout_index.anchor_row(anchor)
@@ -327,12 +333,14 @@ def test_rich_push_history_hide_reopen_and_reload_reuse_one_coarse_subscription(
             )
             key = app._rich_agenda_attachment.token.identity.source_key
             await until(pilot, lambda: timeline.window.sources[key].availability.value == "unavailable")
+            assert "Agenda: error" in str(app.query_one(".timeline-health", Static).content)
             for _ in range(70):
                 managed["update"]()
             publications.put(managed["publication"]())
             await until(pilot, lambda: len(timeline.window.events) == 85)
             assert tuple(timeline.window.events[:15]) == retained
             assert timeline.window.sources[key].availability.value == "observed"
+            assert Provider.AGENDA not in app._timeline_panel._provider_notices
             old_data, old_generation, old_cancelled = app._data, app._agenda_generation, app._agenda_cancel
             app.action_refresh()
             await until(pilot, lambda: len(calls) == 2 and not app._loading)

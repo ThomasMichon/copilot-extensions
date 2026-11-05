@@ -463,10 +463,10 @@ class TimelineWindow:
     def recover_snapshot(
         self, snapshot: TimelineSnapshot, replay: tuple[LiveDelta, ...],
     ) -> WindowResult:
-        """Atomically restore an unavailable source through a bounded exact replay."""
+        """Atomically restore an inactive source through a bounded exact replay."""
         state = self._source(snapshot.token)
         if (
-            state is None or state.availability is not Availability.UNAVAILABLE
+            state is None or state.availability not in {Availability.UNAVAILABLE, Availability.UNKNOWN}
             or state.position is None or snapshot.availability is not Availability.OBSERVED
             or not isinstance(replay, tuple) or not 1 <= len(replay) <= 4
             or any(not isinstance(delta, LiveDelta) or delta.token != snapshot.token for delta in replay)
