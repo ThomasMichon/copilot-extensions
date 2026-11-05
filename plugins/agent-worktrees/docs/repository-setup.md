@@ -253,6 +253,15 @@ the required-module/readiness owners separately and retain their refusal,
 restart and consent boundaries. This command is not an ordinary-launch hook,
 a suite update, or permission to deploy a runtime.
 
+Planning can inspect repository declarations without trusting their execution.
+Native acquisition still enforces Copilot's own configuration trust: a
+repository-only marketplace needs the selected checkout's native folder trust,
+while an already user-declared source does not. This command never grants that
+trust or synthesizes user configuration to bypass native trust. The caller must establish
+any required trust through its admitted repository/worktree setup owner;
+untrusted repository-only acquisition remains unsuccessful. Execution consent
+for `repos setup` is not itself a Copilot folder-trust record.
+
 ## Manager caller and current qualification
 
 The [Manager setup caller](../../../worktree-manager/README.md#optional-repository-setup)
