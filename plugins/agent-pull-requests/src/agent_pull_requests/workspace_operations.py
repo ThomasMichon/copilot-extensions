@@ -13,6 +13,7 @@ import threading
 import time
 
 from .generation_cache import GenerationCache
+from .attention_acquisition import AttentionInputs
 from .native_read import NativeReadHandler
 from .workspace_conversation import conversation_key as conversation_key
 from .owner_read import OwnerReadBudgetExceeded, OwnerReadHandler, REQUEST_SCHEMA
@@ -41,7 +42,8 @@ class WorkspaceOperations:
     """
 
     def __init__(self, store, cache, *, scope, read_owner, binding_ref,
-                 write_context=None, checkpoint, max_work_seconds, conversations=False) -> None:
+                 write_context=None, checkpoint, max_work_seconds, conversations=False,
+                 attention_owner: Callable[[dict], AttentionInputs] | None = None) -> None:
         if (
             not isinstance(cache, GenerationCache)
             or not isinstance(read_owner, (OwnerReadHandler, NativeReadHandler))
@@ -50,6 +52,7 @@ class WorkspaceOperations:
             or type(max_work_seconds) not in (int, float)
             or not math.isfinite(max_work_seconds) or max_work_seconds <= 0
             or type(conversations) is not bool
+            or attention_owner is not None and (not callable(attention_owner) or not conversations)
         ):
             raise ValueError("actual workspace owner inputs required")
         self.scope = _scope({**scope, "number": 1})
@@ -67,6 +70,7 @@ class WorkspaceOperations:
         self.write_context, self.checkpoint = write_context, checkpoint
         self.max_work_seconds = max_work_seconds
         self.conversations = conversations
+        self.attention_owner = attention_owner
         self._materializations = OrderedDict()
         self._materialization_lock = threading.Lock()
 
@@ -184,9 +188,15 @@ class WorkspaceOperations:
             }
             if self.conversations:
                 from .conversation_store import ConversationStore
+                attention = None
+                if publication["status"] == "published" and self.attention_owner is not None:
+                    attention = self.attention_owner(copy.deepcopy(generation))
+                    if type(attention) is not AttentionInputs:
+                        raise ValueError("actual attention owner inputs required")
                 result["conversation"] = (
                     ConversationStore(self.store).observe_workspace(
                         generation, expires_at=expires_at, checkpoint=check,
+                        attention=attention,
                     )
                     if publication["status"] == "published"
                     else {"status": "not_observed", "reason": "cache_publication_not_confirmed"}

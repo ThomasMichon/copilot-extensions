@@ -292,6 +292,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   separates explicit owner-layout expansion, actual observation/feedback
   integration and the optional authenticated reader; it is not implemented
   by the inert projection or conversation ACK.
+  Its A1 explicit data-owner expansion merged in #10641; actual observation/
+  confirmed-feedback integration and negotiated serving remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -929,6 +931,50 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Compose the finite attention acquisition half
+
+- The existing workspace acquisition path now accepts trusted, generation-bound
+  current interest/policy inputs and atomically records attention with its
+  actual journal observation after confirmed cache publication. Default
+  embeddings remain unchanged; neither serving nor reading adopts v4.
+- Preserve meaningful age on semantic nonevents and restart, retain the first
+  unhandled event's age, and begin a new age only after a handled position or a
+  fresh epoch. Omitted interests, missing draft and incomplete path/policy
+  evidence remain unavailable rather than becoming silent exclusions.
+- The final acquisition/workspace/native-read/protected-review packet passes
+  133 cases; the earlier 46-case atomic acquisition/adoption/journal packet
+  overlaps it. The 64 standalone service cases pass with bounded cleanup
+  verified. Existing strict service analysis passes Python 3.10 Linux and
+  Windows targets, not new plugin-wide strict admission or native Windows
+  execution. Install-contract, fatal lint and documentation checks pass.
+- The first review identified an age reset when unknown or omitted selection
+  recovers. Only a confirmed `False -> True` admission now starts a new
+  selection age; outage recovery preserves it. The corrected 52-case
+  acquisition/adoption/journal packet passes, including restart controls.
+- This is only A2's acquisition half. A1's provenance references cannot recover
+  an original pre-effect captured position once concurrent journal input has
+  replaced it. Protected captured-feedback and interest-specific self-echo
+  integration must resolve that durable capture boundary before claiming A2;
+  no global echo suppression or newest-cursor baseline is acceptable. A3
+  negotiated serving and the full parent acceptance remain open.
+
+### 2026-11-04 - Land A1 and continue actual attention integration
+
+- #10641 merged as `04659cf43c535038b5bdccfeb5b473ac55d13c6f`
+  after exact-head Copilot approval with no findings and successful actual
+  CI. Managed completion reconciled the existing source worktree.
+- The affected source packet passed 83 adoption/journal/projection, 123 coupled
+  replay/review/workspace and 64 standalone cases. The final 47-case
+  adoption/journal rerun passed after clarifying v4 serving refusal; it is a
+  repeated subset, not additional unique coverage. All bounded cleanup passed.
+- Re-read the canonical gate and admitted contract after merge. Continue A2
+  actual acquisition and protected-feedback integration, then A3 negotiated
+  reading. Self-echo handling must be interest-specific: a confirmed comment
+  remains real new conversation input for other participants. Do not suppress
+  the global journal event to hide one participant's own echo.
+- No serving volume, credential, policy or production process changed. A1 is
+  not a running queue or completion of the full parent effort.
 
 ### 2026-11-04 - Expand the existing attention data owner after contract review
 

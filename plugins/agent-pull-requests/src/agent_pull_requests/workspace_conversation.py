@@ -22,6 +22,27 @@ def conversation_key(scope: dict, namespace: str) -> PRKey:
     )
 
 
+def observation_interval(sections: dict) -> tuple[int, int] | None:
+    """Conservative bounds over the data-bearing sections of a validated generation."""
+    intervals = []
+    for section in sections.values():
+        if section["data"] is None:
+            continue
+        start, end = section["observed_from"], section["observed_to"]
+        if start is None or end is None:
+            return None
+        start, end = _instant(start).timestamp(), _instant(end).timestamp()
+        if start < 0 or end < start:
+            raise ValueError("invalid workspace observation interval")
+        intervals.append((start, end))
+    if not intervals:
+        return None
+    return (
+        math.floor(min(start for start, _ in intervals)),
+        math.ceil(max(end for _, end in intervals)),
+    )
+
+
 def project_generation(
     generation: dict, namespace: str, previous: Observation | None
 ) -> Observation | None:
@@ -40,18 +61,8 @@ def project_generation(
     }.get(pull.get("status"))
     if state is None or not revision["head_sha"] or not revision["target_sha"]:
         return None
-    intervals = []
-    for section in sections.values():
-        if section["data"] is None:
-            continue
-        start, end = section["observed_from"], section["observed_to"]
-        if start is None or end is None:
-            return None
-        start, end = _instant(start).timestamp(), _instant(end).timestamp()
-        if start < 0 or end < start:
-            raise ValueError("invalid workspace observation interval")
-        intervals.append((start, end))
-    if not intervals:
+    interval = observation_interval(sections)
+    if interval is None:
         return None
 
     def evidence(name, data=None):
@@ -134,8 +145,7 @@ def project_generation(
         Candidate(revision["head_sha"], revision["target_sha"]),
         # The journal's v1 integer-second bounds must contain the native interval.
         # Rounding inward would invent ordering between overlapping observations.
-        math.floor(min(start for start, _ in intervals)),
-        math.ceil(max(end for _, end in intervals)),
+        *interval,
         state,
         complete,
         author,

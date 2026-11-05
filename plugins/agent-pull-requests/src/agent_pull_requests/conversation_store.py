@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict
 
 from .attention import Cursor, PRKey
+from .attention_acquisition import AttentionInputs, observe_attention, unavailable_attention
+from .attention_state import AttentionState
 from .conversation_journal import ConversationJournal, Observation, PROTOCOL
 from .watch_replay_store import ReplayStore, ReplayStoreInvalid
 
@@ -131,25 +134,70 @@ class ConversationStore:
         *,
         expires_at: int,
         checkpoint: Callable[[], None] | None = None,
+        attention: AttentionInputs | None = None,
     ) -> dict:
         """Project trusted acquisition under the same journal transaction, not HTTP ingest."""
-        from .workspace_conversation import conversation_key, project_generation
+        from .workspace_conversation import conversation_key, observation_interval, project_generation
 
-        def observe(journal: ConversationJournal) -> dict:
+        def observe(document: dict) -> dict:
+            if document["version"] not in (3, 4):
+                raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
+            if attention is not None and document["version"] != 4:
+                raise ReplayStoreInvalid("attention requires explicit owner adoption")
+            journal = ConversationJournal(document["conversations"])
             key = conversation_key(generation["scope"], self.owner.namespace)
             record = journal._find(key)
             previous = Observation.restore(record["current"]) if record is not None else None
             value = project_generation(generation, self.owner.namespace, previous)
-            if value is None:
-                return {"status": "unavailable", "reason": "candidate_state_or_interval_missing"}
-            if previous is not None and previous.terminal and not value.complete:
-                return {"status": "unavailable", "reason": "terminal_requires_complete_observation"}
+            attention_state = None
+            interval = None
+            if attention is not None:
+                attention_state = AttentionState(document["attention"])
+                interval = observation_interval(generation["sections"])
+                if interval is None:
+                    return {"status": "unavailable", "reason": "observation_interval_missing"}
+                scoped_key = asdict(key)
+                watermark = max(
+                    (row["facts"]["observed_at"] for row in attention_state.records
+                     if row["facts"]["key"] == scoped_key),
+                    default=0,
+                )
+                watermark = max(watermark, previous.observed_to if previous is not None else 0)
+                current = value.document() if value is not None else None
+                if current is not None and value is not None and value.terminal:
+                    current["sections"] = {}
+                same = current is not None and record is not None and current == record["current"]
+                if interval[0] < watermark and not (same and interval[1] >= watermark):
+                    return {
+                        "status": "stale_observation",
+                        "cursor": {"epoch": record["epoch"], "sequence": record["sequence"]} if record else None,
+                    }
+            if value is None or previous is not None and previous.terminal and not value.complete:
+                result = {
+                    "status": "unavailable",
+                    "reason": "candidate_state_or_interval_missing" if value is None
+                    else "terminal_requires_complete_observation",
+                }
+                if attention is not None and attention_state is not None and interval is not None:
+                    result["attention"] = unavailable_attention(
+                        attention_state, key, generation, attention, interval[1],
+                    )
+                    document["attention"] = attention_state.snapshot()
+                return result
             expected = Cursor(record["epoch"], record["sequence"]) if record else None
-            return journal.observe(
+            result = journal.observe(
                 value, expected=expected,
                 reopen=bool(previous and previous.terminal and value.complete and value.state == "open"),
             )
+            if attention is not None and result["status"] in ("observed", "unchanged"):
+                state = AttentionState(document["attention"])
+                result["attention"] = observe_attention(
+                    state, value, Cursor(**result["cursor"]), generation, attention,
+                )
+                document["attention"] = state.snapshot()
+            document["conversations"] = journal.snapshot()
+            return result
 
-        return self._transaction(
+        return self.owner._review_transaction(
             observe, expires_at=expires_at, checkpoint=checkpoint, persist=True,
         )
