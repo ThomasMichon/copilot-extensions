@@ -2756,6 +2756,11 @@ composition prerequisites, and review/validation rules.
   zero basic and zero unclassified paths**. Two additional files belong to
   existing strict Credential Relay and Dispatch-service scopes; no new
   consumer project is admitted.
+- This documentation-only reconciliation passes the actual inventory CLI,
+  all-row/count correspondence, documentation consistency and effort-structure
+  checks. It does not rerun or replace the foundation's unit/MyPy packets;
+  clean-room and live-venue tiers are inapplicable because no runtime,
+  provisioning or installation behavior changes.
 - Next: integrate canonical consumer aliases, emitted/source correspondence
   and remaining native/interpreter gates for #10331, #10362 and #10371.
   The specific 3.11-only TOML negative control still needs exact evidence
