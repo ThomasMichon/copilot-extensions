@@ -156,6 +156,10 @@ admission with a stop-aware 250 ms retry backoff. Fresh ownership checks must
 succeed before a new admission or returned ticket can be used; temporary
 database locks do not permanently disable a still-current connector. Unavailable
 evidence never confirms ownership or authorizes retirement.
+Ownership probes run off the event loop through the existing thread boundary,
+including admission, credential-access and stale-owner rechecks. Cancellation
+retains and drains the bounded read-only SQLite probe before its caller settles;
+native control and other coroutines remain responsive while it finishes.
 The existing local-control worker independently observes the current database
 fence and canonical selected slot, authenticates that exact owner's existing
 ready health, and rechecks both before scheduling and applying its own stop.

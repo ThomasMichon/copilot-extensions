@@ -1,0 +1,9 @@
+{
+  "comment": "Keep ownership probes off-loop and drain them through cancellation",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

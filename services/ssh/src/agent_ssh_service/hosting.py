@@ -40,10 +40,27 @@ class RegisteredRelay(Protocol):
 _LEASE = "agent-ssh-service.lock"
 
 
-def _require_writer(writer: FencedWriter) -> None:
-    owner = writer.observed_owner()
+async def _observe_writer(writer: FencedWriter) -> str | None:
+    probe = asyncio.create_task(asyncio.to_thread(writer.observed_owner))
+    try:
+        return await asyncio.shield(probe)
+    except asyncio.CancelledError:
+        await _drain(probe)
+        raise
+
+
+async def _require_writer(writer: FencedWriter) -> None:
+    owner = await _observe_writer(writer)
     check(owner is not None, "service-writer-unavailable")
     check(owner == writer.owner, "stale-service-writer")
+
+
+async def _fenced_access(writer: FencedWriter,
+                         access_token: Callable[[], Coroutine[Any, Any, str]]) -> str:
+    await _require_writer(writer)
+    access = await access_token()
+    await _require_writer(writer)
+    return access
 
 
 class FencedConnector(ServiceConnector):
@@ -54,9 +71,9 @@ class FencedConnector(ServiceConnector):
         super().__init__(**options)
 
     async def _admit(self, session: ClientSession) -> str:
-        _require_writer(self.writer)
+        await _require_writer(self.writer)
         ticket = await super()._admit(session)
-        _require_writer(self.writer)
+        await _require_writer(self.writer)
         return ticket
 
     async def run(self, stop: asyncio.Event) -> None:
@@ -71,7 +88,7 @@ class FencedConnector(ServiceConnector):
                     except asyncio.TimeoutError:
                         continue
                     return
-                if str(error) != "stale-service-writer" or self.writer.current():
+                if str(error) != "stale-service-writer" or await _observe_writer(self.writer) == self.writer.owner:
                     raise
                 await stop.wait()
                 return
@@ -212,10 +229,7 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None,
             original_access = credentials.access_token
 
             async def current_access() -> str:
-                _require_writer(lifecycle.writer)
-                access = await original_access()
-                _require_writer(lifecycle.writer)
-                return access
+                return await _fenced_access(lifecycle.writer, original_access)
 
             credentials_access = current_access
         if "relay" in selected:

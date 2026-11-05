@@ -304,11 +304,12 @@ def test_unavailable_connector_retry_remains_interruptible(
 
     async def scenario() -> None:
         unavailable, stop = asyncio.Event(), asyncio.Event()
+        loop = asyncio.get_running_loop()
         observed_owner = active.observed_owner
         def observe() -> str | None:
             owner = observed_owner()
             if owner is None:
-                unavailable.set()
+                loop.call_soon_threadsafe(unavailable.set)
             return owner
         async def connect(current: Any, _stop: asyncio.Event) -> None:
             await current._admit(cast(Any, None))
@@ -351,6 +352,8 @@ def test_current_connector_resumes_after_real_database_lock(
 
     async def scenario() -> None:
         stop, unavailable, admitted = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        loop = asyncio.get_running_loop()
+        probe_lock = threading.Lock()
         probes: list[tuple[float, float, str | None]] = []
         tickets: list[str] = []
         used: list[str] = []
@@ -360,9 +363,11 @@ def test_current_connector_resumes_after_real_database_lock(
         def observe() -> str | None:
             started = time.monotonic()
             owner = observed_owner()
-            probes.append((started, time.monotonic(), owner))
-            if sum(value is None for _start, _end, value in probes) >= 2:
-                unavailable.set()
+            with probe_lock:
+                probes.append((started, time.monotonic(), owner))
+                ready = sum(value is None for _start, _end, value in probes) >= 2
+            if ready:
+                loop.call_soon_threadsafe(unavailable.set)
             return owner
 
         async def ticket(_self: Any, _session: Any) -> str:
@@ -390,7 +395,8 @@ def test_current_connector_resumes_after_real_database_lock(
             await asyncio.wait_for(admitted.wait(), 3)
             assert used == [tickets[-1]]
             assert active.current() and store.snapshot() == baseline
-            failed = [(start, end) for start, end, owner in probes if owner is None]
+            with probe_lock:
+                failed = [(start, end) for start, end, owner in probes if owner is None]
             assert failed[1][0] - failed[0][1] >= 0.2
         finally:
             blocker.rollback()
@@ -398,6 +404,103 @@ def test_current_connector_resumes_after_real_database_lock(
             stop.set()
             outcome, = await asyncio.gather(task, return_exceptions=True)
         assert outcome is None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("phase", [
+    "pre-admission", "post-admission", "pre-credential", "post-credential", "stale-recheck",
+])
+def test_real_locked_ownership_probe_keeps_loop_responsive_and_settles(
+    config: ServiceConfig, writer: type[FencedWriter], monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    from agent_ssh_service.config import SSHServiceError
+    from agent_ssh_service.hosting import FencedConnector, _fenced_access
+    from fleet_manager.gateway_service_connector import ServiceConnector
+
+    active = writer(config, "current-owner")
+    active.activate()
+    if phase == "stale-recheck":
+        writer(config, "different-owner").activate()
+        assert active.observed_owner() == "different-owner"
+    connector = object.__new__(FencedConnector)
+    connector.writer = active
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        locked, started, finished = threading.Event(), threading.Event(), threading.Event()
+        observed = active.observed_owner
+        timings: list[float] = []
+        outcomes: list[str | None] = []
+        thread_ids: list[int] = []
+        loop_thread = threading.get_ident()
+        with closing(sqlite3.connect(active.root / "directory.sqlite3")) as blocker:
+            def lock() -> None:
+                blocker.execute("BEGIN EXCLUSIVE")
+                locked.set()
+            def observe() -> str | None:
+                slow = locked.is_set()
+                if slow:
+                    thread_ids.append(threading.get_ident())
+                    timings.append(time.monotonic())
+                    started.set()
+                try:
+                    owner = observed()
+                    if slow:
+                        outcomes.append(owner)
+                    return owner
+                finally:
+                    if slow:
+                        timings.append(time.monotonic())
+                        finished.set()
+            async def ticket(_self: Any, _session: Any) -> str:
+                if phase == "post-admission":
+                    lock()
+                return "fixture-ticket"
+            async def access() -> str:
+                if phase == "post-credential":
+                    lock()
+                return "fixture-access"
+            async def stale(_self: Any, _stop: asyncio.Event) -> None:
+                raise SSHServiceError("stale-service-writer")
+            async def operation() -> Any:
+                if "credential" in phase:
+                    return await _fenced_access(active, access)
+                if phase == "stale-recheck":
+                    return await connector.run(stop)
+                return await connector._admit(cast(Any, None))
+            async def progress() -> None:
+                deadline = time.monotonic() + 4
+                while not started.is_set():
+                    assert time.monotonic() < deadline, "actual locked probe did not start"
+                    await asyncio.sleep(0.005)
+                assert not finished.is_set(), "SQLite busy timeout blocked another coroutine"
+            monkeypatch.setattr(active, "observed_owner", observe)
+            monkeypatch.setattr(ServiceConnector, "_admit", ticket)
+            monkeypatch.setattr(ServiceConnector, "run", stale)
+            if phase.startswith("pre-") or phase == "stale-recheck":
+                lock()
+            monitor = asyncio.create_task(progress())
+            task = asyncio.create_task(operation())
+            outcome: object
+            try:
+                await asyncio.wait_for(monitor, 4)
+                task.cancel()
+                await asyncio.sleep(0.02)
+                assert not finished.is_set(), "cancelled caller must drain the real pending probe"
+                task.cancel()
+            finally:
+                task.cancel()
+                outcome, = await asyncio.gather(task, return_exceptions=True)
+                monitor.cancel()
+                await asyncio.gather(monitor, return_exceptions=True)
+                blocker.rollback()
+                stop.set()
+            assert isinstance(outcome, asyncio.CancelledError)
+            assert finished.is_set() and outcomes == [None]
+            assert len(thread_ids) == 1 and thread_ids[0] != loop_thread
+            assert timings[-1] - timings[0] >= 0.9
 
     asyncio.run(scenario())
 
