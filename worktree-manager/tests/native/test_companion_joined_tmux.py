@@ -71,6 +71,7 @@ def observed_mount(app):
         value=json.dumps({{
             'app_cells':list(app.size),'timeline_cells':list(timeline.size),
             'focus':type(app.focused).__name__,'follow_live':timeline.window.follow_live,
+            'bridge_members':len(app._bridge_attachment._members),
             'event_count':len(timeline.window.events),
             'sources':[{{'provider':state.token.identity.provider.value,
                         'before':state.before is not None,

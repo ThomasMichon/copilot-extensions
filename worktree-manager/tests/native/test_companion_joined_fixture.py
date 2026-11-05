@@ -45,6 +45,7 @@ def test_observer_retries_only_native_sharing_without_advancing(
     app = SimpleNamespace(
         size=(80, 24), focused=None, query_one=lambda _kind: timeline,
         set_interval=lambda _seconds, callback: callbacks.append(callback),
+        _bridge_attachment=SimpleNamespace(_members={}),
     )
     namespace = {
         "Path": Path, "json": json, "os": SimpleNamespace(name=platform),
