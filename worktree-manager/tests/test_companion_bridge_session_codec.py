@@ -88,9 +88,14 @@ def test_unknown_native_kind_and_missing_time_are_not_invented_causal_or_input_e
     token = codec.token(body, 1)
     event = codec.events(body, token)[0]
     assert event.kind.value == "source-event" and event.observed_at is None and event.occurred_at is None
-    assert TimelineLayout._time(event, None) == "time unknown"
     window = TimelineWindow()
     assert window.bind(token).applied and window.apply_snapshot(codec.snapshot(body, token)).applied
+    layout = TimelineLayout()
+    layout.rebuild(window, 80)
+    assert layout.blocks[0].heading_text.startswith("--:--  ")
+    assert window.toggle_expansion(event.ref).applied
+    layout.rebuild(window, 80)
+    assert "Time: unknown" in layout.blocks[0].detail_text
     # Unknown time has a deterministic display merge, not a fabricated timestamp.
     assert window.apply_snapshot(codec.snapshot(body, token)).applied
 
