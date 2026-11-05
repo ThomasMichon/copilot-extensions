@@ -238,6 +238,9 @@ def _remove_managed_worktree(
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     if reason := terminal_pair_progress.gc_preservation_reason(yaml_path):
         return False, [reason]
+    from .checkout_data import preservation_reason
+    if rec.worktree_path and (reason := preservation_reason(rec.worktree_path)):
+        return False, [reason]
     if force:
         try:
             sessions.kill_tmux_session(rec.worktree_id)
@@ -278,6 +281,8 @@ def _remove_managed_worktree(
                     if force:
                         removed = False
                     else:
+                        if reason := preservation_reason(rec.worktree_path):
+                            return False, [reason]
                         removed = (
                             git_ops.git(
                                 "worktree",
@@ -310,6 +315,8 @@ def _remove_managed_worktree(
             warns.append(f"worktree remove failed: {exc}")
         if warns:
             return False, warns
+        if reason := preservation_reason(rec.worktree_path):
+            return False, [reason]
     if rec.branch:
         try:
             branch_ref = f"refs/heads/{rec.branch}"
@@ -403,6 +410,7 @@ def sweep_managed_worktrees(
     Returns ``{removed: [{id, reason}], skipped: [{id, reason}]}``.
     """
     from . import gc as gc_mod
+    from .checkout_data import preservation_reason
 
     if min_idle_secs is None:
         min_idle_secs = gc_mod.MANAGED_GC_GRACE_SECS
@@ -476,6 +484,9 @@ def sweep_managed_worktrees(
         )
         if verdict.action == "skip":
             result["skipped"].append({"id": rec.worktree_id, "reason": verdict.reason})
+            continue
+        if rec.worktree_path and (reason := preservation_reason(rec.worktree_path)):
+            result["skipped"].append({"id": rec.worktree_id, "reason": reason})
             continue
         # Resolved HERE, before any lock is taken (issue #4556 review): a
         # cross-machine owner probe can take up to the remote-probe timeout,

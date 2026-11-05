@@ -181,6 +181,78 @@ def test_confirmed_close_then_actual_finalize(final_owner, monkeypatch):
     assert current.status == "finalized" and current.resources[0].producer["phase"] == "closed"
 
 
+@pytest.mark.parametrize("layout", ["legacy", "managed"])
+def test_completed_finalize_retains_agenda_without_an_archive_dependency(
+    final_owner, monkeypatch, layout,
+):
+    from pathlib import Path
+
+    from agent_worktrees import repos, worktree_data_store
+
+    root, path, config = final_owner
+    anchor = root / "anchor"
+    checkout = root / "checkout"
+    _git("worktree", "add", "-q", str(checkout), "-b", "worktree/owner", "base", cwd=anchor)
+    record = tracking.load_record(path)
+    record.worktree_path = str(checkout)
+    record.creation_nonce = "fixture-incarnation"
+    tracking.save_record(record, path)
+    registry = root / "fixture-repos.yaml"
+    registry.write_text(json.dumps({
+        "repos": {config.repo_name: {"remote": str(root / "origin.git")}},
+    }))
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: registry)
+    if layout == "legacy":
+        (anchor / ".git/info/exclude").write_text(".effort-agenda/\n")
+        home = checkout / ".effort-agenda/main"
+        home.mkdir(parents=True)
+    else:
+        placement = worktree_data_store.allocate_worktree_data(
+            config.repo_name, record.worktree_id, creation_nonce=record.creation_nonce,
+            domain="agendas", lane="main", store_id="a" * 32,
+        )
+        home = Path(placement.state_home)
+    member = home / "agenda.sqlite3"
+    member.write_bytes(b"synthetic agenda bytes, not a live database")
+    descriptor_root = path.parent.parent / "worktree-state"
+    before = {
+        item: item.read_bytes()
+        for item in descriptor_root.rglob("*") if item.is_file()
+    }
+    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda *_a: None)
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_a: None)
+    monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *_a: None)
+    events = []
+    monkeypatch.setattr(
+        finalize.activity, "log_event", lambda kind, **data: events.append((kind, data)),
+    )
+
+    assert finalize.validate_and_finalize("owner", config) is True
+    assert tracking.load_record(path).status == "finalized"
+    assert member.read_bytes() == b"synthetic agenda bytes, not a live database"
+    assert checkout.exists() is (layout == "legacy")
+    assert bool(_git("branch", "--list", "worktree/owner", cwd=anchor)) is (layout == "legacy")
+    assert any(
+        kind == "worktree_finalized" and data["removed"] is (layout == "managed")
+        for kind, data in events
+    )
+    if layout == "legacy":
+        assert any(
+            kind == "finalize_skipped_removal" and data["reason"] == "retained_data"
+            for kind, data in events
+        )
+    assert {
+        item: item.read_bytes()
+        for item in descriptor_root.rglob("*") if item.is_file()
+    } == before
+    if layout == "managed":
+        observed = worktree_data_store.read_worktree_data(
+            config.repo_name, "owner", store_id="a" * 32,
+        )
+        assert observed is not None and observed.placements == (placement,)
+        assert not observed.live_authority
+
+
 def test_separate_process_producer_waits_for_lock_then_refuses_finalizing(final_owner):
     root, path, config = final_owner
     signal = root / "producer-entered"

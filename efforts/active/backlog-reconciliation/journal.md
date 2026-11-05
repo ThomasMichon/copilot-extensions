@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Four standalone/declaration contracts, eleven comparisons and two whole Active homes](<journal/2026/11.04 standalone-declaration-contracts.md>)
+
+- [2026-11-04 - Two whole installation contracts, five comparisons and retained parked/consumer boundaries](<journal/2026/11.04 installation-scope-contracts.md>)
+
+- [2026-11-04 - Four head-succession contracts, seven comparisons and two whole Draft-home distinctions](<journal/2026/11.04 head-succession-contracts.md>)
+
 - [2026-11-04 - Five qualification/cache contracts, fifteen comparisons and one independently verified finite expectation correction](<journal/2026/11.04 qualification-cache-contracts.md>)
 
 - [2026-11-04 - Five native-supervisor contracts, fifteen comparisons and two actual whole-body tracking folds](<journal/2026/11.04 supervisor-reconciliation-contracts.md>)

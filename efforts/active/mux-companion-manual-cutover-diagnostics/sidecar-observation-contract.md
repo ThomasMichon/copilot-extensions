@@ -30,8 +30,10 @@ from the same complete verified export cut, without changing its manifest.
 including complete nullable attribution and fresh retained-metadata verification;
 explicit passive owner/provider discovery follows in #10503. #10512 composes
 explicit policy-first managed export, revision-pinned provenance and fresh local
-collection readback through those selected owners. Automatic
-collection and existing-tick orchestration, complete source
+collection readback through those selected owners. #10520 integrates this
+boundary into the existing tick with strict machine-local opt-in, bounded shared
+execution and independent destination/source/lock/machine scheduling contexts.
+Legacy rescue, actual archive acknowledgment, complete source
 coverage, qualified current answerability/PRE, installed and native acceptance
 remain open.
 Providers advertise actual running support before independently installed
