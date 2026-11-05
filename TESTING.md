@@ -6410,6 +6410,13 @@ python tools/run-manager-runtime-acceptance.py --root .validation
 
 It uses the existing process-tree containment supervisor and one 300-second
 group budget for fresh/legacy-repair fixture construction plus the assertions.
+All Manager acceptance contracts retain their sandbox and report its path when
+process settlement raises `UnreapedProcessError`, preserving that original error.
+Successful runs and settled failures still clean up normally. A retained sandbox
+may remain owned by unresolved processes; it is not ordinary failed-test debris.
+Run `python -m pytest -q tools/test_run_plugin_tests.py -k manager_acceptance_`
+through the bounded test supervisor for the focused wrapper controls. They inject
+the unsettled-process error without creating a genuinely unreaped process.
 Fixtures are constructed before pytest's unchanged 30-second item checks;
 no constructor, dependency policy, package health or failed-selection assertion
 is mocked. The assertions run through `run-plugin-tests.py` with explicit

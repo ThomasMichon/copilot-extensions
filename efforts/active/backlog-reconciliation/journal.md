@@ -3,6 +3,18 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Two healthy-replacement and stale-slot recovery contracts](<journal/2026/11.04 bridge-replacement-recovery-contracts.md>)
+
+- [2026-11-04 - Two per-unit supervision and independent-native-lifetime contracts](<journal/2026/11.04 supervision-native-lifetime-contracts.md>)
+
+- [2026-11-04 - Two existing-branch and receiving-membership contracts](<journal/2026/11.04 branch-membership-boundaries-contracts.md>)
+
+- [2026-11-04 - One four-outcome resident-demand and single-flight contract](<journal/2026/11.04 resident-demand-singleflight-contract.md>)
+
+- [2026-11-04 - Two prose-casing and authorized marketplace-delivery contracts](<journal/2026/11.04 casing-local-marketplace-contracts.md>)
+
+- [2026-11-04 - Two indexing-domain and standalone-lifecycle contracts](<journal/2026/11.04 index-domain-standalone-contracts.md>)
+
 - [2026-11-04 - Two operation-account and authorization-journey contracts](<journal/2026/11.04 account-preflight-auth-journey-contracts.md>)
 
 - [2026-11-04 - Two live-messaging and session-tool contracts](<journal/2026/11.04 native-messaging-session-tools-contracts.md>)
