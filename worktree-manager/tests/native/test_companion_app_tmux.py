@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 import uuid
+from unittest import mock
 
 import psutil
 import pytest
@@ -91,10 +93,44 @@ class AttachedClient:
             self.drain()
             self.process.wait(timeout=10)
         finally:
-            if self.process.poll() is None:
-                self.process.terminate()
-                self.process.wait(timeout=5)
-            os.close(self.master)
+            try:
+                if self.process.poll() is None:
+                    self.process.terminate()
+                    self.process.wait(timeout=5)
+            finally:
+                os.close(self.master)
+
+
+def retire_fixture(mux, client, server, session, observer) -> None:
+    """Attempt every independent retirement even after a graceful command fails."""
+    def close_server():
+        try:
+            try:
+                _, error = server.communicate(timeout=10)
+            finally:
+                if server.poll() is None:
+                    server.terminate()
+                    server.communicate(timeout=5)
+        finally:
+            server.stderr.close()
+        assert server.returncode == 0, error.decode("utf-8", errors="replace")
+
+    with ExitStack() as cleanup:
+        cleanup.callback(close_server)
+        cleanup.callback(mux, "kill-session", "-t", session, check=False)
+        cleanup.callback(mux, "set-option", "-g", "exit-empty", "on", check=False)
+        if client is not None:
+            cleanup.callback(client.close)
+        cleanup.callback(mux, "detach-client", "-s", session, check=False)
+        if client is not None and client.process.poll() is None and observer is not None:
+            if mux("select-pane", "-t", observer, check=False).returncode == 0:
+                client.send(b"\x1b")
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    client.drain()
+                    if observer not in mux("list-panes", "-t", session, "-F", "#{pane_id}", check=False).stdout.splitlines():
+                        break
+                    time.sleep(.025)
 
 
 def fixture_engine(root: Path, checkout: Path) -> tuple[Path, Path]:
@@ -288,26 +324,56 @@ def test_actual_companion_attached_client_browsing_resize_and_return(
             "display": "tmux server capture; not headed pixels or frame latency",
         }))
     finally:
-        if client is not None and client.process.poll() is None and observer is not None:
-            if mux("select-pane", "-t", observer, check=False).returncode == 0:
-                client.send(b"\x1b")
-                deadline = time.monotonic() + 5
-                while time.monotonic() < deadline:
-                    client.drain()
-                    if observer not in mux("list-panes", "-t", name, "-F", "#{pane_id}", check=False).stdout.splitlines():
-                        break
-                    time.sleep(.025)
-        mux("detach-client", "-s", name, check=False)
-        try:
-            if client is not None:
-                client.close()
-        finally:
-            mux("set-option", "-g", "exit-empty", "on", check=False)
-            mux("kill-session", "-t", name, check=False)
-            try:
-                _, server_error = server.communicate(timeout=10)
-            finally:
-                if server.poll() is None:
-                    server.terminate()
-                    server.communicate(timeout=5)
-        assert server.returncode == 0, server_error.decode("utf-8", errors="replace")
+        retire_fixture(mux, client, server, name, observer)
+
+
+@pytest.mark.parametrize("failure", [
+    "select-pane", "detach-client", "set-option", "kill-session", "client-close",
+])
+def test_native_fixture_retirement_survives_graceful_timeout(failure):
+    attempted = []
+
+    def operation(name):
+        attempted.append(name)
+        if failure == name:
+            raise subprocess.TimeoutExpired(name, 5)
+
+    def mux(command, *args, **kwargs):
+        operation(command)
+        return subprocess.CompletedProcess([], 0, stdout="")
+
+    client, server = mock.Mock(), mock.Mock()
+    client.process.poll.return_value = None
+    client.close.side_effect = lambda: operation("client-close")
+    server.communicate.side_effect = lambda **kwargs: (operation("server-wait"), b"")
+    server.poll.return_value = 0
+    server.returncode = 0
+    with pytest.raises(subprocess.TimeoutExpired):
+        retire_fixture(mux, client, server, "private", "%1")
+    assert attempted[-5:] == [
+        "detach-client", "client-close", "set-option", "kill-session", "server-wait",
+    ]
+    server.stderr.close.assert_called_once()
+
+
+def test_native_fixture_server_timeout_still_terminates_and_closes_pipe():
+    server = mock.Mock()
+    server.communicate.side_effect = [subprocess.TimeoutExpired("tmux", 10), (None, b"")]
+    server.poll.return_value = None
+    with pytest.raises(subprocess.TimeoutExpired):
+        retire_fixture(lambda *args, **kwargs: None, None, server, "private", None)
+    server.terminate.assert_called_once()
+    assert server.communicate.call_args_list == [mock.call(timeout=10), mock.call(timeout=5)]
+    server.stderr.close.assert_called_once()
+
+
+def test_native_fixture_client_timeout_still_closes_terminal():
+    client = AttachedClient.__new__(AttachedClient)
+    client.master, client.process, client.drain = 42, mock.Mock(), mock.Mock()
+    client.process.wait.side_effect = subprocess.TimeoutExpired("tmux-client", 5)
+    client.process.poll.return_value = None
+    with mock.patch.object(os, "close") as close:
+        with pytest.raises(subprocess.TimeoutExpired):
+            client.close()
+        close.assert_called_once_with(42)
+    client.process.terminate.assert_called_once()
