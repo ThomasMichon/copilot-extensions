@@ -139,7 +139,7 @@ def prepare(project: Path, expected_digest: str, *, home: Path | None = None) ->
 
             status = update_acquisition.acquire_missing(
                 name, marketplace, copilot, cwd=project, revalidate=still_missing,
-                home=home / ".copilot",
+                copilot_home=home / ".copilot",
             )
             outcomes.append({"source": source, "status": status})
             result = revalidate()

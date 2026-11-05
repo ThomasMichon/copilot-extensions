@@ -193,11 +193,12 @@ def acquire(
 
 def acquire_missing(
     name: str, marketplace: str, copilot: str, *, cwd: Path,
-    revalidate: Callable[[], None], home: Path | None = None,
+    revalidate: Callable[[], None], copilot_home: Path,
 ) -> str:
     """Install one explicitly selected missing payload, without updating peers."""
     from . import activation_preservation, installer_run
 
+    copilot_home = copilot_home.resolve()
     started = monotonic()
 
     def checked_runner(*args, **kwargs):
@@ -210,7 +211,7 @@ def acquire_missing(
         return _run_update(*args, **kwargs)
 
     try:
-        with activation_preservation.activation_custody(home=home) as custody:
+        with activation_preservation.activation_custody(home=copilot_home) as custody:
             remaining = _TOTAL_BUDGET_S - (monotonic() - started)
             if remaining <= 0:
                 return "payload acquisition budget exhausted"
@@ -219,7 +220,7 @@ def acquire_missing(
                 f"{name}@{marketplace}", cwd=cwd,
                 timeout=min(_ATTEMPT_TIMEOUT_S, remaining), custody=custody,
                 runner=checked_runner,
-                **({"env": {**os.environ, "COPILOT_HOME": str(home)}} if home is not None else {}),
+                env={**os.environ, "COPILOT_HOME": str(copilot_home)},
             )
     except (
         activation_preservation.PluginStateError, installer_run.InstallerCleanupError,

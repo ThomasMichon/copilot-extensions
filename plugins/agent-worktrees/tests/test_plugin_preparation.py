@@ -63,10 +63,10 @@ def test_apply_acquires_only_missing_and_never_uses_core_name_lookup(selected, m
     install(home, "sample", "first")
     calls = []
 
-    def acquire(name, marketplace, copilot, *, cwd, revalidate, home):
+    def acquire(name, marketplace, copilot, *, cwd, revalidate, copilot_home):
         revalidate()
         calls.append((name, marketplace, cwd))
-        install(home.parent, name, marketplace)
+        install(copilot_home.parent, name, marketplace)
         return "OK (installed)"
 
     monkeypatch.setattr(update_acquisition, "acquire_missing", acquire)
@@ -115,10 +115,10 @@ def test_changed_selection_retains_completed_outcomes_without_next_action(select
     home, repo, settings = selected
     calls = []
 
-    def acquire(name, marketplace, copilot, *, cwd, revalidate, home):
+    def acquire(name, marketplace, copilot, *, cwd, revalidate, copilot_home):
         revalidate()
         calls.append(marketplace)
-        install(home.parent, name, marketplace)
+        install(copilot_home.parent, name, marketplace)
         document = json.loads(settings.read_text())
         document["extraKnownMarketplaces"]["second"]["source"]["ref"] = "changed"
         write(settings, document)
@@ -169,7 +169,7 @@ def test_native_revalidation_refusal_never_launches_or_replays(selected, monkeyp
     )
     result = update_acquisition.acquire_missing(
         "sample", "first", sys.executable, cwd=repo, revalidate=refuse,
-        home=home / ".copilot",
+        copilot_home=home / ".copilot",
     )
     assert not result.startswith("OK")
     assert calls == []

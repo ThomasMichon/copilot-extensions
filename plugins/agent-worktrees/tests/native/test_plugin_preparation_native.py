@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shutil
 import subprocess
-import sys
+import sysconfig
 import threading
 from urllib.parse import urlsplit
 
@@ -55,8 +55,12 @@ def test_native_acquisition_preserves_activation_and_checks_actual_payload(selec
 
 def test_real_cli_observation_and_unpinned_apply_never_acquire(selected):
     home, repo, _ = selected
+    entry = Path(sysconfig.get_path("scripts")) / (
+        "agent-worktrees.exe" if os.name == "nt" else "agent-worktrees"
+    )
+    assert entry.is_file()
     command = [
-        sys.executable, "-m", "agent_worktrees", "prepare-plugin-payloads",
+        str(entry), "prepare-plugin-payloads",
         "--repo", str(repo),
     ]
     for arguments, expected in (([], 0), (["--apply"], 1)):
