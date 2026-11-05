@@ -101,22 +101,21 @@ def _worker(root: Path) -> None:
 def _launcher(root: Path, environment) -> None:
     admit(root.parent, True)
     import agent_procutil as pu
-    from agent_procutil import _job_scopes
 
     python, python_env = pu.direct_python(sys.executable)
     replacement = {**environment, **python_env}
-    replacement.pop(_job_scopes.ENVIRONMENT_KEY, None)
-    process = pu.spawn_daemon(
-        [python, str(Path(__file__).resolve()), "--intermediate", str(root)],
-        env=replacement, cwd=root, log_path=root / "intermediate.log",
-        breakaway=False, console_children=True,
-    )
-    try:
-        process.wait(timeout=120)
-    finally:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=5)
+    with (root / "intermediate.log").open("wb") as log:
+        process = subprocess.Popen(
+            [python, str(Path(__file__).resolve()), "--intermediate", str(root)],
+            env=replacement, cwd=root, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=subprocess.STDOUT, **pu.no_window_kwargs(),
+        )
+        try:
+            process.wait(timeout=120)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
 
 
 def _intermediate(root: Path, environment) -> None:

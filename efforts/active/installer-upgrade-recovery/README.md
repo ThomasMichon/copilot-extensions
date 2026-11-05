@@ -1227,3 +1227,29 @@ checks pass. These are source corrections, not native lifetime qualification.
 The first run's original `process-reused` hold remains unmodified and is not
 retroactively settled by the second run's functional pass. Exact revised-head
 Windows/Linux proof, review/required CI, merge and release remain open.
+
+Run `42020741107` at `b947f06d92f7` clears all functional packets on both
+platforms, including Linux's previously failing readiness cases. Native proof
+still fails before the actual MCP hook. The exact-scope check exposes an
+incorrect attribution in the preceding diagnostic: the third Windows scope
+comes from the leased intermediate's own expiry Job, not an established
+runner Job. The fixture had launched a bounded intermediate through
+`spawn_daemon(breakaway=False)`. It now uses ordinary headless `Popen`, retaining
+the outer Job and unchanged inner caller-owned Job without introducing another
+daemon lifetime. A regression rejects using daemon admission for that bounded
+intermediate; exact inherited/outer/inner validation remains.
+
+Linux's native entry creates `libs/update-driver/.venv` before materialization,
+which refuses symlinks in canonical input. Its assertion did not print the full
+materializer result. The hosted step now declares its UV environment under the
+runner's temporary root instead of the canonical library, and the fixture prints
+every materialization finding on refusal. This does not change materialization
+policy or treat a skipped source as successful.
+
+The same head's required CI fails the daemon census: the removed MCP
+`Start-Process`/`nohup` sites remained listed and the new bounded MCP control was
+unclassified. The census now removes those retired sites and classifies both
+bounded fixture launches as caller-contained. Ten focused lane controls pass,
+as does the actual materialized stamp consumer (55.26 seconds). Native
+qualification and required CI must pass on the revised head; no failed result
+is waived or credited as acceptance.

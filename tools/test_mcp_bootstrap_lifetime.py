@@ -71,3 +71,28 @@ def test_native_caller_scopes_preserve_runner_and_both_fixture_jobs(monkeypatch,
     for incomplete in (scopes[:-1], (*inherited, inner), (outer, inner) if inherited else (inner, outer)):
         with pytest.raises(RuntimeError, match="exact inherited and two caller Jobs"):
             caller_scope_names({}, SimpleNamespace(name=outer), ";".join(incomplete))
+
+
+def test_native_intermediate_remains_bounded_without_an_extra_daemon_lease(tmp_path, monkeypatch):
+    lane.source_imports()
+    import agent_procutil as pu
+    import windows_normal_process_lifetime as fixture
+
+    calls = []
+    monkeypatch.setattr(fixture, "admit", lambda *_: None)
+    monkeypatch.setattr(pu, "direct_python", lambda executable: (executable, {}))
+
+    def reject_daemon(*args, **kwargs):
+        pytest.fail("the bounded intermediate must not acquire another daemon-expiry Job")
+
+    def popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(wait=lambda **_: 0, poll=lambda: 0)
+
+    monkeypatch.setattr(pu, "spawn_daemon", reject_daemon)
+    monkeypatch.setattr(fixture.subprocess, "Popen", popen)
+    environment = {"COPILOT_EXTENSIONS_OWNED_JOB_SCOPES": "Local\\ce-owned-job-" + "a" * 32}
+    fixture._launcher(tmp_path, environment)
+    command, arguments = calls[0]
+    assert command[-2:] == ["--intermediate", str(tmp_path)]
+    assert arguments["env"] == environment

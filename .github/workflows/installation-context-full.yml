@@ -1206,6 +1206,8 @@ jobs:
           --junit-dir "${{ runner.temp }}/mcp-bootstrap-functional"
       - name: Qualify actual MCP submitting Job and process-group destruction
         timeout-minutes: 18
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/mcp-native-environment
         run: >-
           uv run --project libs/update-driver --extra dev
           --with "pytest-timeout>=2.3,<3" --with packaging
