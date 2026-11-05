@@ -148,6 +148,131 @@ def test_parent_publication_recheck_is_ordered_and_fail_closed(denied):
         assert process.stdin.writes[-1] == b"deny\n"
 
 
+@pytest.mark.parametrize("outcome", [
+    "flat", "owned", "revoked", "missing-owner", "missing-selection", "foreign-lock",
+])
+def test_source_wheel_profile_requires_its_live_owner(outcome):
+    path = ROOT / "plugins" / "agent-worktrees" / "scripts" / "runtime_install_recheck.py"
+    spec = importlib.util.spec_from_file_location("_source_wheel_profile_unit", path)
+    assert spec and spec.loader
+    recheck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(recheck)
+    source = SimpleNamespace(
+        source_commit="a" * 40, assembly_hash="b" * 64, document=lambda: {"source": "selected"},
+    )
+    profile = {
+        "component": "agent-worktrees", "mode": "source",
+        "release": {"identity": "source:" + source.source_commit, "sha256": "sha256:" + source.assembly_hash},
+    }
+    binding = {
+        "profile": profile,
+        "source_lock": {"source": {} if outcome == "foreign-lock" else source.document()},
+        "build_profile": {}, "build_toolchain": {},
+    }
+    if outcome == "flat":
+        binding = profile
+    events = []
+
+    def verify():
+        events.append("verified")
+        if outcome == "revoked":
+            raise ValueError("revoked")
+
+    callback = None if outcome == "missing-owner" else verify
+    selection = None if outcome == "missing-selection" else {}
+    if outcome in ("flat", "owned"):
+        assert recheck.wheel_profile(binding, source, callback, selection, ValueError) == profile
+        assert events == ([] if outcome == "flat" else ["verified"])
+    else:
+        with pytest.raises(ValueError):
+            recheck.wheel_profile(binding, source, callback, selection, ValueError)
+        assert events == (["verified"] if outcome == "revoked" else [])
+
+
+@pytest.mark.parametrize("outcome", ["owned", "revoked", "foreign-native", "foreign-lock", "artifact"])
+def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
+    scripts = ROOT / "plugins" / "agent-worktrees" / "scripts"
+    identity = SimpleNamespace(plugin="agent-worktrees", document=lambda: {"source": "selected"})
+    policy = {
+        "status": "ready", "owner": {"pluginId": "agent-worktrees", "runtimeRoot": str(ROOT)},
+        "selection": {"allowSourceFallback": True},
+    }
+    plan = SimpleNamespace(
+        policy=lambda: policy, source_trigger="release-index-unavailable",
+        release_selection=object() if outcome == "artifact" else None,
+    )
+    profile = {"target": {}}
+    binding = {
+        "profile": profile,
+        "source_lock": {
+            "source": identity.document(), "policy": {} if outcome == "foreign-lock" else policy,
+            "trigger": plan.source_trigger, "target": {}, "component": "agent-worktrees", "extras": [],
+        },
+    }
+    wheels = SimpleNamespace(receipt=lambda: {
+        "binding": binding, "distributions": {"agent-worktrees": {}},
+    })
+    held, events = [], []
+
+    def verify():
+        assert held == [True]
+        events.append("verify")
+        if outcome == "revoked" and events.count("verify") == 3:
+            raise ValueError("revoked")
+
+    selected = SimpleNamespace(
+        payload=ROOT, identity=identity, profile=SimpleNamespace(record=lambda: profile), wheels=wheels,
+        local_packages=("agent-worktrees",), runtime_version="selected", verify=verify,
+    )
+
+    @contextmanager
+    def retain(*_args, **_kwargs):
+        held.append(True)
+        try:
+            yield selected
+        finally:
+            held.pop()
+
+    engine = SimpleNamespace(
+        _package_roots=lambda path: (path,), _package_name=lambda _path: "agent-worktrees",
+        _source_files=lambda _paths: (), _construction_hash=lambda *_args: "source",
+        _wheel_construction_hash=lambda *_args: "e" * 64,
+    )
+    native = ModuleType("runtime_install")
+    native.__file__ = str(scripts / ("foreign.py" if outcome == "foreign-native" else "runtime_install.py"))
+    native.engine = engine
+    native.runtime_source = SimpleNamespace(manifest_fields=lambda _identity: {"source": "selected"})
+
+    def install(_root, _payload, **options):
+        assert options["wheel_inputs"] is wheels
+        assert options["expected_wheel_selection"]["payload_hash"] == "e" * 64
+        for phase in ("helpers", "selector"):
+            options["_before_publish"]()
+            events.append(phase)
+        return {"runtime_version": "selected"}
+
+    native.install = install
+    monkeypatch.setitem(sys.modules, "runtime_install", native)
+    monkeypatch.setitem(sys.modules, "runtime_source_build", SimpleNamespace(retain_source_runtime_inputs=retain))
+    path = scripts / "runtime_install_source.py"
+    spec = importlib.util.spec_from_file_location("_worktrees_source_adapter_unit", path)
+    assert spec and spec.loader
+    adapter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(adapter)
+    arguments = {
+        "installation": {"payload_root": ROOT}, "component": "agent-worktrees",
+        "python": Path(sys.executable), "uv": sys.executable, "deadline": 1e20,
+    }
+    if outcome != "owned":
+        with pytest.raises(ValueError):
+            adapter.install_source_runtime(plan, **arguments)
+        assert "selector" not in events
+    else:
+        assert adapter.install_source_runtime(plan, **arguments)["runtime_version"] == "selected"
+        assert events == ["verify", "verify", "helpers", "verify", "selector", "verify"]
+    assert not held
+
+
 @pytest.mark.parametrize("fault", ["", "target", "helper", "inside-runtime", "probe"])
 def test_wheel_interpreter_preflight_is_read_only_and_fail_closed(tmp_path, monkeypatch, fault):
     owner, payload, runtime = (tmp_path / name for name in ("owner", "payload", "runtime"))
