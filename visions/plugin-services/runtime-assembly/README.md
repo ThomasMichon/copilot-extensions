@@ -78,6 +78,36 @@ whole-source fingerprint or a full-suite attestation barrier merely to copy
 already-selected applications. Native ownership, package integrity, immutable
 completion and readiness remain independent obligations.
 
+### first-party-manager-artifact
+
+Worktree Manager's prebuilt wheel embeds its selected in-process first-party
+library core, including required resources and notices. Shared process utilities
+are first-party application code; a library does not become an independent
+service merely because it supports daemon processes. Imported clients and
+protocol code remain in the application that uses them.
+
+The default keeps third-party packages as ordinary, exactly locked dependencies,
+with their normal distribution metadata and approved acquisition policy. A
+self-contained first-party core is not a requirement to vendor third-party
+packages or external executables. Build-time first-party wheels may remain
+inputs; installing those libraries separately beside Manager is not embedding
+them in its wheel.
+
+### artifact-and-host-lifetime-independence
+
+Packaging and process lifetime are independent boundaries. Client and host code
+can ship in the same application artifact while a surviving host retains its
+original immutable generation for its required lifetime. The default retains an
+existing owned generation, rather than creating a permanent service or environment
+for each library.
+
+Retention preserves attributable code and interpreter identity through the
+existing owner's drain and retirement contract. It does not make outgoing
+retirement an incoming installation gate. Independently invoked tools and service
+hosts keep their own installation and lifecycle boundaries. Reproducible
+application inputs do not make an already-created virtual environment a
+relocatable artifact.
+
 ### standard-python-environments
 
 Python runtimes follow modern uv project management and standard Python
