@@ -140,6 +140,17 @@ records with partial sampled coverage, not fabricated creation, claim or binding
 events. A timestamp refresh or heartbeat is not a timeline milestone.
 See the [owning source contract](../plugins/agent-worktrees/docs/worktree-observations.md).
 
+Known Bridge tool/contribution occurrences use readable labels and reported
+tool titles or agent display names where available, not raw event enums as the
+normal work summary. Names remain literal, bounded reported metadata; absent
+older-provider fields use generic occurrence labels. Exact native kinds and
+source fields remain in expandable Evidence. These labels do not establish
+current concurrency, allocated-agent custody, lifetime tool totals or pending
+input.
+An optional label that cannot be used as literal display text falls back to
+the next reported name or generic occurrence label while its source value stays
+in Evidence. Invalid wire text remains a source error, not a hidden fallback.
+
 Timeline keeps the purpose, compact source/input qualification and bottom-anchored
 work canvas visible. Expand **Evidence** for exact source IDs, qualifications,
 effort reference, diagnostics and the Bridge feed selector; **Creation** expands

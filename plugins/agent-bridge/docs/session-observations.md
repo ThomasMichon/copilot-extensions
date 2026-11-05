@@ -136,6 +136,15 @@ pending. Unknown native kinds remain `source-event`, without prose inference.
 Reported lifecycle/tool/subagent events do not allocate, settle or release
 canonical resources.
 
+The extensible bounded `details` object optionally retains reported `agent_name`
+and `agent_display_name`, alongside existing tool titles. Unsupported types or
+names longer than 512 characters are explicitly omitted. Task descriptions,
+raw tool input and transcript content are not added. These optional labels do
+not qualify current execution, hierarchy, concurrency or lifetime tool totals.
+Older readers may ignore them; newer readers must retain a generic occurrence
+label when a supported older provider or rollback lacks them. The original v1
+frame, parser, capability and identity/continuity contracts are unchanged.
+
 ## Optional current input and permissions
 
 The executing CLI declares `bridge-session-current-requests-v1`, version 1,

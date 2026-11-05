@@ -45,6 +45,7 @@ PROBES = {
     "test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_custody": 1,
     "test_closing_one_current_follower_preserves_other_follower_push": 1,
     "test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends": 1,
+    "test_contribution_projection_retains_only_bounded_reported_names": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {

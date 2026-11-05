@@ -614,8 +614,8 @@
       "sha256": "1f7bcc621579282062a2d5117daed8a9f0201f4d2c4b44105328a5cd71ccbd26"
     },
     "libs/agent-procutil/src/agent_procutil/_caller_owned.py": {
-      "blob": "ca44948f780814bdf0def69ec3130a8a58236358",
-      "sha256": "bfa207739dd8a9ba8214d7a803f3f126f2f482e4678b082f0622c945dfe449ff"
+      "blob": "7dd160280926bcbbf11543b1ef9f573c214480e1",
+      "sha256": "8d9dde86fafcc7230cf12cf18d314c9b730e9156374a217c18a57603f03efe63"
     },
     "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": {
       "blob": "e4427595b0f8da86b6575933d7a9b4d863cbbf22",
@@ -730,8 +730,8 @@
       "sha256": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277"
     },
     "libs/agent-procutil/src/agent_procutil/daemon.py": {
-      "blob": "be5f0ce307d02116962de1efabd5dd0dc9c88af6",
-      "sha256": "accf01fc7c6c19eb54f0d7f2432649b1ba6d2d00e2a9ac9657b0bcd836ce2606"
+      "blob": "bd08e78b6d9f13bae054b949b34a60ff42ccb1e2",
+      "sha256": "3d1135c5f47bad582af4c7b4b2491d6c64034238c563f49f081565fb32983515"
     },
     "libs/agent-procutil/src/agent_procutil/daemon_broker.py": {
       "blob": "72b1c9d672d80390732beedd9151bd4291ec3775",
@@ -774,8 +774,8 @@
       "sha256": "72e1ca79f9be6ed44c606f14ed12061b68f8dd0b478025374efbf279805566bd"
     },
     "libs/agent-procutil/src/agent_procutil/owned_process.py": {
-      "blob": "becbc22e20202cdb5a99d717a8343ce17e903dfe",
-      "sha256": "50d61a9181e607b8f91fcbc4e54a078cf62ef54c815bbd151eac9e45406c01ea"
+      "blob": "c447e966846102820b2cf4fc5cc9011ce64076a4",
+      "sha256": "179eef3530003501da0a916aedfb63ca1739a5c405f73c124cd2c8c084a9571e"
     },
     "libs/agent-procutil/src/agent_procutil/process_retirement.py": {
       "blob": "4961156eaf4877f0cc2084300566951837c65e4c",
@@ -850,8 +850,8 @@
       "sha256": "6d9852981306ec138b9ef2a7dbc5756961f1a53781fe827c4f36a9e795173bd0"
     },
     "libs/configuration-layers/src/configuration_context/runtime.py": {
-      "blob": "6f510d636d34b29fe0a049ab89ce07d12fb287c6",
-      "sha256": "04bb9fb6dd2f36f0950a09470942b63e34f59aab34fddd2afe51b7cff2f7e209"
+      "blob": "6541364084c2caff86008bdf74f475f45aaa6b1c",
+      "sha256": "fa6a8852c2843b934a33082485848718623fe1e62c6e5087fbc10dd2a1aaa037"
     },
     "libs/configuration-layers/src/configuration_layers/__init__.py": {
       "blob": "a669b36217b9c6e78c6e2e911867b7a55484ebc1",
@@ -886,8 +886,8 @@
       "sha256": "8578edf00be73a6eaf7dd2a0ff2e6ab1ca6733b2b46124bc9c80b940cfc07d63"
     },
     "libs/credential-relay/src/credential_relay/server.py": {
-      "blob": "38fd47a985872c816c51ec3ca06d77f17797808b",
-      "sha256": "0c9452650b06298dcdcbec5931f145a96db8b51d79f19579144a841b466cfec3"
+      "blob": "e29e1576cfc1e0c7b6fc4264942bc1c45fa51c22",
+      "sha256": "3ba2b845a6dfab54296e5cd11509d91f3a7d75e76f675bfe41b3671e1b6cce4b"
     },
     "libs/credential-relay/src/credential_relay/sources/__init__.py": {
       "blob": "84608c762eb8dbc62f69f1f6c4ed29a7a9151623",
@@ -912,6 +912,10 @@
     "libs/credential-relay/src/credential_relay/token_gate.py": {
       "blob": "23ecda7b62f8207d382b95711d47923642a09a8a",
       "sha256": "1b41bbd1ad24c6f9492e601e7c6154d1092dcd79173c94e2905d0ecaaf1020e5"
+    },
+    "libs/credential-relay/src/credential_relay/token_store.py": {
+      "blob": "7d4a497302119a6b0104212e29b33a6a13a7d847",
+      "sha256": "2d78c85b858965fd608457be425fa227c1ad034ceb6e338cf8d2b240e739a38c"
     },
     "libs/docker-resource-producer/src/docker_resource_producer/__init__.py": {
       "blob": "2c6e421a4701ce0c26a0b2ff12bdcb0e2441e805",
@@ -1006,12 +1010,12 @@
       "sha256": "740a29ec0062facf179d0d44d61f64bdf2d010643691b665b7626e29abcefb28"
     },
     "libs/installer-engine/installer_driver.py": {
-      "blob": "3cbe0b1885797c95e555193b78e481c5f0dfce8c",
-      "sha256": "ae219e0eba66f2041fd7ee9b369d6144f87c2643a3f63a45dcb919a6f3b1b203"
+      "blob": "d110f51a84f428efa3108ecec81fc9a70b0c0f7f",
+      "sha256": "56b92b616529d22d1147acab1925bae32a6869dd2de69af9b5b43a9c5317ee3d"
     },
     "libs/installer-engine/installer_engine.py": {
-      "blob": "daf0720e7d813d2016fd3f54cb1bff84fbc14867",
-      "sha256": "8c38de4ba0ecc20db11ad3b264c8e50976844d1b0394d138e0913292188ceac4"
+      "blob": "6cf62a931a7a13324fcc0829ae71783de3969772",
+      "sha256": "b48b0bec304114519830a26aa6b043cdc3d9fe6301aa7a24027aef9927a63dbf"
     },
     "libs/installer-engine/installer_engine_commands.py": {
       "blob": "f8c9d27acb9b12ff2d9cf4282a4cdd152ca97c2e",
@@ -1506,8 +1510,8 @@
       "sha256": "a7060446d207ffcfe432ee89fe4d82a5648234b81c74ba3e4b7d5f0aeaa6db7f"
     },
     "libs/update-driver/src/update_driver/first_use.py": {
-      "blob": "a7bfdadb66f090a85ad022f9bc4c45739a4e4f02",
-      "sha256": "5aa05728f3a20ea359f24c2b767c1e9e1da4594d6d78f81c062fabe7559a05a1"
+      "blob": "16e2dc538e7275ac3b80f9bb2ad41e8fb0b57a13",
+      "sha256": "0b9ea70e8c1276a0af465c0faca1b7033c07ddc94072335dc3c2d4f20d8fa7c0"
     },
     "libs/update-driver/src/update_driver/foundation_admission.py": {
       "blob": "18c1d549f3f29409dead662bfd6ac10903444405",
@@ -1742,8 +1746,8 @@
       "sha256": "55d50b75d31d09b450b01aafaa8f26c80d6882c89eddecbea97c851e6c860843"
     },
     "plugins/agent-bridge/contract/README.md": {
-      "blob": "78ea7b275fe34298f9efaf18226e0781b998b332",
-      "sha256": "8e973b6af23e1d54bca41fcff59595c9df58433686dc57ad26948e146883af52"
+      "blob": "5048076f4efd6ffce254a40bdac0b279b056fa0d",
+      "sha256": "c5d7b54fc84866f2230e51c5198b54d179f11afa0dcad7ca0ffbe319cc5a07c7"
     },
     "plugins/agent-bridge/contract/inputs/http47/capture-cases.json": {
       "blob": "758c89a061c301140849ee6be7d12aadf35e2294",
@@ -1810,8 +1814,8 @@
       "sha256": "2e9ac2cb3634405319513526a4271ed1823e5bcd39992677e9f5330f5360b255"
     },
     "plugins/agent-bridge/docs/session-observations.md": {
-      "blob": "972d680e4a18111e3842f8f2b3e3703651fd6732",
-      "sha256": "f94a4f99f73432cb63fecefe8d2582134d57f5298d1bc82552ca630d9a715e26"
+      "blob": "d71acecef51259f436709cab28d094500faf9051",
+      "sha256": "94dbcd87201970858a5ceae1ebf6279f6fa12b9aa2634c505aa473947386409b"
     },
     "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs": {
       "blob": "d525528a433340a403f66a07f4a05d11620bbfc3",
@@ -1922,12 +1926,12 @@
       "sha256": "761b11358ba089705086b29cb44efaff22882b9604e5969892ac6eeb390e5175"
     },
     "plugins/agent-bridge/scripts/resolve-runtime.ps1": {
-      "blob": "97be9f4b3ebf6a4b5bc34002b9ef03b5843d4b16",
-      "sha256": "01d496696071b395249377ba47c63bcd6abc11f4115544e36366824393532133"
+      "blob": "0747ca59f52056359aa48701d7ae3b6ec988a84c",
+      "sha256": "ea7a37b38edd93cca0158890cc3d092c81e320acfb59f1ab7eab75ba40ebe8ce"
     },
     "plugins/agent-bridge/scripts/resolve-runtime.sh": {
-      "blob": "8809e65bf2d87faceed075e79fa2760ad5c3e7dc",
-      "sha256": "ec308cb8acc5818fdd7c23912ada7cc1ae5bbd691817dac4fcb0f2fd0c28b5c5"
+      "blob": "8b2ba5e386def1092fe9bff5e4d02e79ce6ade5a",
+      "sha256": "1fb2a57c42f5cb4301f9c566f33de4fd72692f31e2a4df65ec63d685819ce6a8"
     },
     "plugins/agent-bridge/scripts/runtime-gate.ps1": {
       "blob": "407b7ee7910e4dc067eb93056ff2afb40c95d759",
@@ -2186,8 +2190,8 @@
       "sha256": "7db1a66a003e7a976c7d0b6d60c953b77a3b856e3e9cf02dddafb48c8bc74876"
     },
     "plugins/agent-bridge/src/agent_bridge/agent_registry_relay.py": {
-      "blob": "b02fbd34ee2163f9fd0cb5ecd75036e614d7a665",
-      "sha256": "b001f052a728eaddd441ddb74e67bd717ad28da1edc79b18d9c173c68a57a69a"
+      "blob": "ac7ab0f7758fde225d2e8eeda29fa5b4ccefa1e8",
+      "sha256": "4522e0b20b98e70180f9e837d425d015912a93cfbdc24db0a07245bfee4a6691"
     },
     "plugins/agent-bridge/src/agent_bridge/agent_registry_resolver.py": {
       "blob": "4f39aa7fc78a49e98671d6cf7bda866792c41df8",
@@ -2354,8 +2358,8 @@
       "sha256": "6fdc7266412c2675ed569116d80dc989b0992bbe78db17f16aa99add93aec4d9"
     },
     "plugins/agent-bridge/src/agent_bridge/configuration.py": {
-      "blob": "b5c9d65c49f8268f5e4c2f67936cd148b8cdeb7e",
-      "sha256": "70085bcf573d7bb2468ae91d1ba1e07b53b709cbeeb1bd404b279a5b18c8207e"
+      "blob": "46032560b9695ffd287660ff0c1e2ccc9e663bac",
+      "sha256": "e4b73fc145e1a685fa7d81064f57deacaf75b6c6c9ddf8e0b8e6d27f71337838"
     },
     "plugins/agent-bridge/src/agent_bridge/connect.py": {
       "blob": "af1f305d7c241812f70969f1c1fb1c7f00785184",
@@ -3082,8 +3086,8 @@
       "sha256": "5bc98cf565276bbadcb8c729d6cbfc433446036919756f70fa23a04033cbf237"
     },
     "plugins/agent-bridge/src/agent_bridge/session_core.py": {
-      "blob": "2b4db34759eb8dc0eccac8f09cc40d6fe257af17",
-      "sha256": "ebfaac45a9d27c671e4ef12e3070057176260d4a2818c0e9cccb4a72902b35c6"
+      "blob": "1b521e5bd7bdc4e1d290879fddbc1b5d1397d4eb",
+      "sha256": "39c1e95ef8ef466558b2d9f4b1e8d60a1b7bd51520b95421e17d206b9e0bd572"
     },
     "plugins/agent-bridge/src/agent_bridge/session_current_requests.py": {
       "blob": "156b10f8d19a4cd356d9f65a95b784f6f25b1550",
@@ -3126,8 +3130,8 @@
       "sha256": "8899c8dbfa1706f63ddf0ba6a74b31e5ab8fe9acd148a85291247c9cd4d21500"
     },
     "plugins/agent-bridge/src/agent_bridge/session_host/codespace_transport.py": {
-      "blob": "8d6deab83835b07ad656ba75512e2fb275326edd",
-      "sha256": "ed9c0efdf0aa6fddcdece4229bec7d4a6720b5f034f3036104a70cfd0feff8c8"
+      "blob": "23c72f1101d534c88a48f66b580699ac8b717251",
+      "sha256": "4a691c2f63a8d742f80aa1cfeacec0111c199c80fbf3cb5c1697c07a12d597cb"
     },
     "plugins/agent-bridge/src/agent_bridge/session_host/container_transport.py": {
       "blob": "7cd5b8486f2ef0ef29587c36b2dd9a0d4123b3a5",
@@ -3194,20 +3198,20 @@
       "sha256": "2549cfb4c456aeb5b09a79360f67fa1b85f2de9fee74452ecd44a45b046792c4"
     },
     "plugins/agent-bridge/src/agent_bridge/session_host_connection.py": {
-      "blob": "c9f523afb9f6e34b1c26cc447b48607643853a26",
-      "sha256": "ef275161feee1bc5fdcaa5bfc7fcd77d68af6cc3930a7aea4f089304b5b3a366"
+      "blob": "c5b9a026bad032a84f2e28931427bfe43e77f86e",
+      "sha256": "507b894f0cf8d8cb8f07ab6efe749447f8e0699d8572a546b5b2ca91d29a99e4"
     },
     "plugins/agent-bridge/src/agent_bridge/session_host_liveness.py": {
       "blob": "b5a1d5d8981a30e1cac4b95b7b31dffaab83ff9f",
       "sha256": "3531a14a994d99155f4b7dc43ea8d8d1b6ab6293bb44be0cab3a66d16810ff9e"
     },
     "plugins/agent-bridge/src/agent_bridge/session_host_recovery.py": {
-      "blob": "4be33a63266b3ef78e91358a416fa824dd875695",
-      "sha256": "6b8ee8d1fc9b09782d7ee6e4cd74b2747e1e427137913512a0dc7975bc1c306d"
+      "blob": "1d324df583da46abec5808a58aadc35fb9ac4781",
+      "sha256": "032e21fe5e6800b607984f7abed5e0bbbf2c3a6d3e83bab1290e95171a220202"
     },
     "plugins/agent-bridge/src/agent_bridge/session_lifecycle.py": {
-      "blob": "c95ec85f05ae074dd368763c47ce77e242427dda",
-      "sha256": "b8ab7fd1f6e3b1ad3a8adb34c6ff4838429e0cfe07bb86dc607a31276665f60e"
+      "blob": "0bc6a478c088c602dace95f74f22a3fc3749617c",
+      "sha256": "abfb7c972632cae8ea6ab7ba77d3acf3d33115b6162fc66210e6541994e296cc"
     },
     "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": {
       "blob": "8f61965b7b91f099e3b9f2985e263c2ea0325d07",
@@ -3218,8 +3222,8 @@
       "sha256": "3af4d07a9dfd7bd5f6b87e1253b0e80f4350af17aa31711a6d5ab5354a23a39c"
     },
     "plugins/agent-bridge/src/agent_bridge/session_manager.py": {
-      "blob": "3e0dcdbad737bd8838bcba98dba0ca5aebf6c51e",
-      "sha256": "50b6f50d88842d2d2aa65691c6169db9208b585c5ceecc8f9b45f469d1281f82"
+      "blob": "7eed0cdafc80a602738081257e7c507c6dcfa16b",
+      "sha256": "c9ef88d48e13f01a39f41359551e5d52cffa6ecfadccbb1d04a61c413f1802d2"
     },
     "plugins/agent-bridge/src/agent_bridge/session_modes.py": {
       "blob": "7046bc9b0b1080e34e73f2d6b64a4fde1dfb0971",
@@ -3238,12 +3242,12 @@
       "sha256": "a21e6bb941067e6976ba91d7147ad7fa612929f9447a1e2833139a70060e4f52"
     },
     "plugins/agent-bridge/src/agent_bridge/session_observations.py": {
-      "blob": "aa308da6909bd40c9a800c960adc02f1aa9b31fb",
-      "sha256": "b0326a23f158f1c6fb03f7dc55ba870d6868110bdcdcbedd31ae4a404f06ff1d"
+      "blob": "1fa3bfd38e89178f03d71b888d551b05450d0d3f",
+      "sha256": "392c470f8b2d88c2222e2ec0df3c58e8ccd628d44ef94ab6641ab13a47343908"
     },
     "plugins/agent-bridge/src/agent_bridge/session_parity.py": {
-      "blob": "05eab24e9dfee2d3ca07a945e7eaf89df9ff8ed0",
-      "sha256": "bea1776cc4dfe379166158069d743ac556fd1170bd2763ba89b36e5679281abd"
+      "blob": "ee8882bd07d9a5a66024ce0e874823fc65841083",
+      "sha256": "ef9f2c1625118423192f47283f22bf61d0e6e305bbf15ffb5acbea39cb6be824"
     },
     "plugins/agent-bridge/src/agent_bridge/session_preferences.py": {
       "blob": "56533e7a93af7a6ced8e3bdc145b95fb0d5c46bd",
@@ -3258,8 +3262,8 @@
       "sha256": "1644dca8e2a7f06abc94c2b67f0aac5a1e75292b79c68f44763edb8cf6505716"
     },
     "plugins/agent-bridge/src/agent_bridge/session_resume.py": {
-      "blob": "6372a906b380424199188fa30e9c53926997d1b1",
-      "sha256": "6c4f966b1682a5153a15afabf134c7307b97aa5460fc28855d5a8c35f2a863c0"
+      "blob": "9175c7a572a9e62190fb13fe03e1129c27eba799",
+      "sha256": "394f1be01cff5256266855fb18a82b30bb03093355e95e6c23e9953646da961d"
     },
     "plugins/agent-bridge/src/agent_bridge/session_runtime.py": {
       "blob": "42cf9bb03b2b3d0244b638457306118197a6c524",
@@ -3270,8 +3274,8 @@
       "sha256": "eef364322d10c04f3fc35793126ce04599f7fc391fe06cba560a6b205f0ea258"
     },
     "plugins/agent-bridge/src/agent_bridge/session_start.py": {
-      "blob": "a1e4c5440c91a6dd0bef469c51d4b685b43e1956",
-      "sha256": "0953164a91a9a12571a677aafab9b35eadadb70fd411da03f0e60400aa19d9ef"
+      "blob": "7665bcb59e4ab9e9e38bc4ff76f0d54fd9b21987",
+      "sha256": "f9070c819eb65b1f991efa9fbef3b1ceada1dd28f3c8675e6de6b12cf1d038f8"
     },
     "plugins/agent-bridge/src/agent_bridge/session_start_cli.py": {
       "blob": "2a06b9655d9821e1207f2b3c297a8ef03e1897bf",
@@ -3534,8 +3538,8 @@
       "sha256": "7c9df7bbadc5095d16b51d1bd96690552613be534db45e06b09afab4e017c426"
     },
     "plugins/agent-bridge/tests/test_http51_capture_probes.py": {
-      "blob": "dd20995a5a093374ca6c8eb8ab36eb23dbe92bd8",
-      "sha256": "835690387041405eb489d15dd3769396ffb77211a310914f111503bb06a5b295"
+      "blob": "e76049e4410d68449f01299132e07730a62e1da7",
+      "sha256": "ce26c19020173bdc0fba1630177949e78da811e51a4695ba34b8f9a97d32aaa1"
     },
     "plugins/agent-bridge/tests/test_live_exact_notify.py": {
       "blob": "060749462c4d15d2abadc8ac61e800771743541b",
@@ -3586,8 +3590,8 @@
       "sha256": "0ff9a98a7f837830b124fddba684b1555ed2116abf0867c61320e165c180df09"
     },
     "plugins/agent-bridge/tests/test_session_observations.py": {
-      "blob": "83e8f403fdf6fbaf6b33b26f3813af3b7775537f",
-      "sha256": "8b2a335ba794068ba26e27e0e70baa6e80e88571b5f0c9284c6957e8dec43f01"
+      "blob": "33bf864e2df7de310df087029e9a3ca1e003ad26",
+      "sha256": "4cc3a9b807c5573e9aed88e2ccc579bf803f1b79973e12928e4090fa77021636"
     },
     "plugins/agent-bridge/tests/test_wire_compat.py": {
       "blob": "37cc7ad03d47bcc37f8c35d5a1abe6c25b6b9be2",
@@ -3602,8 +3606,8 @@
       "sha256": "316f3d4aee2d9a81fcbe085eb9bc9ce286312096ab8a173cbf471dd89e20d123"
     },
     "tools/_devcontainer_network_scope.py": {
-      "blob": "209df2af28ee495cf592ff89499ce81b306503a4",
-      "sha256": "52626bb43d57efefe6ea5680aa2c3777fb32ca3c1cb0c10ad26a659cbb600d67"
+      "blob": "3a7f13f21e7aaaa0287ae8ba609396e3195ea2a7",
+      "sha256": "e21c277b03d3b6fda7d505aa5668d235c6bfcdcb1f8ed4dd10562ca835259751"
     },
     "tools/_devcontainer_selection.py": {
       "blob": "6682f57b966a3e2ea621089f1cde775baba2dfd1",
@@ -3698,8 +3702,8 @@
       "sha256": "dfa4ca4be6fc6efa115cdee2d7b7a7c848f44a27fcb373a791b19997220debc0"
     },
     "tools/bridge_http52_evidence.py": {
-      "blob": "4626686af6fc14bde9ea472bd3163b11f088f36a",
-      "sha256": "fed8dad589c196c3afbfcd31dd6288122ccd94d54cd0e22d030b55198e311ce5"
+      "blob": "eb91fbed193ebd8a0c33ef7e77f6bcc480ee3817",
+      "sha256": "95eeaffb4ec98fb0c96f1f5555d52d07b3e0d214c4a30aaccccfa816b8dd3b57"
     },
     "tools/bridge_http_retained_evidence.py": {
       "blob": "682a27a08d18d5ec3bea54dc2e24dcd37f4d085a",
@@ -4030,8 +4034,8 @@
       "sha256": "8b1eb2f5620cf4ba245a8acd992749e16e64694e6ebc08da4874db50c3d8e414"
     },
     "tools/local_install_profile.py": {
-      "blob": "7857e3d10f17c62fdeeca2c903aaa06b9cbfaf0b",
-      "sha256": "0665bab7db0f8f1bb4f941609bb1588d68f6c5e8ca25588ded837be069e5229c"
+      "blob": "2f39ebd1b416f52cf39f5c73c8ac71acb9a29afe",
+      "sha256": "f657e57ee8419250ba8cea01074cf8f0af8dfc92008e499f9c0a27372a4979f3"
     },
     "tools/local_install_source.py": {
       "blob": "565871bc5269a7d3339ae3ee2e0e9c77a8d8f71b",
@@ -4110,8 +4114,8 @@
       "sha256": "b2bd74e55727acc2ed14189e804eca3e11781ed0a35abc96bcbfb61015d35ed6"
     },
     "tools/plugin_test_cache.py": {
-      "blob": "c8380211560fc3db0adf7d1c8348c36fd957b3ea",
-      "sha256": "753eaeadc813f138fc4d6dad93f64c648e8cebefb9a89aa496b9275fc1eb4e26"
+      "blob": "e338b58302f2e07f82713ed30d1a02eff2be413d",
+      "sha256": "0c4c7657a2302881153dbf3de30bb378b8cca158f66ce7a9b2b6584e24f03393"
     },
     "tools/plugin_test_containment.py": {
       "blob": "aebb3dfa9d20036963e88ec479afd4bd3f9c7c5e",
@@ -4234,8 +4238,8 @@
       "sha256": "6bf107a30ef30529086eebf005186cd0fe0201a0affbf12ea6f5e4f1674401ca"
     },
     "tools/promotion_unit_effects.py": {
-      "blob": "afe9a2eab337bca9752954eb90f85fb54944ef38",
-      "sha256": "d8c7858cfe67d6b6c5da788b467871ea4db2e9b2f5a0df72e56af248d1d7bba7"
+      "blob": "38b2d3eac0afd0558299b23f2bc372ed49722e49",
+      "sha256": "c87200943adbfce085d3328bc385bce95bf6f0a4610554f6f3b2c1452becab6d"
     },
     "tools/promotion_unit_packet.py": {
       "blob": "ceeaa74b9520d0f273e7f657764914c2a96ddc4e",
@@ -4310,16 +4314,16 @@
       "sha256": "ec15945c05517c0ad8870239a6362b7cf6a790c69edbd6356ab6c4c3be223ed2"
     },
     "tools/run-manager-runtime-acceptance.py": {
-      "blob": "ebb928916b221b31e08b057fae7d3c6a9c543187",
-      "sha256": "8929cf97247afbccabe19ffdbcfe4243c83f606f7f34980f5e7c3a65c1b8fe49"
+      "blob": "a184ef6a9aef56d6237d6ca06a7d7d3111065a8c",
+      "sha256": "659951e1f917c58ee0029ea1e2bd499fcfcdda25b814446da3e889d262bb6707"
     },
     "tools/run-manager-suite-acceptance.py": {
       "blob": "8c5bbb48b3983596d769d3a5efc9c1c65618a270",
       "sha256": "289f07c1ea26e16fb2ab6c8fb2bf0db3cef472908f40a0fd6929d7e1424f6e31"
     },
     "tools/run-plugin-tests.py": {
-      "blob": "0b1c2837be3484387bcab3fdee8a169bd22d820a",
-      "sha256": "2df21eab6f0138d0a6f145ecde83453ca1e9e78e573d60856a0f481b0ff6d0a3"
+      "blob": "b4ca8b6b25686deb6d83cc80d06e7279be9ac988",
+      "sha256": "5ad6fa8c66446dca8e9fc9cc135e4aa83833cecb90f3c066e0605f4f54f1aa3b"
     },
     "tools/run-promotion-unit-tests.py": {
       "blob": "cebf7bf926e1c05b64aeff6dc4e4ca7917e0e610",
@@ -4334,12 +4338,12 @@
       "sha256": "e92ee1e9bbb055ad499b2f0bcef9597cd15aa6ebc083966de7acf43f57f6d097"
     },
     "tools/run_tests_in_devcontainer.py": {
-      "blob": "48ead50f87d451f671763e778de01d83bbd684f9",
-      "sha256": "ce18b4de47882120f06b33bfb3be3e89610d1df805a6688d539060c614233653"
+      "blob": "0178c78b0e25ca51b863b9caa57ddd7419aab945",
+      "sha256": "14ea4d74dc9f00b7ce28d4985bb09046c82d5ad5ab8791905f4840ddcc5758c6"
     },
     "tools/runtime_application_project.py": {
-      "blob": "59e53d89382cf3580dd638dfac8d329a5a2bef20",
-      "sha256": "67baa3bc5af97e577c0ae6fb053ca4683caf3c3a62913c8a5b2288d697eba3a6"
+      "blob": "ef8111aa7db09625cb579caa57403ccefc49f785",
+      "sha256": "2eac5e6a8cb5696c0d4302f1762b3fb79562c1f8106cf4c7771aab702d0ece6f"
     },
     "tools/runtime_feed_configuration.py": {
       "blob": "4347e28806005776d6719894267dd0ff4a5de713",
@@ -4428,6 +4432,10 @@
     "tools/standalone_python_artifacts.py": {
       "blob": "6a63997f6cbe145444eaf0f16a5a48fd6db97392",
       "sha256": "fa0421ed1145db575dd4ae33e5a459f19559562a1b6f2de3574f8365f21e130f"
+    },
+    "tools/sweep_forbidden_labels.py": {
+      "blob": "4f6aa53975fc44e17c2162501cc99370003645f1",
+      "sha256": "cc848ce49e60253946d2180331ac13a66b417987014db1184973212b1a634818"
     },
     "tools/sweep_stale_branches.py": {
       "blob": "d27348ce7eaa0b32312e7b85c2c7a10bb4c1752e",
@@ -4754,8 +4762,8 @@
       "sha256": "deed0f52458e44ab05e6ff3450a8b179e76f598ef2fe7c016758cb7f1255c948"
     },
     "tools/test_installation_context_ci_scope.py": {
-      "blob": "5ba581f84df313e45d7150eb39aacbf98a3e0571",
-      "sha256": "e40cfe2c35fcc305dd6ef9865680aa68de635804ade11d71508850d0cb6f59a2"
+      "blob": "bdb124fa912649426535d6a99d3c72084474eca3",
+      "sha256": "9c1daf0f9f1f09c348616fa3f66f728caa87dd245a44c716e348741ba7e81b53"
     },
     "tools/test_installation_context_packaging.py": {
       "blob": "e154cd885167ec7645b1fd8e3a27caa4a92e2f72",
@@ -4841,13 +4849,17 @@
       "blob": "8f3a68ddef3c7dc3e76e33172c1119b6adb6bf29",
       "sha256": "4280bacd05f1d68f03c65b803003d9c5f5712da318905e6275b5981457f561ed"
     },
+    "tools/test_label_cleanup_workflow.py": {
+      "blob": "d712321382f999b1c3a5b724f55c159326d70d73",
+      "sha256": "d04986a05a18596df1ba261ca50530ebc90745602e2c65501b95bdcaec7dffd0"
+    },
     "tools/test_legacy_transaction_interop.py": {
       "blob": "42bc2d3db11107e3777bf2b1022be324042f577b",
       "sha256": "ac8f7c92871c70b70983e555085e0dc4d4ee563b3a3309b810bc93db54f7ff9a"
     },
     "tools/test_local_install_source.py": {
-      "blob": "3b8461ea69d80757e1d4e6704eac08fb373d5265",
-      "sha256": "462cb7439f22544e827dd04057897823d7a48811e4cd4986af8d5750b419268b"
+      "blob": "a7e2ce3478a1839093ea21ce3e46de9fb9350466",
+      "sha256": "390a094ed0822efe987707a48570edf6950e949bf1b98995257dfd30a370cb42"
     },
     "tools/test_logger_runtime_uninstall.py": {
       "blob": "d797526c872ce815afa9522e58c5b2fccf88baa2",
@@ -4874,8 +4886,8 @@
       "sha256": "2d345626e3dacfaffbc6b88d0d84ed4e4ad85fc38a9b1747d19ea0852ac1a2aa"
     },
     "tools/test_materialize_main.py": {
-      "blob": "76472e4d52d21628890fa38eafc2aced43a63e7a",
-      "sha256": "86f1531d480d2c06e19dc32a5a890c8852c4cdaf9bb9b687f43250a6a3272dc9"
+      "blob": "12b81b1ae2746b0ddcafe7b88ccd8c1273aeaf3b",
+      "sha256": "a7d1b288ac1958e4246d00122184416908877767823c9bde6e278bdf5a558e70"
     },
     "tools/test_materialized_provenance.py": {
       "blob": "dd7558cfa82a59a7f1e99e8596467d2094d2c030",
@@ -4926,8 +4938,8 @@
       "sha256": "866be1417d347623adc2b401c9ab38810f45ef58a70d8cd2548610ed1b3c0f86"
     },
     "tools/test_plugin_test_cache.py": {
-      "blob": "ef0b97ac2a3a580ff386e91613be62285e5f3f74",
-      "sha256": "9d13d26196df3978b04dd3e31a7ac9ae02d91f9a7af3d0cbedc21a23e94019a3"
+      "blob": "cecc234bf2d7286b386542ddb7168af4a0281fa3",
+      "sha256": "90276606384a56275071a670fdd5f133958a4ddafc7bde51f212bde04b8dfd0b"
     },
     "tools/test_plugin_test_containment.py": {
       "blob": "3510bd465771a86b2970e6e0ffbe708ac0da2e41",
@@ -5114,20 +5126,20 @@
       "sha256": "5097eea35801421100ca7f7fd8fe15fa7412334df2c81d6d41663a1a929ff8d2"
     },
     "tools/test_run_plugin_tests.py": {
-      "blob": "f11cd254f3049847d5f2955a13f282a794fd2648",
-      "sha256": "30fc97c25641ee7a30375cf0426f5aa55d7955f32ac22c5801d648fc3c8e225b"
+      "blob": "ee7ec2fa57da30e6ff8b01eceda314c3bf3b26eb",
+      "sha256": "a52951ab9a8d69b49cda885f1748668d5d6e0dd80accf19b3df9ca043b9e39eb"
     },
     "tools/test_run_standalone_tests.py": {
       "blob": "b9cf90c5948cf393de0044e344aa41274d62d2b1",
       "sha256": "88556680c119522d2e961bd7f918462c03dd10d48404c51dda61780e221ecb9b"
     },
     "tools/test_run_tests_in_devcontainer.py": {
-      "blob": "88d549b37e8015f724a0963d1704f082b68073f2",
-      "sha256": "5c54df7f2adb89fbf6320036a0657600c7fffec6c68added8464ac5e99e26925"
+      "blob": "b7e8ea92d78ab7182279fdb76fbae2b33a572b89",
+      "sha256": "f2636189a105468ed2335c843cf635965ce7ecd516fd63070b71c1a17b933cbb"
     },
     "tools/test_runtime_admission_toolkit.py": {
-      "blob": "235f53b7ac2c04b5d447528c9e9b393500dd4a23",
-      "sha256": "ee4c12a314c2321cfc2ee849a34c9e1d37dc08bc98b4151c7032b419e6f9f1cc"
+      "blob": "beae975dc79ec08ba7e67a6c8ae61a78a6668c53",
+      "sha256": "a2f2363192450b7242b24639ece1b232aec2acf04b9126451ddfc32e906ee999"
     },
     "tools/test_runtime_application_binstubs.py": {
       "blob": "761ff1764ef39031d0aa99c3937439b545e00edd",
@@ -5242,8 +5254,8 @@
       "sha256": "744aade12ca8948279b69aa5e09d5949edc89201fcbb5d73b78f30ee56bb1198"
     },
     "tools/test_sync_installer_engine.py": {
-      "blob": "493703f1d237ba87ab6da3cd3ea2a78baf58f3f4",
-      "sha256": "4065efbfd80f0c73478f317f550c9a000abb5f6708abb3ae2e8140b1d415403f"
+      "blob": "fccce47ac13834fdc546cc90cd3f6309f50c9ff3",
+      "sha256": "7c21aa61b5b75ad66be10cb05359ecbe890f6585a6e68cd02e208974283c544e"
     },
     "tools/test_sync_vendored_libs.py": {
       "blob": "43479068a29602959f845c183945a0b4bcdcac3f",
@@ -5262,8 +5274,8 @@
       "sha256": "3ddcb70a302608db431152d682d6354f8042f2bf0ed37ab86ec9d1bc1294d73e"
     },
     "tools/test_typecheck.py": {
-      "blob": "9a777f5d6c9db4aba7b3af22adacca4b2f65594b",
-      "sha256": "abf83e7ed0fa5ef9cb0dc97734743830c2d9140714c5dee9f0ecbc1a558356c1"
+      "blob": "b08fdf641d586079af7dd8bcb9f115620bbae3e0",
+      "sha256": "a68a651b070de1fe4715fbf53de9f2aaecf25a5614e13f276566d8aa0d324373"
     },
     "tools/test_uninstall_path_candidates.py": {
       "blob": "105c1ca6c48826e655610adfc0b8cb3415a9bb9e",
@@ -5306,8 +5318,8 @@
       "sha256": "2445023346c0bd8b2733b741b7b78ebf6bf64de9ec724d8a377b258b8de8bedd"
     },
     "tools/typecheck.py": {
-      "blob": "a9d843ad0222fcfa43f2d306295a97b0c5030346",
-      "sha256": "3e5fac774a8a424bf9380d0e06254bc03fdba0eb57c79902887de7c1000182d8"
+      "blob": "9e5cda6308dce5a8654c61774938d614e8e65d26",
+      "sha256": "1cf1292bdf89e7a465ca2d09f6b545bb7842ab274ea7350cc309f906ad031971"
     },
     "tools/typecheck_source_views.py": {
       "blob": "df855dcf6785de6c22e95cde32ba7338a3d46fd1",
@@ -5370,7 +5382,7 @@
       "sha256": "f3e71d888e81948fed0a4e9336ed707c00d33e14234769bc2bc45afc9c6aad6e"
     }
   },
-  "execution_closure_sha256": "a23a51af530846c7dbf599a993ed6c8ea083dc7a8c8567dacd87c09aab5df8d7",
+  "execution_closure_sha256": "b687cc6a1edaf990c4a12bfb6f087fbb7a4f3c677a6d39a7f4c82c56d725b388",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -5421,11 +5433,12 @@
     "test_live_qualification_replacement_terminal_and_reader_cleanup": 1,
     "test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_custody": 1,
     "test_closing_one_current_follower_preserves_other_follower_push": 1,
-    "test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends": 1
+    "test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends": 1,
+    "test_contribution_projection_retains_only_bounded_reported_names": 1
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification",
   "captured_from": {
-    "commit": "2951c5ccb440a7999a5000053236db18fcc08a24",
+    "commit": "870cea99f5560cf625fa8befcf6c9afe3ba7adc2",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",

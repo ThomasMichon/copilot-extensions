@@ -39,6 +39,8 @@ from test_native_send_admission import (
 )
 from test_session_observations import (
     source as source,
+    test_contribution_projection_retains_only_bounded_reported_names
+    as test_contribution_projection_retains_only_bounded_reported_names,
     test_observation_cancellation_preserves_other_subscription
     as test_observation_cancellation_preserves_other_subscription,
     test_observation_http_resource_boundary as test_observation_http_resource_boundary,

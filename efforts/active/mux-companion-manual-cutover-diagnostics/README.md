@@ -524,6 +524,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       pause/error/recovery indicators and healthy ordinary/narrow source
       demonstrations with twelve reviewed rendered comparisons. This closes
       only the linked presentation-correction items, not S2-S5 or this root.
+      #10670 qualifies the actual private tmux popup's unchanged input policy,
+      blocked/failed-read dismissal and original CLI return. Its complete
+      invocation log includes a rejected-attempt negative control. Native
+      Windows/PSMux, installed, Relay and original manual/head gates stay open.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
@@ -610,6 +614,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Reported work labels on the actual Bridge source path](journal/2026/11.05-sidecar-reported-work-labels.md)
+- [2026-11-05 - Actual private popup input and clean exit](journal/2026/11.05-companion-popup-input.md)
 - [2026-11-05 - Sparse presentation correction and truthful source diagnostics](journal/2026/11.05-sidecar-sparse-presentation.md)
 - [2026-11-04 - Actual Companion through an isolated native tmux client](journal/2026/11.04-sidecar-native-client.md)
 - [2026-11-04 - Bounded rendering source qualification and performance observations](journal/2026/11.04-sidecar-bounded-render.md)
