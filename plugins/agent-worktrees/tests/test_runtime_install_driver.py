@@ -105,8 +105,9 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
 
 
 @pytest.mark.parametrize("action", ["install", "repair"])
+@pytest.mark.parametrize("input_timeout", [None, 1234.5])
 def test_native_source_installation_retains_selection_through_the_driver(
-    adapter, tmp_path, monkeypatch, action,
+    adapter, tmp_path, monkeypatch, action, input_timeout,
 ):
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
@@ -115,6 +116,7 @@ def test_native_source_installation_retains_selection_through_the_driver(
     descriptor = {"kind": "github", "canonical": "github:example/suite", "ref": ""}
     args = _arguments(
         tmp_path, action=action, install_source=snapshot, source_descriptor=descriptor,
+        input_timeout=input_timeout,
     )
     queued = []
     driver = SimpleNamespace(
@@ -132,6 +134,29 @@ def test_native_source_installation_retains_selection_through_the_driver(
     assert json.loads(spec.argv[index + 1]) == descriptor
     index = runner.argv.index("--source-descriptor")
     assert json.loads(runner.argv[index + 1]) == descriptor
+    if input_timeout is None:
+        assert "-InputTimeout" not in spec.argv and "--input-timeout" not in runner.argv
+    else:
+        assert spec.argv[spec.argv.index("-InputTimeout") + 1] == str(input_timeout)
+        assert runner.argv[runner.argv.index("--input-timeout") + 1] == str(input_timeout)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf"])
+def test_native_input_timeout_refuses_invalid_budget_before_admission(
+    adapter, tmp_path, monkeypatch, value, capsys,
+):
+    bootstrap = Mock()
+    monkeypatch.setattr(adapter, "bootstrap", bootstrap)
+    with pytest.raises(SystemExit) as failure:
+        adapter.main([
+            "--payload", str(SCRIPTS.parent), "--root", str(tmp_path / "runtime"),
+            "--shell", str(tmp_path / "powershell.exe"), "--action", "repair",
+            "--install-source", str(tmp_path / "inputs"), "--input-timeout=" + value,
+        ])
+    assert failure.value.code == 2
+    assert "positive and finite" in capsys.readouterr().err
+    bootstrap.assert_not_called()
+    assert not (tmp_path / "runtime").exists()
 
 
 @pytest.mark.parametrize("action", ["uninstall", "dev", "dev-release"])

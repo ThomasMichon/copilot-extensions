@@ -802,8 +802,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--mode-owner", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
+    parser.add_argument("--input-timeout", type=install_driver.positive_input_timeout)
     parser.add_argument("--construction-provenance", type=json.loads, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
+    if arguments.input_timeout is not None and not arguments.install_source:
+        parser.error("--input-timeout requires --install-source")
     required = ("root", "plugin") if (
         arguments.inspect_helper_publication or arguments.complete_helper_publication
     ) else ("root", "plugin", "payload", "uv", "base_python", "result")
@@ -817,7 +820,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--install-source selects only ordinary installation or independent repair")
         from install_source import project_inputs
 
-        with project_inputs(arguments.install_source, "agent-worktrees") as (selected, wheels):
+        input_timeout = 600 if arguments.input_timeout is None else arguments.input_timeout
+        input_deadline = time.monotonic() + input_timeout
+        with project_inputs(
+            arguments.install_source, "agent-worktrees", deadline=input_deadline,
+        ) as (selected, wheels):
             if runtime_source.read_source_identity(
                 arguments.plugin, selected.identity.package_version, plugin="agent-worktrees",
             ) != selected.identity:
