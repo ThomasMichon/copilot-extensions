@@ -231,6 +231,39 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [branch/membership](branch-membership-boundaries-cohort.md),
+[supervision/native lifetime](supervision-native-lifetime-cohort.md) and
+[Bridge replacement/recovery](bridge-replacement-recovery-cohort.md) studies
+preserve six originals through twelve whole texts and eighteen relations:
+seventeen noncompletion comparisons and one protected exclusion. Existing
+branch/tracking alternatives, exact receiving Git membership, accepted child
+supervision, matching Linux scope credit and all original incident outcomes
+retain their scope and owners. Both protected descriptions remain unread;
+no whole completion, source/native effect or custody transfer is inferred.
+
+The [casing/local-marketplace](casing-local-marketplace-cohort.md) and
+[resident demand/single-flight](resident-demand-singleflight-cohort.md)
+studies preserve three originals through nine whole texts and nine relations:
+eight noncompletion comparisons and one protected exclusion. One related
+changed original is wholly withheld before rendering. Keep narrow prose casing,
+authorized dependency closure and all four resident/polling outcomes separate.
+
+The [indexing-domain and standalone](index-domain-standalone-cohort.md)
+study preserves two originals through thirteen whole texts and six
+noncompletion relations. Credit real source authorization and delivered
+planning/distribution/staging while retaining ordinary-query compatibility
+and owner-scoped activation/rollback/schema/supervision/adaptor gates.
+
+The twelve-contract lifecycle/account research delta merged in #10586 after
+genuine exact-head approval with no active findings and green required checks.
+All seventeen actual merged bodies equal the reviewed head; the
+[delivery journal](<journal/2026/11.04 account-preflight-auth-journey-contracts.md>)
+records the finalized retained child and continuing parent gate. Two equal
+complete 20:14 PST metadata-only scans remain 1,009 whole open, 280 above
+729, with no arrivals, departures or new campaign closure credit.
+Continue independent graph research and its next accepted publication;
+no original acceptance, older-claim release or installed change follows.
+
 The [native messaging/session tools](native-messaging-session-tools-cohort.md)
 and [account/authorization](account-preflight-auth-journey-cohort.md) studies
 preserve four originals through twelve whole texts and twelve noncompletion
@@ -1157,6 +1190,29 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [branch/membership](branch-membership-boundaries-cohort.md) core preserves
+generic Worktrees AND CodeSpaces characterization, fetched-head OR tracking
+before work, local-work safety and the complete receiving-registration matrix.
+The [supervision/lifetime](supervision-native-lifetime-cohort.md) core keeps
+at-most-one lease owner distinct from process count and Linux cgroup survival,
+including transferred registration, child health and separate live migration.
+The [Bridge incidents](bridge-replacement-recovery-cohort.md) core preserves
+actual combined-path uncertainty, legitimate updates, all three stale-slot/
+schema/host-survival outcomes and their existing owners without shared live-fire.
+
+The [casing/marketplace](casing-local-marketplace-cohort.md) core preserves
+human-only spelling correction and all six authorized local-closure outcomes,
+without broad renames, global preference mutation or unauthorized host plugins.
+The [resident/single-flight](resident-demand-singleflight-cohort.md) core keeps
+all four outcomes, truthful skip/queue/timeout semantics and positive cutover
+ownership distinct from version/age or an unproven hang hypothesis.
+
+The [indexing-domain/standalone](index-domain-standalone-cohort.md) core
+preserves actual authorized-family enforcement without an omitted-filter
+search-everything fallback. The lifted pause and completed native/planning
+milestones do not complete standalone lifecycle or transfer canary, controller,
+Gateway, placement, image/client or credential ownership.
 
 The [messaging/session tools](native-messaging-session-tools-cohort.md) core
 distinguishes SDK ACK, matching-root consumption, request streams, independent
