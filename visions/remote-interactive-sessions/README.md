@@ -1,6 +1,6 @@
 # Remote Interactive Sessions — Vision
 
-- **Subject:** How a human-attended, muxed, interactive Copilot CLI session
+- **Subject:** How a human-attachable, muxed, interactive Copilot CLI session
   running in a remote venue (a CodeSpace, a trusted container, or any
   agent-ssh-reachable machine) becomes a first-class, coordinated peer of a
   locally-hosted session — durably registered in the same discovery index a
@@ -9,45 +9,25 @@
   venue provider.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
 ## Purpose & Intent
 
-[session-hosting](../session-hosting/README.md) already establishes that many
-execution rigs — CLI/mux, ACP, SDK, application, third-party — can host a
-Copilot session as peer providers under one durable agency model. This
-vision's own job — making a muxed, interactive CLI session work the same way
-in a remote venue as it does locally, as a first-class coordinated peer, not
-a second execution protocol — is **realized**: a muxed, interactive CLI
-session has long been a *local* affordance (agent-worktrees/Worktree
-Manager), and the venue providers now offer the identical, coordinated shape
-— [agent-codespaces](../plugins/agent-codespaces/README.md)'s and
-agent-containers' `copilot <name>` (interactive) / `copilot <name> --detach`
-(programmatic) commands place a worktree-keyed reservation, carry a
-daemon-port reverse-forward alongside the credential-relay one on the same
-standing connection, and self-register into `live_sessions` honestly marked
-as CLI-mode-driven — live-clean-room-validated end to end on both venues (see
-`efforts/active/agent-bridge-cli-mode-sessions/README.md`). What remains open
-is narrower: syncing this vision's prose and the plugins' own architecture
-docs to that realized state (that effort's own Phase 5), and the Worktree
-Picker gaining CLI-mode-aware actions on its CodeSpaces/containers pivot (a
-separate, `worktree-manager`-owned integration point, deliberately deferred
-there rather than folded into this vision).
+[session-hosting](../session-hosting/README.md) defines peer execution providers
+under one durable agency model. The [Copilot Driver](../plugins/agent-remote-driver/README.md)
+supplies the minimal direct-Copilot provider independently of coordination
+plugins: its Session Host brokers both headless children and interactive mux
+sessions whose selected, launch-injected extension connects to it.
 
-The north star: a remote venue is simply another place a **standard, muxed
-Copilot CLI session** can run, coordinated by the existing hosting boundary
-exactly as a local one is — never a second, parallel execution protocol
-invented to carry interactive access over a network boundary. The coordination
-layer **pre-allocates** the execution home a launching CLI session will bind
-to; the CLI's own extension **discovers and binds** to that specific
-assignment rather than defaulting to an ambient daemon; and venue providers
-symmetrically gain the ability to **launch** such a session, the same way the
-local worktree/mux launch path already does, riding the selected shared
-transport venue-parity establishes. Once bound, the session is ordinary,
-coordinated, reattachable, multi-observer work — no new vocabulary, no
-duplicated retirement or replay machinery.
+A remote venue is another place that same **standard, muxed Copilot CLI
+session** can run. The caller reserves execution before launch; the Driver
+binds the resulting native session to that reservation and exposes the common
+ACP-compatible broker endpoint with port, process and session information.
+Venue providers prepare and reach the target rather than carry their own
+Session Host or mux-launch implementation. Terminal attachment, programmatic
+control and durable work remain separate identities with one execution owner.
 
 SSH-specific forwarding and TTY launch shapes below apply to SSH-backed venues.
 An optional [machine-fleet Gateway](../machine-fleet/README.md) does not gain
@@ -75,69 +55,31 @@ does not depend on it.
 
 ## Concepts & Components
 
-### CLI mode needs no Session Host process — mux and the extension already do its jobs
+### Session Host brokers headed and headless execution
 
-A Session Host exists to give a headless `copilot --acp` child two things it
-cannot provide itself: **survival** across daemon restarts/reconnects, and an
-**ACP transport surface** so the daemon can drive a child with no human
-attached. A muxed, interactive CLI session already has both, from different
-owners: the multiplexer (tmux/psmux) keeps the `copilot` process alive across
-detach/reattach — that is a mux's entire purpose — and the coordination
-layer's own CLI extension, already loaded inside that real interactive
-process, already registers and participates directly with the daemon (proven
-by the existing `send`-admission and inbox-polling mechanics). Spawning a
-Session Host to wrap a process two other owners already keep alive and
-already speak for would be a second, redundant lifecycle manager — precisely
-what this vision's non-goals rule out.
+Headless mode has Session Host directly own Copilot and its ACP connection.
+Headed mode has the Driver's mux wrap interactive Copilot while its selected
+extension connects to Session Host. The broker is not another Copilot process
+or a rival terminal owner: it supplies the same programmatic endpoint,
+reservation, native identity and control boundary for either presentation.
 
-Discoverability, the third thing a Session Host would otherwise provide, is
-**already handled correctly** by a different, already-existing mechanism: the
-extension's self-registration into the coordination layer's durable
-`live_sessions` registry — the same registry every attended (non-daemon-spawned)
-interactive session already uses to be observable/messageable, CLI-mode or
-not. This is deliberately a *different* map from `host_index` (the daemon's
-record of processes *it itself spawned*, addressed by a dialable local port
-and polled by `host_pid`/`child_pid` liveness) — a CLI-mode session was never
-spawned by the daemon, so it has neither a port nor a host process for that
-model to describe. One process, two owners covering survival and control, one
-already-correct self-registration path for discovery: no fourth mechanism
-needed.
-
-What once blocked a *remote*-venue CLI-mode session from being discoverable
-this same way — narrower and more concrete than the general self-registration
-mechanism above — is now closed: the extension always registers against
-`http://127.0.0.1:<port>` (its own loopback), and that loopback *is* reachable
-from inside a CodeSpace or trusted container today. The venue-launch primitive
-([agent-codespaces](../plugins/agent-codespaces/README.md)'s
-`dual-mode-session-reach`) places a Connection Owner tenant hold that carries
-**both** the pre-existing credential-relay forward **and** a daemon-port
-reverse-forward (reusing the same standing, multiplexed SSH connection — no
-second persistence mechanism), for as long as the attached session runs. A
-venue-launched CLI-mode session self-registers into `live_sessions` exactly
-like a local one — live-clean-room-validated end to end (a real attached
-`copilot` TUI, registered, observed by a second client, and torn down
-cleanly, confirmed on both `agent-containers` and a real `agent-codespaces`
-CodeSpace; see `efforts/active/agent-bridge-cli-mode-sessions/README.md`
-Phase 4). The schema/model half of the related reattach-descriptor work
-(`live_sessions.venue`) has also landed.
+The selected redistributable carries this receiving support without requiring
+Bridge, Worktrees or Manager on the target. Bridge can coordinate or represent
+the session as a client; its ledger does not replace the Driver's execution
+record. Existing venue transport and credential owners provide reachability,
+without making a particular host-side daemon or reverse forward mandatory for
+every backend.
 
 ### Worktree-keyed reservation, not ambient self-registration
 
-The coordination layer's CLI-side extension currently reaches back to bind
-itself to a daemon by assumption rather than by explicit assignment. The
-mechanism is an explicit, operator-created **reservation for a worktree's
-next CLI-mode session**, made by the coordination layer before that session
-starts. This is sound specifically because the fabric already guarantees
+The mechanism is an explicit, authorized **reservation for a worktree's next
+CLI-mode session**, carried by the launching caller into the Driver before
+that session starts. This is sound specifically because the fabric guarantees
 *[single-current-session-per-worktree](../agent-fabric/README.md#single-current-session-per-worktree)*
 — at most one current session per worktree — so a worktree-keyed reservation
-is never ambiguous. Correlating a registering session against a pending
-reservation, and marking the matched `live_sessions` row accordingly, is the
-daemon's own responsibility at registration time; an
-extension that already resolves and sends its worktree identity needs no
-separate lookup step to participate. Only once a *remote* venue's own local
-daemon differs from the host machine's does an explicit, client-read
-discovery step become necessary — the mechanism generalizes without changing
-this concept's identity unit.
+is never ambiguous. The Driver binds its native session to that reservation;
+coordination clients retain the relationship to their worktree rather than
+making a Bridge registry mandatory for standalone execution.
 
 One host coordination layer can see *many* venues of the same repository at
 once (several CodeSpaces each running their own anchor session), so a venue
@@ -155,37 +97,23 @@ exclusive to the local worktree/mux launch path. Any venue provider —
 `agent-codespaces`, `agent-containers`, or a future `agent-ssh`-reachable
 machine — can offer the same launch shape: prepare the venue, allocate the
 paired CLI-mode reservation, and start a standard muxed CLI process bound to
-it, self-registering into `live_sessions` with a reattach descriptor that
-knows how to reach that venue over the provider's shared channel established
-as part of the same launch (a daemon-port reverse forward for SSH-backed
-venues). This rides the selected transport and auth-relay contract
+it, with a reattach descriptor that reaches the Driver's broker and terminal
+over the provider's selected channel. This rides the transport and auth-relay contract
 [venue-parity](../venue-parity/README.md) already establishes
 for headless dispatch; it does not require or invent a second,
 venue-specific transport for the interactive case.
 
-**One verb name, everywhere: `copilot`.** "Deliver a TTY Copilot session to
-the user in the current terminal" is a single, unambiguous action —
-`agent-worktrees copilot` performs it locally (ensure a durable mux'd
-session exists, then hand this process's own terminal to it via exec);
-`agent-codespaces copilot <name>` / `agent-containers copilot <name>`
-perform the *identical* action for a remote venue by preparing it (the
-venue-specific "setup" step: reverse forwards, credentials, the reservation)
-and then running that same local `copilot` command remotely over an
-interactive SSH channel. "Interactive," reused elsewhere in this vocabulary
-for at least three different meanings (has a TTY, has a picker UI, is a
-muxed human-attended session), is deliberately retired in favor of this one
-named action. This is also the primitive the Worktree Picker's own
-CodeSpaces/containers navigation invokes on "Open" (or "create a new
-session" for an idle venue) — the CLI ergonomics of the verb itself matter
-less than it being one cleanly scriptable action any caller (a human typing
-it directly, or Picker driving it) can invoke the same way.
+Local CLIs, remote venue adapters and Picker share the same ensure, launch and
+attach semantics as clients of the Driver. Human terminal attachment and
+detached programmatic launch are explicit outcomes, not duplicated wrappers
+or a requirement that a receiving Worktrees command be installed.
 
-### Human-attended, honestly marked
+### Human-attachable, honestly marked
 
 A session bound through CLI mode carries a durable marker distinguishing it as
-human-attended/mux-launched, as opposed to a headless, fully agent-bridge-owned
-execution. This is not a lesser session — it is a different **honesty
-contract**: recovery and observation guidance for a marked session may tell an
+human-attachable/mux-launched, as opposed to headless Driver-owned execution.
+A headed marker does not assert that a human is currently attached. This is a
+different **honesty contract**: recovery and observation guidance may tell an
 operator to reconnect and look directly (over the same reachable transport)
 rather than promising an automated recovery equivalent to a headless session's.
 
@@ -201,18 +129,17 @@ to carry this over a network boundary.
 
 ### worktree-keyed-host-discovery
 
-A registering session's binding to its CLI-mode designation is resolved from
-an explicit reservation keyed by worktree identity, correlated at
-registration time in the same durable `live_sessions` registry every
-attended session is found through — not inferred from an ambient default,
-and not tracked in a second, parallel discovery mechanism.
+A session's binding to its CLI-mode designation comes from its explicit
+Driver reservation, qualified by the caller's worktree and venue where
+applicable. Coordination can project that binding without replacing the
+broker's execution record or inferring ownership from an ambient daemon.
 
 ### symmetric-muxed-venue-launch
 
 `agent-codespaces` and `agent-containers` can create a standard, muxed
 interactive Copilot CLI session bound to a pre-allocated reservation, the same
-way the local worktree/mux launch path already does, as thin transports over
-one shared SSH substrate. The same launch is available in a **detached** form
+way a local client invokes the Driver, as thin transports over
+the selected shared connectivity substrate. The same launch is available in a **detached** form
 for a programmatic caller (an orchestrating agent that must not hand its own
 terminal away): it returns a scriptable handle once the session is registered,
 and the connection's durable owner keeps the session's back-channels alive for
@@ -249,26 +176,25 @@ something to correlate against by the time it registers.
 
 ### bind-dont-self-register
 
-An extension registering with its ambient local daemon does not itself decide
-whether it is CLI-mode; the daemon correlates the registration against any
-pending worktree reservation server-side. Nothing about a session's own
-behavior changes based on a guess about which mode it's in.
+The launch-injected extension binds to its assigned Driver Session Host, not an
+ambient coordination daemon. The broker correlates native identity with the
+explicit execution reservation; an extension cannot choose a new owner merely
+by registering itself.
 
 ### short-lived-event-based-extension
 
 The CLI-side extension itself stays a fast, event-driven actor: it performs
 quick, non-blocking discovery lookups and handoffs, then delegates all actual
-connection ownership, state, and longer-running work to agent-bridge's daemon
-or the Session Host process. It never holds open a long-running connection,
-watch, or blocking operation in the extension-host process — doing so risks
-the extension-host locking its own plugin directory.
+connection ownership, retained state, and longer-running lifecycle work to the
+Driver's Session Host. Broker communication stays asynchronous and bounded;
+SDK callbacks never block on remote work or retain a caller's installer lifetime.
 
 ### no-duplicate-lifecycle-machinery
 
-A CLI-mode-bound session reuses the exact `live_sessions` registration,
-messaging, and observation machinery any other attended session uses —
-never a second registry or a forked protocol, and never wrapped in a
-Session Host it does not need.
+A CLI-mode-bound session uses the Driver's common Session Host broker and
+execution record rather than a second Copilot conversation, copied mux
+launcher or competing lifecycle owner. Coordination representation remains
+a client view, not another authoritative execution registry.
 
 ### opt-in-not-ambient-default
 
@@ -292,11 +218,9 @@ headless session's mechanics do not actually extend to an attended one.
   parallel raw-terminal replay format, a separate writer/observer protocol, or
   a competing execution-identity model alongside the one session-hosting
   already defines.
-- **Not a second Session Host process or discovery mechanism.** CLI mode
-  spawns no wrapping host process — the multiplexer and the already-loaded
-  extension already provide a Session Host's survival and daemon-facing
-  duties — and it discovers through `live_sessions`, the same registry any
-  attended session already uses, never a parallel index or lifecycle.
+- **Not a rival lifecycle or conversation.** The headed Driver's Session Host
+  brokers its extension-connected mux session; it does not start a second
+  Copilot or take terminal ownership from the mux.
 - **Not reaching local capabilities from the remote session.** Whether and how
   a CLI-mode session reaches locally-provided resources (a browser profile,
   local configuration, etc.) is
@@ -322,6 +246,8 @@ headless session's mechanics do not actually extend to an attended one.
   provider-neutral hosting boundary this vision extends into remote venues,
   and the origin of the Session-host-provider and
   single-current-session-per-worktree concepts this vision builds on.
+- Execution app: [Copilot Driver](../plugins/agent-remote-driver/README.md) —
+  owns the common broker and the hoistable headed/headless receiving package.
 - Sibling vision: [venue-parity](../venue-parity/README.md) — the thin,
   symmetric selected transport and auth-relay contract this vision's venue
   launch rides rather than duplicates.

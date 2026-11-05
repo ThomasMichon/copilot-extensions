@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -91,7 +91,10 @@ hosts, SDK integrations, graphical applications, and third-party rigs are peer
 providers behind one capability-honest boundary. The provider owns execution
 mechanics; the worktree ground layer owns durable agency meaning. The
 cross-cutting [session-hosting](../session-hosting/README.md) vision refines this
-seam.
+seam. Its minimal direct-Copilot provider is the independently distributed
+[Copilot Driver](../plugins/agent-remote-driver/README.md): one Session Host
+broker for headless children and interactive mux sessions, usable locally or
+hoisted into a venue without its coordination suite.
 
 ### agent-bridge — the coordination layer
 Adds **remote agent creation, inspection, and communication** over discoverable
@@ -699,16 +702,22 @@ inspectable and safely resumable.
 
 ### reclaim-idle-process
 A durable agent's **live process is a reclaimable resource, not a permanent
-tenant**. When the fabric's connection to a hosted agent is lost, an agent that
-is **idle** — its turn complete with no work still running on its behalf — has
-its process **freed** rather than left pinning memory indefinitely: promptly when
-the disconnect is **clean**, and within a **bounded grace** when it is **abrupt**
-(so a quick reattach still wins). An agent that is **mid-work** is never reclaimed
-this way — it is kept for reattach (per *recover-not-lose*). Reclaiming an idle
-process **loses nothing**: the agent stays **resumable** from its recovered state,
-so the fabric owns process lifetime by *connection and activity* while the
-consumer need only connect and disconnect. The complement of *recover-not-lose*:
-one keeps *work* from vanishing; this keeps *idle processes* from accumulating.
+tenant**, but reclamation follows its owning execution contract, not connection
+loss alone. The [Copilot Driver](../plugins/agent-remote-driver/README.md)
+retains interactive CLI execution until the user closes it or an explicitly
+authorized owner retires it; foreground idle, terminal detach or observer
+disconnect does not expire that execution.
+
+ACP execution may end on caller stop or after its configured idle allowance
+when no background tasks, agents or schedules remain pending. A clean or abrupt
+disconnect does not bypass that allowance or turn pending work into idle.
+Driver and Session Host processes stay alive as long as their Copilot execution
+needs them. Caller-bounded helpers may follow their separately declared cleanup
+contract without taking target-owned execution down with them.
+
+Reclamation preserves native history and outstanding responsibility for
+deliberate restoration. A resumable record is not proof that process-owned work
+was safely stopped; uncertain state remains explicit.
 
 ### claimed-resource-not-reclaimed
 A resource with a **live claimant is never reclaimed** — not pruned, reaped, or
@@ -722,6 +731,11 @@ that cannot see a resource's claimant must treat it as **potentially owned**, no
 assume it abandoned: absence of a *local* owner is not proof of *no* owner. This
 is what keeps an actively-owned resource from being mistaken for an orphan and
 torn out from under the worktree still using it.
+
+This restricts orphan/idle collection, not an authorized stop or the owning
+session provider's declared mode-specific retirement. Such a lifecycle action
+settles its relationships through their owners; it does not erase unrelated
+claims or durable obligations.
 
 ### summary-status-is-first-class
 The fabric distinguishes an agent's **in-conversation messages** (what it is

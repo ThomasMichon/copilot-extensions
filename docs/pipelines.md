@@ -388,8 +388,15 @@ toolchain lock. Generation does not resolve, publish or install dependencies.
 
 `tools/build_python_artifacts.py` can run standalone and is also invoked by
 promotion's credential-separated `build-python-artifacts` job. Its default
-`--toolchain-source governed` requires an
-affirmatively trusted governed feed. There is no automatic public fallback.
+`--toolchain-source governed` requires a
+configured non-public HTTPS default UV feed. A second per-host environment
+allowance is not required: the legacy
+`BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS` value is ignored. Named-index
+authentication, exact index pinning, TLS verification, source/artifact integrity
+and package-age checks remain unchanged. Native source profiles retain duplicate
+references to the identical selected index and credential identity but reject any
+different supplemental index or credential identity. There is no automatic public
+fallback.
 Public promotion runners may explicitly choose
 `--toolchain-source seasoned-public --toolchain-min-age-days 7` (seven days
 is the default). This exception applies only to the build toolchain:

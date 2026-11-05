@@ -106,7 +106,7 @@ Phase 2+ scope is broken into concrete, assignable pieces.
 | Participant | Scope | Coordination |
 |-------------|-------|--------------|
 | Streaming recovery owner | Phase 6d.3a client startup/reconnect acceptance only | #6832; independent, sequential plan and implementation PRs |
-| Ordinary-hook recovery source owner | Proposed finite P8388 missing-endpoint receiver and eligible hook consumers only | #3761; reviewed proposal before implementation, no installed activation |
+| Ordinary-hook recovery source owner | Finite P8388 shell-readable facts, eligible pre/post consumers and optional owner-mediated boot nudge | #3761; amended proposal review before replacement implementation, no installed activation |
 
 This participant does not take ownership of the remaining daemon phases,
 singleton transitions, central fleet exporter, or other pivots.
@@ -996,10 +996,12 @@ within the already-requested Phase 6d.3 real-consumer acceptance.
 
 ### Phase 6d.3b - Proposed ordinary-hook missing-endpoint recovery
 
-- [ ] Review the [bounded owner-mediated recovery proposal](ordinary-hook-endpoint-recovery.md)
-      before implementation; preserve all incumbent phases and finite scopes.
-- [ ] Implement and qualify the selected-runtime receiver and actual eligible
-      hook fallback consumers, without current-packet replay or a new daemon.
+- [x] Review the original bounded owner-mediated recovery proposal before
+      implementation; #10585 merged. Its synchronous prototype is not qualified.
+- [ ] Review the [shell-facts and asynchronous recovery amendment](ordinary-hook-endpoint-recovery.md)
+      before replacement implementation; preserve all incumbent phases/scopes.
+- [ ] Implement and qualify original-owner fact publications and actual eligible
+      shell consumers, without blocking Python, current-packet replay or a new daemon.
 - [ ] Record exact source/release evidence separately from installed, live
       ordinary-session/model/ACP and composed-throughput acceptance.
 
@@ -1372,7 +1374,7 @@ _(Agent-recommended direct selection/list case; all rows unchecked.)_
 
 ### Proposed ordinary-hook recovery source slice
 
-- [ ] Complete the [paired receiver/consumer, compatibility, identity, deadline,
+- [ ] Complete the [paired shell/file consumer, compatibility, identity, deadline,
       concurrency and cleanup checks](ordinary-hook-endpoint-recovery.md#paired-validation)
       through the real isolated consumer path, not helper counts alone.
 - [ ] Preserve independent roster-client, installer/singleton, publication and
@@ -1477,6 +1479,20 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-11-05 - Shell-facts and asynchronous ordinary-hook amendment
+
+The original #10585 design cleared review, but its unpublished fixed-budget
+synchronous cold receiver did not pass the required native effect observations.
+The [amended finite plan](ordinary-hook-endpoint-recovery.md) now requires shell
+event evaluation and bounded original-owner files, with only an optional
+nonblocking boot nudge. It composes merged managed-session admission #10589 and
+the existing managed guard-map publisher instead of adding competing authority.
+PR operation-bound observation, POSIX decoding, producer interfaces and real
+consumer/throughput qualification remain explicit pre-transition obligations.
+This is proposed design only; review precedes replacement implementation.
+No existing participant, startup/closure owner, installed service or resource
+hold is transferred or changed.
 
 ### 2026-11-04 - Proposed finite ordinary-hook recovery source slice
 

@@ -597,6 +597,13 @@ The internal POSIX Python controller explicitly disables bytecode writes with
 This does not change the requested command's interpreter arguments or bytecode
 policy.
 
+Optional `input_bytes=...` preserves binary stdin through that same bounded
+native owner (including the POSIX guardian frame). Byte input requires binary
+capture and cannot be combined with `input_text`; stream/frame limits and native
+settlement remain unchanged. The default UTF-8 text input path is unchanged.
+Inputs whose encoded bytes cannot fit the existing frame limit are refused
+before base64 allocation; the final frame check still accounts for JSON overhead.
+
 `run_caller_owned(..., on_settled=callback)` optionally reports positive native
 scope settlement, separately from execution success. The callback runs once
 after known pre-launch preparation refusal, or after the entire strict Windows

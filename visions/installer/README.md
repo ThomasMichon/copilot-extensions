@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-04
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -472,14 +472,16 @@ app is where it is delivered and kept current. The interactive Picker opens by t
 **single most natural gesture — a bare, no-args invocation** of a project's front
 door; **every** other invocation routes programmatically to the plugins' own CLIs,
 whether or not it is interactive. Execution is provider-neutral: the app
-currently drives both the **TMux/PSMux presentation layer** and the **AHP
-session backend** — composable, not exclusive, choices — for launch, resume,
-and reattach, and may add ACP, SDK, App, or third-party hosts alongside them.
+requests launch, resume and reattach from the selected provider. The
+[Copilot Driver](../plugins/agent-remote-driver/README.md) owns direct-Copilot
+Session Host and TMux/PSMux wrapping; Manager is its client, not another mux
+implementation. Native AHP, SDK, App and third-party providers remain available,
+with backend and presentation selected as composable rather than exclusive axes.
 The app is also the phased destination for **Terminal Fragment handling**
 (which launch targets a machine's terminal app — Windows Terminal, Tabby,
 ... — carries a profile for, and mirroring that selection into real
-terminal-app fragments): a machine-local concern relocating here the same way
-Mux/AHP already did. **Per-project binstubs are a different, unrelated
+terminal-app fragments): a machine-local presentation concern distinct from
+the Driver's execution mechanics. **Per-project binstubs are a different, unrelated
 artifact and are explicitly out of scope for this relocation** — deploying
 and repairing the PATH launcher scripts a registered project resolves to
 remains agent-worktrees' own responsibility; only the terminal-app *profile*

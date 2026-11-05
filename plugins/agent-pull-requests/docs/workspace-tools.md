@@ -14,9 +14,91 @@ source façade. Native operations remain synchronous under their existing caller
 lifetime; service operations use their existing async client and handler/drain.
 The façade creates no thread, process, watcher, ledger or transport.
 Synchronous LocalReviewSource operations are available only through a native
-synchronous client. An async service host without an existing owned source
-execution/drain adapter reports source/source-read unsupported instead of blocking
-its event loop or launching untracked work. This slice does not invent that owner.
+synchronous client. An async service host may bind Worktrees' `AsyncReviewSource`
+under its existing resource lifetime. Construct it with
+`AsyncReviewSource(selected_source, executor=existing_owned_thread_executor)`.
+The existing host supplies and owns that executor; the adapter never creates or
+shuts down a pool. Missing binding refuses rather than selecting another owner.
+Actual native executor futures, not cancellable loop bridges, prove queued work
+was cancelled before launch. The adapter retains original owner checkpoints;
+it is not another resource/service owner.
+Only one async adapter may bind a selected LocalReviewSource lifetime; a second
+binding refuses instead of creating independent admission/drain state.
+Owned async source selects the stock executing native/service preparation
+binding, not a version marker or generic delegate's declaration. The actual
+exchange, discovery and materialization methods are checked before source work
+and rechecked before subsequent client IO. Overridden preparation methods and
+configured service read-admission callbacks remain metadata-only; the source
+lane cannot infer native settlement for their hidden producers.
+The client accepts the existing operation's checkpoint for
+capability/cache reads and materialization, checking it after pacing and before
+each request. Version-1 peers retain metadata compatibility but do not advertise
+async source tools. Native source/transport frames and their IO limits are unchanged.
+Binding also refuses while synchronous source work is active. Once bound, public
+synchronous inspection/read refuses; only the admitted worker's explicit internal
+entry points can access that selected source. Native unbound behavior is unchanged.
+One physical selected-source operation is admitted at a time; a busy source
+refuses before copying another request, rather than maintaining an internal
+queue. This is source execution contention, not a delegate permission or quota.
+The original absolute deadline starts at admission, including executor wait;
+expired queued work refuses before entering Git and never receives a new budget.
+For async source tools this same reservation is acquired before capability/client
+materialization IO. Client requests stay on their original loop; generation
+assembly, validation, serialization and copies use the supplied executor under
+that reservation. Cancellation retains both actual client preparation and native
+CPU/Git work until terminal drain. Busy sources refuse before those client reads.
+The caller's wait also ends at that deadline while native completion remains
+retained for drain. Blocking owner checkpoints run inside the worker, not on the
+event loop.
+The existing ServiceCaller request has an internal native-completion scope.
+Source qualification binds its actual selected ServiceCredentials reader (or
+its existing synchronous machine-proof path). An opaque token callback,
+decorator or unbound delegate remains metadata-only for this new source lane.
+The released ServiceCaller constructor, callback and ordinary request APIs are
+unchanged. Changing the configured credential callback withdraws source support.
+Cooperating native producers register the actual executor future before
+awaiting a loop wrapper; cancellation joins that producer before request
+settlement. Source requests use the already supplied source executor for the
+existing credential-reference reader. No executor, credential issuer or
+transport is inferred from a declaration.
+Source DNS work uses the same request's registered native execution/drain;
+ordinary metadata keeps its existing resolver.
+Source-owner permission denials during native credential work preserve their
+original exception rather than becoming an authentication failure.
+Active nested client results transfer into tracked execution before their
+parents settle. Withdrawn results retain unfinished producer custody instead.
+New asynchronous inspection accepts immutable generation bytes from the existing
+verified native/service materialization and read cache. Validation pins the
+requested generation identity before retaining those canonical bytes; inspection
+decodes and validates them in its owned worker before any Git read. It never
+traverses a caller's original mutable change list. Unbound raw async inspection
+refuses with `async_inspection_requires_immutable_generation` before work admission.
+The earlier metadata reservation permits owned preparation, not mutable inspection.
+No new evidence quota or on-loop atomic-copy allowance is introduced; existing
+Git output/path limits retain their original meanings.
+Released unbound LocalReviewSource synchronous raw-dictionary inspection and
+native prepared-source tools remain unchanged. No request flag selects a legacy
+escape from an already-bound async lifetime.
+Request snapshotting, generation selection/validation and attachment response
+preparation run inside that retained worker. Content-addressed selection identity
+is pinned before offload; a changed generation cannot replace the selected one.
+Retained reads likewise pin the already validated manifest ID, scope and revision
+before the executor queue and compare the actual worker snapshot before reading.
+An async host without that binding still reports source/source-read unsupported.
+The host must stop admission and await terminal `drain(timeout=...)` before
+releasing the member. Cancellation withdraws the operation but does not release
+its worker. Drain timeout retains pending work and custody; `status()` reports
+that distinction. Never infer cleanup from a caller timeout or response buffer.
+Original process/Job cleanup errors remain in `cleanup_errors`; drain re-raises
+them and cannot report drained. Native worker completion is recorded independently
+of cancellable async bridges, including during normal event-loop executor
+shutdown. A canceled async wrapper cannot discard a later process/Job cleanup
+error. The host must preserve the existing cleanup owner's handles and cannot
+release the member from either outcome.
+If an attachment's caller budget expires, it returns an incomplete envelope with
+`effects: local_refs_possible` and `native_settlement: unconfirmed`. This does not
+claim native settlement or permit release: original owner denials and cleanup
+failures still propagate, and the same owner must drain actual retained work.
 
 The public contract is `agent-pull-requests.workspace-tools/v1`. Discovery reports
 the actual supplied client's supported operations and source-read descriptor.
@@ -25,10 +107,18 @@ All original CLI/watch interfaces and defaults remain unchanged.
 Overlapping service tool calls share negotiation through the existing client's
 `ensure_capabilities()`; explicit rediscovery remains separate and can withdraw
 cached support. This orders metadata, not caller authority or effect admission.
+Custom native `ensure_capabilities` callbacks remain available for ordinary
+metadata discovery but cannot qualify the owned async source lane. They are
+rejected before source reservation or callback execution.
+Source qualification inspects discovery and preparation bindings without
+executing descriptor getters. Stock methods and their bound instance copies
+remain supported; custom descriptors remain available to explicit metadata calls.
 The existing host lifetime retains a bounded 16 MiB total verified-generation
 read cache. Repeated source reads recheck the scoped descriptor through the
 current client/owner, without transferring all chunks again. Changed/missing
 descriptors refuse; cached bytes never substitute for current authority.
+One-shot views suppress only the async source binding and preserve that same
+verified-generation cache.
 
 ## Existing CLI frontdoor
 
@@ -50,6 +140,11 @@ input. An ordinary unbound command only reports source contract support and
 owner-unavailable for operations. It does not capture a watch invocation,
 bootstrap/select a runtime or load an owner from a file/module/environment.
 There is no `--owner`, credential/root override or receipt-based permission.
+The one-shot CLI does not adopt async source owners: its per-invocation loop
+cannot own their lifetime through later reads and drain. It omits source tools
+for that binding and refuses source/source-read honestly; metadata
+operations remain available through their existing client. Use the actual async
+host/tool interface on its original loop, with terminal drain, for async source.
 
 Each non-discovery command takes one bounded finite JSON request, with duplicate
 fields rejected. CLI exit 0 means a JSON operation response was delivered, **not**
@@ -110,11 +205,20 @@ contract remains unchanged. Source Git environment isolation was moved into a
 lightweight module with the original Git helper aliases preserved, avoiding an
 unrelated registry/credential import in this prepared-object reader.
 
-**Exact source acquisition remains unsupported here.** Default-base worktree
-creation and whole-remote Git fetch are not exact shallow head/common preparation.
-No clone/fetch command, allocation manager or fabricated preparation factory is
-added. Actual allocation, object preparation and resource custody stay with their
-existing owner until its narrow review API is admitted and adopted.
+**Prepared-only implementation scope; acquisition deferred pending resource-owner
+capacity admission.** Exact acquisition is unsupported and unadvertised. There
+is no acquisition callable, constructor binding or `source-prepare` command in
+this implementation. Original general-purpose Git fetch behavior is unchanged;
+it is not substituted for exact review acquisition. Even depth-one fetch can
+write oversized unchanged blobs before post-transfer inspection limits apply.
+The existing Git/resource owner must establish actual pre-write transfer/storage
+bounds and reviewed admission before a future implementation under #9535.
+
+The strict prepared-source/read descriptors remain unchanged; the additive
+execution descriptor signals only owned async work over already prepared
+objects. These source APIs do not prove any real resource/credential factory or
+installed-host adoption. A missing object remains unavailable; no lazy fetch or
+fallback acquisition is attempted.
 
 ## Source proof and remaining gates
 

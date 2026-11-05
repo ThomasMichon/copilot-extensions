@@ -22,6 +22,7 @@ def add_parsers(sub) -> None:
     relationship.add_argument("operation", choices=("capabilities", "reserve", "bind", "inspect", "close"))
     relationship.add_argument("--json", action="store_true", required=True)
     relationship.add_argument("--owner-ref", help="Qualified local worktree owner; required except for capabilities")
+    relationship.add_argument("--resident-only", action="store_true", help="Inspect the selected resident without bootstrap or direct fallback; requires expected_creation_nonce")
 
 
 def read_input(label: str = "producer") -> dict:

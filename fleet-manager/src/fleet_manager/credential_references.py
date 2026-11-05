@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,11 +35,15 @@ class ServiceCredentials:
     access_token_file: Path
 
     async def access_token(self) -> str:
-        raw = await asyncio.to_thread(read_credential_reference, self.access_token_file)
+        from ._service_caller_native import run_native
+        raw = await run_native(read_credential_reference, self.access_token_file)
         try:
             return text(raw.decode("utf-8").strip(), 8192)
         except UnicodeError:
             raise GatewayError("credential-reference-unavailable") from None
+
+
+_SOURCE_ACCESS_TOKEN_IMPLEMENTATION = ServiceCredentials.access_token
 
 
 def load_service_credentials(

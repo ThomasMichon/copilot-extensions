@@ -1543,21 +1543,17 @@ jobs:
           EXPECTED_SOURCE: ${{ github.sha }}
         run: |
           python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py worktree-manager --test-file tests/test_pane_args_file.py -k real_psmux --allow-explicit-tiers
       - name: Qualify native Companion navigation and daemon observations
         if: inputs.portfolio == 'mux-companion'
         env:
           UV_PYTHON: "3.12"
-        run: >-
-          python tools/run-plugin-tests.py worktree-manager
-          --test-file tests/native/test_companion_pane_native.py
-          --test-file tests/test_companion_attention.py
-          --test-file tests/test_companion_attention_ui.py
-          --test-file tests/test_daemons_status.py
-          --test-file tests/test_daemons_cli.py
-          --test-file tests/test_windows_daemon_observation.py
-          --test-file tests/native/test_daemon_observation_native.py
-          --allow-explicit-tiers --test-timeout 120
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_companion_pane_native.py --test-file tests/native/test_companion_app_psmux.py --test-file tests/test_companion_attention.py --test-file tests/test_companion_attention_ui.py --test-file tests/test_daemons_status.py --test-file tests/test_daemons_cli.py --test-file tests/test_windows_daemon_observation.py --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers --test-timeout 120
 
   bridge-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
