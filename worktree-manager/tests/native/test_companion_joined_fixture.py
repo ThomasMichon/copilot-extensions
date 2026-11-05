@@ -5,12 +5,14 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from test_companion_joined_tmux import source_entrypoint
-from worktree_manager import companion_bridge_source, mux_companion
+from test_companion_joined_psmux import live_reader_pids
+from worktree_manager import agenda_transport, companion_bridge_source, mux_companion
 
 
 @pytest.mark.parametrize(
@@ -67,3 +69,27 @@ def test_observer_retries_only_native_sharing_without_advancing(
     assert json.loads(target.read_text(encoding="utf-8"))["app_cells"] == [80, 24]
     callbacks[0]()
     assert len(calls) == 2
+
+
+def test_native_reader_selection_includes_actual_agenda_command_and_rejects_reuse(
+    tmp_path: Path,
+) -> None:
+    agenda = agenda_transport.feed_argv(
+        "example", "selected", "head-a", engine_command=[sys.executable, "-m", "agent_worktrees"],
+    )
+    trace = tmp_path / "children.jsonl"
+    trace.write_text("\n".join(map(json.dumps, [
+        {"pid": 1, "birth": 101, "argv": ["worktree-observations", "--follow"]},
+        {"pid": 2, "birth": 102, "argv": agenda},
+        {"pid": 4, "birth": 104, "argv": ["worktree-observation-history"]},
+        {"pid": 5, "birth": 1, "argv": agenda},
+        {"pid": 6, "birth": 106, "argv": agenda},
+    ])), encoding="utf-8")
+    requests = [
+        {"pid": 3, "birth": 103, "path": "/session-observations/child?follow=true"},
+        {"pid": 7, "birth": 107, "path": "/session-observation-history/child"},
+    ]
+    locks = SimpleNamespace(
+        pid_alive=lambda pid: pid != 6, process_start_time=lambda pid: 100 + pid,
+    )
+    assert live_reader_pids(trace, requests, locks) == {1, 2, 3}

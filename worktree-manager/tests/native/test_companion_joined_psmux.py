@@ -35,6 +35,18 @@ pytestmark = [
 ]
 
 
+def live_reader_pids(trace: Path, requests: list[dict[str, Any]], locks: Any) -> set[int]:
+    candidates = [
+        child for child in map(json.loads, trace.read_text(encoding="utf-8").splitlines())
+        if "--follow" in child["argv"] or "agenda-feed" in child["argv"]
+    ]
+    candidates.extend(request for request in requests if "follow=true" in request["path"])
+    return {
+        child["pid"] for child in candidates if locks.pid_alive(child["pid"])
+        and locks.process_start_time(child["pid"]) == child["birth"]
+    }
+
+
 def test_native_windows_three_owner_history_live_and_same_cli(
     semantic_peer: dict[str, Any], actual_waiters: Callable[[str], Awaitable[dict[str, Any]]],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -223,16 +235,7 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                 client.send(b"\x1b[F")
                 wait_for(lambda: "Native task 140" in screen() and "0 unread" in screen())
                 locks = sys.modules["agent_worktrees.locks"]
-                reader_pids = {
-                    child["pid"] for child in map(json.loads, peer["trace"].read_text().splitlines())
-                    if "--follow" in child["argv"] and locks.pid_alive(child["pid"])
-                    and locks.process_start_time(child["pid"]) == child["birth"]
-                }
-                reader_pids.update(
-                    request["pid"] for request in semantic_peer["requests"]
-                    if "follow=true" in request["path"] and locks.pid_alive(request["pid"])
-                    and locks.process_start_time(request["pid"]) == request["birth"]
-                )
+                reader_pids = live_reader_pids(peer["trace"], semantic_peer["requests"], locks)
                 assert len(reader_pids) == 3, reader_pids
                 readers = [pin_owned(reader) for reader in reader_pids]
                 client.send(b"\x1b")
