@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
@@ -23,17 +24,33 @@ def _legacy_report(root: Path) -> dict | None:
         return None
     if (peer / ".installation-ownership.json").exists():
         raise _peer_launch.ContextRefused("legacy configuration owner has installation-cell ownership")
-    path = own_root / "scripts" / "versioned_runtime.py"
+    # Installed wheels have no payload scripts; construction retains this SDK
+    # beside the selected interpreter for read-only runtime resolution.
+    path = Path(sys.prefix) / ".runtime-bootstrap" / "versioned_runtime.py"
+    if not path.is_file() or path.is_symlink():
+        path = own_root / "scripts" / "versioned_runtime.py"
     if not path.is_file():
         path = Path(__file__).resolve().parents[2] / "scripts" / "versioned_runtime.py"
-    if not path.is_file():
-        return None
-    resolver = _peer_launch._load_primitive(path, "_vault_configuration_runtime")
-    prefix = ready_owner_prefix(peer, "agent_worktrees", resolver=resolver.resolve_python)
-    if not prefix:
-        return None
     environment = _peer_launch.legacy_peer_environment(dict(os.environ))
     environment.pop("AGENT_CONFIGURATION_CONTEXT", None)
+    if path.is_file():
+        resolver = _peer_launch._load_primitive(path, "_vault_configuration_runtime")
+        prefix = ready_owner_prefix(peer, "agent_worktrees", resolver=resolver.resolve_python)
+    else:
+        from agent_procutil.owned_process import run_caller_owned
+        from configuration_context.runtime import deployed_runtime_python
+
+        deployed = own_root / "bin" / (
+            "resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh"
+        )
+        prefix = ready_owner_prefix(
+            peer, "agent_worktrees",
+            resolver=lambda selected: deployed_runtime_python(
+                selected, resolver=deployed, environment=environment, runner=run_caller_owned,
+            ),
+        )
+    if not prefix:
+        return None
     return read_owner_context(
         [prefix[0], "-I", "-X", "utf8", *prefix[1:]], root,
         environment=environment,

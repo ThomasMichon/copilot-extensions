@@ -139,6 +139,118 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     assert json.loads(result.stdout)["state"] == "configured"
 
 
+@pytest.mark.parametrize("retained_sdk", [True, False])
+def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, retained_sdk):
+    import venv
+
+    import agent_procutil
+    import configuration_context
+    import configuration_layers
+
+    home, project, knowledge, staging = (
+        tmp_path / name for name in ("home", "project", "knowledge", "stage")
+    )
+    for path in (home, project, knowledge, staging):
+        path.mkdir()
+    slots = {
+        name: home / ("." + name) / "versions" / "1.0.0"
+        for name in ("agent-vault", "agent-worktrees")
+    }
+    packages = {}
+    for name, slot in slots.items():
+        venv.EnvBuilder(with_pip=False).create(slot)
+        packages[name] = (
+            slot / "Lib" / "site-packages" if os.name == "nt"
+            else next((slot / "lib").glob("python*/site-packages"))
+        )
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+        }), encoding="utf-8")
+        (slot.parent.parent / "current-version").write_text("1.0.0", encoding="utf-8")
+    installed = packages["agent-vault"] / "agent_vault"
+    installed.mkdir()
+    for name in ("__init__.py", "config.py", "configuration.py", "_peer_launch.py"):
+        shutil.copyfile(PLUGIN / "src" / "agent_vault" / name, installed / name)
+    for package in (agent_procutil, configuration_context, configuration_layers):
+        shutil.copytree(
+            Path(package.__file__).parent, packages["agent-vault"] / package.__name__,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    if retained_sdk:
+        bootstrap = slots["agent-vault"] / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
+            shutil.copyfile(source, bootstrap / source.name)
+    else:
+        deployed = home / ".agent-vault" / "bin"
+        deployed.mkdir()
+        for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+            shutil.copyfile(PLUGIN / "scripts" / name, deployed / name)
+    owner = packages["agent-worktrees"] / "agent_worktrees"
+    owner.mkdir()
+    (owner / "__init__.py").write_text("", encoding="utf-8")
+    (owner / "__main__.py").write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        "assert sys.argv[1:] == ['state-root', '--configuration', '--json']\n"
+        "report = json.loads(Path(__file__).with_name('report.json').read_text())\n"
+        "assert Path.cwd() == Path(report['context']['base_root'])\n"
+        "print(json.dumps(report))\n",
+        encoding="utf-8",
+    )
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "installed-reader-fixture", "execution_machine": "fixture",
+            "installation_cell": "legacy", "binding": "bound",
+            "base_root": str(project), "knowledge_root": str(knowledge),
+        },
+    }
+    (owner / "report.json").write_text(json.dumps(report), encoding="utf-8")
+    python = slots["agent-vault"] / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
+    for name in tuple(env):
+        if name.startswith(("AGENT_VAULT", "VAULT_")) or name in (
+            "AGENT_RT_ROOT", "AGENT_CONFIGURATION_CONTEXT", "PYTHONPATH", "PYTHONHOME",
+            "COPILOT_EXTENSIONS_CONTEXT", "KPDB",
+        ):
+            env.pop(name)
+    env["AGENT_VAULT_CONFIG"] = str(home / "absent-global.json")
+    reader = (
+        "import json, sys\nfrom pathlib import Path\n"
+        "from agent_vault.configuration import runtime_enabled\n"
+        "from agent_vault.config import resolve_context\n"
+        "assert Path(sys.prefix) == Path(sys.argv[2])\n"
+        "enabled = runtime_enabled(sys.argv[1])\n"
+        "selected = resolve_context(sys.argv[1], strict=True)\n"
+        "print(json.dumps({'enabled': enabled, 'group': selected.group}))\n"
+    )
+    for enabled in (True, False, None, "invalid"):
+        config_path = knowledge / ".agent-vault.json"
+        if enabled is None:
+            config_path.unlink()
+        else:
+            config_path.write_text(json.dumps({
+                "enabled": enabled, "group": "portable-group",
+            }), encoding="utf-8")
+        result = subprocess.run(
+            [str(python), "-I", "-B", "-c", reader, str(project), str(slots["agent-vault"])],
+            cwd=staging, env=env, capture_output=True, text=True, timeout=20,
+            **no_window_kwargs(),
+        )
+        if enabled == "invalid":
+            assert result.returncode != 0
+            assert "enabled must be a boolean" in result.stderr
+        else:
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert json.loads(result.stdout) == {
+                "enabled": enabled is True,
+                "group": "portable-group" if enabled is not None else None,
+            }
+    assert not (home / ".agent-vault" / "scripts").exists()
+    assert not (slots["agent-vault"] / "Lib" / "scripts").exists()
+    assert not (installed.parents[1] / "scripts").exists()
+
+
 @pytest.mark.parametrize("shell", ["python", "powershell", "pwsh"])
 def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path, shell):
     if shell != "python" and (os.name != "nt" or shutil.which(shell) is None):

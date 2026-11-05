@@ -179,6 +179,91 @@ def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path, monkeypa
     assert configuration._legacy_report(tmp_path) is None
 
 
+@pytest.mark.parametrize("enabled,owner_code", [
+    (True, 0), (False, 0), (None, 0), ("invalid", 0), (True, 126),
+])
+def test_installed_reader_uses_retained_sdk_for_qualified_activation(
+    tmp_path, monkeypatch, capsys, enabled, owner_code,
+):
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    real_report = configuration.owner_report
+    base, knowledge, _local, _global_path, report = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    if enabled is not None:
+        write(knowledge, {"enabled": enabled, "vault": "knowledge"})
+    home = tmp_path / "home"
+    peer = home / ".agent-worktrees"
+    python = peer / "versions" / "1.0.0" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture interpreter; never executed")
+    (peer / "current-version").write_text("1.0.0", encoding="utf-8")
+    sdk_source = Path(configuration.__file__).parents[2] / "scripts"
+    slot = home / ".agent-vault" / "versions" / "1.0.0"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    for source in sdk_source.glob("versioned_runtime*.py"):
+        shutil.copy2(source, bootstrap / source.name)
+    sdk = configuration._peer_launch._load_primitive(
+        bootstrap / "versioned_runtime.py", "_vault_installed_fixture_runtime",
+    )
+    sdk.mark_complete(peer, "1.0.0")
+    installed = slot / "Lib" / "site-packages" / "agent_vault" / "configuration.py"
+    monkeypatch.setattr(configuration, "__file__", str(installed))
+    monkeypatch.setattr(sys, "prefix", str(slot))
+    monkeypatch.setattr(Path, "home", lambda: home)
+    staging = tmp_path / "installer-stage"
+    staging.mkdir()
+    monkeypatch.chdir(staging)
+    for name in ("AGENT_RT_ROOT", "AGENT_VAULT_HOME", "COPILOT_EXTENSIONS_CONTEXT",
+                 "AGENT_CONFIGURATION_CONTEXT"):
+        monkeypatch.delenv(name, raising=False)
+    calls = []
+
+    def run(argv, **kwargs):
+        assert argv == [
+            str(python), "-I", "-X", "utf8", "-m", "agent_worktrees",
+            "state-root", "--configuration", "--json",
+        ]
+        assert kwargs["cwd"] == base
+        assert "AGENT_CONFIGURATION_CONTEXT" not in kwargs["env"]
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, owner_code, json.dumps(report).encode(), b"")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if owner_code:
+        with pytest.raises(ConfigurationError, match="refused the selected context"):
+            configuration.runtime_enabled(str(base))
+    elif enabled == "invalid":
+        with pytest.raises(RuntimeError, match="enabled must be a boolean"):
+            configuration.runtime_enabled(str(base))
+    else:
+        assert configuration.runtime_enabled(str(base)) is (enabled is True)
+        from agent_vault import cli
+
+        probes = []
+
+        def ping(request, **kwargs):
+            assert request == {"action": "ping"}
+            assert kwargs == {"strict_endpoint": True}
+            probes.append(request)
+            return {"ok": True, "cli": "locked"}
+
+        monkeypatch.setattr(cli, "send_command", ping)
+        monkeypatch.chdir(base)
+        assert cli.cmd_installer_readiness(None) == 0
+        readiness = json.loads(capsys.readouterr().out)
+        assert readiness["state"] == ("ready" if enabled is True else "configuration-empty")
+        assert len(probes) == int(enabled is True)
+    assert len(calls) == (3 if enabled is True and not owner_code else
+                          2 if enabled in (False, None) else 1)
+    assert not (home / ".agent-vault" / "scripts").exists()
+    assert not (installed.parents[2] / "scripts").exists()
+
+
 @pytest.mark.parametrize("implicit", [False, True])
 @pytest.mark.parametrize("matching_cell", [False, True])
 def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
