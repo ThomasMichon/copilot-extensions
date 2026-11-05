@@ -231,6 +231,16 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [startup discovery/reuse](startup-reuse-cohort.md),
+[account/preflight](account-preflight-cohort.md) and
+[release-check guidance](release-check-guidance-cohort.md) studies preserve
+seven whole originals, 57 texts and twenty-one bounded relations: nineteen
+noncompletion comparisons, one protected exclusion and one independently
+verified finite-source completion. #10291 closed after actual #10293/current
+source and owner-merge checks; the other six remain OPEN. Two equal complete
+17:41 PST metadata-only scans show 1,006 WHOLE open, 277 above the fixed
+729 target. No other arrivals/departures or new acceptance are inferred.
+
 The [self-update observation](self-update-observation-cohort.md),
 [publication-policy](publication-policy-cohort.md) and
 [Vault boundary](vault-boundaries-cohort.md) studies preserve eight whole
@@ -992,6 +1002,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [startup](startup-reuse-cohort.md),
+[account](account-preflight-cohort.md) and
+[release guidance](release-check-guidance-cohort.md) cores retain ACTIVE/RECENT
+cross-key discovery, all three warm-up tracks, original-owner New/Resume
+custody, ordinary/pinned push and inherited identity/401 matrices, both bounded
+preflight deadlines and pinned Main effective-content truth. #10291's finite
+source completion grants no installation, cutover, broader account closure or
+custody release; protected references and scoped publication/role holds remain.
 
 The [self-update](self-update-observation-cohort.md),
 [publication-policy](publication-policy-cohort.md) and

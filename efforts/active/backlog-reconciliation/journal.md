@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - One finite release-check guidance contract](<journal/2026/11.04 release-check-guidance-contract.md>)
+
+- [2026-11-04 - Intended-account contracts and a finite preflight completion](<journal/2026/11.04 account-preflight-contracts.md>)
+
+- [2026-11-04 - Three startup discovery and acceptance contracts](<journal/2026/11.04 startup-reuse-contracts.md>)
+
 - [2026-11-04 - Three cross-boundary Vault contracts](<journal/2026/11.04 vault-boundaries-contracts.md>)
 
 - [2026-11-04 - Two policy-compatible CI and publication contracts](<journal/2026/11.04 publication-policy-contracts.md>)
