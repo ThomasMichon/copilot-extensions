@@ -160,7 +160,7 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
                 return None
             if name != "HEAD" and (
                 b"include" in raw.lower()
-                or re.search(rb"(?m)(?:^|\])[ \t]*worktree[ \t]*(?:=|[#;\r\n]|$)", raw, re.I)
+                or re.search(rb"(?m)(?:^|\])[ \t\r\f\v]*worktree[ \t\r\f\v]*(?:=|[#;\r\n]|$)", raw, re.I)
             ):
                 return None
             files.append((name, after_version, hashlib.sha256(raw).hexdigest()))

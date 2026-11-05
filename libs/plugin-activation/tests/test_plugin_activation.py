@@ -1253,7 +1253,10 @@ def test_registered_identity_memo_keeps_registry_and_settings_live(
     assert any(f.reason == "identity-mismatch" for f in report.findings)
 
 
-@pytest.mark.parametrize("indirection", ["include", "includeIf", "worktree", "inline-worktree"])
+@pytest.mark.parametrize("indirection", [
+    "include", "includeIf", "worktree", "inline-worktree",
+    "cr-worktree",
+])
 def test_registered_identity_memo_reprobes_indirect_git_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, indirection: str,
 ) -> None:
@@ -1263,10 +1266,14 @@ def test_registered_identity_memo_reprobes_indirect_git_config(
     _settings(repo, "local", "demo")
     if indirection == "worktree":
         _git(repo, "config", "core.worktree", str(repo))
-    elif indirection == "inline-worktree":
+    elif indirection.endswith("-worktree"):
         path = repo / ".git" / "config"
+        syntax = {
+            "inline-worktree": "[core] WoRkTrEe = ",
+            "cr-worktree": "[core]\rworktree = ",
+        }[indirection]
         with path.open("a", encoding="utf-8") as stream:
-            stream.write(f'\n[core] WoRkTrEe = "{repo.as_posix()}"\n')
+            stream.write(f'\n{syntax}"{repo.as_posix()}"\n')
     else:
         key = "include.path" if indirection == "include" else "includeIf.gitdir:/**.path"
         _git(repo, "config", key, str(tmp_path / "optional.gitconfig"))
@@ -1599,7 +1606,10 @@ def _synthetic_identity_input_files(
     (b'[core]\n worktree = /repo\n', False),
     (b'[core] WoRkTrEe = /repo\n', False),
     (b'[core]\n worktree # implicit value\n', False),
-])
+    (b'[core]\rworktree = /repo\n', False),
+    (b'[core]worktree\v= /repo\n', False),
+    (b'[core]\fworktree = /repo\n', False),
+], ids=["branch-ref", "core", "inline-core", "implicit-core", "cr-section", "vt-key", "ff-key"])
 def test_project_identity_memo_unit_worktree_directives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: bytes, eligible: bool,
 ) -> None:

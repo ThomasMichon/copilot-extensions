@@ -53,6 +53,7 @@ _identity_original = _load_source(
 for _name in (
     "test_project_identity_memo_unit_work_counts",
     "test_project_identity_memo_unit_failed_probe",
+    "test_project_identity_memo_unit_worktree_directives",
     "test_project_identity_memo_unit_a_b_a_write_metadata",
     "test_project_identity_memo_unit_rejects_legacy_origin",
     "test_project_identity_memo_unit_native_write_version",
