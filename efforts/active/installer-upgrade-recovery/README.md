@@ -6,7 +6,7 @@
 - **Created:** 2026-11-03
 - **Status:** Active
 - **Umbrella issue:** #10377
-- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451
+- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451, #9716, #10054, #10499, #10486, #10652, #10653
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
 ## Guiding Intent
@@ -18,11 +18,20 @@ prove that an affected older installation can recover.
 
 This workstream closes the installer vision's existing authoritative replacement
 intent; it does not extend it. Incoming readiness and every applicable current
-selection define success. Old recovery protocols, provenance, stale installer
-transactions and queue fences cannot veto explicit replacement. Actual incoming
-admission, build, durable-state migration, permission, I/O and health failures
-remain failures. Preserve user state and protected sessions; outgoing central
-retirement remains independent of incoming completion.
+selector, command, route, launcher and registration selecting the incoming
+generation define success; fresh calls must reach that generation. Old recovery
+protocols, provenance, stale installer transactions, queue fences, process-census
+uncertainty and occupied old control homes cannot veto explicit replacement.
+Old stateful wrappers and keepers may retain old code for existing clients.
+Full adopted-client reattachment remains separate work under #10486, not an
+incoming prerequisite; #9716 retains census ownership and #10377 coordination.
+Unknown old cleanup is deferred and reported separately. Actual incoming
+authenticity/admission, build, authentication, necessary durable-state
+compatibility/migration, permission, I/O and health failures remain failures.
+Preserve protected sessions and transfer or exclude conflicting work admission.
+Outgoing central retirement is independent of incoming completion and
+revalidates identity, role and then-current selection before eligible mutations.
+Never sweep process names or force-kill protected state holders.
 
 ## Participants
 
@@ -133,8 +142,21 @@ authorize production updates, recovery mutations or new access.
   incompatible prior state and exercise the real latest entry, not only a
   pristine installation or a mocked successful recovery.
 - [ ] Prove required incoming runtime/service readiness and all applicable
-  selectors, routes, launchers and registrations. Distinguish package identity
-  from running generation and whole-set completion from partial progress.
+  selectors, commands, routes, launchers and registrations, including fresh
+  calls reaching the incoming generation. Distinguish package identity from
+  running generation and whole-set completion from partial progress.
+- [ ] Qualify MCP's cross-platform ordinary-entry fresh-settlement gate under
+  #10652, retaining #10054/#10499/#7758/#7028 ownership and U12's delivered boundary.
+  Pair successful incoming installation with a live old keeper, unknown old
+  census and occupied old control home against genuine incoming source,
+  authentication, build, permission, I/O and health failures. Use the incoming
+  generation's owned namespace, not takeover of an unknown foreign listener.
+  Record native platform results and unavailable lanes separately.
+- [ ] Reuse #6389 for stale-capable-serving/fresh-admission acceptance. Exercise
+  automatic `--force` with inhibited updates and held clients under #10653:
+  force does not change request classification or authorize unsafe retirement.
+  Keep #9716 census and #10486 full reattachment separate from incoming
+  completion.
 - [ ] Preserve configuration, credentials, repositories, worktrees, sessions,
   databases and accepted/uncertain effect history; repeat without manual cleanup.
 - [ ] Retain actual incoming acquisition/build/migration/I/O/permission/health

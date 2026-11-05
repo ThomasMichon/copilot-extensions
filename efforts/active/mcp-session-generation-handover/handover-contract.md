@@ -57,6 +57,11 @@ old authorization decisions into incompatible new semantics.
 1. Prepare and independently authenticate the incoming backend and publish its
    current invocation/routing selections. Fresh clients use it immediately;
    an old client's quiescence must not block new installation or fresh admission.
+   Authentic incoming readiness, every applicable current selector, command,
+   route and registration, and actual fresh execution by that physical
+   generation establish incoming completion. Qualify and land this slice before
+   full session handover; outgoing recovery, census, control-home idleness,
+   provenance and cleanup cannot veto it.
 2. Fence new application work for the migrating session and apply bounded
    backpressure. Continue responses to server-originated requests, cancellation
    and other traffic necessary to settle already-admitted work.
@@ -72,6 +77,14 @@ old authorization decisions into incompatible new semantics.
 6. Retire the outgoing central backend through its owner once accepted work and
    transferred state no longer require it. Client preservers and independently
    owned upstream resources are excluded from central retirement.
+
+Retirement is a separately bounded, role- and generation-scoped operation.
+Revalidate native identity, installation, explicit central role and then-current
+selection/registration at the actual mutation boundary. Unprovable cleanup is
+reported as deferred, not converted into incoming failure. Neither an installer
+force flag nor a central parent's name authorizes terminating protected state
+holders. Necessary durable-state compatibility and conflicting-work admission
+remain part of safe incoming readiness, not optional cleanup.
 
 Before commit, preparation failure may resume the old execution epoch after
 ownership revalidation. After commit or an uncertain effect, do not blindly
@@ -104,7 +117,9 @@ claim that a new relay around an old pipeline implements current backend code.
 
 ## Qualification
 
-The effort's Validation Plan is the completion gate. In particular, real
+Every Plan and Validation Plan item governs whole-effort completion; incoming
+installation completion does not assert session handover or effort completion.
+In particular, real
 Windows and POSIX process/transport tests must distinguish old wrapper version,
 current backend version, stable upstream identity and current handling of a
 post-handover call. Include an in-flight mutation, notification/server request,
@@ -113,3 +128,9 @@ changed ownership/configuration, supported rollback, legacy peer and final EOF.
 Verify multi-client process counts and old cleanup versus current selection.
 Keep the required CI packet focused; broader native/clean-room qualification
 uses the repository's existing explicit test tiers.
+
+The first publication slice also exercises an incoming-ready/fresh-current
+positive with old keepers, opaque outgoing ownership and occupied old control
+state, paired with genuine incoming source/write/permission/health negatives.
+Those controls do not replace the required reattachment witness or certify an
+old capable host as the incoming generation.

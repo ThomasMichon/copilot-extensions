@@ -19,7 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [MCP Session Generation Handover](active/mcp-session-generation-handover/README.md) | Draft; reviewed session-preserving handover before implementation | #10486; fresh calls select incoming code, held client wrappers reattach without session loss; existing installer and census owners retained |
+| [MCP Session Generation Handover](active/mcp-session-generation-handover/README.md) | Active; incoming-publication correction first, full handover qualification open | #10652/#6389 incoming readiness and fresh execution; #10653 protected retirement; #10486 session-preserving reattachment; existing owners retained |
 | [Responsive Codespace Admission](active/responsive-codespace-admission/README.md) | Draft; reviewed cancellation-safe serving-loop plan before implementation | #10601; preserves exact provider/claim custody and #8051/#3194/#6467 ownership; no live effects or rollout |
 | [Managed Session Activation](active/managed-session-activation/README.md) | Draft; reviewed admission plan before implementation | #10564; global availability is not managed-session membership, no installed rollout |
 | [Installer Upgrade Recovery](active/installer-upgrade-recovery/README.md) | Draft; priority source/upgrade-acceptance workstream, reviewed plan before implementation | #10377; latest explicit entry must recover affected prior footprints; existing entry, sequencing, construction and lifecycle owners retained; no rollout |
