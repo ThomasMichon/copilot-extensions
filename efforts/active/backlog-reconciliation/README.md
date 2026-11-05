@@ -330,6 +330,21 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+Five additional child trackers now consolidate into three OPEN parents:
+#3004 preserves first-restart admission, confirmed defaults, provider-policy
+preflight and new-GitHub history protection; #4959 retains recipe composition,
+trigger taxonomy and safe defining-hop origins; #5479 retains distinct helper
+inventory and wrapper/status contract lanes. Original alternatives, evidence
+tiers and implementation/resource owners remain. All product criteria stay
+unchecked. The earlier finite #9082 source completion and these five departures
+are included in two equal complete 15:32 PST scans: 911 whole OPEN,
+637 creator-eligible, 274 excluded, 612 original-cohort and 299 inflow.
+There are no arrivals or external departures since 917. Verified dispositions
+are 886; the fixed 729 whole-queue checkpoint remains 182 away.
+The [dated journal](journal/2026/11.05%20cohort-parent-luna-reconciliation.md)
+records parent-first readbacks and the bounded non-replay provider recovery.
+The campaign remains Active.
+
 Eleven additional audited dispositions comprise one finite source completion
 and ten administrative child supersessions across six OPEN parents.
 #10533 completes only the source prerequisite delivered by #10543; release
