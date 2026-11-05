@@ -1035,3 +1035,15 @@ for Windows provision, keeps stamp witness-free and still rejects unrelated
 lifecycle custody. Actual authenticated admission remains separately exercised
 by the materialized native tests; no production check is removed for this
 fixture correction.
+
+The intervening review confirms the native custody finding resolved and
+correctly requests that preservation cover MCP's real configuration directory.
+The cold fixture now seeds a synthetic stdio configuration under the
+installation's `bridges` directory instead of an unrelated home-directory
+sentinel. Installed consumer checks load it through the real configuration
+loader, require the actual configuration root and unchanged declared command,
+and retain byte comparisons after healthy reuse and incoming failure. The
+declared server is never started and no authentication provider is consulted.
+The corrected Windows synthetic protocol packet passes five focused controls
+in 91.10 seconds of pytest (117.45 total). Revised configuration preservation
+still needs actual native qualification before completion is credited.

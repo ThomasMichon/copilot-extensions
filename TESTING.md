@@ -2269,6 +2269,9 @@ prerequisite, private foundation/queue and actual MCP initializer. It loses the
 original caller process before a follower, then checks concurrent provision,
 immutable reuse, a real incoming module-health failure, preserved configuration/
 selection and installed command/module/distribution use after payload removal.
+The preserved synthetic configuration lives in MCP's actual `bridges` directory
+and is read through the installed configuration loader without starting its
+declared server or consulting an authentication provider.
 Persistent-environment effects use the installer's existing contained-test
 adapter. No MCP server, backend, credentials or host service is exercised.
 Caller-process exit is not cleanup-Job escape; the latter remains a separate

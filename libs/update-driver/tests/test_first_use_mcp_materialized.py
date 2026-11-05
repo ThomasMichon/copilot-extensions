@@ -146,8 +146,11 @@ def assert_installed_mcp(installation, environment, project):
     result = subprocess.run(
         [str(python), "-I", "-B", "-c",
          "import importlib.metadata,json,sys,agent_mcp;"
+         "from agent_mcp.config import BRIDGES_DIR,load_config;"
+         "configuration=load_config('fixture-preserved');"
          "print(json.dumps({'python':sys.executable,'module':agent_mcp.__file__,"
-         "'version':importlib.metadata.version('agent-mcp')}))"],
+         "'version':importlib.metadata.version('agent-mcp'),"
+         "'bridges':str(BRIDGES_DIR),'command':configuration.server.command}))"],
         env=environment, cwd=project, stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=60, **no_window_kwargs(),
     )
@@ -156,6 +159,8 @@ def assert_installed_mcp(installation, environment, project):
     assert Path(identity["python"]) == python
     assert Path(identity["module"]).is_relative_to(slot)
     assert identity["version"]
+    assert Path(identity["bridges"]) == installation / "bridges"
+    assert identity["command"] == ["fixture-server-not-started"]
     result = subprocess.run(
         installed_command(installation), env={**environment, "AGENT_MCP_NO_SELFPROVISION": "1"},
         cwd=project, stdin=subprocess.DEVNULL, capture_output=True, text=True,
@@ -173,8 +178,12 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
     root = area / "cold"
     environment = cold_environment(installation, project, area, python_prerequisite=True)
     environment.pop("AGENT_VAULT_HOME")
-    sentinel = installation.parent / "mcp-config.json"
-    sentinel.write_text('{"preserve":"operator configuration"}', encoding="utf-8")
+    sentinel = installation / "bridges/fixture-preserved.yaml"
+    sentinel.parent.mkdir(parents=True)
+    sentinel.write_text(json.dumps({
+        "server": {"type": "stdio", "command": ["fixture-server-not-started"]},
+        "auth": {"kind": "none"},
+    }), encoding="utf-8")
     preserved = sentinel.read_bytes()
 
     def stage(name):
