@@ -1,6 +1,13 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_label_cleanup.py::test_exact_casefold_matches_across_pages_delete_only_configured_names",
+        "tools/promotion_unit_tests/test_label_cleanup.py::test_unconfigured_empty_and_dry_run_never_delete",
+        "tools/promotion_unit_tests/test_label_cleanup.py::test_invalid_policy_refuses_before_any_request",
+        "tools/promotion_unit_tests/test_label_cleanup.py::test_execution_requires_explicit_token_and_bounded_repository",
+        "tools/promotion_unit_tests/test_label_cleanup.py::test_incomplete_or_duplicate_inventory_never_partially_deletes",
+        "tools/promotion_unit_tests/test_label_cleanup.py::test_cli_uses_explicit_host_and_redacts_backend_failure",
+        "tools/promotion_unit_tests/test_label_cleanup.py::test_cli_summary_does_not_publish_names",
         "tools/promotion_unit_tests/test_runtime_admission_delivery.py::test_default_toolkit_packages_delivery_reader_and_its_local_imports",
         "tools/promotion_unit_tests/test_hook_demand.py::test_completed_hook_response_retains_demand_until_monotonic_expiry[preToolUse]",
         "tools/promotion_unit_tests/test_hook_demand.py::test_completed_hook_response_retains_demand_until_monotonic_expiry[postToolUse]",
@@ -4719,7 +4726,9 @@
         "plugins/agent-worktrees/src/agent_worktrees/reconcile_freshness.py": "88c017962d9d03ca1ad9d2a7a4cad7351159a1327e70793854739091d6f4a9ae",
         "tools/promotion_unit_tests/test_launch_freshness.py": "ad42ff259246d16df7ad8583a486e26db5b8b5861e5a1dc498c08d60d9d112f8",
         "plugins/agent-worktrees/src/agent_worktrees/update_installer_process.py": "6cc476966f7c03b4c256926af80ab93aa2c92f7ef5bbd8818794521f7f965e77",
-        "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "7bc1629ace4a5ac4db4cbae1472be2c49f00753abba3243fdd7931cdbb0d18a5"
+        "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "7bc1629ace4a5ac4db4cbae1472be2c49f00753abba3243fdd7931cdbb0d18a5",
+        "tools/sweep_forbidden_labels.py": "cc848ce49e60253946d2180331ac13a66b417987014db1184973212b1a634818",
+        "tools/promotion_unit_tests/test_label_cleanup.py": "5c60fa35649184a8c59ddd88ecb6a92a4963f04be808921fc68f0eeb07e1861c"
     },
     "coverage_targets": [
         "libs/payload-invocation/runtime_admission.py",
@@ -4968,7 +4977,8 @@
         "tools/bundle_lock.py",
         "tools/artifact_attestation.py",
         "tools/artifact_release_discovery.py",
-        "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py"
+        "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py",
+        "tools/sweep_forbidden_labels.py"
     ],
     "max_seconds": 300
 }
