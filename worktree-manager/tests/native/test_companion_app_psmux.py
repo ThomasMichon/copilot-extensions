@@ -78,7 +78,7 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
             if arguments[index].startswith("%"):
                 arguments[index] = session + ":" + arguments[index]
         result = subprocess.run(
-            [binary, *arguments], capture_output=True, text=True, timeout=5,
+            [binary, *arguments], capture_output=True, encoding="utf-8", timeout=5,
             env=dict(environment, PSMUX_SESSION=session),
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
