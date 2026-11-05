@@ -438,6 +438,16 @@ class _SessionResumeMixin:
                         attempt, _MAX_RESUME_ROUNDS,
                     )
                     break  # success -- leave the ladder
+                except asyncio.CancelledError:
+                    session.status = SessionStatus.STOPPED
+                    self._db.update_session_status(
+                        session_id, SessionStatus.STOPPED.value, time.time(),
+                    )
+                    if client is not None:
+                        with contextlib.suppress(Exception):
+                            await client.shutdown()
+                    session.client = None
+                    raise
                 except Exception as exc:
                     if isinstance(exc, AgentHostingError):
                         session.status = SessionStatus.STOPPED
@@ -640,15 +650,15 @@ class _SessionResumeMixin:
                         "prior-turn context dropped",
                         session_id, session.name, new_acp, old_acp,
                     )
-                except Exception as exc:
-                    if recreate_client:
-                        with contextlib.suppress(Exception):
-                            await recreate_client.shutdown()
-                    session.client = None
+                except (Exception, asyncio.CancelledError) as exc:
                     session.status = SessionStatus.STOPPED
                     self._db.update_session_status(
                         session_id, SessionStatus.STOPPED.value, time.time()
                     )
+                    session.client = None
+                    if recreate_client:
+                        with contextlib.suppress(Exception):
+                            await recreate_client.shutdown()
                     exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
                     if isinstance(exc, LaunchRefusedError):
                         # A refusal at the recreate step is the same terminal

@@ -184,3 +184,24 @@ daemon. Review the plan before implementation.
   current-source contract gates passed. Historical captures remain unchanged.
 - Required exact-head CI and a renewed passing review remain open. No installed
   service, live claim, credential, external venue or rollout effects were taken.
+
+### 2026-11-04 - Restart and cancellation reconciliation
+
+- The next review identified missing target-level exclusion after restart,
+  resumable state after successful cancelled release, metadata rehydration
+  during admission, and STARTING rows after cancelled start/resume. Two
+  carried-over findings already had corrections; replied with their commit and
+  regression anchors rather than changing the same code again.
+- Claim-bearing teardown and guarded recovery/finalization reacquire the
+  existing target-level lock. Metadata refresh observes ownership use.
+  Successful release persists terminal state and completes local teardown
+  before propagating cancellation. Fresh cancellation persists FAILED;
+  ordinary/recreate resume cancellation persists STOPPED before awaited cleanup.
+  Neither retries a provider operation or replaces the conversation.
+- Public-entry-point controls overlap both restart orderings of same-owner
+  alias admission, merge rehydration, repeated cancellation during start and
+  resume, and successful cancelled end followed by attempted resume.
+  The focused claim packet passed 37 cases; the full selected admission,
+  transport, session, resume ladder/ownership, host-claim and parity packet
+  passed 338 cases. Exact-head source gates, review and CI are refreshed before
+  merge; no live deployment acceptance is implied.

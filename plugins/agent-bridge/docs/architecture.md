@@ -1020,9 +1020,16 @@ before unwinding, and clears it before releasing the local TargetLock only after
 confirmed provider release. Unconfirmed release retains the session, receipt and
 lock for reconciliation instead of deleting the session. No create or prompt is
 replayed by this boundary. A per-session ownership guard serializes fresh
-admission, cold recovery, teardown and failed-start finalization. Remote process
-reaping does not release a guarded Codespace's TargetLock ahead of claim
-settlement, and concurrent end requests cannot issue delayed duplicate releases.
+admission, cold recovery, teardown and failed-start finalization, and prevents
+metadata refresh from replacing an in-use target. Stop waits for admission in
+resume-compatible lock order. Remote reaping and authority recovery preserve
+the TargetLock while either the guard or a durable claim remains. After restart,
+claim-bearing teardown/finalization reacquires target-level custody before
+releasing the claim, excluding a new same-owner admission through another alias.
+Concurrent end requests cannot issue delayed duplicate releases. A successful
+release makes teardown terminal before deferred cancellation propagates;
+cancelled starts persist FAILED and cancelled resumes persist STOPPED while
+retaining unresolved ownership and the same conversation.
 Release removes the admission-only disable flag from its copied child environment.
 Relay-provider absence, timeout, failure or malformed
 output stops authenticated preparation explicitly; successful existing

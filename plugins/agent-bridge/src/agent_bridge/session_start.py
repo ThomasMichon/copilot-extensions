@@ -814,6 +814,10 @@ class _SessionStartMixin:
                         target.worktree_id, acp_sid, pid=session.pid,
                         worktree_dir=target.cwd,
                     )
+        except asyncio.CancelledError:
+            self._mark_session_failed(session, trigger="start_cancelled")
+            await _cleanup_failed_process_launch()
+            raise
         except AgentHostingError as exc:
             session.status = SessionStatus.STOPPED
             self._db.update_session_status(session_id, SessionStatus.STOPPED.value, time.time())

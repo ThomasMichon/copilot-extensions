@@ -339,6 +339,9 @@ class _SessionLifecycleMixin:
             async with session._codespace_ownership_lock:
                 if self._sessions.get(session_id) is not session:
                     return
+                claim_key = _codespace_claim_key(session.target)
+                if claim_key is not None:
+                    self._acquire_codespace_lock(session_id, claim_key[0])
                 await self._end_session_owned(session_id, force=force)
         else:
             await self._end_session_owned(session_id, force=force)
@@ -539,28 +542,40 @@ class _SessionLifecycleMixin:
         ):
             self._release_container_lock(session_id)
 
+        cancellation = None
         claim_key = _codespace_claim_key(session.target)
         if claim_key is not None:
             from .session_host.codespace_transport import codespace_provider_call
             core = _core()
-            async with codespace_provider_call(
-                core._release_codespace_claim, *claim_key,
-            ) as released:
-                if released is not True:
-                    self._mark_session_failed(session, trigger="codespace_release_unconfirmed")
-                    raise RemoteHostRecoveryPendingError(
-                        "CodeSpace claim release is unconfirmed; retained session "
-                        f"{session_id}, claim receipt and TargetLock"
+            try:
+                async with codespace_provider_call(
+                    core._release_codespace_claim, *claim_key,
+                ) as released:
+                    if released is not True:
+                        self._mark_session_failed(session, trigger="codespace_release_unconfirmed")
+                        raise RemoteHostRecoveryPendingError(
+                            "CodeSpace claim release is unconfirmed; retained session "
+                            f"{session_id}, claim receipt and TargetLock"
+                        )
+                    # A successfully released session must never resume, even
+                    # if deferred cancellation interrupts the remaining cleanup.
+                    session.status = SessionStatus.ENDED
+                    self._db.update_session_status(
+                        session_id, SessionStatus.ENDED.value, time.time(),
                     )
-                if session.target.venue is None:
-                    session.target.venue = {}
-                session.target.venue.setdefault(
-                    _REQUEST_OVERRIDES_KEY, {},
-                )["codespace_claim"] = None
-                self._db.update_session_target(
-                    session_id, session.target.to_json(), session.target.cwd,
-                )
-                self._release_codespace_lock(session_id)
+                    if session.target.venue is None:
+                        session.target.venue = {}
+                    session.target.venue.setdefault(
+                        _REQUEST_OVERRIDES_KEY, {},
+                    )["codespace_claim"] = None
+                    self._db.update_session_target(
+                        session_id, session.target.to_json(), session.target.cwd,
+                    )
+                    self._release_codespace_lock(session_id)
+            except asyncio.CancelledError as exc:
+                if session.status != SessionStatus.ENDED:
+                    raise
+                cancellation = exc
         session.status = SessionStatus.ENDED
         with contextlib.suppress(Exception):
             self._clear_pending_queue(session, reason="ended")
@@ -585,5 +600,7 @@ class _SessionLifecycleMixin:
             self._db.delete_session(session_id)
         self._sessions.pop(session_id, None)
         log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
+        if cancellation is not None:
+            raise cancellation
 
     # -- Context-aware in-place handoff --------------------------------------

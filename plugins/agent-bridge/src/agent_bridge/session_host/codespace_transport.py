@@ -455,6 +455,11 @@ def codespace_session_operation(function):
         async with session._codespace_ownership_lock:
             if manager._sessions.get(session.session_id) is not session:
                 raise KeyError(session.session_id)
+            from ..session_manager import _codespace_claim_key
+
+            claim_key = _codespace_claim_key(session.target)
+            if claim_key is not None:
+                manager._acquire_codespace_lock(session.session_id, claim_key[0])
             return await function(manager, session, *args, **kwargs)
     return serialized
 
