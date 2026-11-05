@@ -97,6 +97,31 @@ from test_owner_membership_budget import (
     test_unknown_owner_large_history_has_actual_private_vm_cutoff
     as test_unknown_owner_large_history_has_actual_private_vm_cutoff,
 )
+from test_inbox_consumer_enrollment import (
+    enrolled as enrolled, portable as portable,
+    test_portable_scope_never_leaks_a_seed_to_the_legacy_inbox_before_enrollment
+    as test_portable_scope_never_leaks_a_seed_to_the_legacy_inbox_before_enrollment,
+    test_portable_reload_keeps_its_native_binding_and_uses_the_existing_cas
+    as test_portable_reload_keeps_its_native_binding_and_uses_the_existing_cas,
+    test_remote_enrollment_requires_the_original_portable_reservation
+    as test_remote_enrollment_requires_the_original_portable_reservation,
+)
+from test_live_inbox_producer import (
+    test_retained_startup_admission_requires_its_original_ready_input
+    as test_retained_startup_admission_requires_its_original_ready_input,
+)
+from test_plugin_readiness import (
+    test_readonly_poll_never_claims_or_expires_mutation_controls
+    as test_readonly_poll_never_claims_or_expires_mutation_controls,
+)
+from test_portable_mux_joined import (
+    test_bridge_provider_receiver_and_extensions_share_one_conversation
+    as test_bridge_provider_receiver_and_extensions_share_one_conversation,
+)
+from test_receiving_bundle import (
+    test_provider_owner_uses_the_actual_client_interface
+    as test_provider_owner_uses_the_actual_client_interface,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -134,6 +159,10 @@ def test_http51_capture_actual_observations(
         key: api.get("/health").json()[key]
         for key in ("protocol_version", "min_protocol_version")
     }}
+    health = api.get("/health").json()
+    observed["portable_capabilities"] = {
+        key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
+    }
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)
     receipt = json.loads(capsys.readouterr().out)

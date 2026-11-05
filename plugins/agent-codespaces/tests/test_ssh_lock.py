@@ -598,3 +598,72 @@ class TestSshSessionHooks:
     def test_settle_on_disconnect_default_still_settles(self, tmp_path, monkeypatch):
         _rc, calls, _seen = self._run(tmp_path, monkeypatch, settle=True)
         assert "settle" in calls
+
+    def test_portable_preparation_retains_relay_auth_and_private_stdin(self, tmp_path, monkeypatch):
+        calls = []
+        seen = {}
+
+        class Manager(_FakeManager):
+            async def exec_command(self, name, command, **kwargs):
+                seen["command"], seen["input"] = command, kwargs.get("input_bytes")
+                return await super().exec_command(name, command, **kwargs)
+
+        _patch_ssh_dependencies(monkeypatch, tmp_path, Manager(calls))
+
+        async def record(name):
+            calls.append(name)
+
+        for attribute in ("_provision_dotfiles", "_provision_harness", "_provision_repo_hooks"):
+            monkeypatch.setattr(cli, attribute, lambda *a, **k: pytest.fail("full guest provisioning"))
+        monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *a: record("relay"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *a, **k: record("auth"))
+        monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *a, **k: record("warm"))
+        monkeypatch.setattr("agent_codespaces.lease.claim_for_connect", lambda *a, **k: "holder")
+        monkeypatch.setattr(cli, "_settle_codespace_on_disconnect", lambda *a: pytest.fail("settled live launch"))
+        policy_context = json.dumps({
+            "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "",
+        })
+
+        async def prepare(*args, **kwargs):
+            seen["context"] = kwargs["receiving_context"]
+            calls.append("prepare")
+            return ["/scoped/plugin"]
+
+        monkeypatch.setattr(cli, "_register_codespace_plugins", prepare)
+
+        def builder(directories):
+            assert directories == ["/scoped/plugin"]
+            calls.append("build")
+            return "selected-receiver"
+
+        def stdin():
+            assert calls.index("prepare") < calls.index("auth") < calls.index("build")
+            return b"private-transport-envelope"
+
+        args = SimpleNamespace(
+            name="cs-hook", stdio=False, remote_cmd="placeholder", timeout=30,
+            no_provision=False, no_relay=False, repo=None, auth_cache_warmup=True,
+        )
+        assert cli._ssh_session(
+            args, remote_cmd_builder=builder, remote_input_builder=stdin,
+            receiving_context=policy_context, settle_on_disconnect=False,
+            result_sink=lambda result: result.exit_code,
+        ) == 0
+        assert seen["context"] == policy_context
+        assert seen["input"] == b"private-transport-envelope"
+        assert "private-transport-envelope" not in seen["command"]
+        assert calls.index("relay") < calls.index("prepare") < calls.index("auth")
+        assert "disconnect" in calls
+
+    def test_portable_managed_identity_refuses_before_claim(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.lease.claim_for_connect", lambda *a, **k: pytest.fail("claimed"),
+        )
+        context = json.dumps({
+            "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "",
+        })
+        with pytest.raises(ValueError, match="managed worktree"):
+            cli._ssh_session(
+                SimpleNamespace(stdio=False, plugin_worktree_id="managed-id"),
+                remote_cmd_builder=lambda dirs: "receiver", receiving_context=context,
+            )

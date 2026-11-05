@@ -868,7 +868,7 @@ async def set_live_mode(
 
 @router.get("/{session_id}/controls", response_model=LiveMessageListResponse)
 async def list_live_controls(
-    session_id: str, request: Request
+    session_id: str, request: Request, readiness_only: bool = False,
 ) -> LiveMessageListResponse:
     """Claim pending session controls (a mode change), oldest-first: the
     extension's control poll. Each is returned once; the extension applies it
@@ -878,7 +878,10 @@ async def list_live_controls(
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     target_session_id = row["session_id"]
-    rows = db.claim_live_controls(target_session_id, time.time(), CONTROL_MAX_AGE_SECONDS)
+    rows = db.claim_live_controls(
+        target_session_id, time.time(), CONTROL_MAX_AGE_SECONDS,
+        **({"readiness_only": True} if readiness_only else {}),
+    )
     return LiveMessageListResponse(
         messages=[
             LiveMessage(
@@ -946,13 +949,7 @@ async def list_live_messages(
         if kind.startswith("startup:prompt:"):
             if not plugin_readiness:
                 continue
-            try:
-                control_id = int(kind.rsplit(":", 1)[1])
-                control = db.live_control_state(target_session_id, control_id, include_body=True)
-                if control is not None and control.get("kind") == READINESS_CONTROL:
-                    readiness = json.loads(control["body"])
-            except (ValueError, TypeError):
-                pass
+            readiness = live_startup_controls.startup_readiness(db, target_session_id, kind)
         messages.append(LiveMessage(
                 id=r["id"],
                 sender=r["sender"],

@@ -97,6 +97,9 @@ def materialize_into(
     retained: set[str] = set()
     for name in manifest.files:
         source = source_dir / name
+        bad_ancestor = _find_symlinked_ancestor(source, canonical_root_r)
+        if bad_ancestor is not None:
+            return [f"SKIP {source}: {bad_ancestor} is a symlink -- refusing"]
         if not source.is_file():
             return [
                 f"SKIP {dest_bin / name}: canonical source missing: "
@@ -105,6 +108,9 @@ def materialize_into(
         if source.is_symlink():
             return [f"SKIP {source}: is a symlink -- refusing"]
         dest_file = dest_bin / name
+        bad_ancestor = _find_symlinked_ancestor(dest_file.parent, dest_root_r)
+        if bad_ancestor is not None:
+            return [f"SKIP {dest_file}: {bad_ancestor} is a symlink -- refusing"]
         if dest_file.exists() or dest_file.is_symlink():
             if (
                 reuse_existing and not dest_file.is_symlink() and dest_file.is_file()
@@ -120,6 +126,7 @@ def materialize_into(
             continue
         source = source_dir / name
         dest_file = dest_bin / name
+        dest_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, dest_file)
         if os.name != "nt" and name.endswith(".sh"):
             shutil.copymode(source, dest_file)

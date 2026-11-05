@@ -66,6 +66,10 @@ def load_manifest(plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME) -> La
     canonical_dir = data.get("canonicalDir")
     files = data.get("files")
     payload_dir = data.get("payloadDir", "bin")
+    valid_file = (
+        (lambda value: _is_relative_subpath(value) and "\\" not in value)
+        if manifest_name == PACKAGED_MANIFEST_NAME else _is_plain_basename
+    )
     if not isinstance(canonical_dir, str) or not _is_relative_subpath(canonical_dir):
         raise ValueError(f"{manifest_path}: canonicalDir must be a non-empty string")
     if not isinstance(payload_dir, str) or not _is_relative_subpath(payload_dir):
@@ -73,10 +77,11 @@ def load_manifest(plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME) -> La
     if (
         not isinstance(files, list)
         or not files
-        or any(not isinstance(name, str) or not _is_plain_basename(name) for name in files)
+        or any(not isinstance(name, str) or not valid_file(name) for name in files)
         or len(set(files)) != len(files)
     ):
-        raise ValueError(f"{manifest_path}: files must be a non-empty basename-only string list")
+        shape = "safe relative file" if manifest_name == PACKAGED_MANIFEST_NAME else "basename-only"
+        raise ValueError(f"{manifest_path}: files must be a non-empty {shape} string list")
     return LaunchWrapperAssets(
         manifest_path=manifest_path,
         canonical_dir_raw=canonical_dir,

@@ -1977,16 +1977,6 @@ def mux_available(mux: str | None = None) -> bool:
     return shutil.which(_mux_bin(mux)) is not None
 
 
-# Package managers tried, in order, to self-heal a missing ``tmux`` (POSIX
-# only -- see ensure_mux_available). Each installs non-interactively.
-_TMUX_INSTALL_CANDIDATES: tuple[tuple[str, list[str]], ...] = (
-    ("apt-get", ["apt-get", "install", "-y", "tmux"]),
-    ("dnf", ["dnf", "install", "-y", "tmux"]),
-    ("yum", ["yum", "install", "-y", "tmux"]),
-    ("apk", ["apk", "add", "tmux"]),
-)
-
-
 def ensure_mux_available(mux: str | None = None) -> bool:
     """Best-effort self-heal a missing multiplexer binary (POSIX only).
 
@@ -2008,32 +1998,9 @@ def ensure_mux_available(mux: str | None = None) -> bool:
     ``apt-get``/``dnf``/``yum``/``apk`` directly when already root, else via
     ``sudo -n`` (never prompts for a password -- fails fast instead).
     """
-    if mux_available(mux):
-        return True
-    if platform.system() == "Windows":
-        return False
+    from .mux_prerequisite import ensure_mux_available as ensure_native
 
-    import shutil
-    import subprocess
-
-    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
-    sudo = None if is_root else shutil.which("sudo")
-    if not is_root and not sudo:
-        return False
-
-    for tool, install_argv in _TMUX_INSTALL_CANDIDATES:
-        if not shutil.which(tool):
-            continue
-        argv = list(install_argv) if is_root else [sudo, "-n", *install_argv]
-        try:
-            subprocess.run(
-                argv, capture_output=True, timeout=180, check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        if mux_available(mux):
-            return True
-    return False
+    return ensure_native(mux, available=mux_available)
 
 
 def headless_new_session(

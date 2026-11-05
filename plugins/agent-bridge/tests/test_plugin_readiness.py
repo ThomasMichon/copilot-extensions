@@ -31,6 +31,22 @@ def register(db, cwd, sid="native"):
     )
 
 
+def test_readonly_poll_never_claims_or_expires_mutation_controls(tmp_db, tmp_path):
+    register(tmp_db, tmp_path)
+    mode, _ = tmp_db.enqueue_live_message_if_fresh(
+        "native", sender="sender", body="autopilot", kind="control:set-mode", now=time.time() - 300,
+    )
+    readiness, _ = tmp_db.enqueue_live_message_if_fresh(
+        "native", sender="sender", body="{}", kind=READINESS_CONTROL, now=time.time(),
+    )
+    rows = tmp_db.claim_live_controls("native", time.time(), 130, readiness_only=True)
+    assert [row["id"] for row in rows] == [readiness]
+    assert tmp_db.live_control_state("native", mode) == {
+        "claimed_at": None, "outcome": None,
+    }
+    assert tmp_db.claim_live_controls("native", time.time(), 130, readiness_only=True) == []
+
+
 def expectation(cwd=None, **updates):
     return PluginReadinessRequest.model_validate({
         "owner": "bridge", "cwd": str(cwd) if cwd else None,

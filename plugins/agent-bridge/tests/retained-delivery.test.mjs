@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createRetainedInbox, retainedDeliverySelected, retainedConsumption,
 } from "../extensions/agent-bridge/retained-delivery.mjs";
+import { isRemoteDriverSource } from "../extensions/agent-bridge/remote-driver.mjs";
 
 const contract = "retained-inbox-v1";
 const sid = "native-a";
@@ -15,7 +16,7 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 function fixture() {
   const f = {
     calls: [], sends: [], logs: [], events: [], rows: [], current: null,
-    version: 50, clock: 1_000, snapshotSid: sid, nativeSid: sid, closed: false,
+    version: 50, capabilities: {}, clock: 1_000, snapshotSid: sid, nativeSid: sid, closed: false,
     historyReads: 0, after: null, frontendReady: true,
   };
   f.receipt = (row) => ({
@@ -31,7 +32,7 @@ function fixture() {
       throw Object.assign(new Error("frontend requires explicit negotiation"), { status: 409 });
     }
     let result;
-    if (path === "/health") result = { protocol_version: f.version };
+    if (path === "/health") result = { protocol_version: f.version, capabilities: f.capabilities };
     else if (path.startsWith(`${prefix}/recovery?`)) {
       const query = new URL(path, "http://localhost").searchParams;
       const pending = f.rows.filter((r) => r.id > Number(query.get("after"))
@@ -121,6 +122,24 @@ test("retained mode is explicit and never changes legacy delivery defaults", () 
   }
 });
 
+test("driver consumption requires explicit source selection and still binds the original receipt", async () => {
+  const f = fixture();
+  f.add();
+  const inbox = f.consumer("consumer-a", { sourceAllowed: isRemoteDriverSource });
+  await inbox.tick(sid);
+  const receipt = f.receipt(f.rows[0]);
+  const event = f.event();
+  event.data.source = "agent-remote-driver-11111111-2222-4333-8444-555555555555";
+  assert.equal(retainedConsumption(event, receipt), false);
+  assert.equal(retainedConsumption(event, receipt, isRemoteDriverSource), true);
+  assert.equal(retainedConsumption(event, { ...receipt, handoff_id: "different" }, isRemoteDriverSource), false);
+  f.events.push(event);
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.equal(f.sends.length, 1);
+});
+
 test("selected retained mode refuses old or malformed protocol without a legacy request", async () => {
   for (const version of [undefined, 49, "50", null]) {
     const f = fixture();
@@ -132,6 +151,48 @@ test("selected retained mode refuses old or malformed protocol without a legacy 
     assert.match(f.logs.join("\n"), /protocol/);
   }
 });
+
+test("portable consumer declares its attempt only after explicit provider qualification", async () => {
+  const portableLaunch = "11111111-1111-4111-8111-111111111111";
+  const blocked = fixture();
+  await blocked.consumer("consumer", { portableLaunch }).tick(sid);
+  assert.deepEqual(blocked.calls.map((call) => call.path), ["/health"]);
+  const f = fixture();
+  f.capabilities = { portable_inbox: 1, readonly_plugin_controls: 1 };
+  await f.consumer("consumer", { portableLaunch }).tick(sid);
+  assert.equal(f.current.portable_launch, portableLaunch);
+});
+
+for (const changed of ["none", "missing", "after-grant"]) {
+  test(`retained startup rechecks its original plugin context (${changed})`, async () => {
+    const f = fixture();
+    const row = f.add(1, "queue");
+    row.kind = "startup:prompt:7";
+    row.plugin_readiness = {
+      owner: "bridge", expected_session_id: sid, cwd: process.cwd(), selection_digest: "original",
+      timeout_seconds: 1,
+      plugins: [{ projected_source: "helper@fixture", logical_source: "helper@fixture" }],
+    };
+    let enabled = changed !== "missing";
+    f.session.rpc.plugins = { list: async () => ({
+      plugins: [{ name: "helper", marketplace: "fixture", enabled }],
+    }) };
+    f.after = async (_method, path) => {
+      if (changed === "after-grant" && path.endsWith("/begin")) enabled = false;
+    };
+    const inbox = f.consumer();
+    await inbox.tick(sid);
+    assert.equal(f.sends.length, changed === "none" ? 1 : 0, f.logs.join("\n"));
+    if (changed === "none") assert.doesNotMatch(f.sends[0].prompt, /startup:/);
+    if (changed === "missing") assert.equal(f.calls.some((call) => call.path.endsWith("/begin")), false);
+    if (changed === "after-grant") {
+      assert.equal(row.handoff_stage, "unknown");
+      f.clock += 30_001;
+      await inbox.tick(sid);
+      assert.equal(f.sends.length, 0);
+    }
+  });
+}
 
 test("actual SDK target, metadata and required APIs gate enrollment", async () => {
   for (const problem of ["handle", "metadata", "getEvents", "snapshot", "send"]) {

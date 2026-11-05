@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from remote_login_shell import wrap_login_shell
+from venue_copilot.portable_mux import MuxEndpoint
 
 from ._ssh_retry import exec_with_retry
 from .owner_inventory import (
@@ -77,21 +78,33 @@ class _AdmittedExec:
         return await self.manager.exec_command(*args, **kwargs)
 
 
-def batch_command(targets: list[str]) -> str:
+def batch_command(targets: list[str | MuxEndpoint]) -> str:
     targets = list(dict.fromkeys(targets))
     lines = ["command -v tmux >/dev/null 2>&1 || exit 127"]
     for index, target in enumerate(targets):
+        if isinstance(target, MuxEndpoint):
+            probe = [
+                f"state=$({target.command('observe')})",
+                '[ "$?" = 0 ] || state=unknown',
+                'case "$state" in present|gone|unknown) ;; *) state=unknown;; esac',
+            ] if target.confirmed else ["state=unknown"]
+        else:
+            probe = [
+                f"tmux has-session -t {shlex.quote('=' + target)} >/dev/null 2>&1",
+                "rc=$?",
+                'case "$rc" in 0) state=present;; 1) state=gone;; *) state=unknown;; esac',
+            ]
         lines.extend([
-            f"tmux has-session -t {shlex.quote('=' + target)} >/dev/null 2>&1",
-            "rc=$?",
-            'case "$rc" in 0) state=present;; 1) state=gone;; *) state=unknown;; esac',
+            *probe,
             f"""printf 'ACMUX1\\t{index}\\t%s\\n' "$state" """.rstrip(),
         ])
     lines.append(f"printf 'ACMUX1\\tDONE\\t{len(targets)}\\n'")
     return "\n".join(lines)
 
 
-def parse_batch(targets: list[str], stdout: str, exit_code: int | None) -> dict[str, bool | None]:
+def parse_batch(
+    targets: list[str | MuxEndpoint], stdout: str, exit_code: int | None,
+) -> dict[str | MuxEndpoint, bool | None]:
     targets = list(dict.fromkeys(targets))
     unknown = dict.fromkeys(targets)
     if exit_code != 0 or not isinstance(stdout, str):
@@ -99,7 +112,7 @@ def parse_batch(targets: list[str], stdout: str, exit_code: int | None) -> dict[
     lines = stdout.splitlines()
     if len(lines) != len(targets) + 1 or lines[-1] != f"ACMUX1\tDONE\t{len(targets)}":
         return unknown
-    verdicts: dict[str, bool | None] = {}
+    verdicts: dict[str | MuxEndpoint, bool | None] = {}
     values = {"present": True, "gone": False, "unknown": None}
     for index, (target, line) in enumerate(zip(targets, lines)):
         parts = line.split("\t")
@@ -140,7 +153,9 @@ class RemoteMuxProbe:
         except Exception:
             return False
 
-    async def __call__(self, codespace: str, targets: list[str]) -> dict[str, bool | None]:
+    async def __call__(
+        self, codespace: str, targets: list[str | MuxEndpoint],
+    ) -> dict[str | MuxEndpoint, bool | None]:
         try:
             inventory = await self.begin_wave(0)
             return await self.probe_wave(codespace, targets, inventory, 0, lambda: True)
@@ -148,11 +163,11 @@ class RemoteMuxProbe:
             return dict.fromkeys(targets)
 
     async def probe_wave(
-        self, codespace: str, targets: list[str], inventory: OwnerInventory,
+        self, codespace: str, targets: list[str | MuxEndpoint], inventory: OwnerInventory,
         generation: int, current: Callable[[], bool],
         *, owner_check: Callable[[], Awaitable[bool]] | None = None,
         command: str | None = None, parse_result: Callable | None = None,
-    ) -> dict[str, bool | None]:
+    ) -> dict[str | MuxEndpoint, bool | None]:
         unknown = dict.fromkeys(targets)
         manager = None
         cleanup_failed = False

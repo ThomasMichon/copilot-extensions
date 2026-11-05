@@ -171,7 +171,10 @@ Schema 31 adds `bridge_inbox_consumers` to the same database. Explicit
 `enroll_inbox_consumer` binds an exact local live registration to its current
 consumer incarnation, installation and open admission epoch. It does not mint a
 credential, bind a client-selected database or retroactively enroll an ordinary
-legacy registration. A remote `venue` remains unsupported in this local owner.
+legacy registration. Ordinary remote `venue` registrations remain unsupported.
+The [portable receiver](repository-hosting.md#explicit-portable-mux-receiving)
+adds a separately advertised, original-reservation-bound attempt observation;
+it does not relax ordinary remote enrollment.
 
 Schema 32 adds the nonpartial consumer-session history index and partial
 retained-message session index used by ordinary admission.
@@ -302,7 +305,7 @@ cleanup. Changed input refuses; neither recovery nor the returned admitted
 receipt grants an SDK invocation or implies acceptance or consumption.
 The original row survives a real producer-process exit before its reply.
 
-Retained startup, interrupt and control effects remain unsupported. The
+In generation 49, retained startup, interrupt and control effects are unsupported. The
 existing freshness insertion statement refuses their unqualified admission
 to an enrolled target, including readiness controls before a startup prompt.
 Enrollment refuses pending legacy controls, so control insertion and enrollment
@@ -310,6 +313,14 @@ have one serial order; it never retires or silently settles the control.
 Direct internal owner methods and other producer cohorts are not thereby
 qualified. The opt-in SDK consumer uses these owners; actual native/platform
 evidence and full runtime custody remain open.
+
+The optional `readonly_plugin_controls: 1` expansion admits only readonly plugin
+observations outside mutation custody. Its filtered poll leaves mutation
+controls untouched. Typed startup prompts bind the original operation and
+complete input to a successful observation, then enter retained message custody;
+the consumer rechecks native readiness at its final boundary. Missing capability
+refuses rather than polling an older unfiltered control endpoint. Interrupt,
+mode and history-replay effects remain unsupported.
 
 ## Original handoff recovery
 

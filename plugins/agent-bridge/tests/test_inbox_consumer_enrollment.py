@@ -11,8 +11,9 @@ import pytest
 from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_adoption import open_existing_writable
 from agent_bridge.inbox_consumer_schema import definitions, validate_schema
-from agent_bridge.inbox_custody import InboxConsumer
+from agent_bridge.inbox_custody import InboxConsumer, schema_triggers
 from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeInstallation, RuntimeProducer
+from venue_copilot.portable_mux import MuxEndpoint
 
 
 @pytest.fixture
@@ -26,6 +27,97 @@ def enrolled(tmp_db):
     register(tmp_db, consumer)
     enroll(tmp_db, owner, admission, consumer)
     return tmp_db, owner, admission, consumer
+
+
+@pytest.fixture
+def portable(enrolled):
+    db, owner, admission, _ = enrolled
+    consumer = InboxConsumer(
+        "11111111-1111-4111-8111-111111111111", "portable-consumer", 103, 1.0,
+        "22222222-2222-4222-8222-222222222222",
+    )
+    endpoint = MuxEndpoint.parse({
+        "version": 1, "attempt": consumer.portable_launch, "session_id": consumer.session_id,
+        "mux_session": "wt-bridge-" + consumer.portable_launch,
+        "mux_socket": "/receiving/" + consumer.portable_launch + "/tmux.sock",
+        "native": None, "socket_identity": None,
+    })
+    venue = {
+        "kind": "codespace", "target": "fixture-venue", "mux_session_name": endpoint.mux_session,
+        "mux_endpoint": endpoint.record(),
+    }
+    reservation = db.create_cli_mode_reservation(
+        "portable-scope", now=10.0, ttl_seconds=100, venue=json.dumps(venue),
+    )
+    assert reservation is not None
+    register(db, consumer, worktree_id="portable-scope")
+    return db, owner, admission, consumer, reservation, venue
+
+
+def test_portable_reload_keeps_its_native_binding_and_uses_the_existing_cas(portable):
+    db, owner, admission, consumer, reservation, _ = portable
+    assert db.observe_inbox_consumer(owner, admission, consumer, now=11.0) is None
+    enroll(db, owner, admission, consumer)
+    assert db.release_cli_mode_reservation(
+        "portable-scope", reservation_id=reservation,
+    ) == 1
+    enroll(db, owner, admission, consumer)
+    assert db.poll_live_message_handoffs(owner, admission, consumer, now=12.0) == []
+    successor = replace(consumer, incarnation="portable-successor")
+    assert db.observe_inbox_consumer(owner, admission, successor, now=12.0) == consumer.incarnation
+    with pytest.raises(RuntimeCustodyError, match="enrollment changed"):
+        enroll(db, owner, admission, successor)
+    enroll(db, owner, admission, successor, consumer.incarnation)
+    with pytest.raises(RuntimeCustodyError, match="current enrolled"):
+        db.poll_live_message_handoffs(owner, admission, consumer, now=12.0)
+
+
+def test_portable_scope_never_leaks_a_seed_to_the_legacy_inbox_before_enrollment(portable):
+    db, owner, admission, consumer, _, _ = portable
+    options = {
+        "sender": "sender", "body": "original seed", "now": 12.0, "idempotency_key": "seed-operation",
+        "expected_session_id": consumer.session_id, "enrolled_inbox": True,
+        "runtime_admission": admission,
+    }
+    with pytest.raises(RuntimeCustodyError, match="enrolled launch consumer"):
+        db.enqueue_live_message_if_fresh(consumer.session_id, **options)
+    assert db.list_pending_live_messages(consumer.session_id) == []
+    enroll(db, owner, admission, consumer)
+    mid, reason = db.enqueue_live_message_if_fresh(consumer.session_id, **options)
+    assert mid is not None and reason is None
+    assert db.list_pending_live_messages(consumer.session_id) == []
+    row, = db.poll_live_message_handoffs(owner, admission, consumer, now=12.0)
+    assert row["id"] == mid and row["body"] == "original seed"
+
+
+@pytest.mark.parametrize("problem", [
+    "no-attempt", "wrong-attempt", "legacy", "wrong-native", "no-cli-claim", "no-reservation", "changed-venue",
+])
+def test_remote_enrollment_requires_the_original_portable_reservation(portable, problem):
+    db, owner, admission, consumer, reservation, venue = portable
+    if problem == "no-attempt":
+        consumer = replace(consumer, portable_launch=None)
+    elif problem == "wrong-attempt":
+        consumer = replace(consumer, portable_launch="33333333-3333-4333-8333-333333333333")
+    elif problem == "no-reservation":
+        db.release_cli_mode_reservation("portable-scope", reservation_id=reservation)
+    elif problem == "no-cli-claim":
+        db.execute_write("UPDATE live_sessions SET cli_mode=0 WHERE session_id=?", (consumer.session_id,))
+    else:
+        if problem == "legacy":
+            venue.pop("mux_endpoint")
+        elif problem == "wrong-native":
+            venue["mux_endpoint"]["session_id"] = "33333333-3333-4333-8333-333333333333"
+        else:
+            venue["target"] = "another-venue"
+        db.execute_write("UPDATE live_sessions SET venue=? WHERE session_id=?", (
+            json.dumps(venue), consumer.session_id,
+        ))
+    with pytest.raises(RuntimeCustodyError):
+        enroll(db, owner, admission, consumer)
+    assert db.execute_read(
+        "SELECT * FROM bridge_inbox_consumers WHERE session_id=?", (consumer.session_id,),
+    ) == []
 
 
 def register(db, consumer, **kwargs):
@@ -262,6 +354,8 @@ def test_v31_history_index_migration_preserves_original_custody_and_requires_pre
     db.execute_write("DROP INDEX bridge_inbox_consumers_session")
     db.execute_write("DROP INDEX live_messages_retained_session")
     db.execute_write("UPDATE schema_version SET version=31")
+    db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
+    db.execute_write(schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1])
     tables = ("live_messages", "bridge_inbox_consumers", "bridge_runtime_epoch",
               "bridge_runtime_producers")
     before = {table: [dict(row) for row in db.execute_read(f"SELECT * FROM {table}")]
@@ -325,6 +419,8 @@ def test_v30_migration_preserves_handoff_and_leaves_legacy_consumer_unenrolled(e
     for name, (kind, _table, _) in reversed(list(definitions().items())):
         db.execute_write(f"DROP {kind} {name}")
     db.execute_write("UPDATE schema_version SET version=30")
+    db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
+    db.execute_write(schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1])
     other = Database(db.db_path)
     try:
         validate_schema(other._get_conn())
@@ -377,6 +473,6 @@ def test_foreign_epoch_installation_and_remote_enrollment_refuse(enrolled):
                    consumer.incarnation)
     remote = replace(consumer, session_id="remote", incarnation="remote")
     register(db, remote, venue="remote-venue")
-    with pytest.raises(RuntimeCustodyError, match="registration changed"):
+    with pytest.raises(RuntimeCustodyError, match="reserved portable"):
         enroll(db, owner, admission, remote)
     assert len(db.execute_read("SELECT * FROM bridge_inbox_consumers")) == 1

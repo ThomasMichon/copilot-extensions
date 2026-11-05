@@ -1,0 +1,172 @@
+// Async, non-blocking session-metadata resolution for the agent-bridge
+// extension. Split out from extension.mjs (which calls joinSession() at
+// import time, making it hard to unit test directly) so this logic is
+// exercised hermetically, the same way delivery.mjs already is.
+//
+// NEVER use execSync/execFileSync here. Those suspend the ENTIRE process --
+// no I/O of any kind, including the host's own readiness/liveness handshake
+// with the extension -- for as long as the child takes to exit. Resolving
+// session metadata used to run four external spawns (git + three
+// `agent-worktrees get` calls) sequentially via execSync/execFileSync, which
+// could block the whole process for their combined timeout (up to ~29s).
+// Confirmed live as the cause of a ready-timeout crash-loop: under
+// facility-wide session contention (many Copilot processes competing for the
+// same CPU), those blocking spawns ran long enough that the extension never
+// reported ready in time, and the host killed + respawned it in a loop that
+// never resolved on its own.
+//
+// `execFile` (callback-based, wrapped in a Promise) keeps every child async:
+// the event loop stays free to service everything else while a spawn is in
+// flight, so a slow one degrades registration latency, never extension
+// readiness. The four calls also run in parallel (`Promise.all`), bounded by
+// the single slowest one instead of their sum.
+import { exec, execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Epoch seconds this process started (wall clock minus uptime), fixed once
+// per *process*: pinned on the process object, so an extension reload in the
+// same process (a new module instance) reports the bit-identical value rather
+// than a recomputation milliseconds off -- the bridge can then compare exactly.
+const STARTED_AT_KEY = Symbol.for("agent-bridge.processStartedAt");
+const PROCESS_STARTED_AT = (process[STARTED_AT_KEY] ??= Date.now() / 1000 - process.uptime());
+
+// This process's identity, known at load with no subprocess, so every
+// registration -- the very first one included -- lets the bridge refuse a row
+// that belongs to another incarnation instead of accepting an id-only write.
+export function processIdentity() {
+  return { pid: process.pid, process_started_at: PROCESS_STARTED_AT };
+}
+
+// --- Async CLI runner (non-blocking; never freezes the event loop) ---
+// Mirrors the platform split the old synchronous runCli used (Windows
+// binstubs are .cmd -> need a shell; POSIX can exec the binary directly) --
+// `exec` with a manually-quoted command line on Windows avoids Node's
+// shell:true-with-argv deprecation warning (args would otherwise be
+// concatenated unescaped), while POSIX uses `execFile` directly with no
+// shell at all.
+export function runCliAsync(bin, args, cwd) {
+  return new Promise((resolve) => {
+    try {
+      if (process.platform === "win32") {
+        const line = [bin, ...args.map((a) => `"${String(a).replace(/"/g, '""')}"`)].join(" ");
+        exec(line, { cwd, timeout: 8000, encoding: "utf-8", windowsHide: true }, (err, stdout) => {
+          resolve(err ? null : String(stdout).trim());
+        });
+      } else {
+        execFile(bin, args, { cwd, timeout: 8000, encoding: "utf-8" }, (err, stdout) => {
+          resolve(err ? null : String(stdout).trim());
+        });
+      }
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+// --- One-time session metadata ---
+// Deliberately never awaited on the critical path to readiness by the caller
+// (see extension.mjs's load-time init) -- state.meta starts unset and this
+// fills it in whenever it resolves; register()'s payload spread tolerates an
+// absent/partial value and self-corrects on the next heartbeat.
+export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.env } = {}) {
+  if (env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT) {
+    const root = env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT;
+    if (!isAbsolute(root) || realpathSync(root) !== realpathSync(fileURLToPath(new URL("../..", import.meta.url)))
+        || !env.AGENT_BRIDGE_SCOPE_ID
+        || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(env.AGENT_BRIDGE_NATIVE_SESSION_ID || "")) {
+      throw new Error("Portable receiving metadata differs from its selected launch");
+    }
+    // The provider owns this qualified scope. It is not a guest Worktrees
+    // allocation or a claim that the venue has a registered logical machine.
+    return {
+      machine: null, cwd, repo: null, branch: null, role: null, driven_by: null,
+      worktree_id: env.AGENT_BRIDGE_SCOPE_ID, receiving_scope_id: env.AGENT_BRIDGE_SCOPE_ID,
+      ...processIdentity(),
+    };
+  }
+  const getAsync = (key) => runCliAsync("agent-worktrees", ["get", key], cwd); // marketplace-isolation: allow agent-worktrees-management
+  const [branch, sessionScopeId, machine, repo] = await Promise.all([
+    runCliAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd),
+    getAsync("session-scope-id"),
+    getAsync("machine"),
+    getAsync("project"),
+  ]);
+  return {
+    // A physical hostname cannot identify the logical Windows/WSL owner.
+    // Leave failed lookup pending for the bounded identity refresher.
+    machine: machine || null,
+    cwd,
+    // A venue launcher may pin a venue-qualified identity (e.g.
+    // `anchor-<repo>@<codespace>`) via AGENT_BRIDGE_SCOPE_ID so several
+    // venues of the same repo stay distinguishable on the host bridge.
+    worktree_id: env.AGENT_BRIDGE_SCOPE_ID || sessionScopeId || null,
+    repo,
+    branch: branch || null,
+    // process.pid is the extension host process -- a liveness hint, not the
+    // copilot PID. The durable key is session_id; liveness is heartbeat-based.
+    // With the start time, constant for this process (also across an
+    // in-process resume), the bridge tells it from an unrelated process that
+    // later reuses the pid.
+    ...processIdentity(),
+    role: null,
+    // D4: who is steering this session, if an agent embodied it (set by
+    // `agent-worktrees embody --driver`). Surfaces the "driven by <agent>"
+    // banner so a human dropping in via Neuron Forge sees who's at the wheel.
+    // Absent/null for an operator-launched session.
+    driven_by: env.AGENT_BRIDGE_DRIVEN_BY || null,
+  };
+}
+
+// The identity fields a registration needs for the bridge (and its clients) to
+// place the session in its worktree: when the load-time lookup misses them (a
+// slow or failed `agent-worktrees get` under load, as right after a reboot),
+// the session would otherwise stay registered without them for its whole life.
+const IDENTITY_FIELDS = ["machine", "worktree_id", "repo"];
+export const METADATA_RETRY_MIN_MS = 30_000;
+export const METADATA_RETRY_MAX_MS = 10 * 60_000;
+
+export function registrationMetadata(meta) {
+  if (meta?.receiving_scope_id && meta.receiving_scope_id === meta.worktree_id) {
+    const { receiving_scope_id: _scope, ...wire } = meta;
+    return wire;
+  }
+  if (IDENTITY_FIELDS.every((key) => meta?.[key])) return meta;
+  return {
+    ...meta, machine: null, worktree_id: null, repo: null,
+    clear_targeting_metadata: true,
+  };
+}
+
+// ``refresh()`` re-resolves the metadata while a field above is still missing,
+// at most once per backoff (30 s doubling to 10 min), and fills in only what was
+// missing -- a value already known is never replaced. Resolves true when it
+// filled something in (the next registration then carries it).
+export function metadataRefresher(state, resolve = resolveMetadataAsync, now = Date.now) {
+  let nextAt = 0;
+  let delay = METADATA_RETRY_MIN_MS;
+  let running = false;
+  return async () => {
+    const meta = state.meta || {};
+    if (meta.receiving_scope_id && meta.receiving_scope_id === meta.worktree_id) return false;
+    const missing = IDENTITY_FIELDS.filter((k) => !meta[k]);
+    if (!missing.length || running || now() < nextAt) return false;
+    running = true;
+    try {
+      const fresh = await resolve().catch(() => null);
+      const filled = {};
+      for (const k of missing) if (fresh && fresh[k]) filled[k] = fresh[k];
+      if (Object.keys(filled).length) {
+        state.meta = { ...(state.meta || fresh), ...filled };
+        delay = METADATA_RETRY_MIN_MS;
+        return true;
+      }
+      nextAt = now() + delay;
+      delay = Math.min(delay * 2, METADATA_RETRY_MAX_MS);
+      return false;
+    } finally {
+      running = false;
+    }
+  };
+}

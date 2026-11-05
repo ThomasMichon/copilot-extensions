@@ -6,7 +6,7 @@ Split out of ``models.py`` (module-size guard); re-exported from there, so
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer
 
 
 class LiveSessionVenue(BaseModel):
@@ -26,11 +26,22 @@ class LiveSessionVenue(BaseModel):
     #: The multiplexer session name to attach to on that venue
     #: (``embody``'s own ``wt-<worktree_id>`` convention).
     mux_session_name: str
+    #: Provider-owned versioned addressing for a portable native attempt.
+    #: Absence preserves legacy default-server addressing; an invalid/pending
+    #: descriptor must never be treated as absence by the venue consumer.
+    mux_endpoint: dict | None = None
     #: The worktree that launched and supervises this session, as a qualified
     #: ``machine/project/worktree_id`` ref (no ``#session``), so a successor
     #: session in that worktree -- e.g. after a context handoff -- can find the
     #: workers it supervises. Optional; set by the venue's launch verb.
     supervisor_ref: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_venue(self, handler):
+        result = handler(self)
+        if self.mux_endpoint is None:
+            result.pop("mux_endpoint", None)
+        return result
 
 
 class CreateCliModeReservationRequest(BaseModel):

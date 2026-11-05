@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 import json
+import hashlib
+import re
 import sqlite3
 from typing import TYPE_CHECKING
 
 from .db_core import live_session_is_fresh
 from .db_live_session_aliases import CANONICAL_SESSION_SQL as _CANON
 from .inbox_custody import InboxConsumer
+from .plugin_readiness import PluginReadinessRequest, PluginReadinessResult, startup_input_digest
 from .runtime_custody import RuntimeAdmission, RuntimeCustodyError, admission_document
 
 if TYPE_CHECKING:
@@ -32,6 +35,50 @@ class LiveMessageEnqueue:
     report_duplicate: bool
     require_idle: bool
     exact_session: bool = False
+
+
+def _requires_retained_admission(request: LiveMessageEnqueue) -> bool:
+    return request.delivery == "interrupt" or (
+        request.kind != "control:plugin-readiness"
+        and request.kind.casefold().startswith(("control:", "startup:"))
+    )
+
+
+def _ready_startup(conn: sqlite3.Connection, request: LiveMessageEnqueue) -> bool:
+    matched = re.fullmatch(r"startup:prompt:([1-9][0-9]*)", request.kind)
+    if matched is None or request.delivery != "queue" or not request.idempotency_key:
+        return False
+    try:
+        control = conn.execute(
+            "SELECT sender,body,outcome FROM live_messages WHERE id=? AND session_id=? "
+            "AND kind='control:plugin-readiness'",
+            (int(matched[1]), request.session_id),
+        ).fetchone()
+        if control is None:
+            return False
+        selected = json.loads(control["body"])
+        digest = selected.pop("selection_digest")
+        expectation = PluginReadinessRequest.model_validate(selected)
+        observed = PluginReadinessResult.model_validate_json(control["outcome"])
+        intent = conn.execute(
+            "SELECT sender FROM live_messages WHERE session_id=? AND kind='control:plugin-readiness' "
+            "AND idempotency_key=?",
+            (
+                request.session_id,
+                "startup-readiness-" + hashlib.sha256(request.idempotency_key.encode()).hexdigest(),
+            ),
+        ).fetchone()
+        return (
+            intent is not None and intent["sender"] == control["sender"]
+            and expectation.expected_session_id == observed.session_id == request.session_id
+            and observed.status == "ready" and observed.selection_digest == digest
+            and control["sender"] == "bridge-startup:" + startup_input_digest(
+                expectation, body=request.body, sender=request.sender,
+                reply_to=request.reply_to, delivery=request.delivery,
+            )
+        )
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return False
 
 
 def _duplicate(
@@ -83,6 +130,17 @@ def _enrolled_admission(
         (request.session_id, request.session_id, request.session_id),
     ).fetchall()
     if not rows:
+        target = conn.execute(
+            "SELECT venue FROM live_sessions WHERE session_id=? AND cli_mode=1",
+            (request.session_id,),
+        ).fetchone()
+        if target is not None and target["venue"] is not None:
+            try:
+                venue = json.loads(target["venue"])
+            except (TypeError, ValueError):
+                venue = None
+            if isinstance(venue, dict) and venue.get("mux_endpoint") is not None:
+                raise RuntimeCustodyError("Portable inbox requires its enrolled launch consumer")
         history = conn.execute(
             f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? OR session_id={_CANON} LIMIT 1",
             (request.session_id, request.session_id, request.session_id),
@@ -99,8 +157,9 @@ def _enrolled_admission(
         raise RuntimeCustodyError("Retained inbox requires current frontend and consumer enrollment")
     if not request.idempotency_key or not request.idempotency_key.strip():
         raise RuntimeCustodyError("Retained inbox admission requires an original operation key")
-    if request.delivery not in ("steer", "queue") or request.kind.casefold().startswith(
-        ("control:", "startup:"),
+    if (
+        request.delivery not in ("steer", "queue") or request.kind.casefold().startswith("control:")
+        or (request.kind.casefold().startswith("startup:") and not _ready_startup(conn, request))
     ):
         raise RuntimeCustodyError("Retained inbox control, startup and interrupt effects are unsupported")
     consumer = InboxConsumer(**json.loads(rows[0]["consumer_json"]))
@@ -172,7 +231,7 @@ def _insert(
             request.expected_session_id, request.expected_session_id, request.expected_session_id,
             request.exact_session, request.session_id, request.expected_session_id,
             request.require_idle,
-            request.delivery == "interrupt" or request.kind.casefold().startswith(("control:", "startup:")),
+            _requires_retained_admission(request),
             association, request.session_id, request.session_id, request.session_id,
         ),
     )
@@ -181,9 +240,7 @@ def _insert(
     replay = _duplicate(db, request, association)
     if replay is not None:
         return replay
-    if association is None and (
-        request.delivery == "interrupt" or request.kind.casefold().startswith(("control:", "startup:"))
-    ) and db.execute_read(
+    if association is None and _requires_retained_admission(request) and db.execute_read(
         f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? OR session_id={_CANON} LIMIT 1",
         (request.session_id, request.session_id, request.session_id),
     ):

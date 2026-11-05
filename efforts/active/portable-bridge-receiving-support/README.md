@@ -97,7 +97,7 @@ requires its own applicable authority and is recorded separately.
 - [x] Check the actual execution checkout and selected overlays freshly at preflight and launch/resume/successor boundaries; a preflight answer is not a launch grant.
 - [x] Preserve managed workspace identity through its existing allocation/resolution owner. Do not reinterpret a worktree ID as a path or replace allocation with raw Git operations; distinguish a genuinely unavailable managed operation from ordinary provider-workspace launch.
 - [x] Separate no-wake inspection from an authorized activating launch through the venue owner; preserve claim, relay readiness and original-attempt cancellation.
-- [ ] Prove the complete ACP consumer flow, publish it through required gates and steward its PR to merge before extending it.
+- [x] Prove the complete ACP consumer flow, publish it through required gates and steward its PR to merge before extending it.
 
 ### Phase 3 - Complete the existing muxed flow
 - [ ] Stage the same standalone remote-driver plugin at session creation and compose canonical mux/pane launch assets with only their required support closure.
@@ -339,3 +339,330 @@ implementation. The exact support closure follows the consumer trace and tests.
   results for stopped and running-but-denied members. They refuse before
   readiness, staging or session creation. All 15 focused container and preserved
   CodeSpace activation controls pass; final unit/source and review gates remain.
+
+### 2026-11-05 - ACP source slice merged; mux composition next
+
+- #10692 received exact-head approval with no active findings, all fourteen
+  review threads resolved and required green CI, then merged as
+  `1508a124f3f40a9acc747a6ffd60d8298956050c`. The umbrella issue remains open.
+- Re-read the complete effort after merge. Closed only Phase 2's source-flow
+  publication gate: isolated receiving processes, actual provider parser/
+  transport consumers and the shipped Host with a mock ACP peer prove this
+  source slice. The 4,146-case unit packet, focused recovery/container controls,
+  admitted strict-type scopes and separate Windows launch-mechanics observation
+  remain distinct evidence tiers, not installed or native Copilot acceptance.
+- Pulled the continuing worktree onto the actual merged Dev commit. Verified
+  every owned Python source/test blob matched the squash merge before dropping
+  only the already-merged local range; no new work was discarded.
+- Continue Phase 3 by tracing the existing Bridge extension and standalone
+  remote-driver integration, then composing canonical Manager pane/launcher
+  assets through their existing packaging owner. Preserve existing launch and
+  lifecycle ownership; no guest full-suite bootstrap, parallel launcher or
+  default-mode change. Compatibility, mux, native/external acceptance, release
+  and authorized rollout remain open.
+
+### 2026-11-05 - Mux extension custody and canonical support closure
+
+- Traced the existing mux consumer: CodeSpace detached launch still installs
+  guest tooling and calls `embody`; Bridge's extension directly invokes native
+  mutation separately from the standalone driver's generation fence. Merely
+  loading both extensions would not establish exclusive remote control.
+- Added an explicit launch-only driver client. It grants only the pristine
+  observed startup generation, refuses intervening input or another grant,
+  serializes original-claim sequences and holds on failed/unknown effects.
+  Bridge's opt-in adapter uses that same standalone driver, pins the native
+  session/checkout and cannot downgrade to legacy native delivery or controls.
+  Ordinary unselected extension behavior remains unchanged.
+- Added manifest-driven composition of the unchanged canonical Manager pane
+  shell and standalone remote-driver plugin. Nested packaged assets retain
+  their plugin layout without copying unrelated payloads; traversal and linked
+  source/destination paths refuse. The launch-only Bridge manifest excludes
+  full-suite hooks and skills. No Manager launcher/lifecycle source was changed.
+- The complete standalone-driver and changed Bridge extension packet passed
+  148 cases, with one optional installed-SDK check skipped. Seven isolated
+  source/materialized bundle cases and 21 materializer controls passed.
+  The materialized test caught a ZIP manifest timestamp mismatch; corrected
+  deterministic metadata and proved byte-identical source/release archives.
+  Ruff and changed-file whitespace checks passed.
+- This is local implementation progress, not the complete mux flow or a
+  published slice. Receiving launch execution, provider handoff, TMux
+  prerequisite composition, managed-workspace compatibility, native consumer
+  evidence and publication remain open. No runtime rollout or external
+  session was started; retain the existing launch owners and all parent gates.
+
+### 2026-11-05 - Portable mux receiver under implementation
+
+- Added a launch-scoped receiver and a provider-facing process declaration.
+  The selected archive carries canonical policy sources, the unchanged pane
+  shell and standalone driver, without selecting guest-suite commands.
+- Each attempt retains its input digest and native pane/incarnation receipt.
+  Unknown creation stays pending; retry cannot create or adopt a replacement.
+  A request-owned native socket avoids inheriting a different TMux server's
+  credential environment or putting credentials on command arguments.
+- Policy is checked before creation and again inside the actual execution
+  pane. The selected driver adapter observes unique native plugin roots
+  before control and permanently holds on missing or duplicate observations.
+- Initial receiver/package controls passed 29 cases, including a real isolated
+  child denying changed repository policy with no guest suite on PATH.
+  Ten focused extension controls and Python lint pass. A Windows ZIP-reader
+  normalization gap found by the controls was corrected.
+- This is local implementation, not a complete provider flow or native
+  acceptance. Connection Owner socket custody, provider-bound registration,
+  canonical prerequisite setup and launch-scoped loadout qualification remain
+  open. No source publication, runtime rollout or live guest mutation.
+- Follow-up controls passed 31 receiver/package cases and 26 extension/metadata
+  cases. Socket identity now fences a replaced endpoint separately from pane
+  identity. Selected receiving metadata preserves the provider-qualified scope
+  without querying guest Worktrees or inventing a registered machine/repository;
+  ordinary incomplete-metadata clearing remains unchanged.
+
+### 2026-11-05 - Retained portable endpoint custody
+
+- Added a versioned pending/confirmed native endpoint to the shared venue
+  support. Owner persistence, re-hold and rollback retain it; malformed or
+  incomplete endpoint records cannot downgrade to default-server addressing,
+  and a fresh launch cannot erase an unsettled portable attempt.
+- Portable observations enter the existing qualified inventory adapter, with
+  its no-wake, credential-scope and cancellation handling. They remain distinct
+  from same-named default-server sessions. Both positive renewal and release
+  retain the observed Owner generation; a stale positive observation cannot
+  renew a replacement tenant.
+- Bridge reservation routes preserve the provider-authored endpoint through
+  registration. The registering client cannot replace it. The active Owner
+  advertises portable mux support independently of its installed package.
+  Exact attach, pane-tail and stop commands prove socket device/inode and
+  native session/pane identity; an unknown stop is not automatically replayed.
+- Corrected the receiver's use of socket ctime: TMux deliberately chmods its
+  socket when clients attach/detach, so ctime is not a stable birth identity.
+  Device/inode and native incarnation remain the retained addressing proof.
+- The final isolated packets passed 296 CodeSpace cases and 99 Bridge cases.
+  Corrected an outdated purge-race test wrapper to forward the database's
+  membership keyword, preserving the actual race rather than skipping it.
+  Ruff and changed-file whitespace checks passed.
+- These are source/transport-fixture controls, not actual native TMux or
+  installed/external acceptance. The provider does not yet select this
+  receiver. Launch handoff, scoped registration credentials, prerequisite
+  composition, complete-flow qualification and publication remain open.
+
+### 2026-11-05 - Canonical prerequisite composition
+
+- Coordinated the narrow extraction on #8669 and #5579 without taking their
+  retained launch, installation-survival or Windows observation work.
+  Worktrees' public setup wrapper now delegates to a standalone standard-library
+  owner with the same package-manager order, noninteractive privilege behavior,
+  bounded attempts and post-install availability check.
+- Included that exact helper through the existing packaged-asset declaration.
+  The materialized/source archives remain byte-identical. An actual packaged
+  helper control imports no guest Worktrees package and uses the canonical
+  setup path with the package-manager effect substituted.
+- The receiver advertises optional setup separately. It checks policy before
+  setup and again before native creation. A known precreation prerequisite
+  failure can continue only the same ready attempt; an exclusive attempt lock
+  prevents concurrent ready retries from creating twice. Uncertain native
+  creation remains pending and is never replayed.
+- Native control and receiver reuse address the retained pane/session identity
+  even after a human renames the TMux session. A same-named replacement or
+  replaced socket still cannot be adopted.
+- All eight unchanged Worktrees prerequisite cases pass. The final receiving/
+  package packet passed 35 cases; the final focused endpoint/detached packet
+  passed 167. The earlier complete Owner/legacy launch packet passed 296 and
+  the Bridge reservation/receiver packet passed 99. These are isolated source
+  controls, not actual native TMux or live package-manager execution.
+- Provider launch selection, scoped registration credentials, prepared-plugin/
+  owned-seed integration, complete-flow qualification and publication remain
+  open. No runtime, shared guest or live venue was modified.
+
+### 2026-11-05 - Explicit CodeSpace mux handoff and retained launch recovery
+
+- Added explicit portable selection at Bridge's CLI creation entry and the
+  CodeSpace detached provider. Default legacy launch remains unchanged.
+  Same-cell provider invocation retains its existing validated peer boundary;
+  unavailable providers cannot select a different installation after failure.
+- The selected Bridge process and actual running Bridge/Connection Owner
+  advertise independent capabilities. The selected Bridge supplies registration
+  credentials through receiving stdin, with private attempt-scoped routing
+  and configuration. No guest full-suite installation or shared auth rewrite.
+- Portable preparation retains claims, target locks, relay/auth verification
+  and the compiled plugin barrier, while skipping dotfiles, harness and
+  repository provisioning. Canonical policy precedes plugin preparation and
+  remains fresh at prerequisite, native-creation and pane-execution boundaries.
+- Journal the original prepared request before native launch, including fixed
+  native/attempt IDs, reservation, seed and workspace. Before submission retain
+  compiled plugin inputs and the exact payload digest. Lost creation replies,
+  registration failures and changed inputs retain the original endpoint and
+  ownership; recovery cannot create a competing attempt or enter legacy cleanup.
+  Confirmed rejoin observes that same native conversation and owned seed
+  admission reuses its original key. Existing Owner-assigned forward reporting
+  remains the source of current forwarded ports.
+- The first combined provider/legacy packet passed 264 cases with five platform
+  skips. The final focused provider/legacy-detached and actual Windows-peer
+  packet passed 145 cases after the driver-label and forwarded-port refinements.
+  The earlier Bridge registration/health packet passed 46 cases. The latest
+  Bridge-entry, receiver/package and inert Windows-provider packet passed 95.
+  An additional actual Windows peer/stdin packet passed eight cases, with
+  source fixtures for portable launch/recovery alongside the inert process.
+- The Windows witness caught text-mode LF-to-CRLF conversion; the portable
+  provider seam now sends UTF-8 bytes. Its actual process control preserves
+  literal plugin metadata and multiline stdin without a daemon or provider.
+  The source entry control also caught an incorrect context-adapter assumption,
+  corrected to the Bridge owner's existing validated installation boundary.
+- Admitted strict checking found two missing endpoint generic annotations;
+  corrected them and passed the affected library on Linux and Windows targets.
+  Other admitted strict scopes passed; the 28 pending projects remain pending.
+  The install contract reports zero violations. A bare interpreter lacked the
+  unit runner's coverage dependency; full unit/source/contract gates remain open.
+- These are local source and synthetic transport/native-process controls, not
+  actual Copilot/TMux, clean-room install, live credentials or external-venue
+  acceptance. Complete joined-consumer qualification, compatibility review,
+  final source gates and publication remain open. No shared rollout, daemon
+  restart, guest upgrade or live worker was performed.
+
+### 2026-11-05 - Joined mux consumer and original admission
+
+- Composed the actual Bridge CLI, CodeSpace detached provider, selected archive
+  and receiver, extracted Bridge/standalone-driver extensions, SQLite handoff
+  and driver HTTP route. The joined control proves one admitted and consumed
+  seed, then the same conversation on rejoin without another creation or send.
+  A duplicate selected driver holds without an SDK effect.
+- The joined path exposed a fake-client interface gap, missing readonly
+  readiness polling, unsupported typed startup composition and the retained
+  inbox's ordinary remote-enrollment refusal. Corrected the actual client call
+  and added explicit source capabilities rather than bypassing those refusals.
+- Readonly control polling requires the actual daemon's named capability and
+  filters before claim or expiry. Mutation controls remain unsupported.
+  Startup admission binds the original operation, complete input and successful
+  observation; native readiness is rechecked around the one-shot final grant.
+- First portable enrollment requires the current claimed launch reservation,
+  exact native session and attempt. Same-process replacement retains the
+  existing predecessor CAS. Ordinary remote registrations, changed launches
+  and unqualified recovery remain refused. Portable admission cannot expose a
+  seed through the legacy inbox before enrollment.
+- The final focused custody/startup/joined packet passed 23 cases. The Node
+  compatibility wrapper passes all 133 underlying cases. Earlier broader
+  focused execution passed 209 cases and exposed historical schema fixtures
+  that mislabeled current guards; their corrected historical construction and
+  the remaining affected checks passed targeted validation. Touched Python
+  lint and the 13-plugin install contract pass.
+- The SDK, native mux, provider process/SSH/forwards and POSIX-to-private-scratch
+  carrier are explicit fixture substitutions. The extracted policy readers
+  run in real isolated Python processes. This is source composition, not native
+  Copilot/TMux, installed or external-venue acceptance. Docker is unavailable
+  on this test host; no service startup or repair was attempted.
+- Re-admitted only the three changed existing unit source bindings after
+  reviewing their diffs; the exact required unit inventory is unchanged.
+  Whole-unit execution, current contract evidence, remaining source gates,
+  compatibility review and publication are still open. No shared rollout or
+  guest-suite upgrade occurred.
+
+### 2026-11-05 - Required-gate corrections
+
+- The first whole-unit run passed 2,516 cases before stopping on the original
+  basename-only asset error text. Restored that existing diagnostic while
+  retaining safe relative paths for the separately declared packaged assets.
+  The complete packet must run again; the partial result is not qualification.
+- The module-size gate identified three files above its unchanged cap. Moved
+  CLI venue handoff into its own bounded component, session record types and
+  validation into the existing record owner, and verified stop behavior into
+  its own component. Existing CLI/caller seams remain available; no launcher,
+  allocation, cleanup or lease behavior was added.
+- The extracted Bridge CLI/Windows-process/joined packet passes 71 cases;
+  Owner persistence, generation fences, endpoint control, detached launch and
+  stop controls pass 257. Marked the actual standalone standard-library
+  receiver's no-window primitive explicitly rather than adding a guest runtime
+  dependency for that low-level boundary.
+- Added changefiles for the remaining consumers of the changed shared venue
+  helper. Whole-unit qualification and the final module/headless/changefile
+  checks remain open on the corrected source, along with current contract
+  evidence and publication. No baseline cap or authority gate was widened.
+
+### 2026-11-05 - Corrected whole-unit qualification
+
+- The corrected source `1afb472fd63c35a175732e692c1176293b54fceb` passes all
+  4,146 admitted units, with 21 deliberately deselected cases, in 207.59
+  seconds of pytest execution. The complete Windows-native packet, including
+  preparation, coverage and verification, finishes in 234.671 seconds.
+  This local native profile is not required PR/promotion CI evidence.
+- The unchanged module-size gate passes all 37 changed source files.
+  Headless, documentation, changefile and 13-plugin install-contract checks
+  pass. All 40 admitted strict projects pass both Linux and Windows targets;
+  the 28 pending projects remain unqualified.
+- The current contract audit identifies 16 changed source fingerprints and
+  the missing current-registry update. The new capability, readonly-control
+  and portable-consumer behavior needs matching current evidence, not a bulk
+  golden refresh or non-semantic relabeling. Historical capture packets remain
+  untouched. Source publication, review/CI and native/external acceptance remain
+  open; no rollout or live product worker was performed.
+
+### 2026-11-05 - Current portable contract capture preparation
+
+- Extended only the current HTTP-52 owner with 25 existing focused cases and
+  independent expectations for the three actual advertised portable
+  capabilities. Earlier 91 cases, HTTP generations, introduction floors and
+  historical inputs/packets are retained. The 27 focused cases pass; eight
+  declaration-preparation/refusal tests and touched Python lint pass.
+- Registered the explicit portable wire producers and the packaged receiving
+  closure in the current capture recipe. This includes the standalone
+  read-only driver adapter and canonical mux endpoint, not another runtime
+  owner. Declaration preparation remains distinct from executed evidence.
+- The joined source fixture substitutes SDK, native mux, provider process,
+  SSH, Owner, claims, forwards and its POSIX state namespace explicitly.
+  Current capture execution, required review/CI, native/installed qualification
+  and this effort's remaining Plan/Validation items are still open.
+
+### 2026-11-05 - Published checkpoint and executed portable evidence
+
+- Published draft #10748 through the managed flow after preserving the one
+  upstream effort-index conflict. The published source checkpoint is
+  `b9d56fdb83825fb44114e38072cc53b81e1356cd`; every changed production source
+  byte is retained across the rebase.
+- The actual source-bound HTTP-52 capture passes all 116 cases. Its no-write
+  verification independently passes the same portfolio, and the contract
+  audit passes both contracts and 1,018 fixtures. Retained exact capture
+  metadata protects the original source declaration through squash publication.
+  Historical evidence and provenance prefixes remain unchanged.
+- Hosted eligible-unit, dependency-seasoning, strict-type, install,
+  attribution and identifier checks pass on the checkpoint. Its contract gate
+  correctly refuses declarations without the subsequently executed fixtures;
+  fresh CI on the evidence update remains required.
+- The local all-declaration age audit cannot reach four public npm packages
+  through validated TLS; the independent native HTTP client confirms the
+  handshake failure. Python-only declarations pass. Hosted dependency
+  seasoning passes; no TLS policy or global configuration was weakened.
+- Review, fresh final-head CI and native/installed/external acceptance remain
+  open. The source and parent efforts remain Active; no rollout or live
+  product worker was started.
+
+### 2026-11-05 - Generated consumer and canonical-history corrections
+
+- The current-head CI guard identified two stale packaging-helper copies in
+  the newly shipped Worktrees admission toolkit. Refreshed them with the
+  canonical payload generator; all 13 manifests check clean and both changed
+  copies pass Python lint. Generator-only native newline changes were
+  formatted back without changing their canonical content.
+- A shallow fixture initially removed required historical Git ancestry.
+  The corrected canonical-history fixture excludes only the new capture
+  commit and exposed one genuine older HTTP-51 README retention gap.
+  Preserved its exact recorded Git blob and SHA-256 as an inert source
+  artifact; no historical packet, expected value or provenance was rewritten.
+  The corrected fixture must pass again on committed source before merge.
+- Copilot's comment review on the evidence head reports no actionable
+  findings and no discussion threads. It explicitly retains the unqualified
+  native/installed tiers. Updated-head review and required CI remain open;
+  this is not source-effort or parent completion.
+
+- Completed the historical-closure inventory against canonical history plus
+  the candidate tree, with the new capture commit absent. Of 1,986 distinct
+  recorded blobs, four additional HTTP-51 documentation/probe blobs were
+  missing after retaining the README. Preserved all four exact captured
+  byte sequences together rather than iterating on first-error reports.
+  Complete canonical-history validation remains the next acceptance check.
+- Retained the original HTTP-51 capture registry and typed Git object proof
+  as well. The canonical-history check exposed a classification mismatch
+  when that older capture was interpreted through today's registry.
+  Original capture-time semantic decisions are now retained independently;
+  neither the validator nor historical operation packets were changed.
+- Complete canonical-history validation now passes both contracts and 1,018
+  fixtures on `846569699e6a38bcf9201958eb950fa750470fc6`, with both the new
+  HTTP-52 and original HTTP-51 capture commits explicitly absent.
+  Fresh published-head CI and review remain required; no native or installed
+  acceptance is inferred from this repository evidence.

@@ -27,6 +27,7 @@ class OwnerLiveness:
     runtime_identity: str = ""
     state: str = "active"
     work_lease_version: int = 0
+    portable_mux_version: int = 0
 
     def staleness_threshold(self) -> float:
         return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))

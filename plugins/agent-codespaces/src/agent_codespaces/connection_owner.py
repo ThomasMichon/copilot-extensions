@@ -42,11 +42,10 @@ import logging
 import os
 import platform
 import time
-import uuid
 from pathlib import Path
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, fields
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
@@ -56,6 +55,7 @@ from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hol
 from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, spawn_owner_process, wait_for_owner_startup
 from .owner_liveness import OwnerLiveness, _LIVE_STALE_FLOOR as _LIVE_STALE_FLOOR
 from . import owner_session_records
+from .owner_session_records import DEFAULT_TTL as DEFAULT_TTL, OwnerHold as OwnerHold
 from . import __version__ as _PROCESS_VERSION
 from .source_build import capture_owner_runtime
 
@@ -71,55 +71,11 @@ _LOCK_FILE = RUNTIME_DIR / "connection-owner.lock"
 # the short-lived CLI process that registered it, so reclamation is TTL-based: a
 # live tenant refreshes via :func:`heartbeat`; a forgotten one expires after the
 # TTL. A **pinned** relay has no TTL -- it persists until explicitly unpinned.
-DEFAULT_TTL = 3600.0
-
 # A session tenant (a detached CLI-mode session) is renewed by the Owner's own
 # venue probe while its mux session exists, but never beyond this absolute cap
 # from its first hold -- a forgotten session cannot hold a CodeSpace's
 # connection (and keep it awake) forever.
 DEFAULT_SESSION_MAX_LEASE = 24 * 3600.0
-
-
-@dataclass
-class OwnerHold:
-    """The Connection Owner's durable hold on one CodeSpace.
-
-    ``pinned`` marks the credential relay as the Owner's always-on service.
-    ``tenants`` maps a tenant id -> its last heartbeat epoch; the ref-count is
-    the number of *live* (non-stale) tenants. A hold is kept while ``pinned`` or
-    any tenant is live (see :meth:`should_hold`).
-
-    ``daemon_port`` asks the Owner to also keep a reverse forward of the host
-    agent-bridge daemon into the CodeSpace (CodeSpace-side listen port; the
-    host side follows the daemon's live port), so a detached CLI-mode session
-    there can keep registering/heartbeating/receiving messages after its
-    launcher exits. ``sessions`` records, per such tenant, only transport facts
-    the Owner needs to renew it on its own: the remote ``mux_session`` whose
-    existence keeps the tenant alive and an absolute ``expires_at`` lease cap.
-    ``reverse_forwards`` / ``local_forwards`` live as long as ``daemon_port``;
-    assigned local forwards mark ports allocated from ``0:VENUE_PORT``.
-    """
-
-    codespace: str
-    host: str
-    created_at: float
-    heartbeat_at: float
-    pinned: bool = False
-    tenants: dict[str, float] = field(default_factory=dict)
-    daemon_port: int | None = None
-    sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
-    reverse_forwards: dict[str, int] = field(default_factory=dict)
-    local_forwards: dict[str, int] = field(default_factory=dict)
-    assigned_local_forwards: dict[str, int] = field(default_factory=dict)
-
-    def live_tenants(self, ttl: float = DEFAULT_TTL) -> dict[str, float]:
-        """Tenants whose heartbeat is within ``ttl``."""
-        now = time.time()
-        return {t: hb for t, hb in self.tenants.items() if now - hb <= ttl}
-
-    def should_hold(self, ttl: float = DEFAULT_TTL) -> bool:
-        """Whether the durable connection should be kept up."""
-        return self.pinned or bool(self.live_tenants(ttl))
 
 
 def _this_host() -> str:
@@ -287,6 +243,7 @@ def hold(
     ttl: float = DEFAULT_TTL,
     daemon_port: int | None = None,
     mux_session: str | None = None,
+    mux_endpoint: dict | None = None,
     confirmed: bool = False,
     max_lease: float = DEFAULT_SESSION_MAX_LEASE,
     fresh: bool = False,
@@ -307,7 +264,9 @@ def hold(
     is *unconfirmed* until its launcher re-holds it with ``confirmed=True`` once
     the session is up: until then a probe that cannot see the mux session never
     releases it -- only the TTL does. ``daemon_port`` asks for the host bridge
-    daemon reverse forward. ``fresh=True`` starts a new launch
+    daemon reverse forward. ``mux_endpoint`` pins an optional portable native
+    attempt; a pending endpoint may gain native proof, never another identity.
+    ``fresh=True`` starts a new launch
     generation (unconfirmed, new lease), so nothing -- neither an older
     session's confirmation nor an in-flight probe of it -- can release the new
     launch; ``restore`` puts back a session entry exactly as it was before a
@@ -318,6 +277,7 @@ def hold(
         raise RuntimeError("hold requires a CodeSpace name")
     if not tenant:
         raise RuntimeError("hold requires a tenant id")
+    endpoint = owner_session_records.selected_endpoint(mux_session, mux_endpoint, confirmed)
     now = time.time()
     with _owner_lock():
         holds = _prune(_read_holds(), ttl)
@@ -336,16 +296,14 @@ def hold(
             existing.pinned = True
         if mux_session:
             current = existing.sessions.get(tenant) or {}
-            prior = restore if restore is not None else ({} if fresh else current)
+            if fresh and "mux_endpoint" in current:
+                raise ValueError("A retained portable mux attempt must be settled before a fresh launch")
             if fresh and owner_session_records._read_pending(codespace, OWNER_FILE).get(tenant):
                 raise RuntimeError("A pending owned delivery must be reconciled before starting another launch")
-            existing.sessions[tenant] = {
-                "mux_session": mux_session,
-                "expires_at": prior.get("expires_at", now + max_lease),
-                "confirmed": bool(confirmed or prior.get("confirmed", False)),
-                "generation": prior.get("generation") or uuid.uuid4().hex,
-                **({"pending_delivery": prior["pending_delivery"]} if prior.get("pending_delivery") else {}),
-            }
+            existing.sessions[tenant] = owner_session_records.session_record(
+                current, mux_session=mux_session, mux_endpoint=mux_endpoint, endpoint=endpoint,
+                confirmed=confirmed, fresh=fresh, restore=restore, now=now, max_lease=max_lease,
+            )
         port = _sanitize_port(daemon_port)
         if port is not None:
             existing.daemon_port = port
@@ -487,6 +445,7 @@ def _write_liveness(
             "runtime_identity": _PROCESS_SELECTION.identity if _PROCESS_SELECTION else "",
             "state": state,
             "work_lease_version": 1,
+            "portable_mux_version": 1,
         }
         tmp = LIVE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -544,6 +503,9 @@ def read_liveness() -> OwnerLiveness | None:
             ),
             work_lease_version=(
                 raw["work_lease_version"] if type(raw.get("work_lease_version")) is int else 0
+            ),
+            portable_mux_version=(
+                raw["portable_mux_version"] if type(raw.get("portable_mux_version")) is int else 0
             ),
         )
     except (TypeError, ValueError):

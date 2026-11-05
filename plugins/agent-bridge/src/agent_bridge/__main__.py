@@ -542,6 +542,8 @@ def build_parser() -> argparse.ArgumentParser:
     register_acquisition(sub)
     from .relationship_cli import register as register_relationship
     register_relationship(sub)
+    from .receiving_cli import register as register_receiving_support
+    register_receiving_support(sub)
     return parser
 
 

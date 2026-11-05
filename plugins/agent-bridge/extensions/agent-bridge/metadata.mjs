@@ -21,6 +21,9 @@
 // readiness. The four calls also run in parallel (`Promise.all`), bounded by
 // the single slowest one instead of their sum.
 import { exec, execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Epoch seconds this process started (wall clock minus uptime), fixed once
 // per *process*: pinned on the process object, so an extension reload in the
@@ -68,6 +71,21 @@ export function runCliAsync(bin, args, cwd) {
 // fills it in whenever it resolves; register()'s payload spread tolerates an
 // absent/partial value and self-corrects on the next heartbeat.
 export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.env } = {}) {
+  if (env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT) {
+    const root = env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT;
+    if (!isAbsolute(root) || realpathSync(root) !== realpathSync(fileURLToPath(new URL("../..", import.meta.url)))
+        || !env.AGENT_BRIDGE_SCOPE_ID
+        || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(env.AGENT_BRIDGE_NATIVE_SESSION_ID || "")) {
+      throw new Error("Portable receiving metadata differs from its selected launch");
+    }
+    // The provider owns this qualified scope. It is not a guest Worktrees
+    // allocation or a claim that the venue has a registered logical machine.
+    return {
+      machine: null, cwd, repo: null, branch: null, role: null, driven_by: null,
+      worktree_id: env.AGENT_BRIDGE_SCOPE_ID, receiving_scope_id: env.AGENT_BRIDGE_SCOPE_ID,
+      ...processIdentity(),
+    };
+  }
   const getAsync = (key) => runCliAsync("agent-worktrees", ["get", key], cwd); // marketplace-isolation: allow agent-worktrees-management
   const [branch, sessionScopeId, machine, repo] = await Promise.all([
     runCliAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd),
@@ -110,6 +128,10 @@ export const METADATA_RETRY_MIN_MS = 30_000;
 export const METADATA_RETRY_MAX_MS = 10 * 60_000;
 
 export function registrationMetadata(meta) {
+  if (meta?.receiving_scope_id && meta.receiving_scope_id === meta.worktree_id) {
+    const { receiving_scope_id: _scope, ...wire } = meta;
+    return wire;
+  }
   if (IDENTITY_FIELDS.every((key) => meta?.[key])) return meta;
   return {
     ...meta, machine: null, worktree_id: null, repo: null,
@@ -127,6 +149,7 @@ export function metadataRefresher(state, resolve = resolveMetadataAsync, now = D
   let running = false;
   return async () => {
     const meta = state.meta || {};
+    if (meta.receiving_scope_id && meta.receiving_scope_id === meta.worktree_id) return false;
     const missing = IDENTITY_FIELDS.filter((k) => !meta[k]);
     if (!missing.length || running || now() < nextAt) return false;
     running = true;

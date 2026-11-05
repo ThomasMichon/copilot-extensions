@@ -65,6 +65,16 @@ credential authorizes deliberate ownership transfer.
 
 Token-only mutations from older clients fail explicitly; they do not bypass
 the ownership fence. Existing read-only discovery/listing remains compatible.
+
+Explicit launch controllers can use `createStartupSession` from
+`extensions/agent-remote-driver/startup-client.mjs`. It admits initial control
+only while the freshly observed driver still awaits its first explicit
+re-hook. The grant compares that same generation, so intervening human input
+or another grant refuses it. This is not a reconnect/recovery grant. Sends and
+aborts serialize on the original claim; any failed or uncertain effect holds
+the adapter without automatic replay or re-hook. Deliberate later takeover
+continues to use the standalone administrative helper below.
+
 The old curl snippet below illustrates observation/header handling and the
 **rejected legacy mutation shape**: its `/send` request now returns `409`
 because no claim is supplied. Use the standalone helper for control.

@@ -40,6 +40,46 @@ def _ns(**kw):
 
 
 class TestCmdCreateCliDispatch:
+    def test_portable_selection_reaches_the_same_cell_codespace_provider(self, monkeypatch):
+        from types import SimpleNamespace
+
+        calls = []
+        monkeypatch.setattr("agent_bridge._peer_launch.validate_owner", lambda *a: {
+            "pluginRoot": "/selected/cell/plugins/agent-bridge",
+        })
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "selected-receipt")
+        monkeypatch.setattr("agent_bridge._peer_launch.launch_prefix", lambda *a: ["selected-python", "peer"])
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: pytest.fail("cross-cell PATH fallback"))
+        monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+        monkeypatch.setattr(
+            targeting.subprocess, "run",
+            lambda argv, **kwargs: calls.append((argv, kwargs)) or SimpleNamespace(returncode=0),
+        )
+        with pytest.raises(SystemExit) as result:
+            targeting._cmd_create_cli(
+                "codespace:fixture", "one task", None, detach=True, receiving_support="portable",
+            )
+        assert result.value.code == 0
+        assert calls[0][0] == [
+            "selected-python", "peer", "copilot", "fixture", "--receiving-support", "portable",
+            "--detach", "--seed-file", "-",
+        ]
+        assert b"one task" in calls[0][1]["input"]
+
+    @pytest.mark.parametrize("target,detach,worktree", [
+        ("container:fixture", True, None), ("ssh:fixture", True, None),
+        ("codespace:fixture", False, None), ("codespace:fixture", True, "managed-id"),
+    ])
+    def test_portable_unsupported_provider_or_allocator_refuses_before_resolution(
+        self, monkeypatch, target, detach, worktree,
+    ):
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: pytest.fail("resolved unsupported provider"))
+        with pytest.raises(SystemExit) as result:
+            targeting._cmd_create_cli(
+                target, None, None, detach=detach, worktree_id=worktree, receiving_support="portable",
+            )
+        assert result.value.code == 2
+
     def test_ssh_ambiguous_registered_remote_refuses_before_native_launch(self, monkeypatch, tmp_path):
         from types import SimpleNamespace
         from agent_bridge import related_plugins

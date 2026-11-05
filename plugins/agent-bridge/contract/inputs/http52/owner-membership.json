@@ -183,6 +183,11 @@
     }
   },
   "expected": {
+    "portable_capabilities": {
+      "portable_mux": 1,
+      "portable_inbox": 1,
+      "readonly_plugin_controls": 1
+    },
     "owner_membership": {
       "capability": 1,
       "snapshot": {
