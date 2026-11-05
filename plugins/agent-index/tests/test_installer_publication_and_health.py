@@ -41,13 +41,14 @@ SRC_VERSION=2.0.0
 _activation_role() {{ echo host; }}
 _machine_role() {{ echo host; }}
 _service_healthy() {{ return 0; }}
+_index_publication_fresh() {{ return 0; }}
 _write_service_files() {{ return {17 if failure == "service-files" else 0}; }}
 _skip() {{ :; }}; _step() {{ :; }}; _fail() {{ :; }}; _ok() {{ :; }}
 {function("_service_cutover", "sh")}
 result=0
 _service_cutover || result=$?
 exit "$result"
-""", encoding="utf-8")
+""", encoding="utf-8", newline="\n")
     result = subprocess.run(
         [str(bash), harness.as_posix()], cwd=tmp_path, env=environment(tmp_path),
         capture_output=True, text=True, timeout=15,
@@ -60,7 +61,7 @@ exit "$result"
 @pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("outcome", [
     "native-failure", "stale", "health-stale", "wrong-owner", "ready", "dev-ready",
-    "source-mismatch",
+    "source-mismatch", "superseded",
     "client", "unconfigured", "no-service",
     "existing-host-failure",
 ])
@@ -88,6 +89,8 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
     if outcome == "source-mismatch":
         expected = "2.0.0+source." + "a" * 64
     (root / "current-version").write_text(expected, encoding="utf-8")
+    if outcome == "superseded":
+        (root / "current-version").write_text("3.0.0", encoding="utf-8")
     before = {path: path.read_bytes() for path in (preserved, engine / "current-version")}
     version = "2.0.0" if outcome in {"ready", "health-stale", "wrong-owner"} else "1.0.0"
     if outcome == "dev-ready":
@@ -161,7 +164,7 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
         scripts = Path(__file__).resolve().parents[1] / "scripts"
         if host == "bash":
             # No systemctl is discoverable: the native owner must still run.
-            env["PATH"] = str(tmp_path)
+            env["PATH"] = str(tmp_path) + os.pathsep + os.defpath
             text = f"""
 set -euo pipefail
 INSTALL_DIR={shlex.quote(str(root))}
@@ -174,6 +177,9 @@ _fail() {{ echo "$*" >&2; }}
 _activation_role() {{ echo {role}; }}
 _machine_role() {{ echo {machine_role}; }}
 _write_service_files() {{ :; }}
+command() {{ [[ "${{1:-}}" != -v || "${{2:-}}" != systemctl ]] || return 1; builtin command "$@"; }}
+{function("_version_lt", "sh")}
+{function("_index_publication_fresh", "sh")}
 {function("_service_healthy", "sh")}
 {function("_service_cutover", "sh")}
 _service_cutover
@@ -191,6 +197,7 @@ $LinkPython = '{runtime}'
 $SrcVersion = '{expected}'
 $EnvFile = '{env_file}'
 $NoService = ${str(outcome == "no-service").lower()}
+$Force = $false
 function Write-Ok {{ param($m) Write-Host $m }}
 function Write-Skip {{ param($m) Write-Host $m }}
 function Write-Warn {{ param($m) Write-Host $m }}
@@ -199,6 +206,9 @@ function Get-ActivationRole {{ return '{role}' }}
 function Get-MachineRole {{ return '{machine_role}' }}
 function Write-ServiceFiles {{ }}
 {function("Invoke-WithEnvFile", "ps1")}
+{function("Get-VerTuple", "ps1")}
+{function("Test-VersionLt", "ps1")}
+{function("Test-IndexPublicationFresh", "ps1")}
 {function("Get-ActiveServicePort", "ps1")}
 {function("Test-ServiceHealthy", "ps1")}
 {function("Invoke-ServiceCutover", "ps1")}
@@ -215,7 +225,7 @@ if ($env:AGENT_INDEX_HOST -ne '127.0.0.3' -or $env:AGENT_INDEX_DATA_DIR -ne 'unc
             text=True, timeout=25,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-        skipped = outcome in {"client", "unconfigured", "no-service"}
+        skipped = outcome in {"client", "unconfigured", "no-service", "superseded"}
         success = skipped or outcome in {"ready", "dev-ready"}
         assert (result.returncode == 0) is success, result.stdout + result.stderr
         assert log.exists() is not skipped

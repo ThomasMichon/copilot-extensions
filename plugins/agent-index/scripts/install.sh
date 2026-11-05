@@ -2285,6 +2285,10 @@ _ensure_running() {
 # The warm embedding engine is a SEPARATE unit on a fixed port -- left untouched.
 _service_cutover() (
     if [[ "$NO_SERVICE" -eq 1 ]]; then _skip 'Service cutover skipped (--no-service)'; return 0; fi
+    if ! _index_publication_fresh; then
+        _skip 'Newer runtime or stamp superseded service deployment'
+        return 0
+    fi
     # A configured host may start/cut over. An unrelated repository may only
     # cut over an already-running service owned by an explicit machine host.
     local role

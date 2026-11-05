@@ -2624,6 +2624,10 @@ function Invoke-ServiceCutover {
     # routing, drains, and retires the old -- so activation moves the service to the
     # new version with no operator step (invariant #1). No live service -> start one.
     if ($NoService) { Write-Skip 'Service cutover skipped (-NoService)'; return }
+    if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
+        Write-Skip 'Newer runtime or stamp superseded service deployment'
+        return
+    }
     $role = Get-ActivationRole
     $maintainExistingHost = (
         $role -ne 'host' -and
