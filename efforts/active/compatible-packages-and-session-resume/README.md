@@ -239,3 +239,12 @@ claims, and recover partial/unknown results without blindly replaying actions.
   Ordinary resumed heads also select their saved launch profile rather than
   allocating a different context; a profile-bound head change refuses before
   startup-text custody changes. Expanded Worktrees total: 169 passed.
+- Admission-only native setup can advance the head without the outer lifecycle
+  lock. Added a final record/head/liveness/mux revalidation under the acquired
+  admission lease before spawn. Late wins never duplicate a process or replay
+  prepared text; native seed custody is reported unconfirmed. The expanded
+  Worktrees/profile packet passed 255 tests.
+- CI run 42005541498 on the prior source head timed out in the six-minute
+  admitted-type-contract step after successful target output, without type
+  diagnostics. The corrected head must pass fresh required CI; no bypass or
+  untracked flake exemption is assumed.

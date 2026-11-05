@@ -456,52 +456,19 @@ def cmd_embody(args: argparse.Namespace) -> int:
         admission.close()
         return output._json_error(str(exc), exit_code=3)
     try:
-        # A managed-GC pass may have completed while launch preflight ran.
-        # Re-check under the shared lifecycle fence before creating a process.
         try:
-            launch_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
-        except FileNotFoundError:
-            return output._json_error(f"Worktree record disappeared before launch: {wt_id}", exit_code=3,)
-        if getattr(launch_record, "kind", None) in tracking.MANAGED_KINDS and getattr(
-            launch_record, "status", None
-        ) in {"complete", "completed", "finalized"}:
-            return output._json_error(
-                f"Worktree {wt_id} is terminal and managed; refusing embodiment",
-                exit_code=3,
+            launch_record = embody_resume.checked_launch_record(
+                cfg.tracking_dir() / f"{wt_id}.yaml", record, wt_id, work_dir,
             )
-        if (
-            getattr(launch_record, "worktree_id", wt_id) != wt_id
-            or getattr(launch_record, "worktree_path", work_dir) != work_dir
-            or (
-                getattr(record, "branch", None) is not None
-                and getattr(launch_record, "branch", None) != getattr(record, "branch", None)
-            )
-            or (
-                getattr(record, "repo", None) is not None
-                and getattr(launch_record, "repo", None) != getattr(record, "repo", None)
-            )
-        ):
-            return output._json_error(f"Worktree record changed before launch: {wt_id}", exit_code=3,)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
         if acquisition and (error := bridge_acquisition_launch.refusal(args, launch_record, wt_id)):
             return output._json_error(error, exit_code=3)
         if sessions.has_mux_session(wt_id):
-            output._json_output(
-                {
-                    "ok": True,
-                    **deferred,
-                    "worktree_id": wt_id,
-                    "session": sessions.mux_session_name(wt_id),
-                    "work_dir": work_dir,
-                    "created": False,
-                    "resumed": True,
-                    "seeded": False,
-                    "new_pane": (
-                        sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
-                    ),
-                    "note": "a live mux session already embodies this worktree",
-                }
+            return embody_completion.existing_launch(
+                args, wt_id=wt_id, work_dir=work_dir, deferred=deferred,
+                cfg=cfg, sessions=sessions, output=output, tracking_write=tracking_write,
             )
-            return 0
         # A freshly-provisioned remote venue (CodeSpace/container) virtually
         # never has tmux preinstalled (confirmed against a real CodeSpace
         # devcontainer, agent-bridge-cli-mode-sessions Phase 4 prep) --
@@ -555,6 +522,30 @@ def cmd_embody(args: argparse.Namespace) -> int:
             admission.enter_context(launch_admission.guard(cfg.tracking_dir() / f"{wt_id}.yaml"))
         except ValueError as exc:
             return output._json_error(str(exc), exit_code=3)
+        try:
+            admitted_record = embody_resume.checked_launch_record(
+                cfg.tracking_dir() / f"{wt_id}.yaml", record, wt_id, work_dir,
+            )
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
+        if acquisition and (error := bridge_acquisition_launch.refusal(args, admitted_record, wt_id)):
+            return output._json_error(error, exit_code=3)
+        admitted_resume = embody_resume.resume_target(args, admitted_record, seed, make_new=make_new)
+        if admitted_resume != resume_target:
+            return output._json_error(
+                "Head changed during startup preparation; inspect staged text before retrying",
+                exit_code=3,
+            )
+        if sessions.has_mux_session(wt_id):
+            return embody_completion.existing_launch(
+                args, wt_id=wt_id, work_dir=work_dir, deferred=deferred,
+                cfg=cfg, sessions=sessions, output=output, tracking_write=tracking_write,
+                native_seed_id=native_seed_id,
+            )
+        if refusal := embody_resume.live_head_refusal(admitted_resume, wt_id):
+            return output._json_error(refusal, exit_code=3)
+        if refusal := agent_policy.json_refusal(work_dir):
+            return refusal
         from .launch_seed_exec import copied_setup_command
 
         try:

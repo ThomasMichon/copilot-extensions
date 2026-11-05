@@ -521,6 +521,12 @@ attaches to it without injecting a prompt. Even `--fresh` does not replace an
 already-live mux. Use the existing message/input owner to address a running
 conversation, or an explicitly authorized stop/handoff before cold creation.
 
+After startup-text preparation, the launcher revalidates the record, head,
+liveness and mux under admission immediately before process creation. If another
+owner won, it does not spawn or replay text. A prepared native seed is reported
+with its `seed_id` and `seed_unconfirmed: true`; inspect the existing receipts
+instead of assuming that joining an existing mux proves no preparation occurred.
+
 The launch-default cutover is intentional: older `embody --seed` implicitly
 started fresh. Automated new-task callers must now send `--fresh`; continuation
 callers can send `--resume-head` to retain the same meaning on old/new providers

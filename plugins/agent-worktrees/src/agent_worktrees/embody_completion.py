@@ -11,6 +11,7 @@ from . import launch_seed_exec, launch_seed_state
 
 def existing_launch(
     args, *, wt_id, work_dir, deferred, cfg, sessions, output, tracking_write,
+    native_seed_id: str | None = None,
 ) -> int:
     from . import agent_policy
 
@@ -38,6 +39,10 @@ def existing_launch(
         "created": False, "resumed": True, "new_pane": display,
         "note": "a live mux session already embodies this worktree",
         "seeded": bool(seed_result.get("ok")), **settled,
+        **({
+            "seed_id": native_seed_id, "seed_unconfirmed": True,
+            "seed_reason": "joined-after-preparation",
+        } if native_seed_id else {}),
     })
     return 0
 
@@ -95,7 +100,12 @@ def complete_launch(
             "ok": True, **deferred, "worktree_id": wt_id,
             "session": result["session"], "work_dir": work_dir,
             "created": False, "resumed": True, "new_pane": None,
+            "seeded": False,
             "note": "a live mux session already embodies this worktree",
+            **({
+                "seed_id": native_seed_id, "seed_unconfirmed": True,
+                "seed_reason": "joined-after-preparation",
+            } if native_seed_id else {}),
         })
         return 0
     new_pane = result.get("new_pane")

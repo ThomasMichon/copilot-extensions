@@ -3,10 +3,35 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from . import sessions
 from .native_arguments import append_native_arguments
 from .session_liveness import session_liveness
+
+
+def checked_launch_record(path: Path, previous, worktree_id: str, work_dir: str):
+    from . import tracking
+
+    try:
+        current = tracking.load_record(path)
+    except FileNotFoundError as exc:
+        raise ValueError(f"Worktree record disappeared before launch: {worktree_id}") from exc
+    if getattr(current, "kind", None) in tracking.MANAGED_KINDS and getattr(
+        current, "status", None,
+    ) in {"complete", "completed", "finalized"}:
+        raise ValueError(f"Worktree {worktree_id} is terminal and managed; refusing embodiment")
+    if (
+        getattr(current, "worktree_id", worktree_id) != worktree_id
+        or getattr(current, "worktree_path", work_dir) != work_dir
+        or any(
+            getattr(previous, field, None) is not None
+            and getattr(current, field, None) != getattr(previous, field, None)
+            for field in ("branch", "repo")
+        )
+    ):
+        raise ValueError(f"Worktree record changed before launch: {worktree_id}")
+    return current
 
 
 def add_arguments(group: argparse._ActionsContainer) -> None:

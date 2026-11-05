@@ -976,6 +976,93 @@ class TestCmdEmbody:
         with launch_admission.guard(path):
             pass
 
+    def test_native_owner_starting_during_seed_preparation_is_rechecked_under_admission(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from agent_worktrees import embody_completion, launch_admission
+
+        self._stub_existing(monkeypatch, tmp_path)
+        started = {"value": False}
+
+        def prepare(*args, **kwargs):
+            started["value"] = True
+            return ["copilot"], "prepared-seed"
+
+        def liveness(session):
+            if started["value"]:
+                with pytest.raises(launch_admission.LaunchAdmissionBusy), launch_admission.guard(
+                    tmp_path / "wtR.yaml",
+                ):
+                    pytest.fail("the final liveness check must hold admission")
+                return "live"
+            return "dead"
+
+        monkeypatch.setattr(embody_completion, "prepare_startup_seed", prepare)
+        monkeypatch.setattr(embody_resume, "session_liveness", liveness)
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **k: pytest.fail("no duplicate"))
+        assert m.cmd_embody(_ns(worktree_id="wtR", seed="next turn")) == 3
+        assert "already running" in capfd.readouterr().out
+
+    @pytest.mark.parametrize("kind", ["native", "bridge"])
+    def test_mux_appearing_during_seed_preparation_is_reused_without_replaying_text(
+        self, monkeypatch, capfd, tmp_path, kind,
+    ):
+        from agent_worktrees import bridge_seed_delivery, embody_completion, launch_seed_state
+
+        self._stub_existing(monkeypatch, tmp_path)
+        started = {"value": False}
+
+        def prepare(*args, **kwargs):
+            started["value"] = True
+            return ["copilot"], "prepared-seed"
+
+        def claim(*args):
+            started["value"] = True
+            return {"bridge_seed_deferred": True, "deferred_creation_seed": {"seed": None}}
+
+        monkeypatch.setattr(sessions, "has_mux_session", lambda _: started["value"])
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda _: "%9")
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
+        monkeypatch.setattr(embody_completion, "prepare_startup_seed", prepare)
+        monkeypatch.setattr(bridge_seed_delivery, "claim", claim)
+        monkeypatch.setattr(launch_seed_state, "claim_creation", lambda *a: pytest.fail("no reclaim"))
+        monkeypatch.setattr(sessions, "mux_seed_pane", lambda *a, **k: pytest.fail("no replay"))
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **k: pytest.fail("no duplicate"))
+        options = {"seed": "next turn"} if kind == "native" else {
+            "bridge_seed_operation": "operation", "bridge_scope_id": "scope",
+        }
+        assert m.cmd_embody(_ns(worktree_id="wtR", **options)) == 0
+        result = json.loads(capfd.readouterr().out)
+        assert result["created"] is False and result["seeded"] is False
+        assert result["new_pane"] == "%9"
+        if kind == "native":
+            assert result["seed_unconfirmed"] and result["seed_id"] == "prepared-seed"
+        else:
+            assert result["bridge_seed_deferred"]
+
+    def test_head_advancing_during_seed_preparation_refuses_the_stale_resume(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from types import SimpleNamespace
+        from agent_worktrees import embody_completion
+
+        self._stub_existing(monkeypatch, tmp_path)
+        head = {"value": "original-head"}
+        monkeypatch.setattr(m.tracking, "load_record", lambda _: SimpleNamespace(
+            worktree_path="/w/wtR", head=head["value"],
+        ))
+        monkeypatch.setattr(sessions, "resolve_resume_target", lambda record: record.head)
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
+
+        def prepare(*args, **kwargs):
+            head["value"] = "replacement-head"
+            return ["copilot"], "prepared-seed"
+
+        monkeypatch.setattr(embody_completion, "prepare_startup_seed", prepare)
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **k: pytest.fail("no stale resume"))
+        assert m.cmd_embody(_ns(worktree_id="wtR", seed="next turn")) == 3
+        assert "Head changed during startup preparation" in capfd.readouterr().out
+
     @pytest.mark.parametrize(
         "extra, resumed",
         [
