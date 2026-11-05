@@ -274,6 +274,31 @@ result. Exact files/directory prefixes are matched once; unknown or overlapping
 ownership and missing/out-of-repository source fail visibly. New non-ignored
 untracked Python files are included for local pre-validation.
 
+## Interpreter qualification versions
+
+Each project's `python_version` remains its authoritative minimum analysis
+target. A project may additionally declare `"additional_python_versions":
+["3.11"]`. Omission or an empty list retains the single-version policy.
+Additional values must be unique canonical `3.<minor>` strings strictly above
+the minimum; they never replace it or change runtime requirements.
+
+The checker runs the minimum and every additional version against every
+declared platform. An additional-version matrix finishes all cells even after
+diagnostics and returns the first failing status; single-version projects retain
+their existing fail-fast behavior. Every result names its Python version and
+platform, and MyPy caches are separated by project, platform and analysis
+version. Source views are verified after every invocation. The prepared
+dependency environment remains keyed by its actual host interpreter/platform
+and captured lock bytes; analysis targets do not select a different interpreter
+or install another runtime.
+
+This is one project and one physical-file inventory, not additional ownership
+per version. Local, source-PR and frozen-candidate `--enforced` commands all read
+the same project declaration. A version guard that excludes code at the minimum
+cannot qualify that code by itself: an additional declared version must strictly
+check the supported branch. Native minimum-interpreter and consumer/copy
+qualification remain separate evidence.
+
 ## Migration diagnostics
 
 ```text
@@ -309,6 +334,60 @@ activated consumer. Local `--enforced` uses the same pinned checker and target
 policy; `--changed` is an intentionally conservative local parity command.
 The YAML project exercises independent dependency preparation; additional
 project dependency contexts remain subsequent slices.
+
+## Project-local real import roots
+
+A project may append an optional ordered `import_roots` list of repository-relative
+directories. Omission or `[]` preserves the existing seven-field project defaults.
+The optional eighth constructor argument is `additional_python_versions`;
+`import_roots` is optional ninth and is normally passed by keyword. Both empty
+defaults preserve existing seven-argument callers.
+For example, `["tools", "plugins/agent-worktrees/scripts"]` exposes those ordinary
+first-party helper directories after the existing checker import roots. These
+are real source directories, not module aliases, stubs or arbitrary MyPy options.
+Malformed, duplicate, missing, non-directory and redirected roots are refused.
+An explicit root's absolute path must not contain the native path-list separator,
+including in a repository ancestor. For explicit-root projects, the checker also
+refuses that separator in any final search component, including inherited source
+directories and the existing Installation Context view prefix. This uses the
+SDK host's delimiter, not the analysis target's platform: otherwise `MYPYPATH`
+could search different directories from those captured. Empty-root projects
+retain their existing search-path serialization and order. A checking root must
+contain Python source in the existing ownership inventory.
+Ambient `MYPYPATH`, `PYTHONPATH` and `PYTHONHOME` do not supply roots.
+
+For explicit roots, the checker captures the ordinary directory/file identities,
+bytes and membership of reachable Python source without executing it. Identifier
+directory components include namespace packages without requiring `__init__.py`;
+non-module fixture names and data paths do not become import interfaces.
+Importable `.py` members must belong to the existing inventory, including owned,
+nonignored developer WIP. Extra ignored/unowned Python, first-party `.pyi`
+shadows or substitutes, symbolic links, reparse points and nonordinary inputs
+are refused. Third-party SDK stubs outside these roots are unchanged.
+Windows extension aliases such as `.PYI` count when the native lowercase lookup
+resolves to that same file. Ordinary `.PY` aliases retain their inventoried
+`.py` ownership spelling; POSIX case-distinct data is not reclassified.
+The ephemeral capture is verified before and after each version/platform analysis and
+again after checker-file cleanup, before releasing the environment lease.
+Changed or replaced roots/members and added/missing sources cannot credit a
+result, including when MyPy itself fails or times out.
+
+Import delivery does not add helper files to the project's owned targets or
+certify their bodies. MyPy retains ordinary module identities, duplicate-module
+diagnostics and `--follow-imports silent`: consumed helper contracts supply
+types, while the helper owner qualifies its implementation independently.
+The Payload Invocation row uses these roots and remains pending. Both a named
+pending check and `--all` remain nonzero even after a clean diagnostic probe.
+
+Projects with explicit roots use the existing `--cache-dir` option with the null
+device rather than reusing incremental diagnostics for mutable helper inputs.
+Projects without roots retain their existing cache behavior and environment key.
+No new qualification receipt or committed-only source restriction is introduced.
+Local developer files retain the normal ownership inventory rules; frozen checks
+resolve roots relative to their candidate checkout. This does not replace the
+existing frozen-candidate owner's Git content-tree identity. Additional imported
+source must satisfy the same inventory and ephemeral verification; ignored or
+stub inputs are not qualified by the candidate identity.
 
 ## Fixed fragment source views
 
