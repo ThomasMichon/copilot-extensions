@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eleven recovery/reclamation/callback contracts](finite-recovery-reclamation-callback-contracts.md)
+retain thirty-three ranked relationships without confusing planning release
+with implementation authority, SUBMITTED with COMPLETED, a repaired fixture
+with its remaining family proof, or a reconnect with publisher freshness.
+All eleven stay OPEN; the
+[journal](<journal/2026/11.05 finite-recovery-reclamation-callback-contracts.md>)
+keeps actual partials, original alternatives and protected evidence separate.
+
 The [six launch/progress/delivery contracts](finite-launch-progress-delivery-contracts.md)
 retain eighteen ranked relationships without confusing setup/entrypoint
 corrections with clean actual launches, SDK transport with a busy-session
