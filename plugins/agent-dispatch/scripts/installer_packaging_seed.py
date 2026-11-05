@@ -364,7 +364,8 @@ def retain_packaging_seed(
                     acquired.snapshot, _canonical(binding),
                     (("packaging", facts.version, selected["filename"], selected["sha256"]),),
                 ))
-                version = source.runtime_version + ".build." + inputs.receipt()["lock_id"][7:]
+                # The full binding digest already includes the selected source.
+                version = "0+seed." + inputs.receipt()["lock_id"][7:]
 
                 def validate(slot):
                     verify()

@@ -47,16 +47,25 @@ def selected_seed(
     )
     if owner_options:
         native_compile = seed.dependencies.retain_uv_source_compile
+        native_arguments = seed.dependencies._compile_arguments
+
+        def configured_arguments(arguments, environment, cwd, roots, operation):
+            if (
+                operation == "source-compile"
+                and "installer-packaging-seed" not in Path(arguments[0]).read_text()
+                and owner_options[0] not in arguments
+            ):
+                arguments = [*arguments, *owner_options]
+            return native_arguments(arguments, environment, cwd, roots, operation)
 
         def retained_compile(uv, arguments, **options):
-            if "installer-packaging-seed" not in Path(arguments[0]).read_text():
-                arguments = [*arguments, *owner_options]
-            elif dropped_option is not None:
+            if "installer-packaging-seed" in Path(arguments[0]).read_text() and dropped_option is not None:
                 arguments = list(arguments)
                 position = arguments.index(dropped_option)
                 del arguments[position:position + 2]
             return native_compile(uv, arguments, **options)
 
+        monkeypatch.setattr(seed.dependencies, "_compile_arguments", configured_arguments)
         monkeypatch.setattr(seed.dependencies, "retain_uv_source_compile", retained_compile)
     with builds.retain_authenticated_source(
         selected, installation=adopter[1], deadline=deadline,
@@ -138,6 +147,27 @@ def test_real_seed_cold_health_reuse_and_policy_invalidation(
                 pytest.fail("unselected policy reused completed tooling")
         assert engine.runtime.marker_path(root, generation).read_bytes() == completed
         assert engine.runtime.current_version(root) is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path limit requires a native Windows host")
+def test_seed_constructs_with_a_deep_windows_runtime_root(
+    adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch,
+):
+    adopter[1]["legacy_root"] = tmp_path / ("r" * max(1, 90 - len(str(tmp_path)) - 1))
+    with selected_seed(adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch) as (
+        _state, options, _checks, _rejected,
+    ):
+        root = Path(options["policy"]["owner"]["runtimeRoot"]) / ".source-build-tools"
+        former = root / "versions" / (
+            options["source"].runtime_version + ".build." + "a" * 64
+        ) / ".install-complete.json.tmp-12345678"
+        assert len(str(former)) > 260
+        with seed.retain_packaging_seed(**options) as ready:
+            receipt = json.loads((ready.slot / ".runtime-input-origins.json").read_text())
+            wheels = receipt["wheel_inputs"]
+            assert wheels["binding"]["source"] == options["source"].document()
+            assert wheels["lock_id"][7:] in ready.slot.name
+            assert engine.runtime.is_complete(root, ready.slot.name)
 
 
 @pytest.mark.parametrize("phase", ["selection", "health", "consumption"])

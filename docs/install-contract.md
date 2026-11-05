@@ -4687,8 +4687,12 @@ third-party-only immutable constructor, not a shared mutable venv or another
 approval mechanism. Its exact binding includes source, effective policy,
 native lock, inspected wheel/acquisition, interpreter bytes/facts and invoked
 installer/runtime tooling bytes. Changed bindings cannot reuse the old
-generation. Windows probes use an explicit native executable path for long
-immutable-slot names. This component does not activate an ordinary runtime,
+generation. The seed slot uses the full binding digest, which already covers
+the source, without repeating the source identifier in its name. Older,
+longer-named seed slots are left untouched and are not reused by this naming.
+This avoids that specific Windows path-length overhead, not arbitrary long-path
+support. Windows probes use an explicit native executable path for immutable
+slots. This component does not activate an ordinary runtime,
 ship a complete toolkit, connect an ordinary installer or establish production
 feed availability, enabled budgets or installation savings.
 
