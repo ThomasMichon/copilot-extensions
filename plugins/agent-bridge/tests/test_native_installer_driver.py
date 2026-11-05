@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import pytest
 
 from update_driver import core
-from update_driver.participant import ENVIRONMENT_KEY, borrowed_custody, participant
+from update_driver.participant import ENVIRONMENT_KEY, ParticipantError, borrowed_custody, participant
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 REPO = SCRIPTS.parents[2]
@@ -184,6 +184,34 @@ def test_native_participant_checks_exact_admission(adapter, tmp_path, monkeypatc
     else:
         assert core.drain(executor=execute) == 0
     assert core.status(request.id).state == ("interrupted" if changed else "completed")
+
+
+@pytest.mark.parametrize("change", ["malformed", "oversized", "missing-root", "foreign-root"])
+def test_native_custody_refuses_unverified_execution_root(adapter, tmp_path, monkeypatch, change):
+    root = tmp_path / "addressed-driver"
+    foreign = tmp_path / "foreign-driver"
+    request = core.enqueue(
+        core.RequestSpec("engine"),
+        runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
+        root=root,
+    )
+
+    def execute(transaction):
+        body = json.loads(transaction.participant_env()[ENVIRONMENT_KEY])
+        if change == "missing-root":
+            body.pop("root")
+        elif change == "foreign-root":
+            body["root"] = str(foreign)
+        value = "{" if change == "malformed" else "x" * 16385 if change == "oversized" else json.dumps(body)
+        monkeypatch.setenv(ENVIRONMENT_KEY, value)
+        with pytest.raises(ParticipantError):
+            with adapter.custody():
+                pytest.fail("unverified native custody accepted")
+        return 0
+
+    assert core.drain(root=root, executor=execute) == 0
+    assert core.status(request.id, root=root).state == "completed"
+    assert not foreign.exists()
 
 
 def test_restore_identity_binds_bytes_not_the_helpers_private_record_path(adapter, tmp_path):

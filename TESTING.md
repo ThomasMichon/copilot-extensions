@@ -2310,6 +2310,41 @@ does not adopt ordinary command publishers, unreceipted copies, explicit
 installers, cells/custom roots or macOS. Exhaustive native qualification stays
 manual, outside required PR CI.
 
+## Optional MCP fixed recipes
+
+The manual `installation-context-full.yml` portfolio `mcp-recipes` selects
+the MCP prerequisite on native Windows and Ubuntu, separately from ordinary
+publisher adoption. Three bounded packets exercise init-backed queue protocol,
+Python admission refusals and native-shell refusals. Each keeps the
+300-second group limit and explicit 60-second native item bound. Materialized
+stamp and Windows missing-setup-Python refusal use a separate 180-second item
+packet; cold construction/installed consumers use the existing 900-second item
+and 1080-second group envelope. Process, memory and 2 GiB storage caps remain
+unchanged; no matrix is added to required unit-only CI.
+Three queue/native-process controls separately verify canonical UV handoff for
+provision, acquisition failure before init and acquisition-free deferred stamp.
+Only their acquisition helper and installer bodies are synthetic; the cold
+materialized case retains actual acquisition and construction.
+Two additional Windows materialized controls call the actual native installer
+admission from a synthetic initializer while retaining runner containment.
+They require the original authenticated queue owner at both default and
+explicit execution roots, with no second request or fallback queue. A focused
+shared-receiver packet retains direct/scoped participant checks and refuses
+malformed, oversized, missing-root and foreign-root witness metadata.
+
+The cold case retains the runner's containment, setup-provided Python
+prerequisite, private foundation/queue and actual MCP initializer. It loses the
+original caller process before a follower, then checks concurrent provision,
+immutable reuse, a real incoming module-health failure, preserved configuration/
+selection and installed command/module/distribution use after payload removal.
+The preserved synthetic configuration lives in MCP's actual `bridges` directory
+and is read through the installed configuration loader without starting its
+declared server or consulting an authentication provider.
+Persistent-environment effects use the installer's existing contained-test
+adapter. No MCP server, backend, credentials or host service is exercised.
+Caller-process exit is not cleanup-Job escape; the latter remains a separate
+#10499 acceptance requirement, not an inference from this portfolio.
+
 ## Optional Bridge command adoption
 
 The manual `installation-context-full.yml` portfolio `bridge-commands` qualifies

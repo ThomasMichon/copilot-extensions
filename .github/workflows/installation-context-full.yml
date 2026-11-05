@@ -26,6 +26,7 @@ on:
           - logger-bootstrap
           - logger-commands
           - bridge-recipes
+          - mcp-recipes
           - bridge-bootstrap
           - bridge-snapshots
           - bridge-commands
@@ -1084,6 +1085,63 @@ jobs:
           --test-file tests/test_install_ps1_s4u_recovery.py
           --test-file tests/test_install_lifecycle_emit.py
           --test-timeout 60 --timeout 180
+  mcp-recipes-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mcp-recipes'
+    name: MCP fixed native recipes (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env: &mcp-recipes-env
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &mcp-recipes-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify MCP init-backed queue protocol
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp.py
+          -k "not refusal" --test-timeout 60
+      - name: Qualify MCP Python admission refusals
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp.py
+          -k "refusal and False" --test-timeout 60
+      - name: Qualify MCP native admission refusals
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp.py
+          -k "refusal and True" --test-timeout 60
+      - name: Qualify actual MCP stamp and setup prerequisite
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp_materialized.py
+          -k "not cold_recipe" --test-timeout 180
+      - name: Preserve shared native participant admission
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_native_installer_driver.py
+          -k "native_handoff or native_participant_checks or native_custody_refuses or reentry_marker"
+          --test-timeout 60
+      - name: Qualify cold MCP construction, consumers and failure preservation
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp_materialized.py
+          -k "cold_recipe" --test-timeout 900 --timeout 1080
+  mcp-recipes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mcp-recipes'
+    name: MCP fixed native recipes (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env: *mcp-recipes-env
+    steps: *mcp-recipes-steps
   promotion-controls:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
     name: Promotion controls and source retention (actual Git)
