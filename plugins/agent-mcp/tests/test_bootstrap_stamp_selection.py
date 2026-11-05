@@ -84,7 +84,7 @@ def test_native_post_repair_bootstrap_readiness(
         capture_output=True, text=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    assert result.returncode == 0 and result.stdout == "{}", result
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
     assert (home / "children").exists() is (condition != "healthy"), result.stderr
     if condition == "healthy":
         assert not (install / "reconcile.lock").exists()

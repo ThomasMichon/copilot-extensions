@@ -1203,6 +1203,7 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_mcp_bootstrap.py
           -k cold_drift --test-timeout 900 --timeout 1080
+          --junit-dir "${{ runner.temp }}/mcp-bootstrap-functional"
       - name: Qualify actual MCP submitting Job and process-group destruction
         timeout-minutes: 18
         run: >-
@@ -1215,6 +1216,7 @@ jobs:
         with:
           name: mcp-native-lifetime-${{ runner.os }}
           path: |
+            ${{ runner.temp }}/mcp-bootstrap-functional/**/*.xml
             ${{ runner.temp }}/ce-broker-probe-mcp-*/lifetime.xml
             ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/*.json
             ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/*.log

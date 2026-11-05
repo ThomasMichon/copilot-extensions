@@ -52,8 +52,23 @@ def mcp_instance_lifecycle(area, native_recipe_runner, record_property):
     ) as environment:
         yield environment, registry
     record_property("mcp-daemon-cleanup", json.dumps([vars(item) for item in outcomes]))
+    remaining = inspect_instances(registry)
+    if remaining:
+        from agent_procutil._daemon_instance_identity import birth_identity
+
+        observations = []
+        for item in remaining:
+            observation = {"record": item}
+            try:
+                observation["observed_birth"] = birth_identity(
+                    int(item["pid"]), include_exited=True,
+                )
+            except (OSError, ValueError, KeyError) as error:
+                observation["observation_error"] = type(error).__name__
+            observations.append(observation)
+        record_property("mcp-daemon-unsettled", json.dumps(observations))
     assert outcomes and all(item.status == "settled" for item in outcomes), outcomes
-    assert inspect_instances(registry) == []
+    assert remaining == []
 
 
 @pytest.fixture

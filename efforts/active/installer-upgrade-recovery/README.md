@@ -1193,3 +1193,17 @@ The live declaration-age audit checked 548 declarations but could not verify
 four npm metadata reads because their TLS handshakes failed with certificate
 validation enabled. It is not recorded as passing; no trust/verification
 setting was weakened. Hosted CI must resolve that validation boundary.
+
+The first hosted candidate, #10700 at `12b71e11466e`, fails run
+`42016085082` before either production-lifetime step executes. Linux reports
+five PowerShell repaired-readiness failures (37 passed, seven skipped); its
+assertion truncates the subprocess diagnostic. Windows completes the actual
+functional body in 208.10 seconds but fails strict teardown on one
+`process-reused` lifecycle hold. The earlier twelve-settled local packet is
+not substituted for this exact candidate's failed result.
+
+The next diagnostic revision retains the Windows functional JUnit properties,
+remaining original records and read-only native birth observations, and prints
+the complete Linux subprocess error. It changes neither production cleanup
+policy nor the all-settled assertion and does not skip the failing cases.
+Both roots require diagnosis before another native acceptance claim.
