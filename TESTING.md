@@ -7,7 +7,8 @@ Bridge's opt-in `--test-file tests/test_acp_current_requests.py
 the optional current-request HTTP/CLI expansion, current-state-only delivery and
 capture-before-wait races on the existing held reader. It covers exact producer/
 session replacement, cancellation, strict schemas, unchanged history, reserved
-frame bytes and actual private ASGI/Future joins. The existing HTTP-52 capture
+frame bytes, independent shared-log followers, optional-follow heartbeats and
+actual private ASGI/Future joins. The existing HTTP-52 capture
 owner separately includes those source controls without changing the generation,
 historical HTTP-51 evidence or required unit-only CI. Manager and installed/native
 acceptance remain separate.

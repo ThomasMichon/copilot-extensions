@@ -21,10 +21,11 @@ assertion, vector and evidence family all require 52.
 
 The optional `bridge-session-current-requests-v1` expansion retains HTTP
 generation 52, prior feature floors, input vector and every earlier case.
-Thirteen additional explicit source cases bring this capture portfolio to 58:
+Fourteen additional explicit source cases bring this capture portfolio to 59:
 actual local callback/Future-to-HTTP state, strict opt-in/history exclusion,
 selected CLI declaration and actual-provider negotiation/rollback, unchanged
-event positions, before-wait invalidation, producer/session retirement and
+event positions, before-wait invalidation, independent shared-log followers,
+optional-follow heartbeats, producer/session retirement and
 byte-reserved history paging. The owning writer binds the five additional
 producer/projection/declaration modules as semantic sources. No historical
 HTTP-51 packet is refreshed and no SDK/model actor or installed service is used.

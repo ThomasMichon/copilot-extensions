@@ -254,7 +254,7 @@ def validate_frame(body: dict[str, Any], request: ReadRequest) -> None:
     for key in ("position", "next_before"):
         if body.get(key) is not None:
             read_position(body[key], source)
-    if request.current_requests:
+    if request.current_requests and body["kind"] != "heartbeat":
         from .session_current_requests import validate
 
         validate(body.get("current_request_state"))

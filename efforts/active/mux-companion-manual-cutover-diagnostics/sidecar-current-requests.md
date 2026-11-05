@@ -180,3 +180,6 @@ source-bound 58-case capture and no-write verification pass at
 `193f3f768a8086c79fd075016185e89fa7fe10ed`; the contract guard validates both
 contracts and 1,005 fixtures. Independent review and required CI remain pending
 in #10557; Manager consumption and rendered attention validation have not started.
+Subsequent independent-follower/heartbeat corrections pass the combined 287-case
+source packet. Revised source-bound capture, admitted-unit qualification and
+current-head review/CI remain required before accepting those corrections.

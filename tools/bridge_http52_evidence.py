@@ -43,6 +43,7 @@ PROBES = {
     "test_waiter_capture_before_wait_race_does_not_wait_for_backstop": 1,
     "test_live_qualification_replacement_terminal_and_reader_cleanup": 1,
     "test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_custody": 1,
+    "test_closing_one_current_follower_preserves_other_follower_push": 1,
     "test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends": 1,
 }
 TEST = retained.TEST

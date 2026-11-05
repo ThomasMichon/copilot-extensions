@@ -52,6 +52,8 @@ from test_session_observations import (
     as test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_custody,
     test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends
     as test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends,
+    test_closing_one_current_follower_preserves_other_follower_push
+    as test_closing_one_current_follower_preserves_other_follower_push,
 )
 from test_session_observation_transport import (
     endpoint as endpoint,

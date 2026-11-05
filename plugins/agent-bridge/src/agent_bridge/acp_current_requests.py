@@ -70,7 +70,7 @@ class CurrentRequests:
         self._process: object | None = None
         self._session_id: str | None = None
         self._session_epoch = object()
-        self._listeners: set[Callable[[], None]] = set()
+        self._listeners: dict[object, Callable[[], None]] = {}
         self._revision = 0
         self._signature: tuple[Any, ...] | None = None
 
@@ -112,12 +112,17 @@ class CurrentRequests:
 
     def subscribe(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Subscribe to invalidations; callers retain exact unsubscribe custody."""
-        self._listeners.add(callback)
-        return lambda: self._listeners.discard(callback)
+        registration = object()
+        self._listeners[registration] = callback
+
+        def unsubscribe() -> None:
+            self._listeners.pop(registration, None)
+
+        return unsubscribe
 
     def changed(self) -> None:
         """Wake readers without emitting or reconstructing a history event."""
-        for callback in tuple(self._listeners):
+        for callback in tuple(self._listeners.values()):
             try:
                 callback()
             except Exception:

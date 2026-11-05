@@ -419,6 +419,9 @@ def test_executing_cli_disclosure_matches_actual_parser(
         "schema": "agent-bridge.cli-contracts", "version": 1,
         "contracts": {
             "agent-bridge.resume": {"version": 1, "capabilities": ["exact-worktree-target"]},
+            "bridge-session-current-requests-v1": {
+                "version": 1, "capabilities": ["observe-session-current-requests"],
+            },
         },
     }
     assert boundary.calls == []

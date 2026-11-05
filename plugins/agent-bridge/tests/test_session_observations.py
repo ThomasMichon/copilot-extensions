@@ -224,6 +224,34 @@ async def test_replaced_same_log_handle_keeps_exact_subscriber_and_producer_cust
 
 
 @pytest.mark.asyncio
+async def test_closing_one_current_follower_preserves_other_follower_push(source):
+    from test_acp_current_requests import ask
+
+    owner = local_waiters(source)
+    log = source.session_manager.get_session("session-1").event_log
+    first = observations(_http_request(source), request(follow=True, current=True))
+    second = observations(_http_request(source), request(follow=True, current=True))
+    task = None
+    try:
+        await anext(first)
+        await anext(second)
+        await first.aclose()
+        revision = log.observation_revision
+        task = await ask(owner)
+        assert log.observation_revision > revision
+        body = decode((await anext(second)).split(b"data: ", 1)[1].strip())
+        assert body["current_request_state"]["requests"][0]["kind"] == "input"
+        assert len(owner.current_requests._listeners) == 1
+    finally:
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await first.aclose()
+        await second.aclose()
+    assert not owner.current_requests._listeners and log._waiters == []
+
+
+@pytest.mark.asyncio
 async def test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends(source):
     from test_acp_current_requests import ask
 

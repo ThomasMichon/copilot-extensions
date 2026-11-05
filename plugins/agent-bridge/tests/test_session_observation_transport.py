@@ -162,6 +162,24 @@ def test_actual_cli_optional_parser_declaration_and_http_frame_join(endpoint, mo
     body = decode(capsys.readouterr().out.encode())
     assert body["current_request_state"]["reason"] == "no-current-client"
     assert "current_requests=true" in client._stream_sse.call_args.args[0]
+    from agent_bridge.session_observation_contract import sse
+
+    payload += sse({
+        "schema": OBSERVATIONS, "version": 1, "kind": "heartbeat",
+        "source": body["source"], "position": body["position"],
+    }) + sse({
+        "schema": OBSERVATIONS, "version": 1, "kind": "going-away",
+        "selection": {
+            key: body["source"][key]
+            for key in ("session_id", "project", "worktree_id", "head_session_id")
+        },
+        "reason": "hosting-generation-stopping",
+    })
+    args = parser.parse_args(["--project", "demo", *base, "--current-requests", "--follow"])
+    session_observation_cli._cmd(args)
+    assert [decode(line.encode())["kind"] for line in capsys.readouterr().out.splitlines()] == [
+        "snapshot", "heartbeat", "going-away",
+    ]
     with pytest.raises(SystemExit):
         parser.parse_args([*base, "--current-request"])
     with pytest.raises(SystemExit):
