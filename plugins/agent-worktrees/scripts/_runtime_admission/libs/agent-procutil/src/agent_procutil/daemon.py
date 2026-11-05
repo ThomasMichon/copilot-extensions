@@ -128,7 +128,7 @@ def spawn_daemon(
             console_children=console_children, breakaway=breakaway,
             contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
             display=display, stderr_log_path=stderr_log_path, instance=instance,
-            _creation=creation,
+            python_bootstrap_root=python_bootstrap_root, _creation=creation,
         )
     except BaseException as error:
         if not creation[0]:
@@ -152,6 +152,7 @@ def _spawn_daemon(
     display: str | None,
     stderr_log_path: str | os.PathLike[str] | None,
     instance,
+    python_bootstrap_root: str | os.PathLike[str] | None = None,
     _creation: list[bool],
 ) -> subprocess.Popen | WindowsDaemonProcess:
     import agent_procutil as pu

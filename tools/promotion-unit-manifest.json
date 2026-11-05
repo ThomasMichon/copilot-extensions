@@ -4297,7 +4297,7 @@
         "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py": "0f0d84d29db0fe25c27f478f0b1a85a0e88ac08f63837fa4112aeee1c9af7a64",
         "libs/agent-procutil/src/agent_procutil/_windows_job_types.py": "cffa06cd07fd1e6fdf10df1384df356be9ecaa7d8e7bb64a0f1db3095d7e1299",
         "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277",
-        "libs/agent-procutil/src/agent_procutil/daemon.py": "58e48cce3c4ca4e1b6811c6373733638869f65d2b36583d072fe2170cb42f6f1",
+        "libs/agent-procutil/src/agent_procutil/daemon.py": "275934ebb5670e36a043bc7a5923d622315c49df139fe1842c3b41aa54e6daf5",
         "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py": "2ba92519d462d56b22ca80fb8d156c5e0339b5d597aebcbd2b2bfc2a4539e61d",
         "libs/agent-procutil/tests/test_linux_daemon_scope.py": "c81cba4a08ada7fbf7409f22a8547a19e7294a5a14aa970240a029ca1d60f177",
         "tools/promotion_unit_tests/test_linux_daemon_scope.py": "b8fc59ece6341f3876fc091560ed915bd3897376c82c03c93cc7e58449729431",
