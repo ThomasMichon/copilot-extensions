@@ -450,6 +450,16 @@ def _owned_posix_fixture(monkeypatch):
 def test_posix_native_helpers_do_not_signal_after_reaping_leader(tmp_path, monkeypatch, site):
     process, state, _ = _owned_posix_fixture(monkeypatch)
     if site == "snapshot":
+        if os.name != "nt":
+            state.exitcode = -9
+            envelope = json.dumps({
+                "version": 1, "kind": "completed", "returncode": 0,
+                "stdout": "stdout", "stderr": "stderr",
+            })
+            monkeypatch.setattr(
+                watch_process, "_communicate_unreaped",
+                lambda *_args, **_kwargs: (envelope, ""),
+            )
         watch_provider._run_native(["owned-command"])
     else:
         reg, key = registry(tmp_path / "worktrees")
