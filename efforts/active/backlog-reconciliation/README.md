@@ -231,6 +231,16 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [self-update observation](self-update-observation-cohort.md),
+[publication-policy](publication-policy-cohort.md) and
+[Vault boundary](vault-boundaries-cohort.md) studies preserve eight whole
+originals and twenty-two texts, with twenty-three bounded noncompletion
+comparisons. One original and one candidate were withheld before rendering;
+no held-source retry follows. Preserve scheduler-platform acceptance,
+documentation-OR-sweep convergence, causal receipts, policy-compatible
+coverage and independently authorized vault outcomes. Finite #8924 source
+mechanisms receive positive bounded credit without presumed whole completion.
+
 The [componentization/workbench](componentization-workbench-cohort.md),
 [Dispatch observability](dispatch-observability-cohort.md) and
 [knowledge-onboarding](knowledge-onboarding-cohort.md) studies preserve nine
@@ -982,6 +992,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [self-update](self-update-observation-cohort.md),
+[publication-policy](publication-policy-cohort.md) and
+[Vault](vault-boundaries-cohort.md) cores retain Linux-AND-macOS validation,
+the finite documentation alternative, same-occurrence exit/work evidence,
+retired-native-PR policy, stronger trusted-CI replacement before hook
+activation, dynamic authorized targets and endpoint-AND-owner-local context.
+Keep existing owners, all alternatives and protected-reference exclusions;
+no native, credential, installed, receiver or completion grant is inferred.
 
 The three [componentization](componentization-workbench-cohort.md),
 [Dispatch](dispatch-observability-cohort.md) and

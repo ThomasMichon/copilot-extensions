@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-11-04
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -114,6 +114,22 @@ uses; only where it lands differs. Because it is the *interactive* front door, i
 opens as the TUI in an interactive terminal and yields a legible textual
 status/next-steps when invoked non-interactively, rather than forcing the TUI into
 a non-terminal.
+
+### first-task-readiness
+
+An installed engine and adopted repository do not alone establish that the first
+ordinary task can run. Required application health, provider authorization and
+declared knowledge prerequisites remain visible and actionable through their
+owning contributions. First-run guidance leads to the standing Configuration
+sections; a contributed Worktrees view can show its missing knowledge prerequisite
+and direct setup action without inventing a second binding authority.
+
+Browsing and configuration stay usable while setup is incomplete. Normal
+worktree creation is admitted only after the selected configuration's required
+readiness is established by its owners, with an authoritative action-time check
+rather than a remembered splash-dialog acknowledgement. Unknown or failed checks
+never become a healthy gate; unselected optional capabilities do not block use.
+Readiness work follows the normal responsiveness and provider-neutral boundaries.
 
 ### decision-support-before-cost
 The Picker presents enough status **upfront** — per fleet member and in

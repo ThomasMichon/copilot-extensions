@@ -982,6 +982,17 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   failure safety and no-write refusal with isolated native effects. Command/
   bootstrap/explicit-installer adoption, selected snapshots, scoped publication
   under #7030, live task processing, service deployment and rollout remain separate.
+- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify MCP's
+  fixed legacy `stamp` and `provision` actions through the same native foundation,
+  canonical queue and frozen-input owner before changing ordinary MCP publishers.
+  Preserve its actual `init` declaration, required-context direct command,
+  canonical source/default root/project, native staging, own controls and
+  existing construction/command semantics. The [bounded proposal](mcp-first-use.md)
+  requires actual materialized Windows/Linux construction, installed consumers,
+  caller loss/concurrency, immutable failure safety and no-write refusals.
+  This prerequisite does not fix #10499's legacy bootstrap launch by itself;
+  ordinary publishers, other plugins, cells/custom roots, live queue recovery,
+  backend connections and rollout remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-03
+- **Last revised:** 2026-11-04
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -262,6 +262,26 @@ payloads, an old runtime command or interactive shell initialization. Default
 selection follows live upstream Main; explicit locally promoted installation
 snapshots and admitted source checkouts/commits remain supported. Last-known-good
 Main ancestors retain their own release identity.
+
+### staged-repository-onboarding
+
+The public foundation is available before authentication for a selected private
+harness: foundational tools, Manager and the core applications needed to carry
+the setup journey do not depend on access to that harness. Repository selection
+is explicit caller input, never a private repository baked into the installer.
+
+After the selected repository's own access requirements are satisfied, its
+declared configuration determines the additional applications and services to
+prepare. Complete that selected dependency closure through its installation
+owners before normal task use; unrelated optional capabilities are not silently
+enabled. Public acquisition, repository access, installed application readiness,
+provider authentication and usable task readiness remain distinguishable stages.
+
+The resulting project front door is usable from a fresh terminal with the
+intended tool and interpreter environment, not merely from the installer's
+temporary PATH. Manager can guide remaining attended authentication and
+configuration before the first task without requiring an agent session to
+finish onboarding. An early visual handoff is not an installation-complete claim.
 
 ### legacy-force-fresh-installation
 
