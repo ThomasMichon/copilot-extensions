@@ -31,8 +31,8 @@ NATIVE = pytest.mark.skipif(
 def _fixture(tmp_path, plugin):
     home = tmp_path / "home"
     payload = (
-        home / ".copilot/installed-plugins/fixture/agent-bridge"
-        if plugin == "agent-bridge" else tmp_path / "payload"
+        home / ".copilot/installed-plugins/fixture" / plugin
+        if plugin in ("agent-bridge", "agent-mcp") else tmp_path / "payload"
     )
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
@@ -60,14 +60,15 @@ def _fixture(tmp_path, plugin):
         '*) printf "reconcile\\n" >> "$HOME/children" ;;\nesac\n',
         encoding="utf-8",
     )
-    if plugin == "agent-bridge":
+    if plugin in ("agent-bridge", "agent-mcp"):
         query = scripts / "installation-context/json-query.awk"
         query.parent.mkdir()
         shutil.copyfile(REPO / "libs/installation-context/json-query.awk", query)
         driver = payload / "libs/update-driver/scripts/first-use.sh"
         driver.parent.mkdir(parents=True)
+        contract = "bridge-install-v1" if plugin == "agent-bridge" else "mcp-recipes-v1"
         driver.write_text(
-            "# Installation driver lifecycle contract: bridge-install-v1\n"
+            f"# Installation driver lifecycle contract: {contract}\n"
             '[[ ! -e "$3/runtime-deployment.json" ]] || exit 3\n'
             'action=reconcile; [[ "$6" != stamp ]] || action=stamp\n'
             'printf "%s\\n" "$action" >>"$HOME/children"\n'

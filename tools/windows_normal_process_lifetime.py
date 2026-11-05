@@ -113,9 +113,13 @@ def _intermediate(root: Path, environment) -> None:
     import agent_procutil as pu
 
     python, python_env = pu.direct_python(sys.executable)
+    declared = root / "worker-command.json"
+    command = json.loads(declared.read_text(encoding="utf-8")) if declared.is_file() else [
+        python, str(Path(__file__).resolve()), "--worker", str(root),
+    ]
     with (root / "worker.log").open("wb") as log:
         process, job = pu.spawn_sync_in_kill_on_close_job(
-            [python, str(Path(__file__).resolve()), "--worker", str(root)],
+            command,
             env={**environment, **python_env}, cwd=root, require_job=True, allow_breakaway=True,
             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             **pu.no_window_kwargs(),
@@ -124,6 +128,23 @@ def _intermediate(root: Path, environment) -> None:
         process.wait(timeout=120)
     finally:
         job.terminate_and_wait(5)
+
+
+def start_caller_hierarchy(command, root: Path, environment, *, restrictive=False):
+    """Start an admitted consumer under both existing fixture-owned Jobs."""
+    admit(root.parent, True)
+    import agent_procutil as pu
+
+    root.mkdir(exist_ok=True)
+    (root / "worker-command.json").write_text(json.dumps(command), encoding="utf-8")
+    python, python_env = pu.direct_python(sys.executable)
+    with (root / "launcher.log").open("wb") as log:
+        return pu.spawn_sync_in_kill_on_close_job(
+            [python, str(Path(__file__).resolve()), "--launcher", str(root)],
+            env={**environment, **python_env}, cwd=root, require_job=True,
+            allow_breakaway=not restrictive, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=subprocess.STDOUT, **pu.no_window_kwargs(),
+        )
 
 
 def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:

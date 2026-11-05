@@ -1149,3 +1149,47 @@ U12's contained caller-process-loss evidence is not substituted. No production
 hook was run, no source implementation or native acceptance is claimed, and no
 shared installation, queue, credential, service or rollout effect is authorized.
 The parent remains Active; the next gate is review of this bounded proposal.
+
+The proposal subsequently merged through #10658 at 08:25:00 UTC as
+`ff1ae2a9fb9a818dbd905af7e77c2ceff13f9017`. Its final head
+`c43e52a4875ada22ff16b99594f74aacff5e663c` received genuine approval
+`5781807321`, with no review threads and both required source CI runs green.
+The preserving rebase retains the separate U13/#10652 fresh-settlement plan;
+this bootstrap slice is U14. All six plan files match the merge.
+
+The parent Plan and Validation Plan remain unresolved. The next source step
+implements only the reviewed MCP bootstrap adapter, preserving the original
+queue, real readiness and all incumbent custodians, before exact-candidate
+hook and production-lifetime qualification. A plan merge is neither a source
+fix nor native/affected-host acceptance; no updater or live repair ran.
+
+### 2026-11-05 - MCP bootstrap functional result and native lifetime candidate
+
+The local adapter implements the reviewed U14 proposal: fixed stamp/provision
+handoff, real source-qualified readiness, preserved controls and guidance,
+unchanged deadline/output and removal of this hook's direct installer/PID-age
+custody. The actual Windows functional packet passes in 686.14 seconds. All
+twelve original lifecycle records settle and final inventory is empty; restoring
+the fixture's original source identity before canonical teardown fixes the
+earlier test-only missing-runtime-root hold. That result is contained functional
+and cleanup evidence, not production caller-Job loss.
+
+The candidate now includes an explicit ephemeral hosted Windows/Linux lifetime
+packet through the existing native owner. It holds the ordinary execution lock,
+invokes the real hook, pins acknowledged owners, destroys every fixture caller
+boundary while work is pending and requires completion without resubmission.
+The existing restrictive shared-outer negative and qualified Windows desktop
+witness remain separate controls. An explicit renewed lifecycle, bounded-child
+controls, ordinary/coalesced work and exact cleanup remain required.
+
+Seven local admission/filter/CLI controls pass; the bounded shared cold-environment
+packet passes three checks and correctly skips the hosted-only native item.
+Focused Ruff and the install-contract gate pass. No actual hosted result is
+claimed yet. The new lane retains the existing item/step/portfolio bounds and
+uploads only receipts and logs. Exact-candidate Windows/Linux native results,
+implementation review/CI, merge and containing release remain open. The parent
+Plan and Validation Plan remain Active; no updater or shared installation ran.
+The live declaration-age audit checked 548 declarations but could not verify
+four npm metadata reads because their TLS handshakes failed with certificate
+validation enabled. It is not recorded as passing; no trust/verification
+setting was weakened. Hosted CI must resolve that validation boundary.

@@ -2514,6 +2514,51 @@ queue and kernel custody before fixture cleanup. Synthetic native effects are
 not live serving, remote-session, deployment or rollout evidence. Exhaustive
 native integration remains explicitly manual, not required PR CI.
 
+## Optional MCP bootstrap adoption
+
+The manual `installation-context-full.yml` portfolio `mcp-bootstrap` selects
+the actual MCP session-start adapter on native Windows and Ubuntu.
+`test_bootstrap_driver.py` exercises fixed action handoff, contract skew,
+malformed metadata, acknowledgement validation, deadline and historical-record
+preservation with a synthetic receiver. Source/repair readiness remains covered
+by `test_bootstrap_stamp_selection.py` and the canonical selected-readiness
+packet; a healthy fallback cannot substitute for the selected source.
+
+`test_first_use_mcp_bootstrap.py` separately exercises the real packaged
+receiver's refusal paths and complete canonical materialization. Its cold
+functional packet measures the actual 15-second hook and exact `{}` output,
+ordinary receipt/result, concurrent equivalent provision coalescing, installed
+command/module/configuration consumers, healthy repeat, incoming-health failure
+preservation and source independence. Windows missing setup Python refuses
+before supervisor launch. No MCP server, backend, credentials, host service or
+existing queue is exercised.
+
+The functional packet preserves the canonical runner's containment, lifecycle
+lease and native owner settlement. It proves caller-process exit, **not**
+production caller-Job/group destruction.
+
+The same manual portfolio selects `tools/mcp_bootstrap_lifetime.py
+--ephemeral-ci-consent` on disposable GitHub-hosted Windows/Linux runners,
+outside the ordinary contained runner. The entry refuses inherited containment,
+self-hosted execution and absent consent before creating a fixture; it never
+strips a contained-test marker. Its fixed `test_first_use_mcp_lifetime.py` packet
+reuses the real materialized hook and existing native lifetime owner. A held
+ordinary execution lock keeps accepted work pending while both tracked Windows
+caller Jobs close, or an alive pidfd-pinned Linux caller group is killed.
+Bounded controls must die and the same acknowledged owners must survive before
+the lock releases, without another submission. Two stamp/provision cycles
+retain coalescing, a separate ordinary request, installed consumers, a renewed
+instance lease, exact cleanup receipts and empty final inventory. Windows also
+retains the existing restrictive shared-outer negative and qualified desktop
+witness. Those generic owner controls are recorded separately from actual MCP
+hook outcomes.
+
+Native qualification is credited only from the exact candidate's successful
+platform results, not from local refusal tests or this lane's presence. The
+900-second item, 1080-second step and 35-minute portfolio bounds remain intact.
+Only receipts and diagnostic logs are uploaded, not the constructed runtime
+tree. Neither packet expands required unit-only PR CI or authorizes rollout.
+
 ## Optional Logger bootstrap adoption
 
 Logger's corresponding manual `installation-context-full.yml` portfolio

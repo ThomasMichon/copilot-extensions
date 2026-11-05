@@ -27,6 +27,7 @@ on:
           - logger-commands
           - bridge-recipes
           - mcp-recipes
+          - mcp-bootstrap
           - bridge-bootstrap
           - bridge-snapshots
           - bridge-commands
@@ -1145,6 +1146,89 @@ jobs:
     timeout-minutes: 35
     env: *mcp-recipes-env
     steps: *mcp-recipes-steps
+  mcp-bootstrap-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mcp-bootstrap'
+    name: MCP bootstrap (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env: &mcp-bootstrap-env
+      UPDATE_DRIVER_MCP_BOOTSTRAP_ACCEPTANCE: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &mcp-bootstrap-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Preserve MCP hook handoff and repaired-runtime readiness
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_stamp_selection.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-timeout 60
+      - name: Qualify actual cold-hook refusals
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp_bootstrap.py
+          -k "refuses and cold" --test-timeout 60
+      - name: Preserve batched publication and source admission
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp.py
+          -k "batches or native_admits" --test-timeout 60
+      - name: Qualify actual drift-hook refusals
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp_bootstrap.py
+          -k "refuses and drift" --test-timeout 60
+      - name: Qualify materialization, setup prerequisite and independent guidance
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp_bootstrap.py
+          -k "not refuses_before_acquisition and not cold_drift" --test-timeout 180
+      - name: Preserve source-qualified selected readiness
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_bootstrap_selected_readiness.py -k agent-mcp
+          --test-timeout 60
+      - name: Qualify actual MCP bootstrap construction and installed consumers
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_mcp_bootstrap.py
+          -k cold_drift --test-timeout 900 --timeout 1080
+      - name: Qualify actual MCP submitting Job and process-group destruction
+        timeout-minutes: 18
+        run: >-
+          uv run --project libs/update-driver --extra dev
+          --with "pytest-timeout>=2.3,<3" --with packaging
+          python tools/mcp_bootstrap_lifetime.py --ephemeral-ci-consent
+      - name: Retain MCP native lifetime receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-native-lifetime-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/ce-broker-probe-mcp-*/lifetime.xml
+            ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/*.json
+            ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/*.log
+            ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/hook.*
+            ${{ runner.temp }}/ce-broker-probe-mcp-*/native-lifetime-*/*.json
+            ${{ runner.temp }}/ce-broker-probe-mcp-*/native-lifetime-*/*.log
+          if-no-files-found: warn
+  mcp-bootstrap-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mcp-bootstrap'
+    name: MCP bootstrap (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env: *mcp-bootstrap-env
+    steps: *mcp-bootstrap-steps
   promotion-controls:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
     name: Promotion controls and source retention (actual Git)

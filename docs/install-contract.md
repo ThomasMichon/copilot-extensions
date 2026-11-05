@@ -3079,6 +3079,18 @@ unadopted callers. The
 [driver contract](../libs/update-driver/README.md#fixed-first-use-handoff-and-vault-command-adoption)
 owns the native waiter, receipt/result and qualification boundaries.
 
+MCP's legacy session-start adapter also submits its own fixed `init`-backed
+`stamp` or `provision` recipe through the packaged `mcp-recipes-v1` receiver.
+It preserves MCP's source-qualified selected/completed readiness, filesystem
+project and default legacy publication admission. It does not import Bridge's
+`install` service contract, call an initializer directly or reap historical PID
+records. The hook's `{}` output and 15-second launch budget do not attest durable
+acceptance or installation completion. Windows retains setup-provided Python
+3.10+ on PATH; qualified Linux cold admission is a distinct lane.
+MCP commands, explicit initializers, selected snapshots, custom roots and macOS
+remain separate. See [MCP installation](../plugins/agent-mcp/README.md#install)
+for the owning adapter's support and diagnostic boundaries.
+
 ### Update-in-progress marker — installer self-reports a live transition (#5066)
 
 A **separate** concern from the completion marker above: that one records
