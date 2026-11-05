@@ -1,5 +1,40 @@
 # Testing copilot-extensions
 
+## Select the evidence first
+
+This page is a reference catalog, not a sequential checklist. Read the lane
+needed for the changed behavior; optional packets below do not all become
+prerequisites for one contribution.
+
+| Question | Start here |
+|----------|------------|
+| What does required PR/promotion testing cover? | [Unit-only packet](#unit-only-promotion-packet) and [portfolio invariants](#test-portfolio-invariants) |
+| How do I run a focused local selection? | [Turn-key runner](#the-turn-key-runner); select the affected files/contracts rather than the whole portfolio |
+| How do I isolate portable integration? | [Devcontainer isolation](#optional-devcontainer-based-isolation-linux) and the declared periodic inventory in `tools/periodic-integration-inventory.json` |
+| What proves a native or external consumer? | Its explicitly selected packet below, with the actual platform, launch mode and prerequisites; a portable or synthetic pass is not equivalent |
+| What are the source checks? | [Lint and contract gates](#lint--contract-gates-before-a-push), scoped by the contribution policy |
+
+Before a substantial run, name the unmet criterion, selected source/tests and
+the result that would change the next action. After a timeout, identify whether
+preparation, collection, test execution, a native child, cleanup or the outer
+observer hit its limit. A shell read returning "still running" is not a failed
+test and does not call for a duplicate launch.
+
+If comparable attempts stop at the same boundary, profile or isolate that
+boundary before repeating the broad packet. Preflight fixture inputs, platform
+eligibility and faithful consumer selection before expensive qualification.
+Reuse supported prepared environments only where doing so preserves the
+cold-start, concurrency or lifetime property being tested.
+
+Keep functional correctness, performance budgets and environment suitability
+separate. A supported diagnostic profile or narrower selection can supply
+useful evidence without passing the original full acceptance gate. Preserve
+that remaining gate, real assertions, cleanup and resource bounds. Required
+CI and review remain unchanged; a shared native quiet window still needs its
+affected owners' agreement.
+
+## Focused packet catalog
+
 Worktrees' opt-in `--test-file tests/test_resident_recovery.py
 --test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py
 --test-file tests/test_status_monitor.py --allow-explicit-tiers` packet checks
