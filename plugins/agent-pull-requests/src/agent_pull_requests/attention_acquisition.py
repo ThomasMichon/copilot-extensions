@@ -83,7 +83,7 @@ def observe_attention(
                     handled = Handled(**_scoped(old["handled"]))
                     provenance = old["provenance"]
                 was_handled = handled is not None and handled.cursor == facts.cursor
-                newly_selected = old["interest"]["matches"] is not True and interest.matches is True
+                newly_selected = old["interest"]["matches"] is False and interest.matches is True
                 if not newly_selected and (cursor == facts.cursor or not was_handled):
                     pending_since = facts.pending_since
         facts = Facts(

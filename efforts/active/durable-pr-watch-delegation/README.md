@@ -948,6 +948,10 @@ callback an implicit credential store.
   verified. Existing strict service analysis passes Python 3.10 Linux and
   Windows targets, not new plugin-wide strict admission or native Windows
   execution. Install-contract, fatal lint and documentation checks pass.
+- The first review identified an age reset when unknown or omitted selection
+  recovers. Only a confirmed `False -> True` admission now starts a new
+  selection age; outage recovery preserves it. The corrected 52-case
+  acquisition/adoption/journal packet passes, including restart controls.
 - This is only A2's acquisition half. A1's provenance references cannot recover
   an original pre-effect captured position once concurrent journal input has
   replaced it. Protected captured-feedback and interest-specific self-echo

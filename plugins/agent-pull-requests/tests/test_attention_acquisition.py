@@ -178,6 +178,31 @@ def test_interests_and_foreign_prs_remain_independent_with_no_feedback_inference
     assert by_role["codeowner"]["interest"]["matches"] is None
 
 
+@pytest.mark.parametrize("selection", ["unknown", "omitted", "excluded"])
+def test_selection_recovery_preserves_age_unless_admission_was_confirmed_false(
+    acquired: tuple, selection: str,
+) -> None:
+    store, evidence = acquired
+    journal = ConversationStore(store)
+    first = generation(evidence)
+    journal.observe_workspace(first, attention=inputs(first), expires_at=100)
+    initial = rows(store)[0]["facts"]
+    later = generation(evidence, 2)
+    interests = () if selection == "omitted" else (
+        Interest("maintainer", False if selection == "excluded" else None, "consumer-a"),
+    )
+    journal.observe_workspace(later, attention=inputs(later, interests=interests), expires_at=100)
+    restarted = ReplayStore(store.root, store.namespace, clock=store.clock)
+    current = generation(evidence, 4)
+    result = ConversationStore(restarted).observe_workspace(
+        current, attention=inputs(current), expires_at=100,
+    )
+    assert result["status"] == "unchanged"
+    facts = rows(restarted)[0]["facts"]
+    assert facts["cursor"] == initial["cursor"]
+    assert facts["pending_since"] == initial["pending_since"] + (4 if selection == "excluded" else 0)
+
+
 def test_terminal_hint_is_unavailable_and_cannot_clear_a_live_interest(acquired: tuple) -> None:
     store, evidence = acquired
     initial = generation(evidence)

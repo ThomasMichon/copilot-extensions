@@ -107,6 +107,8 @@ event after an existing handled baseline starts its own age. The original
 baseline/provenance remains unchanged. A genuine reopen clears the old epoch's
 baseline and starts a fresh pending age. Omitted formerly admitted interests
 become selection-unknown, not silently deleted or still positively selected.
+Recovery from unknown or temporarily omitted selection preserves pending age;
+only a confirmed excluded-to-selected admission starts a new selection age.
 Missing native draft evidence, incomplete policy and unknown path selection
 are unavailable rather than a positive queue decision.
 
