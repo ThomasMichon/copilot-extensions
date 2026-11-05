@@ -218,6 +218,42 @@ contract.
 
 ## Journal
 
+### 2026-11-05 - Descriptor-safe source preparation qualification
+
+Discovery and preparation descriptors can execute getters during dynamic method
+qualification. A descriptor returning the original bound stock method could
+also pass the old identity check. Actual WorkspaceTools invocation controls
+demonstrate both boundaries without deliberately starting hidden work: the
+discovery property executes before refusal, and the stock-method-returning
+property and non-data descriptor incorrectly remain source-admissible.
+All three focused controls fail on the preceding candidate.
+
+Qualification now inspects static bindings without executing custom getters.
+The existing stock function identities and genuine bound instance method copies
+remain supported; explicit metadata calls still execute their configured
+descriptors. The built-in instance dictionary descriptor distinguishes class
+methods from unbound function shadows without invoking a custom dictionary
+getter. This is bounded discovery/preparation qualification, not arbitrary
+Python isolation, a new credential authority or a new execution owner.
+
+The expected-red packet records three failures in 19.13 seconds, 85.50 seconds
+including preparation and cleanup. The corrected complete native-only,
+native-custody and workspace-tool packet passes 69 controls with no skips:
+195.36 seconds of tests, 240.28 seconds including preparation and cleanup.
+The 180-second subsuite and 600-second aggregate bounds are unchanged.
+Private receipts preserve commands, separate output streams, source hashes and
+index trees before and after each run, plus bounded user-PATH type/hash and
+test-prefix indicators. Both runs retain identical source and registry
+observations and report no cleanup uncertainty; no rollback, guard bypass or
+unchanged retry was used in this correction.
+
+The earlier exit-125 drift remains unresolved: its saved evidence does not
+distinguish PATH data from registry-type/presence changes or establish the
+writer. These new observations do not prove restoration or attribution.
+All nine outstanding Plan items and eleven outstanding Validation items remain
+open, along with source-unit coverage, independent exact-head review, required
+CI and the existing publication, adoption and rollout gates.
+
 ### 2026-11-05 - Local native discovery qualification candidate
 
 The prepared-source candidate reconstructs public #9928 head

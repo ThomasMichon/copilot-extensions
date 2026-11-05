@@ -110,6 +110,9 @@ cached support. This orders metadata, not caller authority or effect admission.
 Custom native `ensure_capabilities` callbacks remain available for ordinary
 metadata discovery but cannot qualify the owned async source lane. They are
 rejected before source reservation or callback execution.
+Source qualification inspects discovery and preparation bindings without
+executing descriptor getters. Stock methods and their bound instance copies
+remain supported; custom descriptors remain available to explicit metadata calls.
 The existing host lifetime retains a bounded 16 MiB total verified-generation
 read cache. Repeated source reads recheck the scoped descriptor through the
 current client/owner, without transferring all chunks again. Changed/missing

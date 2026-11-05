@@ -7,6 +7,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 import copy
 import hashlib
+from inspect import getattr_static
 import json
 import math
 import threading
@@ -366,10 +367,17 @@ class NativeWorkspaceClient:
 
 
 def _stock_preparation(client, methods):
-    from types import MethodType
+    from types import GetSetDescriptorType, MethodType
+    namespace = getattr_static(type(client), "__dict__", None)
+    if (
+        type(namespace) is not GetSetDescriptorType
+        or namespace.__objclass__ is not type(client) or namespace.__name__ != "__dict__"
+    ):
+        return False
+    own = namespace.__get__(client, type(client))
     return all(
-        type(bound := getattr(client, name, None)) is MethodType
-        and bound.__self__ is client and bound.__func__ is method
+        ((bound := getattr_static(client, name, None)) is method and name not in own)
+        or type(bound) is MethodType and bound.__self__ is client and bound.__func__ is method
         for name, method in methods
     )
 
@@ -380,11 +388,15 @@ _NATIVE_PREPARATION_METHODS = tuple(
 
 
 def _native_source_supported(client):
-    return (
-        type(client) is NativeWorkspaceClient
-        and not callable(getattr(client, "ensure_capabilities", None))
-        and _stock_preparation(client, _NATIVE_PREPARATION_METHODS)
-    )
+    if type(client) is not NativeWorkspaceClient:
+        return False
+    missing = object()
+    discovery = getattr_static(client, "ensure_capabilities", missing)
+    if discovery is not missing and (
+        callable(discovery) or getattr_static(type(discovery), "__get__", missing) is not missing
+    ):
+        return False
+    return _stock_preparation(client, _NATIVE_PREPARATION_METHODS)
 
 
 def materialize(descriptor, read_chunk):

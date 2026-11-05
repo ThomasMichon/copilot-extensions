@@ -319,6 +319,82 @@ def test_native_discovery_offload_is_metadata_only_before_source_reservation(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("method,shape", [
+    ("ensure_capabilities", "property"), ("exchange", "property"), ("materialize", "descriptor"),
+])
+def test_native_descriptor_getters_are_metadata_only_before_source_reservation(
+    environment, tools, execution_pool, monkeypatch, method, shape,
+):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_pull_requests.workspace_tools import WorkspaceTools, WorkspaceToolUnavailable
+    native_host, _, _ = tools
+    client = native_host.client
+    _, _, initial, _, _, _ = environment
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(client, source_owner=owner)
+    getters, callbacks, reservations = [], [], []
+    exchange, operation = client.exchange, owner.operation
+    def discover(**options):
+        callbacks.append(True)
+        return exchange("capabilities", {}, **options)
+    selected = discover if method == "ensure_capabilities" else getattr(client, method)
+    def get(instance):
+        assert instance is client
+        getters.append(True)
+        return selected
+    class Dynamic:
+        def __get__(self, instance, owner=None):
+            return self if instance is None else get(instance)
+    def reserve(*args, **kwargs):
+        reservations.append(True)
+        return operation(*args, **kwargs)
+    monkeypatch.setattr(type(client), method, property(get) if shape == "property" else Dynamic(), raising=False)
+    monkeypatch.setattr(owner, "operation", reserve)
+    async def scenario():
+        try:
+            with pytest.raises(WorkspaceToolUnavailable, match="preparation_binding_unsupported"):
+                await host.invoke("source", {"number": 42, "generation_id": initial["id"], "budget_seconds": 60})
+            assert not getters and not callbacks and not reservations
+            assert owner.status()["pending"] == 0
+            metadata = await host.invoke("capabilities", {})
+            assert "load" in metadata["operations"] and "source" not in metadata["operations"]
+            materialized = await host.invoke("materialize", {"number": 42, "generation_id": initial["id"]})
+            assert materialized["id"] == initial["id"] and getters
+            if method == "ensure_capabilities":
+                assert callbacks
+        finally:
+            await owner.drain(timeout=2)
+    asyncio.run(scenario())
+
+
+def test_stock_instance_method_copies_keep_actual_async_source(
+    environment, tools, execution_pool, monkeypatch,
+):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_pull_requests.workspace_tools import WorkspaceTools
+    native_host, _, _ = tools
+    _, _, initial, _, _, _ = environment
+    client = native_host.client
+    for method in ("exchange", "materialize"):
+        monkeypatch.setattr(client, method, getattr(client, method))
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+        host = WorkspaceTools(client, source_owner=owner)
+        try:
+            assert client.preparation_contract()["version"] == 2
+            attachment = await host.invoke("source", {
+                "number": 42, "generation_id": loaded["result"]["descriptor"]["id"], "budget_seconds": 60,
+            })
+            assert attachment["state"] == "ready"
+        finally:
+            await owner.drain(timeout=2)
+        assert owner.status()["drained"]
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("variation", ["subclass", "wrapped", "late-wrapped", "older"])
 def test_request_overrides_and_older_callers_keep_metadata_without_source(
     environment, integration, tools, execution_pool, monkeypatch, variation,
