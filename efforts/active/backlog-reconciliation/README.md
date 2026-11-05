@@ -252,6 +252,30 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The eleven-contract checkpoint is actually delivered in #10702 after genuine
+exact-head approval, no active findings or threads and eight complete
+successful/skipped checks before normal managed merge. All eight actual
+merged/current blobs equal the approved head; only its publication child
+finalized, retained. The
+[delivery journal](<journal/2026/11.05 finite-configured-consumer-recovery-contracts.md>)
+records two equal complete 03:23 PST scans, unchanged at 1,009 whole open:
+734 creator-eligible, 275 excluded, 672 original-cohort and 337 inflow.
+There are no arrivals, departures or new credit; dispositions remain 777
+and the parent stays Active, 280 issues above 729. The next seven whole
+originals and twenty-one ranked relationships are integrated for reviewed
+publication; six further originals and eighteen comparisons are fully
+researched. Protected whole sources and all existing custodians remain.
+
+The [seven producer/policy/fixture contracts](finite-producer-policy-fixture-contracts.md)
+integrate sixteen whole texts and twenty-one ranked relationships without new
+completion or receiving-transfer credit. All seven stay OPEN. Actual producer
+preallocation/settlement, override-derived evaluator status, bounded inner
+cleanup, materialized content/error recovery, mixed archived-name behavior
+and explicit Index expectation disposition remain independent.
+The [journal](<journal/2026/11.05 finite-producer-policy-fixture-contracts.md>)
+credits repaired fixtures and current partials while retaining original
+alternatives, accepted HOME policy, parked roots and protected whole evidence.
+
 The twelve-contract checkpoint is actually delivered in #10699 after genuine
 exact-head approval, no active findings or threads and nine complete
 successful/skipped checks before normal managed merge. All eight actual
@@ -1734,6 +1758,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [producer/policy/fixture study](finite-producer-policy-fixture-contracts.md)
+separates twelve whole-message, four fresh whole-description, three reused
+whole-description and two protected relations. Five other whole originals
+stay protected before model reading. No ranked comparison replaces actual
+producer custody, original alternatives, independent issue scope, accepted
+policy or owner disposition; no implementation, receiving transfer or
+source/resource release is claimed.
 
 The [configured-consumer/recovery study](finite-configured-consumer-recovery-contracts.md)
 distinguishes 24 whole-message, five fresh whole-description, one reused
