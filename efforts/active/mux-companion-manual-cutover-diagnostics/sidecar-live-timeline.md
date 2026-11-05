@@ -474,7 +474,7 @@ publication and installed support retain their separate qualification.
 - [ ] Supply live reported subagent/tool activity and owner-qualified accumulated
   statistics with explicit coverage; preserve unknown current concurrency when
   the native/ACP source does not establish it.
-  The [bounded tool-statistics amendment](sidecar-tool-statistics.md) proposes
+  The [bounded tool-statistics amendment](sidecar-tool-statistics.md), reviewed in #10704, admits
   one source-range occurrence counter, not unique calls or lifetime totals.
   Provider, compatibility and actual consumer controls precede source closure.
 - [x] Supply rich agenda-history access through its actual owner and an admitted

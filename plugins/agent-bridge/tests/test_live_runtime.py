@@ -82,8 +82,38 @@ def test_open_tool_and_telemetry_state_survive_without_sink_or_event_replay(monk
     target = restored.get("live")
     assert vars(source._telemetry) == vars(target._telemetry)
     assert target._open_tool_calls["call"] is target._events[0]
+    source_statistics = source.snapshot_observation_with_statistics()[-1]
+    assert source_statistics.start_occurrences == 1
+    assert target.snapshot_observation_with_statistics()[-1] == source_statistics
     target._events[0].data["raw_input"]["opaque"].append(2)
     assert source._events[0].data["raw_input"]["opaque"] == [1]
+
+
+def test_represented_duplicate_delivery_restore_and_counter_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge.event_tool_statistics import ToolStartCounter
+
+    store = LiveEventStore()
+    native = {
+        "id": "tool", "type": "tool.execution_start", "timestamp": 100.0,
+        "data": {"toolCallId": "call", "toolName": "shell"},
+    }
+    assert store.ingest("live", [native]) == 1
+    assert store.ingest("live", [native]) == 0
+    source = store.get("live")
+    assert source.snapshot_observation_with_statistics()[-1].start_occurrences == 1
+    payload = capture_live_events(store)
+
+    def broken(*_args: object, **_kwargs: object) -> None:
+        raise MemoryError("synthetic ancillary failure")
+
+    monkeypatch.setattr(ToolStartCounter, "observe", broken)
+    restored = restore_live_events(payload)
+    assert capture_live_events(restored) == payload
+    target = restored.get("live")
+    assert target.get_events()[0].event == "tool_call_start"
+    assert target.snapshot_observation_with_statistics()[-1].unavailable_reason == "counter-unavailable"
 
 
 @pytest.mark.parametrize("pause", ["dedup", "append", "record", "alias"])

@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+Bridge's selected `tests/test_events.py` and `tests/test_live_runtime.py` packet
+checks the internal tool-start range projection across append, SQLite hydration,
+captured tails, rebuild and represented restoration. It covers distinct replay/
+nested occurrences, duplicate represented delivery, qualified zero versus
+unknown, exact-integer exhaustion, ancillary failure, atomic append/rebuild
+races and visibility before persistence. A 5,000-record work-count control
+forbids retained-history iteration during bounded reads. These are isolated
+source controls, not negotiated wire/Manager consumption, lifetime/concurrency
+totals, installed acceptance or native performance. Required unit-only CI is
+unchanged.
+
 Manager's additional opt-in `--test-file tests/native/test_companion_popup_tmux.py
 --allow-explicit-tiers` packet opens the actual unmodified Companion through a
 private `display-popup -E` binding and an attached native tmux client PTY.
