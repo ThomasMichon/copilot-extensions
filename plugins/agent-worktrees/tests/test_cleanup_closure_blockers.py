@@ -77,3 +77,21 @@ def test_cmd_cleanup_reports_every_blocker_when_a_worktree_has_both(capsys, monk
     assert "held resource claim" in out
     assert "open-follow-ups" in out
     assert harness.reaped == []
+
+
+def test_batch_cleanup_reports_retained_agenda_instead_of_nothing_to_clean(
+    capsys, monkeypatch, tmp_path,
+):
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    record = make_record(tmp_path, status="finalized")
+    (tmp_path / "wt1/.effort-agenda").mkdir()
+    harness.seed(record)
+    harness.set_classifier(info(S.COMPLETED), info(S.COMPLETED))
+
+    assert harness.run_batch() == 0
+
+    captured = capsys.readouterr()
+    text = captured.out + captured.err
+    assert "Skipping wt1" in text and ".effort-agenda" in text
+    assert "Nothing to clean" not in text
+    assert harness.reaped == []

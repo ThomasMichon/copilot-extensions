@@ -291,6 +291,7 @@ BUCKET_DISPO = {
     "follow-up": "REVIEW",
     "held-claims": "REVIEW",
     "held-claims-cross-machine": "REVIEW",
+    "retained-data": "REVIEW",
     "closed-unmerged": "REVIEW",
     "gone": "REVIEW",
     "dirty": "UNSAFE",
@@ -317,6 +318,7 @@ BUCKET_REASON = {
     # prune._count_cross_machine_worktree_claims's docstring).
     "held-claims": "resource claim(s) still held",
     "held-claims-cross-machine": "claim(s) on a worktree hosted remotely",
+    "retained-data": "checkout-local agenda requires preservation",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
     "dirty": "uncommitted work",

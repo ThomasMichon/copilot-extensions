@@ -95,8 +95,14 @@ orchestration remain open; this does not complete D4 or authorize live effects.
 policy-first managed export/collection composition and fresh local readback.
 The [source readback](journal/2026/11.04-sidecar-managed-export-composition.md)
 records 224 isolated controls, the corrected shared origin-probe deadline and
-actual reviewed merge. Existing-tick integration, automatic collection, legacy
-rescue, actual archive acknowledgment and native qualification remain open.
+actual reviewed merge.
+
+#10520 merged as `00e34cfad46186b9107b6febe6b3103f40d58bc6`, connecting the
+same composed boundary to the existing sync tick with strict machine-local
+opt-in, shared execution limits and independent collection-context cursors.
+The [source readback](journal/2026/11.04-sidecar-existing-tick-collection.md)
+closes D4's source integration, not D5 legacy preservation, actual archive
+acknowledgment, installed/native qualification or any original parent gate.
 
 ## Guiding intent
 

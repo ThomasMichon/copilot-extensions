@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve known checkout-local agenda homes while allowing checkout retirement with independent managed data",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
