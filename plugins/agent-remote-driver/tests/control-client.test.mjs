@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDriverServer } from "../extensions/agent-remote-driver/driver-server.mjs";
 import { createControlClient } from "../extensions/agent-remote-driver/control-client.mjs";
+import { createStartupSession } from "../extensions/agent-remote-driver/startup-client.mjs";
 import { controlSession } from "../bin/control-session.mjs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -195,4 +196,62 @@ test("the real CLI retains redacted partial-effect and recovery diagnostics", as
     server.control.observe({ type: "user.message", id: "during-abort", data: { source: "user" } });
     return { aborted: true };
   } });
+});
+
+test("launch-only control uses the real driver and never automatically re-hooks after takeover", async () => {
+  await fixture(async ({ descriptor, server, calls }) => {
+    const session = await createStartupSession(descriptor, { ownerId: "launch-controller" });
+    assert.deepEqual(await session.send({ prompt: "first" }), { accepted: true });
+    assert.match(calls[0].source, /^agent-remote-driver-/);
+    const observed = createControlClient(descriptor);
+    assert.equal((await observed.health()).lastSequence, 1);
+    await assert.rejects(createStartupSession(descriptor, { ownerId: "replacement" }),
+      (error) => error.code === "startup_control_changed");
+    server.control.observe({ type: "user.message", id: "human-takeover", data: { source: "user" } });
+    await assert.rejects(session.send({ prompt: "stale" }), (error) => error.code === "generation_stale");
+    await assert.rejects(session.abort(), (error) => error.code === "startup_control_held");
+    await assert.rejects(createStartupSession(descriptor, { ownerId: "replacement" }),
+      (error) => error.code === "startup_control_changed");
+    assert.equal(calls.length, 1);
+  });
+});
+
+test("launch-only grant refuses input before inspection and during the health-to-grant gap", async () => {
+  for (const duringGrant of [false, true]) {
+    await fixture(async ({ descriptor, server, calls }) => {
+      const input = () => server.control.observe({
+        type: "user.message", id: "intervening-human-input", data: { source: "user" },
+      });
+      if (!duringGrant) input();
+      const fetchImpl = async (url, init) => {
+        if (url.endsWith("/control/re-hook")) input();
+        return fetch(url, init);
+      };
+      await assert.rejects(createStartupSession(descriptor, { ownerId: "launch-controller", fetchImpl }),
+        (error) => error.code === (duringGrant ? "generation_stale" : "startup_control_changed"));
+      assert.equal(calls.length, 0);
+      assert.equal(server.control.snapshot().mode, "human");
+    });
+  }
+});
+
+test("launch-only control serializes effects and holds a lost native response without replay", async () => {
+  await fixture(async ({ descriptor, calls, server }) => {
+    let dropReply = false;
+    const fetchImpl = async (url, init) => {
+      const response = await fetch(url, init);
+      if (dropReply && url.endsWith("/send")) throw new Error("synthetic lost response");
+      return response;
+    };
+    const session = await createStartupSession(descriptor, { ownerId: "launch-controller", fetchImpl });
+    await Promise.all([session.send({ prompt: "one" }), session.send({ prompt: "two" })]);
+    assert.equal(server.control.snapshot().lastSequence, 2);
+    dropReply = true;
+    await assert.rejects(session.send({ prompt: "uncertain" }),
+      (error) => error.code === "transport_outcome_unknown");
+    await assert.rejects(session.send({ prompt: "never replay" }),
+      (error) => error.code === "startup_control_held");
+    assert.deepEqual(calls.map((call) => call.content), ["one", "two", "uncertain"]);
+    assert.equal(server.control.snapshot().lastSequence, 3);
+  });
 });

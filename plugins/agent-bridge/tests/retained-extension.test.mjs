@@ -5,12 +5,13 @@ import vm from "node:vm";
 import * as path from "node:path";
 import * as delivery from "../extensions/agent-bridge/delivery.mjs";
 import * as retained from "../extensions/agent-bridge/retained-delivery.mjs";
+import { isRemoteDriverSource } from "../extensions/agent-bridge/remote-driver.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const source = readFileSync(new URL("../extensions/agent-bridge/extension.mjs", import.meta.url), "utf8");
 
-async function load(selected, version = 50, { exact = false, nativeId = "native-a" } = {}) {
-  const calls = [], sends = [], logs = [], timers = [], handlers = [];
+async function load(selected, version = 50, { exact = false, nativeId = "native-a", driver = false } = {}) {
+  const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [];
   let consumer;
   const session = {
     sessionId: "native-a", on: (handler) => handlers.push(handler),
@@ -52,7 +53,12 @@ async function load(selected, version = 50, { exact = false, nativeId = "native-
   };
   const context = vm.createContext({
     process: {
-      env: { SESSION_ID: "native-a", AGENT_BRIDGE_RETAINED_INBOX: selected },
+      env: { SESSION_ID: "native-a", AGENT_BRIDGE_RETAINED_INBOX: selected,
+        ...(driver ? {
+          AGENT_BRIDGE_REMOTE_DRIVER_ROOT: process.cwd(), AGENT_BRIDGE_NATIVE_SESSION_ID: "native-a",
+          AGENT_BRIDGE_DRIVER_OWNER: "synthetic-launch",
+        } : {}) },
+      cwd: () => process.cwd(),
       stderr: { write: (line) => logs.push(line) }, once: () => {},
     },
     fetch: () => { throw new Error("real network forbidden"); },
@@ -71,6 +77,15 @@ async function load(selected, version = 50, { exact = false, nativeId = "native-
     "@github/copilot-sdk/extension": { joinSession: async () => session },
     "./delivery.mjs": delivery,
     "./retained-delivery.mjs": retained,
+    "./remote-driver.mjs": {
+      isRemoteDriverSource,
+      createRemoteDriverSession: (native, options) => {
+        assert.equal(driver, true);
+        assert.equal(options.expectedSessionId, "native-a");
+        assert.equal(options.ownerId, "synthetic-launch");
+        return { ...native, send: async (value) => { driverSends.push(value); return "driver-message"; } };
+      },
+    },
     "./announce.mjs": { firstLoadThisSession: () => false },
     "./bridge-endpoint.mjs": { makeBridgeEndpoint: () => ({
       ep: { base: "http://127.0.0.1:9280", token: "synthetic-secret" }, call,
@@ -104,7 +119,7 @@ async function load(selected, version = 50, { exact = false, nativeId = "native-
   assert.ok(poll);
   poll.fn();
   await settle();
-  return { calls, sends, logs, handlers, poll };
+  return { calls, sends, logs, handlers, poll, driverSends };
 }
 
 test("actual extension default still uses legacy inbox, ACK and controls", async () => {
@@ -143,4 +158,15 @@ test("actual selected extension holds on old protocol instead of silently downgr
   assert.equal(f.sends.length, 0);
   assert.equal(f.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
   assert.ok(f.logs.some((line) => line.includes("protocol 50")));
+});
+
+test("launch-selected driver cannot fall through to legacy native delivery or controls", async () => {
+  const f = await load("0", 50, { driver: true });
+  assert.equal(f.sends.length, 0);
+  assert.equal(f.driverSends.length, 1);
+  assert.equal(f.calls.some((call) => /\/messages|\/controls/.test(call.route)), false);
+  const old = await load("0", 49, { driver: true });
+  assert.equal(old.sends.length, 0);
+  assert.equal(old.driverSends.length, 0);
+  assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
 });

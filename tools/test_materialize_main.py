@@ -336,6 +336,67 @@ def test_packaged_assets_refuse_escaping_payload_directory(tmp_path, directory):
         lwar.load_manifest(consumer, manifest_name=lwar.PACKAGED_MANIFEST_NAME)
 
 
+def test_packaged_assets_preserve_nested_plugin_layout_without_copying_other_plugins(tmp_path):
+    root = tmp_path / "source"
+    consumer = root / "plugins" / "bridge"
+    consumer.mkdir(parents=True)
+    source = _canonical_file(root, "plugins/driver/extensions/driver/extension.mjs", content="export {};\n")
+    (consumer / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "plugins", "payloadDir": "support",
+        "files": ["driver/extensions/driver/extension.mjs"],
+    }), encoding="utf-8")
+    dest = tmp_path / "release" / "bridge"
+    dest.mkdir(parents=True)
+    report = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest,
+        canonical_root=root,
+    )
+    assert len(report) == 1 and report[0].startswith("OK")
+    assert (dest / "support/driver/extensions/driver/extension.mjs").read_bytes() == source.read_bytes()
+    assert not (dest / "support/bridge").exists()
+
+
+@pytest.mark.parametrize("name", ["../outside", "driver/../outside", "/outside", "C:/outside", "driver\\file", "driver//file"])
+def test_packaged_assets_refuse_unsafe_nested_file_names(tmp_path, name):
+    (tmp_path / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "canonical", "files": [name],
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="relative file"):
+        lwar.load_manifest(tmp_path, manifest_name=lwar.PACKAGED_MANIFEST_NAME)
+
+
+@pytest.mark.parametrize("linked_source", [True, False])
+def test_packaged_assets_refuse_linked_nested_directories(tmp_path, linked_source):
+    root = tmp_path / "source"
+    consumer = root / "plugins" / "bridge"
+    consumer.mkdir(parents=True)
+    _canonical_file(root, "plugins/driver/extensions/entry.mjs", content="export {};\n")
+    (consumer / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "plugins", "payloadDir": "support",
+        "files": ["driver/extensions/entry.mjs"],
+    }), encoding="utf-8")
+    dest = tmp_path / "release"
+    (dest / "support/driver").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    parent = root / "plugins/driver" if linked_source else dest / "support/driver"
+    if linked_source:
+        shutil.rmtree(parent / "extensions")
+    try:
+        (parent / "extensions").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    report = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest,
+        canonical_root=root,
+    )
+    assert len(report) == 1 and "symlink" in report[0] and report[0].startswith("SKIP")
+    assert not list(outside.iterdir())
+
+
 def _canonical_lib(root: Path, lib: str, *, version: str, content: str) -> Path:
     pkg = lib.replace("-", "_")
     d = root / "libs" / lib

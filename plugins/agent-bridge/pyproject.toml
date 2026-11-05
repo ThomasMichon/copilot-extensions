@@ -51,6 +51,7 @@ dependencies = [
     "agent-remote-login-shell",
     "agent-machine-transport",
     "agent-worktree-identity",
+    "agent-venue-copilot",
 ]
 
 [tool.uv.sources]
@@ -58,6 +59,7 @@ agent-configuration-layers = { path = "../../libs/configuration-layers", editabl
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-process-telemetry = { path = "../../libs/process-telemetry", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
+agent-venue-copilot = { path = "../../libs/venue-copilot", editable = true }
 # Always resolve the vendored lib from the local path, never an index.
 # The distribution is named agent-ssh-manager (not the squatted PyPI name
 # "ssh-manager") to prevent dependency-confusion; the import module stays
@@ -126,7 +128,14 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 # The /ui control surface's page, scripts, and stylesheet (routes/ui.py).
-agent_bridge = ["ui_static/*.html", "ui_static/*.js", "ui_static/*.css"]
+agent_bridge = [
+    "ui_static/*.html", "ui_static/*.js", "ui_static/*.css",
+    "receiving_assets/mux/*.sh",
+    "receiving_assets/plugins/*/*.json",
+    "receiving_assets/plugins/*/bin/*.mjs",
+    "receiving_assets/plugins/*/extensions/*/*.mjs",
+    "receiving_assets/plugins/*/src/*/*.py",
+]
 
 [tool.ruff]
 target-version = "py310"

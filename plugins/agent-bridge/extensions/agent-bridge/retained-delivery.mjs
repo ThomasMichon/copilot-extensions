@@ -2,7 +2,7 @@
 // module owns only the one SDK invocation authorized by a true /begin reply.
 import { randomUUID } from "node:crypto";
 import { buildDeliveredSendOptions, escAttr, isSubAgentEvent } from "./delivery.mjs";
-import { readinessContextMatches } from "./plugin-readiness.mjs";
+import { observePluginReadiness, readinessContextMatches } from "./plugin-readiness.mjs";
 
 const CONTRACT = "retained-inbox-v1";
 const PROTOCOL = 50;
@@ -15,14 +15,17 @@ const nullableTime = (value) => value === null || time(value);
 const errorText = (error) => error instanceof Error ? error.message : String(error);
 const sameConsumer = (a, b) => a?.session_id === b?.session_id
   && a?.incarnation === b?.incarnation && a?.pid === b?.pid
-  && a?.process_started_at === b?.process_started_at;
+  && a?.process_started_at === b?.process_started_at
+  && (a?.portable_launch ?? null) === (b?.portable_launch ?? null);
 const sameBinding = (a, b) => a?.installation === b?.installation && a?.epoch === b?.epoch;
 
 export const retainedDeliverySelected = (value) => /^(1|true|on|yes)$/i.test(value || "");
 
 function consumerValid(value, sid) {
   return value?.session_id === sid && nonblank(value.incarnation)
-    && positive(value.pid) && time(value.process_started_at);
+    && positive(value.pid) && time(value.process_started_at)
+    && (value.portable_launch === undefined
+      || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value.portable_launch));
 }
 
 function receiptValid(value, sid) {
@@ -41,11 +44,11 @@ function retainedHeader(receipt) {
     + `retained-handoff="${escAttr(receipt.handoff_id)}" `;
 }
 
-export function retainedConsumption(event, receipt) {
+export function retainedConsumption(event, receipt, sourceAllowed = (source) => source === "agent-bridge") {
   if (!receiptValid(receipt, receipt?.session_id) || receipt.handoff_started_at === null
       || event?.type !== "user.message" || isSubAgentEvent(event)
       || (event.sessionId !== undefined && event.sessionId !== receipt.session_id)
-      || event.data?.source !== "agent-bridge") return false;
+      || !sourceAllowed(event.data?.source)) return false;
   const content = event.data.transformedContent ?? event.data.content;
   if (typeof content !== "string" || !content.startsWith(retainedHeader(receipt))) return false;
   const end = content.indexOf(">");
@@ -58,6 +61,8 @@ export function retainedConsumption(event, receipt) {
 export function createRetainedInbox({
   session, request, processIdentity, cwd, isCurrent = () => true, canSend = () => true,
   log = () => {}, now = Date.now, incarnation = randomUUID, nativeTimeoutMs = 10_000,
+  sourceAllowed,
+  portableLaunch,
 }) {
   let busy = false;
   let stopped = false;
@@ -185,7 +190,7 @@ export function createRetainedInbox({
     let held = response.next_after !== null;
     for (const receipt of receipts) {
       if (receipt.stage === "consumed") continue;
-      if (events.some((event) => retainedConsumption(event, receipt))) {
+      if (events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
         await report(receipt, "consumed");
       } else if (receipt.stage !== "offered" || !sameConsumer(receipt.consumer, context.consumer)) {
         held = true;
@@ -202,6 +207,10 @@ export function createRetainedInbox({
       if (!Number.isSafeInteger(health?.protocol_version) || health.protocol_version < PROTOCOL) {
         throw new Error(`protocol ${PROTOCOL} recovery support required; legacy downgrade refused`);
       }
+      if (portableLaunch !== undefined && (health?.capabilities?.portable_inbox !== 1
+          || health?.capabilities?.readonly_plugin_controls !== 1)) {
+        throw new Error("portable inbox and readonly plugin controls are required; legacy downgrade refused");
+      }
       healthUntil = now() + RECHECK_MS;
     }
     await retryReport();
@@ -210,6 +219,7 @@ export function createRetainedInbox({
       const consumer = {
         session_id: sid, incarnation: incarnation(),
         pid: processIdentity?.pid, process_started_at: processIdentity?.process_started_at,
+        ...(portableLaunch === undefined ? {} : { portable_launch: portableLaunch }),
       };
       if (!consumerValid(consumer, sid)) throw new Error("consumer process observations unavailable");
       context = { sid, cwd: workingDirectory, consumer };
@@ -266,10 +276,11 @@ export function createRetainedInbox({
     }
     const [msg] = poll.messages;
     if (!msg) return;
+    const startup = /^startup:prompt:[1-9]\d*$/.test(msg.kind || "");
     if (!positive(msg.id) || !nonblank(msg.handoff_id) || !STAGES.has(msg.handoff_stage)
         || typeof msg.body !== "string" || !["steer", "queue"].includes(msg.delivery)
         || String(msg.kind || "").startsWith("control:")
-        || String(msg.kind || "").startsWith("startup:")) {
+        || (String(msg.kind || "").startsWith("startup:") && !startup)) {
       throw new Error("unsupported retained message; no SDK or control effect");
     }
     if (msg.handoff_stage !== "offered") {
@@ -279,7 +290,19 @@ export function createRetainedInbox({
     const receipt = {
       session_id: sid, message_id: msg.id, handoff_id: msg.handoff_id, consumer: context.consumer,
     };
-    const options = buildDeliveredSendOptions(msg);
+    const readiness = async () => {
+      if (!startup) return;
+      if (!msg.plugin_readiness || msg.delivery !== "queue"
+          || msg.plugin_readiness.expected_session_id !== sid) {
+        throw new Error("original startup readiness context is unavailable");
+      }
+      const observed = await nativeCall(() => observePluginReadiness(session, msg.plugin_readiness, {
+        isCurrent: () => current(sid), waitForReady: false,
+      }));
+      if (observed.status !== "ready") throw new Error("original startup plugins are not ready");
+    };
+    await readiness();
+    const options = buildDeliveredSendOptions(startup ? { ...msg, kind: "prompt" } : msg);
     options.prompt = options.prompt.replace(/^<agent-message /, retainedHeader(receipt));
     if (msg.delivery === "steer") options.mode = "immediate";
     await nativeContext(sid);
@@ -293,6 +316,7 @@ export function createRetainedInbox({
     }
     try {
       await nativeContext(sid);
+      await readiness();
       if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed after final admission");
       const messageId = await nativeCall(() => {
         if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed at SDK invocation");

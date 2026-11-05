@@ -1234,6 +1234,8 @@ def _ssh_session(
     args: argparse.Namespace,
     *,
     remote_cmd_builder: Callable[[list[str]], str] | None = None,
+    remote_input_builder: Callable[[], bytes] | None = None,
+    receiving_context: str | None = None,
     result_sink: Callable[[Any], int] | None = None,
     settle_on_disconnect: bool = True,
 ) -> int:
@@ -1249,11 +1251,29 @@ def _ssh_session(
       minimal "diagnostic ``--remote-cmd``" provisioning path;
     * ``result_sink(result) -> int`` receives the exec result instead of it
       being printed;
+    * ``remote_input_builder() -> bytes`` supplies in-memory stdin after the
+      command builder, without exposing receiving assets or credentials in argv;
+    * ``receiving_context`` selects portable policy and plugin preparation,
+      without dotfiles, harness or repository provisioning;
     * ``settle_on_disconnect=False`` keeps the borrowing worktree's claim
       obligation active at disconnect (the launched work keeps running).
     """
     from .hosting_policy import admit_stdio_launch
 
+    if remote_input_builder is not None and (remote_cmd_builder is None or args.stdio):
+        raise ValueError("Remote launch input requires a non-stdio command builder")
+    if receiving_context is not None:
+        from repository_policy.receiving import receiving_marketplace
+
+        receiving_marketplace(receiving_context)
+        if (
+            remote_cmd_builder is None or args.stdio
+            or getattr(args, "no_provision", False)
+            or getattr(args, "skip_plugin_preparation", False)
+        ):
+            raise ValueError("Portable receiving requires its plugin preparation barrier")
+        if getattr(args, "plugin_worktree_id", None):
+            raise ValueError("Portable receiving cannot allocate or resolve a managed worktree")
     admit_stdio_launch(args)
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
@@ -1519,7 +1539,7 @@ def _ssh_session(
             # post-start dotfiles clone hasn't run (e.g. first agent-bridge
             # connect) and syncs it forward on reconnect. Needs the relay up for
             # git auth.
-            if not args.no_relay:
+            if not args.no_relay and receiving_context is None:
                 await _provision_dotfiles(
                     manager, args.name, config, relay_env=relay_env,
                 )
@@ -1528,10 +1548,11 @@ def _ssh_session(
                 )
 
             # Repo hooks may create the execution checkout preparation requires.
-            await _provision_repo_hooks(
-                manager, args.name, config, getattr(args, "repo", None),
-                relay_env=relay_env,
-            )
+            if receiving_context is None:
+                await _provision_repo_hooks(
+                    manager, args.name, config, getattr(args, "repo", None),
+                    relay_env=relay_env,
+                )
 
             # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via
             # BOTH lanes: (1) the CodeSpace user settings so they load for
@@ -1556,6 +1577,7 @@ def _ssh_session(
                         if getattr(args, "plugin_prepared_context", None) is not None
                         else launch_context
                     ),
+                    **({"receiving_context": receiving_context} if receiving_context is not None else {}),
                 )
 
             tracker.reached(ConnectStage.TARGET_BINSTUB)
@@ -1626,7 +1648,8 @@ def _ssh_session(
             # Non-interactive command execution
             tracker.started(ConnectStage.LAUNCH_ACP, "remote command")
             result = await manager.exec_command(
-                args.name, remote_cmd, timeout=args.timeout
+                args.name, remote_cmd, timeout=args.timeout,
+                **({"input_bytes": remote_input_builder()} if remote_input_builder is not None else {}),
             )
             tracker.reached(ConnectStage.LAUNCH_ACP)
             if result_sink is not None:
@@ -2045,6 +2068,7 @@ async def _register_codespace_plugins(
     prepared_context: dict | None = None,
     live_attachment: bool = False,
     hosting_required: bool = True,
+    receiving_context: str | None = None,
 ) -> list[str]:
     """Install/copy all selections, then register locally before either launch."""
     from .plugin_preparation import prepare_plugins
@@ -2065,6 +2089,7 @@ async def _register_codespace_plugins(
         prelude=prelude, relay_port=relay_port,
         live_attachment=live_attachment,
         hosting_required=hosting_required,
+        **({"receiving_context": receiving_context} if receiving_context is not None else {}),
         **({"prepared_context": prepared_context} if prepared_context is not None else {}),
     )
 

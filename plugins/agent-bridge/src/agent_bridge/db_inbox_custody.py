@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+import json
+
+from venue_copilot.portable_mux import MuxEndpoint
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
 from .db_live_session_aliases import PROCESS_START_TOLERANCE_SECONDS
@@ -26,7 +29,8 @@ class _InboxCustodyMixin:
 
     @staticmethod
     def _registered_inbox_consumer(
-        conn: sqlite3.Connection, consumer: InboxConsumer, now: float,
+        conn: sqlite3.Connection, consumer: InboxConsumer, now: float, *,
+        require_portable_admission: bool = False,
     ) -> None:
         # Exact native id, not alias resolution: a renamed conversation cannot
         # inherit a send capability even when the OS process did not change.
@@ -39,13 +43,50 @@ class _InboxCustodyMixin:
             or abs(row["process_started_at"] - consumer.process_started_at)
             >= PROCESS_START_TOLERANCE_SECONDS
             or row["updated_at"] < now - LIVE_SESSION_STALE_SECONDS
-            or row["venue"] is not None
             or conn.execute(
                 "SELECT 1 FROM live_session_aliases WHERE alias_session_id=?",
                 (consumer.session_id,),
             ).fetchone() is not None
         ):
             raise RuntimeCustodyError("Inbox consumer registration changed or is unqualified")
+        if row["venue"] is None:
+            if consumer.portable_launch is not None:
+                raise RuntimeCustodyError("Portable inbox consumer has no reserved venue")
+            return
+        try:
+            venue = json.loads(row["venue"])
+            endpoint = MuxEndpoint.parse(venue["mux_endpoint"])
+            if (
+                row["cli_mode"] != 1 or not row["worktree_id"]
+                or venue["kind"] != "codespace" or not isinstance(venue["target"], str) or not venue["target"]
+                or venue["mux_session_name"] != endpoint.mux_session
+                or endpoint.session_id != consumer.session_id
+                or endpoint.attempt != consumer.portable_launch
+            ):
+                raise ValueError("portable launch differs")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise RuntimeCustodyError("Remote inbox requires its reserved portable native launch") from exc
+        if require_portable_admission:
+            enrolled = conn.execute(
+                "SELECT consumer_json FROM bridge_inbox_consumers WHERE session_id=? AND current=1",
+                (consumer.session_id,),
+            ).fetchone()
+            if enrolled is not None:
+                predecessor = InboxConsumer(**json.loads(enrolled["consumer_json"]))
+                if (
+                    predecessor.portable_launch == consumer.portable_launch
+                    and predecessor.pid == consumer.pid
+                    and abs(predecessor.process_started_at - consumer.process_started_at)
+                    < PROCESS_START_TOLERANCE_SECONDS
+                ):
+                    return
+            reservation = conn.execute(
+                "SELECT venue FROM cli_mode_reservations WHERE worktree_id=? "
+                "AND claimed_by_session_id=? AND expires_at>?",
+                (row["worktree_id"], consumer.session_id, now),
+            ).fetchone()
+            if reservation is None or json.loads(reservation["venue"] or "null") != venue:
+                raise RuntimeCustodyError("Portable inbox enrollment requires its current launch reservation")
 
     def enroll_inbox_consumer(
         self, installation: RuntimeInstallation, admission: RuntimeAdmission,
@@ -65,9 +106,10 @@ class _InboxCustodyMixin:
         document = encode(consumer.document())
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
-            self._registered_inbox_consumer(conn, consumer, now)
+            self._registered_inbox_consumer(conn, consumer, now, require_portable_admission=True)
             if conn.execute(
                 "SELECT 1 FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
+                "AND kind != 'control:plugin-readiness' "
                 "AND delivered_at IS NULL LIMIT 1", (consumer.session_id,),
             ).fetchone() is not None:
                 raise RuntimeCustodyError("Pending legacy controls prevent retained inbox enrollment")
@@ -119,7 +161,7 @@ class _InboxCustodyMixin:
         identity = self._runtime_installation(installation)
         with self._runtime_transaction(write=False) as conn:
             self._inbox_admission(conn, identity, admission)
-            self._registered_inbox_consumer(conn, consumer, now)
+            self._registered_inbox_consumer(conn, consumer, now, require_portable_admission=True)
             row = conn.execute(
                  "SELECT incarnation FROM bridge_inbox_consumers WHERE session_id=? AND current=1",
                  (consumer.session_id,),

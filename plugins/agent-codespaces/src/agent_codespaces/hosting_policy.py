@@ -184,7 +184,10 @@ def admit_detached_launch(args: Namespace, plan: dict) -> bool:
     """Establish live-attachment intent and admit before detached state effects."""
     from venue_copilot import live_session_for
 
-    rejoining = (live_session_for(plan["scope_id"]) or {}).get("status") == "live"
+    row = live_session_for(plan["scope_id"]) or {}
+    if (row.get("venue") or {}).get("mux_endpoint") is not None:
+        raise RuntimeError("Retained portable custody requires --receiving-support portable; legacy launch refused")
+    rejoining = row.get("status") == "live"
     args.hosting_live_attachment = rejoining
     require_codespace_hosting(
         args.name, plan["workspace_folder"], worktree_id=getattr(args, "worktree_id", None),

@@ -67,6 +67,10 @@ def add_copilot_subparser(sub) -> None:
              "(stamps the 'driven by' banner; default 'cli-mode')",
     )
     copilot_parser.add_argument(
+        "--receiving-support", choices=["portable"], default=None,
+        help="With --detach: select Bridge's portable mux receiver instead of guest-suite launch.",
+    )
+    copilot_parser.add_argument(
         "--seed", help="Forwarded to the remote `agent-worktrees copilot --seed`",
     )
     copilot_parser.add_argument(
@@ -458,6 +462,9 @@ def cmd_copilot(
     (the agent-facing, no-TTY lifecycle); ``ssh_session`` is injected for it
     for the same no-circular-import reason as ``interactive_ssh``.
     """
+    if getattr(args, "receiving_support", None) and not getattr(args, "detach", False):
+        print("[FAIL] --receiving-support requires --detach", file=sys.stderr)
+        return 1
     if getattr(args, "ref_files", None) and not getattr(args, "detach", False):
         print("[FAIL] --ref-file requires --detach", file=sys.stderr)
         return 2
@@ -492,7 +499,22 @@ def cmd_copilot(
         {"scope_id": f"{args.worktree_id}@{args.name}", "workspace_folder": None}
         if args.worktree_id else plan_for(args, load_merged_config())
     )
-    rejoining = (live_session_for(plan["scope_id"]) or {}).get("status") == "live"
+    row = live_session_for(plan["scope_id"]) or {}
+    from . import connection_owner
+    from .portable_mux_control import attach, retained_endpoint
+
+    if "tenant" in plan:
+        try:
+            held = next((
+                hold for hold in connection_owner.list_holds(prune=False) if hold.codespace == args.name
+            ), None)
+            endpoint = retained_endpoint(plan, held, row)
+            if endpoint is not None:
+                return attach(args, endpoint, interactive_ssh=interactive_ssh)
+        except (RuntimeError, ValueError, OSError) as exc:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+            return 1
+    rejoining = row.get("status") == "live"
     try:
         require_codespace_hosting(
             args.name, plan["workspace_folder"], worktree_id=getattr(args, "worktree_id", None),

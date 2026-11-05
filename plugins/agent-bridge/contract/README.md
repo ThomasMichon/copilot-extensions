@@ -50,6 +50,20 @@ probes exercise deadline expiry and actual SQLite VM exhaustion. The production
 50-ms and 100,000-step limits are unchanged; these captures are not wall-clock
 read qualification.
 
+Portable receiving support adds 25 cases, bringing the current portfolio to
+116. The actual health response advertises independently named `portable_mux`,
+`portable_inbox` and `readonly_plugin_controls` version-1 capabilities without
+changing HTTP generation 52 or prior floors. Cases cover reservation-bound
+enrollment, same-attempt reload through the existing CAS, pre-enrollment legacy
+seed exclusion, original-input-bound startup admission, read-only polling and
+the selected provider's actual client interface. The joined launch exercises
+the real archive, isolated policy readers, ASGI/SQLite and driver HTTP.
+SDK, native mux, provider process, SSH, Owner, claims, forwards and the
+POSIX-to-private-scratch namespace are controlled fixtures, not native Copilot,
+TMux, remote-authentication or installed acceptance. Historical vectors and
+packets remain unchanged; only the current HTTP-52 vector adds capability
+expectations.
+
 Commit source and the generation declaration, run the new owner's `--prepare`,
 commit and publish that checkpoint, then run `--write`, no-write verification
 and `tools/check-agent-bridge-contracts.py --base <reviewed-base>`. Prepared

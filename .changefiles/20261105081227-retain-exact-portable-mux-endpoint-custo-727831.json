@@ -1,0 +1,9 @@
+{
+  "comment": "Retain exact portable mux endpoint custody in the connection owner and venue controls",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
