@@ -12,7 +12,7 @@ import sys
 from dropin_registry import ScanAuthority
 from plugin_activation import (
     activation_custody, activation_preservation_pending,
-    current_declarations, resolve_active_plugins, validate_identity,
+    current_declarations, declared_payload_roots, validate_identity,
 )
 from plugin_resolve import split_source
 
@@ -46,9 +46,7 @@ def observe(project: Path, *, home: Path | None = None) -> dict:
     sources = sorted(declared.settings.enabled_sources())
     if len(sources) > 256:
         raise PreparationError("Enabled plugin selection exceeds its bound.")
-    activation = resolve_active_plugins(home=home, project_root=project, include_projects=False)
-    if activation.authority is ScanAuthority.INDETERMINATE or set(activation.decisions) != set(sources):
-        raise PreparationError("Enabled payload inventory is incomplete or changed.")
+    roots = declared_payload_roots(declared, home=home)
     rows = []
     for source in sources:
         validate_identity(source)
@@ -63,22 +61,19 @@ def observe(project: Path, *, home: Path | None = None) -> dict:
         context._get_declarations(marketplace, home / ".copilot", project)
         expected = context.source_identity(normalized, marketplace)["fingerprint"]
         row = {"source": source, "sourceFingerprint": expected, "state": "needed", "reason": ""}
-        active = activation.active.get(source)
-        if active is not None:
-            roots = {item.root for item in active.live_roots}
-            if len(roots) != 1:
-                raise PreparationError("Enabled payload has ambiguous live roots.")
-            actual = context.resolve_payload_source(
-                payload_root=next(iter(roots)), plugin_id=name,
-                copilot_home=home / ".copilot", project_root=project, environment={},
-            )
-            if actual["sourceFingerprint"] != expected:
-                raise PreparationError("Available payload does not match its declared source.")
+        root = roots[source]
+        if root is not None:
+            if normalized.kind != "directory":
+                actual = context.resolve_payload_source(
+                    payload_root=root, plugin_id=name,
+                    copilot_home=home / ".copilot", project_root=project, environment={},
+                )
+                if actual["sourceFingerprint"] != expected:
+                    raise PreparationError("Available payload does not match its declared source.")
             row.update(state="ready", reason="source-qualified-payload")
         else:
-            reasons = {item.reason for item in activation.decisions[source].findings}
-            if reasons != {"missing-target"} or normalized.kind not in {"github", "git"}:
-                raise PreparationError("Unavailable payload requires source-owner reconciliation.")
+            if normalized.kind not in {"github", "git"}:
+                raise PreparationError("Unavailable authored local payload requires source-owner reconciliation.")
             row["reason"] = "missing-remote-payload"
         rows.append(row)
     current = current_declarations(home=home, project_root=project)

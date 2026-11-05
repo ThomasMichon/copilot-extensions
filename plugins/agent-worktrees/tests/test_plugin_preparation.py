@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from plugin_activation import preserve_activation_durably, state
+from plugin_activation import activation_preservation_pending, preserve_activation_durably, state
 from agent_worktrees import plugin_preparation as preparation, update_acquisition
 
 pytestmark = pytest.mark.guard
@@ -132,22 +132,72 @@ def test_invalid_declarations_refuse_before_native_acquisition(selected, monkeyp
         preparation.observe(repo, home=home)
 
 
-def test_native_revalidation_refusal_never_launches_or_replays(selected, monkeypatch):
-    _, repo, _ = selected
+@pytest.mark.parametrize("error", [ValueError, FileNotFoundError])
+def test_native_revalidation_refusal_never_launches_or_replays(selected, monkeypatch, error):
+    from agent_procutil import owned_process
+
+    home, repo, _ = selected
     calls = []
 
     def refuse():
-        raise ValueError("changed selection")
+        raise error("changed selection")
 
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
     monkeypatch.setattr(
         update_acquisition, "_run_update",
         lambda *args, **kwargs: calls.append(args) or subprocess.CompletedProcess(args, 0, "", ""),
     )
     result = update_acquisition.acquire_missing(
         "sample", "first", sys.executable, cwd=repo, revalidate=refuse,
+        home=home / ".copilot",
     )
     assert not result.startswith("OK")
     assert calls == []
+    assert not activation_preservation_pending(home / ".copilot")
+
+
+def authored_local(selected, *, user_declaration=False, stable_id=False, missing=False):
+    home, repo, settings = selected
+    base = home / ".copilot" if user_declaration else repo
+    market = base / ".ai"
+    payload = market / "sample"
+    source = {"source": "directory", "path": "./.ai", "manifestName": "fixture"}
+    if stable_id:
+        source["stableId"] = "fixture-local"
+    write(market / ".claude-plugin" / "marketplace.json", {
+        "name": "fixture", "plugins": [{"name": "sample", "source": "./sample"}],
+    })
+    if not missing:
+        write(payload / "plugin.json", {"name": "sample", "version": "1.0.0"})
+    declaration = {"local": {"source": source}}
+    write(settings, {
+        "enabledPlugins": {"sample@local": True},
+        **({} if user_declaration else {"extraKnownMarketplaces": declaration}),
+    })
+    if user_declaration:
+        write(home / ".copilot" / "settings.json", {"extraKnownMarketplaces": declaration})
+    return payload
+
+
+def test_split_layer_marketplace_uses_the_declaration_base(selected):
+    home, repo, _ = selected
+    authored_local(selected, user_declaration=True)
+    assert preparation.observe(repo, home=home)["payloadsReady"]
+
+
+def test_stale_installed_copy_cannot_replace_missing_authored_local_payload(selected):
+    home, repo, _ = selected
+    authored_local(selected, missing=True)
+    install(home, "sample", "local")
+    with pytest.raises(preparation.PreparationError, match="local payload"):
+        preparation.observe(repo, home=home)
+
+
+def test_stable_identity_accepts_the_verified_authored_directory(selected):
+    home, repo, _ = selected
+    authored_local(selected, stable_id=True)
+    assert preparation.observe(repo, home=home)["payloadsReady"]
 
 
 def test_native_home_mismatch_refuses_before_mutation(selected, monkeypatch):

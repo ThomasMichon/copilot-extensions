@@ -1,6 +1,6 @@
 """Effective Copilot plugin activation across global and registered-project scopes."""
 
-from .declarations import PluginDeclarations, current_declarations
+from .declarations import PluginDeclarations, current_declarations, declared_payload_roots
 from .preservation import (
     SETTLEMENT_RETRY_RESERVE_S,
     ActivationCustody,
@@ -49,6 +49,7 @@ __all__ = [
     "activation_preservation_pending",
     "capture",
     "current_declarations",
+    "declared_payload_roots",
     "inspect_plugin_state",
     "installed_plugin_identities",
     "inventory_identity",

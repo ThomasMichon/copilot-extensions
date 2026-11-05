@@ -7,10 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from dropin_registry import Finding, ScanAuthority
-from plugin_resolve import SETTINGS_RELS, RepoPluginSettings
+from plugin_resolve import (
+    SETTINGS_RELS, MarketplaceSourceKind, RepoPluginSettings,
+    marketplace_source_kind, split_source,
+)
 
-from ._config_io import _read_settings, _user_settings
+from ._config_io import _SettingsLoad, _read_settings, _user_settings
 from ._findings import _combine_authority
+from .state import PluginStateError, validate_identity
 
 
 @dataclass(frozen=True)
@@ -44,3 +48,39 @@ def current_declarations(*, home: Path, project_root: Path) -> PluginDeclaration
         authority=_combine_authority(*authorities),
         findings=tuple(findings),
     )
+
+
+def declared_payload_roots(
+    declared: PluginDeclarations, *, home: Path,
+) -> dict[str, Path | None]:
+    """Resolve the effective declarations without an authored-local cache fallback."""
+    from ._installed_root import _installed_root
+    from ._marketplace_root import _local_root
+    from ._memo import MarketplaceMemo
+
+    if declared.authority is ScanAuthority.INDETERMINATE:
+        raise PluginStateError("Plugin declaration authority is indeterminate.")
+    loaded = _SettingsLoad(
+        settings=declared.settings, authority=declared.authority,
+        marketplace_origins=declared.marketplace_bases,
+    )
+    roots = {}
+    memo = MarketplaceMemo()
+    for source in sorted(declared.settings.enabled_sources()):
+        validate_identity(source)
+        _, marketplace = split_source(source)
+        kind = marketplace_source_kind(marketplace, declared.settings)
+        if kind is MarketplaceSourceKind.LOCAL:
+            candidate = _local_root(
+                source, loaded, base=declared.marketplace_bases[marketplace], _memo=memo,
+            )
+        elif kind is MarketplaceSourceKind.REMOTE:
+            candidate = _installed_root(home / ".copilot", source)
+        else:
+            raise PluginStateError("Enabled payload has no valid marketplace declaration.")
+        if candidate.indeterminate or any(
+            item.reason != "missing-target" for item in candidate.findings
+        ):
+            raise PluginStateError("Enabled payload source is invalid or indeterminate.")
+        roots[source] = candidate.root
+    return roots

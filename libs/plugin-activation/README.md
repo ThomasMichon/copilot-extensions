@@ -188,6 +188,12 @@ effective enablement, marketplace definitions and their relative-path bases,
 scan authority and findings. An indeterminate read is not permission to use a
 partial user fallback. This is declaration evidence only, not installed
 inventory, source verification, execution trust or mutation authority.
+`declared_payload_roots(declarations, home=Path(user_home))` resolves that
+effective stack through the existing root validators, using each marketplace's
+recorded base. Authored directory sources never fall back to an old installed
+copy. A missing root is explicit absence; malformed or indeterminate ownership
+refuses resolution. Callers still qualify source identity and choose readiness
+or acquisition policy separately.
 
 Callers locating one sibling may also pass `plugin_names=("customizing-copilot",)`.
 Only requested names incur source resolution, but all matching marketplace

@@ -203,7 +203,7 @@ def acquire_missing(
     def checked_runner(*args, **kwargs):
         try:
             revalidate()
-        except ValueError as error:
+        except (ValueError, OSError) as error:
             raise installer_run.InstallerLaunchError(
                 "payload selection changed before acquisition"
             ) from error
