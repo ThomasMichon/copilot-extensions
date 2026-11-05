@@ -361,9 +361,9 @@ only returns the exact committed receipt, never authorizes another transition.
 A changed request
 or rejected/reassigned binding cannot reuse it. Legacy completion and late-result
 enrichment refuse prepared tasks, including after restart; SQL also preserves
-the submitted proposal against older backfill code. This bounded operation
-supports the first retained proposal only. Multiple rejected/resubmitted
-proposals, post-stop same-native recovery, non-circular decline, negotiated
+the submitted proposal against older backfill code. Internal rejected-proposal
+resubmission uses the lineage below. Post-stop same-native recovery,
+non-circular decline, negotiated
 ordinary callers, manual/absent-workspace applicability and full native
 qualification remain open. Ordinary callers and assignment writers stay disabled.
 
@@ -374,3 +374,30 @@ the original receipt/relationship remain unchanged. Submitted work stays
 provisional and keeps its claim until independent confirmation. Detachment is
 not execution readmission, and a detached incarnation cannot replay the old
 advancement as a new submission.
+
+### Internal rejected-proposal resubmission
+
+After an authoritative rejection of a consumed proposal, `prepare_submission`
+may append one new immutable preparation with a new request ID. Its task,
+queue, worker, generation, native, workspace and original assignment binding
+must remain unchanged. The existing rejection owner's audit transition and
+matching evaluator steer must name the exact prior result, reference,
+submitting owner and completion timestamp. A caller-supplied feedback object,
+sender label or copied steer without that transition is not authority.
+
+The new request retains its previous preparation/event references and exact
+rejection reason/feedback. Earlier requests and consumed receipts are never
+rewritten or rearmed. Concurrent preparation consumes one rejection once;
+an identical current request reconciles, while a different unsubmitted proposal
+or superseded request ID refuses. Taking the feedback and suspending an
+intermediate investigation does not erase its lineage.
+
+Readiness rechecks that original lineage before and after the independent
+owner read. Another changed candidate still needs its own fresh readiness and
+guarded advancement; no rejection carries a reusable ready permit. All prior
+answers, the protected task relationship and original native return binding
+remain retained. Older preparers cannot replace these requests, and the
+existing persisted completion/receipt guards remain unchanged.
+
+This is internal queue source support, not HTTP/CLI/MCP negotiation, ordinary
+writer activation, stopped-native recovery or full reviewer-loop acceptance.
