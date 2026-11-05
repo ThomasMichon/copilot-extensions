@@ -538,7 +538,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       whole-S2 qualification.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
-      work rows. It is proposed review-first source work, not new effect
+      work rows. Plan #10689 is reviewed; implementation remains pending.
+      It grants no new effect
       authority or closure of the retained source/native/manual gates.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
@@ -626,6 +627,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Reviewed bounded source-output presentation amendment](journal/2026/11.05-sidecar-output-plan.md)
 - [2026-11-05 - Reported actor attribution without runtime inference](journal/2026/11.05-sidecar-reported-actors.md)
 - [2026-11-05 - Reported work labels on the actual Bridge source path](journal/2026/11.05-sidecar-reported-work-labels.md)
 - [2026-11-05 - Actual private popup input and clean exit](journal/2026/11.05-companion-popup-input.md)

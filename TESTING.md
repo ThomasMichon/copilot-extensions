@@ -91,6 +91,21 @@ process, not isolated widget allocation or child CPU/memory. These source-fixtur
 observations neither enforce wall-clock thresholds nor qualify native tails,
 installed performance or the complete repaint acceptance target.
 
+Manager's selected `tests/test_companion_bridge_session_codec.py`,
+`tests/test_companion_timeline_layout.py`, `tests/test_companion_timeline_widget.py`
+and `tests/test_companion_visual.py` packet also covers bounded output
+presentation. Actual Bridge EventLog/semantic frames pass through the codec and
+Textual widget: a 40-chunk burst becomes one expandable output group, and one
+explicit backward page restores the preceding tool occurrence without moving
+the live boundary. Cancellation, source loss, raw detail inspection, reported
+actor/work/unknown-kind boundaries and narrow anchors remain checked.
+Pure controls cover group split/merge, eviction aliases, 64-record/16-group
+limits and geometry reuse over a 5,000-record window. Fourteen deterministic
+SVG comparisons include two sparse output states; resize clamps retain live
+following instead of creating history demand. These are source controls, not
+installed/native-frame or performance qualification. Required unit-only CI is
+unchanged.
+
 Manager's opt-in `--test-file tests/test_companion_joined_lifecycle.py
 --test-file tests/test_companion_bridge_source.py
 --test-file tests/test_companion_bridge_session_source.py

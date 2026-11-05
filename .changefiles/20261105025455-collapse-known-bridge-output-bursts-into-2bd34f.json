@@ -1,0 +1,9 @@
+{
+  "comment": "Collapse known Bridge output bursts into bounded expandable timeline groups while preserving raw evidence, explicit history demand and stable live/browsing anchors",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

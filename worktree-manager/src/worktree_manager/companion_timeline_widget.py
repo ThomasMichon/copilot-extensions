@@ -24,7 +24,7 @@ from .companion_timeline_contract import (
     Availability, EventRef, HistoryPage, LiveDelta, MAX_STRIP_CACHE_BYTES, OVERSCAN_LINES, Provider,
     SourcePosition, SourceToken, TimelineGap, TimelineSnapshot, ViewportAnchor, aware_time,
 )
-from .companion_timeline_layout import TimelineLayout, display_text, wrap_lines
+from .companion_timeline_layout import OUTPUT_GROUP_LINE, TimelineLayout, display_text, wrap_lines
 from .companion_timeline_model import TimelineWindow, WindowResult
 
 
@@ -66,6 +66,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
         self.window = window if window is not None else TimelineWindow()
         self.layout_index = TimelineLayout()
         self.selected: EventRef | None = None
+        self._selected_group = False
         self.demand_visible = True
         self._clock: datetime | None = None
         self._programmatic = False
@@ -97,22 +98,38 @@ class SubwayTimeline(ScrollView, can_focus=True):
                 return ViewportAnchor(row.event, row.logical_line, screen_row)
         return None
 
-    def _select_event(self, ref: EventRef | None) -> None:
-        if self.selected != ref:
+    def _select_event(self, ref: EventRef | None, *, group: bool = False) -> None:
+        if ref is not None:
+            group |= self.layout_index.is_group(ref)
+            ref = self.layout_index.visible_ref(ref, group=group)
+        if self.selected != ref or self._selected_group != group:
             self.selected = ref
+            self._selected_group = group
             self._clear_cache()
             self.refresh()
 
     def _select_visible_event(self) -> None:
         if self.selected is not None and self.layout_index.is_visible(
             self.selected, int(self.scroll_offset.y) - self._padding, self.size.height,
+            group=self._selected_group,
         ):
             return
-        anchor = self.capture_anchor()
-        self._select_event(anchor.event if anchor is not None else None)
+        self._select_anchor(self.capture_anchor())
+
+    def _select_anchor(self, anchor: ViewportAnchor | None) -> None:
+        self._select_event(
+            anchor.event if anchor is not None else None,
+            group=anchor is not None and anchor.logical_line == OUTPUT_GROUP_LINE,
+        )
 
     def _reflow(self, anchor: ViewportAnchor | None) -> None:
-        self.layout_index.rebuild(self.window, self.scrollable_content_region.width or 1, now=self._clock)
+        refs = tuple(ref for ref in (anchor.event if anchor else None, self.selected) if ref is not None)
+        self.layout_index.rebuild(
+            self.window, self.scrollable_content_region.width or 1, now=self._clock, anchors=refs,
+        )
+        self._select_event(self.selected, group=(
+            self._selected_group and self.selected is not None and self.layout_index.has_group(self.selected)
+        ))
         anchor_row = None
         screen_row = 0
         if anchor is not None and not self.window.follow_live:
@@ -122,7 +139,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
             screen_row = min(anchor.screen_row, max(0, self.size.height - 1))
         self._padding = max(0, self.size.height - self.layout_index.height)
         if anchor_row is not None:
-            self._padding = max(self._padding, screen_row - anchor_row)
+            self._padding = max(0, screen_row - anchor_row)
         self._layout_generation += 1
         self._clear_cache()
         self._programmatic = True
@@ -206,10 +223,11 @@ class SubwayTimeline(ScrollView, can_focus=True):
 
     def watch_scroll_y(self, old_value: float, new_value: float) -> None:
         super().watch_scroll_y(old_value, new_value)
-        if not self._programmatic and old_value != new_value:
+        # A layout clamp from an obsolete range is not user browsing.
+        if not self._programmatic and old_value != new_value and old_value <= self.max_scroll_y:
             self.window.set_follow_live(False)
             anchor = self.capture_anchor()
-            self._select_event(anchor.event if anchor is not None else None)
+            self._select_anchor(anchor)
             self._post_timeline_message(self.Changed())
             if new_value <= OVERSCAN_LINES and self.demand_visible:
                 self.action_request_history()
@@ -227,7 +245,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
     def _begin_upward_browse(self) -> None:
         self.window.set_follow_live(False)
         anchor = self.capture_anchor()
-        self._select_event(anchor.event if anchor is not None else None)
+        self._select_anchor(anchor)
         if self.scroll_offset.y <= OVERSCAN_LINES:
             self.action_request_history()
         self._post_timeline_message(self.Changed())
@@ -250,7 +268,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
         self.window.set_follow_live(False)
         self.scroll_to(y=0, animate=False, immediate=True)
         anchor = self.capture_anchor()
-        self._select_event(anchor.event if anchor is not None else None)
+        self._select_anchor(anchor)
         self.action_request_history()
         self._post_timeline_message(self.Changed())
 
@@ -277,6 +295,12 @@ class SubwayTimeline(ScrollView, can_focus=True):
     def action_expand_selected(self) -> None:
         self._select_visible_event()
         if self.selected is not None:
+            output = self.layout_index.toggle_output(self.selected) if self._selected_group else None
+            if output is not None:
+                self.window.last_result = output
+                self._reflow(self.capture_anchor())
+                self._post_timeline_message(self.Changed(output))
+                return
             self._change(lambda: self.window.toggle_expansion(self.selected))
 
     def on_click(self, event: events.Click) -> None:
@@ -285,7 +309,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
         )
         if row is not None:
             self.window.set_follow_live(False)
-            self._select_event(row.event)
+            self._select_event(row.event, group=row.logical_line == OUTPUT_GROUP_LINE)
             if row.heading and event.offset.x < self.layout_index.prefix_width:
                 self.action_expand_selected()
 
@@ -318,7 +342,8 @@ class SubwayTimeline(ScrollView, can_focus=True):
                 return self._store(key, strip)
             return Strip.blank(width, self.rich_style)
         prefix = self.layout_index.prefix(row, self.window)
-        style = self.rich_style + Style(reverse=True) if row.event == self.selected else self.rich_style
+        selected = row.event == self.selected and (row.logical_line == OUTPUT_GROUP_LINE) == self._selected_group
+        style = self.rich_style + Style(reverse=True) if selected else self.rich_style
         strip = Strip([
             Segment(prefix, style), Segment(row.text, style),
         ]).crop_extend(0, width, self.rich_style)
@@ -375,7 +400,10 @@ class CompanionTimelinePanel(Vertical):
         yield SubwayTimeline(self.window)
         with Horizontal(classes="timeline-buttons"):
             yield Button("Follow live", name="follow", classes="timeline-follow")
-            yield Button("Older", name="older", classes="timeline-older", disabled=True)
+            yield Button(
+                "Older", name="older", classes="timeline-older", disabled=True,
+                tooltip="Load one bounded history page. Repeat to continue; hide the timeline to cancel.",
+            )
             yield Button("Creation", name="creation")
             yield Button("Reconcile source", name="reconcile", classes="timeline-reconcile", disabled=True)
             yield Static(classes="timeline-unread")
@@ -459,7 +487,7 @@ class CompanionTimelinePanel(Vertical):
         if not self.window.last_result.applied:
             status += f"\n{self.window.last_result.code.value}: {self.window.last_result.reason}"
         if self.window.evicted:
-            status += f"; {self.window.evicted} display rows evicted; source history not erased"
+            status += f"; {self.window.evicted} display records evicted; source history not erased"
         for gap in self.window.source_gaps.values():
             status += f"\nHistory gap: {gap.reason}; floor {gap.floor.cursor}; {gap.reconcile}: {gap.details}"
         health = ["History gap"] if self.window.source_gaps else []

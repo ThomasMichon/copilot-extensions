@@ -100,6 +100,7 @@ class TimelineKind(StrEnum):
     SOURCE_GAP = "source-gap"
     OBSERVED_CHANGE = "observed-change"
     SOURCE_EVENT = "source-event"
+    SOURCE_OUTPUT = "source-output"
 
 
 def text(value: str, label: str, *, empty: bool = False, limit: int = MAX_FIELD_BYTES) -> None:
