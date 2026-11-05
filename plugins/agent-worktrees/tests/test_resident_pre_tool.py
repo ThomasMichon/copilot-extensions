@@ -55,7 +55,13 @@ def test_resident_pre_tool_contract(case, tmp_path):
         for path in (PLUGIN / "scripts").glob("*.py"):
             shutil.copyfile(path, scripts / path.name)
         (home / ".git").mkdir()
+        for folder in ("objects", "refs"):
+            (home / ".git" / folder).mkdir()
+        (home / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
         (home / ".agent-worktrees").mkdir()
+        (home / ".agent-worktrees" / "projects.yaml").write_text(
+            "projects:\n  fixture:\n    anchor: " + json.dumps(str(home)) + "\n", encoding="utf-8",
+        )
         (home / ".agent-worktrees" / "config.yaml").write_text(
             "default_branch: main\nstateless: true\n", encoding="utf-8"
         )
@@ -85,7 +91,9 @@ const fallback = async payload => {
   return { permissionDecision: "deny", permissionDecisionReason: "fixture policy" };
 };
 const make = invokePolicy => createResidentPreToolHook({
-  scriptsRoot: root, environment: env, invokePolicy, report: reason => {
+  scriptsRoot: root, environment: env, invokePolicy,
+  admit: name.startsWith("real-") ? undefined : async () => true,
+  report: reason => {
     if (name === "report-failure") throw new Error("fixture diagnostic failure");
     reports.push(reason);
   },
@@ -216,6 +224,8 @@ if (name === "reads" || name === "bom") {
   if (name === "real-protected-write") {
     assert.equal(result.permissionDecision, "deny");
     assert.match(result.permissionDecisionReason, /stateless|personal/i);
+  } else if (name === "real-invalid-context") {
+    assert.deepEqual(result, {}, "unqualified installation cannot activate policy");
   } else {
     assertUnavailable(result);
     assert.match(result.additionalContext,
@@ -278,7 +288,7 @@ console.log(JSON.stringify({ case: name, calls, reports }));
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update(HOME=str(home), USERPROFILE=str(home))
+    env.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
     result = subprocess.run(
         [node, str(driver), str(module), str(scripts), str(flag), str(home), sys.executable, case],
         capture_output=True, text=True, encoding="utf-8", env=env, cwd=home, timeout=40,
@@ -619,6 +629,7 @@ def test_legacy_main_keeps_cheap_guard_when_sdk_native_admission_unavailable(mon
         modules[filename + ".py"] = module
         monkeypatch.setitem(sys.modules, filename, module)
     client = modules["hook_client.py"]
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda *_: True)
     modules.update({
         "pretool_killswitch.py": SimpleNamespace(is_active=lambda: False),
         "statelessness_guard.py": SimpleNamespace(decide=lambda *a, **k: {
@@ -713,6 +724,7 @@ def test_disabled_supersede_keeps_cheap_decision_without_owned_supervision(monke
         spec.loader.exec_module(module)
         modules[name + ".py"] = module
     client = modules["hook_client.py"]
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda *_: True)
     modules.update({
         "pretool_killswitch.py": SimpleNamespace(is_active=lambda: False),
         "statelessness_guard.py": SimpleNamespace(decide=lambda *a, **k: {
@@ -789,6 +801,7 @@ def test_classifier_failure_cannot_suppress_independent_legacy_protection(monkey
         "pr_supersede_guard.py": SimpleNamespace(needs_observations=broken_classifier, decide=lambda *a, **k: None),
     })
     client = loaded["hook_client.py"]
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda *_: True)
     def load(name):
         assert name != "hook_policy_process.py", "failed classification selected supervision"
         return loaded.get(name)

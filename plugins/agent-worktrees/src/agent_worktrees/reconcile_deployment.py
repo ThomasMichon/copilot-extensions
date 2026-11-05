@@ -236,7 +236,7 @@ HOOK_SHIM_FILES = (
     "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py",
     "pr_supersede_guard.py",
     "registry_root.py",
-    "hook_client.py", "hook_pre_policy.py", "hook_policy_process.py",
+    "hook_client.py", "managed_session.py", "managed-session.ps1", "hook_pre_policy.py", "hook_policy_process.py",
     "pre-tool-hook.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1",
 )
 

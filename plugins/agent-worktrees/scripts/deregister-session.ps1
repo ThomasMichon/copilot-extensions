@@ -3,6 +3,12 @@ try {
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $OutputEncoding = $utf8
     [Console]::OutputEncoding = $utf8
+    $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
+    try { $payload = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
+    if (-not [IO.File]::Exists($admission)) { exit 0 }
+    . $admission
+    if (-not (Test-ManagedWorktreesSession -Raw $payload)) { exit 0 }
     $runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
         $pointer = $env:COPILOT_EXTENSIONS_CONTEXT
@@ -60,8 +66,6 @@ print(helper['python_cache_arguments'](Path(sys.executable))[1].split('=', 1)[1]
         (Join-Path $PSScriptRoot 'hook_runtime.py'))
     if ($LASTEXITCODE -ne 0 -or $selectedCache.Count -ne 1 -or
         -not [IO.Path]::IsPathRooted($selectedCache[0])) { throw 'Runtime cache selection failed' }
-    $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
-    try { $payload = $reader.ReadToEnd() } finally { $reader.Dispose() }
     $payload | & $python -I -X utf8 -X "pycache_prefix=$($selectedCache[0])" (Join-Path $PSScriptRoot 'hook_client.py') sessionEnd
     if ($LASTEXITCODE -ne 0) { throw 'SessionEnd client failed' }
 } catch {

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent review-first plan and implementation PRs against `dev`
 - **Created:** 2026-11-04
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Worktree agency and cooperative write guards](../../../visions/plugins/agent-worktrees/README.md#write-guards-are-hygiene-nudges-named-for-their-plain-mundane-reason); [bounded hook failures](../../../visions/harness-guidance/README.md#bounded-actionable-hook-failures)
 - **Umbrella issue:** #10564
 - **Sub-issues:** none
@@ -35,7 +35,8 @@ without turning a cached ownership fact into cached permission for an edit.
 #10564 records global hooks and extension behavior applying outside an adopted
 harness. Initial inspection identified command hooks, the Python hook client,
 resident pre-tool policy and the session extension as relevant consumers.
-The reported edit denial still needs an isolated reproducer.
+Isolated event-replay controls now cover the reported scope failure and compare
+registry-only no-ops with preserved managed-anchor denial.
 
 This closes the existing vision's cooperative, applicable intervention intent.
 It follows [circumstantial hook contracts](../../../docs/patterns/circumstantial-hook-contracts.md):
@@ -70,18 +71,18 @@ publication rules remain independent gates.
 
 ### Phase 1 - Review the bounded activation contract
 
-- [ ] Land this proposal after the required automated review and CI before implementation.
+- [x] Land this proposal after the required automated review and CI before implementation.
 
 ### Phase 2 - Prove and implement managed-session admission
 
-- [ ] Inventory automatic hook/extension consumers and reproduce the unrelated-repository failure using synthetic owned fixtures.
-- [ ] Implement shared admission from the selected installation's project ownership before policy, lifecycle or extension effects; repository registration/classification alone never admits a session.
-- [ ] Cache positively established session/workspace membership with appropriate ownership-input invalidation; preserve current policy evaluation, first-use discovery and independent sessions.
-- [ ] Apply equivalent admission to command/resident, lifecycle and fallback paths without disabling intended protections inside managed anchors/worktrees.
+- [x] Inventory automatic hook/extension consumers and reproduce the unrelated-repository failure using synthetic owned fixtures.
+- [x] Implement shared admission from the selected installation's project ownership before policy, lifecycle or extension effects; repository registration/classification alone never admits a session.
+- [x] Cache positively established session/workspace membership with appropriate ownership-input invalidation; preserve current policy evaluation, first-use discovery and independent sessions.
+- [x] Apply equivalent admission to command/resident, lifecycle and fallback paths without disabling intended protections inside managed anchors/worktrees.
 
 ### Phase 3 - Validate and land the complete source fix
 
-- [ ] Run focused unit and real consumer checks for unmanaged inertness, managed behavior and cache isolation/invalidation; record platform coverage and native measurements honestly.
+- [x] Run focused unit and real consumer checks for unmanaged inertness, managed behavior and cache isolation/invalidation; record platform coverage and native measurements honestly.
 - [ ] Update authoritative behavior documentation, add the plugin changefile and pass applicable lint, typing, install-contract and required publication checks.
 - [ ] Land the complete implementation after review and required CI, preserving release-versus-installed-state distinctions.
 
@@ -92,11 +93,11 @@ publication rules remain independent gates.
 
 ## Validation Plan
 
-- [ ] Unregistered and registry-only reference/worktree-class repositories produce no agent-worktrees policy, lifecycle, pulse or disposition effects through actual automatic entry points.
-- [ ] Owned managed anchors and worktrees still reach existing policy and lifecycle behavior, including nested working directories and the selected installation.
-- [ ] Positive associations are reused, cannot leak across session/workspace/installation boundaries, and invalidate when relevant ownership inputs change; a prior unmanaged result does not permanently suppress later legitimate admission.
-- [ ] Command and resident pre-tool paths, session start/end, post-tool behavior and compatibility fallbacks agree on membership; absence or failure of admission does not fabricate a lifecycle outcome.
-- [ ] Lightweight real-process consumer checks and a fresh temporary profile exercise the first-touch and warm paths without changing the operator's installation; native Windows and available POSIX coverage are distinguished.
+- [x] Unregistered and registry-only reference/worktree-class repositories produce no agent-worktrees policy, lifecycle, pulse or disposition effects through actual automatic entry points.
+- [x] Owned managed anchors and worktrees still reach existing policy and lifecycle behavior, including nested working directories and the selected installation.
+- [x] Positive associations are reused, cannot leak across session/workspace/installation boundaries, and invalidate when relevant ownership inputs change; a prior unmanaged result does not permanently suppress later legitimate admission.
+- [x] Command and resident pre-tool paths, session start/end, post-tool behavior and compatibility fallbacks agree on membership; absence or failure of admission does not fabricate a lifecycle outcome.
+- [x] Lightweight real-process consumer checks and a fresh temporary profile exercise the first-touch and warm paths without changing the operator's installation; native Windows and available POSIX coverage are distinguished.
 - [ ] Targeted tests and required source gates pass on the submitted revision; public documentation and reproducible validation steps describe the implemented behavior.
 - [ ] Review and required CI pass, implementation and completion deltas merge, the effort is Done/archived, and source obligations settle. Installed rollout is explicitly excluded.
 
@@ -118,3 +119,20 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - Confirmed target effort adoption and allocated an isolated source worktree.
 - Adopted an owner-managed context-qualified agenda for the driving worktree; it sequences plan review, implementation, validation/publication and canonical completion.
 - No implementation, installed update or service mutation has occurred.
+
+### 2026-11-04 - Reviewed plan accepted
+
+- #10566 merged after an approving Copilot review with no findings and required green CI.
+- Pulled the source branch forward to the merged plan; the coordination issue remains open.
+- Proceeding to the Phase 2 consumer inventory and isolated reproducer. No installed rollout is authorized.
+
+### 2026-11-04 - Admission implemented and locally qualified
+
+- Added one passive project/Git-membership owner with source-bound positive session caching; command hooks, the resident receiver and SDK effects share that boundary. Legacy bootstrap fallback is gated too.
+- Initial regression controls failed for all four unmanaged event kinds before admission was wired. Actual hook subprocesses now remain inert in unregistered and registry-only reference/worktree repositories; the same adopted anchor still denies protected edits.
+- The six-file adjacent packet passed 378 cases with 3 platform skips at unchanged runner budgets. The final 35-case admission packet also passed, including incomplete-Git freshness, repeated use of the same session/workspace in real isolated installation cells with no legacy fallback, and refusal to execute WindowsApps interpreter aliases.
+- Native PowerShell 7 and Windows PowerShell 5.1 controls preserve Unicode paths, deferred PR-observation frames and protected decisions. Two cycles per host observed actual Python descendants, zero visible windows and zero foreground transitions. Forced admission timeout retires the pinned actual interpreter behind the venv redirector before fixture cleanup.
+- Retained protected-hook cold/warm samples were 2338.85/2056.21 ms for PowerShell 7 and 2014.52/1846.26 ms for Windows PowerShell. Earlier pairs were 2152.66/1844.50 and 1993.24/1777.37 ms. Inputs were one adopted synthetic anchor/project, a temporary profile and the source policy fallback, not an installed serving runtime. These are individual samples, not tail or two-second budget qualification; wider performance qualification remains with #7935.
+- Install contract, version/docs consistency, focused Python lint, JavaScript syntax and all 40 admitted strict typing projects passed. The installer declaration generator changed only this plugin's human-output declaration.
+- Fresh temporary-profile checks exercise first-touch behavior without installing anything. Git Bash consumers were exercised on Windows; native Linux/macOS, a live Copilot process and an external venue were not available in this local Windows source lane. SDK transport is an explicit test double around the actual extension and Python policy modules, not installed activation evidence.
+- Implementation review, required CI and canonical completion/archival remain open. No runtime update, service restart or fleet rollout has occurred.

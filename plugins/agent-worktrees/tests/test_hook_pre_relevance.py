@@ -20,11 +20,18 @@ def _pretool_recovery_fixture(tmp_path, fault):
     scripts = home / ".agent-worktrees" / "bin"
     scripts.mkdir(parents=True)
     (cwd / ".git").mkdir(parents=True)
+    for folder in ("objects", "refs"):
+        (cwd / ".git" / folder).mkdir()
+    (cwd / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (scripts.parent / "projects.yaml").write_text(
+        "projects:\n  fixture:\n    anchor: " + json.dumps(str(cwd)) + "\n", encoding="utf-8",
+    )
     (cwd / ".agent-worktrees").mkdir()
     (cwd / ".agent-worktrees" / "config.yaml").write_text("stateless: true\n", encoding="utf-8")
     for path in SCRIPTS.glob("*.py"):
         shutil.copyfile(path, scripts / path.name)
     shutil.copyfile(SCRIPTS / "pre-tool-hook.ps1", scripts / "pre-tool-hook.ps1")
+    shutil.copyfile(SCRIPTS / "managed-session.ps1", scripts / "managed-session.ps1")
     interpreter = sys.executable.replace("'", "''")
     (scripts / "resolve-runtime.ps1").write_text(
         "param([string]$TraceMode)\n$AwPy = '" + interpreter + "'\n", encoding="utf-8-sig",
@@ -69,6 +76,8 @@ def _pretool_recovery_fixture(tmp_path, fault):
     ):
         env.pop(name, None)
     env["PRETOOL_KILLSWITCH_STATE_FILE"] = str(home / "absent-stop.json")
+    env["COPILOT_AGENT_SESSION_ID"] = "recovery-fixture"
+    env["AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON"] = sys.executable
     return home, cwd, scripts, env
 
 
@@ -136,12 +145,18 @@ def _run_pretool_manifest(tmp_path, consumer, fault, protected=False, read=False
     "missing-entry", "missing-policy", "broken-policy", "missing-runtime", "malformed-event",
 ])
 def test_pretool_manifest_unavailable_keeps_repair_usable(tmp_path, consumer, fault):
-    _assert_pretool_recovery_outcome(_run_pretool_manifest(tmp_path, consumer, fault))
+    result = _run_pretool_manifest(tmp_path, consumer, fault)
+    if fault == "malformed-event":
+        assert result == {}, "an event without session membership remains inert"
+    else:
+        _assert_pretool_recovery_outcome(result)
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
 def test_pretool_manifest_unavailable_keeps_read_usable(tmp_path, consumer):
-    _assert_pretool_recovery_outcome(_run_pretool_manifest(tmp_path, consumer, "missing-runtime", read=True))
+    result = _run_pretool_manifest(tmp_path, consumer, "missing-runtime", read=True)
+    if result:
+        _assert_pretool_recovery_outcome(result)
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])

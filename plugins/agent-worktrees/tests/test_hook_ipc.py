@@ -612,6 +612,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     installed.mkdir(parents=True)
     helpers = (
         "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py",
+        "managed_session.py", "managed-session.ps1", "guarded_anchor_map.py", "registry_root.py",
         "hook_lifecycle_runtime.py", "native_source_context.py",
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",
@@ -1657,6 +1658,7 @@ def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts
         "spec=importlib.util.spec_from_file_location('hook',sys.argv[1]); "
         "hook=importlib.util.module_from_spec(spec); spec.loader.exec_module(hook); "
         "hook._command_catalog_context=lambda:'catalog'; "
+        "hook._managed_session_admitted=lambda *_:True; "
         "hook.socket.gethostname=lambda:'VM-ABC'; "
         "hook.decide=lambda *args: (_ for _ in ()).throw(RuntimeError('lifecycle interrupted')); "
         "raise SystemExit(hook.main(['sessionStart']))"
@@ -2013,6 +2015,7 @@ def test_session_start_main_folds_decision_context_and_emits_empty_result(
         },
     }
     seen = {"enrichment_calls": 0}
+    monkeypatch.setattr(hook_client, "_managed_session_admitted", lambda *_: True)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
 
     def enrich(value):
@@ -2056,6 +2059,7 @@ def test_session_start_main_emits_empty_object_on_unhandled_exception(
     exception anywhere in the try block (decide(), payload enrichment,
     _write_session_guidance) still leaves valid stdout for the host to parse.
     """
+    monkeypatch.setattr(hook_client, "_managed_session_admitted", lambda *_: True)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"sessionId": "s"})))
     monkeypatch.setattr(
         hook_client,
@@ -2070,6 +2074,7 @@ def test_session_start_main_emits_empty_object_on_unhandled_exception(
 def test_session_start_catalog_exists_before_lifecycle_decision(
     monkeypatch, tmp_path, capsys, decision_fails
 ):
+    monkeypatch.setattr(hook_client, "_managed_session_admitted", lambda *_: True)
     payload = {
         "sessionId": "early-catalog", "cwd": str(tmp_path),
         "timestamp": 1000, "source": "new",
@@ -2320,7 +2325,7 @@ def test_windows_session_hook_rejects_windowsapps_python_alias():
     assert "$ran = ($LASTEXITCODE -eq 0)" in command
     assert "-not $env:COPILOT_EXTENSIONS_CONTEXT" in command
     bash = hooks["hooks"]["sessionStart"][0]["bash"]
-    assert 'if python3 "$s" sessionStart; then ran=true; fi' in bash
+    assert 'python3 "$s" sessionStart; then ran=true; fi' in bash
     assert '[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]' in bash
     assert '${COPILOT_PLUGIN_ROOT:-$PWD}' not in bash
 

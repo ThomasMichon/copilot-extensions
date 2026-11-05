@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { lstatSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { createManagedSessionAdmission } from "./managed-session.mjs";
 
 const GUARDS = [
   "statelessness_guard.py", "cross_repo_guard.py",
@@ -87,7 +88,7 @@ export function createPythonPolicy({ scriptsRoot, python, environment = process.
   if (!isAbsolute(python) || !statSync(python).isFile()) {
     throw new Error("resident pre-tool policy requires an absolute existing interpreter");
   }
-  return payload => new Promise((resolve, reject) => {
+  const invoke = payload => new Promise((resolve, reject) => {
     const frame = JSON.stringify(payload) + "\n";
     for (const name of [...GUARDS, "hook_client.py", "hook_runtime.py", "pretool_killswitch.py",
       "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py"]) {
@@ -133,10 +134,15 @@ export function createPythonPolicy({ scriptsRoot, python, environment = process.
     });
     child.stdin?.write(frame, "utf8");
   });
+  invoke.python = python;
+  return invoke;
 }
 
 export function createResidentPreToolHook({
   scriptsRoot, invokePolicy, environment = process.env,
+  admit = createManagedSessionAdmission({
+    scriptsRoot, environment, python: environment.AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON || invokePolicy?.python,
+  }),
   report = reason => console.error(`agent-worktrees resident preToolUse: ${reason}`),
 }) {
   let generation = null;
@@ -149,6 +155,7 @@ export function createResidentPreToolHook({
           typeof input.sessionId !== "string" || !input.sessionId) {
         throw new Error("invalid-sdk-input");
       }
+      if (!await admit(input)) return {};
       const stop = hotStop(environment);
       if (stop === true) return {};
       if (stop === false && ["view", "rg", "glob"].includes(input.toolName)) {

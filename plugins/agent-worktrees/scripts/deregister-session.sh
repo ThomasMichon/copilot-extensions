@@ -6,6 +6,10 @@ unavailable() {
     exit 0
 }
 scripts="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || unavailable
+payload="$(cat)" || exit 0
+python="$(command -v python3 || command -v python || true)"
+[[ -n "$python" && -f "$scripts/managed_session.py" ]] || exit 0
+printf '%s' "$payload" | "$python" -I -B "$scripts/managed_session.py" --check || exit 0
 runtime_root="$HOME/.agent-worktrees"
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     owner="${AGENT_WORKTREES_PAYLOAD_ROOT:-${COPILOT_PLUGIN_ROOT:-${scripts%/*}}}"
@@ -34,5 +38,5 @@ helper = runpy.run_path(sys.argv[1])
 print(helper["python_cache_arguments"](Path(sys.executable))[1].split("=", 1)[1])
 ' "$scripts/hook_runtime.py")" || unavailable
 [[ -n "$selected_cache" ]] || unavailable
-PYTHONPATH="" "$AW_PY" -I -X utf8 -X "pycache_prefix=$selected_cache" "$scripts/hook_client.py" sessionEnd || unavailable
+printf '%s' "$payload" | PYTHONPATH="" "$AW_PY" -I -X utf8 -X "pycache_prefix=$selected_cache" "$scripts/hook_client.py" sessionEnd || unavailable
 exit 0
