@@ -231,6 +231,28 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [daemon-scheduling](daemon-scheduling-cohort.md),
+[engine-adoption](engine-adoption-cohort.md) and
+[native-controls](native-controls-cohort.md) studies preserve twelve whole
+originals and all refinements, thirty-two noncompletion comparisons and four
+protected-description relations withheld. Existing historical intake/source
+credit, paused adopter gates and independent profile/permission policies remain;
+#10149 has a finite changed-source question, not a completion verdict.
+
+That [finite follow-through](native-controls-cohort.md#finite-10149-source-follow-through)
+now verifies the actual reviewed merge, green required CI, unchanged prior
+whole objects and whole skill/dispatcher. The actual CI selection excludes
+the focused control cases; the Active owner's remaining qualification and
+acceptance gates survive, and #10149 remains OPEN. Two complete 16:33 PST
+scans remain 1,007 whole open, 278 above 729, without new closure credit.
+
+The preceding eleven-document research delta merged in #10537; its
+[delivery journal](<journal/2026/11.04 repository-authority-contracts.md>)
+records the actual outcome. Two complete 16:25 PST scans count 1,007 whole
+open, 278 above 729; one metadata-only inflow adds no campaign closure credit.
+Continue genuine finite-source qualification and the weighted graph without
+resuming held lanes or treating documentation as the parent checkpoint.
+
 The [lifetime-control](lifetime-control-cohort.md),
 [finalization/recovery](finalization-recovery-cohort.md) and
 [repository-authority](repository-authority-cohort.md) studies retain eleven
@@ -929,6 +951,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [daemon](daemon-scheduling-cohort.md),
+[engine](engine-adoption-cohort.md) and
+[native-control](native-controls-cohort.md) cores retain all thirty-five
+whole texts and their original distinctions. Current messages/descriptions
+support thirty-two bounded comparisons, not source completion. Four protected
+relations receive no source/subset retry. Preserve historical intake without
+replay, actual production-witness uncertainty, paused rollout, native/installed
+acceptance, settings/permission authority and every incumbent claim/check state.
 
 The three [lifetime](lifetime-control-cohort.md),
 [recovery](finalization-recovery-cohort.md) and
