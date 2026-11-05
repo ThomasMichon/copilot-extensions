@@ -327,6 +327,9 @@ HTTP event loop. The real legacy resolver module is retained once per canonical
 owner path, with serialized first load; runtime selection is still recomputed
 on each observation. Repeated health polls therefore do not accumulate its
 fork callbacks or freeze the previously selected slot.
+Same-cell observations similarly retain the packaged validator code, but
+revalidate installation, namespace and governance receipts on every poll.
+Independently selected peer payload validators are not retained.
 
 This declaration covers coherent acquisition/lineage delegation, not support in
 the selected Worktrees build. An assembling owner must independently observe that

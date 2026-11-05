@@ -64,8 +64,8 @@ TMux, remote-authentication or installed acceptance. Historical vectors and
 packets remain unchanged; only the current HTTP-52 vector adds capability
 expectations.
 
-Worktree record delegation adds six focused ASGI controls, bringing the
-portfolio to 122. Health advertises `worktree_record_delegation: 1` and the
+Worktree record delegation adds seven focused ASGI controls, bringing the
+portfolio to 123. Health advertises `worktree_record_delegation: 1` and the
 canonical selected installation root without executing a child. Legacy,
 same-cell, PATH-only, missing and refused selections preserve baseline health;
 the existing active/passive slot and routing generation remain independent.
@@ -73,7 +73,10 @@ These controls do not certify the delegated serializer or admit an assignment.
 The repeated-observation control loads the real installed resolver, checks
 stable fork-callback registration across 32 health polls, then changes the
 selected runtime slot and requires the new selection without reloading code.
-The selection resolver is now a semantic HTTP source. The current vector adds
+A separate real same-cell validator control requires one packaged code load
+across 32 health polls, then independently corrupts and restores installation,
+namespace and activation receipts to prove that observations remain fresh.
+The selection resolver and packaged peer launcher are semantic HTTP sources. The current vector adds
 the named capability expectation; HTTP generation 52, prior feature floors,
 all earlier cases and historical packets remain unchanged.
 

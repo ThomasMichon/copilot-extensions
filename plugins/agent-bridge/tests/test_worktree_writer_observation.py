@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from zdd import routing
 
 from agent_bridge import session_lifecycle_cli as lifecycle
+from agent_bridge import _installation_context as installation
 from agent_bridge.routes import health
 
 
@@ -129,3 +130,81 @@ def test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot(
         assert client.get("/health").status_code == 200
         assert lifecycle._legacy_worktrees_runtime_prefix(own)[0] == str(second)
         assert len(registrations) == initial
+
+
+def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle._peer_launch, "_packaged_primitives", {})
+    cell = tmp_path / "marketplaces" / "example--9caa0da95f327099"
+    own = cell / "plugins" / "agent-bridge"
+    own.mkdir(parents=True)
+    (own.parent / "agent-worktrees").mkdir()
+    payload = cell / "payloads" / "agent-bridge"
+    payload.mkdir(parents=True)
+    namespace = cell / "namespace.json"
+    namespace.write_text(json.dumps({
+        "schema": "copilot-extensions.marketplace-namespace", "version": 1,
+        "marketplaceId": cell.name, "generation": 1, "state": "active",
+        "source": {
+            "kind": "github", "canonical": "github:example-org/example-marketplace",
+            "ref": "", "fingerprint":
+                "sha256:9caa0da95f327099983348a3d2353fa93e57ef6428b69f354cc3bdc76ada0894",
+        },
+        "locators": [],
+    }), encoding="utf-8")
+    receipt = own / "install.json"
+    receipt.write_text(json.dumps({
+        "schema": "copilot-extensions.plugin-installation", "version": 1,
+        "marketplaceId": cell.name, "pluginId": own.name,
+        "pluginRoot": str(own), "namespaceReceipt": str(namespace),
+        "payload": {"root": str(payload), "version": "1.0.0", "origin": "explicit"},
+        "roots": {name: name for name in (
+            "versions", "snapshots", "state", "run", "logs", "cache", "launchers",
+        )},
+        "generation": 1, "state": "active",
+    }), encoding="utf-8")
+    environment, _ = installation._current_environment(
+        environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
+    )
+    activation = own / "installation-activation.json"
+    activation.write_text(json.dumps({
+        "schema": "copilot-extensions.installation-activation", "version": 1,
+        "marketplaceId": cell.name, "pluginId": own.name, "mode": "namespaced",
+        "state": "active", "environment": environment, "context": str(receipt),
+        "namespaceGeneration": 1, "installGeneration": 1, "generation": 1,
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+        "legacy": {"disposition": "absent", "probe": {
+            "declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z",
+        }},
+    }), encoding="utf-8")
+    monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
+    monkeypatch.setattr(lifecycle.shutil, "which", lambda name: pytest.fail("cell used PATH"))
+    monkeypatch.setattr(lifecycle.subprocess, "run", lambda *a, **k: pytest.fail("health launched a child"))
+    monkeypatch.setattr(health, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        health, "get_default_manager", lambda: SimpleNamespace(carrier_diagnostics=lambda: {}),
+    )
+    load = Mock(wraps=lifecycle._peer_launch._load_primitive)
+    monkeypatch.setattr(lifecycle._peer_launch, "_load_primitive", load)
+    app = FastAPI()
+    app.include_router(health.router)
+    with TestClient(app) as client:
+        for _ in range(32):
+            assert client.get("/health").json()["worktree_record_writer"] == {
+                "installation_root": str(own.parent / "agent-worktrees"),
+            }
+        assert load.call_count == 1
+        for path in (receipt, namespace, activation):
+            original = path.read_text(encoding="utf-8")
+            path.write_text("{}", encoding="utf-8")
+            assert client.get("/health").json()["worktree_record_writer"] == {
+                "installation_root": None,
+            }
+            path.write_text(original, encoding="utf-8")
+            assert client.get("/health").json()["worktree_record_writer"] == {
+                "installation_root": str(own.parent / "agent-worktrees"),
+            }
+        assert load.call_count == 1
