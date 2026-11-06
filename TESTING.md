@@ -35,6 +35,18 @@ affected owners' agreement.
 
 ## Focused packet catalog
 
+Worktrees' opt-in `--test-file tests/test_handoff_head_observation.py --test-file
+tests/test_lazy_dispatch.py --test-file tests/test_session_lifecycle.py
+--allow-explicit-tiers` packet checks the passive expected-consumer comparison
+over current private tracking and delivery files. Actual JavaScript file/task
+consume functions retain independent identity when head promotion fails;
+parser/dispatch, legacy/malformed/ambiguous/incomplete evidence, changed sources,
+bounded non-creating reads, and separate durable-head/Picker choices are covered.
+The receipt-directory discovery is limited to one exact owning worktree;
+session-state reads remain exact registered IDs. These are isolated source
+controls, not installed, native performance or live manual-cutover acceptance.
+The required unit-only packet is unchanged.
+
 The Windows Resume consumer packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
 It requires PowerShell 7 and real PSMux, without fallback or prerequisite skips

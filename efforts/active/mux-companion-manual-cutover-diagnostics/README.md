@@ -331,7 +331,7 @@ https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321
 
 - The [independent expected-head source sequence](expected-head-observation.md)
   realizes P3/P4 through the existing owner receipts and an optional passive
-  comparison. Plan #10865 is merged; H1 captures optional original/consumer
+  comparison. Plan #10865 is merged; #10870 captures optional original/consumer
   identity in source. The passive comparison reader and Companion consumer remain
   unimplemented. Legacy identity stays unknown and all original clauses below
   remain unchanged.
@@ -624,6 +624,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Validation Plan
 
+- [x] Independent expected-head H1 identity capture in existing owner records:
+      36 actual binding and 147 handoff/CLI controls preserve exact optional
+      identity, unknown outcomes, legacy replay and deduplicated original
+      metadata. #10870 merged after current-head independent approval and every
+      required green check; the complete root and five linked contracts were
+      read immediately afterward. H2 comparison, H3 display and all original
+      manual/head/native gates remain open.
+
 - [x] Step 7 finite supported history/live splice and gap qualification:
       274 owner/model/actual-three-source controls preserve explicit
       retention/replacement/append failure and distinguish coalesced
@@ -733,6 +741,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Passive independent expected-head provider](journal/2026/11.05-companion-expected-head-reader.md)
+- [2026-11-05 - Original handoff and consumer identity capture](journal/2026/11.05-companion-expected-head-identity.md)
 - [2026-11-05 - Reviewed independent expected-head source sequence](journal/2026/11.05-companion-expected-head-plan.md)
 - [2026-11-05 - Supported history/live splice and gap qualification](journal/2026/11.05-sidecar-history-gaps.md)
 - [2026-11-05 - Strict codec and retained membership replay boundaries](journal/2026/11.05-sidecar-codec-boundaries.md)

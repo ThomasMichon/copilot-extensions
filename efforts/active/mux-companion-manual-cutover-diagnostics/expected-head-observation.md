@@ -7,7 +7,8 @@ not a replacement effort or a new head authority. Coordination remains
 Plan #10865 merged as `5c8cf8466cbaca830af80ebe7347efad83d3111f`.
 The source captures optional identity in the existing binding and consumption
 records. The passive comparison reader and Companion consumer remain
-unimplemented.
+unimplemented. H1 merged in #10870 as
+`0c51500c9284d4aeaaa6b4706ef969c8c49b4111`.
 
 ## Intent and existing evidence
 
@@ -34,16 +35,19 @@ Existing Context Handoff storage already supplies the independent side:
   promotion does not erase the successful consume.
 
 These are owned delivery records, not proof that the head changed or that a
-process/pane retired. The current records do not capture their original
-worktree-creation nonce or consumer activation. A mutable binding read later
-cannot retroactively supply those facts. Legacy records must therefore remain
-unqualified rather than being rewritten or upgraded by observation.
+process/pane retired. Legacy records do not capture their original
+worktree-creation nonce or consumer activation. H1 enriches fresh records without
+retroactively supplying those facts from a mutable binding read later.
+Legacy records therefore remain unqualified rather than being rewritten or
+upgraded by observation.
 
 Worktrees already stamps an exact session's `worktree-binding.json`, optionally
 including project and creation nonce after a locked, uncached source recheck.
 Reuse that seam for an optional activation observation. Context Handoff can
 capture it within its existing durable delivery records, without another
-per-operation CLI lookup or another registry.
+binding-lookup CLI or another registry. Task creation reuses returned payload
+metadata or one existing read-only payload lookup to preserve the original
+author identity on deduplication, including unknown legacy evidence.
 
 The current durable head and the Picker's read-time resume choice are distinct:
 `WorktreeRecord.resolved_head_session` replays the head ledger, while
@@ -86,8 +90,10 @@ distinction; a durable-head match alone cannot promise the same resume target.
 
 - [ ] Add one optional, versioned Worktrees read over an exact current record and
       the existing delivery schemas. Use current record ownership/incarnation
-      and bounded exact-ID reads, never a session-state-root sweep. A missing
-      state directory is not created by this read.
+      and bounded exact-ID reads, never a session-state-root sweep. Candidate
+      discovery is confined to the exact worktree's own existing handoff
+      directory: actual consumption can precede recording a token in the head
+      ledger. A missing state directory is not created by this read.
 - [ ] Return the independently admitted expected consumer/predecessor/token,
       the durable head and the existing Picker resolver's read-time choice as
       separate facts. Retain the source kind, exact subject/activation and
@@ -138,7 +144,8 @@ The proposed read contract is `agent-worktrees.handoff-head-observation`, versio
 callers ignore the declaration without incurring receipt reads. A later
 Companion retains the declaration instead of discarding the envelope and invokes
 the new read only when that selected runtime declares support. The exact parser,
-envelope and resource limits are documented with H2 before consumer adoption.
+envelope and resource limits are documented with H2 before consumer adoption
+in the [provider contract](../../../plugins/agent-worktrees/docs/handoff-head-observation.md).
 
 Old Context Handoff records and old binding writers remain usable for their
 existing purposes but cannot qualify the new comparison. New Context Handoff

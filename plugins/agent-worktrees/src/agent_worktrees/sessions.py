@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import platform
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -816,7 +816,11 @@ def session_has_conversation_data(session_id: str | None) -> bool:
     return (sdir / "session.db").exists() or (sdir / "events.jsonl").exists()
 
 
-def resolve_resume_target(record) -> str | None:
+def resolve_resume_target(
+    record, *,
+    conversation_data: Callable[[str], bool] | None = None,
+    latest_session: Callable[[str, list | None], str | None] | None = None,
+) -> str | None:
     """The concrete session id a resume should reattach to -- freshest first.
 
     The single execution-time answer to "which session does this worktree
@@ -845,9 +849,11 @@ def resolve_resume_target(record) -> str | None:
             head = yielded_head_session(record)
     except Exception:
         head = None
-    if head and session_has_conversation_data(head):
+    has_data = conversation_data if conversation_data is not None else session_has_conversation_data
+    latest = latest_session if latest_session is not None else find_latest_session_id_fast
+    if head and has_data(head):
         return head
-    return find_latest_session_id_fast(
+    return latest(
         getattr(record, "worktree_path", ""), getattr(record, "sessions", None),
     )
 
