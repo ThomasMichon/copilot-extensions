@@ -120,7 +120,7 @@ class CopilotAccountFile:
             temporary = candidate
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 stream.write(header)
-                json.dump(value, stream, ensure_ascii=True)
+                json.dump(value, stream, ensure_ascii=True, allow_nan=False)
                 stream.write("\n")
                 stream.flush()
                 if os.fstat(stream.fileno()).st_size > _MAX_CONFIG_BYTES:

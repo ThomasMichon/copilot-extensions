@@ -272,7 +272,8 @@ async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(t
 
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
 @pytest.mark.parametrize("kind", [
-    "symlink", "public", "malformed", "header-duplicate", "nonfinite", "missing-account", "hardlink",
+    "symlink", "public", "malformed", "header-duplicate", "nonfinite", "overflow",
+    "negative-overflow", "missing-account", "hardlink",
 ])
 def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
     root = tmp_path / ".copilot"
@@ -294,6 +295,12 @@ def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
         config.write_text('// Native header\n{"authTokens":{},"authTokens":{}}')
     elif kind == "nonfinite":
         config.write_text('{"authTokens":{"https://github.com:synthetic":{"token":"old-token"}},"value":NaN}')
+    elif kind in {"overflow", "negative-overflow"}:
+        number = "1e309" if kind == "overflow" else "-1e309"
+        config.write_text(
+            '{"authTokens":{"https://github.com:synthetic":{"token":"old-token"}},"value":'
+            + number + "}",
+        )
     elif kind == "missing-account":
         config.write_text('{"authTokens":{}}')
     elif kind == "hardlink":
