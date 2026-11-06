@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SOURCE_LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
+SOURCE_LEASE_EXCHANGE = "connection-bound/v1"
 
 
 @dataclass
@@ -187,13 +188,19 @@ def _source_lease(transport, fields, capability, *, timeout):
             raise ValueError
         started = time.monotonic()
         started_at = time.time()
-        support = _roundtrip(transport, "describe-account-relay\n\n", timeout=timeout)
-        if support != {
-            "contract": SOURCE_LEASE_CONTRACT, "operation": "get-account-source-lease",
-        }:
-            raise RuntimeError("source-account-relay-lease-unsupported")
-        wire = _account_wire("get-account-source-lease", fields, capability())
-        response = _roundtrip(transport, wire, timeout=timeout - (time.monotonic() - started))
+
+        def acquire(support):
+            if support != {
+                "contract": SOURCE_LEASE_CONTRACT, "operation": "get-account-source-lease",
+                "exchange": SOURCE_LEASE_EXCHANGE,
+            }:
+                raise RuntimeError("source-account-relay-lease-unsupported")
+            return _account_wire("get-account-source-lease", fields, capability())
+
+        response = _roundtrip(
+            transport, f"describe-account-relay\nexchange={SOURCE_LEASE_EXCHANGE}\n\n",
+            timeout=timeout, followup=acquire,
+        )
         token = _response_token(response, fields, source_lease=True)
         if (
             response["lease_contract"] != SOURCE_LEASE_CONTRACT
@@ -254,7 +261,7 @@ def _response_token(response, fields, *, source_lease=False):
         raise RuntimeError("source-account-relay-unavailable") from None
 
 
-def _roundtrip(transport: dict, wire: str, *, timeout: float) -> dict:
+def _roundtrip(transport: dict, wire: str, *, timeout: float, followup=None) -> dict:
     try:
         if type(timeout) not in (int, float) or not 0 < timeout <= 30:
             raise ValueError
@@ -338,30 +345,34 @@ def _roundtrip(transport: dict, wire: str, *, timeout: float) -> dict:
                 observed = endpoint.stat()
                 if actual_uid != peer_uid or (observed.st_dev, observed.st_ino) != (device, inode):
                     raise ValueError
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ValueError
-            connection.settimeout(remaining)
-            connection.sendall(wire.encode("utf-8"))
-            data = bytearray()
-            while b"\n\n" not in data:
+            def request(value):
                 remaining = deadline - time.monotonic()
-                if remaining <= 0 or len(data) >= 32768:
+                if remaining <= 0:
                     raise ValueError
                 connection.settimeout(remaining)
-                part = connection.recv(min(4096, 32768 - len(data)))
-                if not part:
-                    if not data:
-                        return {}
-                    raise ValueError
-                data.extend(part)
-        response = {}
-        for line in data.decode("utf-8").strip().splitlines():
-            key, separator, value = line.partition("=")
-            if not separator or key in response:
-                raise ValueError
-            response[key] = value
-        return response
+                connection.sendall(value.encode("utf-8"))
+                data = bytearray()
+                while b"\n\n" not in data:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or len(data) >= 32768:
+                        raise ValueError
+                    connection.settimeout(remaining)
+                    part = connection.recv(min(4096, 32768 - len(data)))
+                    if not part:
+                        if not data:
+                            return {}
+                        raise ValueError
+                    data.extend(part)
+                response = {}
+                for line in data.decode("utf-8").strip().splitlines():
+                    key, separator, value = line.partition("=")
+                    if not separator or key in response:
+                        raise ValueError
+                    response[key] = value
+                return response
+
+            response = request(wire)
+            return request(followup(response)) if followup is not None else response
     except (OSError, ValueError, TypeError, KeyError, UnicodeError):
         raise RuntimeError("source-account-relay-unavailable") from None
 

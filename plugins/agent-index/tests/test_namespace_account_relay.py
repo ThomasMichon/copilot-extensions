@@ -22,8 +22,9 @@ CAPABILITY = "synthetic-namespace-capability-0123456789"
 RESPONSE = b"protocol=https\nhost=github.com\nusername=fixture-account\ntoken=synthetic-token\n\n"
 SUPPORT = (
     b"contract=credential-relay.account-source-lease/v1\n"
-    b"operation=get-account-source-lease\n\n"
+    b"operation=get-account-source-lease\nexchange=connection-bound/v1\n\n"
 )
+DISCOVER = b"describe-account-relay\nexchange=connection-bound/v1\n\n"
 
 
 def lease_response(issued, expires, **changes):
@@ -98,7 +99,7 @@ def test_namespace_identity_is_checked_before_capability_bytes(
             self.sent.append(value)
 
         def recv(self, size):
-            if self.sent[-1] == b"describe-account-relay\n\n":
+            if self.sent[-1] == DISCOVER:
                 return SUPPORT
             if source_lease:
                 now = time.time()
@@ -126,6 +127,7 @@ def test_namespace_identity_is_checked_before_capability_bytes(
 
 @pytest.mark.parametrize("support", [
     b"", b"contract=older\n\n", SUPPORT.replace(b"\n\n", b"\nextra=unknown\n\n"),
+    SUPPORT.replace(b"exchange=connection-bound/v1\n", b""),
 ])
 def test_lease_client_refuses_unsupported_live_peer_before_reading_capability(tmp_path, support):
     captured = []
@@ -155,7 +157,54 @@ def test_lease_client_refuses_unsupported_live_peer_before_reading_capability(tm
         finally:
             worker.join(timeout=6)
             assert not worker.is_alive()
-    assert captured == [b"describe-account-relay\n\n"]
+    assert captured == [DISCOVER]
+
+
+def test_lease_acquisition_stays_on_the_peer_that_answered_discovery():
+    captured = []
+    with socket.socket() as original, socket.socket() as replacement:
+        for listener in (original, replacement):
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            listener.settimeout(1)
+        transport = {"host": "127.0.0.1", "port": original.getsockname()[1]}
+
+        def frame(client):
+            data = bytearray()
+            while b"\n\n" not in data:
+                part = client.recv(4096)
+                if not part:
+                    return bytes(data)
+                data.extend(part)
+            return bytes(data)
+
+        def serve():
+            with original.accept()[0] as client:
+                client.settimeout(2)
+                captured.append(frame(client))
+                # Republish the route before answering; the admitted connection remains original.
+                transport["port"] = replacement.getsockname()[1]
+                client.sendall(SUPPORT)
+                captured.append(frame(client))
+                now = time.time()
+                client.sendall(("\n".join(
+                    f"{key}={value}" for key, value in lease_response(now, now + 60).items()
+                ) + "\n\n").encode())
+
+        worker = threading.Thread(target=serve)
+        worker.start()
+        try:
+            result = relay.exchange_source_lease(transport, FIELDS, CAPABILITY, timeout=1)
+            assert result.token == "synthetic-token"
+            replacement.settimeout(0.1)
+            with pytest.raises(TimeoutError):
+                replacement.accept()
+        finally:
+            worker.join(timeout=3)
+            assert not worker.is_alive()
+    assert captured[0] == DISCOVER
+    assert captured[1].startswith(b"get-account-source-lease\n")
+    assert CAPABILITY.encode() in captured[1]
 
 
 @pytest.mark.parametrize("failure", [
@@ -169,13 +218,17 @@ def test_lease_client_bounds_duration_and_rejects_invalid_evidence(monkeypatch, 
     ))
     requests = []
 
-    def roundtrip(transport, wire, *, timeout):
+    def roundtrip(transport, wire, *, timeout, followup):
         requests.append((wire, timeout))
         assert 0 < timeout <= 20
-        if wire == "describe-account-relay\n\n":
-            clock.monotonic_value += 2
-            clock.wall += 2
-            return {"contract": relay.SOURCE_LEASE_CONTRACT, "operation": "get-account-source-lease"}
+        assert wire.encode() == DISCOVER
+        clock.monotonic_value += 2
+        clock.wall += 2
+        wire = followup({
+            "contract": relay.SOURCE_LEASE_CONTRACT, "operation": "get-account-source-lease",
+            "exchange": relay.SOURCE_LEASE_EXCHANGE,
+        })
+        requests.append((wire, timeout - 2))
         clock.monotonic_value += 3
         clock.wall += 3
         value = lease_response(1002, 1062)
