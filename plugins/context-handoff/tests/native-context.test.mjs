@@ -142,14 +142,14 @@ test("native pressure defers checkpoint persistence and ordering to the host", (
   }
 });
 
-test("real extension event path suppresses force and resets only root windows", async () => {
+async function runExtensionFixture(fixtureName, configText) {
   const root = await mkdtemp(join(tmpdir(), "native-extension-"));
   try {
     await mkdir(join(root, ".git"));
     await mkdir(join(root, ".context-handoff"));
-    await writeFile(join(root, ".context-handoff", "config.yaml"), "mode: auto\n");
+    await writeFile(join(root, ".context-handoff", "config.yaml"), configText);
     await writeFile(join(root, "settings.json"), '{"contextManagementTools":true}');
-    const fixture = fileURLToPath(new URL("./fixtures/native-extension.mjs", import.meta.url));
+    const fixture = fileURLToPath(new URL(`./fixtures/${fixtureName}`, import.meta.url));
     const loader = new URL("./fixtures/native-sdk-loader.mjs", import.meta.url).href;
     const extension = fileURLToPath(new URL("../extensions/context-handoff/extension.mjs", import.meta.url));
     const result = spawnSync(process.execPath,
@@ -161,4 +161,12 @@ test("real extension event path suppresses force and resets only root windows", 
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally { await rm(root, { recursive: true, force: true }); }
+}
+
+test("real extension event path suppresses force and resets only root windows", async () => {
+  await runExtensionFixture("native-extension.mjs", "mode: auto\nnative_pressure: nudge\n");
+});
+
+test("native-selected sessions defer automatic pressure nudges to the host by default", async () => {
+  await runExtensionFixture("native-defer-extension.mjs", "mode: auto\n");
 });

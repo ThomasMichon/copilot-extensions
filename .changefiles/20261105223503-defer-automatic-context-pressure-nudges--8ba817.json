@@ -1,0 +1,9 @@
+{
+  "comment": "Defer automatic context-pressure nudges to the host when native context management is selected (new native_pressure config: defer by default, nudge to restore).",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

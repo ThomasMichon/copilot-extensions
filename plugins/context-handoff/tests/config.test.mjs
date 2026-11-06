@@ -96,7 +96,15 @@ test("token thresholds are accepted as a full alternative", () => {
 test("rejects unknown and unsafe configuration", () => {
   assert.throws(
     () => parseContextHandoffConfig("thresholds:\n  mystery_percent: 200000\n"),
-    /expected top-level mode or thresholds block entries/,
+    /expected top-level mode, native_pressure, or thresholds block entries/,
+  );
+  assert.throws(
+    () => parseContextHandoffConfig("native_pressure: loud\n"),
+    /native_pressure must be one of 'defer', 'nudge'/,
+  );
+  assert.throws(
+    () => parseContextHandoffConfig("native_pressure: nudge\nnative_pressure: defer\n"),
+    /duplicate native_pressure/,
   );
   assert.throws(
     () => parseThresholdConfig(
@@ -108,6 +116,18 @@ test("rejects unknown and unsafe configuration", () => {
     () => parseContextHandoffConfig("mode: sideways\n"),
     /mode must be one of/,
   );
+});
+
+test("native pressure defaults to defer and repo config overrides user config", () => {
+  withRepository((root, home) => {
+    assert.equal(loadContextHandoffConfig(root, { homeDir: home }).nativePressure, "defer");
+    mkdirSync(join(home, ".context-handoff"));
+    writeFileSync(join(home, ".context-handoff", "config.yaml"), "native_pressure: nudge\n");
+    assert.equal(loadContextHandoffConfig(root, { homeDir: home }).nativePressure, "nudge");
+    mkdirSync(join(root, ".context-handoff"));
+    writeFileSync(join(root, ".context-handoff", "config.yaml"), "native_pressure: defer\n");
+    assert.equal(loadContextHandoffConfig(root, { homeDir: home }).nativePressure, "defer");
+  });
 });
 
 test("describes non-Error throw values safely", () => {
