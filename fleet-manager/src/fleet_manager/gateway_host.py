@@ -180,16 +180,24 @@ def prepare(root: Path, selection: dict) -> tuple[object, object]:
         from .ssh_machine import prepare as prepare_ssh
 
         state = Path(config.to_dict()["state_dir"]).resolve()
-        host_state = (root / STATE).resolve()
-        if state.is_relative_to(host_state) or host_state.is_relative_to(state):
-            raise PlanError("SSH client lease must be separate from host lifecycle state")
+        installation = root.resolve()
+        if state.is_relative_to(installation) or installation.is_relative_to(state):
+            raise PlanError("SSH client lease must be separate from host lifecycle state and installation root")
         from agent_ssh.gateway_directory import validate_consumer_state
 
         value = config.to_dict()
-        validate_consumer_state(
-            root, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
-            authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,
+        protected = [root, Path(selection["configuration"])]
+        protected.extend(
+            Path(value[name])
+            for name in ("policy_path", "identity_file", "public_key_file", "proof_key_file",
+                         "gateway_ca", "access_token_file")
+            if value.get(name) is not None
         )
+        for path in protected:
+            validate_consumer_state(
+                path, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
+                authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,
+            )
         startup_digest(selection, configuration=config)
         prepare_ssh(config)
         return config, None

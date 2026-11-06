@@ -76,12 +76,13 @@ Use the same owner-private `gateway-host.json`, with configuration version 2:
 The referenced [SSH configuration](ssh-machine.md) keeps its existing v1
 token/proof or v2 machine-key meaning and provider-owned references. Preflight
 validates the existing local writer scopes and credentials without network,
-lease creation or profile writes. The SSH lease and lifecycle state must be
-separate. No enrollment, credential acquisition or materialization occurs.
+lease creation or profile writes. The SSH lease and entire installation root
+must be separate. No enrollment, credential acquisition or materialization occurs.
 The entire installation root is excluded from all direct and derived writer
 destinations, protecting configuration, selectors and immutable runtime slots
-as well as lifecycle state. Token-mode preflight reads and validates the current
-bounded UTF-8 token without retaining it; later admissions still reread the
+as well as lifecycle state. Selected configuration and startup input references
+outside that root are protected from writer overlap too. Token-mode preflight
+reads and validates the current bounded UTF-8 token without retaining it; later admissions still reread the
 provider reference.
 Every fingerprinted policy, identity, public-key, proof-key and CA reference is
 read during setup preflight, before the incoming selection can replace a healthy

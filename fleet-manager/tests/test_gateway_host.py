@@ -298,6 +298,40 @@ def test_ssh_host_preflight_preserves_installation_metadata_from_writer_scope(tm
     assert not Path(value["state_dir"]).exists()
 
 
+@pytest.mark.parametrize("reference", [
+    "configuration", "policy_path", "identity_file", "public_key_file", "proof_key_file",
+])
+def test_ssh_host_preflight_protects_external_input_references_from_writers(tmp_path, reference):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    original = Path(selection[reference] if reference == "configuration" else value[reference])
+    external = tmp_path / "external-input"
+    external.write_bytes(original.read_bytes())
+    if reference == "configuration":
+        selection["configuration"] = str(external)
+    else:
+        value[reference] = str(external)
+    value["ssh_config"] = str(external)
+    host.write_private(Path(selection["configuration"]), value)
+    before = external.read_bytes()
+    with pytest.raises(ValueError, match="outside local writer scopes"):
+        host.prepare(root, selection)
+    assert external.read_bytes() == before
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+def test_ssh_host_preflight_keeps_consumer_lease_outside_installed_slots(tmp_path):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    slot = root / "versions" / "candidate"
+    host.write_private(Path(selection["configuration"]), value | {"state_dir": str(slot)})
+    with pytest.raises(PlanError, match="separate from host lifecycle state"):
+        host.prepare(root, selection)
+    assert not slot.exists()
+    assert not (root / host.STATE).exists()
+
+
 @pytest.mark.parametrize("failure", ["missing", "empty", "invalid-utf8", "overlong"])
 def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_path, failure):
     from fleet_manager.gateway_contract import GatewayError
