@@ -118,13 +118,25 @@ def tool_result(identifier, content):
     return {"role": "tool", "tool_call_id": identifier, "content": content}
 
 
-@pytest.mark.parametrize("status", ["absent", "unsafe_root", "entry_limit", "file_limit"])
+@pytest.mark.parametrize("status", [
+    "absent", "unsafe_root", "redirected_root", "entry_limit", "file_limit",
+])
 def test_refused_initial_inventory_emits_no_tool_calls(tmp_path, monkeypatch, status):
     import snapshot_rounds
 
     root = tmp_path / "instructions"
     if status == "unsafe_root":
         root.write_text("Not a directory", encoding="utf-8")
+    elif status == "redirected_root":
+        root.mkdir()
+        resolve = Path.resolve
+        monkeypatch.setattr(
+            Path, "resolve",
+            lambda path, *args, **kwargs: (
+                tmp_path / "outside" if path == root else resolve(path, *args, **kwargs)
+            ),
+        )
+        status = "unsafe_root"
     elif status != "absent":
         root.mkdir()
         for name in ("one.md", "two.md"):
