@@ -403,6 +403,14 @@ transition or evaluator request. Historical protected submissions without a
 retained proposal cannot be enriched or retroactively qualified through this
 path. Existing confirmation of already submitted work is unchanged.
 
+The current `DispatchClient` gives completion a read budget of at least
+60 seconds for the three bounded 15-second owner reads and response overhead.
+It preserves a longer or disabled selected read timeout, the selected connection,
+write and pool budgets, and other operations' timeouts. This adds no read-timeout
+retry. Older clients may still have a shorter request budget; a lost response is
+an unknown outcome to reconcile against the original retained task/proposal,
+not evidence that submission failed or permission for cleanup.
+
 The rollback guard also refuses first-result admission **before** the first
 ordinary completion call has retained a proposal. Another persisted guard binds
 advancement to that exact proposal. Upgraded and older callers therefore cannot

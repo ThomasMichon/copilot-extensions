@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -248,3 +249,58 @@ def test_original_machine_case_alias_keeps_exact_workspace_and_completion_owner(
     submitted = queue.complete(task.id, "HOST-A/tree", result={"answer": "done"})
     assert submitted.completed_by == "HOST-A/tree"
     assert queue.submission_preparation(task.id)["request"]["workspace"]["machine"] == "host-a"
+
+
+def test_http_client_waits_for_owner_observation_beyond_its_baseline_read_timeout(ready, monkeypatch):
+    from agent_dispatch.client import DispatchClient
+    from tests.test_mcp_http import _boot
+
+    queue, _, task, _, _, _, _, calls = ready
+    observe = advancement.observe_owner_state
+
+    def delayed(task_id, original):
+        time.sleep(11)
+        return observe(task_id, original)
+
+    monkeypatch.setattr(advancement, "observe_owner_state", delayed)
+    url, stop = _boot(create_app(queue, enable_mcp=False, verification_interval=0))
+    try:
+        with DispatchClient(url) as client:
+            assert client._http.timeout.read == 10.0
+            submitted = client.complete(task.id, task.owner, result={"answer": "done"})
+            assert client._http.timeout.read == 10.0
+        assert submitted["status"] == Status.SUBMITTED
+        assert queue.submission_preparation(task.id)["advancement"]["state"] == "submitted"
+        assert len(calls) == 3 and len(queue.list_verification_requests(task.id)) == 1
+    finally:
+        stop()
+
+
+@pytest.mark.parametrize("configured,expected", [(10.0, 60.0), (120.0, 120.0)])
+def test_completion_extends_only_read_budget_and_preserves_a_longer_selected_timeout(
+    ready, configured, expected,
+):
+    import httpx
+
+    from agent_dispatch.client import DispatchClient
+
+    observed = []
+
+    def reply(request):
+        observed.append((request.url.path, request.extensions["timeout"]))
+        return httpx.Response(200, json={"status": "submitted"})
+
+    with DispatchClient(
+        "http://coordinator.invalid", timeout=configured, transport=httpx.MockTransport(reply),
+    ) as client:
+        client.complete("task", "worker")
+        client.health()
+        assert client._http.timeout.read == configured
+    assert observed == [
+        ("/tasks/task/complete", {
+            "connect": configured, "read": expected, "write": configured, "pool": configured,
+        }),
+        ("/health", {
+            "connect": configured, "read": configured, "write": configured, "pool": configured,
+        }),
+    ]
