@@ -1351,6 +1351,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     tmp_path: Path,
     shell: str,
     command: str,
+    record_property,
 ) -> None:
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
@@ -1360,7 +1361,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     (script.parents[1] / "plugin.json").write_text(
         json.dumps({"name": "agent-index", "version": "9.9.9"}), encoding="utf-8",
     )
-    cell = installation.stamp_context(
+    stamped = installation.stamp_context(
         payload_version="9.9.9", payload_origin="installed",
         expected_namespace_generation=0, expected_install_generation=0,
         payload_root=script.parents[1], plugin_id="agent-index",
@@ -1368,8 +1369,54 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         source_descriptor={"source": "github", "repo": "Example/Plugins"},
         durable_home=tmp_path / "cell", environment=env,
     )
+    cell = installation.validate_context_receipt(
+        stamped["installReceipt"], tmp_path / "cell", environment=env,
+    )
     cell_root = Path(cell["pluginRoot"])
     context = Path(cell["installReceipt"])
+
+    def owner_probe(value):
+        return subprocess.run(
+            [
+                sys.executable, "-I", "-B", "-c",
+                "import json, sys; from pathlib import Path; "
+                "sys.path.insert(0, sys.argv[1]); "
+                "from agent_index import _peer_launch; "
+                "print(json.dumps(_peer_launch.validate_owner("
+                "'agent-index', Path(sys.argv[2]), sys.argv[3])))",
+                str(script.parents[1] / "src"), str(cell_root), json.dumps(value),
+            ],
+            env=env, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    rejected = owner_probe(stamped)
+    rejection = "Explicit inline context conflicts with its canonical receipt"
+    assert rejected.returncode != 0 and rejection in rejected.stderr, (
+        rejected.stdout + rejected.stderr
+    )
+    record_property("original_context_rejection", rejection)
+    policy = tmp_path / ".copilot-extensions" / "installation-mode.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(json.dumps({
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": True, "marketplaces": {}},
+    }), encoding="utf-8")
+    installation.compare_and_swap_activation(
+        context=context, expected_marketplace_id=cell["marketplaceId"],
+        expected_plugin_id="agent-index",
+        expected_namespace_generation=cell["namespaceGeneration"],
+        expected_install_generation=cell["generation"], expected_activation_generation=0,
+        activation_mode="namespaced", activation_state="active",
+        legacy_disposition="absent",
+        legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+        durable_home=tmp_path / "cell", legacy_root=tmp_path / ".agent-index",
+        environment=env,
+    )
+    admitted = owner_probe(cell)
+    assert admitted.returncode == 0, admitted.stdout + admitted.stderr
+    owner = json.loads(admitted.stdout)
+    assert owner["invocationGovernance"]["reason"] == "namespaced-active"
     repository = tmp_path / f"repo-{shell}-{command}"
     nested = repository / "nested" / "work"
     nested.mkdir(parents=True)
@@ -1432,6 +1479,17 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     )
 
     result = _run(shell, script, env, *arguments, cwd=nested)
+    if result.returncode != (7 if command == "setup" else 0):
+        reader = subprocess.run(
+            [sys.executable, "-E", "-B", str(script.parent / "resolve_effective_config.py"),
+             "--cwd", str(repository)],
+            env=env, cwd=nested, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        pytest.fail(
+            f"Dispatcher: {result.returncode} {result.stdout} {result.stderr}\n"
+            f"Effective reader: {reader.returncode} {reader.stdout} {reader.stderr}"
+        )
 
     if command == "setup":
         assert result.returncode == 7
