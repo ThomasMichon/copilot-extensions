@@ -137,6 +137,8 @@ from test_worktree_writer_observation import (
     as test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts,
     test_unknown_or_changed_slot_never_certifies_a_build
     as test_unknown_or_changed_slot_never_certifies_a_build,
+    test_same_cell_health_rechecks_peer_selection_without_launch
+    as test_same_cell_health_rechecks_peer_selection_without_launch,
 )
 
 ROOT = Path(__file__).resolve().parents[3]

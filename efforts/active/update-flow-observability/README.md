@@ -66,6 +66,11 @@ while retaining installation, ownership, policy and health contracts.
   outcomes and retention; #6057 retains remote prompt admission. Compatibility
   must preserve those contracts, not manufacture target-owned evidence or
   reinterpret an uncertain launch as permission to repeat it.
+- **Direct cohort receipt:** the [update-convergence amendment](cohort-receiving.md)
+  retains #5703's unknown lifecycle residuals and #7305's complete installed,
+  wrapper and hook acceptance as distinct planned lanes. Only complete actual
+  parent/effort readback permits subordinate `NOT_PLANNED` tracking retirement;
+  #6796's explicit #6600 disposition and #6820's pause remain unchanged.
 
 ## Context
 
@@ -107,6 +112,10 @@ On 2026-10-24, the operator added the following compatibility requirements:
 The audit, timing, presentation and speed goals are operator-requested.
 The sequencing, specific repair choices, formatter grammar and validation
 matrix below are _(agent-recommended)_ implementation details.
+
+- [ ] Complete the [direct update-convergence cohort Plan](cohort-receiving.md#direct-plan),
+  preserving all existing credits, exact failure history, owner duties and
+  authoritative incoming replacement independently of predecessor retirement.
 
 ### Phase 1 - Account for the flow and review the proposal
 
@@ -321,6 +330,10 @@ intent without changing session, seed or publication authority.
   named tracked objective, archive this effort, and release responsibility.
 
 ## Validation Plan
+
+- [ ] Satisfy the [direct cohort Validation](cohort-receiving.md#direct-validation)
+  under existing source/native/installed owners; tracking receipt is not a
+  completed bug, cause, retry authorization, rollout or custody release.
 
 - [x] Use deterministic clocks to cover start, progress, completion, no-op,
   failure, nesting, multiline output, empty output and clock movement.

@@ -330,8 +330,14 @@ fork callbacks or freeze the previously selected slot.
 Same-cell observations similarly retain the packaged validator code, but
 revalidate installation, namespace and governance receipts on every poll.
 Independently selected peer payload validators are not retained.
+The shared [peer launcher](../../../libs/peer-launch/README.md) now delegates
+both same-cell execution and child-free observation to that peer's shipped
+Python resolver. This intentionally adopts its selector semantics rather than
+assuming equivalence with the former shell/PowerShell path. Peers without a
+callable Python resolver retain native execution and unknown build observation;
+an available resolver that fails is not bypassed.
 
-For the completed legacy selection, `runtime_generation` reads the build UUID
+For a completed legacy or supported same-cell selection, `runtime_generation` reads the build UUID
 published by Worktrees candidate preparation in the exact selected version
 slot's `.runtime-bootstrap/runtime-generation`. Both physical `.venv`
 application environments and historical direct-slot environments are supported.
@@ -339,9 +345,11 @@ Redirected directories, indirect/non-regular generation files, malformed or
 missing metadata and the mutable `dev` slot leave that generation unknown.
 Selection and metadata are rechecked around the observation; a change leaves
 both fields unknown. Root-wide deployment stamps and newer payload metadata
-are not consulted. The same-cell native launcher does not yet expose its
-resolved interpreter without launching a child, so its root remains observable
-but its build generation stays null rather than being guessed from that root.
+are not consulted. Same-cell selection rechecks both installation/namespace
+receipts and owner/peer governance around the peer-owned resolver, and again
+around metadata observation. Replaced resolver source leaves the observation
+unknown until a fresh caller loads current code; it never certifies the cached
+answer as the replacement's selection.
 Older responses may omit the additive field entirely.
 
 This declaration covers coherent acquisition/lineage delegation, not support in

@@ -32,8 +32,17 @@ on cwd changes and root window clears. Errors are surfaced without settings
 contents; advertised tools are not proof of provider provenance or a successful
 rollover.
 
-Native selection substitutes soft/hard **checkpoint** prompts, suppresses custom
-force capture/pickup and mutating-tool denial, and resets per-window pressure on
+Native selection defers automatic soft/hard pressure handling to the host by
+default (`native_pressure: defer`): the extension sends no pressure prompts and
+logs no threshold crossings, because the host already drives its own checkpoint
+cadence and its context accounting can differ from the `session.usage_info`
+estimate (for example when a host routes turns across models with different
+windows), so plugin nudges could compete with the host controller. A nudge
+queued before native selection is dropped at the next idle, and one
+informational log per window records the deferral. Set `native_pressure: nudge`
+in `.context-handoff/config.yaml` to restore plugin-originated soft/hard
+**checkpoint** prompts. Either way native selection suppresses custom force
+capture/pickup and mutating-tool denial, and resets per-window pressure on
 confirmed root `session.context_cleared` (not subagent clears or cwd changes).
 It does not call native tools, clear a live session, opt subagents in, or change
 worktree ownership. The skill preserves parent gates, current slice, unresolved
@@ -970,6 +979,7 @@ layer, so a repo that only sets `mode` still inherits user-level thresholds.
 
 ```yaml
 mode: auto         # auto | manual-only | off
+native_pressure: defer  # defer | nudge (only when native context is selected)
 thresholds:
   soft_percent: 65
   hard_tokens: 75000

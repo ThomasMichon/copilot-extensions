@@ -302,7 +302,11 @@ _Operator-required outcome; agent-recommended slices and validation._
   resends or consuming newer input. The first conservative B3 comment-echo
   leaf merged in #10743; exact original versions and one contiguous semantic
   position are required. Unsupported attribution and longer chains remain
-  unavailable. Complete B3/A2 acceptance and negotiated serving remain open.
+  unavailable. The optional [retained reader](../../../plugins/agent-pull-requests/docs/attention-reader.md)
+  source merged in #10906, including conservative captured-feedback availability
+  and the negotiated CLI/client/Gateway path. Complete B3/A2, historical
+  per-operation readback, normal-host/provider/installed serving and the remaining
+  parent acceptance stay open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -940,6 +944,39 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Land the optional retained attention consumer source
+
+- #10906 actually merged as `98e8f311db0efdf9a19a2e9fc27e317ad6c03329`
+  after current-head Copilot approval with no open review issues and the latest
+  required CI passed. The source worktree is reconciled; no running host was
+  migrated, enrolled, updated or deployed.
+- The optional v5 reader uses the current acquisition, selector/policy,
+  protected-feedback, replay-envelope and authenticated Gateway owners.
+  Actual strict CLI/client/handler/store fixtures preserve scoped interests,
+  meaningful age, original native outcomes and snapshot-fenced paging without
+  read-side handled writes, watch ACK, Dispatch emission or a new ledger.
+- All five findings were addressed: capture-specific readback provenance,
+  distinct refused/unavailable/invalid-result CLI exits, unknown/partial native
+  feedback across reopen and explicit in-flight read supersession during
+  capability refresh. The final coupled packet passes 295 cases with bounded
+  cleanup verified. Fatal lint, module/docs/install contracts and admitted
+  strict service Linux/Windows targets pass; native Windows, installed and
+  live-provider acceptance are not inferred.
+- The current layout retains only current handled provenance. Historical
+  per-operation readback, unsupported reply/edit/vote echo versions and longer
+  chains remain explicitly unavailable under the existing captured-feedback
+  acceptance. Complete B3/A2, broad A3 serving, provider/retention/CLI/Dispatch
+  and installed/shadow outcomes stay open.
+- Post-merge pull-forward initially replayed the squash and aborted on a
+  conflict, despite canonical aggregate landing proof. All changed source/test
+  content matched the actual merge; the journal contained only an additional
+  concurrent upstream entry. Retained backup and verified zero-unpublished
+  range allowed lossless reconciliation. The recurrence is recorded on #4130's
+  existing PRC-5404-R4 / PRC-4699-R2 scope, not silently dismissed or assigned a
+  new owner.
+- Re-read the complete current Plan and Validation Plan. Keep the parent Active
+  and preserve every independent source/resource, provider and rollout gate.
 
 ### 2026-11-06 - Land the released-checkout test-preparation repair
 

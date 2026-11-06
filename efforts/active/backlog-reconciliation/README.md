@@ -331,6 +331,14 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed delivery of #10917 and two direct actual-parent studies.
+The complete22:53 PST census is827 whole OPEN:548 creator-eligible,
+279 excluded,561 original-cohort and266 inflow. A new metadata-only arrival
+adds no credit; verified dispositions remain979,98 above fixed729.
+Update and role receiving plans require actual canonical acceptance/readback;
+no source, native, installed, owner or custody outcome is inferred.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records reviewed merge #10904, the actual #9481 corrective reopening and
 #7942's finite observation completion through #8026. The original native
 acceptance remains OPEN; source parity for #8972 is credited without
