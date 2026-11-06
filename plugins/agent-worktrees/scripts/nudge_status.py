@@ -143,15 +143,20 @@ def _note_identity(value):
 @contextmanager
 def _counter_lock(aw: Path, worktree_id: str, deadline=None):
     """Share one bounded byte-range transaction with the shell read consumer."""
+    with _byte_lock(aw / "nudge-state" / f"{worktree_id}.lock", deadline) as acquired:
+        yield acquired
+
+
+@contextmanager
+def _byte_lock(path: Path, deadline=None):
     if deadline is not None and time.time() >= deadline:
         yield False
         return
     stream = None
     acquired = False
     try:
-        directory = aw / "nudge-state"
-        directory.mkdir(parents=True, exist_ok=True)
-        stream = (directory / f"{worktree_id}.lock").open("a+b")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stream = path.open("a+b")
         until = time.monotonic() + min(
             0.1, max(0, deadline - time.time()) if deadline is not None else 0.1,
         )
@@ -264,24 +269,27 @@ def _consume_late_watch(path: Path, snapshot: bytes) -> bool:
     if os.name != "nt":
         path.unlink()
         return True
-    claimed = path.with_name(path.name + ".consuming-" + uuid.uuid4().hex)
-    try:
-        path.rename(claimed)
+    with _byte_lock(path.with_name(path.name + ".lock")) as acquired:
+        if not acquired:
+            return False
+        claimed = path.with_name(path.name + ".consuming-" + uuid.uuid4().hex)
         try:
-            with claimed.open("rb") as stream:
-                if stream.read(8193) != snapshot:
-                    return False
-            claimed.unlink()
-            return True
-        finally:
-            if claimed.exists():
-                try:
-                    claimed.rename(path)
-                except FileExistsError:
-                    # A newer watch supersedes the claimed snapshot; never overwrite it.
-                    claimed.unlink()
-    except OSError:
-        return False
+            path.rename(claimed)
+            try:
+                with claimed.open("rb") as stream:
+                    if stream.read(8193) != snapshot:
+                        return False
+                claimed.unlink()
+                return True
+            finally:
+                if claimed.exists():
+                    try:
+                        claimed.rename(path)
+                    except FileExistsError:
+                        # A newer watch supersedes the claimed snapshot; never overwrite it.
+                        claimed.unlink()
+        except OSError:
+            return False
 
 
 def _late_guidance_notice(payload: dict, home: Path) -> str | None:

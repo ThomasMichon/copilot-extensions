@@ -212,7 +212,11 @@ repair, restart/new-context and no-model-admission wording.
 
 Windows shell and retained Python consumers atomically rename an eligible watch
 to a unique same-directory consumption path. Only the winner with the evaluated
-snapshot emits a notice. A replacement is restored without overwriting a newer
+snapshot emits a notice. The entire claim/check/restore transaction shares a
+bounded byte-range guard at `local-guidance-watch.json.lock`, waiting at most
+100 ms. Contention skips consumption without replay; the stable guard file is
+not removed. This prevents an overlapping stale claimant's restored old watch
+from being mistaken for a new publication. A replacement is restored without overwriting a newer
 watch; a superseded claimed snapshot is removed. Failed restoration without a
 replacement preserves the claimed file rather than discarding it. This is
 best-effort advisory consumption, not durable delivery or a new preparation

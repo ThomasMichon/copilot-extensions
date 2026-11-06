@@ -207,6 +207,8 @@ function Read-PostToolBoundedJson {
 function Remove-PostToolLateWatch {
     param([string]$Path, [string]$Snapshot)
     $claimed = $Path + '.consuming-' + [Guid]::NewGuid().ToString('N')
+    $guard = Enter-PostToolCounterLock ($Path + '.lock')
+    if ($null -eq $guard) { return $false }
     try {
         [IO.File]::Move($Path, $claimed)
         try {
@@ -227,7 +229,7 @@ function Remove-PostToolLateWatch {
                 }
             }
         }
-    } catch {}
+    } catch {} finally { $guard.Dispose() }
     return $false
 }
 

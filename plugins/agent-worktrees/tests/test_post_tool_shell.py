@@ -347,8 +347,13 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
             )
             assert result.returncode == 0, result.stderr
             assert not result.stderr
-            assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
-        assert seen == [("postToolUse", payload), ("postToolUse", payload)]
+            if event_case == "late-watch":
+                assert result.stdout == ""
+                assert (session / "local-guidance-watch.json").read_text() == "{}"
+            else:
+                assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
+        expected = [] if event_case == "late-watch" else [("postToolUse", payload)] * 2
+        assert seen == expected
     finally:
         server.close()
 
@@ -753,7 +758,18 @@ print(json.dumps({"additionalContext": notice} if notice else {}))
             process.stdin = None
         end = time.monotonic() + 6
         while not all((control / role).exists() for role in ("first", "second")):
-            assert time.monotonic() < end, "both consumers must evaluate the same original watch"
+            if time.monotonic() >= end or any(process.poll() is not None for process in processes):
+                diagnostics = []
+                for role, process in zip(("first", "second"), processes):
+                    code = process.poll()
+                    if code is None:
+                        process.kill()
+                    stdout, stderr = process.communicate(timeout=10)
+                    diagnostics.append({
+                        "role": role, "ready": (control / role).exists(), "exit_before_cleanup": code,
+                        "stdout": stdout, "stderr": stderr,
+                    })
+                pytest.fail(f"both consumers must evaluate the same original watch: {diagnostics}")
             time.sleep(0.005)
         (control / "go").write_text("go")
         notices = []
@@ -841,6 +857,112 @@ $consumed = Remove-PostToolLateWatch $env:TEST_WATCH '{"version":1,"started_at":
     assert json.loads(response.stdout) == {"consumed": False}
     assert json.loads(watch.read_text())["started_at"] == (3 if newer_during_restore else 2)
     assert not list(tmp_path.glob("local-guidance-watch.json.consuming-*"))
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native overlapping stale watch transactions")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("second_owner", ["shell", "python"])
+def test_overlapping_stale_claims_preserve_latest_publication(tmp_path, shell, second_owner):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    watch = tmp_path / "local-guidance-watch.json"
+    watch.write_text('{"started_at":2}', encoding="utf-8")
+    shell_driver = tmp_path / "stale-watch.ps1"
+    shell_driver.write_text("""
+. $env:TEST_MANAGED_SCRIPT
+. $env:TEST_FACTS_SCRIPT
+$script:originalRead = ${function:Read-PostToolBoundedJson}
+function Read-PostToolBoundedJson {
+    param([string]$Path, [int]$Limit, [ref]$Snapshot)
+    $control = $env:TEST_CONTROL
+    [IO.File]::WriteAllText([IO.Path]::Combine($control, $env:TEST_ROLE + '-claimed'), 'ready')
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while (-not [IO.File]::Exists([IO.Path]::Combine($control, $env:TEST_ROLE + '-go'))) {
+        if ($clock.Elapsed.TotalSeconds -ge 6) { throw 'stale claim rendezvous timed out' }
+        [Threading.Thread]::Sleep(5)
+    }
+    & $script:originalRead $Path $Limit $Snapshot
+}
+$consumed = Remove-PostToolLateWatch $env:TEST_WATCH $env:TEST_SNAPSHOT
+[Console]::Write((ConvertTo-Json -InputObject @{ consumed = $consumed } -Compress))
+""", encoding="utf-8")
+    python_driver = tmp_path / "stale-watch.py"
+    python_driver.write_text("""
+import importlib.util, json, os, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("stale_nudge", sys.argv[1])
+nudge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nudge)
+watch = Path(os.environ["TEST_WATCH"])
+control = Path(os.environ["TEST_CONTROL"])
+role = os.environ["TEST_ROLE"]
+rename = Path.rename
+def paused_rename(source, target):
+    result = rename(source, target)
+    if source == watch:
+        (control / (role + "-claimed")).write_text("ready")
+        end = time.monotonic() + 6
+        while not (control / (role + "-go")).exists():
+            if time.monotonic() >= end:
+                raise RuntimeError("stale claim rendezvous timed out")
+            time.sleep(0.005)
+    return result
+Path.rename = paused_rename
+print(json.dumps({"consumed": nudge._consume_late_watch(
+    watch, os.environ["TEST_SNAPSHOT"].encode("utf-8"))}))
+""", encoding="utf-8")
+    processes = []
+
+    def start(role, snapshot):
+        command = [executable, "-NoProfile", "-NonInteractive", "-File", str(shell_driver)]
+        if role == "second" and second_owner == "python":
+            command = [sys.executable, str(python_driver), str(PLUGIN / "scripts" / "nudge_status.py")]
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=dict(
+                os.environ, TEST_MANAGED_SCRIPT=str(PLUGIN / "scripts" / "managed-session.ps1"),
+                TEST_FACTS_SCRIPT=str(PLUGIN / "scripts" / "hook-facts.ps1"),
+                TEST_WATCH=str(watch), TEST_CONTROL=str(tmp_path), TEST_ROLE=role, TEST_SNAPSHOT=snapshot,
+            ), **no_window_kwargs(),
+        )
+        processes.append(process)
+        return process
+
+    def wait_for(predicate):
+        end = time.monotonic() + 6
+        while not predicate():
+            assert time.monotonic() < end, "stale claim control did not reach its boundary"
+            time.sleep(0.005)
+
+    def finish(process):
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0, stderr
+        assert not stderr
+        assert json.loads(stdout) == {"consumed": False}
+
+    try:
+        first = start("first", '{"started_at":1}')
+        wait_for(lambda: (tmp_path / "first-claimed").exists())
+        watch.write_text('{"started_at":3}', encoding="utf-8")
+        second = start("second", '{"started_at":2}')
+        wait_for(lambda: second.poll() is not None or (tmp_path / "second-claimed").exists())
+        (tmp_path / "first-go").write_text("go")
+        finish(first)
+        (tmp_path / "second-go").write_text("go")
+        finish(second)
+        assert json.loads(watch.read_text()) == {"started_at": 3}
+        assert not list(tmp_path.glob("local-guidance-watch.json.consuming-*"))
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
 
 
 @pytest.mark.portfolio_tier("T2")
