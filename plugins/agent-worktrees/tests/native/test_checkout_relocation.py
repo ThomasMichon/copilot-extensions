@@ -445,10 +445,16 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
         assert not record.yaml_path.with_suffix(".lock").exists()
 
 
-def test_ignored_nested_linked_worktree_refuses_without_changing_either_registration(checkout):
+@pytest.mark.parametrize("marker_case", [".git", ".GIT"])
+def test_ignored_nested_linked_worktree_refuses_without_changing_either_registration(checkout, marker_case):
+    if marker_case != ".git" and os.name != "nt":
+        pytest.skip("native Windows Git path case equivalence")
     nested = checkout.source / "nested"
+    (checkout.anchor / ".git" / "info").mkdir(exist_ok=True)
     (checkout.anchor / ".git" / "info" / "exclude").write_text("nested/\n")
     git_ops.create_worktree(str(checkout.anchor), str(nested), "worktree/nested", "HEAD")
+    if marker_case != ".git":
+        (nested / ".git").rename(nested / marker_case)
     before = git_ops.git("worktree", "list", "--porcelain", cwd=checkout.anchor).stdout
     with pytest.raises(ValueError, match="nested Git"):
         _plan(checkout)
@@ -491,7 +497,7 @@ def test_invalid_capability_effect_combination_uses_existing_error_output(capsys
         capabilities=True, worktree_id=None, destination=None, apply=True, abort=False,
     )
     assert worktree_ops_cli.cmd_move(args) == 1
-    assert "accepts no target or effects" in capsys.readouterr().err
+    assert "accepts no target or effects" in capsys.readouterr().out
 
 
 @pytest.mark.timeout(120)

@@ -82,8 +82,10 @@ def manifest(root: Path) -> dict[str, tuple]:
             raise ValueError("relocation v1 checkout exceeds its bounded entry inventory")
         info = path.lstat()
         relative = path.relative_to(root).as_posix()
+        name = path.name.casefold() if os.name == "nt" else path.name
+        root_git = name == ".git" and path.parent == root
         attributes = getattr(info, "st_file_attributes", 0)
-        if path.name == ".git" and relative != ".git":
+        if name == ".git" and not root_git:
             raise ValueError("relocation v1 refuses nested Git checkouts")
         if (
             stat.S_ISLNK(info.st_mode) or attributes & 0x144DE00
@@ -92,7 +94,7 @@ def manifest(root: Path) -> dict[str, tuple]:
             or stat.S_ISREG(info.st_mode) and attributes & 1
         ):
             raise ValueError("relocation v1 refuses links, hardlinks and special storage attributes")
-        if path.name == "pyvenv.cfg" or path.name == ".gitmodules":
+        if name in {"pyvenv.cfg", ".gitmodules"}:
             raise ValueError("relocation v1 refuses path-bound venvs and submodules")
         if os.name != "nt" and (
             hasattr(os, "listxattr") and os.listxattr(path)
@@ -101,7 +103,7 @@ def manifest(root: Path) -> dict[str, tuple]:
             raise ValueError("relocation v1 refuses extended attributes and sparse storage")
         if os.name == "nt":
             _require_plain_stream(path)
-        if relative == ".git":
+        if root_git:
             continue
         digest = None
         if path.is_file():
