@@ -1,0 +1,9 @@
+{
+  "comment": "Create the short socket fixture parent on fresh SSH test checkouts",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

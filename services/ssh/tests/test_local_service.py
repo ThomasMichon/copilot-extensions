@@ -408,6 +408,7 @@ def test_posix_projected_request_uses_short_owned_socket_directory(
     monkeypatch.setattr(local_control, "current_peer", lambda: caller)
     temporary: list[Path] = []
     repo = Path(__file__).resolve().parents[3]
+    (repo / ".test-venvs").mkdir(exist_ok=True)
     def create(*, prefix: str) -> str:
         path = Path(tempfile.mkdtemp(prefix=prefix, dir=repo / ".test-venvs"))
         temporary.append(path)
