@@ -129,7 +129,7 @@ async def test_attached_native_session_retires_before_host_admission(tmp_path, m
             await self.upstream.__aexit__(None, None, None)
 
     monkeypatch.setattr(serve, "BridgeSession", RetainedSession)
-    monkeypatch.setattr(serve, "load_config", lambda _: config)
+    monkeypatch.setattr(serve, "load_config", lambda _, **kwargs: config)
     server = Server(tmp_path / "runtime" / "serve.sock")
     registry = tmp_path / "instances"
     writer = None
@@ -140,7 +140,12 @@ async def test_attached_native_session_retires_before_host_admission(tmp_path, m
         try:
             await until(lambda: server._control_server is not None)
             reader, writer, token = await _connect(server.socket_path)
-            writer.write((json.dumps({"op": "attach", "bridge": "test", "token": token}) + "\n").encode())
+            from agent_mcp.request_context import capture_context
+
+            writer.write((json.dumps({
+                "op": "attach", "bridge": "test", "token": token,
+                "configuration_context": capture_context("test"),
+            }) + "\n").encode())
             await writer.drain()
             assert json.loads(await asyncio.wait_for(reader.readline(), 5))["attached"]
             child = sessions[0].upstream._transport._proc

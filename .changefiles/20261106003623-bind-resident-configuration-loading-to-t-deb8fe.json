@@ -1,0 +1,9 @@
+{
+  "comment": "Bind resident configuration loading to the qualified caller repository and isolate concurrent configuration sources.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
