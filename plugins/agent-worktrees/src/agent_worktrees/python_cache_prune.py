@@ -6,13 +6,14 @@ runtime has valid install evidence and otherwise mint a one-off
 process has exited, but nothing reclaims them automatically. This module
 reports (and with ``apply=True`` removes) only directories that are provably
 bytecode-only, old enough to be idle, free of reparse points, and not named by
-any inspectable live process.
+any live process.
 
-Removing a prefix that a live interpreter still points at is not a
-correctness hazard -- CPython treats bytecode-cache reads and writes as
-best-effort and recreates missing directories -- so the age grace period is
-the baseline liveness bound, strengthened by process evidence where the
-platform exposes it cheaply.
+Age alone does not prove the owning interpreter exited, so a candidate is
+eligible only after a complete process scan (every process environment and
+command line was readable) found no reference to it. Where that evidence is
+unavailable or incomplete, candidates are retained unless the caller
+explicitly accepts the age grace period as the liveness bound
+(``allow_age_only``); a failed scan always retains every candidate.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from typing import Callable, Iterable
 
 DEFAULT_MIN_AGE_SECONDS = 3600.0
 _UNSEALED = re.compile(r"^unsealed-[A-Za-z0-9-]+$")
-_UNSEALED_REF = re.compile(rb"unsealed-[A-Za-z0-9]+")
+_UNSEALED_REF = re.compile(rb"unsealed-[A-Za-z0-9-]+")
 _BYTECODE = re.compile(r"\.pyc(?:\.\d+)?$", re.IGNORECASE)
 _REPARSE_POINT = 0x400
 
@@ -53,7 +54,8 @@ class PruneReport:
     cache_root: str
     apply: bool
     min_age_seconds: float
-    liveness: str = "age-only"
+    liveness: str = "unavailable"
+    age_only_allowed: bool = False
     candidates: list[Candidate] = field(default_factory=list)
 
     def summary(self) -> dict[str, int]:
@@ -70,6 +72,7 @@ class PruneReport:
             "apply": self.apply,
             "min_age_seconds": self.min_age_seconds,
             "liveness": self.liveness,
+            "age_only_allowed": self.age_only_allowed,
             "summary": self.summary(),
             "candidates": [asdict(c) for c in self.candidates],
         }
@@ -252,17 +255,20 @@ def _remove(directory: str, tree: dict[str, _Node]) -> None:
         raise _Unsafe("no-anchored-removal")
 
 
-def live_unsealed_names() -> tuple[str, set[str] | None]:
+def live_unsealed_names(proc_root: str = "/proc") -> tuple[str, set[str] | None]:
     """Return (liveness mode, names referenced by live processes).
 
-    ``("process-scan", names)`` when every same-account process environment and
-    command line was inspected; ``("age-only", None)`` where the platform has
-    no cheap inspection; ``("unknown", None)`` when inspection failed.
+    ``("process-scan", names)`` when every process environment and command
+    line was read; ``("incomplete", names)`` when some live process could not
+    be inspected (for example another account's); ``("unavailable", None)``
+    where the platform offers no cheap inspection; ``("unknown", None)`` when
+    the scan itself failed. Only a process that exited mid-scan is skipped.
     """
-    proc = Path("/proc")
+    proc = Path(proc_root)
     if not sys.platform.startswith("linux") or not proc.is_dir():
-        return "age-only", None
+        return "unavailable", None
     names: set[str] = set()
+    complete = True
     try:
         pids = [p for p in os.listdir(proc) if p.isdigit()]
     except OSError:
@@ -271,12 +277,15 @@ def live_unsealed_names() -> tuple[str, set[str] | None]:
         for leaf in ("environ", "cmdline"):
             try:
                 data = (proc / pid / leaf).read_bytes()
-            except (FileNotFoundError, ProcessLookupError, PermissionError):
+            except (FileNotFoundError, ProcessLookupError):
+                break
+            except PermissionError:
+                complete = False
                 continue
             except OSError:
                 return "unknown", None
-            names.update(m.decode("ascii") for m in _UNSEALED_REF.findall(data))
-    return "process-scan", names
+            names.update(m.decode("ascii").rstrip("-") for m in _UNSEALED_REF.findall(data))
+    return ("process-scan" if complete else "incomplete"), names
 
 
 def _validate_age(min_age_seconds: float) -> float:
@@ -293,6 +302,7 @@ def prune_unsealed(
     min_age_seconds: float = DEFAULT_MIN_AGE_SECONDS,
     now: float | None = None,
     liveness: tuple[str, Iterable[str] | None] | None = None,
+    allow_age_only: bool = False,
 ) -> PruneReport:
     """Inspect (and optionally remove) idle ``unsealed-*`` dirs under *cache_root*.
 
@@ -300,15 +310,20 @@ def prune_unsealed(
     and every other name are never touched. A candidate is removed only when
     its whole tree contains nothing but directories and ``.pyc`` files, holds
     no symlink/junction/reparse point (including the root's ancestors), its
-    newest entry is older than *min_age_seconds*, and no inspected live
-    process names it. Any error preserves the candidate (fail closed); root
+    newest entry is older than *min_age_seconds*, and no live process names
+    it. *liveness* comes from ``live_unsealed_names``; without a complete
+    ``process-scan`` every candidate is retained unless *allow_age_only*
+    accepts the grace period as the liveness bound (an ``unknown`` scan is
+    never overridden). Any error preserves the candidate (fail closed); root
     level failures are reported as error entries rather than raised.
     """
     min_age = _validate_age(min_age_seconds)
     root_text = os.fspath(cache_root)
     report = PruneReport(_display(os.path.abspath(root_text)), apply, min_age)
-    mode, live = liveness if liveness is not None else ("age-only", None)
+    mode, live = liveness if liveness is not None else ("unavailable", None)
     report.liveness = mode
+    report.age_only_allowed = bool(allow_age_only)
+    proven = mode == "process-scan" or (allow_age_only and mode in ("incomplete", "unavailable"))
     live_names = set(live) if live is not None else set()
     io_root = _io_path(root_text)
     try:
@@ -345,6 +360,9 @@ def prune_unsealed(
                 continue
             if mode == "unknown":
                 item.reason = "liveness-unknown"
+                continue
+            if not proven:
+                item.reason = "liveness-unproven"
                 continue
             if name in live_names:
                 item.reason = "referenced-by-live-process"
@@ -416,6 +434,11 @@ def add_parsers(sub) -> None:
         "--min-age-hours", type=float, default=DEFAULT_MIN_AGE_SECONDS / 3600,
         help="Grace period since the newest entry was modified (default 1, minimum 1 with --apply)",
     )
+    prune.add_argument(
+        "--allow-age-only", action="store_true",
+        help="Accept the grace period as the liveness bound when a complete process scan "
+             "is unavailable (Windows/macOS) or incomplete; a failed scan still retains everything",
+    )
     prune.add_argument("--json", action="store_true", help="Emit the report as JSON")
 
 
@@ -438,16 +461,24 @@ def cmd_python_cache(args: argparse.Namespace) -> int:
         return 2
     roots = [Path(r) / "cache" / "python" for r in args.root] if args.root else default_cache_roots()
     liveness = live_unsealed_names()
+    allow = bool(getattr(args, "allow_age_only", False))
     reports = [
-        prune_unsealed(root, apply=args.apply, min_age_seconds=min_age_hours * 3600, liveness=liveness)
+        prune_unsealed(
+            root, apply=args.apply, min_age_seconds=min_age_hours * 3600,
+            liveness=liveness, allow_age_only=allow,
+        )
         for root in roots
     ]
     failed = any(c.status == "error" for report in reports for c in report.candidates)
     if args.json:
-        print(json.dumps({"apply": args.apply, "liveness": liveness[0], "roots": [r.as_dict() for r in reports]}, indent=2))
+        print(json.dumps({
+            "apply": args.apply, "liveness": liveness[0], "age_only_allowed": allow,
+            "roots": [r.as_dict() for r in reports],
+        }, indent=2))
         return 1 if failed else 0
     if not reports:
         print("No plugin runtime Python cache roots found.")
+    quiet = ("", "younger-than-grace-period", "liveness-unproven")
     for report in reports:
         summary = report.summary()
         verb = "removed" if args.apply else "eligible"
@@ -457,9 +488,14 @@ def cmd_python_cache(args: argparse.Namespace) -> int:
             f"{summary.get('error', 0)} error(s)"
         )
         for item in report.candidates:
-            if item.status in ("error",) or item.reason not in ("", "younger-than-grace-period"):
+            if item.status in ("error",) or item.reason not in quiet:
                 print(f"  {item.status}: {item.path} ({item.reason})")
-    print(f"Liveness evidence: {liveness[0]} (plus the grace period).")
+    print(f"Liveness evidence: {liveness[0]}{' + age-only (allowed)' if allow else ''}.")
+    if any(c.reason == "liveness-unproven" for r in reports for c in r.candidates):
+        print(
+            "Idle candidates were retained because no complete process scan proved them unused. "
+            "Re-run with --allow-age-only to accept the grace period as the liveness bound."
+        )
     if not args.apply and any(r.summary().get("eligible") for r in reports):
         print("Dry run only. Re-run with --apply to remove eligible directories.")
     return 1 if failed else 0

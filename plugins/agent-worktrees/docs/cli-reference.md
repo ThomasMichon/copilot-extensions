@@ -1465,6 +1465,7 @@ agent-worktrees python-cache prune                    # dry run: report eligible
 agent-worktrees python-cache prune --json             # same, machine-readable
 agent-worktrees python-cache prune --apply            # remove eligible dirs
 agent-worktrees python-cache prune --root ~/.agent-vault --apply
+agent-worktrees python-cache prune --apply --allow-age-only   # Windows/macOS: accept age as liveness evidence
 ```
 
 By default it inspects `cache/python` under each of this account's plugin runtime
@@ -1485,13 +1486,17 @@ It is conservative and fails closed:
   skipped. A live process still writing bytecode keeps it fresh.
   `--min-age-hours` defaults to 1, must be a finite number, and must be at
   least 1 with `--apply`.
-- Liveness evidence is reported as `liveness`. On Linux every readable
-  process environment and command line is scanned. A candidate named there
-  is kept (`referenced-by-live-process`); if the scan fails, every candidate
-  is kept (`liveness-unknown`). Other platforms rely on the grace period
-  (`age-only`). Removing an idle namespace a process still names is benign:
-  CPython treats bytecode reads and writes as best-effort and recreates
-  missing cache directories.
+- Liveness evidence is reported as `liveness`. On Linux every process
+  environment and command line is scanned, and a candidate named there is
+  kept (`referenced-by-live-process`). The mode is `process-scan` when every
+  process was read, `incomplete` when some were unreadable (for example
+  another account's processes), `unavailable` on platforms without a process
+  scan (Windows, macOS), and `unknown` when the scan itself failed.
+- Only `process-scan` proves a candidate unused. Under `incomplete` or
+  `unavailable` every candidate is kept (`liveness-unproven`) unless
+  `--allow-age-only` accepts the grace period as the only liveness evidence
+  (reported as `age_only_allowed`). Under `unknown` every candidate is kept
+  (`liveness-unknown`); `--allow-age-only` does not override it.
 - Each candidate is re-inventoried immediately before removal. Removal is
   anchored to the inventoried directories (directory handles on POSIX,
   non-delete-sharing guard handles on Windows). If any directory was replaced
@@ -2161,7 +2166,9 @@ evidence, or from a detached or `exec`-style launcher that cannot clean up
 after its child. A persistently empty `installed-*` set for a runtime suggests
 its install evidence is missing or invalid. Reinstalling or updating that
 runtime restores reuse. Run `agent-worktrees python-cache prune` (dry run) to
-size the backlog, then `--apply` to reclaim it. See
+size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
+process scan exists, add `--allow-age-only` once no affected runtime is
+running). See
 [Python bytecode caches](#python-bytecode-caches-python-cache-prune).
 
 ### Handoff trace (Tier C)

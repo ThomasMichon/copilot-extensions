@@ -304,14 +304,18 @@ def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
     }), encoding="utf-8")
     cache_root = Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
     caches = []
-    for extra in ([], ["--fail"]):
-        result = _run(argv + extra, env=env, cwd=tmp_path)
-        assert result.returncode == (7 if extra else 0), result.stderr
-        cache = Path(json.loads(result.stdout)["cached"])
-        caches.append(cache)
-        assert cache.is_file()
-        assert [path.name.startswith("installed-") for path in cache_root.iterdir()] == [True]
-    assert caches[0] == caches[1]
+    # CE_TERMINAL_LAUNCH forces the CMD launcher's native branch instead of
+    # delegating to PowerShell.
+    native = [{"CE_TERMINAL_LAUNCH": "1"}] if argv[0] == os.environ.get("COMSPEC") else []
+    for overlay in [{}, *native]:
+        for extra in ([], ["--fail"]):
+            result = _run(argv + extra, env={**env, **overlay}, cwd=tmp_path)
+            assert result.returncode == (7 if extra else 0), result.stderr
+            cache = Path(json.loads(result.stdout)["cached"])
+            caches.append(cache)
+            assert cache.is_file()
+            assert [path.name.startswith("installed-") for path in cache_root.iterdir()] == [True]
+    assert len(set(caches)) == 1
 
 
 def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_path, monkeypatch):

@@ -15,6 +15,16 @@ _CACHE_SELECTOR_SH = (
 _CACHE_SELECTOR_PS = _CACHE_SELECTOR_SH.replace('"', "'").replace(
     "sys.stdout.write(prefix)", "import json; print(json.dumps(prefix))"
 )
+# Single-line, double-quote-free form for cmd; any failure exits non-zero so
+# the caller keeps its minted prefix. Non-ASCII paths are not selected because
+# ``set /p`` reads the result in the console code page.
+_CACHE_SELECTOR_CMD = (
+    "import os,sys,importlib.util as u;p=sys.pycache_prefix;"
+    "m=u.find_spec('agent_procutil') and __import__('agent_procutil.python_cache',fromlist=['_']);"
+    "q=m and m.cache_arguments(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1];"
+    "p=q if q and os.path.basename(q).startswith('installed-') and q.isascii() else p;"
+    "sys.stdout.write(p)"
+)
 
 
 def _legacy_runtime_probe() -> str:
@@ -127,8 +137,16 @@ def _cmd_binstub() -> str:
         'if not exist "%SLOT%\\.venv\\Scripts\\python.exe" goto invalid\r\n'
         f'"%SLOT%\\.venv\\Scripts\\python.exe" -I -B -X "pycache_prefix=%CACHE%" -c "{probe}" "%SLOT%" >nul 2>&1\r\n'
         'if errorlevel 1 goto invalid\r\n'
+        'set "MINTED=%CACHE%"\r\n'
+        'set "SELECTED="\r\n'
+        f'"%SLOT%\\.venv\\Scripts\\python.exe" -I -B -X utf8 -X "pycache_prefix=%MINTED%" -c "{_CACHE_SELECTOR_CMD}" '
+        '"%WORKTREE_MANAGER_ROOT%" >"%MINTED%\\.selected" 2>nul\r\n'
+        'if not errorlevel 1 set /p SELECTED=<"%MINTED%\\.selected"\r\n'
+        'del /f /q "%MINTED%\\.selected" >nul 2>&1\r\n'
+        'if defined SELECTED set "CACHE=%SELECTED%"\r\n'
+        'if not "%CACHE%"=="%MINTED%" rmdir /s /q "%MINTED%" >nul 2>&1\r\n'
         '"%SLOT%\\.venv\\Scripts\\python.exe" -I -X utf8 -X "pycache_prefix=%CACHE%" -m worktree_manager %* '
-        '& call set "CACHE_RC=%%errorlevel%%" & rmdir /s /q "%CACHE%" >nul 2>&1 & call exit /b %%CACHE_RC%%\r\n'
+        '& call set "CACHE_RC=%%errorlevel%%" & rmdir /s /q "%MINTED%" >nul 2>&1 & call exit /b %%CACHE_RC%%\r\n'
         ':invalid\r\n'
         'rmdir /s /q "%CACHE%" >nul 2>&1\r\n'
         '>&2 echo invalid constructed worktree-manager runtime: "%SLOT%"\r\n'

@@ -14,6 +14,7 @@ import pytest
 from agent_worktrees import python_cache_prune as prune
 
 OLD = time.time() - 3 * 3600
+PROVEN = ("process-scan", ())
 
 
 def _bytecode_dir(root: Path, name: str, *, mtime: float = OLD) -> Path:
@@ -34,7 +35,7 @@ def _statuses(report: prune.PruneReport) -> dict[str, tuple[str, str]]:
 def test_dry_run_reports_without_removing(tmp_path: Path) -> None:
     target = _bytecode_dir(tmp_path, "unsealed-" + "a" * 32)
 
-    report = prune.prune_unsealed(tmp_path)
+    report = prune.prune_unsealed(tmp_path, liveness=PROVEN)
 
     assert _statuses(report) == {target.name: ("eligible", "")}
     assert report.summary()["bytes"] == 120
@@ -46,7 +47,7 @@ def test_apply_removes_only_unsealed_bytecode(tmp_path: Path) -> None:
     installed = _bytecode_dir(tmp_path, "installed-" + "c" * 64)
     other = _bytecode_dir(tmp_path, "unrelated")
 
-    report = prune.prune_unsealed(tmp_path, apply=True)
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=PROVEN)
 
     assert _statuses(report) == {unsealed.name: ("removed", "")}
     assert not unsealed.exists()
@@ -59,7 +60,7 @@ def test_non_bytecode_content_is_preserved(tmp_path: Path) -> None:
     stray.write_text("keep", encoding="utf-8")
     os.utime(stray, (OLD, OLD))
 
-    report = prune.prune_unsealed(tmp_path, apply=True)
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=PROVEN)
 
     assert _statuses(report) == {target.name: ("skipped", "non-bytecode-content")}
     assert stray.is_file()
@@ -70,7 +71,7 @@ def test_young_directory_is_preserved(tmp_path: Path) -> None:
     fresh = target / "C" / "pkg" / "__pycache__" / "mod.cpython-313.pyc"
     os.utime(fresh, None)
 
-    report = prune.prune_unsealed(tmp_path, apply=True)
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=PROVEN)
 
     assert _statuses(report) == {target.name: ("skipped", "younger-than-grace-period")}
     assert fresh.is_file()
@@ -112,7 +113,7 @@ def test_removal_error_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         raise PermissionError(13, "denied")
 
     monkeypatch.setattr(prune.os, "unlink", deny)
-    report = prune.prune_unsealed(tmp_path, apply=True)
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=PROVEN)
 
     status, reason = _statuses(report)[target.name]
     assert status == "error" and reason.startswith("PermissionError")
@@ -125,7 +126,10 @@ def _args(root: Path, *extra: str) -> argparse.Namespace:
     return parser.parse_args(["python-cache", "prune", "--root", str(root), *extra])
 
 
-def test_cli_json_dry_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_json_dry_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(prune, "live_unsealed_names", lambda: ("process-scan", set()))
     target = _bytecode_dir(tmp_path / "cache" / "python", "unsealed-" + "2" * 32)
 
     assert prune.cmd_python_cache(_args(tmp_path, "--json")) == 0
@@ -160,7 +164,7 @@ def test_root_scan_error_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyP
         raise PermissionError(13, "denied")
 
     monkeypatch.setattr(prune.os, "scandir", deny)
-    report = prune.prune_unsealed(tmp_path, apply=True)
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=PROVEN)
 
     assert [(c.status, c.reason.split(":")[0]) for c in report.candidates] == [("error", "PermissionError")]
 
@@ -193,7 +197,7 @@ def test_replacement_during_removal_fails_closed(tmp_path: Path, monkeypatch: py
         _link_directory(package, outside / "C" / "pkg")
 
     monkeypatch.setattr(prune, "_before_remove", swap)
-    report = prune.prune_unsealed(cache, apply=True)
+    report = prune.prune_unsealed(cache, apply=True, liveness=PROVEN)
 
     assert _statuses(report)[target.name][0] == "error"
     assert victim.is_file()
@@ -232,7 +236,7 @@ def test_real_cli_runs_from_neutral_directory(tmp_path: Path) -> None:
 
     result = subprocess.run(
         [sys.executable, "-B", "-m", "agent_worktrees", "python-cache", "prune",
-         "--root", str(tmp_path / "rt"), "--json"],
+         "--root", str(tmp_path / "rt"), "--allow-age-only", "--json"],
         cwd=neutral, env=env, capture_output=True, text=True, timeout=60, **kwargs,
     )
 
@@ -241,3 +245,64 @@ def test_real_cli_runs_from_neutral_directory(tmp_path: Path) -> None:
     assert payload["apply"] is False
     assert payload["roots"][0]["summary"]["eligible"] == 1
     assert target.is_dir()
+
+
+@pytest.mark.parametrize("mode", ["unavailable", "incomplete"])
+def test_unproven_liveness_retains_unless_age_only_is_allowed(tmp_path: Path, mode: str) -> None:
+    target = _bytecode_dir(tmp_path, "unsealed-" + "d" * 32)
+
+    retained = prune.prune_unsealed(tmp_path, apply=True, liveness=(mode, set()))
+    assert _statuses(retained) == {target.name: ("skipped", "liveness-unproven")}
+    assert target.is_dir()
+
+    removed = prune.prune_unsealed(tmp_path, apply=True, liveness=(mode, set()), allow_age_only=True)
+    assert _statuses(removed) == {target.name: ("removed", "")}
+    assert removed.as_dict()["age_only_allowed"] is True
+
+
+def test_allow_age_only_never_overrides_failed_scan(tmp_path: Path) -> None:
+    target = _bytecode_dir(tmp_path, "unsealed-" + "e" * 32)
+
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=("unknown", None), allow_age_only=True)
+
+    assert _statuses(report) == {target.name: ("skipped", "liveness-unknown")}
+    assert target.is_dir()
+
+
+def _fake_proc(root: Path, entries: dict[str, bytes | None]) -> Path:
+    for pid, environ in entries.items():
+        (root / pid).mkdir(parents=True)
+        (root / pid / "environ").write_bytes(environ or b"")
+        (root / pid / "cmdline").write_bytes(b"python\0")
+    return root
+
+
+def test_process_scan_matches_hyphenated_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    name = "unsealed-123-456-789-101"
+    proc = _fake_proc(tmp_path / "proc", {"1": f"PYTHONPYCACHEPREFIX=/c/{name}\0".encode()})
+    monkeypatch.setattr(prune.sys, "platform", "linux")
+
+    mode, names = prune.live_unsealed_names(str(proc))
+    assert (mode, names) == ("process-scan", {name})
+
+    cache = tmp_path / "cache"
+    live = _bytecode_dir(cache, name)
+    report = prune.prune_unsealed(cache, apply=True, liveness=(mode, names))
+    assert _statuses(report) == {name: ("skipped", "referenced-by-live-process")}
+    assert live.is_dir()
+
+
+def test_denied_process_read_makes_scan_incomplete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = _fake_proc(tmp_path / "proc", {"1": b"A=b\0", "2": None})
+    denied = proc / "2" / "environ"
+    original = Path.read_bytes
+
+    def read_bytes(self: Path) -> bytes:
+        if self == denied:
+            raise PermissionError(13, "denied")
+        return original(self)
+
+    monkeypatch.setattr(prune.sys, "platform", "linux")
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    assert prune.live_unsealed_names(str(proc)) == ("incomplete", set())
