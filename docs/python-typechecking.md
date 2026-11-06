@@ -488,6 +488,11 @@ identity and bytes remain independently checked; nothing is cached across passes
 Its normal checker counts physical inputs separately from supplemental programs.
 The pure AST adapter recognizes only declared literals, concatenations and
 validated fixture conversions; it never imports or runs a producer.
+Named inputs require one prior assignment in the same statement suite or a
+dominating ancestor suite. Parameters, ambiguous rebindings and assignments
+from another branch are refused; fixture origins obey the same construction-time
+rule. Nested programs are limited to one declared decoded child, with deeper
+Python producers refused rather than silently left inside an unchecked string.
 Portable parameter strings are typing witnesses, not captured native paths.
 Diagnostics identify the original expression range rather than inventing a
 column mapping through concatenated strings. Generated-file epochs, nested

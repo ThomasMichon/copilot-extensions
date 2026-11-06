@@ -438,19 +438,36 @@ def _harness_assets(root: Path) -> tuple[str, ...]:
 
 
 def _harness_binding(fn: ast.FunctionDef, name: str, site: ast.AST) -> ast.expr:
+    parents = {child: node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
+
+    def local(node: ast.AST) -> bool:
+        while node in parents:
+            node = parents[node]
+            if node is fn:
+                return True
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                return False
+        return False
+
+    if not local(site):
+        raise SourceViewError("Ambiguous nested producer binding")
     arguments = [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]
     arguments.extend(arg for arg in (fn.args.vararg, fn.args.kwarg) if arg is not None)
     if any(arg.arg == name for arg in arguments):
         raise SourceViewError("Parameter-backed producer binding")
     definitions = [
-        node for node in fn.body if isinstance(node, ast.Assign)
+        node for node in ast.walk(fn) if isinstance(node, ast.Assign) and local(node)
         and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
     ]
     stores = [
         node for node in ast.walk(fn) if isinstance(node, ast.Name)
-        and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id == name
+        and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id == name and local(node)
     ]
     for node in ast.walk(fn):
+        if isinstance(node, ast.Nonlocal) and name in node.names:
+            raise SourceViewError("Ambiguous nonlocal producer binding")
+        if not local(node):
+            continue
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
             and node is not fn and node.name == name
@@ -468,14 +485,23 @@ def _harness_binding(fn: ast.FunctionDef, name: str, site: ast.AST) -> ast.expr:
             raise SourceViewError("Ambiguous lexical producer binding")
     if len(definitions) != 1 or len(stores) != 1:
         raise SourceViewError("Unbound or ambiguous reassigned producer binding")
-    parents = {child: node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
-    statement = site
-    while statement not in fn.body and statement in parents:
-        statement = parents[statement]
+    suites: dict[ast.stmt, tuple[list[ast.AST], int]] = {}
+    for node in ast.walk(fn):
+        for _field, children in ast.iter_fields(node):
+            if isinstance(children, list):
+                for position, child in enumerate(children):
+                    if isinstance(child, ast.stmt):
+                        suites[child] = children, position
     definition = definitions[0]
-    if statement not in fn.body or fn.body.index(definition) >= fn.body.index(statement):
-        raise SourceViewError("Producer binding must precede its direct containing statement")
-    return definition.value
+    suite, position = suites[definition]
+    statement = site
+    while statement in parents:
+        if isinstance(statement, ast.stmt) and statement in suites:
+            use_suite, use_position = suites[statement]
+            if use_suite is suite and use_position > position:
+                return definition.value
+        statement = parents[statement]
+    raise SourceViewError("Producer binding must precede its use in the same or ancestor suite")
 
 
 def _required_harness_programs(

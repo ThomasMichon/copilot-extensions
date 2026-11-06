@@ -274,7 +274,8 @@ def named_source(root: Path, source: str, origins: dict[str, str] | None = None)
 
 @pytest.mark.parametrize("change", [
     "parameter", "parameter-dead", "posonly", "kwonly", "vararg", "kwarg", "dead", "after",
-    "import", "function", "class", "global", "unconditional",
+    "import", "function", "class", "global", "unconditional", "same-suite",
+    "opposite-branch", "finally", "local-helper",
 ])
 def test_named_producer_requires_a_direct_prior_nonparameter_binding(tmp_path: Path, change: str) -> None:
     headers = {
@@ -298,22 +299,50 @@ def test_named_producer_requires_a_direct_prior_nonparameter_binding(tmp_path: P
         body = extra + assignment + sink
     elif change == "unconditional":
         body = assignment + "    for item in (1,):\n    " + sink
+    elif change == "same-suite":
+        body = "    if enabled:\n    " + assignment + "    " + sink
+    elif change == "opposite-branch":
+        body = "    if enabled:\n    " + assignment + "    else:\n    " + sink
+    elif change == "finally":
+        body = "    try:\n    " + assignment + "    finally:\n    " + sink
+    elif change == "local-helper":
+        body = assignment + "    def helper():\n        script = 'unrelated local'\n" + sink
     paths = named_source(tmp_path, f"def emit({headers.get(change, '')}):\n" + body)
-    if change == "unconditional":
+    if change in {"unconditional", "same-suite", "local-helper"}:
         assert views.harness_emitted_inputs(tmp_path, paths)[1][0][1] == b"value: int = 1"
     else:
         with pytest.raises(views.SourceViewError, match="binding"):
             views.harness_emitted_inputs(tmp_path, paths)
 
 
-def test_fixture_origin_requires_the_same_unconditional_binding_guarantee(tmp_path: Path) -> None:
+@pytest.mark.parametrize("change", ["dead-origin", "same-suite", "after-expression"])
+def test_fixture_origin_requires_the_same_unconditional_binding_guarantee(
+    tmp_path: Path, change: str,
+) -> None:
     source = (
         "def emit(tmp_path):\n"
         "    if False:\n        pid_file = tmp_path / 'descendant.pid'\n"
         "    script = f\"open({str(pid_file)!r}, 'w').close()\"\n"
         "    subprocess.run([sys.executable, '-c', script])\n"
     )
+    if change == "same-suite":
+        source = (
+            "def emit(tmp_path):\n    if enabled:\n"
+            "        pid_file = tmp_path / 'descendant.pid'\n"
+            "        script = f\"open({str(pid_file)!r}, 'w').close()\"\n"
+            "        subprocess.run([sys.executable, '-c', script])\n"
+        )
+    elif change == "after-expression":
+        source = (
+            "def emit(tmp_path):\n"
+            "    script = f\"open({str(pid_file)!r}, 'w').close()\"\n"
+            "    pid_file = tmp_path / 'descendant.pid'\n"
+            "    subprocess.run([sys.executable, '-c', script])\n"
+        )
     paths = named_source(tmp_path, source, {"pid_file": "tmp_path / 'descendant.pid'"})
+    if change == "same-suite":
+        assert b"__harness_typing_witness__" in views.harness_emitted_inputs(tmp_path, paths)[1][0][1]
+        return
     with pytest.raises(views.SourceViewError, match="binding"):
         views.harness_emitted_inputs(tmp_path, paths)
 
@@ -340,3 +369,21 @@ def test_nested_programs_are_supported_only_to_the_declared_leaf_depth(tmp_path:
     else:
         with pytest.raises(views.SourceViewError, match="deeper nested"):
             views.harness_emitted_inputs(tmp_path, paths)
+
+
+@pytest.mark.parametrize("change", ["except", "match-as", "match-star", "match-rest", "delete"])
+def test_unsupported_non_name_rebindings_cannot_mask_producer(tmp_path: Path, change: str) -> None:
+    sink = "subprocess.run([sys.executable, '-c', script])\n"
+    if change == "except":
+        statements = "    try:\n        raise ValueError()\n    except ValueError as script:\n        " + sink
+    elif change == "delete":
+        statements = "    del script\n    " + sink
+    else:
+        pattern = {
+            "match-as": "script", "match-star": "[*script]",
+            "match-rest": "{'key': item, **script}",
+        }[change]
+        statements = f"    match supplied:\n        case {pattern}:\n            " + sink
+    paths = named_source(tmp_path, "def emit(supplied):\n    script = 'value: int = 1'\n" + statements)
+    with pytest.raises(views.SourceViewError, match="binding"):
+        views.harness_emitted_inputs(tmp_path, paths)
