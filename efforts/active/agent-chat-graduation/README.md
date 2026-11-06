@@ -491,6 +491,28 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-11-06 - Recover image qualification and repair unit admission
+
+- Recovered completed native run40140118467 for candidate
+  `529246714bcbf6a401ec0b7203b9bb023ad115c5`. All four Linux/Windows
+  Python3.10/3.11 cells passed acceptance and the complete494-node portfolio
+  under the unchanged180s/600s limits. Linux ran494 cases without skips;
+  Windows ran492 with the same two declared POSIX skips. Acceptance took
+  25.95-65.84 seconds and complete execution46.63-111.59 seconds.
+- Container run40140084901 passed against its recorded merge candidate
+  `af044445d869eeac6ad494be3c79112f2438681e`, containing that source head.
+  The actual Linux/amd64 image exercised initialization/refusal, independent
+  participants, writer exclusion, graceful shutdown and retained restart.
+  Startup/restart/shutdown took5.093/5.100/0.248 seconds under the declared
+  disposable fixture limits. This is not release admission, Gateway or Komodo
+  qualification.
+- Required unit CI refused before execution because the changed retained-store
+  source still had its previous admission hash. Refresh only that source hash;
+  preserve every admitted node, coverage target, effect guard and300s budget.
+  Current required CI and review remain open; recovered native/image passes
+  do not waive them. The parent effort remains Active with its broader service,
+  private-composition, lifecycle and adoption obligations unchanged.
+
 ### 2026-10-24 - Independent container-image candidate and host bindings
 
 - Added the Chat-owned offline wheel-only recipe and synthetic host
