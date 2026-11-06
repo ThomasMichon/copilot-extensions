@@ -153,6 +153,32 @@ callers keep the unchanged baseline, while a provider rollback cannot satisfy
 an incarnation-required assignment. These facts constrain assignment admission,
 not authorized installer replacement or unrelated legacy operations.
 
+### Qualified executing-session writes
+
+The executing CLI advertises `retained_session_writes: 1` alongside its existing
+relationship capabilities. After negotiating it, a caller may add
+`--retained-record-writer '<JSON>'` to `register-session`, `bind-session` or
+`link-succession`. The object contains exactly requirement `version: 1`,
+the existing installed-build `identity`, and nonempty `creation_nonce`,
+`worktree_id`, `project` and `worktree_path`. An explicit full worktree ID
+and, for registration/binding, an explicit session ID are required.
+
+The option qualifies the actual executing CLI before work and invokes the
+existing session registration/succession handler directly under its normal
+sidecar lock. That handler rechecks the executing identity and fresh record's
+project, path, worktree ID and nonce before mutation. It never sends the write
+to a resident whose ordinary verb version alone cannot prove this serializer.
+The opted-in command does not boot a monitor or status updater. This is a
+bounded session-write route, not a global daemon-disable setting, a replacement
+serializer, or permission to write a remote/frozen record.
+
+Omitting the option preserves ordinary resident-first behavior and all existing
+CLI syntax. Older providers without the capability must not receive the option.
+A missing declaration, changed identity/incarnation or rollback refuses the
+required operation without dropping its scope or retrying through a resident.
+This capability does not qualify unrelated participating writers or authorize
+installer inhibition.
+
 ## Replay and obligation
 
 Reserve persists pending responsibility before returning. Exact request-ID

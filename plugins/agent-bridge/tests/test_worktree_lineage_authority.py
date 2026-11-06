@@ -139,3 +139,41 @@ async def test_retained_command_is_used_for_qualification_and_later_lineage(
     after = snapshot(selected_owner)
     assert after["resources"][:len(before["resources"])] == before["resources"]
     assert after["creation_nonce"] == before["creation_nonce"]
+
+
+@pytest.mark.parametrize("changed", ["creation_nonce", "identity", "worktree_path", "project"])
+@pytest.mark.parametrize("command", ["register-session", "bind-session", "link-succession"])
+def test_retained_session_receiver_refuses_changed_scope_without_resident_fallback(
+    tmp_path, changed, command,
+):
+    root = Path(__file__).resolve().parents[3]
+    state = tmp_path / "authority"
+    state.mkdir()
+    identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
+    (state / "writer-identity.json").write_text(json.dumps(identity), encoding="utf-8")
+    prefix = [
+        sys.executable, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
+        str(root), str(state), "example", "host",
+    ]
+    snapshot(prefix, "protect")
+    before = snapshot(prefix)
+    scope = {
+        "version": 1, "identity": identity, "creation_nonce": before["creation_nonce"],
+        "worktree_id": "host", "project": "example",
+        "worktree_path": str(state / "trees" / "host"),
+    }
+    scope[changed] = (
+        {**identity, "runtime_generation": "c" * 32} if changed == "identity" else "changed"
+    )
+    arguments = (
+        ["--predecessor", "native-one", "--successor", "native-two"]
+        if command == "link-succession" else ["--session-id", "native-one"]
+    )
+    result = subprocess.run(
+        [*prefix, command, "--worktree-id", "host", *arguments,
+         "--retained-record-writer", json.dumps(scope)],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert snapshot(prefix) == before
+    assert not (state / "resident-calls").exists()

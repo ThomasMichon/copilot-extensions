@@ -140,6 +140,35 @@ from test_worktree_writer_observation import (
     test_same_cell_health_rechecks_peer_selection_without_launch
     as test_same_cell_health_rechecks_peer_selection_without_launch,
 )
+from test_acquisition_runtime import (
+    rig as rig, writer_rig as writer_rig,
+    test_required_writer_round_trips_through_the_existing_http_owner
+    as test_required_writer_round_trips_through_the_existing_http_owner,
+    test_required_writer_survives_stopped_resume_and_later_acquisition
+    as test_required_writer_survives_stopped_resume_and_later_acquisition,
+    test_required_handoff_retry_reuses_original_successor_after_lineage_failure
+    as test_required_handoff_retry_reuses_original_successor_after_lineage_failure,
+    test_required_handoff_retains_unknown_effect_without_replacement
+    as test_required_handoff_retains_unknown_effect_without_replacement,
+    test_required_writer_refuses_provider_type_change_before_persist_or_launch
+    as test_required_writer_refuses_provider_type_change_before_persist_or_launch,
+    test_required_writer_resume_exhaustion_cannot_recreate
+    as test_required_writer_resume_exhaustion_cannot_recreate,
+    test_required_handoff_retries_registration_on_original_native
+    as test_required_handoff_retries_registration_on_original_native,
+    test_required_registration_failure_detaches_before_normal_send
+    as test_required_registration_failure_detaches_before_normal_send,
+    test_required_queued_send_refusal_keeps_startup_recovery_dormant
+    as test_required_queued_send_refusal_keeps_startup_recovery_dormant,
+    test_required_writer_refuses_before_native_effects
+    as test_required_writer_refuses_before_native_effects,
+    test_retained_acquisition_and_later_lineage_use_actual_owner_processes
+    as test_retained_acquisition_and_later_lineage_use_actual_owner_processes,
+)
+from test_worktree_lineage_authority import (
+    test_retained_session_receiver_refuses_changed_scope_without_resident_fallback
+    as test_retained_session_receiver_refuses_changed_scope_without_resident_fallback,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -184,6 +213,9 @@ def test_http51_capture_actual_observations(
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
     observed["worktree_record_delegation"] = health["capabilities"]["worktree_record_delegation"]
+    observed["retained_acquisition_worktree_writer"] = (
+        health["capabilities"]["retained_acquisition_worktree_writer"]
+    )
     assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)

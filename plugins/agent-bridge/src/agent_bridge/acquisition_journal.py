@@ -52,6 +52,7 @@ class AcquisitionJournal(_AcquisitionCustodyMixin):
 
     def claim(
         self, request: AcquisitionRequest, *, runtime_admission: RuntimeAdmission | None = None,
+        worktree_writer: dict | None = None,
     ) -> AcquisitionClaim:
         token = uuid.uuid4().hex
         digest = _digest(request)
@@ -59,7 +60,9 @@ class AcquisitionJournal(_AcquisitionCustodyMixin):
         association = admission_document(runtime_admission)
         # Admission and the complete prepared recovery facts commit together.
         # No await or independently committed write can strand a digest-only claim.
-        with self.db._runtime_transaction(write=True, full_sync=runtime_admission is not None) as conn:
+        with self.db._runtime_transaction(
+            write=True, full_sync=runtime_admission is not None or worktree_writer is not None,
+        ) as conn:
             prior = conn.execute(
                 "SELECT * FROM acquisition_attempts WHERE delivery_id=?", (request.delivery_id,),
             ).fetchone()
@@ -68,6 +71,8 @@ class AcquisitionJournal(_AcquisitionCustodyMixin):
                     raise RuntimeCustodyError("Acquisition cannot replace its original admission")
                 inserted = False
             else:
+                if (request.worktree_writer is not None) != (worktree_writer is not None):
+                    raise AcquisitionRefused("worktree_writer_unconfirmed", "new acquisition lacks its writer binding")
                 inserted = conn.execute(
                     "INSERT INTO acquisition_attempts "
                     "(delivery_id, target, worktree_id, request_digest, token, state, "
@@ -80,7 +85,10 @@ class AcquisitionJournal(_AcquisitionCustodyMixin):
                     conn.execute(
                         "INSERT INTO acquisition_effects VALUES (?, 'prepared', ?)",
                         (request.delivery_id, json.dumps(
-                            {"_request": request.model_dump(mode="json")}, sort_keys=True,
+                            {
+                                "_request": request.model_dump(mode="json"),
+                                **({"_worktree_writer": worktree_writer} if worktree_writer is not None else {}),
+                            }, sort_keys=True,
                         )),
                     )
         if inserted:

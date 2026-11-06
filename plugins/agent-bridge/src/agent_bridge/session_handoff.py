@@ -7,9 +7,14 @@ import contextlib
 from collections.abc import Awaitable, Callable
 from functools import wraps
 import time
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from .models import SessionStatus
+from .acquisition_worktree_writer import (
+    current, handoff_state, lineage_errors, require_target, session_writer,
+)
+from .acquisition_contract import AcquisitionRefused
 from .session_manager import DaemonDrainingError, Session, _workspace_key, log
 
 if TYPE_CHECKING:
@@ -258,6 +263,7 @@ class _SessionHandoffMixin:
         return text
 
     @_exclude_native_enrollment
+    @session_writer
     async def handoff_session(
         self,
         session_id: str,
@@ -303,6 +309,18 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        retained = handoff_state(self._db, session_id)
+        inputs = {
+            "reason": reason, "seed": seed, "seed_text": seed_text, "handoff_token": handoff_token,
+        }
+        if retained is not None and retained["inputs"] != inputs:
+            raise AcquisitionRefused("handoff_pending", "original handoff inputs cannot be replaced")
+        if retained is not None and retained["stage"] == "completed":
+            successor = self._sessions.get(retained["successor_id"])
+            if successor is None or successor.acp_session_id != retained.get("native_session_id"):
+                raise AcquisitionRefused("handoff_pending", "original successor is unavailable")
+            require_target(successor.target)
+            return successor
         from .acquisition_launch_owner import require_unassociated_session
 
         require_unassociated_session(self, session, operation="lifecycle handoff")
@@ -337,7 +355,7 @@ class _SessionHandoffMixin:
 
         # A live child is needed to author the brief; auto-resume a recoverable
         # STOPPED session, mirroring submit_prompt.
-        if not session.client or not session.client.is_running:
+        if retained is None and (not session.client or not session.client.is_running):
             if not session.acp_session_id:
                 raise RuntimeError(
                     f"Session {session_id} has no live child and no ACP id -- "
@@ -355,7 +373,11 @@ class _SessionHandoffMixin:
         brief = ""
         seed_prompt = ""
         seed_source = "external" if external_seed else "agent-authored"
-        if external_seed:
+        if retained is not None:
+            brief = retained["brief"]
+            seed_prompt = retained["seed_prompt"]
+            seed_source = retained["seed_source"]
+        elif external_seed:
             brief = external_seed
             seed_prompt = external_seed
         else:
@@ -373,7 +395,7 @@ class _SessionHandoffMixin:
                 brief = self._synthesize_handoff_brief(session)
                 seed_source = "synthesized"
             seed_prompt = self._build_seed_prompt(brief)
-        if session.event_log:
+        if retained is None and session.event_log:
             session.event_log.append(
                 "handoff_brief",
                 {
@@ -392,15 +414,39 @@ class _SessionHandoffMixin:
         if stop_arrived():
             raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
         assert_prompt_allowed(self._db, session_id, None)
-        successor = await self.start_session(
-            session.target,
-            agent_name=session.agent_name,
-            caller_id=session.caller_id,
-            caller_session_id=session.caller_session_id,
-            mcp_servers=[dict(server) for server in session.mcp_servers],
-            model=session.model_override,
-            effort=session.effort_override,
-        )
+        recovering = retained is not None
+        if retained is None and current() is not None:
+            retained = handoff_state(self._db, session_id, create={
+                "inputs": inputs, "successor_id": str(uuid.uuid4())[:12],
+                "brief": brief, "seed_prompt": seed_prompt, "seed_source": seed_source,
+            })
+        if recovering:
+            successor = self._sessions.get(retained["successor_id"])
+            if successor is None:
+                raise AcquisitionRefused("handoff_pending", "original successor start is unconfirmed")
+            require_target(successor.target)
+            if (
+                retained.get("native_session_id") is not None
+                and successor.acp_session_id != retained["native_session_id"]
+            ):
+                raise AcquisitionRefused("handoff_pending", "original successor native identity changed")
+            if successor.status == SessionStatus.STOPPED and successor.acp_session_id:
+                successor = await self.resume_session(successor.session_id, drain=False)
+        else:
+            start_options = {}
+            if retained is not None:
+                handoff_state(self._db, session_id, stage="spawning")
+                start_options["creation_session_id"] = retained["successor_id"]
+            successor = await self.start_session(
+                session.target,
+                agent_name=session.agent_name,
+                caller_id=session.caller_id,
+                caller_session_id=session.caller_session_id,
+                mcp_servers=[dict(server) for server in session.mcp_servers],
+                model=session.model_override,
+                effort=session.effort_override,
+                **start_options,
+            )
         if successor.status != SessionStatus.IDLE:
             # Spawn failed -- retain the predecessor and surface the failure so
             # the worktree is never left headless.
@@ -420,6 +466,10 @@ class _SessionHandoffMixin:
             with contextlib.suppress(Exception):
                 await self.end_session(successor.session_id, force=True)
             raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
+        if retained is not None and retained["stage"] in {"prepared", "spawning"}:
+            retained = handoff_state(
+                self._db, session_id, stage="started", native_session_id=successor.acp_session_id,
+            )
 
         # 3. Persist the two-way succession link.
         now = time.time()
@@ -439,19 +489,23 @@ class _SessionHandoffMixin:
         gl_dir = getattr(session.target, "cwd", None)
         pred_acp = session.acp_session_id
         succ_acp = successor.acp_session_id
-        if gl_local and gl_worktree and pred_acp and succ_acp:
+        if gl_local and gl_worktree and pred_acp and succ_acp and (
+            retained is None or retained["stage"] == "started"
+        ):
             from . import worktree_lineage
             # The successor's own start_session already registered it into the
             # ground layer (4a, synchronous), so link-succession finds it tracked.
-            with contextlib.suppress(Exception):
+            with lineage_errors():
                 worktree_lineage.link_succession(
                     gl_worktree, pred_acp, succ_acp, worktree_dir=gl_dir,
                 )
-            with contextlib.suppress(Exception):
+            with lineage_errors():
                 worktree_lineage.note_handoff(
                     gl_worktree, pred_acp, title=(reason or "context-pressure"),
                     worktree_dir=gl_dir,
                 )
+        if retained is not None and retained["stage"] == "started":
+            retained = handoff_state(self._db, session_id, stage="linked")
 
         # 4. Announce the changeover on BOTH event streams.
         payload = {
@@ -477,10 +531,10 @@ class _SessionHandoffMixin:
         #    the `sessionStart` role/digest hook CANNOT fire under `copilot --acp`
         #    -- so the ACP successor learns its lineage from its opening turn
         #    instead. Fail-open: a missing digest never blocks the warm seed.
-        if seed:
+        if seed and (retained is None or retained["stage"] == "linked"):
             if gl_local and gl_worktree and succ_acp:
                 from . import worktree_lineage
-                with contextlib.suppress(Exception):
+                with lineage_errors():
                     role = worktree_lineage.session_role(
                         gl_worktree, succ_acp, worktree_dir=gl_dir,
                     )
@@ -492,13 +546,26 @@ class _SessionHandoffMixin:
                     )
                     if header:
                         seed_prompt = header + seed_prompt
-            with contextlib.suppress(Exception):
+            if retained is None:
+                with contextlib.suppress(Exception):
+                    await self.submit_prompt(successor.session_id, seed_prompt)
+            else:
+                retained = handoff_state(self._db, session_id, stage="seeding")
                 await self.submit_prompt(successor.session_id, seed_prompt)
+                retained = handoff_state(self._db, session_id, stage="seeded")
+        elif retained is not None and retained["stage"] == "seeding":
+            raise AcquisitionRefused("handoff_pending", "original successor seed outcome is unconfirmed")
 
         # 6. Retire the predecessor: STOPPED keeps it resumable and preserves its
         #    transcript + succession link (end_session would delete both).
-        with contextlib.suppress(Exception):
+        if retained is None:
+            with contextlib.suppress(Exception):
+                await self.stop_session(session_id, force=True)
+        else:
             await self.stop_session(session_id, force=True)
+            if session.status != SessionStatus.STOPPED:
+                raise AcquisitionRefused("handoff_pending", "original predecessor retirement is unconfirmed")
+            handoff_state(self._db, session_id, stage="completed")
 
         log.info(
             "Handoff: session %s -> %s (worktree %s)",

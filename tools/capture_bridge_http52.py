@@ -10,7 +10,9 @@ import capture_bridge_http48 as common
 
 
 def run_probes(root: Path, proof: dict, vector: dict) -> dict:
-    return common.run_probes(root, proof, vector, evidence=evidence)
+    return common.run_probes(
+        root, proof, vector, evidence=evidence, expected_roles=frozenset({"record-writer"}),
+    )
 
 
 def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]:

@@ -131,6 +131,9 @@ class _SessionStartMixin:
         from .hosting_policy import require_target_hosting
 
         await require_target_hosting(target)
+        from .acquisition_worktree_writer import require_target
+
+        require_target(target)
         core = _core()
         # Per-session copilot args: append to the resolved target's args for
         # THIS spawn only (a fresh target copy so a shared/cached AgentConfig
@@ -259,7 +262,9 @@ class _SessionStartMixin:
                 )
 
         session = Session(session_id, name, target, agent_name, caller_id=caller_id)
-        session.background_recovery_enabled = acquisition_launch is None
+        from .acquisition_worktree_writer import current
+
+        session.background_recovery_enabled = acquisition_launch is None and current() is None
         session.caller_session_id = normalize_caller_session_id(caller_session_id)
         # Per-session model / reasoning-effort override (agent-bridge create
         # --model/--effort). Retained on the Session so within-daemon resume /
@@ -809,11 +814,15 @@ class _SessionStartMixin:
             # its own machine. Best-effort / fail-open: never breaks a launch.
             if acquisition_launch is None and target.type == "local" and target.worktree_id and acp_sid:
                 from . import worktree_lineage
-                with contextlib.suppress(Exception):
+                from .acquisition_worktree_writer import lineage_errors
+
+                with lineage_errors():
                     worktree_lineage.register_session(
                         target.worktree_id, acp_sid, pid=session.pid,
                         worktree_dir=target.cwd,
                     )
+                if current() is not None:
+                    self._set_background_recovery_enabled(session, True)
         except asyncio.CancelledError:
             self._mark_session_failed(session, trigger="start_cancelled")
             await _cleanup_failed_process_launch()
@@ -895,7 +904,15 @@ class _SessionStartMixin:
             log.warning("Session %s not launched: %s", session_id, exc)
         except Exception as exc:
             await _cleanup_failed_process_launch()
-            self._mark_session_failed(session, trigger="start_exception")
+            if current() is not None and session.acp_session_id:
+                from .acquisition_worktree_writer import registration_pending
+
+                await registration_pending(self, session)
+                session.event_log.append("session_state_changed", {
+                    "status": SessionStatus.STOPPED.value, "reason": "native_registration_pending",
+                })
+            else:
+                self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
         finally:
