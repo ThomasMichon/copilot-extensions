@@ -49,9 +49,31 @@ def allocation_requirement(row: dict, project: str, value: dict | None) -> str |
         raise TaskError("ordinary Bridge writer requirement lacks its original creation key")
     if retained is not None and json.loads(retained) != requirement:
         raise TaskError("ordinary Bridge original writer requirement cannot change")
+    if retained is None and row.get("task_relationship_event_id") is not None:
+        raise TaskError("historical relationship has no original writer requirement")
     if retained is None and (row["agent_info"] or row["session_handle"]):
         raise TaskError("historical ordinary agent has no original writer requirement")
     return json.dumps(requirement, sort_keys=True)
+
+
+def prepared_requirement(
+    row: dict, *, worktree: str, project: str | None, path: str | None,
+    creation_nonce: str | None, value: dict | None,
+) -> str | None:
+    """Retain the expectation with preparation, before its first relationship."""
+    retained = row[REQUIREMENT]
+    if value is None and retained is None:
+        return None
+    if value is not None and (
+        not row["task_relationship_required"] or creation_nonce is None
+    ):
+        raise TaskError("prepared writer requirement needs its governed workspace incarnation")
+    requirement = writer_requirement(value if value is not None else json.loads(retained))
+    if creation_nonce is not None and creation_nonce != requirement["creation_nonce"]:
+        raise TaskError("prepared writer requirement differs from its workspace incarnation")
+    return allocation_requirement(
+        {**row, "worktree": worktree, "worktree_path": path}, project, requirement,
+    )
 
 
 class OrdinaryWriterAdmission:

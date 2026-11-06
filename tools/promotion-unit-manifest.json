@@ -10,6 +10,11 @@
         "tools/promotion_unit_tests/test_relationship_request_admission.py::test_configured_admission_carries_both_actual_independent_owners",
         "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_serve_command_preserves_admission_selection",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_future_admission_needs_no_impossible_prior_journal",
+        "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_prepared_requirement_preserves_original_expectation_without_agent_or_journal",
+        "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_prepared_requirement_refuses_unproven_original_attachment[legacy]",
+        "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_prepared_requirement_refuses_unproven_original_attachment[nonce]",
+        "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_prepared_requirement_refuses_unproven_original_attachment[historical]",
+        "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_prepared_requirement_refuses_unproven_original_attachment[native]",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_discovery_argv_executes_the_shipped_bridge_parser_and_contract",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_future_admission_refuses_unknown_cli_daemon_or_selected_writer[cli-version]",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py::test_future_admission_refuses_unknown_cli_daemon_or_selected_writer[create-support]",
@@ -5167,10 +5172,10 @@
         "plugins/agent-dispatch/src/agent_dispatch/queue_task_relationships.py": "eb95df4cc2e4532cc47256ce8daaba4c0da12a7efa23e806fdf772ab4ad30c5d",
         "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py": "9915c6dbddbce56b27099b234a004c70ba548ae33f462d4718c4b11a180b4e13",
         "plugins/agent-dispatch/src/agent_dispatch/worktree_owner_launch.py": "ae30f2fba563d9b42a894243a497a41838246af681c098bc7fcc71e750e90f90",
-        "plugins/agent-dispatch/src/agent_dispatch/ordinary_writer_admission.py": "034d74a25f420c6be9d017539f66ecd96cf7563ed3d199b7c9f459a96352f1f8",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_writer_admission.py": "108a29d81193fad93b19e2d6ecf2d3869a42cbee27952b81086ee47474d70cb3",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_agent_facts.py": "807a4fc8b03ce20794f47829078c3f4353854782bcc93eb7f9e6ada212c2ac22",
         "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
-        "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "63810dbe74d089bc9646eca684eefb08a02e09df44ca71e5b37c34b94a6aad22"
+        "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "a8f924bb4c1468ecd4e7a7161957b34b18af8a03f58b1ffacce133991e016c1c"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_writer_admission.py",

@@ -1,0 +1,9 @@
+{
+  "comment": "Retain negotiated ordinary writer expectations in the original prepared-workspace transaction before relationship effects",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

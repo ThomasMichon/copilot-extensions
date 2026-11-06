@@ -78,8 +78,11 @@ Original prepared-reservation correlation subsequently merged in #11105.
 Queue reconciliation now checks that exact original reservation before each
 owner call; this source prerequisite does not admit the actual writer cohort.
 Explicit ordinary coordinator configuration now has a conditional trusted
-admission-factory source path. It retains both independent callbacks and fails
+admission-factory source path, merged in #11117. It retains both independent callbacks and fails
 closed for invalid selections; no permissive policy is provided or installed.
+The next prepared-workspace provider expansion retains the expected writer
+before the first relationship under its original nonce and request. It does
+not yet derive the expectation in ordinary startup or qualify the cohort.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running

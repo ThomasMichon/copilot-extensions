@@ -47,11 +47,17 @@ class SpawnReservationClientMixin:
         driver: str | None = None, allocation_project: str | None = None,
         worktree_path: str | None = None,
         creation_nonce: str | None = None,
+        worktree_writer_requirement: dict | None = None,
     ) -> dict:
         """Retain workspace provenance and its independent execution machine."""
         if creation_nonce is not None:
             from .client_task_relationships import require_support
             require_support(self)
+        if worktree_writer_requirement is not None:
+            from .client_errors import DispatchError
+            versions = self.pool_placement_contract().get("prepared_writer_requirement_versions")
+            if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                raise DispatchError(409, "selected task owner cannot retain a prepared writer requirement")
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/worktree",
             json={
@@ -60,6 +66,8 @@ class SpawnReservationClientMixin:
                 "allocation_project": allocation_project, "worktree_path": worktree_path,
                 **({"execution_machine": execution_machine} if execution_machine is not None else {}),
                 **({"creation_nonce": creation_nonce} if creation_nonce is not None else {}),
+                **({"worktree_writer_requirement": worktree_writer_requirement}
+                   if worktree_writer_requirement is not None else {}),
             },
         ))
 
