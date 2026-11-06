@@ -1,0 +1,174 @@
+# Machine Health Heartbeats
+
+- **Slug:** `machine-health-heartbeats`
+- **Repo:** copilot-extensions
+- **Branch(es):** independent, dependency-ordered PRs targeting `dev`
+- **Created:** 2026-11-05
+- **Status:** Draft
+- **Vision:** [machine heartbeats](../../../visions/telemetry/machine-heartbeats/README.md),
+  [user-state carriers](../../../visions/user-state-carriers/README.md)
+- **Umbrella issue:** #10873
+- **Sub-issues:** source slices are claimed before implementation
+
+## Guiding Intent
+
+Make machine outages diagnosable without making monitoring another essential
+service. Agent Machines propagates supported core machine preferences through
+an explicitly selected OneDrive carrier and aggregates telemetry/health back.
+Reuse existing retained local telemetry, add bounded hourly reports, and
+eventually publish seven days of health through that out-of-band carrier.
+Observation remains useful without Manager, an interactive
+agent, SSH or Gateway availability.
+
+The immediate delivery is a reviewed architecture and first complete local
+capture-to-report implementation, followed by adopter-owned configuration-only
+rollout. Further outage rounds refine the probe/carrier design before their
+activation. A completed source slice is not the whole effort's completion.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Health implementation owner | Plan, bounded reports, health engine and reviewed source PRs | #10873 and this effort |
+| Existing telemetry owners | Producer schemas, retained sinks, optional SDK/OTLP boundaries | #7935 / #5900 |
+| Adopter configuration owner | Private defaults, selected-machine configuration and activation decisions | Existing adopter configuration and machine owners |
+
+## Coordination
+
+- **Topology:** independent per-slice PRs; merge reviewed design before code.
+- **Host (owns PRs):** Health implementation owner.
+- **Delegates:** none; existing producer and maintenance work keeps its owners.
+- **Handoff:** update this canonical effort, source issues and validation before
+  transferring a slice. No public links to private deployment records.
+- Preserve #7935/#5900 producer/native/OTLP acceptance, #5215 readiness and
+  #5559 process-registry ownership. Do not pre-patch or depend on open #8932.
+
+## Context
+
+#10860 established the standing intent, not an implementation. The source
+inventory and owner decision are in [architecture.md](architecture.md); concrete
+interfaces and outage controls are in [design.md](design.md).
+
+Bridge and Dispatch already support explicit retained local JSONL sinks using
+`process_telemetry.configured_spool`, one existing bounded writer, and 30-day
+local diagnostic retention. The library already supplies measurements,
+percentile summaries and optional genuine SDK/OTLP adapters. JSONL capture is
+not OTLP reception, and existing application logs are not optional event capture.
+
+Agent Machines already owns machine configuration and native scheduled jobs.
+Its old hourly self-update watchdog is transport-specific and must not be
+revived for this feature. Manager and Worktrees are optional observation or
+presentation consumers, not prerequisites for machine-health publication.
+
+## Request
+
+The accepted request is to plan the architecture/design, obtain review, start
+implementation, incorporate outage lessons, enable local telemetry through
+adopter defaults, and derive useful performance/reliability charts while avoiding
+an unnecessary service. The original, public-safe wording and later narrowing
+are preserved in [inception-transcript.md](inception-transcript.md).
+
+The operator subsequently endorsed Agent Machines ownership. The detailed
+division and first-slice sequencing below remain **agent recommendations**
+submitted for review, not additional operational authority.
+
+## Scope Approvals
+
+The operator authorizes source planning, review and implementation. The adopter
+has separately selected default configuration and an initial visible Windows
+cohort. Its explicit latest boundary is **configuration-only: ask before
+activating any running service**.
+
+No live service reload/restart, scheduled-job enrollment, Linux rollout,
+credential acquisition, new collector, transport setup, cloud-storage selection
+or remote recovery follows from plan approval. Existing custom sinks and active
+sessions must survive. Exact deployment selectors and original private approval
+evidence remain with the adopter; this public plan does not manufacture a grant.
+
+## Plan
+
+### Phase 1 - Reviewed architecture and design
+- [x] Inventory existing sinks, local reports, machine schedulers and overlapping work.
+- [x] Capture the request, separate recommendations and record activation limits.
+- [ ] Review and merge this effort, architecture, design and outage-control matrix.
+
+### Phase 2 - First complete local capture-to-report flow
+- [ ] Claim the bounded source slice and implement an Agent Machines report
+  command over existing typed local telemetry, without a new daemon or SDK
+  requirement.
+- [ ] Produce 168 hourly, coverage-qualified summaries and a self-contained
+  chart from real existing sink output; preserve loss, invalid and missing data.
+- [ ] Prove the existing producer/configured sink -> file -> report/chart
+  consumer flow, not only pure aggregation functions.
+- [ ] Pass targeted tests, required review/CI and merge; update reality docs.
+
+### Phase 3 - Adopter default configuration, no activation
+- [ ] Provide the supported configuration-only setup contract, preserving
+  pre-existing custom sinks and selecting owner-resolved local namespaces.
+- [ ] Have the adopter land its versioned defaults and configure the currently
+  visible selected Windows machines through existing owners.
+- [ ] Record configured, already-capturing, unavailable and pending-activation
+  outcomes separately. Do not reload or restart a running service.
+
+### Phase 4 - Core preference propagation
+- [ ] Extend the existing Agent Machines configuration owner to publish and
+  receive explicitly supported nonsecret core preferences through the selected
+  carrier, not through the health-record parser.
+- [ ] Reuse normal configuration validation, scope, precedence, preview/apply
+  and local authority; preserve existing bindings and machine overrides.
+- [ ] Qualify delayed/conflicting preferences, unsupported versions, offline
+  operation and safe withdrawal before any adopted application.
+
+### Phase 5 - Hourly health engine and carrier qualification
+- [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
+  hypotheses and confirmed causes separately.
+- [ ] Implement bounded domain probes and the 168-slot store, using exact
+  existing owners and no remediation or new resident process.
+- [ ] Add independent native scheduled execution through Agent Machines after
+  source review, retaining a separate explicit enrollment/activation gate.
+- [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
+  conflicts, offline catch-up and reader-side outage reporting.
+- [ ] Obtain activation authority for the selected cohort, prove actual hourly
+  publication and peer receipt, and preserve local-only operation.
+
+## Validation Plan
+
+- [ ] Source: strict bounded input, mixed schema/timestamp units, malformed and
+  partial records, tail rotation, loss/unknown accounting and output privacy.
+- [ ] Consumer: real retained sink output reaches the normal report command;
+  charts reflect observations without inventing uptime or unobserved zeroes.
+- [ ] Statistics: group homogeneous stages, show population/coverage, preserve
+  absent durations, and do not qualify unsupported p99 or causal claims.
+- [ ] Operations: no producer-side extra I/O, network, process or writer; measure
+  report cost and bound storage, scan work, runtime and scheduled overlap.
+- [ ] Outages: exercise the [design controls](design.md#outage-derived-controls),
+  including a live process with an unresponsive SSH path and an impaired carrier.
+- [ ] Platforms: portable unit contracts plus isolated Windows/Linux native
+  one-shot, scheduling, headlessness and cleanup qualification before enrollment.
+- [ ] Deployment: default configuration round-trip, custom-sink preservation,
+  real readback, no running-service activation and explicit unavailable hosts.
+- [ ] Preferences: separate typed input, permitted settings only, existing
+  validation/precedence and local authority, with visible conflicts rather than
+  last-write-wins or command execution from synchronized data.
+- [ ] Acceptance: required review/CI, source merge, release availability,
+  configured state, active capture and carrier receipt remain separate facts.
+
+## Proposal
+
+**Agent-recommended:** Agent Machines owns the bounded machine-health job and
+its native periodic registration, not a resident service. Existing producers
+retain their local sinks; the shared telemetry library retains event/statistic
+semantics; Manager renders cached reports; Worktrees contributes observations.
+The [owner comparison](architecture.md#owner-decision) explains this choice.
+
+## Journal
+
+### 2026-11-05 - Inception and source inventory
+- Claimed #10873 after deduplicating heartbeat/capture work.
+- Confirmed existing retained sinks and optional SDK/OTLP support; no second
+  telemetry bus, collector or runtime activation is required for the first flow.
+- Recorded the operator's configuration-only narrowing. Plan review is pending;
+  no runtime implementation or adopter configuration has changed.
+- The operator endorsed Agent Machines propagating core preferences through
+  OneDrive and aggregating health/telemetry back. Added the separate preference
+  phase without widening activation authority.

@@ -20,6 +20,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Maintainer Vision Adherence Review](active/maintainer-vision-adherence-review/README.md) | Active; public lens and paired skill proposed | #10864; existing vision/pattern/conformance and review owners retained, no runtime rollout |
+| [Machine Health Heartbeats](active/machine-health-heartbeats/README.md) | Draft; reviewed architecture before first local capture-to-report flow | #10873; existing telemetry/domain owners retained, no new daemon; adopter rollout configuration-only |
 | [Copilot Driver Core Refactor](active/copilot-driver-core/README.md) | Draft; reviewed main refactor plan before code | #10765; standalone core and all caller convergence, existing component owners retained, no shared rollout |
 | [Repository Write Guidance](active/repository-write-guidance/README.md) | Active; native forms implemented, real consumer and timing qualification open | #10778; preserves prepared facts, scoped break-glass and native owners; no new interception or rollout authority |
 | [Portable Bridge Receiving Support](active/portable-bridge-receiving-support/README.md) | Active; ACP source merged, canonical mux/driver composition next | #10636; canonical policy, Session Host, remote-driver and Manager launch composition; existing owners retained, no guest-suite upgrade or rollout |
