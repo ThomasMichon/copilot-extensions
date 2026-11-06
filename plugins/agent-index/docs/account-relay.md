@@ -44,9 +44,46 @@ withdrawal are reread before each operation and rechecked before delivery.
 Use different capabilities for different recipient/source/account bindings.
 Grant expiry is a capability limit, **not account-token validity**.
 
+### Renewable source-authorization leases
+
+A grant may explicitly add `source_lease_seconds`, an integer from 1 through
+3600. Absence preserves the existing token operation and refuses lease issuance.
+This is authorization to borrow that exact signed-in source for a bounded
+interval, **not an account-token expiry claim**. An older source policy reader
+rejects this added field; install capable source support before adopting it and
+restore the previous policy before rolling that source back.
+
+The existing account-only listener accepts `describe-account-relay` with no
+fields and replies with `contract=credential-relay.account-source-lease/v1`
+and `operation=get-account-source-lease`. This read acquires no credential or
+authority. Discover and authenticate the actual serving endpoint through its
+existing lifecycle owner; a newer installed package is not live support.
+Older listeners close without this declaration. A consumer requiring a lease
+must report unsupported support, never fall back to the unrestricted listener
+or an ordinary token response.
+
+`get-account-source-lease` uses the same exact fields and capability as
+`get-account-token`. It acquires anew, rechecks policy/capability before delivery,
+and returns the existing token fields plus `lease_contract`, a fresh `lease_id`,
+and Unix-second `lease_issued_at` / `lease_expires_at` timestamps. Its deadline
+is the earlier of request-start plus `source_lease_seconds` and grant expiry;
+acquisition latency counts against it. Source failure, rotation or expiry
+delivers neither a token nor a lease. The ordinary `get-account-token` response
+is unchanged, including on a lease-enabled grant.
+
+The receiving execution owner must independently enforce its auth-wait action
+and retain durable native identity and uncertain operations. It must account
+conservatively for request latency, suspension and clock uncertainty. This
+source operation does not install that consumer, refresh a Copilot file,
+pause/resume a process, create a feeder or authorize transport enrollment.
+Provider-first expansion does not make an existing token-only consumer enforce
+a lease. Both the ordinary token operation and declaration-less legacy
+listener remain supported; no legacy operation is retired.
+
 The Bridge publishes `account-relay-port.json` beside the policy, containing
 only the actual loopback port, process ID and generation. This dedicated listener accepts
-only `get-account-token`; legacy get/fill/token actions cannot bypass it. The
+the account operations and their fixed support declaration described above;
+legacy get/fill/token actions cannot bypass it. The
 embedding must authenticate the selected local process and remote SSH peer,
 and keep any forwarded listener private. Discovery is not identity by itself.
 Bridge shutdown withdraws its discovery and cancels in-flight operations.
