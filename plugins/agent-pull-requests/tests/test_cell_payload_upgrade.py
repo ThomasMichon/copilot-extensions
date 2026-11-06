@@ -128,9 +128,10 @@ def _run(script, arguments, environment, caller, *, timeout):
             timeout=timeout, check=False, **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as error:
-        error.add_note(
+        print(
             f"Owned payload command timed out after {timeout}s: "
-            f"stdout={error.stdout!r}; stderr={error.stderr!r}"
+            f"stdout={error.stdout!r}; stderr={error.stderr!r}",
+            file=sys.stderr,
         )
         raise
 
@@ -187,19 +188,23 @@ def test_scenario_remaining_preserves_the_original_deadline(monkeypatch):
         _scenario_remaining(140)
 
 
-def test_payload_command_timeout_retains_both_streams(tmp_path, monkeypatch):
+def test_payload_command_timeout_retains_both_streams(tmp_path, monkeypatch, capsys):
+    timeout_error = subprocess.TimeoutExpired(
+        ["fixture"], 5, output="partial stdout", stderr="partial stderr",
+    )
+    timeout_error.add_note = None
+
     def timed_out(command, **kwargs):
-        raise subprocess.TimeoutExpired(
-            command, kwargs["timeout"], output="partial stdout", stderr="partial stderr",
-        )
+        raise timeout_error
 
     monkeypatch.setattr(subprocess, "run", timed_out)
     with pytest.raises(subprocess.TimeoutExpired) as failure:
         _run(tmp_path / "scripts" / "init.ps1", [], {}, tmp_path, timeout=5)
-    notes = "\n".join(failure.value.__notes__)
-    assert "after 5s" in notes
-    assert "partial stdout" in notes
-    assert "partial stderr" in notes
+    captured = capsys.readouterr()
+    assert failure.value is timeout_error
+    assert "after 5s" in captured.err
+    assert "partial stdout" in captured.err
+    assert "partial stderr" in captured.err
 
 
 @pytest.mark.parametrize("phase", ["startup", "upgrade"])
@@ -214,6 +219,7 @@ def test_cutover_timeout_retains_caller_evidence_and_both_streams(tmp_path, monk
     timeout_error = subprocess.TimeoutExpired(
         ["fixture"], 5, output="partial stdout", stderr="partial stderr",
     )
+    timeout_error.add_note = None
 
     def timed_out(*_args, **_kwargs):
         raise timeout_error

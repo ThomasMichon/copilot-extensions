@@ -1081,10 +1081,12 @@ callback an implicit credential store.
   not shared-host rollout, the separate Dispatch reproduction or parent completion.
 - Fresh review then found the new timeout wrapper changed the exception type
   before startup/upgrade diagnostic handlers could catch it. The helper now
-  annotates and rethrows the original timeout; both cutover callers combine
+  emits captured streams to stderr and rethrows the original timeout; both cutover callers combine
   captured streams with journal, lifecycle, native-birth and original-exit
-  evidence. Eleven focused controls pass, including both actual diagnostic
-  caller phases. Current-head CI, re-review and hosted qualification of this
+  evidence. This does not depend on Python 3.11 exception notes: the plugin
+  retains Python 3.10 support. Eleven focused controls pass, including both
+  actual diagnostic caller phases with exception notes unavailable.
+  Current-head CI, re-review and hosted qualification of this
   test-helper correction remain pending under the same bounded repair loop.
 - The separately authorized `watch_owner` run `42279632485` exercised
   #10953's exact candidate `10be300359f85323f012c94fd1124ed50ac70a06`.
