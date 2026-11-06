@@ -14,8 +14,12 @@ import threading
 from weakref import WeakKeyDictionary
 
 FIELD = "_fixture_context"
-_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_().-]*\Z")
 _PATH = re.compile(r"/[A-Za-z0-9_/~.-]*\Z")
+_UNKNOWN_REASONS = {
+    f"{side}_{reason}" for side in ("local", "remote")
+    for reason in ("missing", "shape", "field_limit", "environment_name", "config_path", "digest_shape")
+} | {"key_domain_differs"}
 
 
 class Diagnostics:
@@ -59,27 +63,44 @@ class Diagnostics:
             self.snapshot.set(None)
 
     @staticmethod
-    def _valid(value):
+    def _invalid_reason(value):
+        if value is None:
+            return "missing"
         if not isinstance(value, dict) or set(value) != {"key_tag", "config", "environment", "cwd"}:
-            return False
+            return "shape"
         if not isinstance(value["config"], dict) or not isinstance(value["environment"], dict):
-            return False
+            return "shape"
         if len(value["config"]) + len(value["environment"]) > 4096:
-            return False
+            return "field_limit"
         pairs = [("key_tag", value["key_tag"]), ("cwd", value["cwd"])]
         for group, pattern in (("config", _PATH), ("environment", _NAME)):
             for name, digest in value[group].items():
                 if not isinstance(name, str) or len(name) > 256 or not pattern.fullmatch(name):
-                    return False
+                    return "environment_name" if group == "environment" else "config_path"
                 pairs.append((name, digest))
-        return all(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
-                   for _, digest in pairs)
+        if not all(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+                   for _, digest in pairs):
+            return "digest_shape"
+        return None
+
+    @staticmethod
+    def _valid(value):
+        return Diagnostics._invalid_reason(value) is None
 
     def compare(self, remote):
         local = self.snapshot.get()
-        if not self._valid(local) or not self._valid(remote) or local["key_tag"] != remote["key_tag"]:
+        reason = None
+        for side, value in (("local", local), ("remote", remote)):
+            invalid = self._invalid_reason(value)
+            if invalid is not None:
+                reason = f"{side}_{invalid}"
+                break
+        if reason is None and local["key_tag"] != remote["key_tag"]:
+            reason = "key_domain_differs"
+        if reason is not None:
             return {"comparison": "unknown", "cwd_equal": None,
-                    "different_environment": [], "different_config": []}
+                    "different_environment": [], "different_config": [],
+                    "unknown_reason": reason}
         return {
             "comparison": "compared", "cwd_equal": local["cwd"] == remote["cwd"],
             "different_environment": sorted(name for name in local["environment"].keys() | remote["environment"].keys()
@@ -190,7 +211,9 @@ def file_sink(directory, phase):
 
     def write(record):
         nonlocal count
-        allowed = {"event", "comparison", "cwd_equal", "different_environment", "different_config"}
+        allowed = {
+            "event", "comparison", "cwd_equal", "different_environment", "different_config", "unknown_reason",
+        }
         events = {
             "context_refused", "context_accepted", "warm_refused", "warm_unknown_outcome",
             "warm_unavailable", "warm_other_failure", "warm_accepted", "warm_error_response", "direct_selected",
@@ -209,6 +232,8 @@ def file_sink(directory, phase):
         if "cwd_equal" in record and record["cwd_equal"] is not None and type(record["cwd_equal"]) is not bool:
             return
         if "comparison" in record and record["comparison"] not in {"compared", "unknown"}:
+            return
+        if "unknown_reason" in record and record["unknown_reason"] not in _UNKNOWN_REASONS:
             return
         role = "server" if record["event"].startswith(("context_", "pool_")) else "caller"
         data = json.dumps({"phase": phase, "role": role, **record}, separators=(",", ":")).encode() + b"\n"

@@ -186,17 +186,63 @@ def test_missing_invalid_or_different_key_is_unknown_and_sink_never_serializes_m
     diagnostic.capture(data, key)
     remote = diagnostic.snapshot.get()
     diagnostic.emit("context_accepted", **diagnostic.compare(remote))
-    for candidate in (None, {}, {**remote, "key_tag": "0" * 64}):
-        assert diagnostic.compare(candidate)["comparison"] == "unknown"
+    for candidate, reason in (
+        (None, "remote_missing"), ({}, "remote_shape"),
+        ({**remote, "key_tag": "0" * 64}, "key_domain_differs"),
+    ):
+        comparison = diagnostic.compare(candidate)
+        assert comparison["comparison"] == "unknown"
+        assert comparison["unknown_reason"] == reason
     diagnostic.emit("context_accepted", snapshot=remote)
-    diagnostic.emit("context_accepted", different_environment=["bad\nsynthetic-secret"])
+    for unsafe in ("bad\nsynthetic-secret", "bad=synthetic-secret", "bad/synthetic-secret"):
+        invalid = {**remote, "environment": {unsafe: remote["environment"]["TOKEN"]}}
+        assert diagnostic.compare(invalid)["unknown_reason"] == "remote_environment_name"
+        diagnostic.emit("context_accepted", different_environment=[unsafe])
+    diagnostic.emit("context_refused", unknown_reason="synthetic-secret")
+    diagnostic.emit("context_refused", **diagnostic.compare(None))
     diagnostic.capture(b"not-json", key)
     assert diagnostic.compare(remote)["comparison"] == "unknown"
+    assert diagnostic.compare(remote)["unknown_reason"] == "local_missing"
     records = fixture.read_records(tmp_path)
-    assert len(records) == 1
+    assert len(records) == 2 and records[1]["unknown_reason"] == "remote_missing"
     output = json.dumps(records)
     assert key not in output and "synthetic-secret" not in output and "key_tag" not in output
     assert fixture.actor_environment({"CONTROL": "1", "control": "1", "STABLE": "same"}, "CONTROL") == {"STABLE": "same"}
+
+
+@pytest.mark.parametrize("name", ["ProgramFiles(x86)", "CommonProgramFiles(x86)"])
+def test_windows_punctuation_observation_survives_fields_and_sink(tmp_path, name):
+    diagnostic = fixture.Diagnostics(fixture.file_sink(tmp_path, "unit"))
+    key = secrets.token_hex(32)
+    original = {"execution_context": {"contract": "fixture", "digest": "unchanged"}}
+    environment = {name: "synthetic-sensitive-location"}
+
+    def fields():
+        diagnostic.capture(json.dumps({
+            "config": {}, "environment": environment, "cwd": "/fixture",
+        }).encode(), key)
+        return original
+
+    async def caller():
+        return await asyncio.to_thread(diagnostic.fields(fields))
+
+    request = asyncio.run(caller())
+    assert diagnostic.snapshot.get() is None
+    has_observation = fixture.FIELD in request
+    assert has_observation
+    assert request["execution_context"] is original["execution_context"]
+    environment[name] = "different-sensitive-location"
+    fields()
+    remote = json.loads(json.dumps(request[fixture.FIELD]))
+    diagnostic.emit("context_refused", **diagnostic.compare(remote))
+    records = fixture.read_records(tmp_path)
+    assert records[0]["comparison"] == "compared"
+    assert records[0]["different_environment"] == [name]
+    assert records[0]["cwd_equal"] is True
+    private_absent = all(value not in json.dumps(records) for value in (
+        key, "synthetic-sensitive-location", "different-sensitive-location",
+    ))
+    assert private_absent
 
 
 def test_private_payload_uses_canonical_producer_owner(tmp_path):
