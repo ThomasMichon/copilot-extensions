@@ -98,9 +98,10 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert len(events["workflow_dispatch"]["inputs"]) <= 25
     job = workflow["jobs"]["gateway-host-application-" + platform]
     steps = [step for step in job["steps"] if "run" in step]
-    assert job["timeout-minutes"] == 6 and len(steps) == 2
+    assert job["timeout-minutes"] == 6 and len(steps) == 3
     assert [shlex.split(step["run"]) for step in steps] == [
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
     ]
     assert not any(step.get("continue-on-error") for step in steps)
@@ -155,29 +156,31 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert groups[0] == {
         "test_gateway_host_distribution.py::test_selected_gateway_application_first_touch_repeat_update_and_stop",
     }
-    assert groups[0].isdisjoint(groups[1])
-    assert groups[2] == {
+    assert groups[1] == {
+        "test_gateway_host_distribution.py::"
+        "test_selected_ssh_application_first_touch_repeat_update_and_stop",
+    }
+    assert groups[3] == {
         "test_gateway_host_distribution.py::"
         "test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop",
     }
-    assert groups[2].isdisjoint(groups[0] | groups[1])
-    assert groups[3] == {
+    assert groups[4] == {
         node for node in nodes if node.startswith("test_ssh_setup.py::")
     } | {
         "test_repository_ssh_setup_installed.py::"
         "test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop",
     }
-    assert groups[3].isdisjoint(groups[0] | groups[1] | groups[2])
-    assert groups[0] | groups[1] | groups[2] | groups[3] == selected(original)
-    assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
+    for index, group in enumerate(groups):
+        assert group.isdisjoint(set().union(*groups[:index]))
+    assert set().union(*groups) == selected(original)
     assert (
         "test_continuity_bootstrap.py::"
         "test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
-    ) in groups[1]
+    ) in groups[2]
     assert (
         "test_continuity_bootstrap.py::"
         "test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
-    ) in groups[1]
+    ) in groups[2]
 
 
 @pytest.mark.parametrize(

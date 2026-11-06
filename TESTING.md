@@ -528,6 +528,10 @@ source-independent repeat, failed candidate
 preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
+The Gateway jobs keep each complete installed Gateway and SSH lifecycle case
+in its own sequential 180-second runner, separate from the independent consumer
+controls. No lifecycle sequence is split; the six-minute job limit and peak job
+concurrency are unchanged.
 
 Its further dependent normal-setup jobs prepare the engine's declared test
 dependencies and run the repository continuity module's `normal_ssh_setup or
