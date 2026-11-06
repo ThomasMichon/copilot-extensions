@@ -299,3 +299,34 @@ gap, with no new sandbox, process interception, service, or security guarantee.
   environment; `uv pip check` confirms all 63 installed packages are compatible.
   The full native release gate and installed write-guidance acceptance remain
   open; local setup is not either of those results.
+- Release prerequisite #10843 merged as
+  `aea7ecc6e9d4ba862d94cca0c20efb45b8b1a6a7` after current-head Copilot approval
+  and successful required CI. The worktree was pulled forward. Release
+  observation now waits for a candidate containing this fix as well as #10800;
+  neither the release blocker nor the parent coordination issue is resolved
+  merely by merging the source correction.
+- Promotion `42148874159` froze development input
+  `aea7ecc6e9d4ba862d94cca0c20efb45b8b1a6a7`. Its required real Windows Resume
+  job passed both cases in 28.20 seconds, with preparation, owned cleanup and
+  native evidence upload also successful. Closed #10830 on this actual
+  materialized-consumer result, not a local setup result. Full promotion and
+  installed write-guidance acceptance remain separate open gates.
+- The same run failed its SSH strict type check before source-unit execution:
+  materialized vendored libraries and their tests were being claimed by the
+  service's broad strict source prefix. Existing issue #10842 now owns this
+  remaining prerequisite. The correction must preserve service-owned strict
+  inputs and canonical library declarations, rather than suppress diagnostics
+  or relaxing type checking globally.
+- Separated the four strict services' materialized library directories into
+  their own pending inventory. Service source/tests and canonical library
+  declarations retain their admission. An all-project probe reports absent
+  pending copies without aborting later scopes or certifying them.
+- All 142 checker regressions pass under the repository's pinned MyPy
+  environment; the first invocation used an interpreter without MyPy and was
+  corrected rather than treated as a product failure. Six actor-free checker
+  controls, strict checker analysis on both targets, lint and the complete
+  required unit-manifest source bindings also pass.
+- The real materialized SSH fixture reproduces failure with the former
+  261-file scope. With complete first-party import inputs, all 35 service-owned
+  files pass unchanged strict Python 3.10 checking for Linux and Windows.
+  Exact-candidate promotion remains required before closing #10842.

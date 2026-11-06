@@ -57,6 +57,30 @@ def test_candidate_checker_refuses_unclassified_pending_and_failed_scopes(
     assert checker.main(["--enforced", "--require-complete"]) == 2
 
 
+@pytest.mark.parametrize("prepare", [False, True])
+def test_all_projects_continues_past_unmaterialized_pending_copies(monkeypatch, capsys, prepare):
+    projects = tuple(
+        checker.Project(name, (name + ".py",), (), level, "3.10", ("linux",), "requirements.txt")
+        for name, level in (("admitted", "strict"), ("pending-copy", "pending"))
+    )
+    monkeypatch.setattr(checker, "load_projects", lambda: projects)
+    monkeypatch.setattr(checker, "python_paths", lambda: ("admitted.py",))
+    calls = []
+
+    def check(_root, project, files, **_kwargs):
+        assert files == ("admitted.py",)
+        calls.append(project.name)
+        return 0
+
+    monkeypatch.setattr(checker, "check_project", check)
+    monkeypatch.setattr(checker, "prepare", lambda _root, project: calls.append(project.name))
+    monkeypatch.setattr(checker, "environment_path", lambda _root, _project: (Path("fixture"), "digest"))
+    argv = ["--all", "--prepare"] if prepare else ["--all"]
+    assert checker.main(argv) == (0 if prepare else 1)
+    assert calls == ["admitted"]
+    assert "pending-copy: pending, no physical Python files" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("with_dependency", [False, True])
 def test_candidate_checker_preserves_checker_failure_and_environment_custody(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_dependency: bool,
