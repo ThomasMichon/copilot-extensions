@@ -19,7 +19,7 @@ import psutil
 import pytest
 
 from worktree_manager import companion_pane, mux_mapping_registry
-from _companion_joined_fixtures import managed_join
+from _companion_joined_fixtures import managed_join, native_state_reader
 from test_companion_bridge_session_source import semantic_peer as semantic_peer
 from test_companion_current_requests import actual_waiters as actual_waiters
 from test_companion_joined_tmux import source_entrypoint
@@ -133,7 +133,11 @@ def test_native_windows_three_owner_history_live_and_same_cli(
 
             def app_state() -> dict[str, Any]:
                 path = peer["checkout"].parent / "native-state.json"
-                return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+                try:
+                    with native_state_reader(path) as stream:
+                        return json.load(stream)
+                except FileNotFoundError:
+                    return {}
 
             def wait_for(
                 condition: Callable[[], bool], describe: Callable[[], dict[str, Any]] | None = None,

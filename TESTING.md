@@ -2554,6 +2554,13 @@ change the 50 ms/VM budgets or make a failed read pass. Other runs remain
 unprofiled unless explicitly selected. Portable controls preserve one call
 and exact result/exception identity in both modes. Profiled timings include
 instrumentation and are diagnostic evidence, not native performance acceptance.
+The fixture's state reader also opens its Windows handle with read/write/delete
+sharing, matching atomic publication rather than temporarily denying its
+publisher's DELETE access. A native negative control retains the old ordinary
+reader's replacement refusal; the shared reader allows replacement while
+retaining its original complete JSON and then reads the newly published file.
+Only a missing publication is deferred. Access, sharing and malformed-JSON
+errors remain failures; there is no permission-error retry or deadline reset.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

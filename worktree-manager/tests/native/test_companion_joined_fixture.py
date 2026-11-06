@@ -14,11 +14,56 @@ from types import SimpleNamespace
 import pytest
 
 from agent_procutil import no_window_kwargs
+from _companion_joined_fixtures import native_state_reader
 from test_companion_bridge_codec import OWNER
 from test_companion_bridge_session_source import membership_seed, semantic_peer as semantic_peer
 from test_companion_joined_tmux import source_entrypoint
 from test_companion_joined_psmux import live_reader_pids, owner_commands_settled
 from worktree_manager import agenda_transport, companion_bridge_source, mux_companion
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows delete-sharing semantics")
+def test_native_state_reader_preserves_atomic_replacement_and_original_handle(
+    tmp_path: Path,
+) -> None:
+    target, replacement = tmp_path / "state.json", tmp_path / "next.json"
+    target.write_text('{"revision":1}', encoding="utf-8")
+    replacement.write_text('{"revision":2}', encoding="utf-8")
+    with target.open("rb"):
+        with pytest.raises(PermissionError):
+            replacement.replace(target)
+    with native_state_reader(target) as stream:
+        replacement.replace(target)
+        assert json.load(stream) == {"revision": 1}
+    with native_state_reader(target) as stream:
+        assert json.load(stream) == {"revision": 2}
+
+
+@pytest.mark.parametrize("failure", [
+    FileNotFoundError("not published"), PermissionError("access denied"),
+    json.JSONDecodeError("invalid state", "", 0),
+])
+def test_native_state_observation_only_defers_a_missing_publication(
+    tmp_path: Path, failure: Exception,
+) -> None:
+    source = ast.parse(Path(__file__).with_name("test_companion_joined_psmux.py").read_text())
+    state = next(node for node in ast.walk(source)
+                 if isinstance(node, ast.FunctionDef) and node.name == "app_state")
+
+    def reader(_path):
+        raise failure
+
+    namespace = {
+        "Any": object, "json": json, "native_state_reader": reader,
+        "peer": {"checkout": tmp_path / "checkout"},
+    }
+    exec(compile(ast.Module(body=[state], type_ignores=[]), "<native state>", "exec"), namespace)
+    if isinstance(failure, FileNotFoundError):
+        assert namespace["app_state"]() == {}
+    else:
+        with pytest.raises(type(failure)) as caught:
+            namespace["app_state"]()
+        assert caught.value is failure
 
 
 @pytest.mark.parametrize("profile", [False, True])
