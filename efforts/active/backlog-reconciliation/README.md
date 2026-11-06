@@ -330,6 +330,24 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
+the complete OPEN #6185 parent receiving #6186 as an independent emitter
+convergence/recovery lane. Current source credits actual-start writing,
+fingerprint restart and crash revival while retaining inner conclusion
+progress and actual incident causality. One whole retry source remains
+withheld; original alternatives, all technical acceptance and custody
+remain. #6186 awaits planning review and a separate current-parent audit;
+the last complete whole count is still 802, 73 above fixed 729.
+
+The [caller-pipe study](launch-pipe-and-logger-quality-cohorts.md) records
+reviewed #11054 and #6880's separately audited NOT_PLANNED retirement
+under independently OPEN #5716. All technical lanes and custody remain.
+Two identical complete scans measure 802 whole OPEN and 1,021 audited
+outcomes: the one campaign departure is offset by eligible metadata-only
+arrival #11050, now separately qualified as an in-progress producer-owned
+configuration prerequisite, not a completion candidate. Fixed 729 stays
+73 away; new source studies and actual fleet-reconcile intake continue.
+
 The [caller-pipe study](launch-pipe-and-logger-quality-cohorts.md) now records
 the complete independently OPEN #5716 parent's fourth finite lane, #6880.
 Current source separates root exit from captured-output EOF; the exact
