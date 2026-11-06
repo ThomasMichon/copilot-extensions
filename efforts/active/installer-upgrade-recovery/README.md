@@ -2169,3 +2169,30 @@ unchanged; no inventory, coverage or budget is relaxed. Source publication,
 current-head review/required CI, exact-source hosted qualification and
 containing release observation remain gates. The provider does not yet migrate
 setup callers or qualify an installed host; #10377 remains Active.
+
+### 2026-11-06 - Strict option review correction and retained closure gate
+
+The first published head `89bd803bc47cfd053735292647a0c421659a03ff` receives
+one Medium review finding: argparse accepts recognized-option prefixes before
+acquisition. The correction disables abbreviation for the entire versioned
+parser, not only one spelling. Four pre-read rejection variants cover the
+unknown option and the anchor/default/contract prefixes. The six impacted
+parser, actual CLI and namespace controls pass in 16.09 seconds, 125.97 seconds
+including preparation and verified cleanup, at unchanged limits. The earlier
+34-control complete packet remains attributed to its original source; the
+current 37-control inventory still needs exact-head hosted qualification.
+
+All failing jobs in CI `42226529545` are inspected. Eligible units execute
+successfully. The guard job fails because HTTP-52's existing execution closure
+includes all Worktrees/Codespaces source modules; the new inspection module
+therefore changes its captured inventory. The required PR gate's failure is
+the consequent failed source guard, not a unit-test failure.
+
+The existing `bridge-http52-capture` portfolio owns the necessary controlled
+capture, independent verification and canonical artifact export. Its source pin,
+contained consumers, existing budgets and publication preimage checks remain
+unchanged. The next revision must clear actual current-head review, then use
+that owner at the corrected exact source and materialize its genuine outputs.
+No stale hashes are hand-edited, no module is relocated to blind the guard,
+and no signing, evidence, CI or containment rule is bypassed. Native inspection,
+retained closure, source merge/release and caller recovery stay separate gates.

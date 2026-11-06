@@ -157,7 +157,7 @@ def command(argv: list[str]) -> int:
         def error(self, message):
             raise RegistrationError("invalid-request", f"Invalid inspection request: {message}")
 
-    parser = Parser(prog="repos registration", description=__doc__)
+    parser = Parser(prog="repos registration", description=__doc__, allow_abbrev=False)
     parser.add_argument("action", choices=("inspect",))
     parser.add_argument("--anchor", required=True)
     parser.add_argument("--default-name", required=True)

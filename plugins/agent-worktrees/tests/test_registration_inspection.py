@@ -198,10 +198,13 @@ def test_invalid_legacy_identity_or_policy_never_guesses(registered, capsys, rec
     assert data["status"] == "failed"
 
 
-def test_unknown_request_is_rejected_before_registry_acquisition(registered, capsys, monkeypatch):
+@pytest.mark.parametrize("option", ["--misspelled", "--anch", "--default-n", "--contract-v"])
+def test_unknown_request_is_rejected_before_registry_acquisition(registered, capsys, monkeypatch, option):
     _root, anchor, _other = registered
     monkeypatch.setattr(repos, "read_registry", lambda **_kwargs: pytest.fail("read registry"))
-    data = request(anchor, capsys, extra=("--misspelled",), expected=2)
+    values = {"--anch": str(anchor), "--default-n": "control", "--contract-v": "1"}
+    extra = (option, values[option]) if option in values else (option,)
+    data = request(anchor, capsys, extra=extra, expected=2)
     assert data["code"] == "invalid-request"
 
 
