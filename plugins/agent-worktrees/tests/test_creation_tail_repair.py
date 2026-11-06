@@ -848,9 +848,9 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
     waiting, spawned = threading.Event(), threading.Event()
     worker = None
     results = []
+    parent_reports = []
     original_config, original_dir = cfg.load_config, cfg.project_dir
     original_acquire = repair.fin.FinalizeLock.acquire
-    original_output = repair.output._json_output
     core = handoff_cli._core()
 
     def child_thread():
@@ -870,7 +870,8 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
         if child_thread():
             results.append(value)
         else:
-            original_output(value)
+            # The child owns the process-global stdout capture while embodying.
+            parent_reports.append(value)
 
     def spawn(*args, **kwargs):
         spawned.set()
@@ -920,10 +921,14 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
     monkeypatch.setattr(local_cache_refresh, "prepare_for_launch", guidance)
     monkeypatch.setattr(repair, "_checks", checks)
     try:
-        code, report = _run(creation, capsys, fix=True)
+        code = repair.targeted_doctor(_args(creation, fix=True))
     finally:
         if worker is not None:
             worker.join(10)
+    assert len(parent_reports) == 1
+    report = parent_reports[0]
+    captured = capsys.readouterr()
+    assert creation.seed.text not in json.dumps(report) + captured.out + captured.err
     assert code == 0 and report["prepared"]
     assert worker is not None and not worker.is_alive()
     assert spawned.is_set() and results[-1] == 0
