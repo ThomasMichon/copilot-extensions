@@ -1073,3 +1073,29 @@ its saved installed-update, launch and handoff obligations.
   a passed native packet or a reason to widen the limit. Keep both local
   environmental failures and the hosted failure in the evidence; complete
   fresh hosted Windows qualification before merging the fixture correction.
+
+### 2026-11-06 - Routed-port source merged; parent return retained
+
+- #10916 merges as `88f51e11612171638d3ae9667534efca6e5ac56a` after
+  current-head review `5797030423` reports no open issues and its requested
+  exact-head native evidence is supplied. The earlier dismissed approval is
+  not used. Review threads are empty; required CI `42181133437` succeeds
+  before the normal role-scoped merge. No CI or thread gate is bypassed.
+- Native run `42180608803` succeeds on the exact published head
+  `6f79db48d8f11c6faf5081d4fc0253caa4a8b0ee`. Linux and Windows jobs pass.
+  The Windows Companion/reader packet passes 138 cases in 65.75 seconds
+  with successful ordinary cleanup; its bounded owner-lookup packet also
+  passes. All earlier failed runs and cleanup/timing observations remain.
+- Re-read the canonical parent and agenda after merge. The source correction
+  is complete, not installed adoption or whole-update acceptance. Preserve
+  the separately owned serving-generation gap, the original installed-set
+  return and every later launch, handoff and measured-completion item.
+- The ordinary pull-forward helper aborts a squash-history replay conflict.
+  Verify all owned code, tests, changefile and effort bytes against the merged
+  revision; the owned README section also agrees, with only an unrelated
+  upstream addition elsewhere. Retain a local backup and advance the already
+  merged history without replaying or discarding unmerged work.
+- Observe containing release and current installed consumer through their
+  normal owners before claiming the corrected reader live. No new update,
+  Vault intervention, retained-session migration or worktree finalization is
+  performed by this source result.
