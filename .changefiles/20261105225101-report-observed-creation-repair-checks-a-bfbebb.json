@@ -1,0 +1,9 @@
+{
+  "comment": "Report observed creation-repair checks after partial setup failure without masking the original error",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
