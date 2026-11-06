@@ -1961,3 +1961,105 @@ The existing admitted CLI hash is refreshed for the guard move; the unit node
 set, source cohort, coverage/effect guards and 300-second budget are unchanged.
 Fresh-head review, required CI and hosted discovery/consumer qualification
 remain due. This is source validation, not a live binding, pair or rollout.
+
+### 2026-11-06 - Knowledge-related source and hosted qualification complete
+
+#10956 merges at 10:53:30 UTC as
+`27af49e7eaa33733a32e43bbb86a541558f74042`. Actual review `5798951079`
+on final head `abcb17534424a180ce93610adc272022becab9a9` has no open code
+findings and requests the native/consumer validation then still pending.
+All three inline findings are corrected and resolved. Required CI
+`42203689201`, `42203911472` and final description-triggered `42205361933`
+pass that unchanged head. The managed merge uses the authorized ordinary
+review-rule exception, not a required-CI bypass.
+
+The existing reviewed opt-in owner runs `42204493016` at that exact head and
+both Linux/Windows jobs succeed. Downloaded JUnit contains 22 successful
+discovery cases on each platform, all 159 dependent consumers on Linux, and
+151 dependent consumers plus eight explicit Bash-only skips on Windows.
+Those eight execute successfully on Linux. Both bare-anchor/linked-worktree
+native entry cases execute uniquely without skips on both platforms.
+
+The two earlier local CLI timeout cases pass with the original limits:
+set/reset takes 2.750 seconds on Linux and 3.875 on Windows; the repository-name
+preference flow takes 1.613 and 2.409 seconds. These are platform consumer
+results, not a local-performance pass. Earlier local failures and refused
+Windows full-unit evidence remain recorded rather than relabeled successful.
+The final local 203-case packet and hosted qualification cover the corrected
+producer, upsert and helper-owned narrative boundaries. No macOS or installed
+host result is inferred.
+
+Post-merge managed sync safely aborts an incremental squash replay conflict.
+The reviewed combined patch and actual squash patch have identical stable ID
+`dfac4b3bdc3fcfe2c7f9dab62d07d7e7bbf28db2`; all seventeen feature, test,
+workflow and journal bodies match. Only shared TESTING and the unit manifest
+also retain peer contributions. A local backup preserves the reviewed tip,
+and skipping only the proven-merged range permits normal managed sync.
+The canonical Plan and Validation Plan are reread and remain Active.
+
+This completes the bounded #1419 K3/K5 source/discovery reservation. Its K1
+feasibility/retrofit, K2 overlay precedence, actual K4 aligned write/cleanup
+and full receiving lifecycle retain their existing owners and acceptance.
+The next gate is normal containing-release observation, separately from
+rollout; this parent is not Done and no worktree is finalized.
+
+The bounded source completion is published and read back on both existing
+coordination threads: [#1419 comment 6683277573](https://github.com/ThomasMichon/copilot-extensions/issues/1419#issuecomment-6683277573)
+and [#10377 comment 6683279947](https://github.com/ThomasMichon/copilot-extensions/issues/10377#issuecomment-6683279947).
+The original K1 feasibility owner is still present; no reservation or broader
+acceptance is cleared by age or by this completion note.
+
+Read-only release-health reconciliation diagnoses older run `42201092834`
+literally: both Windows Resume fixtures fail with missing
+`work_coalescing_singleton`, not a timeout or assumed flake. Existing owner
+#10960 already fixes that isolated fixture and adds a real isolated-session-shell
+regression, merging as `375ed2eb53fead5ee8cd3b0daeeb997382d42623`.
+Normal release #10981 qualifies that exact Dev source and merges as Main
+`4a8e317f0b169c71036acb751dbcd1de221cb0af` at 10:42:43 UTC.
+That is verified resolution of the earlier failure, not this slice's containing
+release: its source precedes #10956. No competing patch or forced retry is
+selected. A bounded read-only observer waits for a merged normal candidate
+whose admitted Dev contains this feature, then still requires actual admission
+and released implementation-byte proof before crediting release.
+
+The bounded twenty-minute observer sees no containing merged release. A new
+actual failure in run `42207277039` is independently inspected across every
+job: source units, unsigned construction and native Windows Resume pass,
+while artifact attestation fails with `InternalError: error retrieving identity
+token` and `CI: no tokens available`. Existing #10990 owns that recorded
+incident. The actual workflow commit declares the required OIDC/attestation
+write permissions; no missing grant or source fix is inferred.
+
+Normal successor `42208938885` then passes its actual attestation job and
+advances to immutable-candidate checks without this workstream forcing a
+retry or changing access. [Diagnosis 6683772491](https://github.com/ThomasMichon/copilot-extensions/issues/10990#issuecomment-6683772491)
+is published and read back. The successor is a later admitted source run,
+not same-input rerun evidence or a completed Main release. A bounded attached
+observer now follows that exact run; admission, final published bytes and
+Main merge still precede containing-release credit. The report stays open
+and signing/authenticity gates remain unchanged.
+
+### 2026-11-06 - Knowledge-related containing release verified
+
+Normal successor `42208938885` completes successfully. Release #10991 actually
+merges at 11:30:48 UTC as Main
+`f921808d2292394abc738149891de4efdc933630`. Its downloaded immutable admission
+names Dev `8073d6b937c20a5ee994c2edda9ab5a48e98b643`, Main base
+`8e2ac72460f6fbb78f9e3bb8e1c403875ad9a3c7`, original producing attempt 1.
+That actual admitted Dev contains #10956's merge, unlike the two older
+normal releases observed earlier.
+
+Every required release gate succeeds, including actual artifact attestation,
+immutable-candidate unit reuse, publication/readback and the head-pinned
+non-administrative Main merge. All fifteen defining production, fixture,
+workflow, skill and README bodies match the source merge, admitted Dev and
+published Main exactly. The released Worktrees payload is `1.24.504-dev1`.
+No native test is rerun merely to restate unchanged-source evidence.
+
+This satisfies U16's source and containing-release observation. It is not an
+installed binding/pair/overlay, general retrofit/write/cleanup, full receiving
+or affected-host recovery result. The earlier failed attestation run remains
+failed and #10990 remains open; a later admitted source succeeding is not
+same-input rerun evidence. No updater, permission change, token fetch, manual
+release or rollout is performed. The parent stays Active with its remaining
+Plan and Validation Plan under their existing owners.
