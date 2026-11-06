@@ -122,6 +122,20 @@ fresh tracking disposition. All technical rows and source/process/
 Connection Owner/worker/receipt/reservation/uncertain-delivery custody stay
 with their existing owners; no process termination or deployment is granted.
 
+### Reviewed tracking disposition
+
+#11054 merged to Dev as `9b4b811e25969ced41c89b5292c5bec64c354abf`.
+Current-head Copilot approval, complete successful pre-merge checks, zero
+threads and all three reviewed/merged/current document blobs were verified.
+The entire published study was read back; 133 bounded documentation
+contracts and the 24-plugin guard passed with cleanup verified.
+
+Only then #6880 retired NOT_PLANNED beneath still-OPEN #5716, audit 242,
+with complete current eligibility, parent/readback and unchanged original
+body/title/assignment/discussion verified. This is tracking consolidation,
+not completion of the logger regression, Windows transport work, strict
+owner qualification, source claim or resource duty.
+
 ## Logger rescue transactions and repeated helper types
 
 #5665's actual complete 25,472-character body preserves its 18,424-character
