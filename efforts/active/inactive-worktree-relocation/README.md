@@ -445,3 +445,22 @@ adopter pilot feedback gates subsequent widening.
 - These are qualification/safety corrections to the conservative first flow,
   not broader WIP/session/pair support. Current source review/CI/merge and the
   retained external-fixture disposition remain open.
+
+### 2026-11-06 — Final publication ownership boundary
+- Reconciled the next upstream change without overwriting its newer contract
+  evidence or effort entries. Kept the relocation advertisement in the
+  Worktrees status-publication composer, only after its writer server is
+  actually published. The externally observed generation-1 capability is
+  unchanged; the early ownership stamp still does not advertise readiness.
+- The Bridge-owned `tracking_write.py` and canonical upstream contract corpus
+  are byte-identical to current `dev`. The earlier source-only capture remains
+  a verified experiment in durable backup/history and its public workflow,
+  not a competing final contract refresh. Removed the unnecessary Bridge
+  changefile; no Bridge runtime/protocol change is included.
+- The actual isolated monitor publication plus writer/refusal packet passed
+  **52 controls**. Canonical contract validation passed **2 contracts / 1054
+  fixtures** against the preserved upstream evidence. No historical capture,
+  version floor or semantic-owner guard was weakened.
+- The whole feature/umbrella remain Active. Current-head source review/CI/merge,
+  retained failed-fixture disposition and the corrected real-volume retry are
+  still explicit gates; actual activation and adopter migration remain held.

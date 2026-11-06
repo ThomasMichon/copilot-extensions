@@ -103,7 +103,6 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
             "tracking_write_endpoint",
             "tracking_write_token",
             "tracking_write_generation",
-            "checkout_relocation_writer_generation",
             "tracking_write_verbs",
             "tracking_write_verb_versions",
             "tracking_write_record_contract",
