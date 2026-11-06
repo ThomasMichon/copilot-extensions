@@ -280,7 +280,8 @@ slot (`slot(clean_incomplete=True)` instead raises), without waiting for an
 installer or deleting its lock file. Only the thread that already owns
 construction can clean its own unfinished slot without reacquiring construction;
 its GC/toss operations still preserve that build. Do not clean a slot while
-holding its shared retention lease.
+holding its shared retention lease. Windows removal uses extended-length paths
+for deep package trees without changing these ownership or link guards.
 Activation takes shared target retention before selector publication, so it
 cannot publish a target deleted after an earlier existence probe. Current and
 last-known-good references are protected by GC/toss, including incomplete
