@@ -44,6 +44,10 @@ isolated Python with exact argv and inherited stdio. Only constant resolver
 commands cross POSIX shell or Windows PowerShell 5.1. Normal POSIX venv
 interpreter symlinks remain supported. This boundary does not provision,
 activate, or impose exemplar-only snapshot/completion receipt contracts.
+The selected interpreter may live directly in a version slot or in its
+physical `.venv` application environment. Redirected slot/environment
+directories and answers outside that peer's versions root are refused;
+the interpreter leaf itself may remain a normal POSIX venv symlink.
 
 Routing roots and caller credentials are removed before rebinding the peer's
 installation receipt, payload, runtime root, and plugin-specific routing.

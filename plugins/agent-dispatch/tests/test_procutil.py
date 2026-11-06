@@ -212,7 +212,9 @@ def _assert_peer_refused(prefix: list[str]) -> None:
     assert "peer launch refused:" in result.stderr
 
 
-def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
+def _make_live_peer(
+    cell: Path, plugin: str, version: str, *, nested: bool = False,
+) -> Path:
     """Disposable real venv + actual shipped governance and runtime resolver."""
     receipt = _make_namespaced_context(cell, plugin_id=plugin)
     root = receipt.parent
@@ -244,11 +246,12 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
         },
     }), encoding="utf-8")
     slot = root / "versions" / version
-    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    environment_root = slot / ".venv" if nested else slot
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(environment_root)
+    python = environment_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     site = (
-        slot / "Lib" / "site-packages" if os.name == "nt"
-        else slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        environment_root / "Lib" / "site-packages" if os.name == "nt"
+        else environment_root / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
         / "site-packages"
     )
     module = site / plugin.replace("-", "_")
@@ -276,6 +279,54 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
 
 
 @pytest.mark.parametrize(
+    ("nested", "redirect"),
+    [(False, "slot"), (True, "slot"), (True, "environment"),
+     (False, "bin"), (True, "bin"), (False, "outside"), (True, "outside")],
+)
+def test_peer_resolver_refuses_redirected_or_foreign_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool, redirect: str,
+) -> None:
+    from agent_dispatch import peer_launch
+
+    versions = tmp_path / "versions"
+    slot = versions / "selected"
+    environment = slot / ".venv" if nested else slot
+    bin_name = "Scripts" if os.name == "nt" else "bin"
+    executable = "python.exe" if os.name == "nt" else "python"
+    target = versions / "other" / bin_name
+    target.mkdir(parents=True)
+    (target / executable).touch()
+    python = environment / bin_name / executable
+    if redirect == "outside":
+        python = tmp_path / "foreign" / bin_name / executable
+        python.parent.mkdir(parents=True)
+        python.touch()
+    else:
+        link = {"slot": slot, "environment": environment, "bin": python.parent}[redirect]
+        destination = target if redirect == "bin" else target.parent
+        if redirect == "slot" and nested:
+            destination = target.parent / "application"
+            (destination / ".venv" / bin_name).mkdir(parents=True)
+            (destination / ".venv" / bin_name / executable).touch()
+        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            link.symlink_to(destination, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"directory links are unavailable: {error}")
+    scripts = tmp_path / "payload" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")).touch()
+    monkeypatch.setattr(peer_launch.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        [], 0, stdout=str(python),
+    ))
+    with pytest.raises(ValueError, match="escaped its version slots"):
+        peer_launch._peer_python(
+            {"payloadRoot": str(scripts.parent), "pluginId": "agent-worktrees",
+             "versionsRoot": str(versions)}, {},
+        )
+
+
+@pytest.mark.parametrize(
     ("resolver", "sibling_id", "module"),
     [
         (procutil.agent_worktrees_launch_prefix, "agent-worktrees", "agent_worktrees"),
@@ -286,7 +337,7 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
 @pytest.mark.parametrize(
     "owner", [
         "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
-        "agent-pull-requests", "agent-ssh",
+        "agent-pull-requests", "agent-ssh", "agent-bridge",
     ],
 )
 @pytest.mark.timeout(180)
@@ -305,7 +356,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
     _make_namespaced_context(second_cell, plugin_id=owner)
     _make_namespaced_context(first_cell, plugin_id=sibling_id)
     _make_namespaced_context(second_cell, plugin_id=sibling_id)
-    first_python = _make_live_peer(first_cell, sibling_id, "1.0.0-dev1")
+    first_python = _make_live_peer(first_cell, sibling_id, "1.0.0-dev1", nested=True)
     second_python = _make_live_peer(second_cell, sibling_id, "2.0.0-dev1")
     monkeypatch.setenv(
         "AGENT_DISPATCH_INSTALL_DIR",
@@ -346,7 +397,10 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         if owner == "agent-codespaces":
             adapter = _codespaces_adapter(monkeypatch)
             result = adapter.run(*raw_args)
-        elif owner in ("agent-containers", "agent-logger", "agent-pull-requests", "agent-ssh"):
+        elif owner in (
+            "agent-containers", "agent-logger", "agent-pull-requests", "agent-ssh",
+            "agent-bridge",
+        ):
             from agent_dispatch import peer_launch
 
             prefix = peer_launch.launch_prefix(
@@ -492,6 +546,7 @@ def test_containers_config_validates_owner_before_optional_peer(tmp_path, monkey
     monkeypatch.setattr(config, "RUNTIME_DIR", own.parent)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
     monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("shutil.which", lambda _: pytest.fail("ambient PATH selected"))
     assert config.load_config().exec_user == "vscode"
