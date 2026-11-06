@@ -329,7 +329,8 @@ Installation, rollout, allocation and original native-resource holds remain.
 This is an **agent-proposed source refinement** of the existing independent
 admission and ordinary-integration items, not ordinary construction or activation.
 The documentation-only refinement was reviewed and merged in #11028;
-implementation and all five validation obligations remain open.
+implementation subsequently merged in #11031. The five bounded source controls
+below passed; actual original-queue/cohort and installed observations remain open.
 The first protected workspace relationship precedes keyed Bridge creation.
 `task_events.task_relationship` already owns its original request: workspace,
 reservation, task/generation, audited assignment event, request ID, authority and
@@ -367,17 +368,24 @@ before the first reserve.
 
 ### Original-request slice validation
 
-- [ ] Before an original reserve, the independent callback receives the exact
+- [x] Before an original reserve, the independent callback receives the exact
       retained request and executing writer, with no owner mutation if it refuses.
-- [ ] Replay and retirement use that same audited request; changed workspace,
+      #11031 passes bounded actual-queue and actor-free refusal controls.
+- [x] Replay and retirement use that same audited request; changed workspace,
       queue/request identity or conflicting operation facts cannot become
       another assignment. Callback mutation cannot rewrite the original request.
-- [ ] Request-aware admission cannot be bypassed through an unbound call or
+      #11031 passes source recovery, token and isolated/interleaved snapshot controls.
+- [x] Request-aware admission cannot be bypassed through an unbound call or
       silently degraded on recovery. Legacy explicit writers retain their
       existing callable behavior; ordinary construction remains disabled.
-- [ ] Real queue reconciliation retains the protected task relationship through
+      #11031 passes source compatibility and required-admission refusal controls.
+- [x] Real queue reconciliation retains the protected task relationship through
       submission/rejection/resubmission and accountable retirement, including an
       unknown owner response. Keep existing original-event and post-I/O guards.
-- [ ] Retain focused actor-free controls in the admitted packet and bounded
+      #11031 passes finite SQLite/selected-adapter controls with a synthetic owner,
+      not installed native-lifecycle acceptance.
+- [x] Retain focused actor-free controls in the admitted packet and bounded
       queue/owner controls in the integration lane. Actual original-queue,
       installed-writer and complete-cohort observations remain separate gates.
+      #11031 passes 17 new admitted controls, the complete 4,352-unit packet
+      and 106 distinct queue/owner controls. No ordinary writer is constructed.

@@ -99,6 +99,23 @@ def _normalize_repository_remote(project: str, remote: str) -> str:
     return normalized
 
 
+def _repository_id(normalized: str) -> str:
+    return "repo-" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+
+
+def canonical_repository_id(
+    project: str, *, remote: str | None = None, portable: bool = False,
+) -> str:
+    """Read the native identity without enrolling namespaced project state."""
+    normalized = (
+        _normalized_repository_remote(project) if remote is None
+        else _normalize_repository_remote(project, remote)
+    )
+    if portable and not normalized.startswith("network:"):
+        raise ValueError("local-only repository identity is not portable")
+    return _repository_id(normalized)
+
+
 def _identity(project: str, *, remote: str | None = None) -> RepositoryIdentity:
     context = registry_paths.installation_context()
     if context is None:
@@ -107,8 +124,7 @@ def _identity(project: str, *, remote: str | None = None) -> RepositoryIdentity:
         _normalized_repository_remote(project) if remote is None
         else _normalize_repository_remote(project, remote)
     )
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
-    repository_id = f"repo-{digest}"
+    repository_id = _repository_id(normalized)
     try:
         cell_root = Path(context["cellRoot"])
         marketplace_id = str(context["marketplaceId"])

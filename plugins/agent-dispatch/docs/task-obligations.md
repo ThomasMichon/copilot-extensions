@@ -193,6 +193,18 @@ and post-I/O queue checks remain required. This is an in-process context seam,
 not proof that the assembling owner's original-queue/cohort observation has
 qualified the actual installed writers. It adds no Worktrees wire field or probe.
 
+The queue independently rereads its original task/event snapshot before each
+external relationship call, including retirement inspection and absence
+tombstoning. It compares the durable queue identity, selected local/central
+authority, audited worker and complete original request with type-preserving
+canonical encoding. A changed queue, audit or substituted caller snapshot
+refuses before the next owner call; earlier effects remain accountable to
+that same retained request. These are optimistic reads, not a transaction
+held across external I/O, so the existing post-I/O CAS remains mandatory.
+They add one indexed, task-scoped snapshot per relationship call, with no
+process or wire probe and no preflight on unrelated record saves. This
+original-queue check does not qualify the resident, Bridge or other writers.
+
 The original direct-claim audit event stores one immutable relationship
 request in `task_events.task_relationship`. Allocator placement still claims
 capacity before a workspace exists. A newly governed reservation retains its

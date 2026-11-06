@@ -230,6 +230,93 @@ def test_cancelled_unknown_reserve_is_tombstoned_not_released_from_absence_alone
     assert [operation for operation, _ in owner.calls] == ["inspect", "reserve", "close"]
 
 
+@pytest.mark.parametrize("operation", ["reserve", "inspect"])
+@pytest.mark.parametrize("change", ["queue", "authority", "event"])
+def test_original_queue_is_read_again_before_the_next_relationship_effect(
+    assignment, operation, change,
+):
+    queue, owner, workspace, task = assignment
+    if operation == "inspect":
+        claim(queue, workspace, task)
+        queue.yield_task(task.id, workspace.worker_id)
+    original_authority = queue._relationship_authority
+    retained = {}
+
+    def change_original(boundary, result):
+        if boundary != operation:
+            return
+        with queue._connect() as conn:
+            row = conn.execute(
+                "SELECT id,worker,task_relationship FROM task_events"
+                " WHERE task_id=? AND task_relationship IS NOT NULL", (task.id,),
+            ).fetchone()
+            retained.update(dict(row))
+            retained["queue_identity"] = conn.execute(
+                "SELECT identity FROM workspace_queue_identity WHERE singleton=1",
+            ).fetchone()["identity"]
+            if change == "queue":
+                conn.execute(
+                    "UPDATE workspace_queue_identity SET identity=? WHERE singleton=1",
+                    ("f" * 32,),
+                )
+            elif change == "authority":
+                queue._relationship_authority = "central"
+            else:
+                conn.execute(
+                    "UPDATE task_events SET worker='another/worker' WHERE id=?", (row["id"],),
+                )
+
+    owner.before_reply = change_original
+    with pytest.raises(TaskError, match="original queue"):
+        if operation == "reserve":
+            claim(queue, workspace, task)
+        else:
+            queue.reconcile_task_relationship(task.id)
+    assert [name for name, _ in owner.calls] == (
+        ["reserve"] if operation == "reserve" else ["reserve", "bind", "inspect"]
+    )
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE task_events SET worker=?,task_relationship=? WHERE id=?",
+            (retained["worker"], retained["task_relationship"], retained["id"]),
+        )
+        conn.execute(
+            "UPDATE workspace_queue_identity SET identity=? WHERE singleton=1",
+            (retained["queue_identity"],),
+        )
+    queue._relationship_authority = original_authority
+    owner.before_reply = None
+    recovered = queue.reconcile_task_relationship(task.id)
+    assert recovered["state"] == ("bound" if operation == "reserve" else "closed")
+    assert recovered["request"] == json.loads(retained["task_relationship"])["request"]
+    assert len(owner.claims) == 1
+
+
+@pytest.mark.parametrize("field", ["request_id", "reservation_key", "generation", "queue_identity"])
+def test_caller_snapshot_cannot_substitute_the_original_queue_request(assignment, monkeypatch, field):
+    queue, owner, workspace, task = assignment
+    queue._relationship_writer = lambda *a: (_ for _ in ()).throw(TimeoutError())
+    with pytest.raises(TaskError):
+        claim(queue, workspace, task)
+    original = queue.task_relationship(task.id)
+    substituted = copy.deepcopy(original)
+    if field == "generation":
+        assert substituted["request"]["generation"] == 1
+        substituted["request"]["generation"] = True
+    elif field == "queue_identity":
+        substituted["request"]["recovery"]["queue_identity"] = "f" * 32
+    else:
+        substituted["request"][field] = "replacement"
+    monkeypatch.setattr(queue, "task_relationship", lambda *a, **k: substituted)
+    queue._relationship_writer = owner
+    with pytest.raises(TaskError, match="original queue"):
+        queue.reconcile_task_relationship(task.id)
+    assert owner.calls == [] and owner.claims == {}
+    monkeypatch.undo()
+    assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
+    assert queue.task_relationship(task.id)["request"] == original["request"]
+
+
 def test_submission_and_abandonment_keep_responsibility_until_independent_completion(assignment):
     queue, owner, workspace, task = assignment
     claim(queue, workspace, task)

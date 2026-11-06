@@ -47,8 +47,11 @@ Opt-in ordinary keyed-creation writer retention and exact-session requalificatio
 subsequently merged in #11022, using the original embodiment journal and
 preserving strict continuation. This is bounded source credit, not admission
 of the installed Bridge, resident or complete participating cohort.
-Next, bind generation-aware independent admission and original-request
-correlation before ordinary submission consumers,
+Original first-relationship request admission subsequently merged in #11031.
+It carries the original audited request into the independent callback before
+effects; it does not supply independent original-queue or closed-cohort observation.
+Next, assemble generation-aware independent admission of those actual owners
+before ordinary submission consumers,
 then post-stop same-native recovery and the complete running
 lifecycle. No deployment or cleanup permission is implied.
 
