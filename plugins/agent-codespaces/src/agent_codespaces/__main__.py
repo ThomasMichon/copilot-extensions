@@ -1344,11 +1344,7 @@ def _ssh_session(
     # clobbered by the relay exports.
     relay_token: str | None = None
     if not args.no_relay:
-        # #122: the relay is owned/run by the agent-bridge daemon; this command
-        # only forwards the port. If the relay isn't listening host-side, the
-        # -R forward dead-ends and git auth over the tunnel silently returns
-        # nothing (ADO 'could not read Username', GitHub/dotfiles 403). Probe it
-        # up front and warn LOUDLY with remediation rather than failing silently.
+        # Host TCP is advisory; the far-side protocol gate below controls admission.
         if not _relay_listening(relay_port):
             log.warning(
                 "Credential relay not listening on 127.0.0.1:%d before connecting "
@@ -1485,6 +1481,10 @@ def _ssh_session(
                     host_port_resolver=lambda: relay_launch.effective_relay_port(config),
                 )
                 relay_ready = relay_forward is not None
+            if relay_ready:
+                relay_ready = await relay_launch.ssh_relay_serving(
+                    manager, args.name, relay_port, timeout=overall_timeout,
+                )
             if not relay_ready:
                 message = (
                     f"Required credential relay for CodeSpace '{args.name}' did not "
