@@ -406,3 +406,13 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   the supported-scope normal CLI adoption/withdrawal control passed. Ruff and
   whitespace passed. Empty-union adoption remains unsupported, not silently
   qualified by these refusal tests. Review and current-head CI remain open.
+
+### 2026-11-06 - Deterministic native scalar contributors
+- The native ordinary-default collector now orders its scalar fields before
+  recording contributors. Set iteration cannot change the manifest digest and
+  spuriously invalidate an unchanged Copilot preview in another process.
+- A forced field-order regression reproduced the original token mismatch.
+  Separate-process CLI preview/apply controls retain native collection,
+  validation and the real settings writer, with fixture-resolved context only.
+  This does not qualify an installed owner or carrier. Review and exact-source
+  CI remain required; the parent effort stays Active.

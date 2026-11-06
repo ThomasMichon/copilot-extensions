@@ -239,3 +239,68 @@ print(json.dumps({'changed': result.changed}))
             if child.poll() is None:
                 child.kill()
             child.communicate(timeout=5)
+
+
+def test_copilot_cli_confirmation_survives_a_different_process_hash_seed(tmp_path):
+    root, home, state = (tmp_path / name for name in ("base", "home", "state"))
+    for path in (root, home, state):
+        path.mkdir()
+    package = root / ".copilot-extensions" / "agent-machines" / "all" / "native.yaml"
+    package.parent.mkdir(parents=True)
+    package.write_text(json.dumps({
+        "schema_version": 4, "package": "native",
+        "manage": {"copilot.settings": {
+            "disposition": "ensure-present",
+            "values": {"model": "native-model", "effortLevel": "medium"},
+        }},
+    }), encoding="utf-8")
+    (state / "policy.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences.policy", "version": 1,
+        "publisher": "example-publisher", "participant": "example-receiver", "domains": ["copilot"],
+    }), encoding="utf-8")
+    (state / "accepted.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences", "version": 1,
+        "publisher": "example-publisher", "revision": 1, "parent": None,
+        "domains": {"copilot": {"model": "portable-model", "effortLevel": "high"}},
+    }), encoding="utf-8")
+    child_script = """
+import contextlib,io,json,sys
+from pathlib import Path
+from unittest.mock import patch
+from agent_machines import __main__ as cli, configuration, discover
+root, home, state = map(Path, sys.argv[1:4])
+report = {'schema': 'agent-worktrees.configuration', 'version': 1, 'context': {
+    'repository_id': 'repo-qualified', 'execution_machine': 'logical-worker',
+    'installation_cell': 'cell-one', 'binding': 'unbound', 'base_root': str(root),
+}}
+with patch.object(discover, 'home', lambda: home), \
+     patch.object(cli._layout, 'resolve_cwd_repo', lambda: ('base-native', root, root)), \
+     patch.object(discover, 'project_scope_repos', lambda *a, **k: [
+         discover.RepoCandidate(name='base-native', path=root)]), \
+     patch.object(configuration, 'owner_report', lambda _: report):
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = cli.main(['preferences', 'copilot', '--state-dir', str(state), *sys.argv[4:]])
+    if code == 0:
+        print(json.dumps({'report': json.loads(output.getvalue()), 'field_order': list(configuration.FIELDS)}))
+    sys.exit(code)
+"""
+
+    def invoke(seed, *arguments):
+        result = subprocess.run(
+            [sys.executable, "-c", child_script, str(root), str(home), str(state), *arguments],
+            env={**os.environ, "PYTHONHASHSEED": str(seed), "HOME": str(home), "USERPROFILE": str(home)},
+            capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    first = invoke(1)
+    second = invoke(9)
+    assert first["field_order"] != second["field_order"]
+    assert first["report"]["preview_token"] == second["report"]["preview_token"]
+    assert not (home / ".copilot" / "settings.json").exists()
+    assert invoke(9, "--apply", "--expect", first["report"]["preview_token"])["report"]["configuration_applied"]
+    assert json.loads((home / ".copilot" / "settings.json").read_text()) == {
+        "model": "native-model", "effortLevel": "medium",
+    }

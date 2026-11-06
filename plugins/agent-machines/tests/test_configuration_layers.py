@@ -232,6 +232,19 @@ def test_portable_floors_retain_live_native_defaults_and_enforce(tmp_path, monke
     }
 
 
+def test_portable_confirmation_is_stable_across_scalar_field_iteration(tmp_path, monkeypatch):
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    write(base, "native-defaults", {"model": "native-model", "effortLevel": "medium"})
+    monkeypatch.setattr(configuration, "FIELDS", ("model", "effortLevel"))
+    proposed = adopt(state)
+    monkeypatch.setattr(configuration, "FIELDS", ("effortLevel", "model"))
+    assert adopt(state)["preview_token"] == proposed["preview_token"]
+    adopt(state, apply=True, expected=proposed["preview_token"])
+    assert json.loads(target.read_text()) == {"model": "native-model", "effortLevel": "medium"}
+
+
 @pytest.mark.parametrize("change", ["accepted", "local", "native", "live", "context", "policy"])
 def test_portable_apply_refuses_changed_preview_inputs(tmp_path, monkeypatch, change):
     from agent_machines import preferences
