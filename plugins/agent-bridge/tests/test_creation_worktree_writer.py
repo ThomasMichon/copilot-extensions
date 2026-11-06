@@ -447,6 +447,27 @@ def test_required_creation_writer_cli_invalid_input_refuses_before_connect(
     assert failure.value.code == 2
 
 
+@pytest.mark.parametrize("target", ["remote-acp:fixture", "https://example.com/acp"])
+def test_required_creation_writer_cli_rejects_remote_before_connect(monkeypatch, target):
+    import io
+    import sys
+    from agent_bridge import __main__ as core, session_targeting_cli
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "version": 1,
+        "identity": {"installation_root": "/owner", "runtime_generation": "a" * 32},
+        "creation_nonce": "original-allocation",
+    })))
+    monkeypatch.setattr(core, "_get_client", lambda: pytest.fail("remote writer must not connect"))
+    args = core.build_parser().parse_args([
+        "create", target, "--creation-key", "original-key", "--worktree-id", "worktree-a",
+        "--worktree-writer-file", "-",
+    ])
+    with pytest.raises(SystemExit) as failure:
+        session_targeting_cli._cmd_create(args)
+    assert failure.value.code == 2
+
+
 def test_required_creation_writer_round_trips_through_actual_http_owner(writer_creation, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

@@ -179,6 +179,8 @@ from test_creation_worktree_writer import (
     as test_required_creation_writer_cli_carries_requirement_to_actual_client,
     test_required_creation_writer_cli_invalid_input_refuses_before_connect
     as test_required_creation_writer_cli_invalid_input_refuses_before_connect,
+    test_required_creation_writer_cli_rejects_remote_before_connect
+    as test_required_creation_writer_cli_rejects_remote_before_connect,
     creation_rig as creation_rig, writer_creation as writer_creation,
     test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses
     as test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses,

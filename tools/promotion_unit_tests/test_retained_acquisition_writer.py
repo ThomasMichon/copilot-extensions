@@ -82,6 +82,7 @@ def test_creation_cli_forwards_validated_writer_without_changing_creation(bounda
     ({"provider_instance": True}, "{}"), ({"cli": True}, "{}"),
     ({"target_dir": "/elsewhere"}, "{}"), ({"prompt_file": "-"}, "{}"),
     ({"prompt": "-"}, "{}"), ({}, "not json"),
+    ({"target": "remote-acp:fixture"}, "{}"), ({"target": "https://example.com/acp"}, "{}"),
 ])
 def test_creation_cli_refuses_invalid_writer_before_client(boundary, changes, text):
     import io
@@ -141,6 +142,10 @@ def boundary(monkeypatch):
         WorktreeWriterRequirement=SimpleNamespace(model_validate=lambda value: requirement),
     )
     module(f"{PACKAGE}.acquisition_journal", _digest=lambda request: request.delivery_id)
+    module(
+        f"{PACKAGE}.remote_acp_config",
+        is_remote_address=lambda name: name.startswith("remote-acp:") or "://" in name,
+    )
     module(f"{PACKAGE}._peer_launch", ContextRefused=Refused)
     calls = []
     prefix = ("/example/pinned-python", "/example/pinned-worktrees")

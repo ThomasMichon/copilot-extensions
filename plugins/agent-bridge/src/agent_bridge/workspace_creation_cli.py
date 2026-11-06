@@ -29,10 +29,13 @@ def validate_arguments(args: argparse.Namespace) -> dict[str, Any] | None:
     path = getattr(args, "worktree_writer_file", None)
     if path is None:
         return None
+    from .remote_acp_config import is_remote_address
+
     if (
         not getattr(args, "creation_key", None) or not getattr(args, "worktree_id", None)
         or getattr(args, "cli", False) or getattr(args, "provider_instance", False)
         or getattr(args, "target_dir", None) is not None
+        or is_remote_address(getattr(args, "target", ""))
         or path == "-" and (
             getattr(args, "prompt", None) == "-" or getattr(args, "prompt_file", None) == "-"
         )

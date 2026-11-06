@@ -95,6 +95,7 @@ PROBES = {
     **retained.PROBES,
     "test_required_creation_writer_cli_carries_requirement_to_actual_client": 4,
     "test_required_creation_writer_cli_invalid_input_refuses_before_connect": 10,
+    "test_required_creation_writer_cli_rejects_remote_before_connect": 2,
     "test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep": 1,
     "test_private_deadline_uses_precise_elapsed_time_not_coarse_ticks": 3,
     "test_unknown_owner_large_history_has_actual_private_vm_cutoff": 1,
