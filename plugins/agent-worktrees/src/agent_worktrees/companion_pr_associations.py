@@ -113,35 +113,62 @@ def _url_matches(url: str, provider: str, endpoint: str, repo: str, number: int)
     return [part.lower() for part in components] == [part.lower() for part in expected]
 
 
+# Stages and reasons that always disqualify a binding, including owner entry
+# verdicts that are not themselves indeterminate.
+_FAILED_STAGES = frozenset(
+    {
+        "config-yaml",
+        "config-dropins",
+        "config-dropin-entry",
+        "inrepo-yaml",
+        "committed-decoding",
+        "related-file",
+    }
+)
+_FAILED_REASONS = frozenset(
+    {
+        "unreadable-source",
+        "invalid-shape",
+        "invalid-registry-source",
+        "registry-helper-unavailable",
+        "migration-failed",
+        "control-plane-related-pr-failed",
+        "source-selection-failed",
+        "committed-source-unavailable",
+    }
+)
+# Reasons an owner records when a value was acquired but its complete
+# provenance cannot be proven. Any other indeterminate outcome is an
+# acquisition failure, so an unrecognized failure cannot qualify a binding.
+_PROVENANCE_ONLY = frozenset(
+    {
+        "owner-coverage-unavailable",
+        "presence-provenance-unavailable",
+        "cached-config-unattributed",
+        "membership-unobserved",
+        "activation-unobserved",
+        "activation-scope-incomplete",
+        "migration-unavailable",
+    }
+)
+
+
 def _config_failed(observations) -> bool:
-    """Reject value failures, not incomplete owner-provenance diagnostics."""
-    return any(
-        observation.stage
-        in {
-            "config-yaml",
-            "config-dropins",
-            "config-dropin-entry",
-            "inrepo-yaml",
-            "committed-decoding",
-            "related-file",
-        }
-        and observation.authority is config_acquisition.ScanAuthority.INDETERMINATE
-        or any(
+    """Fail closed on acquisition failures; tolerate only provenance-only gaps."""
+    for observation in observations:
+        indeterminate = observation.authority is config_acquisition.ScanAuthority.INDETERMINATE
+        if indeterminate and observation.stage in _FAILED_STAGES:
+            return True
+        if any(finding.reason in _FAILED_REASONS for finding in observation.findings):
+            return True
+        reasons = {
             finding.reason
-            in {
-                "unreadable-source",
-                "invalid-shape",
-                "invalid-registry-source",
-                "registry-helper-unavailable",
-                "migration-failed",
-                "control-plane-related-pr-failed",
-                "source-selection-failed",
-                "committed-source-unavailable",
-            }
             for finding in observation.findings
-        )
-        for observation in observations
-    )
+            if indeterminate or finding.status == "indeterminate"
+        }
+        if (indeterminate and not reasons) or reasons - _PROVENANCE_ONLY:
+            return True
+    return False
 
 
 def _binding(config, entry: dict, registry_entries: list) -> dict:

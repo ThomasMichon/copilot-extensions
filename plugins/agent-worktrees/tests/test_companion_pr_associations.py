@@ -1071,6 +1071,83 @@ def test_native_related_file_failure_cannot_qualify_active_defaults(
     assert path.read_text() == raw if raw is not None else not path.exists()
 
 
+@pytest.mark.parametrize(
+    ("context", "available"),
+    [
+        (None, True),
+        ('{"marketplaceId": "fixture"}', True),
+        ("{", False),
+        ("[]", False),
+        ('{"other": 1}', False),
+        ("missing-context.json", False),
+    ],
+)
+def test_native_installation_context_failure_cannot_qualify_base_related(
+    source, monkeypatch, context, available
+):
+    from agent_worktrees import related
+
+    anchor = source.path.parent / "repository"
+    directory = anchor / related.CANONICAL_RELATED_DIR
+    directory.mkdir(parents=True)
+    (directory / related.RELATED_FILENAME).write_text("related:\n  sample:\n")
+    if context is None:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    elif context.endswith(".json"):
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(source.path.parent / context))
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", context)
+    monkeypatch.setattr(config, "_control_plane_related_pr_map", config._CONTROL_PLANE_PR_OWNER)
+    monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(anchor))
+    monkeypatch.setattr(related, "installed_plugin_related_anchors", lambda: [])
+    monkeypatch.setattr(
+        repos,
+        "list_repos",
+        lambda **kwargs: [
+            SimpleNamespace(
+                name="sample",
+                remote="https://github.com/example/repository.git",
+                local_path=lambda: None,
+            )
+        ],
+    )
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is available for entry in entries), [
+        entry["binding"] for entry in entries
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reason", "available"),
+    [
+        ("unclassified-acquisition-failure", False),
+        ("owner-coverage-unavailable", True),
+        ("presence-provenance-unavailable", True),
+    ],
+)
+def test_unclassified_acquisition_failure_fails_closed(source, monkeypatch, reason, available):
+    from agent_worktrees import config_acquisition, pr_config
+
+    original = pr_config.resolve_repo_config_for_slug
+
+    def resolve(*args, **kwargs):
+        config_acquisition.failed(
+            config_acquisition.current_observations(), "fixture", "fixture-stage", reason, "fixture"
+        )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", resolve)
+    monkeypatch.setattr(
+        repos,
+        "list_repos",
+        lambda **kwargs: [
+            SimpleNamespace(name="sample", remote="https://github.com/example/repository.git")
+        ],
+    )
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is available for entry in entries)
+
+
 @pytest.mark.parametrize("foreign", [False, True])
 @pytest.mark.parametrize("failure", ["head", "batch", "absent"])
 def test_committed_transport_failure_cannot_qualify_disk_fallback(

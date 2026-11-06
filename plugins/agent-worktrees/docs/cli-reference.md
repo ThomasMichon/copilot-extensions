@@ -72,7 +72,11 @@ suppressed related-overlay failures and failed/malformed/lossy committed inputs,
 cannot qualify fallback bindings. Related-file diagnostics join the active
 configuration acquisition without changing the loader's fallback values or
 legacy exception behavior.
-Opaque owner-provenance diagnostics alone are not configuration value failures.
+Classification fails closed: any indeterminate acquisition outcome, including a
+malformed or unreadable installation context and any unrecognized failure
+reason, makes the binding unavailable. Only recognized owner-provenance gaps,
+where a value was acquired but its complete provenance cannot be proven, are
+not configuration value failures.
 It performs no credential/forge read, Git remote discovery,
 Git fetch, service startup or canonical write of its own; the status command's
 existing Git/liveness/bootstrap behavior is unchanged.

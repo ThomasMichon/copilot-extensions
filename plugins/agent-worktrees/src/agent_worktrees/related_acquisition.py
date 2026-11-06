@@ -108,6 +108,9 @@ def base_path(anchor: Path, observations: list[SourceObservation] | None = None)
 def overlay_path(anchor: Path, observations: list[SourceObservation] | None = None):
     from . import related as r
 
+    from .config_acquisition import current_observations
+
+    diagnostics = observations if observations is not None else current_observations()
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not raw:
         observe(observations, "COPILOT_EXTENSIONS_CONTEXT", "installation-context", ScanAuthority.ABSENT)
@@ -116,14 +119,14 @@ def overlay_path(anchor: Path, observations: list[SourceObservation] | None = No
     try:
         context = r.json.loads(raw if raw.startswith("{") else Path(raw).expanduser().read_text(encoding="utf-8"))
     except (OSError, TypeError, ValueError) as exc:
-        failed(observations, source, "installation-context", "installation-context-invalid", type(exc).__name__)
+        failed(diagnostics, source, "installation-context", "installation-context-invalid", type(exc).__name__)
         return None
     if not isinstance(context, dict):
-        failed(observations, source, "installation-context", "installation-context-invalid", "context must be a mapping")
+        failed(diagnostics, source, "installation-context", "installation-context-invalid", "context must be a mapping")
         return None
     marketplace_id = str(context.get("marketplaceId") or "").strip()
     if not marketplace_id:
-        failed(observations, source, "installation-context", "installation-context-invalid", "context has no marketplace selection")
+        failed(diagnostics, source, "installation-context", "installation-context-invalid", "context has no marketplace selection")
         return None
     observe(observations, source, "installation-context", ScanAuthority.COMPLETE, owner=marketplace_id)
     candidate = anchor / r.MARKETPLACE_OVERLAYS_DIR / marketplace_id / r.RELATED_FILENAME

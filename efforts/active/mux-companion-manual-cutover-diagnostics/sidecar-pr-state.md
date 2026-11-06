@@ -276,3 +276,24 @@ This is another explicit affected selection, not a sum of prior qualification
 counts. Opaque owner-provenance diagnostics alone still cannot make otherwise
 known binding data malformed. R1 remains pending a fresh independent verdict,
 required checks and actual merge/readback; every original parent gate remains.
+
+### 2026-11-06 - Class-level fail-closed admission
+
+Successive reviews each found one more acquisition failure reason that the
+consumer's denylist did not recognize, most recently a malformed installation
+context that silently omitted the related overlay while the baseline still
+qualified. Rather than add another reason, the assessment is now fail-closed:
+any indeterminate acquisition outcome, including an unrecognized reason,
+makes the binding unavailable. Only an explicit allowlist of owner-provenance
+gaps, where a value was acquired but its complete provenance is unproven,
+remains tolerated. The overlay owner also records its installation-context
+failures into the active acquisition collector when no explicit list is
+passed; outside a collection scope behavior is unchanged.
+
+Five new controls (four malformed or unreadable contexts and one synthetic
+unclassified failure) failed before the correction and pass after it; valid,
+absent and provenance-only controls passed throughout. The affected six-file
+plugin selection passed 647 controls and the existing related-acquisition
+promotion unit passed 152, both with verified cleanup. Only that unit's
+source binding was refreshed. R1 remains pending a fresh independent verdict,
+required checks and actual merge/readback; every original parent gate remains.
