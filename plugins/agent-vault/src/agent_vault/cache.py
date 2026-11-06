@@ -380,6 +380,7 @@ class PersistentCache:
         generation: int = 0,
         *,
         strict: bool = False,
+        legacy_entry: str | None = None,
     ) -> bool:
         """Cache a value (cache-through). No-op when disabled."""
         if not self.enabled:
@@ -388,7 +389,11 @@ class PersistentCache:
             with self._store_lock():
                 store = self._read_store(readonly=True, strict=True) if strict else self._read_store()
                 if strict:
-                    self._field_record(store, entry, field, strict=True)
+                    current = self._field_record(store, entry, field, strict=True)
+                    if current is None and legacy_entry and legacy_entry != entry:
+                        legacy = self._field_record(store, legacy_entry, field, strict=True)
+                        if legacy is not None:
+                            entry = legacy_entry
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
                 if isinstance(current, dict) and "rotation" in current:
@@ -546,6 +551,7 @@ class PersistentCache:
         generation: int | None = None,
         *,
         strict: bool = False,
+        legacy_entry: str | None = None,
     ) -> bool:
         """Apply a confirmed live value, clearing a pending replacement journal.
 
@@ -559,7 +565,11 @@ class PersistentCache:
             with self._store_lock():
                 store = self._read_store(readonly=True, strict=True) if strict else self._read_store()
                 if strict:
-                    self._field_record(store, entry, field, strict=True)
+                    current = self._field_record(store, entry, field, strict=True)
+                    if current is None and legacy_entry and legacy_entry != entry:
+                        legacy = self._field_record(store, legacy_entry, field, strict=True)
+                        if legacy is not None:
+                            entry = legacy_entry
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
                 if (

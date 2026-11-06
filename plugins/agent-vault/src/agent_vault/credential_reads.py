@@ -117,13 +117,15 @@ def read_credential(args) -> CredentialRead:
                         field,
                         value,
                         int(generation) if generation is not None else None,
-                        **({"strict": True} if strict_cache else {}),
+                        **({"strict": True, "legacy_entry": None if pinned else entry}
+                           if strict_cache else {}),
                     )
                 else:
                     cached_ok = cache.put(
                         cache_entry, field, value,
                         *(() if generation is None else (int(generation),)),
-                        **({"strict": True} if strict_cache else {}),
+                        **({"strict": True, "legacy_entry": None if pinned else entry}
+                           if strict_cache else {}),
                     )
                     reconciliation_failed = strict_cache and not cached_ok
     if reconciliation_failed:

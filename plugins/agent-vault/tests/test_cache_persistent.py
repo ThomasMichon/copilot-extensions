@@ -565,28 +565,38 @@ def test_batch_service_errors_are_not_reported_as_cache_failures(
 
 
 @pytest.mark.parametrize("refresh", [False, True])
+@pytest.mark.parametrize("legacy_alias", [False, True])
 def test_batch_preserves_valid_pending_journal_semantics(
-    enabled_cache, monkeypatch, capsys, refresh,
+    enabled_cache, monkeypatch, capsys, refresh, legacy_alias,
 ):
+    from agent_vault import config
+
+    entry = "token" if legacy_alias else "Example/one"
+    monkeypatch.delenv("AGENT_VAULT_PINNED_CONTEXT", raising=False)
+    monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(group="Example"))
     persistent = get_cache()
-    assert persistent.put("Example/one", "password", "previous")
-    assert persistent.begin_replace("Example/one", "password", "candidate", 1)
+    assert persistent.put(entry, "password", "previous")
+    assert persistent.begin_replace(entry, "password", "candidate", 1)
+    cache_before = persistent._cache_file.read_bytes()
     monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
     monkeypatch.setattr(cli, "ensure_service", lambda: True)
     monkeypatch.setattr(cli, "send_command", lambda *_args, **_kwargs: {
         "ok": True, "value": "authoritative", "generation": 1,
     })
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"Example/one"}]'))
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps([{"entry": entry}])))
 
     assert cli.main(["batch-get", *(["--refresh"] if refresh else [])]) == 0
     result, = json.loads(capsys.readouterr().out)["results"]
     assert result["value"] == "authoritative"
     if refresh:
-        assert persistent.pending_replace("Example/one", "password") is None
-        assert persistent.get("Example/one") == "authoritative"
+        assert persistent.pending_replace(entry, "password") is None
+        assert persistent.get(entry) == "authoritative"
     else:
-        assert persistent.pending_replace("Example/one", "password")["candidate"] == "candidate"
-        assert persistent.get("Example/one") is None
+        assert persistent.pending_replace(entry, "password")["candidate"] == "candidate"
+        assert persistent.get(entry) is None
+        assert persistent._cache_file.read_bytes() == cache_before
+    if legacy_alias:
+        assert persistent.get("Example/token") is None
 
 
 @pytest.mark.parametrize("refresh", [False, True])
