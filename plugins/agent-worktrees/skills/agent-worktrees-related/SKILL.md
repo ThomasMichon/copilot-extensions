@@ -44,8 +44,27 @@ summary, doc), **locus** (where to work), and **delegate** (how to hand off).
 Checkout paths, class, and remote still resolve from the global registry --
 never restate them here.
 
+For a harness requiring external state, normal reads also synthesize its bound
+knowledge repository from the existing configuration-source and canonical
+registration owners. No self-entry is written to topology. The canonical
+`knowledge` role, local locus and `none` delegation win over conflicting
+relationship labels or venues; existing narrative/PR metadata retains its
+original source and policy trust. Unregistered, mismatched or non-worktree-capable
+bindings fail instead of using fallback checkout discovery.
+The topology writer refuses a synthesized projection; genuine index changes
+edit the authored source rather than copying the resolved binding into it.
+
+The optional JSON `state_root` block describes an aligned-knowledge-worktree-only
+write policy, not a ready pair or permission to write the registered anchor.
+`related resolve` directs the caller to the native pair owner and refuses to
+suggest standalone knowledge-agent allocation. An unavailable pair/repair
+remains a blocker. Discovery does not create, repair or release a pair, and an
+older provider omitting this block does not waive existing state-write guards.
+`related doc` can return an existing narrative but does not scaffold a synthesized
+knowledge relationship into its registered anchor.
+
 > **Role / locus / delegate here are *not* the registry `class`.** The registry's
-> `class` (`reference` / `singleton` / `worktree`) is the **editing model** — a
+> `class` (`reference` / `singleton` / `worktree` / `knowledge`) is the **editing model** — a
 > third, orthogonal axis. Don't collapse "worktree / owner / delegate" into one
 > taxonomy: `worktree` is a class, "owner" is a landing policy, and `delegate` is
 > a locus/handoff. See

@@ -379,6 +379,19 @@ def _related_conduct(anchor: str) -> int:
 
 
 def cmd_related_dispatch(argv: list[str]) -> int:
+    from configuration_layers import ConfigurationError
+
+    try:
+        return _cmd_related_dispatch(argv)
+    except ConfigurationError as error:
+        if "--json" in argv:
+            output._json_output({"error": str(error)})
+        else:
+            output.err(str(error))
+        return 1
+
+
+def _cmd_related_dispatch(argv: list[str]) -> int:
     """Route related subcommands (per-project related-repos index)."""
     from . import related, repos
 
@@ -441,8 +454,11 @@ def cmd_related_dispatch(argv: list[str]) -> int:
     if sub == "list":
         role = _related_opt(rest, "--role")
         anchors = _related_config_source_anchors(anchor)
-        entries = related.list_related_grafted(anchors, role=role)
-        primary = related.get_primary_grafted(anchors)
+        selected = related.read_related_grafted(anchors)
+        entries = sorted(selected.related.values(), key=lambda entry: entry.name)
+        if role:
+            entries = [entry for entry in entries if entry.role == related.normalize_role(role)]
+        primary = selected.primary
         if json_out:
             registered = repos.read_registry().repos
             output._json_output(
@@ -460,6 +476,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                             "audience": related.effective_audience(e),
                             "ai_attribution": related.effective_ai_attribution(e),
                             "provenance": related.entry_provenance(e),
+                            **({"state_root": related.state_root_policy(e)}
+                               if e.bound_state_root else {}),
                             "locus": {
                                 "preferred": e.locus.preferred,
                                 "machines": e.locus.machines,
@@ -518,6 +536,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                     "audience_explicit": e.audience,
                     "ai_attribution": related.effective_ai_attribution(e),
                     "provenance": related.entry_provenance(e),
+                    **({"state_root": related.state_root_policy(e)}
+                       if e.bound_state_root else {}),
                     "locus": {
                         "preferred": e.locus.preferred,
                         "machines": e.locus.machines,
@@ -728,6 +748,15 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output._json_output(
                 {
                     "name": resn.name,
+                    **({
+                        "role": entry.role,
+                        "registry": {
+                            "class": reg.repo_class,
+                            "remote": reg.remote,
+                            "path": reg.local_path(),
+                        } if reg else None,
+                        "state_root": related.state_root_policy(entry),
+                    } if entry.bound_state_root else {}),
                     "locus_kind": resn.locus_kind,
                     "target_machine": resn.target_machine,
                     "available_here": resn.available_here,

@@ -140,6 +140,23 @@ class _EchoServer:
 # ---------------------------------------------------------------------------
 
 
+def test_ping_transports_each_callers_current_vault_context(
+    run_dir, monkeypatch, tmp_path, empty_registry,
+):
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    server = _EchoServer({"ok": True})
+    try:
+        _write_tcp(run_dir, server.port)
+        for name in ("first.kdbx", "second.kdbx"):
+            selected = str(tmp_path / name)
+            monkeypatch.setenv("KPDB", selected)
+            assert cli.send_command({"action": "ping"})["ok"]
+            assert json.loads(server.received)["kpdb"] == selected
+    finally:
+        server.close()
+
+
 def test_discover_returns_none_without_file(run_dir, monkeypatch):
     monkeypatch.setattr(cli, "IS_WSL", False)
     assert cli._discover_endpoint(config.resolve_context()) is None

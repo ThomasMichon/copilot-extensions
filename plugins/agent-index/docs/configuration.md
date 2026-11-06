@@ -90,6 +90,14 @@ or protected opt-in. Capability/role discovery remains independent of ordinary
 configuration. Source-qualified explicit mode retains its inline-only contract
 and does not discover host repositories or credentials.
 
+Machine hosting capability and a repository's client routing are independent.
+The installer selects a required host companion when either native authority
+requires hosting, without adding server dependencies to the primary CLI or
+coupling the durable embedding engine. The companion must be healthy before a
+new generation publishes completion. Every completed-slot reuse checks the
+required closure; missing host content is an honest refusal, never permission to
+enrich, rebuild or remove the completion marker of an immutable slot.
+
 Runtime config readers reacquire files at their native command/operation
 boundary. Environment-backed constructor defaults retain their existing
 import/instance lifetime; changing a YAML file does not restart the engine,

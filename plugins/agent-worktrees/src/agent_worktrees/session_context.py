@@ -116,7 +116,18 @@ def _related_summary(
         else plugin_related_anchors
     )
     topology = related.read_related_grafted(
-        [*plugin_anchors, *[item.anchor for item in anchors]]
+        [
+            *plugin_anchors,
+            *[
+                related.config_contribution_anchor(
+                    item.anchor, item.origin,
+                    directory_form=getattr(item, "directory_form", False),
+                    source_tier=getattr(item, "tier", None),
+                    state_repo=getattr(item, "state_repo", ""),
+                )
+                for item in anchors
+            ],
+        ]
     )
     primary = _clean(topology.primary)
     entries = sorted(

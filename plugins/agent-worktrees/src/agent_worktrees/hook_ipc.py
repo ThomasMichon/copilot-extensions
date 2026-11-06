@@ -17,6 +17,7 @@ Decision = Callable[[str, dict, float], dict]
 _READ_TIMEOUT_S = 1.0
 _RECENT_HOOK_DEMAND_S = 120.0
 READ_DEMAND_CAPABILITY = "read-hook-demand-v1"
+NATIVE_MUTATION_CAPABILITY = "native-hook-mutation-v1"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
 ]
@@ -92,6 +93,11 @@ class _Handler(socketserver.StreamRequestHandler):
                 if owner is not None and len(raw) <= 2048 and raw.endswith(b"\n"):
                     owner._on_read_demand(request)
                 return
+            if kind == "nativeToolMutation":
+                owner = self.server.owner
+                if owner is not None and len(raw) <= 65536 and raw.endswith(b"\n"):
+                    owner._on_native_mutation(request)
+                return
             payload = request.get("payload")
             deadline = float(request.get("deadline") or 0)
             payload_valid = isinstance(payload, dict)
@@ -145,6 +151,7 @@ class HookIpcServer:
     def __init__(
         self, decide: Decision, *, read_demand_admitted: Callable[[], bool] | None = None,
         read_demand_lock=None,
+        native_mutation_decide: Callable[[str, dict, float], dict | None] | None = None,
     ):
         self.token = secrets.token_urlsafe(32)
         self.generation = secrets.token_hex(16)
@@ -162,6 +169,7 @@ class HookIpcServer:
         self._clock = time.monotonic
         self._last_completed_hook: float | None = None
         self._read_demand_admitted = read_demand_admitted
+        self._native_mutation_decide = native_mutation_decide
         self._read_demand_lock = read_demand_lock if read_demand_lock is not None else threading.RLock()
 
     def start(self) -> None:
@@ -181,6 +189,7 @@ class HookIpcServer:
         return [
             *_CAPABILITIES,
             *([READ_DEMAND_CAPABILITY] if self._read_demand_admitted is not None else []),
+            *([NATIVE_MUTATION_CAPABILITY] if self._native_mutation_decide is not None else []),
         ]
 
     def close(self) -> None:
@@ -234,6 +243,39 @@ class HookIpcServer:
                 ):
                     return
                 self._last_completed_hook = self._clock()
+        finally:
+            self._read_demand_lock.release()
+
+    def _on_native_mutation(self, request: dict) -> None:
+        if (
+            set(request) != {"version", "token", "kind", "hook_generation", "deadline", "payload"}
+            or type(request.get("version")) is not int
+            or request.get("hook_generation") != self.generation
+            or type(request.get("deadline")) not in (int, float)
+            or not isinstance(request.get("payload"), dict)
+            or self._native_mutation_decide is None
+        ):
+            return
+        deadline = request["deadline"]
+        if (
+            not math.isfinite(deadline) or not 0 < deadline - time.time() <= 1.0
+            or self.server.admission_closed
+        ):
+            return
+        if not self._read_demand_lock.acquire(timeout=0.05):
+            return
+        try:
+            with self._active_handlers_lock:
+                if self.server.admission_closed or (
+                    self._read_demand_admitted is not None and not self._read_demand_admitted()
+                ):
+                    return
+            try:
+                result = self._native_mutation_decide("nativeToolMutation", request["payload"], deadline)
+            except HookUnavailable:
+                return
+            if isinstance(result, dict) and deadline > time.time():
+                self._on_hook_completed("postToolUse")
         finally:
             self._read_demand_lock.release()
 

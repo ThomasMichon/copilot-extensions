@@ -120,7 +120,8 @@ def _run_install(
             )
             result = _auth.run_acquisition(
                 runner or _run_update, argv,
-                context=cwd, cwd=cwd, timeout=remaining, **environment, **settlement,
+                context=cwd, marketplace=identity.rpartition("@")[2],
+                cwd=cwd, timeout=remaining, **environment, **settlement,
             )
         except _QuiescentPayloadTimeout:
             if _WINDOWS:
@@ -286,7 +287,8 @@ def _acquire(
             result = (
                 _run_install(argv, ref, cwd=cwd, timeout=timeout, custody=custody, **environment)
                 if verb == "install" else _auth.run_acquisition(
-                    _run_update, argv, context=cwd, cwd=cwd, timeout=timeout, **environment,
+                    _run_update, argv, context=cwd, marketplace=marketplace,
+                    cwd=cwd, timeout=timeout, **environment,
                     **({"native_write_deadline": started + _TOTAL_BUDGET_S - installer_run._REAP_GRACE_S}
                        if _WINDOWS and installed else {}),
                 )

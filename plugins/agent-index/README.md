@@ -193,8 +193,13 @@ provisioning or service startup itself; a stamp is not runtime readiness.
 role. It never provisions the durable embedding engine. Lightweight
 provisioning emits `::agent-provisioning::`.
 
-A machine whose resolved role is `client` runs no local indexer daemon. A host
-runs its local service through the plugin's own installer/runtime lifecycle.
+A repository's `client` role routes its commands to the designated indexer; it
+does not withdraw a separately configured machine-wide host capability.
+A machine host retains the complete `[store,server]` companion while the primary
+CLI stays light. Fresh construction validates that companion before publishing
+completion; reuse refuses an incomplete host closure without changing a
+completed slot. Local activation remains explicitly gated, including `NoService`.
+A host runs its local service through the plugin's own installer/runtime lifecycle.
 `install`, `update`, and `provision` manage the light host runtime directly and
 use zdd cutover when replacing a live service. The independent durable engine's
 explicit lifecycle remains separate and is never coupled to routine host
@@ -205,6 +210,8 @@ update successful. POSIX installation uses the same native deployment owner
 without requiring systemd; a deployment failure is not retried through a
 healthy-service shortcut. A completed runtime slot remains immutable and can be
 reused when retrying the service phase.
+Health probes, completeness checks, activation, and current-version reads
+suppress selected-slot bytecode writes explicitly.
 Deployment and verification share the scoped `service.env` settings. Ordinary
 `-devN`/`.devN` spellings compare equivalently; source-qualified generation
 identities remain exact.

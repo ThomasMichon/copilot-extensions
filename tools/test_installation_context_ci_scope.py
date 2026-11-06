@@ -24,6 +24,68 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+@pytest.mark.parametrize("outcome", ["passed", "failed", "skipped"])
+@pytest.mark.parametrize("step_id", ["readers", "consumers"])
+def test_related_knowledge_portfolio_requires_native_reader_execution(
+    tmp_path, monkeypatch, outcome, step_id,
+):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    step = next(
+        value for value in workflow["jobs"]["related-knowledge-linux"]["steps"]
+        if value.get("id") == step_id
+    )
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "run-plugin-tests.py").write_text(
+        f"""import json, sys
+from pathlib import Path
+import xml.etree.ElementTree as ET
+arguments = sys.argv[1:]
+Path("arguments.json").write_text(json.dumps(arguments))
+if {outcome!r} == "failed":
+    sys.exit(17)
+reports = Path(arguments[arguments.index("--junit-dir") + 1])
+reports.mkdir(parents=True)
+root = ET.Element("testsuites")
+suite = ET.SubElement(root, "testsuite")
+for variant in ("bare-anchor", "harness-worktree"):
+    case = ET.SubElement(suite, "testcase",
+        name="test_native_bound_knowledge_discovery_is_read_only[" + variant + "]")
+    if {outcome!r} == "skipped" and variant == "harness-worktree":
+        ET.SubElement(case, "skipped")
+ET.ElementTree(root).write(reports / "native.xml")
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "job-environment"))
+    body = compile(step["run"], "<related-knowledge-workflow>", "exec")
+    if outcome == "passed" or (outcome == "skipped" and step_id == "consumers"):
+        exec(body, {})
+    else:
+        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected):
+            exec(body, {})
+    arguments = json.loads((tmp_path / "arguments.json").read_text())
+    assert arguments[0] == "agent-worktrees"
+    assert ("--allow-explicit-tiers" in arguments) == (step_id == "readers")
+    selected = [
+        arguments[index + 1] for index, value in enumerate(arguments)
+        if value == "--test-file"
+    ]
+    expected = [
+        "tests/test_related_knowledge.py", "tests/native/test_related_knowledge_native.py",
+    ] if step_id == "readers" else [
+        "tests/test_pr_related_binding.py", "tests/test_session_context_registry.py",
+        "tests/test_session_context_companions.py", "tests/test_repos_configuration.py",
+    ]
+    assert selected == expected
+    assert "--allow-host-state" not in arguments
+
+
 @pytest.mark.parametrize(
     "path",
     [

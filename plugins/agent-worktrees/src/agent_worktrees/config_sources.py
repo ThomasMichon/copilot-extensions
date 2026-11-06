@@ -27,6 +27,7 @@ class ConfigSource:
     root), or ``"knowledge"`` (the bound knowledge repo's config overlay)."""
     tier: str | None = field(default=None, kw_only=True, compare=False)
     directory_form: bool = field(default=False, kw_only=True, compare=False)
+    state_repo: str = field(default="", kw_only=True, compare=False)
 
 
 def _default_anchor(config: cfg.Config) -> str | None:
@@ -418,7 +419,18 @@ def _knowledge_config_source(config, *, base_anchor=None, cwd=None, observations
         raise ConfigurationError("explicit knowledge binding is unresolved")
     observe(diagnostics, res.path, "knowledge-source", ScanAuthority.COMPLETE)
     if not base_anchor or Path(res.path).resolve() != Path(base_anchor).resolve():
-        return ConfigSource(anchor=res.path, origin="knowledge", tier="repository")
+        try:
+            repository = getattr(config, "default_repo", None)
+        except KeyError:
+            repository = None
+        external = bool(
+            getattr(repository, "stateless", False)
+            or getattr(repository, "requires_external_state_root", False)
+        )
+        return ConfigSource(
+            anchor=res.path, origin="knowledge", tier="repository",
+            state_repo=binding if external else "",
+        )
     return None
 
 
@@ -469,7 +481,9 @@ def _knowledge_registry_source(config, *, base_anchor=None, cwd=None, observatio
     if res.requires_external and res.bound and res.path:
         observe(diagnostics, res.path, "knowledge-source", ScanAuthority.COMPLETE)
         if not base_anchor or os.path.abspath(res.path) != os.path.abspath(base_anchor):
-            return ConfigSource(anchor=res.path, origin="knowledge")
+            return ConfigSource(
+                anchor=res.path, origin="knowledge", state_repo=res.repo,
+            )
     elif diagnostics is not None:
         failed(diagnostics, (res.repo or "knowledge") if observations is not None else "knowledge",
                "knowledge-source", "knowledge-unavailable",

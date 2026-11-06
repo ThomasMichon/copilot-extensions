@@ -816,3 +816,41 @@ implementation. The exact support closure follows the consumer trace and tests.
   A raw-file fixture reader discovered during the wider packet now uses its
   canonical delete-sharing reader; publication checks were not weakened.
   This source correction still needs review, release and authorized rollout.
+
+### 2026-11-06 - Native health prerequisite source accepted
+
+- #10974 received exact-head approval with no active issues and all required
+  green CI, then merged as `f12d59b92eb1c0f94a63e694147e42b0d8fe20ec`.
+  The published production/test bytes match the locally tested commit.
+  The managed self-merge exception omitted only the additional code-owner vote.
+- The existing contributor's Windows Resume fixture correction #10960 is
+  separately merged as `375ed2eb53fead5ee8cd3b0daeeb997382d42623`.
+  Preserve that ownership and the required native gate; no competing fix or
+  independent merge of the contributor's PR was performed here.
+- Re-read this effort's Plan and Validation Plan. No receiving/native/external
+  item closes from these prerequisite merges. Observe their actual release,
+  verify the released bytes and complete authorized normal installation before
+  the original single-venue acceptance. The effort and #10636 remain Active.
+
+### 2026-11-06 - Prior-observer compatibility before rollout
+
+- Release `42202812208` completed successfully, including real Windows Resume
+  and exact-source reuse. No ordinary installation was started: a final mixed-
+  direction analysis identified that a prior observer still sends full ping
+  without the new hint, so repeated configuration resolution can prevent it
+  from observing and retiring for its successor.
+- Reopened #10971 for that remaining direction. Contextless full ping now uses
+  the resident default selected at initialization. Local clients already send
+  their freshly resolved context; credential requests without a context still
+  resolve configuration on every request. Ordinary expiration checks remain.
+  Documented the read-only resident-status scope rather than claiming fresh
+  configuration selection for an old contextless ping.
+- The legacy-default regression failed before this correction. The complete
+  generation/settlement/readiness/discovery packet passes 144 cases with one
+  platform skip and a CPython closed-pipe destructor warning. The real warm
+  successor control now uses an old-style observer without the hint; actual
+  retirement, handoff and writer-exclusion assertions remain intact.
+  Local client context changes and fresh credential selections are checked.
+- Ruff, install contract, documentation and whitespace gates pass. This
+  compatibility follow-up still needs review, release and authorized normal
+  installation; it does not close any receiving or parent acceptance item.

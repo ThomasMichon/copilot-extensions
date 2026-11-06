@@ -83,6 +83,19 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+Worktrees' opt-in `--test-file tests/test_post_tool_shell.py --test-file
+tests/test_hook_ipc.py --test-file tests/test_status_monitor.py
+--allow-explicit-tiers -k "native_mutation or
+registered_post_hook_reuses_original_prepared_membership or
+registered_read_demand_is_send_only or handoff_wake_kind_actually_wakes"`
+packet exercises real registered Windows PowerShell 5.1/7 entries with original
+prepared membership, interpreter/resident traps, structured-edit and patch-move
+invalidation, missing/old/stale/closed discovery and a non-replying peer.
+Original IPC controls cover exact generation/schema/deadline/wire bounds and
+the running monitor's real invalidation wake and unadmitted refusal. These are
+isolated source consumers, not installed, complete shell/batch or throughput
+acceptance; required exact-source unit CI remains separate.
+
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
 --allow-explicit-tiers` packet checks optional expected-head declaration/codec
@@ -4749,6 +4762,14 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+Five binding-projection controls in `test_related_acquisition.py` exercise the
+actual synthesis body with logical paths and substituted canonical-registry
+acquisition. They preserve metadata provenance, knowledge/legacy-worktree
+classes and explicit uncertainty without importing the native registry owner
+on unconfigured paths. These actor-free models do not qualify real filesystem,
+registration, pairing or lifecycle effects; the opt-in native reader portfolio
+retains those separate boundaries.
+
 The runner explicitly preserves full parameter IDs, including on pytest 9.2,
 so collection continues to match the exact admitted node inventory.
 
@@ -6460,6 +6481,19 @@ machine-local sources without resolving an unused state root. Stateless and
 external-state configurations still resolve the knowledge overlay on every
 call, including changed or removed bindings. `config_sources` owns this read
 path; `state_root` re-exports the same types and function for existing callers.
+`tests/test_related_knowledge.py` additionally checks binding-driven related
+synthesis, canonical registration, collisions without policy-trust promotion,
+ambiguous sources and preservation of ordinary self-hosted configuration.
+The opt-in T3 `tests/native/test_related_knowledge_native.py` uses real Git
+bare/linked-worktree fixtures and the installed CLI to exercise list/resolve,
+aligned-only planning, narrative-scaffold refusal and structured nonzero
+canonical-class failure. It allocates no managed pair and preserves both
+repository trees. The `related-knowledge` portfolio in
+`installation-context-full.yml` selects these files on Linux and Windows.
+A separate standard-tier packet checks their dependent PR-binding, session
+context and repository-configuration consumers, including the actual CLI.
+Neither packet extends required unit-only CI or qualifies actual write/cleanup,
+late-binding retrofit or installed rollout.
 The diverged-checkout Git fixtures
 hide only the unrelated CodeSpace CLI from discovery, leaving real Git,
 finalization, status polling and checkout-invalidation assertions intact.

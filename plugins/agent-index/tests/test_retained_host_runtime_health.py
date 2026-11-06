@@ -66,6 +66,7 @@ def venv(path: Path, *, host: bool = False) -> tuple[Path, Path]:
 @pytest.mark.parametrize(("role", "corruption"), [
     ("host", "server"), ("host", "dependency"), ("host", "none"), ("client", "server"),
     ("host", "cli"), ("client", "cli"), ("host", "server-cli"),
+    ("machine-host-client", "server"),
 ])
 def test_retained_host_health_gates_publication(
     source, tmp_path: Path, ext: str, role: str, corruption: str,
@@ -86,7 +87,10 @@ def test_retained_host_health_gates_publication(
     venv(previous / "server", host=True)
     _, cli_site = venv(candidate)
     _, server_site = venv(candidate / "server", host=True)
+    for site in (cli_site, server_site):
+        (site / "sitecustomize.py").write_text("import agent_index\n", encoding="utf-8")
     runtime = api._runtime()
+    runtime.retain_runtime_helpers(candidate, complete=False)
     runtime.mark_complete(root, "1.0.0", payload_hash="e" * 64)
     runtime.activate(root, "1.0.0", link_free=True)
     full_identity = json.dumps(api.manifest_fields(identity), sort_keys=True)
@@ -102,6 +106,12 @@ def test_retained_host_health_gates_publication(
     token = f"retained {corruption} corruption"
     if corruption != "none":
         damaged.write_text(f"raise ImportError({token!r})\n", encoding="utf-8")
+    for cache in candidate.rglob("__pycache__"):
+        shutil.rmtree(cache)
+    candidate_before = {
+        path.relative_to(candidate): path.read_bytes()
+        for path in candidate.rglob("*") if path.is_file()
+    }
     previous_payload = tmp_path / "previous-payload"
     previous_payload.mkdir()
     (root / "payload-dir").write_text(str(previous_payload), encoding="utf-8")
@@ -133,7 +143,7 @@ def test_retained_host_health_gates_publication(
     reader_before = {reader: reader.read_bytes() for reader in readers}
     completion = (candidate / ".install-complete.json").read_bytes()
     env = FIXTURES._FIXTURES.environment(tmp_path)
-    env["AGENT_INDEX_ROLE"] = role
+    env["AGENT_INDEX_ROLE"] = "host" if role == "machine-host-client" else role
     paths = [str(Path(BASE).parent), str(Path(executable).resolve().parent)]
     if os.name == "nt":
         system = Path(env["SYSTEMROOT"])
@@ -170,14 +180,14 @@ $VersionedRuntime = $true
 $Force = $false
 . '{ENGINE / "installer-engine.ps1"}'
 . '{SCRIPTS / "versioned_runtime_native.ps1"}'
-function Write-Ok {{ param($Msg) }}
-function Write-Skip {{ param($Msg) }}
+function Write-Ok {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
+function Write-Skip {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
 function Write-Warn {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
 function Write-Fail {{ param($Msg) throw $Msg }}
 {definitions}
 function Get-BootstrapPython {{ return '{BASE}' }}
 function Get-IndexUv {{ return $null }}
-function Get-ActivationRole {{ return 'unconfigured' }}
+function Get-ActivationRole {{ return '{"client" if role == "machine-host-client" else "unconfigured"}' }}
 function Invoke-VersionedGc {{ param($KeepPrev) }}
 function Get-GitInfo {{ param($Path) return @{{commit='unknown'; branch='unknown'; dirty=$false}} }}
 Initialize-SourceRuntime
@@ -215,17 +225,24 @@ _fail() {{ printf '%s\\n' "$*" >&2; }}
 _bootstrap_python() {{ printf '%s' '{BASE}'; }}
 _find_python() {{ printf '%s' '{BASE}'; }}
 _ensure_uv() {{ :; }}; _ensure_uv_index() {{ :; }}
-_activation_role() {{ printf unconfigured; }}
+_activation_role() {{ printf '{"client" if role == "machine-host-client" else "unconfigured"}'; }}
 _versioned_gc() {{ :; }}
 _initialize_source_runtime
 _ensure_runtime
 """
         argv = [executable, str(harness)]
     harness.write_bytes(text.encode("utf-8"))
-    result = subprocess.run(
-        argv, env=env, capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
-    )
-    if corruption == "cli" or (role == "host" and corruption != "none"):
+    try:
+        result = subprocess.run(
+            # Match the existing full source-publication fixture's finite bound.
+            argv, env=env, capture_output=True, text=True, timeout=40, creationflags=HEADLESS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            f"Retained-slot publication exceeded the native source fixture bound: "
+            f"stdout={exc.stdout!r}; stderr={exc.stderr!r}"
+        )
+    if corruption == "cli" or (role in {"host", "machine-host-client"} and corruption != "none"):
         assert result.returncode != 0, result.stdout + result.stderr
         assert token in result.stdout + result.stderr
         after = {name: (root / name).read_bytes() if (root / name).exists() else None for name in names}
@@ -237,3 +254,7 @@ _ensure_runtime
         manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
         assert manifest["runtime_source"] == identity.document()
     assert (candidate / ".install-complete.json").read_bytes() == completion
+    assert {
+        path.relative_to(candidate): path.read_bytes()
+        for path in candidate.rglob("*") if path.is_file()
+    } == candidate_before

@@ -32,6 +32,9 @@ catalog_path = cache / "marketplaces" / "opaque-clone" / ".github" / "plugin" / 
 if os.environ.get("VENUE_CALL_LOG"):
     with Path(os.environ["VENUE_CALL_LOG"]).open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({"argv": sys.argv[1:], "cwd": str(Path.cwd())}) + "\n")
+if os.environ.get("VENUE_EXPECTED_GITHUB_TOKEN"):
+    assert os.environ.get("COPILOT_GITHUB_TOKEN") == os.environ["VENUE_EXPECTED_GITHUB_TOKEN"]
+    assert os.environ.get("GH_TOKEN") == os.environ["VENUE_EXPECTED_GITHUB_TOKEN"]
 native_settings_path = home / "settings.json"
 native = json.loads(native_settings_path.read_text()) if native_settings_path.exists() else {}
 registered = native.setdefault("extraKnownMarketplaces", {})

@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from test_install_engine_adoption import environment
+
 PLUGIN = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PLUGIN / "src"
 
@@ -44,6 +46,9 @@ DEFAULT_FAKE_RUNTIME = (
     "'role':None,'running':False,'runtime':{'state':'ready'}}))\n"
     "elif command in ('version', '--version'):\n"
     "    print('9.9.9')\n"
+    "elif command == 'installer-readiness':\n"
+    "    print(json.dumps({'schema':'copilot-extensions.module-readiness','version':1,"
+    "'module':'agent-index/runtime','state':'configuration-empty','detail':'unconfigured fixture'}))\n"
 )
 
 
@@ -158,6 +163,10 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
     payload = tmp_path / f"payload-{shell}"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copytree(
+        SOURCE_ROOT, payload / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     (payload / "pyproject.toml").write_text(
         '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
         encoding="utf-8",
@@ -172,7 +181,8 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
         "raise SystemExit(0)\n",
         encoding="utf-8",
     )
-    env = os.environ.copy()
+    env = environment(tmp_path)
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
     env["AGENT_INDEX_HOME"] = str(tmp_path / f"home-{shell}")
     env["USERPROFILE"] = str(tmp_path)
     env["PYTHONPATH"] = os.pathsep.join(
@@ -277,6 +287,19 @@ $root = $env:TEST_CELL_ROOT
         _fake_runtime(tmp_path, DEFAULT_FAKE_RUNTIME)
     )
     return scripts / "runtime-gate.ps1", env
+
+
+def _configure_repository_role(root: Path, env: dict[str, str], role: str) -> None:
+    machine = "fixture-local"
+    indexer = machine if role == "host" else "fixture-remote"
+    config = root / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        f"indexers:\n  - machine: {indexer}\n    ssh: fixture-indexer\n",
+        encoding="utf-8",
+    )
+    env["AGENT_INDEX_MACHINE"] = machine
+    env["AGENT_INDEX_ROLE"] = role
 
 
 def _run(
@@ -719,7 +742,7 @@ def test_windows_powershell5_dispatches_from_non_ascii_path(
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(unicode_root, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {
@@ -842,7 +865,8 @@ def test_installer_readiness_never_provisions_at_session_start(
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["state"] == "configuration-empty"
-    assert "does not provision" in payload["detail"]
+    assert payload["detail"]
+    assert "::agent-provisioning::" not in result.stdout + result.stderr
     assert not home.exists()
 
 
@@ -933,7 +957,7 @@ def test_configured_role_with_missing_runtime_is_not_called_dormant(
         pytest.skip("bash is not installed")
     script, env = _fixture(tmp_path, shell)
     env["TEST_PYTHON"] = ""
-    env["AGENT_INDEX_ROLE"] = "client"
+    _configure_repository_role(tmp_path, env, "client")
 
     result = _run(shell, script, env, "status")
 
@@ -952,7 +976,7 @@ def test_configured_roles_are_reported_without_mutation(
     if shell == "bash" and shutil.which("bash") is None:
         pytest.skip("bash is not installed")
     script, env = _fixture(tmp_path, shell)
-    env["AGENT_INDEX_ROLE"] = role
+    _configure_repository_role(tmp_path, env, role)
 
     result = _run(shell, script, env, "role", "--json")
 
@@ -966,7 +990,7 @@ def test_configured_roles_are_reported_without_mutation(
 def test_stdio_mcp_never_provisions_missing_runtime(tmp_path: Path, shell: str, role: str):
     script, env = _fixture(tmp_path, shell)
     env["TEST_PYTHON"] = ""
-    env["AGENT_INDEX_ROLE"] = role
+    _configure_repository_role(tmp_path, env, role)
     result = _run(shell, script, env, "mcp")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "this command cannot provision a runtime" in result.stderr
@@ -1213,7 +1237,7 @@ def test_active_cell_option_command_is_one_validator_argument(
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(tmp_path, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {"status": "ready", "reason": "namespaced-active",
@@ -1250,7 +1274,7 @@ def test_active_cell_dispatch_sets_cell_roots_and_context(tmp_path: Path) -> Non
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(tmp_path, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {
@@ -1327,14 +1351,74 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     tmp_path: Path,
     shell: str,
     command: str,
+    record_property,
 ) -> None:
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
     script, env = _fixture(tmp_path, shell)
-    cell_root = tmp_path / "cell" / "plugins" / "agent-index"
-    context = cell_root / "install.json"
-    context.parent.mkdir(parents=True)
-    context.write_text("{}\n", encoding="utf-8")
+    from agent_index import _installation_context as installation, _peer_launch
+
+    (script.parents[1] / "plugin.json").write_text(
+        json.dumps({"name": "agent-index", "version": "9.9.9"}), encoding="utf-8",
+    )
+    stamped = installation.stamp_context(
+        payload_version="9.9.9", payload_origin="installed",
+        expected_namespace_generation=0, expected_install_generation=0,
+        payload_root=script.parents[1], plugin_id="agent-index",
+        marketplace_key="example",
+        source_descriptor={"source": "github", "repo": "Example/Plugins"},
+        durable_home=tmp_path / "cell", environment=env,
+    )
+    cell = installation.validate_context_receipt(
+        stamped["installReceipt"], tmp_path / "cell", environment=env,
+    )
+    cell_root = Path(cell["pluginRoot"])
+    context = Path(cell["installReceipt"])
+
+    def owner_probe(value):
+        return subprocess.run(
+            [
+                sys.executable, "-I", "-B", "-c",
+                "import json, sys; from pathlib import Path; "
+                "sys.path.insert(0, sys.argv[1]); "
+                "from agent_index import _peer_launch; "
+                "print(json.dumps(_peer_launch.validate_owner("
+                "'agent-index', Path(sys.argv[2]), sys.argv[3])))",
+                str(script.parents[1] / "src"), str(cell_root),
+                value if isinstance(value, str) else json.dumps(value),
+            ],
+            env=env, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    rejected = owner_probe(stamped)
+    rejection = "Explicit inline context conflicts with its canonical receipt"
+    assert rejected.returncode != 0 and rejection in rejected.stderr, (
+        rejected.stdout + rejected.stderr
+    )
+    record_property("original_context_rejection", rejection)
+    policy = tmp_path / ".copilot-extensions" / "installation-mode.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(json.dumps({
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": True, "marketplaces": {}},
+    }), encoding="utf-8")
+    installation.compare_and_swap_activation(
+        context=context, expected_marketplace_id=cell["marketplaceId"],
+        expected_plugin_id="agent-index",
+        expected_namespace_generation=cell["namespaceGeneration"],
+        expected_install_generation=cell["generation"], expected_activation_generation=0,
+        activation_mode="namespaced", activation_state="active",
+        legacy_disposition="absent",
+        legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+        durable_home=tmp_path / "cell", legacy_root=tmp_path / ".agent-index",
+        environment=env,
+    )
+    invocation_context = _peer_launch.peer_environment(cell, env)["COPILOT_EXTENSIONS_CONTEXT"]
+    admitted = owner_probe(invocation_context)
+    assert admitted.returncode == 0, admitted.stdout + admitted.stderr
+    owner = json.loads(admitted.stdout)
+    assert owner["invocationGovernance"]["reason"] == "namespaced-active"
     repository = tmp_path / f"repo-{shell}-{command}"
     nested = repository / "nested" / "work"
     nested.mkdir(parents=True)
@@ -1350,6 +1434,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         "corpus:\n  sources:\n    - name: git:test\n",
         encoding="utf-8",
     )
+    _configure_repository_role(repository, env, "host")
     captured = tmp_path / f"repo-context-{shell}-{command}.json"
     runtime_source = (
         "import json, os, sys\n"
@@ -1365,7 +1450,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     )
     env.update(
         {
-            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "COPILOT_EXTENSIONS_CONTEXT": invocation_context,
             "AGENT_INDEX_ROLE": "host",
             "TEST_CELL_ROOT": str(cell_root),
             "TEST_INSTALLATION_STATUS": json.dumps(
@@ -1375,7 +1460,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
                     "actualMode": "namespaced",
                     "desiredMode": "namespaced",
                     "context": str(context),
-                    "marketplaceId": "example--1234",
+                    "marketplaceId": cell["marketplaceId"],
                     "policy": {"state": "valid", "enabled": True},
                 }
             ),
@@ -1396,6 +1481,17 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     )
 
     result = _run(shell, script, env, *arguments, cwd=nested)
+    if result.returncode != (7 if command == "setup" else 0):
+        reader = subprocess.run(
+            [sys.executable, "-E", "-B", str(script.parent / "resolve_effective_config.py"),
+             "--cwd", str(repository)],
+            env=env, cwd=nested, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        pytest.fail(
+            f"Dispatcher: {result.returncode} {result.stdout} {result.stderr}\n"
+            f"Effective reader: {reader.returncode} {reader.stdout} {reader.stderr}"
+        )
 
     if command == "setup":
         assert result.returncode == 7
@@ -1421,7 +1517,7 @@ def test_active_cell_rejects_validator_interpreter_outside_selected_slot(
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(tmp_path, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {

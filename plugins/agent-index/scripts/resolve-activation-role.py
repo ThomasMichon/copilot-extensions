@@ -31,7 +31,7 @@ def _fallback_machines(text: str) -> list[str]:
 
 
 def configured_machines(
-    path: Path | None = None, *, data_b64: str | None = None
+    path: Path | None = None, *, data_b64: str | None = None, strict: bool = False,
 ) -> list[str]:
     if data_b64 is not None:
         try:
@@ -39,14 +39,20 @@ def configured_machines(
             value = json.loads(raw.decode("utf-8"))
             normalized = _validate_config(value)
         except (ConfigError, TypeError, ValueError, UnicodeError):
+            if strict:
+                raise ConfigError("explicit activation configuration is invalid")
             return []
     elif path is not None:
         state, value = _load_yaml_mapping(path)
         if state != "ready" or value is None:
+            if strict:
+                raise ConfigError("explicit activation configuration is unavailable or invalid")
             return []
         try:
             normalized = _validate_config(value)
         except ConfigError:
+            if strict:
+                raise
             return []
     else:
         return []
@@ -54,9 +60,9 @@ def configured_machines(
 
 
 def resolve(
-    path: Path | None, machine: str, *, data_b64: str | None = None
+    path: Path | None, machine: str, *, data_b64: str | None = None, strict: bool = False,
 ) -> str:
-    machines = configured_machines(path, data_b64=data_b64)
+    machines = configured_machines(path, data_b64=data_b64, strict=strict)
     if not machines:
         return "unconfigured"
     return "host" if machine.strip().casefold() in machines else "client"
@@ -65,6 +71,11 @@ def resolve(
 def resolve_repository(repo: str, machine: str) -> str:
     effective = resolve_effective_config(repo)
     if not effective["opted_in"]:
+        if effective["reason"] not in {
+            "repository-unavailable", "repository-config-absent",
+            "external-state-root-config-absent",
+        }:
+            raise ConfigError("repository activation configuration could not be resolved")
         return "unconfigured"
     machines = [item["machine"].casefold() for item in effective["indexers"]]
     if not machines:
@@ -80,13 +91,15 @@ def main() -> int:
     source.add_argument("--repo")
     parser.add_argument("--machine", required=True)
     args = parser.parse_args()
-    print(
-        resolve_repository(args.repo, args.machine) if args.repo else resolve(
-            Path(args.config) if args.config else None,
-            args.machine,
-            data_b64=args.data_b64,
+    try:
+        role = resolve_repository(args.repo, args.machine) if args.repo else resolve(
+            Path(args.config) if args.config else None, args.machine,
+            data_b64=args.data_b64, strict=True,
         )
-    )
+    except (ConfigError, OSError, ValueError):
+        print("agent-index: activation configuration could not be resolved", file=sys.stderr)
+        return 1
+    print(role)
     return 0
 
 

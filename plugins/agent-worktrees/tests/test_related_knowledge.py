@@ -1,0 +1,300 @@
+"""Binding-driven related discovery without topology or lifecycle writes."""
+
+from dataclasses import replace
+from types import SimpleNamespace
+
+import pytest
+from configuration_layers import ConfigurationError
+from dropin_registry import ScanAuthority
+
+from agent_worktrees import config, config_sources, related, related_acquisition, repos
+
+
+@pytest.fixture
+def bound_source(tmp_path, monkeypatch):
+    harness, knowledge = tmp_path / "harness", tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    registry = repos.ReposRegistry(repos={
+        "notes": repos.RepoEntry(
+            name="notes", repo_class="knowledge",
+            paths={platform: str(knowledge) for platform in ("windows", "linux", "wsl")},
+        ),
+    })
+    monkeypatch.setattr(repos, "read_registry", lambda **_kwargs: registry)
+    cfg = config.Config(
+        srcroot=str(tmp_path), machine="fixture", platform=config.detect_platform(),
+        repo_name="harness", knowledge_repo="notes",
+        repos={"harness": config.RepoConfig(
+            anchor=str(harness), worktree_root=str(tmp_path / "worktrees"),
+            stateless=True,
+        )},
+    )
+
+    def anchors(configuration=cfg):
+        source = config_sources.knowledge_config_source(
+            configuration, base_anchor=str(harness),
+        )
+        return [
+            related.config_contribution_anchor(harness, "harness"),
+            related.config_contribution_anchor(
+                source.anchor, source.origin, state_repo=source.state_repo,
+            ),
+        ]
+
+    return harness, knowledge, registry, cfg, anchors
+
+
+@pytest.mark.parametrize("repo_class", ["knowledge", "worktree"])
+def test_bound_state_appears_without_a_committed_self_entry(bound_source, repo_class):
+    harness, knowledge, registry, _cfg, anchors = bound_source
+    registry.repos["notes"].repo_class = repo_class
+    selected = anchors()
+    entries = related.list_related_grafted(selected, role="knowledge")
+    assert [entry.name for entry in entries] == ["notes"]
+    entry = entries[0]
+    resolution = related.build_resolution(
+        entry, current_machine="fixture", repo_class=repo_class,
+        repo_path=str(knowledge), adopted=True, base_repo=True,
+    )
+    assert entry.locus.preferred == "local" and entry.delegate == "none"
+    assert resolution.editing_model == "paired-knowledge-worktree"
+    assert "never the registered anchor" in " ".join(resolution.steps)
+    assert "state-root --pair --json" in " ".join(resolution.steps)
+    assert not list(harness.iterdir()) and not list(knowledge.iterdir())
+
+
+def test_bound_role_wins_without_promoting_a_harness_policy(bound_source):
+    harness, _knowledge, _registry, _cfg, anchors = bound_source
+    related.write_related(harness, related.RelatedConfig(related={
+        "notes": related.RelatedEntry(
+            name="notes", role="product", summary="Existing narrative",
+            delegate="agent-bridge", audience="private",
+            locus=related.Locus(preferred="codespace"),
+            pr={"enabled": True},
+        ),
+    }))
+    before = related.related_path(harness).read_bytes()
+    entry = related.get_related_grafted(anchors(), "notes")
+    assert entry.role == "knowledge" and entry.locus.preferred == "local"
+    assert entry.delegate == "none" and not entry.locus.codespace
+    assert entry.summary == "Existing narrative" and entry.pr == {"enabled": True}
+    assert entry.origin_layer == "harness"
+    assert related.effective_audience(entry) == ""
+    assert related.related_path(harness).read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["unregistered", "wrong-class", "different-root"])
+def test_bound_discovery_refuses_fallback_or_changed_registration(
+    bound_source, monkeypatch, tmp_path, failure,
+):
+    _harness, _knowledge, registry, _cfg, anchors = bound_source
+    selected = anchors()
+    if failure == "unregistered":
+        registry.repos.clear()
+    elif failure == "wrong-class":
+        registry.repos["notes"].repo_class = "reference"
+    else:
+        other = tmp_path / "other"
+        other.mkdir()
+        registry.repos["notes"].paths = {
+            platform: str(other) for platform in ("windows", "linux", "wsl")
+        }
+    monkeypatch.setattr(
+        repos, "resolve_path",
+        lambda *_args, **_kwargs: pytest.fail("fallback discovery is not canonical"),
+    )
+    with pytest.raises(ConfigurationError, match="bound knowledge related source"):
+        related.read_related_grafted(selected)
+    report = related_acquisition.read_related_grafted_report(selected)
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert "notes" not in report.value.related
+
+
+def test_ordinary_knowledge_config_does_not_claim_external_state(bound_source):
+    _harness, _knowledge, _registry, cfg, anchors = bound_source
+    ordinary = replace(
+        cfg, repos={"harness": replace(cfg.default_repo, stateless=False)},
+    )
+    assert related.list_related_grafted(anchors(ordinary)) == []
+
+
+def test_conflicting_bound_sources_are_not_silently_overlaid(bound_source):
+    _harness, knowledge, _registry, _cfg, anchors = bound_source
+    selected = anchors() + [
+        related.config_contribution_anchor(
+            knowledge, "knowledge", state_repo="different-binding",
+        ),
+    ]
+    with pytest.raises(ConfigurationError, match="ambiguous"):
+        related.read_related_grafted(selected)
+    report = related_acquisition.read_related_grafted_report(selected)
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert not report.value.related
+
+
+def test_synthesized_projection_cannot_be_written_back_to_topology(bound_source):
+    harness, _knowledge, _registry, _cfg, anchors = bound_source
+    related.write_related(harness, related.RelatedConfig(related={
+        "tool": related.RelatedEntry(name="tool", role="tooling"),
+    }))
+    before = related.related_path(harness).read_bytes()
+    projected = related.read_related_grafted(anchors())
+    with pytest.raises(ConfigurationError, match="Cannot persist a synthesized"):
+        related.write_related(harness, projected)
+    assert related.related_path(harness).read_bytes() == before
+
+
+@pytest.mark.parametrize("authored", [False, True])
+def test_synthesized_entry_cannot_be_upserted_into_authored_topology(bound_source, authored):
+    harness, _knowledge, _registry, _cfg, anchors = bound_source
+    topology = related.RelatedConfig(related={
+        "tool": related.RelatedEntry(name="tool", role="tooling"),
+    })
+    if authored:
+        topology.related["notes"] = related.RelatedEntry(
+            name="notes", role="product", summary="Retained narrative",
+            delegate="agent-bridge", locus=related.Locus(preferred="codespace"),
+        )
+    related.write_related(harness, topology)
+    before = related.related_path(harness).read_bytes()
+    entry = related.get_related_grafted(anchors(), "notes")
+    with pytest.raises(ConfigurationError, match="Cannot persist a synthesized"):
+        related.upsert_related(harness, entry)
+    assert related.related_path(harness).read_bytes() == before
+
+
+@pytest.mark.parametrize(("present", "force"), [
+    (False, False), (False, True), (True, False), (True, True),
+])
+def test_synthesized_narrative_scaffolder_cannot_write_the_anchor(
+    bound_source, present, force,
+):
+    harness, knowledge, _registry, _cfg, anchors = bound_source
+    entry = related.get_related_grafted(anchors(), "notes")
+    path = related.doc_abs_path(harness, entry)
+    assert path.is_relative_to(knowledge)
+    if present:
+        path.parent.mkdir(parents=True)
+        path.write_text("Retained authored narrative\n", encoding="utf-8")
+    before = {
+        candidate: candidate.read_bytes() if candidate.is_file() else None
+        for root in (harness, knowledge) for candidate in root.rglob("*")
+    }
+    if present and not force:
+        assert related.scaffold_doc(harness, entry, force=force) == (path, False)
+    else:
+        with pytest.raises(ConfigurationError, match="no narrative is scaffolded"):
+            related.scaffold_doc(harness, entry, force=force)
+    assert {
+        candidate: candidate.read_bytes() if candidate.is_file() else None
+        for root in (harness, knowledge) for candidate in root.rglob("*")
+    } == before
+
+
+def test_current_checkout_briefing_retains_aligned_state_policy(bound_source):
+    from agent_worktrees import related_briefing
+
+    _harness, knowledge, _registry, _cfg, anchors = bound_source
+    entry = related.get_related_grafted(anchors(), "notes")
+    resolution = related.build_resolution(
+        entry, current_machine="fixture", repo_class="knowledge",
+        repo_path=str(knowledge), adopted=False,
+    )
+    text = related_briefing.render_briefing(
+        entry, resolution, doc_relpath=None,
+        current_checkout_path=str(knowledge), registered=True,
+    )
+    assert "state-root --pair --json" in text
+    assert "never the registered anchor" in text
+    assert "work here directly" not in text
+
+
+@pytest.mark.parametrize("authored", [False, True])
+def test_briefing_producer_preserves_bound_source_markers(
+    bound_source, tmp_path, monkeypatch, authored,
+):
+    from agent_worktrees import related_briefing, state_root
+
+    harness, _knowledge, _registry, cfg, _anchors = bound_source
+    topology = related.RelatedConfig()
+    if authored:
+        topology.related["notes"] = related.RelatedEntry(
+            name="notes", role="product", delegate="agent-bridge",
+            locus=related.Locus(preferred="codespace"),
+        )
+    related.write_related(harness, topology)
+    original = related.related_path(harness).read_bytes()
+    source = config_sources.knowledge_config_source(cfg, base_anchor=str(harness))
+    monkeypatch.setattr(
+        state_root, "config_source_anchors",
+        lambda *_args, **_kwargs: [
+            config_sources.ConfigSource(anchor=str(harness), origin="harness"), source,
+        ],
+    )
+    monkeypatch.setattr(related_briefing.doctor, "_read_projects", lambda: {})
+    sessions = tmp_path / "sessions"
+    session = sessions / "fixture-session"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(related_briefing.sessions, "_session_state_dir", lambda: sessions)
+    written = related_briefing.write_related_briefings(
+        cfg, SimpleNamespace(repo="harness", worktree_path=str(harness)),
+        cwd=str(harness), session_id=session.name, plugin_related_anchors=[],
+    )
+    assert written == ["notes"]
+    text = (session / "files" / "related-briefings" / "notes.md").read_text()
+    assert "paired-knowledge-worktree" in text
+    assert "state-root --pair --json" in text
+    assert "never the registered anchor" in text
+    assert related.related_path(harness).read_bytes() == original
+
+
+def test_session_summary_preserves_bound_source_markers(bound_source, monkeypatch):
+    from agent_worktrees import session_context, state_root
+
+    harness, _knowledge, _registry, cfg, _anchors = bound_source
+    related.write_related(harness, related.RelatedConfig(primary="notes"))
+    source = config_sources.knowledge_config_source(cfg, base_anchor=str(harness))
+    monkeypatch.setattr(
+        state_root, "config_source_anchors",
+        lambda *_args, **_kwargs: [
+            config_sources.ConfigSource(anchor=str(harness), origin="harness"), source,
+        ],
+    )
+    primary, summary = session_context._related_summary(
+        cfg, str(harness), plugin_related_anchors=[],
+    )
+    assert primary == "notes"
+    assert "notes(role=knowledge,locus=local,delegate=none)" in summary
+
+
+def test_configuration_inspection_retains_bound_role_on_collision(
+    bound_source, monkeypatch,
+):
+    from agent_worktrees import repos_configuration_catalog as catalog, state_root
+
+    harness, _knowledge, _registry, cfg, _anchors = bound_source
+    related.write_related(harness, related.RelatedConfig(related={
+        "notes": related.RelatedEntry(
+            name="notes", role="product", delegate="agent-bridge",
+            locus=related.Locus(preferred="codespace"),
+        ),
+    }))
+    source = config_sources.knowledge_config_source(cfg, base_anchor=str(harness))
+    monkeypatch.setattr(
+        state_root, "config_source_anchors",
+        lambda *_args, **_kwargs: [
+            config_sources.ConfigSource(anchor=str(harness), origin="harness"), source,
+        ],
+    )
+    monkeypatch.setattr(catalog.cfg, "load_project_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(
+        catalog.installer, "read_projects_registry",
+        lambda **_kwargs: {"projects": {}},
+    )
+    monkeypatch.setattr(related, "installed_plugin_related_anchors", lambda **_kwargs: [])
+    inspected = catalog.inspect_project("harness", "")
+    assert not inspected.findings
+    entry = inspected.routes["notes"]
+    assert entry.role == "knowledge" and entry.bound_state_root
+    assert entry.locus.preferred == "local" and entry.delegate == "none"
