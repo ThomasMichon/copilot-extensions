@@ -91,6 +91,16 @@ class UnixAlias:
         except (OSError, ValueError):
             return None
 
+    def owned_by_current(self) -> bool:
+        payload = self.read()
+        try:
+            return bool(
+                payload is not None and payload["pid"] == os.getpid()
+                and payload["birth"] == birth_identity(os.getpid())
+            )
+        except (OSError, ValueError):
+            return False
+
     def dead_identity(self) -> tuple[int, int] | None:
         payload = self.read()
         if payload is None and self.previous is not None and not os.path.lexists(self.record):

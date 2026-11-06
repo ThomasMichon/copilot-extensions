@@ -159,6 +159,9 @@ permission to signal the reused PID. Alias mutation and cleanup share the
 publication lease; cleanup only unlinks the socket identities bound by that
 generation, preserving a later owner's path. Alias retries continue until its
 actual owner exits, including when that owner predates the discovery predecessor.
+Fixed-path cleanup also requires the current alias record's PID and native birth
+to match this process, so inode reuse alone cannot authorize removing a later
+owner's socket.
 
 The payload contains unlocked KeePass master passwords, their original set
 times, and absolute expiration deadlines. It does not copy credential-value

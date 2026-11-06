@@ -114,6 +114,31 @@ def test_old_cleanup_preserves_a_replaced_alias_and_current_discovery(tmp_path, 
     assert (tmp_path / "pid").read_text() == "123"
 
 
+@pytest.mark.parametrize("foreign", ("none", "pid", "birth"))
+def test_fixed_alias_cleanup_checks_owner_even_when_socket_inode_is_reused(
+    owner, tmp_path, monkeypatch, foreign,
+):
+    from agent_vault import service
+
+    if foreign != "none":
+        payload = json.loads(owner.record.read_text())
+        payload[foreign] = os.getpid() + 1 if foreign == "pid" else "different-native-birth"
+        owner.record.write_text(json.dumps(payload))
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "PID_FILE", str(tmp_path / "absent.pid"))
+    monkeypatch.setattr(service, "SOCKET_PATH", owner.path)
+    monkeypatch.setattr(service, "clear_endpoint", lambda _: None)
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "socket_identity", lambda _: (1, 2))
+    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller.unix_alias = owner
+    controller.owned_sockets = {owner.path: (1, 2)}
+    unlinked = []
+    monkeypatch.setattr(generation.os, "unlink", lambda path: unlinked.append(path))
+    controller.cleanup()
+    assert (owner.path in unlinked) is (foreign == "none")
+
+
 @pytest.mark.parametrize("current", (False, True))
 def test_alias_publication_rechecks_selection_under_the_publication_lease(
     tmp_path, monkeypatch, current,

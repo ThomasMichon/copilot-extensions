@@ -579,6 +579,8 @@ class ServiceGeneration:
             try:
                 self.api.clear_endpoint(self.root)
                 for path, identity in self.owned_sockets.items():
+                    if path == self.api.SOCKET_PATH and not self.unix_alias.owned_by_current():
+                        continue
                     if socket_identity(path) == identity:
                         with contextlib.suppress(FileNotFoundError):
                             os.unlink(path)

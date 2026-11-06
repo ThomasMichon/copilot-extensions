@@ -1055,3 +1055,9 @@ implementation. The exact support closure follows the consumer trace and tests.
   outcomes remain in the retained reports rather than being erased by retries.
   Linux/macOS, installer clean-room, installed whole-update and external
   receiving acceptance remain separate. No live process was changed.
+- A final cleanup control failed when a newer fixed-alias owner reused the
+  same socket inode. Fixed-path cleanup now also requires the current private
+  record's PID and native birth to match this process. Own, changed-PID and
+  changed-birth cases pass; all 36 selected alias/cleanup consumers pass with
+  one Linux skip. This is a focused final correction, not a repeated full
+  265-case packet or additional unrelated coverage.
