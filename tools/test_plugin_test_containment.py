@@ -1508,7 +1508,8 @@ def test_native_cancellation_reaps_file_holding_descendant(tmp_path, monkeypatch
 def test_environment_audit_failure_cannot_mask_unreaped_retention(
     tmp_path, monkeypatch, unreaped, audit_error,
 ):
-    original = plugin_test_containment.UnreapedProcessError("tree remains owned")
+    owned_job = object()
+    original = plugin_test_containment.UnreapedProcessError("tree remains owned", job=owned_job)
     sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
 
     def command(*args, **kwargs):
@@ -1534,6 +1535,7 @@ def test_environment_audit_failure_cannot_mask_unreaped_retention(
         if unreaped:
             assert (Path(sandbox.name) / "still-owned").read_text() == "preserve"
             assert raised.value.__cause__ is original
+            assert raised.value.job is owned_job
             assert "environment audit also failed" in str(raised.value)
             assert type(audit_error).__name__ in str(raised.value)
         else:

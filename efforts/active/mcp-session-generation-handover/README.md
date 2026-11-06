@@ -1340,3 +1340,20 @@ migration already works.
   only, without GUI/observer/debugger or production operations. The coordinator
   retains this concrete ordinary-witness diagnosis/acceptance decision together
   with publication, current-head CI/review and release/installed verification.
+
+### 2026-11-06: Formal ordinary-installer validation; historical mismatch unresolved
+
+- At source revision `2e1a5c5535`, new isolated Windows formal cases passed for
+  explicit-only and installer-discovered selection in 124.47s and 196.04s,
+  respectively, each within its own original 300s total bound including
+  verified cleanup. Instrumentation was disabled; every original PID reuse,
+  physical-code, stale refusal, endpoint identity and held-client assertion
+  remained intact. Earlier instrumented diagnostics and negative controls
+  remain separate evidence, not retroactively qualified formal runs.
+- The earlier warm PID mismatch was **not reproduced; its cause remains
+  unknown**, not fixed. Preserve that finding under #10486; these passing
+  cases do not establish its historical cause or waive a future regression.
+- Subsequent source reconciliation retains upstream lifecycle ownership and
+  admission inventory. New-source validation, current review/CI, release and
+  installed verification remain separate gates; prepared-application acceptance
+  and complete session-preserving handover remain open.
