@@ -44,12 +44,18 @@ def scratch_root(repo: Path) -> Path:
     return scratch
 
 
-def resource_root(repo: Path) -> Path:
-    """Keep retained environments separate for every canonical source checkout."""
+def resource_path(repo: Path) -> Path:
+    """Name a checkout's retained-cache root without creating it."""
     source = repo.resolve(strict=True)
     scratch = scratch_root(repo)
     identity = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:20]
-    root = ordinary_cache_root(scratch / f"ce-tests-{identity}")
+    return ordinary_cache_root(scratch / f"ce-tests-{identity}")
+
+
+def resource_root(repo: Path) -> Path:
+    """Keep retained environments separate for every canonical source checkout."""
+    source = repo.resolve(strict=True)
+    root = resource_path(repo)
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     record_owner(root, source, retention="retained source-bound test cache; no automatic sweep")
     return root
