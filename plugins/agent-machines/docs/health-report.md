@@ -151,6 +151,8 @@ known result, null otherwise. Listener/banner evidence cannot qualify it.
 Logical agents additionally have `count`: an observed `ok` count from 0 to
 65,535, null otherwise. Absence is unknown, never an inferred zero. No raw
 errors, process names, routes, credentials or arbitrary labels are accepted.
+Synthesized missing domains retain the same timestamp/evidence fields,
+including `count: null` for logical agents and `direction: null` for SSH.
 
 ```text
 agent-machines health record --input <absolute-observation.json> --store-dir <absolute-local-store>
@@ -191,6 +193,8 @@ retains `applied: null` and never retries. Inspect current state before choosing
 another operation. Inspect exit 0 includes missing/invalid evidence; it is not
 healthy-machine proof. No probes, credentials, scheduled jobs, services, carrier
 publication or peer receipt are activated or qualified.
+A response write/flush failure after confirmed apply also reports an unknown
+acknowledgement through stderr when available, never an untouched slot.
 
 Inspect rechecks policy bytes and namespace identity after its scan; a concurrent
 policy change requires another read, not a view qualified by the old owner.

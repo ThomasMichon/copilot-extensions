@@ -34,6 +34,7 @@ def add_parser(subparsers) -> None:
 def run_slots(args) -> int:
     from . import health_slots
 
+    result = None
     try:
         now = datetime.fromisoformat(args.now.replace("Z", "+00:00")) if args.now else datetime.now(timezone.utc)
         if now.tzinfo is None or now.utcoffset() is None:
@@ -45,14 +46,25 @@ def run_slots(args) -> int:
             )
         else:
             result = health_slots.inspect(args.store_dir, **fields)
-        print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
         if result.get("status") == "unknown":
             return 2
         return 0 if result.get("eligible", True) else 1
     except (ValueError, OSError, TimeoutError, OverflowError) as error:
-        reason = str(error) if isinstance(error, health_slots.HealthError) else "local-store-unavailable"
+        if result is not None and isinstance(error, OSError) and sys.stdout is sys.__stdout__:
+            # A second buffered flush must not replace the command's exit status.
+            try:
+                with open(os.devnull, "wb") as sink:
+                    os.dup2(sink.fileno(), sys.stdout.fileno())
+            except (OSError, ValueError):
+                pass
+        reason = (
+            "response-output-unavailable" if result is not None
+            else str(error) if isinstance(error, health_slots.HealthError) else "local-store-unavailable"
+        )
         print(json.dumps({
-            "ok": False, "error": reason, "applied": False,
+            "ok": False, "error": reason,
+            "applied": None if result is not None and getattr(args, "apply", False) else False,
             "probe_execution": "not-performed", "carrier_publication": "not-requested",
         }), file=sys.stderr)
         return 2

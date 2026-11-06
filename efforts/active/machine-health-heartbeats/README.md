@@ -656,3 +656,22 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Reader policy/namespace revalidation and the final independent CLI flow
   passed two focused cases. Ruff, documentation consistency, install contracts
   and whitespace checks passed; the Machines patch changefile is included.
+
+### 2026-11-06 - Local store review corrections
+- The #11139 review found three valid gaps: a response-output failure could
+  misreport a committed slot as unapplied, a required input disappearing
+  between validation and read could escape bounded refusal, and synthesized
+  unknown domains omitted their nullable count/direction fields.
+- Apply-output failures now retain an unknown acknowledgement; required-file
+  disappearance raises a bounded error while optional vanished slots stay
+  missing. Synthesized domains share the explicit unknown observation shape.
+- Eight focused controls passed initially. An additional real buffered
+  closed-pipe CLI control then exposed Python's shutdown flush replacing
+  exit 2 with 120 after the correct unknown acknowledgement. Only the CLI's
+  own failed stdout descriptor is redirected to prevent that second failure;
+  embedded caller streams remain untouched.
+- The final nine-case packet passed without skips, including actual committed
+  storage plus a closed native stdout pipe, in-memory write/flush failures,
+  required/optional file races and the independent empty-domain CLI roundtrip.
+  Ruff and whitespace passed. Fresh review and exact-head CI still gate this
+  correction. No probe, schedule, carrier or running-service effect occurred.

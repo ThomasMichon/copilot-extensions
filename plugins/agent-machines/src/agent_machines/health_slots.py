@@ -159,7 +159,9 @@ def _read(path: Path, validator, *, optional=False):
     try:
         before = path.lstat()
     except FileNotFoundError:
-        return None, None
+        if optional:
+            return None, None
+        raise HealthError("path-unavailable") from None
     descriptor = None
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
@@ -318,8 +320,14 @@ def _sample(record: dict, now_ms: int) -> dict:
     for domain in EVIDENCE:
         observed = record["domains"].get(domain)
         if observed is None:
-            domains[domain] = {"state": "unknown", "reason": "not-observed", "age_ms": None}
-            continue
+            observed = {
+                "state": "unknown", "reason": "not-observed",
+                "observed_at_ms": None, "evidence": "not-observed",
+            }
+            if domain == "logical_agents":
+                observed["count"] = None
+            if domain == "ssh_authenticated":
+                observed["direction"] = None
         stamp = observed["observed_at_ms"]
         age = None if stamp is None else now_ms - stamp
         domains[domain] = {

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import io
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,6 +78,79 @@ def test_normal_cli_preview_record_and_age_qualified_reader(local, capsys):
     assert view["observation_qualification"] == "input-supplied-not-verified"
     unchanged = apply(store, source)
     assert unchanged["applied"] and not unchanged["changed"]
+
+
+@pytest.mark.parametrize("apply_record", [False, True])
+@pytest.mark.parametrize("failure", ["write", "flush"])
+def test_response_output_failure_preserves_unknown_apply_acknowledgement(
+    local, monkeypatch, apply_record, failure,
+):
+    store, source = local
+    preview = health.record(store, source, now_ms=STAMP)
+
+    class FailedOutput(io.StringIO):
+        def write(self, value):
+            if failure == "write":
+                raise BrokenPipeError("synthetic closed stdout")
+            return super().write(value)
+
+        def flush(self):
+            if failure == "flush":
+                raise BrokenPipeError("synthetic failed stdout flush")
+            return super().flush()
+
+    errors = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", FailedOutput())
+    monkeypatch.setattr(sys, "stderr", errors)
+    arguments = [
+        "health", "record", "--input", str(source), "--store-dir", str(store), "--now", NOW.isoformat(),
+    ]
+    if apply_record:
+        arguments.extend(["--apply", "--expect", preview["preview_token"]])
+    assert cli.main(arguments) == 2
+    result = json.loads(errors.getvalue())
+    assert result["error"] == "response-output-unavailable"
+    assert result["applied"] is None if apply_record else result["applied"] is False
+    assert health.inspect(store, now_ms=STAMP)["observed_hours"] == (1 if apply_record else 0)
+
+
+@pytest.mark.parametrize("selected", ["policy", "input"])
+def test_required_file_disappearance_is_a_bounded_cli_refusal(local, monkeypatch, capsys, selected):
+    store, source = local
+    missing = store / "policy.json" if selected == "policy" else source
+    original = health._plain
+
+    def plain(path, **fields):
+        result = original(path, **fields)
+        if path == missing:
+            path.unlink()
+        return result
+
+    monkeypatch.setattr(health, "_plain", plain)
+    assert cli.main([
+        "health", "record", "--input", str(source), "--store-dir", str(store), "--now", NOW.isoformat(),
+    ]) == 2
+    result = json.loads(capsys.readouterr().err)
+    assert result["error"] == "path-unavailable" and result["applied"] is False
+    assert not (store / "health.lock").exists()
+    assert not list(store.glob("[0-9][0-9][0-9].json"))
+
+
+def test_optional_slot_disappearance_remains_missing_evidence(local, monkeypatch):
+    store, source = local
+    apply(store, source)
+    target = store / f"{sample()['hour'] % health.SLOTS:03d}.json"
+    original = health._plain
+
+    def plain(path, **fields):
+        result = original(path, **fields)
+        if path == target and path.exists():
+            path.unlink()
+        return result
+
+    monkeypatch.setattr(health, "_plain", plain)
+    result = health.inspect(store, now_ms=STAMP)
+    assert result["hours"][-1]["state"] == "missing" and result["observed_hours"] == 0
 
 
 def test_weekly_slot_reuse_cannot_promote_delayed_old_input(local):
