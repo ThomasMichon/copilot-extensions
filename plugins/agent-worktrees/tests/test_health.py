@@ -435,7 +435,7 @@ class TestOrphanedHandoffs:
         assert health.find_orphaned_handoffs([rec], now=_NOW) == []
 
     def test_detects_dark_stale_unlinked_yielded_tail(self, monkeypatch):
-        """aperture-labs#7824 regression: a lone "yielded" tail (opened a
+        """Regression: a lone "yielded" tail (opened a
         handoff intent, never linked to a successor) is the same "orphaned,
         nobody ever took head" shape as an unlinked "handed-off" tail, and
         must be detected the same way."""
@@ -531,7 +531,7 @@ class TestOrphanedHandoffs:
         """Same end-to-end semantic as `test_reactivation_makes_head_resolvable`
         above, for a "yielded" (not "handed-off") orphaned tail -- the
         orchestrator's repair must reactivate either state the same way
-        (aperture-labs#7824)."""
+        after the unsuccessful handoff."""
         entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
                              state="yielded")
         rec = WorktreeRecord(
@@ -580,7 +580,7 @@ class TestOrphanedHandoffs:
     def test_reactivate_orphaned_handoff_bumps_revision_even_when_head_unchanged(
         self, tmp_tracking_dir, monkeypatch_config
     ):
-        """aperture-labs#7824 review follow-through: `set_head_session` is a
+        """`set_head_session` is a
         no-op when the ledger already names the orphan candidate (true here,
         since it IS the orphan candidate), so without an explicit revision
         bump a stale equal-revision writer could later silently undo this
@@ -636,7 +636,7 @@ class TestOrphanedHandoffs:
         assert fresh.session_entry("s1").state == "active"  # untouched, not clobbered
 
     def test_detects_yielded_tail_despite_an_older_active_session(self):
-        """aperture-labs#7824 regression: an older session left
+        """Regression: an older session left
         "active" must not save a worktree from detection when the ledger's
         authoritative head is a LATER, now-yielded session -- the real
         `resolved_head_session` ledger replay (not a naive "any session is
@@ -662,7 +662,7 @@ class TestOrphanedHandoffs:
         assert len(orphans) == 1 and orphans[0].session_id == "new"
 
     def test_detects_ledger_named_orphan_that_is_not_the_list_tail(self):
-        """aperture-labs#7824 regression: `old` registers, `new`
+        """Regression: `old` registers, `new`
         registers/concludes, `old` is explicitly re-adopted (the ledger's
         latest transition names it), then `old` yields. The list TAIL is
         still terminal `new`, but the ledger's own named, now-ineligible
