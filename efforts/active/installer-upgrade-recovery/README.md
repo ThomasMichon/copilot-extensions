@@ -2554,3 +2554,35 @@ Current-source capture, verification, historical guards, canonical import,
 review/CI, merge and release remain open under the original bounds.
 Caller, local Windows historical-seed and installed-host recovery gates are
 unchanged; no update, deployment or larger validation budget is authorized.
+
+### 2026-11-06 - Combined source qualifies every incoming case and canonical output
+
+Exact combined source `8c79b42decdd1d75c65cfd4254703edf1a894bee` passes
+fresh native `42269611394`. Both source-pin/execution steps and downloaded
+Linux/Windows reports contain 39 unique passing cases each, no skips/errors
+and complete identical expected sets, including actual CLI/namespace/prefix/
+identity witnesses. Incoming runtime-delivery code is genuinely included.
+
+Full `42269629159` passes every step, including all 252 current capture and
+252 independent-verification cases in 173.27/170.30 seconds of tests under
+the unchanged 240-second caller-owned POSIX bound. The five historical
+reports contain 6/34/26/26/26 unique passing cases, all 118 original-plus-
+locator controls, no skips/errors. Their case-time sums are
+44.400/71.947/49.380/48.876/51.690 seconds. Original group, item, aggregate
+and resource bounds remain; no incoming case or old assertion is removed.
+
+Actual qualified artifact `13530820180` and historical outcomes
+`13530850148` are downloaded and audited. The producer's logged manifest
+digest `19431323dafbf410cc2b47d4e6a9bdb44c9a2c92035cac3453c7efbcbd7cc36c`
+matches downloaded bytes. At unchanged HEAD `8c79`, the native publication
+owner validates all 3,074 input preimages and materializes all 140 declared
+outputs. Every output matches byte-for-byte, only declared paths change and
+HTTP-51 remains untouched. The canonical checker passes
+2 contracts/1,051 fixtures.
+
+The next revision changes canonical metadata and these validation records
+only; executable source, workflows, native fixtures and instrumentation remain
+the qualified `8c79` source. Earlier qualifications retain their own source
+pins and artifacts. Final current-head review/CI, evidence-thread resolution,
+actual merge and containing release remain gates. Caller, local Windows
+historical-seed and installed recovery remain separate unfinished objectives.
