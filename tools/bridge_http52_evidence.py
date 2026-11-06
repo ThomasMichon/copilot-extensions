@@ -36,7 +36,17 @@ AFFECTED = (
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
+        "acquisition_worktree_writer.py", "acquisition_authority.py",
+        "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
+        "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
+        "routes/acquisitions.py", "session_handoff.py", "session_resume.py",
+        "session_start.py", "session_core.py", "session_prompts.py", "worktree_head.py", "worktree_lineage.py",
         "_peer_launch.py",
+    )),
+    *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
+        "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
+        "session_binding_cli.py", "session_tracking_cli.py",
+        "tracking_session_registration_write.py", "tracking_session_lifecycle_write.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
     "plugins/agent-bridge/extensions/agent-bridge/retained-delivery.mjs",
@@ -54,12 +64,16 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_receiving_bundle.py",
     "plugins/agent-bridge/tests/test_portable_mux_joined.py",
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
+    "plugins/agent-bridge/tests/test_acquisition_runtime.py",
+    "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
+    "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
     *(path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
+      for plugin in ("agent-codespaces", "agent-worktrees")
       for path in sorted(
-          (Path(__file__).resolve().parents[1] / "plugins/agent-codespaces/src").rglob("*.py"),
+          (Path(__file__).resolve().parents[1] / "plugins" / plugin / "src").rglob("*.py"),
       ) if "__pycache__" not in path.parts),
     *(declaration["canonicalDir"] + "/" + name
       for manifest in ("packaged-assets.json", "launch-wrapper-assets.json")
@@ -107,6 +121,18 @@ PROBES = {
     "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
     "test_unknown_or_changed_slot_never_certifies_a_build": 10,
     "test_same_cell_health_rechecks_peer_selection_without_launch": 11,
+    "test_required_writer_round_trips_through_the_existing_http_owner": 1,
+    "test_required_writer_survives_stopped_resume_and_later_acquisition": 2,
+    "test_required_handoff_retry_reuses_original_successor_after_lineage_failure": 4,
+    "test_required_handoff_retains_unknown_effect_without_replacement": 2,
+    "test_required_writer_refuses_provider_type_change_before_persist_or_launch": 5,
+    "test_required_writer_resume_exhaustion_cannot_recreate": 1,
+    "test_required_handoff_retries_registration_on_original_native": 3,
+    "test_required_registration_failure_detaches_before_normal_send": 2,
+    "test_required_queued_send_refusal_keeps_startup_recovery_dormant": 1,
+    "test_required_writer_refuses_before_native_effects": 6,
+    "test_retained_acquisition_and_later_lineage_use_actual_owner_processes": 1,
+    "test_retained_session_receiver_refuses_changed_scope_without_resident_fallback": 12,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
@@ -115,6 +141,7 @@ CAPABILITY_VERSIONS = {
     "bridge-session-tool-statistics-v1": 1,
     "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,
     "worktree_record_delegation": 1,
+    "retained_acquisition_worktree_writer": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

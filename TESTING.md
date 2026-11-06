@@ -4899,6 +4899,29 @@ admits these exact nodes, source closure and production coverage targets.
 This is in-process contract evidence, not installed CLI, native conversation,
 process-exit, transport availability or deployment qualification.
 
+`tools/promotion_unit_tests/test_retained_acquisition_writer.py` exercises
+the real retained writer owner with synthetic journal rows and substituted
+writer selection/process responses. It checks original-prefix recovery,
+incompatible serializer refusal, missing-binding non-recapture, exact workspace
+scope, required lineage error propagation and pre-effect CLI refusal.
+The executing-session controls also check capability-gated original-scope
+arguments, locked receiving-incarnation refusal and scope reset after failure.
+The additional journal control retains the original successor, native identity
+and seed through synthetic database responses, with full-sync intent and
+replacement refusal. Real stopped-session refresh and post-spawn handoff
+recovery are covered by the separate acquisition/runtime packet.
+The exact nodes, source and coverage target are positively admitted in the
+unit-only packet. The separate Bridge acquisition/runtime and lineage controls
+retain actual SQLite and finite source-process effects; their patched build
+identity and synthetic ACP transport do not prove installed/native or closed
+writer-cohort qualification. Required CI starts no new actor.
+The opt-in HTTP-52 capture additionally binds every finite Worktrees fixture
+launch to its committed entrypoint and full source closure. A reachable
+ordinary-verb-compatible resident receives the legacy control but no required
+registration, binding or succession. Those commands reject changed identity,
+nonce, project and path. Capture instrumentation is restored explicitly in the
+fixture after the real owner environment scrub; production routing is unchanged.
+
 `tools/promotion_unit_tests/test_namespace_contract.py` joins the actual
 Containers `namespace-list` CLI and `ContainerResolver.list_specs` output to
 Bridge's `CliNamespaceResolver._enumerate_once` and `NamespaceAgentInfo`.

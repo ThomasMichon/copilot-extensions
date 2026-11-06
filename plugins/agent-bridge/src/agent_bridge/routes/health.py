@@ -29,6 +29,7 @@ from ..session_observation_contract import CURRENT_REQUESTS, HISTORY, OBSERVATIO
 from ..owner_membership import CAPABILITY as OWNER_MEMBERSHIP
 from ..worktree_writer_observation import observe as observe_worktree_writer
 from .._peer_launch import ContextRefused
+from ..acquisition_worktree_writer import CAPABILITY as RETAINED_WRITER_CAPABILITY
 
 router = APIRouter()
 
@@ -70,6 +71,7 @@ async def health(request: Request) -> dict:
             READONLY_PLUGIN_CONTROLS_CAPABILITY: 1,
             PORTABLE_INBOX_CAPABILITY: 1,
             "worktree_record_delegation": 1,
+            RETAINED_WRITER_CAPABILITY: 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),

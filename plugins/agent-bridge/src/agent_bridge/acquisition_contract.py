@@ -16,12 +16,31 @@ ACQUISITION_CONTRACT_VERSION: Literal[1] = 1
 DEFAULT_CLI_WORKER_TARGET = "task-worker"
 
 
+class InstalledWorktreeWriter(BaseModel):
+    """Expected serializer identity, never a caller-selected command."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    installation_root: str = Field(min_length=1)
+    runtime_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
+class WorktreeWriterRequirement(BaseModel):
+    """The original workspace incarnation and required delegated writer."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[1] = 1
+    identity: InstalledWorktreeWriter
+    creation_nonce: str = Field(min_length=1)
+
+
 class AcquisitionRequest(BaseModel):
     """Owner-supplied facts, separate from provider-verified session evidence."""
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
-    version: Literal[1, 2] = ACQUISITION_CONTRACT_VERSION
+    version: Literal[1, 2, 3] = ACQUISITION_CONTRACT_VERSION
     target: str = Field(min_length=1)
     mode: Mode
     task_id: str = Field(min_length=1)
@@ -46,19 +65,25 @@ class AcquisitionRequest(BaseModel):
     caller_worktree: str | None = Field(default=None, min_length=1)
     caller_owner_ref: str | None = Field(default=None, min_length=1)
     caller_session_id: str | None = Field(default=None, min_length=1)
+    worktree_writer: WorktreeWriterRequirement | None = None
 
     @model_serializer(mode="wrap")
     def serialize_request(self, handler):
         result = handler(self)
-        for field in ("plugin_readiness", "caller_worktree", "caller_owner_ref", "caller_session_id"):
+        for field in (
+            "plugin_readiness", "caller_worktree", "caller_owner_ref", "caller_session_id",
+            "worktree_writer",
+        ):
             if getattr(self, field) is None:
                 result.pop(field, None)
         return result
 
     @model_validator(mode="after")
     def validate_intent(self) -> AcquisitionRequest:
-        if self.version == 2 and (not self.project or not self.worktree_path):
+        if self.version >= 2 and (not self.project or not self.worktree_path):
             raise ValueError("workspace-qualified acquisition requires project and path")
+        if (self.version == 3) != (self.worktree_writer is not None):
+            raise ValueError("installed writer requirements require acquisition version 3")
         if self.intent == "continue" and self.conversation_retired is True:
             raise ValueError("strict continuation cannot revive a retired conversation")
         if self.intent == "fresh" and (

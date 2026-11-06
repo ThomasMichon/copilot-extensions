@@ -217,6 +217,10 @@ class AcquisitionStore:
                 data.setdefault("prepared_context", previous_data["prepared_context"])
             if "plugin_preparation_required" in previous_data:
                 data.setdefault("plugin_preparation_required", previous_data["plugin_preparation_required"])
+            if "_worktree_writer" in previous_data:
+                if data.get("_worktree_writer", previous_data["_worktree_writer"]) != previous_data["_worktree_writer"]:
+                    raise AcquisitionRefused("worktree_writer_unconfirmed", "original acquisition writer changed")
+                data["_worktree_writer"] = previous_data["_worktree_writer"]
         self.db._execute_runtime_admitted_write(
             "INSERT INTO acquisition_effects VALUES (?, ?, ?) "
             "ON CONFLICT(delivery_id) DO UPDATE SET stage=excluded.stage, data_json=excluded.data_json",

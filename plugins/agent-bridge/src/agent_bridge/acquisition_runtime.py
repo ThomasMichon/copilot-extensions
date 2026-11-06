@@ -63,7 +63,10 @@ class AcquisitionRuntime:
                     raise AcquisitionRefused("acquisition_draining", "bridge is draining")
                 self.manager._active_acquisitions = getattr(self.manager, "_active_acquisitions", 0) + 1
                 try:
-                    return await self._acquire_locked(req, custody=custody)
+                    from .acquisition_worktree_writer import acquisition_writer
+
+                    async with acquisition_writer(self.db, req):
+                        return await self._acquire_locked(req, custody=custody)
                 except AcquisitionRefused as exc:
                     if self.store.journal.refused_before_effect(req):
                         exc.effect = "not_started"
@@ -87,9 +90,15 @@ class AcquisitionRuntime:
 
         admission = original_admission(self, req, custody)
         venue = await verify_dispatch(req, self.resolver)
+        from .acquisition_worktree_writer import retained_document
+
+        writer_binding = retained_document(req)
+        claim_options = {"runtime_admission": admission}
+        if writer_binding is not None:
+            claim_options["worktree_writer"] = writer_binding
         preflight_claim = None
         if not completed and not self.store.pending(req.worktree_id):
-            preflight_claim = self.store.journal.claim(req, runtime_admission=admission)
+            preflight_claim = self.store.journal.claim(req, **claim_options)
         try:
             row, head = await verify_worktree(req)
         except AcquisitionRefused as exc:
@@ -102,7 +111,7 @@ class AcquisitionRuntime:
         venue = await verify_dispatch(req, self.resolver)
         row, head = await verify_worktree(req)
         try:
-            claim = preflight_claim or self.store.journal.claim(req, runtime_admission=admission)
+            claim = preflight_claim or self.store.journal.claim(req, **claim_options)
         except AcquisitionRefused as exc:
             if exc.code != "acquisition_pending":
                 raise
@@ -384,6 +393,17 @@ class AcquisitionRuntime:
         if req.mode == "acp":
             from .acquisition_local_launch import launch
 
+            if req.worktree_writer is not None and decision.conversation:
+                from .acquisition_worktree_writer import require_target
+
+                session = self.manager.get_session(decision.conversation.session_id)
+                if session is None:
+                    raise AcquisitionRefused("worktree_writer_unconfirmed", "original native holder is missing")
+                from .acquisition_worktree_writer import DELIVERY_KEY
+
+                if (session.target.venue or {}).get(DELIVERY_KEY) is None:
+                    raise AcquisitionRefused("worktree_writer_unconfirmed", "native holder has no original writer")
+                require_target(session.target)
             return await launch(self, req, decision, row, target, request_env, custody=custody)
         if decision.acquired == "reused":
             assert decision.conversation and decision.conversation.native_session_id
@@ -444,10 +464,13 @@ class AcquisitionRuntime:
         req: AcquisitionRequest,
         row: dict[str, Any],
     ) -> tuple[Any, dict[str, str]]:
-        return await acquisition_plugins.prepare_target(
+        target, env = await acquisition_plugins.prepare_target(
             self, req, row, target_factory=SpawnTarget, bound_charter=_apply_bound_charter,
             apply_preferences=apply_request_preferences,
         )
+        from .acquisition_worktree_writer import bind_target
+
+        return bind_target(target, req), env
 
     async def _local_preparation_target(
         self, req: AcquisitionRequest, row: dict[str, Any], target: SpawnTarget,
