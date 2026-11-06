@@ -173,6 +173,28 @@ def test_native_scoped_first_use_retains_discovery_and_native_file_separately(tm
     assert not runtime.exists()
 
 
+@pytest.mark.parametrize("arguments,enabled,code,diagnostic", [
+    (["identity-key", "setup", "--require-running"], True, 1, "service_unavailable"),
+    (["ssh-key", "prepare", "--require-running"], True, 1, "service_unavailable"),
+    (["ssh-key", "install", "--require-running"], True, 1, "service_unavailable"),
+    (["stop"], False, 1, "runtime not provisioned"),
+    (["lock"], False, 1, "runtime not provisioned"),
+    (["installer-readiness"], False, 0, "configuration-empty"),
+])
+def test_native_scoped_admission_preserves_no_provisioning_commands(
+    tmp_path, arguments, enabled, code, diagnostic,
+):
+    home, payload, runtime, project, receipt, env = _scoped_first_use_fixture(tmp_path)
+    if not enabled:
+        for path in (project / ".agent-vault.json", home / "native.json"):
+            path.write_text('{"enabled": false}', encoding="utf-8")
+    result = invoke(payload, env, home, "--configuration-root", str(project), *arguments)
+    assert result.returncode == code, result.stdout + result.stderr
+    assert diagnostic in result.stdout + result.stderr
+    assert not receipt.exists()
+    assert not runtime.exists()
+
+
 @pytest.mark.parametrize("dispatcher_aware", [False, True])
 @pytest.mark.parametrize("operation", ["scope", "contract"])
 @pytest.mark.parametrize("prepared", [False, True])

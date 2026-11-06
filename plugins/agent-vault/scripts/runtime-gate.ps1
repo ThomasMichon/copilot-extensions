@@ -309,11 +309,11 @@ if (-not (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT)) {
         exit 3
     }
     if ($activation.state -ceq 'configuration-empty') {
-        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installer-readiness') {
+        if ($commandArguments.Count -gt 0 -and $commandArguments[0] -ceq 'installer-readiness') {
             $activation | ConvertTo-Json -Compress
             exit 0
         }
-        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('stop', 'lock')) {
+        if ($commandArguments.Count -gt 0 -and $commandArguments[0] -in @('stop', 'lock')) {
             $env:AGENT_VAULT_NO_SELFPROVISION = '1'
         } else {
             [Console]::Error.WriteLine($activation.detail)
@@ -325,10 +325,10 @@ if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
 }
 if (
-    $forwardArgs.Count -ge 2 -and $forwardArgs -contains '--require-running' -and
+    $commandArguments.Count -ge 2 -and $commandArguments -contains '--require-running' -and
     (
-        ($forwardArgs[0] -eq 'identity-key' -and $forwardArgs[1] -eq 'setup') -or
-        ($forwardArgs[0] -eq 'ssh-key' -and $forwardArgs[1] -in @('prepare', 'install'))
+        ($commandArguments[0] -eq 'identity-key' -and $commandArguments[1] -eq 'setup') -or
+        ($commandArguments[0] -eq 'ssh-key' -and $commandArguments[1] -in @('prepare', 'install'))
     )
 ) {
     [Console]::Out.WriteLine(

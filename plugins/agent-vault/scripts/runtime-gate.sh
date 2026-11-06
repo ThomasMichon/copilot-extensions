@@ -254,11 +254,11 @@ if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
     activation_code=0
     activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector)" || activation_code=$?
     if [[ "$activation_code" == 2 ]]; then
-        if [[ "${1:-}" == installer-readiness ]]; then
+        if [[ "${command_arguments[0]:-}" == installer-readiness ]]; then
             printf '%s\n' "$activation"
             exit 0
         fi
-        if [[ "${1:-}" == stop || "${1:-}" == lock ]]; then
+        if [[ "${command_arguments[0]:-}" == stop || "${command_arguments[0]:-}" == lock ]]; then
             export AGENT_VAULT_NO_SELFPROVISION=1
         else
             printf '%s\n' "$activation" >&2
@@ -277,9 +277,9 @@ fi
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
 fi
-if [[ ( "${1:-}" == identity-key && "${2:-}" == setup ) ||
-      ( "${1:-}" == ssh-key && ( "${2:-}" == prepare || "${2:-}" == install ) ) ]]; then
-    for argument in "$@"; do
+if [[ ( "${command_arguments[0]:-}" == identity-key && "${command_arguments[1]:-}" == setup ) ||
+      ( "${command_arguments[0]:-}" == ssh-key && ( "${command_arguments[1]:-}" == prepare || "${command_arguments[1]:-}" == install ) ) ]]; then
+    for argument in "${command_arguments[@]}"; do
         if [[ "$argument" == --require-running ]]; then
             printf '%s\n' '{"version":1,"error":"service_unavailable","message":"Provision and start the selected vault independently before delegated setup."}'
             exit 1
