@@ -160,6 +160,25 @@ and event-time rechecks. No broad acknowledgement grants permission.
 
 ## Implementation plan
 
+### Prepared Windows membership prerequisite
+
+The existing PowerShell admission entry can consume the original owner's
+positive exact-session association without launching its interpreter again.
+Reuse requires current session/workspace/legacy-registry/platform scope,
+matching original project/repository source stamps, the original Git marker
+witness and unchanged recorded filesystem inputs. Bounds are 1 MiB, 256
+witnesses, 4,096 characters per path and 128 path components. The eligible
+subset is native legacy Windows with canonical local, unlinked paths.
+Other scopes or unavailable evidence retain the original admission owner.
+
+This incremental consumer preserves cold and installation-cell behavior;
+it does not advertise complete prepared admission or satisfy the no-Python
+cold-path gate. The original source publication remains unchanged. Real
+registered-entry controls must compose that publication, not replace
+admission with a true-returning stub, and must trap interpreter lookup while
+retaining changed-input refusal. See the
+[current reader boundary](../../../plugins/agent-worktrees/docs/worktree-observations.md#prepared-windows-membership-reuse).
+
 ### First additive producer contract
 
 The existing `WorktreesRuntime` publishes a small advisory view only after its
