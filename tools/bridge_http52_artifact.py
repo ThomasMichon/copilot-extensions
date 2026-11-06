@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 
 import agent_bridge_contract_registry as codec
-from agent_bridge_contract_publication import publish
+from agent_bridge_contract_publication import JOURNAL, publish, recover_pending_links
 import bridge_http52_evidence as evidence
 
 SCHEMA = "agent-bridge.http52-artifact"
@@ -21,6 +22,7 @@ def _head(root: Path, source: str) -> None:
         raise ValueError("an exact source checkpoint is required")
     actual = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], timeout=15, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     ).strip()
     if actual != source:
         raise ValueError("artifact source differs from the current checkpoint")
@@ -35,7 +37,9 @@ def _required(snapshot) -> set[str]:
 
 
 def _preimages(snapshot, outputs: dict[str, bytes]) -> dict[str, str | None]:
-    inputs = {path: codec.digest(data) for path, data in snapshot.inputs.items()}
+    inputs: dict[str, str | None] = {
+        path: codec.digest(data) for path, data in snapshot.inputs.items()
+    }
     for contract in snapshot.materialized["contracts"]:
         for row in contract["fixtures"]:
             inputs[row["path"]] = row["sha256"]
@@ -144,22 +148,50 @@ def materialize(root: Path, source: str, directory: Path, expected_digest: str) 
     ):
         raise ValueError("foreign artifact identity")
     outputs = _read_outputs(directory, manifest["outputs"])
+    ordered = {path: data for path, data in outputs.items() if path != codec.REGISTRY}
+    ordered[codec.REGISTRY] = outputs[codec.REGISTRY]
     snapshot = evidence.baseline(root, source)
-    _validate(root, source, snapshot, outputs)
+    resuming = _resume_plan(root, source, ordered)
+    _validate(root, source, snapshot, outputs, exporting=resuming)
     expected = _preimages(snapshot, outputs)
     if manifest["input_preimages"] != expected:
         raise ValueError("artifact input inventory differs from the source checkpoint")
-    raw_hashes = _preimage_hashes(root, expected)
+    raw_hashes = _preimage_hashes(
+        root, {path: digest for path, digest in expected.items()
+               if not resuming or path not in outputs},
+    )
     # Native publication validates again under its OS lock and compares all raw
     # preimages before replacing current outputs; immutable chunks use no-replace.
-    ordered = {path: data for path, data in outputs.items() if path != codec.REGISTRY}
-    ordered[codec.REGISTRY] = outputs[codec.REGISTRY]
     publish(
         root, source, ordered,
         validate=lambda: evidence.validate_outputs(root, snapshot, ordered),
         input_hashes=raw_hashes,
     )
     print(json.dumps({"source_commit": source, "materialized_outputs": len(outputs)}))
+
+
+def _resume_plan(root: Path, source: str, outputs: dict[str, bytes]) -> bool:
+    identity = {
+        "source_commit": source,
+        "outputs": {path: codec.digest(data) for path, data in outputs.items()},
+    }
+    transaction = codec.digest(codec.encode(identity))
+    journal = evidence.safe(root, JOURNAL, directory=True)
+    if not journal.exists():
+        return False
+    children = list(journal.iterdir())
+    if len(children) != 1 or children[0].name != transaction:
+        raise ValueError("another native publication plan requires recovery")
+    path = JOURNAL + "/" + transaction + "/manifest.json"
+    if not (root / path).exists():
+        return False
+    prior = codec.decode(codec.read_file(root, path))
+    if any(prior.get(key) != value for key, value in identity.items()):
+        raise ValueError("native recovery source or outputs differ")
+    # Only the existing owner repairs interrupted chunk links and authenticates
+    # original/postimage preconditions under its native publication lock.
+    recover_pending_links(root, source)
+    return True
 
 
 def _preimage_hashes(root: Path, expected: dict) -> dict:

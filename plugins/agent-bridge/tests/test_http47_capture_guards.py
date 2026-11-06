@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -21,6 +22,24 @@ ROOT = Path(__file__).resolve().parents[3]
 SEED_STATES = pytest.mark.parametrize(
     "repository", ["initial", "registered-refresh"], indirect=True
 )
+
+
+def remove_fixture(root: Path) -> None:
+    """Release only this completed composed Git fixture, including readonly objects."""
+    def readonly(function, path, error):
+        target = Path(path)
+        info = target.lstat()
+        if (
+            not target.absolute().is_relative_to(root.absolute())
+            or target.is_symlink()
+            or getattr(info, "st_file_attributes", 0) & 0x400
+            or info.st_nlink != 1
+        ):
+            raise error[1]
+        target.chmod(info.st_mode | stat.S_IWRITE)
+        function(path)
+
+    shutil.rmtree(root, onerror=readonly)
 
 
 def read_registry(root: Path) -> dict:

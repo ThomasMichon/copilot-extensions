@@ -95,8 +95,11 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) ->
     commit = commit_fixture(root, f"Synthetic HTTP-{evidence.GENERATION} publication-guard cohort")
     monkeypatch.setattr(evidence.previous.git_evidence, "REPO", root)
     evidence.previous.git_evidence.prefetch_sources([])
-    yield root, commit
-    evidence.previous.git_evidence.prefetch_sources([])
+    try:
+        yield root, commit
+    finally:
+        evidence.previous.git_evidence.prefetch_sources([])
+        old_guards.remove_fixture(root)
 
 
 def expected(root: Path, evidence) -> dict:

@@ -1824,12 +1824,20 @@ jobs:
         timeout-minutes: 5
         run: python tools/run-plugin-tests.py agent-bridge --prepare-only
       - name: Check controlled artifact input boundaries
-        if: inputs.portfolio == 'bridge-http52-capture'
+        if: inputs.portfolio == 'bridge-http52-capture' || inputs.portfolio == 'bridge-contracts'
         timeout-minutes: 3
         run: >-
           python tools/run-plugin-tests.py agent-bridge --allow-explicit-tiers
           --test-file tests/test_http52_artifact.py
           --plugin-timeout 120 --timeout 90 --test-timeout 30
+      - name: Check the immutable peer-prefix consumer
+        if: inputs.portfolio == 'bridge-http52-capture' || inputs.portfolio == 'bridge-contracts'
+        timeout-minutes: 5
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests --allow-explicit-tiers
+          --test-file tests/test_watch_peer.py
+          -k cli_peer_prefix_uses_immutable_snapshot_not_management_payload
+          --plugin-timeout 180 --timeout 120 --test-timeout 90
       - name: Capture current HTTP-52 controlled source evidence
         if: inputs.portfolio == 'bridge-http52-capture'
         timeout-minutes: 10
@@ -1873,6 +1881,8 @@ jobs:
           path: http52-qualified-artifact
           if-no-files-found: error
       - name: Exercise immutable bytes and historical publication guards
+        env:
+          PYTEST_ADDOPTS: "--maxfail=1"
         run: >-
           python tools/run-plugin-tests.py agent-bridge
           --test-file tests/test_http48_source_retention.py
