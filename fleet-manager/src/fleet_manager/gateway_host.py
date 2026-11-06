@@ -194,6 +194,8 @@ def prepare(root: Path, selection: dict) -> tuple[object, object]:
             if value.get(name) is not None
         )
         for path in protected:
+            if path.resolve().is_relative_to(state):
+                raise PlanError("SSH client lease state must exclude protected host inputs")
             validate_consumer_state(
                 path, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
                 authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,

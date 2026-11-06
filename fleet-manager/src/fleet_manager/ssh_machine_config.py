@@ -80,6 +80,13 @@ class SSHMachineConfig:
             if value[name] is not None
         ):
             raise PlanError("SSH client requires a dedicated state directory")
+        if any(
+            absolute(value[name]).resolve().is_relative_to(root)
+            for name in ("policy_path", "identity_file", "public_key_file", "proof_key_file",
+                         "access_token_file", "gateway_ca")
+            if value.get(name) is not None
+        ):
+            raise PlanError("SSH client state directory must exclude input references")
         origin(value["gateway_origin"])
         path, query = target(value["namespace"])
         if query or path in ("", "/") or path.endswith("/"):

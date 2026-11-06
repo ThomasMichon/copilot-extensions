@@ -111,6 +111,27 @@ def test_existing_consumer_state_preflight_refuses_before_network_or_writes(tmp_
         assert not root.exists()
 
 
+@pytest.mark.parametrize("reference", [
+    "policy_path", "identity_file", "public_key_file", "proof_key_file",
+])
+def test_lease_cannot_overwrite_an_input_reference(tmp_path, reference):
+    from fleet_manager.private_state import create_private_file, private_directory
+    import os
+
+    value, _, _ = machine_config(tmp_path)
+    state = Path(value["state_dir"])
+    private_directory(state)
+    retained = Path(value[reference]).read_bytes()
+    path = state / ssh_machine.LEASE
+    with os.fdopen(create_private_file(path), "wb") as stream:
+        stream.write(retained)
+    value[reference] = str(path)
+    with pytest.raises(PlanError, match="exclude input references"):
+        ssh_machine.prepare(SSHMachineConfig.from_dict(value))
+    assert path.read_bytes() == retained
+    assert not Path(value["config_d"]).exists()
+
+
 def update(policy, directory):
     return DirectoryUpdate.parse(canonical({
         "schema": "agent-ssh.service-directory", "version": 1,

@@ -333,6 +333,23 @@ def test_ssh_host_preflight_keeps_consumer_lease_outside_installed_slots(tmp_pat
     assert not (root / host.STATE).exists()
 
 
+def test_host_configuration_cannot_be_a_consumer_lease(tmp_path):
+    from fleet_manager import ssh_machine
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    state = Path(value["state_dir"])
+    private_directory(state)
+    path = state / ssh_machine.LEASE
+    host.write_private(path, value)
+    selection["configuration"] = str(path)
+    before = path.read_bytes()
+    with pytest.raises(PlanError, match="exclude protected host inputs"):
+        host.prepare(root, selection)
+    assert path.read_bytes() == before
+    assert not (root / host.STATE).exists()
+
+
 @pytest.mark.parametrize("failure", ["missing", "empty", "invalid-utf8", "overlong"])
 def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_path, failure):
     from fleet_manager.gateway_contract import GatewayError

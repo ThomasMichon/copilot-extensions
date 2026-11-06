@@ -61,6 +61,8 @@ Preflight checks existing lease-state directory privacy, its lease-file shape
 and absence of unowned contents without creating or acquiring anything. A missing
 state directory requires an existing ordinary parent; regular files and invalid
 lease state refuse before the watch or an installed selection can change.
+No policy, credential, identity, CA or host configuration reference may occupy
+that lease-only tree, including its canonical lock filename.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an
