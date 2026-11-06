@@ -60,6 +60,11 @@ remain unavailable.
 Read the existing digest's `list`, then `segment <N>` for the assigned range.
 If collation is needed, use the caller's exact `ramp_argv0` with the explicit
 `--session <id>` only when the caller permits tool-owned ephemeral collation.
+Pass a unique `--output-dir <path>` for each reader's collation, resolved on
+the owning host under the audit's permitted scratch. Never reuse the default
+per-session directory: collation deletes existing digest files, so parallel
+readers could overwrite evidence still being consumed. Keep subsequent reads
+bound to that reader's returned directory.
 Missing collation permission or command means missing evidence, not a setup
 task. Honor stricter no-filesystem-write limits. For remote evidence, require
 the caller's admitted remote route and remote command paths; never send local

@@ -69,3 +69,10 @@ def test_fabric_reader_preserves_cross_project_roster_scope() -> None:
     text = _read(SKILL / "references" / "fabric-readers.md")
     assert "list-sessions --all-projects --worktree <id> --json" in text
     assert "select its owning project with `-p <project>`" in text
+
+
+def test_fabric_reader_suppresses_worktrees_provisioning() -> None:
+    text = " ".join(_read(SKILL / "references" / "fabric-readers.md").split())
+    assert "AGENT_WORKTREES_NO_SELFPROVISION=1" in text
+    assert "for every Worktrees invocation, including on the remote host" in text
+    assert "refusal or missing runtime as unavailable evidence" in text

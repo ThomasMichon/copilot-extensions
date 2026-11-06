@@ -10,6 +10,11 @@ a coverage gap, not permission to provision it.
 
 ## Workspace and session identity
 
+Set `AGENT_WORKTREES_NO_SELFPROVISION=1` in the process environment for every
+Worktrees invocation, including on the remote host. Catalog shims do not
+automatically suppress provisioning for every diagnostic command. Treat a
+refusal or missing runtime as unavailable evidence, not permission to install.
+
 The supplied Worktrees command supports these diagnostic compositions:
 
 ```text
