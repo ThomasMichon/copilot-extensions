@@ -1,5 +1,7 @@
 """Real installation policy admission and durable lifecycle purpose."""
 from __future__ import annotations
+from typing import Any, cast
+from collections.abc import Iterator
 
 import json
 import os
@@ -10,16 +12,19 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from test_command_binding import PowerShellFactory
 
 from test_command_binding import (
     POWERSHELL, _lifecycle_lock_path, _prepare_catalog, _snapshot, _write,
-    binding_fixture as binding_fixture,
-    powershell_host as powershell_host,
+    binding_fixture as _binding_fixture,
+    powershell_host as _powershell_host,
 )
 from test_command_lifecycle import _real_installer
+binding_fixture = _binding_fixture
+powershell_host = _powershell_host
 
 
-def _policy(fixture: dict, managed: bool = True) -> dict:
+def _policy(fixture: dict[str, Any], managed: bool = True) -> dict[str, Any]:
     primitive = fixture["primitive"]
     arguments = fixture["arguments"]
     result = primitive.resolve_runtime_deployment(**arguments)
@@ -33,7 +38,7 @@ def _policy(fixture: dict, managed: bool = True) -> dict:
 
 @pytest.mark.parametrize("phase", ["before", "after", "both"])
 def test_lifecycle_accepts_native_powershell_utf8_manifests(
-    binding_fixture: dict, phase: str,
+    binding_fixture: dict[str, Any], phase: str,
 ) -> None:
     manifest = binding_fixture["legacy"] / "deploy-manifest.json"
     document = {
@@ -54,7 +59,7 @@ def test_lifecycle_accepts_native_powershell_utf8_manifests(
 
 
 def test_lifecycle_retains_older_manifest_reader(
-    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     primitive = binding_fixture["primitive"]
     monkeypatch.delattr(primitive, "read_deployment_manifest")
@@ -76,7 +81,7 @@ def test_lifecycle_retains_older_manifest_reader(
     if not (state == "managed" and management)
 ])
 def test_command_binding_deployment_refuses_before_any_writes(
-    binding_fixture: dict, reserve: bool, state: str, management: bool,
+    binding_fixture: dict[str, Any], reserve: bool, state: str, management: bool,
 ) -> None:
     policy = _policy(binding_fixture)
     if state == "invalid":
@@ -99,7 +104,7 @@ def test_command_binding_deployment_refuses_before_any_writes(
 
 @pytest.mark.parametrize("managed", [False, True])
 def test_command_binding_deployment_management_uses_existing_owner(
-    binding_fixture: dict, managed: bool, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], managed: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _policy(binding_fixture, managed)
     binding = binding_fixture["binding"]
@@ -128,7 +133,7 @@ def test_command_binding_deployment_management_uses_existing_owner(
 
 
 def test_command_binding_deployment_plugin_lease_cannot_upgrade(
-    binding_fixture: dict,
+    binding_fixture: dict[str, Any],
 ) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
@@ -143,7 +148,7 @@ def test_command_binding_deployment_plugin_lease_cannot_upgrade(
 
 @pytest.mark.parametrize("change", ["policy", "purpose"])
 def test_command_binding_deployment_revalidates_held_lease(
-    binding_fixture: dict, change: str,
+    binding_fixture: dict[str, Any], change: str,
 ) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
@@ -160,7 +165,7 @@ def test_command_binding_deployment_revalidates_held_lease(
 
 
 def test_command_binding_deployment_rechecks_after_real_lock_acquisition(
-    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
@@ -168,7 +173,7 @@ def test_command_binding_deployment_rechecks_after_real_lock_acquisition(
     original = lifecycle._lock
 
     @contextmanager
-    def changed_policy(*args):
+    def changed_policy(*args: Any) -> Iterator[Any]:
         with original(*args) as lock:
             _policy(binding_fixture)
             yield lock
@@ -182,7 +187,7 @@ def test_command_binding_deployment_rechecks_after_real_lock_acquisition(
 
 
 def test_command_binding_deployment_teardown_retains_policy_independence(
-    binding_fixture: dict,
+    binding_fixture: dict[str, Any],
 ) -> None:
     _write(binding_fixture["legacy"] / "runtime-deployment.json", {"version": 999})
     binding = binding_fixture["binding"]
@@ -206,7 +211,7 @@ def test_command_binding_deployment_teardown_retains_policy_independence(
 
 
 def test_command_binding_deployment_manifest_writer_checks_policy_without_lease(
-    binding_fixture: dict,
+    binding_fixture: dict[str, Any],
 ) -> None:
     _policy(binding_fixture)
     binding = binding_fixture["binding"]
@@ -220,7 +225,7 @@ def test_command_binding_deployment_manifest_writer_checks_policy_without_lease(
 
 
 def test_command_binding_deployment_old_helper_requires_absent_policy(
-    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     primitive = binding_fixture["primitive"]
     monkeypatch.delattr(primitive, "resolve_runtime_deployment")
@@ -237,7 +242,7 @@ def test_command_binding_deployment_old_helper_requires_absent_policy(
 
 
 def test_command_binding_deployment_environment_cannot_grant_management(
-    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _policy(binding_fixture)
     binding = binding_fixture["binding"]
@@ -258,7 +263,7 @@ def test_command_binding_deployment_environment_cannot_grant_management(
 
 @pytest.mark.parametrize("management", [False, True])
 def test_command_binding_deployment_run_carries_durable_purpose_to_child(
-    binding_fixture: dict, management: bool,
+    binding_fixture: dict[str, Any], management: bool,
 ) -> None:
     _policy(binding_fixture)
     binding = binding_fixture["binding"]
@@ -289,7 +294,7 @@ def test_command_binding_deployment_run_carries_durable_purpose_to_child(
     [], ["--check-lifecycle"], ["--publish-legacy"], ["--run-lifecycle", "--teardown"],
 ])
 def test_command_binding_deployment_cli_restricts_explicit_flag(
-    binding_fixture: dict, options: list[str],
+    binding_fixture: dict[str, Any], options: list[str],
 ) -> None:
     _prepare_catalog(binding_fixture)
     payload = binding_fixture["payload"]
@@ -311,7 +316,7 @@ def test_command_binding_deployment_cli_restricts_explicit_flag(
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 def test_command_binding_deployment_real_native_installer_refuses_before_staging(
-    binding_fixture: dict, shell: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, powershell_host: PowerShellFactory,
 ) -> None:
     installer, environment = _real_installer(binding_fixture, shell, "installed")
     _policy(binding_fixture)
@@ -320,7 +325,7 @@ def test_command_binding_deployment_real_native_installer_refuses_before_staging
     for action in ("install", "update", "provision", "stamp"):
         command = (
             ["bash", str(installer), action] if shell == "bash" else
-            [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), action]
+            [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(installer), action]
         )
         result = host.run(command) if host else subprocess.run(
             command, env=environment, cwd=binding_fixture["home"],
@@ -340,7 +345,7 @@ def test_command_binding_deployment_real_native_installer_refuses_before_staging
     {"version": 1, "origin": "management", "operation": []},
 ])
 def test_command_binding_deployment_invalid_durable_purpose_refuses(
-    binding_fixture: dict, value: dict,
+    binding_fixture: dict[str, Any], value: dict[str, Any],
 ) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
@@ -359,14 +364,14 @@ def test_command_binding_deployment_invalid_durable_purpose_refuses(
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 def test_command_binding_deployment_explicit_cli_native_reentry(
-    binding_fixture: dict, shell: str,
+    binding_fixture: dict[str, Any], shell: str,
 ) -> None:
     installer, environment = _real_installer(binding_fixture, shell, "installed")
     _policy(binding_fixture)
     payload = binding_fixture["payload"]
     native = (
-        [shutil.which("bash"), str(installer), "stamp"] if shell == "bash" else
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+        [cast(str, shutil.which("bash")), str(installer), "stamp"] if shell == "bash" else
+        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
     )
     interpreter = (
         sys.executable if os.name == "nt" else
@@ -393,7 +398,7 @@ def test_command_binding_deployment_explicit_cli_native_reentry(
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 def test_command_binding_deployment_native_teardown_ticket_cannot_publish(
-    binding_fixture: dict, shell: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, powershell_host: PowerShellFactory,
 ) -> None:
     installer, environment = _real_installer(binding_fixture, shell, "installed")
     _policy(binding_fixture)
@@ -409,7 +414,7 @@ def test_command_binding_deployment_native_teardown_ticket_cannot_publish(
         for action in ("stamp", "install", "update", "provision", "publish-runtime-helpers"):
             command = (
                 ["bash", str(installer), action] if shell == "bash" else
-                [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), action]
+                [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(installer), action]
             )
             result = host.run(command) if host else subprocess.run(
                 command, env=environment, cwd=binding_fixture["home"],
@@ -428,7 +433,7 @@ def test_command_binding_deployment_native_teardown_ticket_cannot_publish(
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 def test_command_binding_deployment_native_teardown_ticket_admits_uninstall(
-    binding_fixture: dict, shell: str,
+    binding_fixture: dict[str, Any], shell: str,
 ) -> None:
     installer, environment = _real_installer(binding_fixture, shell, "installed")
     _policy(binding_fixture)
@@ -440,7 +445,7 @@ def test_command_binding_deployment_native_teardown_ticket_admits_uninstall(
     ) as lease:
         command = (
             ["bash", str(installer), "uninstall"] if shell == "bash" else
-            [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "uninstall"]
+            [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(installer), "uninstall"]
         )
         result = subprocess.run(
             command, env={**environment, lifecycle.TICKET_ENV: json.dumps(lease.ticket)},

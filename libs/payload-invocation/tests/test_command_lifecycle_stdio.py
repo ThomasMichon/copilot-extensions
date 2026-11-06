@@ -1,5 +1,7 @@
 """Hidden lifecycle children retain diagnostics through native PowerShell dispatch."""
 from __future__ import annotations
+from collections.abc import Iterator
+from typing import Any, NoReturn, cast
 
 import base64
 import hashlib
@@ -18,8 +20,9 @@ import pytest
 
 from test_command_binding import (
     LIB, POWERSHELL, ROOT, _lifecycle_lock_path, _load, _resolve, _write,
-    binding_fixture as binding_fixture,
+    binding_fixture as _binding_fixture,
 )
+binding_fixture = _binding_fixture
 
 
 @pytest.fixture
@@ -59,7 +62,7 @@ def test_human_lifecycle_refuses_undeclared_powershell_before_admission(
 ) -> None:
     lifecycle = _load(human_lifecycle, "undeclared_human_lifecycle")
     monkeypatch.delitem(sys.modules, "_payload_lifecycle_human", raising=False)
-    def refuse_admission(*args, **kwargs):
+    def refuse_admission(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("encoding refusal must precede admission and process creation")
     monkeypatch.setattr(lifecycle, "legacy_lifecycle", refuse_admission)
     target = human_lifecycle.parent / "powershell.exe"
@@ -71,8 +74,8 @@ def test_human_lifecycle_refuses_undeclared_powershell_before_admission(
 
 
 def test_human_failure_retains_real_pending_owner_and_releases_lease(
-    human_lifecycle: Path, binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture,
+    human_lifecycle: Path, binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     lifecycle = _load(human_lifecycle, "real_human_lifecycle")
     monkeypatch.delitem(sys.modules, "_payload_lifecycle_human", raising=False)
@@ -93,8 +96,8 @@ def test_human_failure_retains_real_pending_owner_and_releases_lease(
 
 @pytest.mark.parametrize("human", [False, True])
 def test_unattributed_lifecycle_warning_preserves_human_and_plain_contracts(
-    human_lifecycle: Path, binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture, human: bool,
+    human_lifecycle: Path, binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], human: bool,
 ) -> None:
     lifecycle = _load(human_lifecycle, "unattributed_warning_lifecycle")
     monkeypatch.delitem(sys.modules, "_payload_lifecycle_human", raising=False)
@@ -135,10 +138,10 @@ def test_human_duration_excludes_final_output_drain(
     monkeypatch.delitem(sys.modules, "_payload_lifecycle_human", raising=False)
     human = lifecycle._human_output()
     clock = [0.0]
-    released = []
-    cleaned = []
+    released: list[bool] = []
+    cleaned: list[float] = []
     class Sink(io.StringIO):
-        def write(self, text):
+        def write(self, text: str) -> int:
             if "[duration " in text:
                 assert released == [True]
                 assert cleaned == ([2] if bounded else [])
@@ -151,17 +154,17 @@ def test_human_duration_excludes_final_output_drain(
         lambda label: constructor(label, stream=stream, monotonic=lambda: clock[0]),
     )
     @contextmanager
-    def lease(*args, **kwargs):
+    def lease(*args: object, **kwargs: object) -> Iterator[SimpleNamespace]:
         yield SimpleNamespace(ticket={})
         released.append(True)
     @contextmanager
-    def output():
+    def output() -> Iterator[int]:
         yield 42
         clock[0] += 88
-    def wait(timeout=None):
+    def wait(timeout: float | None = None) -> int:
         clock[0] = 2
         return 37
-    def cleanup(timeout):
+    def cleanup(timeout: float) -> None:
         cleaned.append(timeout)
         clock[0] += 77
     monkeypatch.setattr(lifecycle, "legacy_lifecycle", lease)
@@ -194,9 +197,9 @@ def test_command_binding_lifecycle_forwards_explicit_streams(
     monkeypatch.setattr(lifecycle, "legacy_lifecycle", lambda *a, **kw: nullcontext(lease))
     monkeypatch.setattr(lifecycle, "os", SimpleNamespace(name="nt", environ={}))
     child = SimpleNamespace(wait=lambda timeout: 37)
-    cleaned = []
+    cleaned: list[float] = []
 
-    def spawn(command, **kwargs):
+    def spawn(command: list[str], **kwargs: Any) -> SimpleNamespace | tuple[SimpleNamespace, SimpleNamespace]:
         assert kwargs["stdout"] is sys.stdout
         assert kwargs["stderr"] is sys.stderr
         if bounded:
@@ -244,7 +247,7 @@ def test_fresh_human_lifecycle_frames_child_and_preserves_exit(
     )
     completed = subprocess.run(
         [sys.executable, "-I", "-B", str(driver)], capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert completed.returncode == result, completed.stderr
     assert completed.stdout == ""
@@ -319,11 +322,11 @@ def test_command_binding_hidden_child_preserves_native_diagnostics(
     quoted = [str(path).replace("'", "''") for path in (sys.executable, driver, log)]
     result = subprocess.run(
         [
-            POWERSHELL, "-NoProfile", "-Command",
+            cast(str, POWERSHELL), "-NoProfile", "-Command",
             f"& '{quoted[0]}' -I -X utf8 '{quoted[1]}' *> '{quoted[2]}'; exit $LASTEXITCODE",
         ],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 37, result.stdout + result.stderr
     raw = log.read_bytes()
@@ -340,7 +343,7 @@ def test_command_binding_hidden_child_preserves_native_diagnostics(
         direct = subprocess.run(
             [sys.executable, "-I", "-X", "utf8", str(driver)],
             capture_output=True, encoding="utf-8", timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         assert direct.returncode == 37, direct.stderr
         assert direct.stdout == ""

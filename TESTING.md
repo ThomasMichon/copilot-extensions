@@ -5265,6 +5265,10 @@ test bytes, the expected parameter nodes, production coverage targets and a
 whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. One pytest directory collector visits only admitted
 files, once each in manifest order, without repeated sibling-directory scans.
+The catalog correspondence controls also bind the canonical catalog declaration
+and eleven templates as exact, hashed data inputs. These registered data paths
+cannot be selected as test nodes or Python coverage targets; an unregistered
+template or changed input still rejects admission.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
 Nine execution-acquisition controls in `test_related_acquisition.py` exercise

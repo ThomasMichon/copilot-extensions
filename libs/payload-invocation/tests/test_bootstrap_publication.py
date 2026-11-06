@@ -1,5 +1,6 @@
 """The common bootstrap family must admit publication before dispatch."""
 from __future__ import annotations
+from typing import Any, cast
 
 import json
 import os
@@ -12,18 +13,22 @@ from collections.abc import Callable
 from functools import cache
 
 import pytest
+from test_command_binding import PowerShellFactory, _PowerShellHost
 
-from test_adopter_publication import ROOT, SHELLS, _adopter, _command, _without_python
+from test_adopter_publication import SHELLS, _adopter, _command, _without_python
+from test_command_binding import ROOT
 from test_bridge_first_use_publication import _initialize_shell_profiles
 from test_command_binding import (
     POWERSHELL, _snapshot,
     _write,
-    binding_fixture as binding_fixture,
-    powershell_host as powershell_host,
+    binding_fixture as _binding_fixture,
+    powershell_host as _powershell_host,
 )
 from test_installer_publication import _policy
 from test_native_publication import _run
 from test_simple_first_use_publication import _release_payload
+binding_fixture = _binding_fixture
+powershell_host = _powershell_host
 
 PLUGINS = (
     "agent-codespaces", "agent-logger", "agent-pull-requests", "agent-vault",
@@ -46,8 +51,8 @@ def bootstrap_payloads(tmp_path_factory: pytest.TempPathFactory) -> Callable[[st
 
 
 def _bootstrap_fixture(
-    fixture: dict, shell: str, plugin: str, release: Callable[[str], Path],
-) -> dict:
+    fixture: dict[str, Any], shell: str, plugin: str, release: Callable[[str], Path],
+) -> dict[str, str]:
     released = release(plugin)
     environment = _adopter(fixture, plugin, released)
     environment["BOOTSTRAP_WITNESS"] = str(fixture["legacy"] / "installer-dispatched")
@@ -113,13 +118,13 @@ def _bootstrap_fixture(
     return environment
 
 
-def _bootstrap_snapshot(fixture: dict) -> dict:
+def _bootstrap_snapshot(fixture: dict[str, Any]) -> dict[str, Any]:
     # Shell-only controls attest these exact host profiles, never product state.
     profiles = fixture.get("bootstrap_shell_profiles", set())
     return {name: value for name, value in _snapshot(fixture["home"]).items() if name not in profiles}
 
 
-def _run_bootstrap(fixture: dict, environment: dict, command: list[str], host=None):
+def _run_bootstrap(fixture: dict[str, Any], environment: dict[str, str], command: list[str], host: _PowerShellHost | None = None) -> subprocess.CompletedProcess[str]:
     if fixture["payload"].name not in DRIVER_BOOTSTRAPS:
         return _run(fixture, environment, command, host)
     assert host is None
@@ -142,7 +147,7 @@ def _run_bootstrap(fixture: dict, environment: dict, command: list[str], host=No
         command, caller.returncode, output.read_text(encoding="utf-8-sig"),
         errors.read_text(encoding="utf-8-sig"),
     )
-    result.bootstrap_elapsed = time.monotonic() - started
+    setattr(result, "bootstrap_elapsed", time.monotonic() - started)
     plugin = fixture["payload"].name
     prefix = f"[{plugin}] driver launch acknowledgement: "
     frame = next(
@@ -163,7 +168,7 @@ def _run_bootstrap(fixture: dict, environment: dict, command: list[str], host=No
         return result
     root = fixture["home"] / ".copilot-extensions" / "update-driver"
     release = root / "bootstrap-foundation-release"
-    descriptor = os.pidfd_open(int(frame.split()[0].removeprefix("launched:")))
+    descriptor = cast(Any, os).pidfd_open(int(frame.split()[0].removeprefix("launched:")))
     try:
         release.touch()
         assert select.select([descriptor], [], [], 30)[0], result.stderr
@@ -174,7 +179,7 @@ def _run_bootstrap(fixture: dict, environment: dict, command: list[str], host=No
     return result
 
 
-def _assert_driver_launch(fixture: dict, result, action: str) -> None:
+def _assert_driver_launch(fixture: dict[str, Any], result: subprocess.CompletedProcess[str], action: str) -> None:
     root = fixture["home"] / ".copilot-extensions" / "update-driver"
     assert f"bootstrap {action} supervision launched" in result.stderr, result.stdout + result.stderr
     deadline = time.monotonic() + 25
@@ -196,10 +201,10 @@ def _assert_driver_launch(fixture: dict, result, action: str) -> None:
     assert not (root / "queue.sqlite3").exists()
 
 
-def _assert_hook_deadline(fixture: dict, result) -> None:
+def _assert_hook_deadline(fixture: dict[str, Any], result: subprocess.CompletedProcess[str]) -> None:
     hooks = json.loads((fixture["payload"] / "hooks.json").read_text(encoding="utf-8"))
     deadline = hooks["hooks"]["sessionStart"][0]["timeoutSec"]
-    elapsed = result.bootstrap_elapsed
+    elapsed = cast(float, getattr(result, "bootstrap_elapsed"))
     assert elapsed <= deadline, f"bootstrap admission took {elapsed:.2f}s; hook deadline is {deadline}s"
 
 
@@ -207,7 +212,7 @@ def _assert_hook_deadline(fixture: dict, result) -> None:
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["managed", "invalid", "foreign", "future"])
 def test_bootstrap_family_denies_stamp_before_dispatch(
-    binding_fixture: dict, plugin: str, shell: str, state: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, shell: str, state: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
@@ -232,7 +237,7 @@ def test_bootstrap_family_denies_stamp_before_dispatch(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["missing", "standalone"])
 def test_bootstrap_family_still_stamps_standalone(
-    binding_fixture: dict, plugin: str, shell: str, state: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, shell: str, state: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
@@ -260,7 +265,7 @@ def test_bootstrap_family_still_stamps_standalone(
         assert Path(environment["BOOTSTRAP_PROCESS_WITNESS"]).read_text() == "spawn"
 
 
-def _installed(fixture: dict, *, healthy: bool) -> None:
+def _installed(fixture: dict[str, Any], *, healthy: bool) -> None:
     (fixture["payload"] / "pyproject.toml").write_text('version = "2.0.0"\n', encoding="utf-8")
     declaration = fixture["payload"] / "plugin.json"
     document = json.loads(declaration.read_text(encoding="utf-8"))
@@ -299,7 +304,7 @@ def _installed(fixture: dict, *, healthy: bool) -> None:
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["managed", "invalid"])
 def test_bootstrap_family_healthy_runtime_remains_read_only(
-    binding_fixture: dict, plugin: str, shell: str, state: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, shell: str, state: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     _installed(binding_fixture, healthy=True)
@@ -322,7 +327,7 @@ def test_bootstrap_family_healthy_runtime_remains_read_only(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed"])
 def test_bootstrap_family_helperless_compatibility(
-    binding_fixture: dict, plugin: str, shell: str, state: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, shell: str, state: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     suffix = "ps1" if shell == "powershell" else "sh"
@@ -357,7 +362,7 @@ def test_bootstrap_family_helperless_compatibility(
         assert _bootstrap_snapshot(binding_fixture) == before
 
 
-def _recording_processes(fixture: dict, shell: str, environment: dict) -> list[str]:
+def _recording_processes(fixture: dict[str, Any], shell: str, environment: dict[str, str]) -> list[str]:
     witness = fixture["legacy"] / "process-dispatched"
     environment["BOOTSTRAP_PROCESS_WITNESS"] = str(witness)
     scripts = fixture["payload"] / "scripts"
@@ -391,7 +396,7 @@ def _recording_processes(fixture: dict, shell: str, environment: dict) -> list[s
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["managed", "invalid", "foreign", "future"])
 def test_bootstrap_family_denies_drift_before_reap_lock_or_spawn(
-    binding_fixture: dict, plugin: str, shell: str, state: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, shell: str, state: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     _installed(binding_fixture, healthy=False)
@@ -416,7 +421,7 @@ def test_bootstrap_family_denies_drift_before_reap_lock_or_spawn(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("failure", ["mode-invalid", "resolver-missing", "adapter-broken"])
 def test_bootstrap_family_other_admission_failures_are_read_only(
-    binding_fixture: dict, shell: str, failure: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], shell: str, failure: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, "agent-logger", bootstrap_payloads)
     suffix = "ps1" if shell == "powershell" else "sh"
@@ -451,7 +456,7 @@ def test_bootstrap_family_other_admission_failures_are_read_only(
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("shell", SHELLS)
 def test_bootstrap_family_standalone_drift_still_dispatches(
-    binding_fixture: dict, plugin: str, shell: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, shell: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     _installed(binding_fixture, healthy=False)
@@ -484,7 +489,7 @@ def test_bootstrap_family_standalone_drift_still_dispatches(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["managed", "standalone", "healthy"])
 def test_budget_bootstrap_retains_pythonless_admission(
-    binding_fixture: dict, shell: str, state: str, powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], shell: str, state: str, powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(
         binding_fixture, shell, "budget-guidance", bootstrap_payloads,
@@ -531,7 +536,7 @@ def test_budget_bootstrap_retains_pythonless_admission(
 @pytest.mark.parametrize("phase", ["cold", "drift"])
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed", "invalid", "foreign", "future"])
 def test_bootstrap_publication_with_stock_bash(
-    binding_fixture: dict, plugin: str, phase: str, state: str, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, phase: str, state: str, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     requested = os.environ.get("INSTALLATION_CONTEXT_BASH32")
     interpreter = Path(requested or "/bin/bash")
@@ -595,8 +600,8 @@ def test_bootstrap_publication_with_stock_bash(
 @pytest.mark.parametrize("phase", ["cold", "drift", "healthy"])
 @pytest.mark.parametrize("state", ["managed", "invalid", "foreign", "future", "standalone"])
 def test_machines_bootstrap_uses_selected_cell_publication_policy(
-    binding_fixture: dict, shell: str, phase: str, state: str,
-    powershell_host, bootstrap_payloads,
+    binding_fixture: dict[str, Any], shell: str, phase: str, state: str,
+    powershell_host: PowerShellFactory, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(
         binding_fixture, shell, "agent-machines", bootstrap_payloads,
@@ -691,7 +696,7 @@ def test_machines_bootstrap_uses_selected_cell_publication_policy(
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("shell", SHELLS)
 def test_bootstrap_refusal_does_not_gate_independent_hook_commands(
-    binding_fixture: dict, plugin: str, shell: str, bootstrap_payloads,
+    binding_fixture: dict[str, Any], plugin: str, shell: str, bootstrap_payloads: Callable[[str], Path],
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     environment["COPILOT_PLUGIN_ROOT"] = str(binding_fixture["payload"])
