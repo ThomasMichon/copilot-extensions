@@ -11,7 +11,7 @@ from single_instance_lease import OperationLockedError
 from .attention import Cursor, Interest
 from .attention_state import MAX_INTERESTS
 from .conversation_journal import ConversationJournal, Observation, _meaning
-from .feedback_capture import FeedbackCaptures
+from .feedback_capture import FeedbackCaptures, PROTOCOL, READBACK_PROTOCOL, readback_references
 from .generation_cache import CacheUnavailable
 from .review_intent import identifier
 from .review_workspace import _digest, _generation, _instant, build_generation
@@ -109,14 +109,15 @@ class ReviewFeedback:
         key = conversation_key(selected["scope"], self.owner.namespace)
 
         def capture(document: dict) -> dict:
-            if document["version"] != 5:
+            if document["version"] not in (5, 6):
                 raise FeedbackUnavailable("capture_layout_unavailable")
             retained = self.owner._review_operation(
                 document, selected["operation_id"], selected["scope"],
             )
             if retained["intent_id"] != operation["intent_id"]:
                 raise FeedbackUnavailable("original_intent_changed")
-            captures = FeedbackCaptures(document["feedback_captures"])
+            protocol = READBACK_PROTOCOL if document["version"] == 6 else PROTOCOL
+            captures = FeedbackCaptures(document["feedback_captures"], protocol=protocol)
             previous = next(
                 (row for row in captures.records if row["operation_id"] == selected["operation_id"]),
                 None,
@@ -176,8 +177,10 @@ class ReviewFeedback:
                 "key": asdict(key), "candidate": asdict(current.candidate), "cursor": cursor,
                 "observed_at": observed.observed_to, "interests": interests,
             }
+            if document["version"] == 6:
+                value["readback"] = None
             captures.records.append(value)
-            document["feedback_captures"] = FeedbackCaptures(captures.snapshot()).snapshot()
+            document["feedback_captures"] = FeedbackCaptures(captures.snapshot(), protocol=protocol).snapshot()
             return value
 
         self.capture = self._transaction(capture)
@@ -408,9 +411,10 @@ class ReviewFeedback:
         capture = copy.deepcopy(self.capture)
         if capture is None:
             raise FeedbackUnavailable("capture_unavailable")
+        readback = readback_references(capture, operation) if "readback" in capture else None
 
         def record(document: dict) -> dict:
-            if document["version"] != 5:
+            if document["version"] not in (5, 6):
                 raise ReplayStoreInvalid("feedback capture requires explicit owner adoption")
             retained = self.owner._review_operation(
                 document, operation["intent"]["operation_id"], operation["intent"]["scope"],
@@ -421,6 +425,8 @@ class ReviewFeedback:
             )
             if retained != operation or original != capture:
                 raise FeedbackUnavailable("original_confirmation_changed")
+            if document["version"] == 6:
+                original["readback"] = copy.deepcopy(readback)
             proof = {
                 "operation_id": capture["operation_id"], "generation_id": capture["generation_id"],
                 "receipt_refs": [
@@ -443,6 +449,8 @@ class ReviewFeedback:
                     row is None or row["facts"]["cursor"]["epoch"] != capture["cursor"]["epoch"]
                     or row["facts"]["cursor"]["sequence"] < capture["cursor"]["sequence"]
                 ):
+                    if document["version"] == 6:
+                        continue
                     raise FeedbackUnavailable("captured_epoch_or_interest_unavailable")
                 handled = row["handled"]
                 if (
@@ -469,4 +477,7 @@ class ReviewFeedback:
                 "interests": len(capture["interests"]), "updated": updated,
             }
 
-        return self._transaction(record)
+        result = self._transaction(record)
+        if readback is not None:
+            self.capture = {**capture, "readback": readback}
+        return result

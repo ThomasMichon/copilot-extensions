@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original per-operation readback proof through the existing protected feedback owner",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
