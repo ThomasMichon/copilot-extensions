@@ -240,3 +240,12 @@ gap, with no new sandbox, process interception, service, or security guarantee.
   real pre-tool denial with unchanged target bytes and healthy Driver evidence.
   This evidence predates the latest shell/mixed-version corrections; final
   release inclusion and installed full-flow acceptance remain independent.
+
+### 2026-11-05 - Attached shell operands
+- The final shell review found that whitespace tokenization missed attached
+  redirects, `dd of=` destinations and PowerShell colon-valued path arguments.
+  Extracted literal redirect operands with shell-aware quoting and normalized
+  target-bearing arguments in the existing shell-parser owner.
+- The anchor module's size guard required moving its unchanged Git tokenizer
+  into that same already-shipped parser; no cap or deployment inventory changed.
+  Fresh parser/guard controls passed 238 tests before the attached-operand fix.

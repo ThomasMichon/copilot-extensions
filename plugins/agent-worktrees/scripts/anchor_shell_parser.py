@@ -34,7 +34,7 @@ def git_branch_invocation_is_readonly(args: list[str]) -> bool:
     )
 
 
-def git_tokens(seg: str, tool: str) -> list[str]:
+def git_tokens(seg: str, tool: str, *, split_redirects: bool = False) -> list[str]:
     """Tokenize literal arguments with the selected shell's quoting rules."""
     posix_escapes = tool.lower() in {"bash", "sh"}
     powershell_escapes = tool.lower() in {"powershell", "pwsh"}
@@ -84,11 +84,24 @@ def git_tokens(seg: str, tool: str) -> list[str]:
                 tokens.append("".join(current))
                 current = []
                 token_started = False
+        elif split_redirects and char == ">":
+            if token_started:
+                tokens.append("".join(current))
+                current = []
+                token_started = False
+            if index + 1 < len(seg) and seg[index + 1] == ">":
+                tokens.append(">>")
+                index += 1
+            else:
+                tokens.append(">")
         elif (
             posix_escapes
             and char == "\\"
             and index + 1 < len(seg)
-            and (seg[index + 1].isspace() or seg[index + 1] in {"'", '"', "\\"})
+            and (
+                seg[index + 1].isspace() or seg[index + 1] in {"'", '"', "\\"}
+                or split_redirects and seg[index + 1] in {">", "<", "|", "&"}
+            )
         ):
             current.append(seg[index + 1])
             token_started = True
@@ -104,6 +117,26 @@ def git_tokens(seg: str, tool: str) -> list[str]:
     if token_started:
         tokens.append("".join(current))
     return tokens
+
+
+def literal_write_targets(seg: str, tool: str) -> list[str]:
+    """Extract literal redirect operands and target-bearing shell arguments."""
+    tokens = git_tokens(seg, tool, split_redirects=True)
+    targets = []
+    for index, token in enumerate(tokens):
+        if token in {">", ">>"}:
+            if index + 1 < len(tokens) and not tokens[index + 1].startswith("&"):
+                targets.append(tokens[index + 1])
+            continue
+        if token.lower().startswith("of="):
+            token = token[3:]
+        elif tool.lower() in {"powershell", "pwsh"}:
+            token = re.sub(
+                r"^-(?:literalpath|path|filepath|destination):", "", token,
+                flags=re.IGNORECASE,
+            )
+        targets.append(token)
+    return targets
 
 
 def shell_segments(cmd: str, tool: str) -> list[str]:

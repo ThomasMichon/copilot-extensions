@@ -203,7 +203,14 @@ def test_prepared_worktree_posture_preserves_anchor_controls(tmp_path, guarded, 
     assert (decision["permissionDecision"] if decision else None) == expected
 
 
-@pytest.mark.parametrize("command", ['echo value > "{target}"', 'Set-Content "{target}" value'])
+@pytest.mark.parametrize("command", [
+    'echo value > "{target}"', 'echo value>"{target}"',
+    'echo value >> "{target}"', 'echo value>>"{target}"',
+    'dd of="{target}"', 'Set-Content "{target}" value',
+    'Set-Content -Path "{target}" -Value value',
+    'Set-Content -Path:"{target}" -Value value',
+    'Set-Content -LiteralPath:"{target}" -Value value',
+])
 @pytest.mark.parametrize("delegated", [False, True])
 @pytest.mark.parametrize("linked", [False, True])
 def test_nested_linked_shell_destination_preserves_posture_and_delegation(

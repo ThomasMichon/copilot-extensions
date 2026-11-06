@@ -82,6 +82,7 @@ from anchor_shell_parser import (
     GIT_INTRINSIC_NONWRITE_COMMANDS as _GIT_READ_BUILTINS,
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
     git_tokens as _git_tokens,
+    literal_write_targets as _literal_write_targets,
     shell_command_substitutions as _shell_command_substitutions,
     shell_segments as _shell_segments,
 )
@@ -810,8 +811,8 @@ def _shell_hit(
             if redirect or at_write_cmd and re.search(tok, seg_hay):
                 if literal_targets is None:
                     literal_targets = [
-                        re.sub(r"^\d*>>?", "", token).replace("\\", os.sep)
-                        for token in _git_tokens(eff, tool)
+                        token.replace("\\", os.sep)
+                        for token in _literal_write_targets(eff, tool)
                     ]
                 for target in literal_targets:
                     resolved = _resolve(target, eff_cwd)
