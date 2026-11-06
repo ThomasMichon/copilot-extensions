@@ -437,6 +437,47 @@ def _harness_assets(root: Path) -> tuple[str, ...]:
     ))
 
 
+def _harness_binding(fn: ast.FunctionDef, name: str, site: ast.AST) -> ast.expr:
+    arguments = [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]
+    arguments.extend(arg for arg in (fn.args.vararg, fn.args.kwarg) if arg is not None)
+    if any(arg.arg == name for arg in arguments):
+        raise SourceViewError("Parameter-backed producer binding")
+    definitions = [
+        node for node in fn.body if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+    ]
+    stores = [
+        node for node in ast.walk(fn) if isinstance(node, ast.Name)
+        and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id == name
+    ]
+    for node in ast.walk(fn):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node is not fn and node.name == name
+        ) or (
+            isinstance(node, ast.alias) and (node.asname or node.name.split(".")[0]) == name
+        ) or (
+            isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names
+        ) or (
+            isinstance(node, ast.ExceptHandler) and node.name == name
+        ) or (
+            isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == name
+        ) or (
+            isinstance(node, ast.MatchMapping) and node.rest == name
+        ):
+            raise SourceViewError("Ambiguous lexical producer binding")
+    if len(definitions) != 1 or len(stores) != 1:
+        raise SourceViewError("Unbound or ambiguous reassigned producer binding")
+    parents = {child: node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
+    statement = site
+    while statement not in fn.body and statement in parents:
+        statement = parents[statement]
+    definition = definitions[0]
+    if statement not in fn.body or fn.body.index(definition) >= fn.body.index(statement):
+        raise SourceViewError("Producer binding must precede its direct containing statement")
+    return definition.value
+
+
 def _required_harness_programs(
     trees: dict[str, ast.Module], data_writes: list[object],
 ) -> dict[tuple[str, str, str], list[list[int]]]:
@@ -467,19 +508,9 @@ def _required_harness_programs(
                 raise SourceViewError("Unsupported module/class/async/nested Python producer context")
             return functions[-1]
 
-        def binding(fn: ast.FunctionDef, name: str) -> ast.expr:
-            definitions = [
-                n.value for n in ast.walk(fn) if isinstance(n, ast.Assign)
-                and any(isinstance(t, ast.Name) and t.id == name for t in n.targets)
-            ]
-            stores = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id == name]
-            if len(definitions) != 1 or len(stores) != 1:
-                raise SourceViewError("Unbound or ambiguous reassigned producer binding")
-            return definitions[0]
-
         def source(fn: ast.FunctionDef, expression: ast.expr, site: ast.expr) -> None:
             if isinstance(expression, ast.Name):
-                expression = binding(fn, expression.id)
+                expression = _harness_binding(fn, expression.id, site)
             if isinstance(expression, ast.IfExp):
                 if ast.unparse(expression.test) != "name == 'startup'":
                     raise SourceViewError("Unknown value-dependent Python producer")
@@ -510,11 +541,7 @@ def _required_harness_programs(
                 fn = context(node)
                 receiver = node.func.value
                 if isinstance(receiver, ast.Name):
-                    receiver_name = receiver.id
-                    definitions = [n for n in ast.walk(fn) if isinstance(n, ast.Assign)
-                                   and any(isinstance(t, ast.Name) and t.id == receiver_name for t in n.targets)]
-                    if definitions:
-                        receiver = binding(fn, receiver_name)
+                    receiver = _harness_binding(fn, receiver.id, node)
                 python_file = any(
                     isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.endswith(".py")
                     for n in ast.walk(receiver)
@@ -675,13 +702,10 @@ def harness_emitted_inputs(
                 covered[expression_key] = row["sites"]
             values: dict[str, str] = {}
             for name, origin in row["origins"].items():
-                assignments = [n for n in ast.walk(fn) if isinstance(n, ast.Name)
-                               and isinstance(n.ctx, ast.Store) and n.id == name]
-                definitions = [n for n in ast.walk(fn) if isinstance(n, ast.Assign)
-                               and any(isinstance(t, ast.Name) and t.id == name for t in n.targets)]
-                if name not in _WITNESSES or len(assignments) != 1 or len(definitions) != 1:
+                if name not in _WITNESSES:
                     raise SourceViewError("Unknown or shadowed fixture origin")
-                if ast.unparse(definitions[0].value) != origin:
+                definition = _harness_binding(fn, name, expression)
+                if ast.unparse(definition) != origin:
                     raise SourceViewError("Fixture component relation changed")
                 values[name] = _WITNESSES[name]
             if any(isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id in {"str", "repr"} for n in ast.walk(fn)):
@@ -704,6 +728,16 @@ def harness_emitted_inputs(
                 if len(nested) != 1 or not isinstance(nested[0], ast.Constant) or not isinstance(nested[0].value, str):
                     raise SourceViewError("Unknown nested Python producer")
                 body = nested[0].value
+                leaf = _parse(body.encode("utf-8"), path, feature_version=(3, 10))
+                if any(
+                    (isinstance(node, ast.Constant) and node.value == "-c")
+                    or (
+                        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in {"write_text", "write_bytes"}
+                    )
+                    for node in ast.walk(leaf)
+                ):
+                    raise SourceViewError("Unsupported deeper nested Python producer")
                 values = {}
             normal = _witness_positions(body, values)
             escaped = {name: value + "'\"\\\n{injection}" for name, value in values.items()}

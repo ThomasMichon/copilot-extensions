@@ -249,3 +249,94 @@ def test_emitted_diagnostics_annotate_only_the_current_generated_output(
     with pytest.raises(views.SourceViewError, match="outside the composed source map"):
         parent.diagnostics(f"{parent.output}:2: error: invalid", tmp_path)
     owner.cleanup()
+
+
+def named_source(root: Path, source: str, origins: dict[str, str] | None = None) -> tuple[str, ...]:
+    paths, declaration = emitted_source(root)
+    content = source.encode()
+    (root / paths[0]).write_bytes(content)
+    tree = ast.parse(content)
+    expression = next(
+        node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "script" for target in node.targets)
+    )
+    container = next(node for node in ast.walk(tree) if isinstance(node, ast.List))
+    declaration["members"][0].update(
+        sha256=[hashlib.sha256(content).hexdigest()], structure=views._shape(tree),
+    )
+    declaration["programs"][0].update(
+        selector="assignment:script", expression=views._shape(expression), origins=origins or {},
+        sites=[[container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]],
+    )
+    (root / views.HARNESS_DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    return paths
+
+
+@pytest.mark.parametrize("change", [
+    "parameter", "parameter-dead", "posonly", "kwonly", "vararg", "kwarg", "dead", "after",
+    "import", "function", "class", "global", "unconditional",
+])
+def test_named_producer_requires_a_direct_prior_nonparameter_binding(tmp_path: Path, change: str) -> None:
+    headers = {
+        "parameter": "script: str", "parameter-dead": "script: str", "posonly": "script, /", "kwonly": "*, script",
+        "vararg": "*script", "kwarg": "**script",
+    }
+    assignment = "    script = 'value: int = 1'\n"
+    sink = "    subprocess.run([sys.executable, '-c', script])\n"
+    body = assignment + sink
+    if change in {"dead", "parameter-dead"}:
+        body = "    if False:\n    " + assignment + sink
+    elif change == "after":
+        body = sink + assignment
+    elif change in {"import", "function", "class", "global"}:
+        extra = {
+            "import": "    from other import value as script\n",
+            "function": "    def script():\n        return 'wrong'\n",
+            "class": "    class script:\n        pass\n",
+            "global": "    global script\n",
+        }[change]
+        body = extra + assignment + sink
+    elif change == "unconditional":
+        body = assignment + "    for item in (1,):\n    " + sink
+    paths = named_source(tmp_path, f"def emit({headers.get(change, '')}):\n" + body)
+    if change == "unconditional":
+        assert views.harness_emitted_inputs(tmp_path, paths)[1][0][1] == b"value: int = 1"
+    else:
+        with pytest.raises(views.SourceViewError, match="binding"):
+            views.harness_emitted_inputs(tmp_path, paths)
+
+
+def test_fixture_origin_requires_the_same_unconditional_binding_guarantee(tmp_path: Path) -> None:
+    source = (
+        "def emit(tmp_path):\n"
+        "    if False:\n        pid_file = tmp_path / 'descendant.pid'\n"
+        "    script = f\"open({str(pid_file)!r}, 'w').close()\"\n"
+        "    subprocess.run([sys.executable, '-c', script])\n"
+    )
+    paths = named_source(tmp_path, source, {"pid_file": "tmp_path / 'descendant.pid'"})
+    with pytest.raises(views.SourceViewError, match="binding"):
+        views.harness_emitted_inputs(tmp_path, paths)
+
+
+@pytest.mark.parametrize("change", ["leaf", "python-c", "python-write"])
+def test_nested_programs_are_supported_only_to_the_declared_leaf_depth(tmp_path: Path, change: str) -> None:
+    child = "value: int = 1\n"
+    if change == "python-c":
+        child = "subprocess.run([sys.executable, '-c', \"value: int = 'wrong'\"])\n"
+    elif change == "python-write":
+        child = "Path('grandchild.py').write_text(\"value: int = 'wrong'\")\n"
+    parent = f"subprocess.run([sys.executable, '-c', {child!r}])\n"
+    paths = named_source(tmp_path, f"def emit():\n    script = {parent!r}\n"
+                         "    subprocess.run([sys.executable, '-c', script])\n")
+    declaration_path = tmp_path / views.HARNESS_DECLARATION
+    declaration = json.loads(declaration_path.read_bytes())
+    nested = dict(declaration["programs"][0])
+    nested.update(selector="nested:script", transport="nested-parent-constant",
+                  role="synthetic-child", sites=[])
+    declaration["programs"].append(nested)
+    declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
+    if change == "leaf":
+        assert len(views.harness_emitted_inputs(tmp_path, paths)[1]) == 3
+    else:
+        with pytest.raises(views.SourceViewError, match="deeper nested"):
+            views.harness_emitted_inputs(tmp_path, paths)
