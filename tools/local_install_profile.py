@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
 from packaging.utils import canonicalize_name
 from packaging.version import Version
@@ -24,10 +25,11 @@ from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
 from installer_wheel_snapshot import retain_wheel_inputs
 
 from build_toolchain_lock import _query_marker_environment
-from promotion_python_artifacts import validate_manifest
+from promotion_python_artifacts import validate_manifest, validate_wheel_sources
 from runtime_profile import SCHEMA, ProfileError, _reachable, _requirement, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import _wheel_pins, dependencies
+from standalone_python_artifacts import embedded_projects
 
 
 def wheel_limits() -> WheelLimits:
@@ -85,12 +87,23 @@ def _associated_first_party(
         raise ProfileError("source wheel manifest has a foreign component")
     entries = manifest["wheels"]
     declared = {}
+    package_roots = {}
     for package in source_inputs.engine._package_roots(selected.payload):
         metadata = dependencies._toml(package / "pyproject.toml")["project"]
         name = canonicalize_name(metadata["name"])
         if name in declared:
             raise ProfileError("selected source has ambiguous first-party names")
         declared[name] = Version(metadata["version"])
+        package_roots[name] = package.resolve()
+    embedded = embedded_projects(selected.payload) if component == "worktree-manager" else {}
+    if any(
+        name not in package_roots or directory.resolve() != package_roots[name]
+        for name, (directory, _metadata) in embedded.items()
+    ):
+        raise ProfileError("embedded first-party sources differ from the selected source closure")
+    application = canonicalize_name(
+        dependencies._toml(selected.payload / "pyproject.toml")["project"]["name"],
+    )
     archives = {
         row["filename"]: source_inputs._member(snapshot, project["wheels"] + "/" + row["filename"])
         for row in entries
@@ -116,6 +129,14 @@ def _associated_first_party(
                 or name not in declared or Version(facts.version) != declared[name]
             ):
                 raise ProfileError("associated source wheel name/version differs from selected source")
+            if embedded and name == application:
+                with zipfile.ZipFile(retained.archives[row["filename"]]) as archive:
+                    validate_wheel_sources(
+                        archive, facts.member_hashes, source_dir=selected.payload,
+                        prefix=facts.prefix, metadata=facts.metadata,
+                        component=component, candidate_root=selected.payload.parent,
+                    )
+                _check_deadline(deadline)
             result[name] = {
                 "name": name, "version": facts.version,
                 "filename": row["filename"], "sha256": row["sha256"],
@@ -125,6 +146,8 @@ def _associated_first_party(
                 "provides_extras": list(facts.provides_extras),
             }
         retained.verify()
+    if result.keys() != declared.keys() - embedded.keys():
+        raise ProfileError("associated wheels do not complete the declared first-party source set")
     if source_inputs.select_project(snapshot, component).identity != selected.identity:
         raise ProfileError("selected source changed during wheel inspection")
     return selected, result
@@ -135,7 +158,6 @@ def first_party(
 ) -> tuple[source_inputs.ProjectSource, dict]:
     """Follow application dependencies through this snapshot's associated wheels."""
     selected, result = _associated_first_party(snapshot, deadline=deadline, component=component)
-    inspected = [selected]
     applications = {}
     for key, project in selected.record["projects"].items():
         _check_deadline(deadline)
@@ -158,7 +180,6 @@ def first_party(
             dependency_source, associated = _associated_first_party(
                 snapshot, deadline=deadline, component=applications[name],
             )
-            inspected.append(dependency_source)
             for dependency, row in associated.items():
                 previous = result.get(dependency)
                 if previous is not None:
@@ -169,13 +190,6 @@ def first_party(
                     continue
                 result[dependency] = row
                 pending.append(row)
-    declared = {
-        canonicalize_name(dependencies._toml(package / "pyproject.toml")["project"]["name"])
-        for project in inspected
-        for package in source_inputs.engine._package_roots(project.payload)
-    }
-    if result.keys() != declared:
-        raise ProfileError("associated wheels do not complete the declared first-party source set")
     return selected, result
 
 
