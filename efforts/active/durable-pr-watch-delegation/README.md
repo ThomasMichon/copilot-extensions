@@ -691,9 +691,12 @@ It extends the following checkout-free lane, not the fleet deployment scope.
 - [ ] Complete [A5: qualification and adoption](author-publication.md#a5---qualification-and-adoption), with source, release and authorized installed acceptance distinguished.
 
 The operator selected source-PR completion with remaining adoption tracked
-separately. #10412, assigned to ThomasMichon, retains the remaining A4-A5
-consumer/live/installed and remote-only transport acceptance. Generic guidance
-and source tests do not close those rows or the broader parent effort.
+separately. Historical #10412 was subsumed into the
+[author-publication cohort under #6007](https://github.com/ThomasMichon/copilot-extensions/issues/6007#issuecomment-6668447425),
+preserving its per-item owners and remaining A4-A5 consumer/live/installed and
+remote-only transport acceptance, not marking them complete. #11092 expands
+the portable worker author-policy source contract; its source tests do not
+close these rows or adopt the broader parent campaign.
 
 ### Direct checkout-free operation and inherited ADO matrix from #2700/#2881
 
