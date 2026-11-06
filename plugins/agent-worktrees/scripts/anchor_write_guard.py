@@ -83,6 +83,7 @@ from anchor_shell_parser import (
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
     git_tokens as _git_tokens,
     literal_write_targets as _literal_write_targets,
+    normalize_post_command as _normalize_post_command,
     shell_command_substitutions as _shell_command_substitutions,
     shell_segments as _shell_segments,
 )
@@ -410,26 +411,17 @@ def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern | Non
                     (child, depth + 1)
                     for child in _shell_command_substitutions(segment, tool, scan_budget=scan_budget)
                 )
+                effective, data_assignment = _normalize_post_command(
+                    effective, tool, normalize=_effective_seg, scan_budget=scan_budget,
+                )
             except ValueError:
                 return True
-            if tool.lower() in {"powershell", "pwsh"}:
-                assignment = re.match(r"^\s*\$[\w:]+\s*(?:\+?=)\s*(.*)$", effective, re.DOTALL)
-                if assignment and not assignment[1].startswith(("'", '"')):
-                    effective = _effective_seg(assignment[1])
-                    if effective.lstrip().startswith("$"):
-                        return True
-                elif assignment is None and re.match(r"^\s*\$[^=]*=", effective):
-                    return True
-                effective = re.sub(r"^\s*\.\s+", "", effective, count=1)
-            if re.match(
-                r"^\s*(?:\.\s+)?(?:[({]|(?:if|elseif|else|foreach|for|while|until|switch|try|catch|finally|do|trap|function|filter|begin|process|end|then|case|select)\b)",
-                effective, re.IGNORECASE,
-            ):
+            if effective is None:
                 return True
-            syntax: set[str] = set()
+            syntax: set[str] = {"read"} if data_assignment else set()
             targets = _literal_write_targets(effective, tool, syntax=syntax)
-            if targets or syntax & {"{", "evaluation", "write"} or (
-                tool.lower() in {"powershell", "pwsh"} and "[" in syntax
+            if targets or syntax & {"{", "evaluation", "write", "control", "unknown"} or (
+                tool.lower() in {"powershell", "pwsh"} and "[" in syntax and "=" in syntax and "read" not in syntax
                 and re.match(r"^\s*\[[^=\r\n]+\]\s*\$", effective)
             ):
                 return True

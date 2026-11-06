@@ -4142,7 +4142,7 @@ class _ResidentHookPolicy:
             return None
         args = module._as_args(payload.get("toolArgs") or payload.get("tool_input") or {})
         command = module._pick(args, module.CMD_ARG_KEYS)
-        if command is not None and tool not in {"bash", "sh", "powershell", "pwsh", "cmd"}:
+        if command is not None and tool not in {"bash", "sh", "powershell", "pwsh"}:
             return None if module._WRITE_VERBS.search(command) else []
         return None if command is None or shell.shell_may_mutate(command, tool, legacy_writes=module._WRITE_VERBS) else []
 

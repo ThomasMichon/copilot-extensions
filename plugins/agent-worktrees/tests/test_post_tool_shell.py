@@ -623,6 +623,8 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "shell-read-bracket-path", "shell-read-type-call", "shell-sed-cluster",
     "shell-git-output", "shell-dot-write", "shell-dot-read", "shell-dot-assignment",
     "shell-evaluation", "shell-module-write", "shell-module-read", "shell-quoted-evaluation",
+    "shell-read-select-string", "shell-read-select-object", "shell-read-expansion",
+    "shell-read-assignment",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -784,6 +786,14 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
                 args = {"command": r"Microsoft.PowerShell.Management\Get-Content file"}
             elif case == "quoted-evaluation":
                 args = {"command": "Write-Output \"Invoke-Expression 'Set-Content file value'\""}
+            elif case == "read-select-string":
+                args = {"command": "Select-String -Pattern error -Path file"}
+            elif case == "read-select-object":
+                args = {"command": "Select-Object -Property Name"}
+            elif case == "read-expansion":
+                args = {"command": "Write-Output ${env:USERPROFILE}"}
+            elif case == "read-assignment":
+                args = {"command": "$copy = $value"}
             payload.update(toolName="powershell", toolArgs=args)
             if case == "bash-assignment":
                 payload["toolName"] = "bash"
@@ -830,6 +840,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             "read-bracket-path", "read-type-call",
             "dot-read",
             "module-read", "quoted-evaluation",
+            "read-select-string", "read-select-object", "read-expansion", "read-assignment",
         })
     finally:
         release.set()

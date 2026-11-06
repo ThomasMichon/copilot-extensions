@@ -125,6 +125,24 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     pytest.param(r"Microsoft.PowerShell.Management\Get-Content file", False, id="module-read"),
     pytest.param(r"Write-Output 'Microsoft.PowerShell.Management\Set-Content file value'", False, id="quoted-module"),
     pytest.param("Write-Output \"Invoke-Expression 'Set-Content file value'\"", False, id="quoted-evaluation"),
+    pytest.param("Select-String -Pattern error -Path file", False, id="select-string-read"),
+    pytest.param("Select-Object -Property Name", False, id="select-object-read"),
+    pytest.param("Write-Output ${env:USERPROFILE}", False, id="braced-variable-read"),
+    pytest.param("${name=part}", False, id="braced-variable-equals"),
+    pytest.param("$value -eq 'a=b'", False, id="comparison-data"),
+    pytest.param("$copy = $value", False, id="variable-assignment-data"),
+    pytest.param("${copy} = 'git commit -m test'", False, id="braced-assignment-data"),
+    pytest.param("[string[]]$copy = $values", False, id="typed-assignment-data"),
+    pytest.param("$copy = $(Get-Date)", False, id="subexpression-assignment-read"),
+    pytest.param("$copy = (Get-Date)", False, id="group-assignment-read"),
+    pytest.param("Write-Output ${name(git commit -m test)}", False, id="braced-name-not-code"),
+    pytest.param("$copy = $(git commit -m test)", True, id="subexpression-assignment-write"),
+    pytest.param("$copy = $value + 1", False, id="variable-arithmetic-data"),
+    pytest.param("${unclosed", True, id="unclosed-variable"),
+    pytest.param(
+        'Write-Output $($inner = (Write-Output "' + "x" * 50000 + '"))',
+        True, id="normalization-budget-exhausted",
+    ),
 ])
 def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
     assert guard.shell_may_mutate(command, "powershell") is mutates
@@ -140,6 +158,16 @@ def test_assignment_substitution_precedes_environment_normalization(tool, comman
     assert guard.shell_may_mutate(command, tool) is mutates
 
 
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param("echo ${HOME}", False, id="braced-read"),
+    pytest.param("echo ${value:-${fallback}}", False, id="nested-variable-read"),
+    pytest.param("echo ${value:-$(git commit -m test)}", True, id="variable-substitution-write"),
+    pytest.param("select item in one; do touch file; done", True, id="select-control"),
+])
+def test_parameter_expansion_is_data_but_its_substitutions_still_execute(command, mutates):
+    assert guard.shell_may_mutate(command, "bash") is mutates
+
+
 @pytest.mark.parametrize("tool,command,mutates", [
     pytest.param("powershell", "pwsh -Command 'Set-Content file value'", True, id="nested-shell"),
     pytest.param("bash", "command -p git commit -m test", True, id="wrapper-options"),
@@ -149,6 +177,8 @@ def test_assignment_substitution_precedes_environment_normalization(tool, comman
     pytest.param("bash", "result='$(git commit -m test)'", False, id="literal-substitution"),
     pytest.param("powershell", r"Microsoft.PowerShell.Management\Get-Content Set-Content.txt", False, id="module-read"),
     pytest.param("powershell", "git log --format=Set-Content", False, id="git-format-data"),
+    pytest.param("powershell", "select -Property Name", False, id="select-alias-read"),
+    pytest.param("powershell", "sls -Pattern 'git commit' file", False, id="select-string-alias-read"),
 ])
 def test_unclassified_shell_forms_retain_original_write_heuristic(tool, command, mutates):
     assert guard.shell_may_mutate(

@@ -384,9 +384,15 @@ external programs cannot write.
 Unclassified forms retain the original stateless guard's write heuristic rather
 than being silently declared read-only. Confirmed literal/read forms avoid
 that fallback, and source-bound controls use the actual original pattern.
-Dialect-ambiguous shell aliases retain the original occurrence rule entirely;
+Dialect-ambiguous aliases and the not-yet-qualified CMD dialect retain the original occurrence rule entirely;
 the receiver does not guess their dialect. This is conservative compatibility,
 not a new permission decision or an assertion of complete command semantics.
+The original tokenizer treats ordinary braced parameter expansions as data,
+without hiding executable substitutions inside them. Post-only assignment
+normalization distinguishes data values and complete read-expression containers
+from unknown executable forms. Control keywords require a complete command
+token and use the declared dialect, so `Select-String`, `Select-Object` and
+PowerShell's `select` alias are not mistaken for POSIX control flow.
 
 Original managed admission, current governance/state locks and idle grace
 remain authoritative. Accepted reads renew demand without mutation wake;

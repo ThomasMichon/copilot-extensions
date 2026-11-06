@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 GIT_INTRINSIC_NONWRITE_COMMANDS = frozenset({
     "blame", "cat-file", "describe", "diff", "diff-files", "diff-index",
@@ -32,6 +33,83 @@ def git_branch_invocation_is_readonly(args: list[str]) -> bool:
         or _GIT_BRANCH_SAFE_SHORT_CLUSTER.match(token)
         for token in args
     )
+
+
+def _braced_variable_end(
+    text: str, index: int, tool: str, *, scan_budget: list[int] | None = None,
+) -> int | None:
+    cursor, depth = index + 2, 1
+    escape = "\\" if tool.lower() in {"bash", "sh"} else "`"
+    while cursor < len(text):
+        if scan_budget is not None:
+            scan_budget[0] -= 1
+            if scan_budget[0] < 0:
+                raise ValueError("shell substitution scan budget exhausted")
+        if text[cursor] == escape and cursor + 1 < len(text):
+            cursor += 2
+        elif text.startswith("${", cursor):
+            depth += 1
+            cursor += 2
+        elif text[cursor] == "}":
+            depth -= 1
+            cursor += 1
+            if depth == 0:
+                return cursor
+        else:
+            cursor += 1
+    return None
+
+
+def _variable_end(text: str, tool: str) -> int | None:
+    if text.startswith("${"):
+        return _braced_variable_end(text, 0, tool)
+    match = re.match(r"\$(?:[\w:]+|[?$^])", text)
+    return match.end() if match else None
+
+
+def normalize_post_command(
+    seg: str, tool: str, *, normalize: Callable[[str], str],
+    scan_budget: list[int] | None = None,
+) -> tuple[str | None, bool]:
+    """Return command position and data-assignment evidence, or explicit uncertainty."""
+    if tool.lower() not in {"powershell", "pwsh"}:
+        return seg, False
+    text = seg.lstrip()
+    typed = re.match(r"\[[^=\r\n]+\]\s*(?=\$)", text)
+    if typed:
+        text = text[typed.end():]
+    if text.startswith("$"):
+        end = _variable_end(text, tool)
+        if end is None:
+            return (None, False) if text.startswith("${") else (seg, False)
+        rest = text[end:].lstrip()
+        assignment = re.match(r"(?:\?\?=|[+\-*/%]?=)\s*(.*)$", rest, re.DOTALL)
+        if assignment:
+            rhs = assignment[1]
+            variable_end = _variable_end(rhs, tool) if rhs.startswith("$") else None
+            data_variable = variable_end is not None and re.fullmatch(
+                r"(?:\.[A-Za-z_]\w*|\[\d+\])*", rhs[variable_end:].strip(),
+            )
+            if rhs.startswith(("'", '"')) or data_variable:
+                return seg, True
+            value = normalize(rhs)
+            if value.lstrip().startswith(("$(", "@(", "(")):
+                spans: list[tuple[int, int]] = []
+                shell_command_substitutions(value, tool, scan_budget=scan_budget, spans=spans)
+                if (len(value) - len(value.lstrip()), len(value.rstrip())) in spans:
+                    return value, True
+            if value.lstrip().startswith("$"):
+                syntax: set[str] = set()
+                git_tokens(value, tool, syntax=syntax)
+                if syntax & {"(", "{"}:
+                    return None, False
+            return re.sub(r"^\s*\.\s+", "", value, count=1), False
+        if rest.startswith((".", "[")):
+            syntax = set()
+            git_tokens(seg, tool, syntax=syntax)
+            if "=" in syntax:
+                return None, False
+    return re.sub(r"^\s*\.\s+", "", seg, count=1), False
 
 
 def git_tokens(
@@ -86,6 +164,18 @@ def git_tokens(
                 tokens.append("".join(current))
                 current = []
                 token_started = False
+        elif (posix_escapes or powershell_escapes) and seg.startswith("${", index):
+            end = _braced_variable_end(seg, index, tool)
+            if end is None:
+                if syntax is not None:
+                    syntax.add("unknown")
+                current.append(seg[index:])
+                token_started = True
+                break
+            current.append(seg[index:end])
+            token_started = True
+            index = end
+            continue
         elif split_redirects and char == ">":
             if token_started:
                 tokens.append("".join(current))
@@ -112,7 +202,7 @@ def git_tokens(
             current.append(seg[index + 1])
             token_started = True
             index += 1
-        elif syntax is not None and char in "{[":
+        elif syntax is not None and char in "{[=(":
             syntax.add(char)
             current.append(char)
             token_started = True
@@ -170,15 +260,22 @@ def literal_write_targets(seg: str, tool: str, *, syntax: set[str] | None = None
     args = arguments[1:]
     if syntax is not None and verb in {"invoke-expression", "iex", "eval"}:
         syntax.add("evaluation")
+    if syntax is not None and (
+        re.match(
+            r"^\s*(?:[({]|(?:if|elseif|else|foreach|for|while|until|switch|try|catch|finally|do|trap|function|filter|begin|process|end|then|case)(?=\s|[({]|$))",
+            seg, re.IGNORECASE,
+        ) and not (
+            tool.lower() in {"powershell", "pwsh"} and "read" in syntax and seg.lstrip().startswith("(")
+        ) or tool.lower() in {"bash", "sh"} and re.match(r"^\s*select(?=\s|[({]|$)", seg)
+    ):
+        syntax.add("control")
     if syntax is not None and tool.lower() in {"bash", "sh", "powershell", "pwsh", "cmd"}:
         if verb in {
             "write-output", "write-host", "echo", "printf", "get-content", "cat", "type",
             "head", "tail", "get-item", "get-childitem", "ls", "dir", "pwd", "get-location",
             "select-string", "grep", "rg", "select-object", "format-list", "format-table",
-            "out-string", "get-command", "get-date",
-        } or tool.lower() in {"powershell", "pwsh"} and re.match(
-            r"""^\s*\$[\w:]+\s*\+?=\s*['"]""", seg,
-        ):
+            "out-string", "get-command", "get-date", "select", "sls", "gci", "gc",
+        }:
             syntax.add("read")
     if verb == "sed" and not _sed_in_place(args):
         return targets
@@ -319,6 +416,15 @@ def shell_segments(cmd: str, tool: str) -> list[str]:
                 index += 1
             elif char == quote:
                 quote = None
+        elif lower_tool in {"bash", "sh", "powershell", "pwsh"} and cmd.startswith("${", index):
+            end = _braced_variable_end(cmd, index, tool)
+            if end is None:
+                current.append(cmd[index:])
+                index = len(cmd)
+            else:
+                current.append(cmd[index:end])
+                index = end
+            continue
         elif powershell_escapes and cmd.startswith("<#", index):
             block_comment = True
             index += 1
@@ -402,6 +508,7 @@ def shell_segments(cmd: str, tool: str) -> list[str]:
 
 def shell_command_substitutions(
     seg: str, tool: str, *, scan_budget: list[int] | None = None,
+    spans: list[tuple[int, int]] | None = None,
 ) -> list[str]:
     """Extract executable substitutions, optionally sharing a finite scan budget."""
     lower_tool = tool.lower()
@@ -436,6 +543,14 @@ def shell_command_substitutions(
         if char == '"' and quote != "'":
             quote = None if quote == '"' else '"'
             index += 1
+            continue
+        if lower_tool in {"powershell", "pwsh"} and quote != "'" and seg.startswith("${", index):
+            end = _braced_variable_end(seg, index, tool, scan_budget=scan_budget)
+            if end is None:
+                if scan_budget is not None:
+                    raise ValueError("unterminated shell variable")
+                return substitutions
+            index = end
             continue
         substitution_prefix = None
         if quote != "'":
@@ -479,6 +594,14 @@ def shell_command_substitutions(
                     inner_quote = None if inner_quote == "'" else "'"
                 elif current == '"' and inner_quote != "'":
                     inner_quote = None if inner_quote == '"' else '"'
+                elif lower_tool in {"powershell", "pwsh"} and inner_quote != "'" and seg.startswith("${", cursor):
+                    end = _braced_variable_end(seg, cursor, tool, scan_budget=scan_budget)
+                    if end is None:
+                        if scan_budget is not None:
+                            raise ValueError("unterminated shell variable")
+                        return substitutions
+                    cursor = end
+                    continue
                 elif (
                     inner_quote != "'"
                     and (
@@ -498,6 +621,8 @@ def shell_command_substitutions(
                         depth -= 1
                         if depth == 0:
                             substitutions.append(seg[start:cursor])
+                            if spans is not None:
+                                spans.append((index, cursor + 1))
                             index = cursor + 1
                             break
                 cursor += 1
@@ -517,6 +642,8 @@ def shell_command_substitutions(
                     continue
                 if seg[cursor] == "`":
                     substitutions.append(seg[start:cursor])
+                    if spans is not None:
+                        spans.append((index, cursor + 1))
                     index = cursor + 1
                     break
                 cursor += 1

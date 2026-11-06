@@ -1416,6 +1416,7 @@ def test_shell_mutation_rejects_wrong_tool_and_batch_before_effects(payload):
     ("terminal", "git log --format=$(git commit -m test)", True),
     ("run_command", "Write-Output 'Set-Content file value'", True),
     ("shell", "git status --short", False),
+    ("cmd", "echo ${HOME}", False),
 ])
 def test_ambiguous_shell_aliases_retain_original_occurrence_semantics(tool, command, mutates):
     policy = m._ResidentHookPolicy(m._load_hook_client_module())
