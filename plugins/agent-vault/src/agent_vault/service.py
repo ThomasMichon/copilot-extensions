@@ -88,6 +88,7 @@ class VaultService:
         self._password_handoff_deadlines: dict[str, float] = {}
         self._shutdown = False
         self._runtime_can_work = True
+        self._default_kpdb: str | None = None
         self.ttl_override: int | None = None  # 0 = persistent (never expire)
         self._unlock_lock = threading.Lock()  # prevents concurrent GUI prompts
         self._credential_lock = threading.RLock()
@@ -308,6 +309,7 @@ class VaultService:
 
     def initialize(self) -> None:
         kpdb = resolve_kpdb(required=False)
+        self._default_kpdb = kpdb
         log.info("Initializing - KPDB=%s, CLI=%s", kpdb or "<unset>", self.cli._cli_path)
         if not kpdb:
             log.error("KeePass database path is not configured; set KPDB to your .kdbx path")
@@ -572,7 +574,9 @@ class VaultService:
             return self._generation_health()
         self._check_password_ttl()
         client = request.get("_client", "")
-        kpdb = request.get("kpdb") or resolve_kpdb(required=False)
+        kpdb = request.get("kpdb")
+        if not kpdb:
+            kpdb = self._default_kpdb if action == "ping" else resolve_kpdb(required=False)
         group = request.get("group")
         vault_name = request.get("vault", "") or ""
 
