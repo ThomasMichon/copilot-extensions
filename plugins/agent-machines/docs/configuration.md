@@ -70,6 +70,8 @@ an enforce constraint into last-wins.
 Native settings applies serialize live read, merge, any confirmation precondition,
 backup and replacement with the target's retained `settings.json.lock`.
 Read-only surface previews do not acquire or create that writer lock.
+The lock resolves only the parent directory; a linked settings filename or
+lock refuses before mutation rather than changing lock identity on replacement.
 
 Machine-wide resource/module packages are read only for this eligible default
 projection; this does not expand a repo-scoped restore's resource-application

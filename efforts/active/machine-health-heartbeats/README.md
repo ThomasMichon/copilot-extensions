@@ -386,3 +386,13 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   preserved both adopted fields and unmanaged state.
 - Current-head review and CI remain required. These source corrections do not
   activate a carrier, install a runtime or change a running session.
+
+### 2026-11-06 - Stable settings lock identity
+- The settings lock resolves only its parent, preserving the final filename.
+  The existing linked-target check now refuses a symlinked settings file
+  before read/merge/write instead of selecting the referent's lock and then
+  switching lock identities after replacement.
+- Both focused Windows controls passed without skips: a real file symlink
+  remained intact with unchanged referent bytes and no lock creation; the real
+  two-process ordinary-target serialization/refreshed-write flow still passed.
+  Ruff and whitespace passed. Review and exact-source CI remain open.

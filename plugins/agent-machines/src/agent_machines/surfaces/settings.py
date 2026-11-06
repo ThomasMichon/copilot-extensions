@@ -72,7 +72,7 @@ def apply(
         return _apply(contributions, home, True, precondition)
     from ..killswitch_mutation import mutation_lock
 
-    with mutation_lock((home / SETTINGS_FILE).resolve()):
+    with mutation_lock(home.resolve() / SETTINGS_FILE):
         return _apply(contributions, home, False, precondition)
 
 

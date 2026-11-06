@@ -284,6 +284,8 @@ live read, merge, confirmation, backup and replacement. The retained sibling
 `settings.json.lock` is local writer coordination, not synchronized fleet state.
 Different preference-state directories do not bypass it. Read-only previews
 take no writer lock and create no lock file.
+Only the parent directory is resolved for lock identity. Linked settings or
+lock filenames refuse before read/merge/write, including native callers.
 
 Exit `0` is a successful preview or native settings transaction; `2` means
 invalid/unavailable input or a refused confirmation. Inspect
