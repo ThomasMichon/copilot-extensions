@@ -21,6 +21,11 @@ from agent_mcp.ipc import request_via_socket
 REPOSITORY = Path(__file__).parents[3]
 QUALIFICATION = "COPILOT_EXTENSIONS_MCP_NATIVE_INSTALL_QUALIFICATION"
 DIAGNOSTIC = "COPILOT_EXTENSIONS_MCP_INCOMING_DIAGNOSTICS"
+_diagnostics_spec = importlib.util.spec_from_file_location(
+    "mcp_incoming_fixture_diagnostics", Path(__file__).with_name("incoming_diagnostics.py"),
+)
+_diagnostics = importlib.util.module_from_spec(_diagnostics_spec)
+_diagnostics_spec.loader.exec_module(_diagnostics)
 
 
 @pytest.fixture
@@ -97,9 +102,7 @@ def payload_copy(root, generation, *, diagnostics=None):
         encoding="utf-8",
     )
     if diagnostics is not None:
-        from incoming_diagnostics import instrument_payload
-
-        instrument_payload(payload, diagnostics, generation)
+        _diagnostics.instrument_payload(payload, diagnostics, generation)
     # This refreshes actual producer bytes, not an installed-slot receipt.
     spec = importlib.util.spec_from_file_location(
         f"fixture_footprint_{generation}", REPOSITORY / "libs/installer-engine/installer_engine_footprint.py",
@@ -154,12 +157,11 @@ async def test_ordinary_install_publishes_without_predecessor_extinction(
     tmp_path_factory, record_testsuite_property, configured, dead_endpoint_port,
 ):
     from plugin_test_environment import isolated_environment
-    from incoming_diagnostics import actor_environment
 
     private = tmp_path_factory.mktemp("in")
     environment = isolated_environment(os.environ, private / "profile")
     diagnostic = os.environ.get(DIAGNOSTIC) == "1"
-    environment = actor_environment(environment, DIAGNOSTIC)
+    environment = _diagnostics.actor_environment(environment, DIAGNOSTIC)
     diagnostic_root = private / "context-diagnostics"
     assert environment.get("OS") == "Windows_NT"
     root = Path(environment["USERPROFILE"]) / ".agent-mcp"
@@ -430,9 +432,8 @@ async def test_ordinary_install_publishes_without_predecessor_extinction(
                     task.cancel()
             await asyncio.gather(*readers, return_exceptions=True)
             if diagnostic:
-                from incoming_diagnostics import read_records
-
                 record_testsuite_property("incoming-fixture-diagnostic-only", True)
                 record_testsuite_property(
-                    "incoming-fixture-context-events", json.dumps(read_records(diagnostic_root), sort_keys=True),
+                    "incoming-fixture-context-events",
+                    json.dumps(_diagnostics.read_records(diagnostic_root), sort_keys=True),
                 )

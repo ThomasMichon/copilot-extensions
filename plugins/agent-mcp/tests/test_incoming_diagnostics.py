@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import replace
 import gc
+import importlib.util
 import json
 from pathlib import Path
 import secrets
@@ -15,7 +16,12 @@ import pytest
 
 from agent_mcp import config, execution_context, incoming
 from agent_mcp.config import AuthSpec, BridgeConfig, ServerSpec
-import incoming_diagnostics as fixture
+
+_fixture_spec = importlib.util.spec_from_file_location(
+    "mcp_incoming_fixture_diagnostics", Path(__file__).with_name("incoming_diagnostics.py"),
+)
+fixture = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(fixture)
 
 
 @pytest.mark.parametrize("difference", ["none", "environment", "config", "cwd"])
@@ -194,10 +200,16 @@ def test_missing_invalid_or_different_key_is_unknown_and_sink_never_serializes_m
 
 
 def test_private_payload_uses_canonical_producer_owner(tmp_path):
-    from test_incoming_installer import payload_copy
+    spec = importlib.util.spec_from_file_location(
+        "mcp_incoming_fixture_installer", Path(__file__).with_name("test_incoming_installer.py"),
+    )
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
 
     original = Path(execution_context.__file__).read_bytes()
-    payload, tripwire = payload_copy(tmp_path / "copy", "old", diagnostics=tmp_path / "events")
+    payload, tripwire = installer.payload_copy(
+        tmp_path / "copy", "old", diagnostics=tmp_path / "events",
+    )
     assert not tripwire.exists()
     assert (payload / "src" / "agent_mcp" / "_fixture_diagnostics.py").is_file()
     profile = json.loads((payload / "scripts" / "uninstall-profile.json").read_text(encoding="utf-8"))
