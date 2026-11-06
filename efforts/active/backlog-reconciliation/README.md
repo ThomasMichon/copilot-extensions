@@ -330,6 +330,24 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [caller-pipe study](launch-pipe-and-logger-quality-cohorts.md) now records
+the complete independently OPEN #5716 parent's fourth finite lane, #6880.
+Current source separates root exit from captured-output EOF; the exact
+logger/watchdog/session/daemon regression remains unchecked. Three completed
+source studies retain #7010's native long-path gap, #7136's manifest-only
+cache regression and #8511's nonexclusive default allocation. None supplies
+technical completion, receiving transfer or resource release. Latest complete
+census remains 802 whole OPEN, 73 above fixed 729; planning review and a
+separate current-parent tracking audit precede any #6880 retirement.
+
+The journal records reviewed #11051 delivery of the three audited outcomes
+and completed-work correction. All three current document blobs match the
+reviewed head, the complete published study was read back, and the actual
+campaign Plan/Validation remains Active. Three independent source studies
+continue; the separate captured-output/root-exit contract is qualified for
+current-source assessment, not an accepted transfer or new native execution.
+Latest complete census remains 802 whole OPEN, 73 above fixed 729.
+
 The [anchor/owner study](anchor-and-owner-observation-cohorts.md) now records
 reviewed #11048, two separately audited NOT_PLANNED tracking retirements
 under OPEN #4173/#4619, and #7039's finite completed source correction in
