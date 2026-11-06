@@ -318,6 +318,155 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
 
 
 @pytest.mark.client_distribution_full
+def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
+    tmp_path_factory, wheel, monkeypatch, progress,
+):
+    from aiohttp import web
+    from fleet_manager.gateway_service_connector import ServiceConnector
+    from fleet_manager.machine_identity import PROFILE
+    from gateway_service_transport_fixtures import Rig
+    from test_gateway_host import ssh_selected
+    from test_gateway_ssh_provider import key
+    from test_runtime_identity import AUDIENCE
+    from test_ssh_machine import continuity_config, update
+
+    tmp_path = tmp_path_factory.mktemp("c")
+    snapshot, application, updated = prepared_application(
+        tmp_path, wheel, monkeypatch, progress, extras="gateway-host,ssh-client",
+    )
+    root = tmp_path / "i"
+    selection, previous, policy, directory = ssh_selected(root)
+    gateway = tmp_path / "gateway"
+    gateway.mkdir()
+    rig = Rig(gateway)
+    rig.h.document["version"] = 4
+    rig.h.document["identity"] = {
+        "profile": PROFILE, "audience": AUDIENCE,
+        "trust_valid_until": rig.h.clock.value + 86400,
+    }
+    rig.h.document["enrollment"] = {"mappings": [
+        {"principal": principal, "kind": kind, "resource": "service-a",
+         "key_source": principal, "expires_at": rig.h.clock.value + 1800}
+        for principal, kind in (("service-a", "service"), ("caller-a", "caller"))
+    ]}
+    rig.h.clock = lambda: int(time.time())
+    slots = [
+        root / "versions" / json.loads((path / "application.json").read_text())["construction"]["runtime_version"]
+        for path in (application, updated)
+    ]
+    for path, slot in zip((application, updated), slots):
+        shutil.copytree(path, slot)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = {
+        name: value for name, value in os.environ.items()
+        if not name.startswith("UV_")
+        and name not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "FLEET_MANAGER_HOST_NONCE"}
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), UV_OFFLINE="1", UV_PYTHON=sys.executable,
+        UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+        FLEET_MANAGER_HOME=str(root),
+    )
+    if os.name == "nt":
+        environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+
+    async def invoke(slot, command, *arguments):
+        executable = slot / (command + (".ps1" if os.name == "nt" else ".sh"))
+        argv = (
+            [shutil.which("powershell.exe"), "-NoLogo", "-NoProfile", "-NonInteractive",
+             "-File", str(executable), *arguments]
+            if os.name == "nt" else [str(executable), *arguments]
+        )
+        started = time.monotonic()
+        result = await asyncio.to_thread(run, argv, cwd=home, env=environment, timeout=90)
+        progress(f"continuity fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
+        return result
+
+    async def status(slot):
+        result = await invoke(slot, "fleet-manager", "gateway-host", "status")
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(result.stdout)
+
+    async def handle(request):
+        assert request.method == "GET" and request.path == "/directory"
+        if request.query["after"] == "0":
+            return web.Response(body=update(policy, directory).encoded)
+        await asyncio.sleep(int(request.query["wait"]))
+        return web.Response(status=204)
+
+    rig.backends[0].handle = handle
+
+    async def exercise():
+        selected_slot, connector_stop = slots[0], asyncio.Event()
+        try:
+            await rig.start()
+            value, _, _, public = continuity_config(
+                root, gateway_origin=rig.origin, gateway_ca=rig.ca, audience=AUDIENCE,
+            )
+            for name in ("state_dir", "config_d", "ssh_config", "authorization_dir"):
+                value[name] = previous[name]
+            value["namespace"] = "/api"
+            binding = next(item for item in rig.h.document["bindings"] if item["reference"] == "keys/caller-a")
+            binding["jwk"] = public
+            rig.h.document["manifest"]["revision"] += 1
+            rig.save()
+            await rig.state.reload()
+            connector = ServiceConnector(
+                slot="service-a", gateway_origin=rig.origin, backend_origin=rig.origins[0],
+                proof_key=rig.h.keys[1], gateway_ca=rig.ca,
+                machine_principal="service-a", machine_audience=AUDIENCE,
+            )
+            rig.tasks.append(asyncio.create_task(connector.run(connector_stop)))
+            await asyncio.wait_for(connector.connected.wait(), 3)
+            host.write_private(Path(selection["configuration"]), value)
+            retained = Path(value["credential_source"]["state_root"]) / "machine.json"
+            before = retained.read_bytes(), retained.stat().st_mtime_ns
+            staged = await invoke(slots[0], "install", "--stage")
+            assert staged.returncode == 0, staged.stdout + staged.stderr
+            assert not (root / host.STATE).exists() and not Path(value["state_dir"]).exists()
+            installed = await invoke(slots[0], "install")
+            assert installed.returncode == 0, installed.stdout + installed.stderr
+            initial = await status(slots[0])
+            assert initial["ready"] and initial["selected"] and initial["revision"] == directory["revision"]
+            authorized = Path(value["authorization_dir"]) / "authorized_keys.gateway"
+            assert key(2) in authorized.read_text()
+            snapshot.rename(snapshot.with_name("unavailable-snapshot"))
+            repeated = await invoke(slots[0], "install")
+            assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+            assert (await status(slots[0]))["pid"] == initial["pid"]
+            wrong = value | {"credential_source": value["credential_source"] | {"harness": "other-harness"}}
+            host.write_private(Path(selection["configuration"]), wrong)
+            failed = await invoke(slots[1], "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == slots[0].name
+            assert (root / "last-known-good").read_text().strip() == slots[0].name
+            host.write_private(Path(selection["configuration"]), value)
+            assert (await status(slots[0]))["pid"] == initial["pid"]
+            changed = await invoke(slots[1], "install")
+            assert changed.returncode == 0, changed.stdout + changed.stderr
+            selected_slot = slots[1]
+            incoming = await status(slots[1])
+            assert incoming["ready"] and incoming["selected"] and incoming["pid"] != initial["pid"]
+            assert (retained.read_bytes(), retained.stat().st_mtime_ns) == before
+            assert not (root / "proof.pem").exists() and not (root / "access").exists()
+            stopped = await invoke(slots[1], "fleet-manager", "gateway-host", "stop")
+            assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+            assert json.loads(stopped.stdout)["native_exit_confirmed"]
+            assert (await status(slots[1]))["state"] == "not-running"
+        finally:
+            try:
+                if (root / host.STATE / host.RUNTIME).exists():
+                    result = await invoke(selected_slot, "fleet-manager", "gateway-host", "stop")
+                    assert result.returncode == 0, result.stdout + result.stderr
+            finally:
+                connector_stop.set()
+                await rig.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.client_distribution_full
 def test_selected_ssh_application_first_touch_repeat_update_and_stop(
     tmp_path_factory, wheel, monkeypatch, progress,
 ):
