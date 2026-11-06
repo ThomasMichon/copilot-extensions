@@ -8,8 +8,8 @@ SKIP_VALUE=0
 for ARGUMENT in "$@"; do
     if [[ "$SKIP_VALUE" == 1 ]]; then SKIP_VALUE=0; continue; fi
     case "$ARGUMENT" in
-        --url|--token|--control-token) SKIP_VALUE=1 ;;
-        --url=*|--token=*|--control-token=*|--shared|--local) ;;
+        --url|--token|--control-token|--task-token|--task-token-file|--task-scope|--task-url|--task-worker) SKIP_VALUE=1 ;;
+        --url=*|--token=*|--control-token=*|--task-token=*|--task-token-file=*|--task-scope=*|--task-url=*|--task-worker=*|--shared|--local) ;;
         telemetry) CONFIGURATION_ONLY=1; break ;;
         *) break ;;
     esac

@@ -506,3 +506,17 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Required current-head CI and review still gate this provider slice.
   Machines adoption, carrier exchange, probes, scheduling and activation
   remain open; no installed or running qualification is inferred.
+
+### 2026-11-06 - Task-prefixed cold launch remains passive
+- Current-head CI passed, but the next review identified a further launcher
+  gap: explicit task-worker root options hid the telemetry namespace from
+  the cold-start scanner, allowing provisioning before native admission.
+- Both Dispatch runtime gates now consume all five task-worker value options
+  and their equals forms before classifying telemetry. Payload controls assert
+  missing-runtime refusal without installation or configuration-state changes.
+- Seven focused Windows controls passed, including ordinary warm-runtime
+  availability; five native POSIX cases remain skipped on this host. The
+  existing warm-runtime fixture now locates the conditional resolver assignment
+  introduced by the configuration-only gate. Ruff and whitespace passed.
+- Fresh current-head review and CI remain required. This correction does not
+  authorize runtime installation, active capture or carrier publication.

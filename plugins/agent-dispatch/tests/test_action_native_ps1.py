@@ -212,7 +212,7 @@ def test_ready_runtime_executes_before_any_action_policy_prerequisite(
 ) -> None:
     source = GATE.read_text(encoding="utf-8")
     if resolution == "ready":
-        start = source.index("\n$python = Resolve-Runtime\n")
+        start = source.index("\n$python = if ($configurationOnly)")
         end = source.index("\nif ($env:AGENT_DISPATCH_NO_SELFPROVISION)", start)
     else:
         start = source.index("\n$provisionSource = Select-ProvisionSource\n")
@@ -843,6 +843,15 @@ def run_global_gate(tmp_path: Path, entry: Path, env: dict[str, str], prefix: st
     ["telemetry", "capabilities"],
     ["telemetry", "retained", "--directory", "unused", "--apply", "--confirm", "unused"],
     ["--url", "unused", "telemetry", "capabilities"],
+    [
+        "--task-token", "unused", "--task-token-file", "unused", "--task-scope", "unused",
+        "--task-url", "unused", "--task-worker", "unused", "telemetry", "capabilities",
+    ],
+    [
+        "--task-token=unused", "--task-token-file=unused", "--task-scope=unused",
+        "--task-url=unused", "--task-worker=unused", "telemetry", "retained",
+        "--directory", "unused", "--apply", "--confirm", "unused",
+    ],
 ])
 def test_payload_telemetry_refuses_missing_runtime_without_provision(
     tmp_path: Path, arguments: list[str],

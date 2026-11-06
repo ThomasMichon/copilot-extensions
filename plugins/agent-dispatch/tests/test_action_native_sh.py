@@ -139,6 +139,15 @@ def test_warm_runtime_start_ignores_action_inhibition(tmp_path: Path) -> None:
     ["telemetry", "capabilities"],
     ["telemetry", "retained", "--directory", "unused", "--apply", "--confirm", "unused"],
     ["--url", "unused", "telemetry", "capabilities"],
+    [
+        "--task-token", "unused", "--task-token-file", "unused", "--task-scope", "unused",
+        "--task-url", "unused", "--task-worker", "unused", "telemetry", "capabilities",
+    ],
+    [
+        "--task-token=unused", "--task-token-file=unused", "--task-scope=unused",
+        "--task-url=unused", "--task-worker=unused", "telemetry", "retained",
+        "--directory", "unused", "--apply", "--confirm", "unused",
+    ],
 ])
 def test_payload_telemetry_refuses_missing_runtime_without_provision(
     tmp_path: Path, arguments: list[str],

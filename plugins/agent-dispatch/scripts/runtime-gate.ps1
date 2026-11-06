@@ -6,12 +6,14 @@ $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($fals
 $forwardArgs = @($args)
 $configurationOnly = $false
 $skipValue = $false
+$valueOptions = @('--url', '--token', '--control-token',
+    '--task-token', '--task-token-file', '--task-scope', '--task-url', '--task-worker')
 foreach ($argument in $forwardArgs) {
     if ($skipValue) { $skipValue = $false; continue }
     $optionName = ([string]$argument -split '=', 2)[0]
-    if ($argument -cin @('--url', '--token', '--control-token')) {
+    if ($argument -cin $valueOptions) {
         $skipValue = $true
-    } elseif ($optionName -cin @('--url', '--token', '--control-token', '--shared', '--local')) {
+    } elseif ($optionName -cin $valueOptions -or $argument -cin @('--shared', '--local')) {
         continue
     } elseif ($argument -ceq 'telemetry') {
         $configurationOnly = $true
