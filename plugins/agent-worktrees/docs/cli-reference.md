@@ -79,6 +79,10 @@ boundaries. Both encoded and legacy unescaped ADO repository names are supported
 Concrete initial/foreign configuration acquisition failures keep bindings
 unavailable even if the loader returns usable defaults. A failed foreign
 target cannot regain availability through the same invocation's cache.
+Malformed `config.d` entries and indeterminate drop-in scans likewise keep
+bindings unavailable, including scans that retain last-known configuration.
+The owning configuration loader's ordinary valid-peer isolation is unchanged.
+Genuinely absent optional registries remain compatible.
 Incomplete owner-provenance diagnostics alone are not a malformed value.
 The record is reread and checked against the selected worktree incarnation and
 again after binding resolution. Changed, malformed, oversized or legacy

@@ -116,7 +116,7 @@ def _url_matches(url: str, provider: str, endpoint: str, repo: str, number: int)
 def _config_failed(observations) -> bool:
     """Reject value failures, not incomplete owner-provenance diagnostics."""
     return any(
-        observation.stage == "config-yaml"
+        observation.stage in {"config-yaml", "config-dropins", "config-dropin-entry"}
         and observation.authority is config_acquisition.ScanAuthority.INDETERMINATE
         or any(
             finding.reason

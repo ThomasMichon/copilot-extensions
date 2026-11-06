@@ -841,3 +841,59 @@ def test_opaque_owner_provenance_is_not_a_configuration_value_failure(source, mo
 
     monkeypatch.setattr(config, "load_config", load)
     assert source.read([_pr()])["associations"][0]["binding"]["available"]
+
+
+def test_malformed_dropin_cannot_leave_a_fallback_binding_available(source, monkeypatch):
+    from agent_worktrees import config_acquisition
+
+    directory = source.path.parent / "config.d"
+    directory.mkdir()
+    path = directory / "override.yaml"
+    path.write_text("repos: [\n")
+
+    def load(**kwargs):
+        config_acquisition.dropin_value(directory, project_name="sample")
+        return SimpleNamespace(repo_name="sample", default_repo=object(), repos={})
+
+    monkeypatch.setattr(config, "load_config", load)
+    entry = source.read([_pr()])["associations"][0]
+    assert entry["binding"]["available"] is False
+    assert path.read_text() == "repos: [\n"
+
+
+def test_indeterminate_dropin_registry_cannot_qualify_retained_values(source, monkeypatch):
+    from pathlib import Path
+    from agent_worktrees import config_acquisition
+
+    directory = source.path.parent / "config.d"
+    directory.mkdir()
+    (directory / "valid.yaml").write_text("repos:\n  sample:\n    remote: origin\n")
+    config_acquisition.dropin_value(directory, project_name="sample")
+    original_iterdir = Path.iterdir
+
+    def unreadable(path):
+        if path == directory:
+            raise OSError("fixture directory unavailable")
+        return original_iterdir(path)
+
+    def load(**kwargs):
+        retained = config_acquisition.dropin_value(directory, project_name="sample")
+        assert retained["repos"]["sample"]["remote"] == "origin"
+        return SimpleNamespace(repo_name="sample", default_repo=object(), repos={})
+
+    monkeypatch.setattr(Path, "iterdir", unreadable)
+    monkeypatch.setattr(config, "load_config", load)
+    assert source.read([_pr()])["associations"][0]["binding"]["available"] is False
+
+
+def test_absent_optional_dropin_registry_keeps_a_known_binding(source, monkeypatch):
+    from agent_worktrees import config_acquisition
+
+    directory = source.path.parent / "absent-config.d"
+
+    def load(**kwargs):
+        assert config_acquisition.dropin_value(directory, project_name="sample") == {}
+        return SimpleNamespace(repo_name="sample", default_repo=object(), repos={})
+
+    monkeypatch.setattr(config, "load_config", load)
+    assert source.read([_pr()])["associations"][0]["binding"]["available"]

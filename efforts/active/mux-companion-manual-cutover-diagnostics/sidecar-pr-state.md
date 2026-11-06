@@ -259,3 +259,20 @@ existing stdout source binding, not its nodes, targets or deadline.
 R1 still needs a fresh independent verdict and green checks on the revised
 head, actual merge and immediate whole-parent readback. R2 and all original
 acceptance remain open; no installed, daemon, model or head action occurred.
+
+### 2026-11-06 - Concrete drop-in admission assessment
+
+The next review had no inline issues but asked for assessment of malformed or
+indeterminate configuration inputs. A bounded check reproduced two real
+`config.d` paths where binding availability survived a malformed override or
+an indeterminate registry retaining old values. Both controls failed before the
+correction; the genuinely absent registry control already passed.
+
+The consumer now includes the canonical drop-in value/entry stages in its
+failure assessment, without changing the owning configuration loader or its
+valid-peer isolation. The five-file packet passed 163 controls without skips
+and with verified cleanup, including the three actual drop-in regressions.
+This is another explicit affected selection, not a sum of prior qualification
+counts. Opaque owner-provenance diagnostics alone still cannot make otherwise
+known binding data malformed. R1 remains pending a fresh independent verdict,
+required checks and actual merge/readback; every original parent gate remains.
