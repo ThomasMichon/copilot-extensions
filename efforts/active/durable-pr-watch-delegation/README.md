@@ -987,6 +987,72 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Repair the actual release-candidate projection blocker
+
+- The repair in #10953 is still pending release. Promotion run `42309816584`
+  failed its candidate-freezing job on #11160: the Efforts completion template
+  was 4,167 bytes, above the unchanged 4,096-byte declaration limit. Overlap
+  warnings were not the blocker.
+- Compact wording retains the same effort completion, post-merge digest,
+  continued-driving, authority, hold and agenda rules at 4,049 bytes. The
+  existing shipped-template and enabled-stack regressions reproduced two
+  failures before the edit; all twenty-one tests pass afterward.
+- The actual promotion projection-sync helper also passes on a fresh isolated
+  candidate containing the real Efforts payload. It writes the selector and
+  reviewed fallback, and a second invocation makes no changes. Its owned
+  fixture was removed after successful validation. This is consumer-contract
+  proof, not a full hosted promotion, runtime rollout or operational acceptance.
+- Continue the bounded #11160 contribution through ordinary review, required
+  CI and an actual merge, then observe normal release execution. Preserve all
+  parent and retained-resource gates; do not force the pipeline or reuse a
+  completed qualification grant for a new released-source run.
+
+### 2026-11-06 - Qualify the original released Dispatch preparation path
+
+- #9277's original fresh-release command,
+  `python tools/run-plugin-tests.py --prepare-only agent-dispatch`, passed on
+  Windows with CPython 3.12.10 and UV 0.12.0 at released Main
+  `9007b0ef321d2be24088cd42279564005d39289e`. A separate fresh test environment
+  also passed with UV 0.13.7. Both real runner invocations returned exit zero
+  and confirmed preparation, preserving source constraints and normal
+  dependency admission. No shared resolver or runtime was installed or updated.
+- The issue is closed on this direct Dispatch evidence after #10861, not on
+  the sibling PR-owner/Fleet preparation or #10953's native acceptance.
+  Preparation alone runs no Dispatch pytest suite and does not qualify
+  credentials, deployed delegation, image/provider/fleet operation or the
+  parent effort. All retained resource and custody holds remain unchanged.
+- Continue with the remaining installed-adoption and retained-resource
+  obligations at their existing authority boundaries. Do not repeat the
+  completed preparation or native qualification to substitute for those gates.
+
+### 2026-11-06 - Complete the bounded native watch-owner repair
+
+- #10953 merged as `ea954b226a096c4bea0ebbd1b1ebcdd64c049c81` after
+  exact-head Copilot approval, resolution of both timeout-diagnostic findings
+  and required CI, including the metadata-triggered run `42305029563`.
+  This resolves #10927's four diagnosed failure classes, not the parent.
+- Final-head hosted run `42303184240` at
+  `5cd79cbbd7bee1d15be4e47d09caf96cfc8c83d1` passed all fifteen selected
+  jobs with actual test and cleanup results read for each. Windows/Linux
+  normal upgrade, shipped cells, peer directions, lease-only refusal,
+  controller-death recovery and concurrent upgrades passed; macOS's
+  unsupported governed-identity refusal passed. Linux's seven existing
+  platform-specific legacy skips do not skip native upgrade or a selected job.
+- Both earlier progress-loop candidates also passed their fifteen selected
+  jobs. Each of the three exact temporary tags was removed after a fresh
+  matching-SHA check and absence readback. The final timeout correction
+  preserves Python 3.10-compatible evidence and the original exception;
+  source controls are not a claim of native Python 3.10 execution.
+- Re-read the parent Plan, Validation Plan and direct retained outcomes after
+  merge. They remain open, including #9277's distinct released-tree Dispatch
+  preparation reproduction, configured credentials, running-consumer,
+  image/provider/fleet and retained-resource duties. Release and authorized
+  installed rollout remain separate from this candidate's disposable hosted
+  qualification. No shared runtime, profile, policy or service was changed.
+- Continue by reconciling #9277's exact release-only preparation path against
+  current source and existing fixes; do not infer Dispatch success from the
+  passing PR-owner/Fleet cohort or repeat the completed qualification.
+
 ### 2026-11-06 - Review compact forge-comment provenance before implementation
 
 - #11129 actually merged as `5687588a648f5ac54bcd7acf6e5857fdebe4ada4`
