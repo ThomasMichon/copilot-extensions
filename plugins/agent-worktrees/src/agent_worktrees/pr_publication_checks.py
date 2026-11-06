@@ -397,7 +397,7 @@ def dispatch_cli(argv: list[str]) -> int:
         if args.operation == "export-config":
             from dataclasses import replace
             config = pr_publication_labels.activate(config, args.publication_origin, args.publication_label)
-            origin = pr_publication_labels.selected(config.default_repo.pr)
+            origin = pr_publication_labels.selected_for_config(config)
             if origin is not None:
                 repo = replace(repo, pr=replace(repo.pr, publication_origin=origin))
             from .pr_worker_config import export_config

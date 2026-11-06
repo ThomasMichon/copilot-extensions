@@ -124,14 +124,26 @@ def test_central_cli_publishes_admitted_source_with_exact_lease(publication, mon
     assert result["expected_remote_head"] == "" and result["observed_head"] == remote_head(p) == p.head
 
 
-def test_configured_push_validates_the_invoking_managed_caller(publication, monkeypatch, tmp_path):
+@pytest.mark.parametrize("origin_mode", ["inert", "absent", "conflicting"])
+def test_configured_push_validates_the_invoking_managed_caller(
+    publication, monkeypatch, tmp_path, origin_mode,
+):
     import json
-    from agent_worktrees import __main__ as cli, output, pr_cli
+    from agent_worktrees import __main__ as cli, output, pr_cli, providers
+    from agent_worktrees.pr_publication_labels import PublicationOrigin
 
     p = publication
+    caller = replace(p.caller, repos={p.caller.repo_name: replace(
+        p.caller.default_repo, pr=replace(
+            p.caller.default_repo.pr, publication_origin=(
+                PublicationOrigin("author", ("source:caller",)) if origin_mode == "conflicting" else None
+            ),
+        ),
+    )})
     policy = tmp_path / "worker-author.json"
     target = replace(p.target, pr=replace(
         p.target.pr, api_base="https://forge.invalid", repository=p.repo,
+        publication_origin=PublicationOrigin("author", ("source:target",)),
     ))
     pr_worker_config.export_config(
         p.repo, target, str(p.workspace), "origin/master", policy, include_author=True,
@@ -140,20 +152,37 @@ def test_configured_push_validates_the_invoking_managed_caller(publication, monk
     monkeypatch.setattr(
         source.cfg, "load_config",
         lambda path=None, **options: (
-            p.caller if path is None else source.cfg._load_config_uncached(path, **options)
+            caller if path is None else source.cfg._load_config_uncached(path, **options)
         ),
     )
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda config, repo:
                         pr_config.ForeignRepoResolution(config.explicit_pr_target, "pr-worker"))
     monkeypatch.setattr(pr_cli, "require_claimant_worktree", lambda *_: (p.wid, ""))
+    current = ["unrelated"]
+    backend = SimpleNamespace(
+        find_pull_by_head=lambda *a, **k: SimpleNamespace(
+            state="open", merged=False, number=7, url="https://forge.invalid/7",
+        ),
+        get_publication_labels=lambda *a, **k: tuple(current),
+        add_publication_labels=lambda repo, number, values, **k: current.extend(values),
+    )
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    origin_args = [] if origin_mode == "inert" else ["--publication-origin", "author"]
     with output.capture_json_output() as capture:
         code = cli.main([
             "pr-push", "--repo", p.repo, "--workspace", str(p.workspace), "--branch", p.branch,
             "--expected-head", p.head, "--expected-remote-head=", "--config", str(policy), "--json",
+            *origin_args,
         ])
     result = json.loads(capture.getvalue())
     assert code == 0 and result["publication_state"] == "pushed", result
     assert result["observed_head"] == remote_head(p) == p.head
+    if origin_mode == "inert":
+        assert "publication_labels" not in result and current == ["unrelated"]
+    else:
+        assert result["publication_labels"]["ok"]
+        assert current == ["unrelated", "source:target"]
 
 
 @pytest.mark.parametrize("change", ["dirty", "untracked", "wrong-branch", "wrong-head", "subfolder"])

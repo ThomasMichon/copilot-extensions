@@ -123,7 +123,7 @@ def cmd_push(args):
             raise ValueError(error)
         config = load_author_config(args.config, args.repo, claimant=True)
         config = labels.activate(config, args.publication_origin, args.publication_label)
-        origin = labels.selected(config.default_repo.pr)
+        origin = labels.selected_for_config(config)
         resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
         if not resolution.resolved:
             raise ValueError("Source target needs a registered repository PR binding")

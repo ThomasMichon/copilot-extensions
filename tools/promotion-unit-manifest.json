@@ -5117,7 +5117,7 @@
         "libs/machine-transport/src/machine_transport/local_execution.py": "9d09c897004ff9d96c76053281ca2db1b76d6e9dae21fef14a9ebf47412f5d05",
         "libs/machine-transport/src/machine_transport/transport.py": "e0eb0294d7786a78cd5533bc1916e0dc271f9528b250fc0c202f35126eab9f84",
         "libs/machine-transport/src/machine_transport/__init__.py": "45ee13e8af7c54400af88ec2e33ab562d81e2ae5e028140e3c130fa69c69d729",
-        "plugins/agent-worktrees/src/agent_worktrees/pr_publication_labels.py": "aa08119bc1d1c5f3e4cd192810829ea5adbe7f7f5d1f77e869d9f68aeb37444b",
+        "plugins/agent-worktrees/src/agent_worktrees/pr_publication_labels.py": "f76a36dcbb55761bd489768fb2d38e57c351d1b83187ca8bfc0123339f257b14",
         "tools/bundle_lock.py": "630134574d86ab5c115ee5e64e1f8e108b0386838992f21e003fbf1957831787",
         "tools/bundle_input_cases.py": "8371f0ee7916be6312ecf8aa6635627d62723ba74586085bf90690f855503743",
         "tools/promotion_unit_tests/test_bundle_inputs.py": "58fe264c28fe361c0e0417b6ed4f09d3ff04ebd053dcfb9310485093fa590d20",

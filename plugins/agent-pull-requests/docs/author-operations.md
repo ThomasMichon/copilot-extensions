@@ -47,7 +47,10 @@ operations use its declared PR policy without inheriting a same-slug registry
 entry or checkout policy. Caller custody and metadata locking still use the
 invoking project's configuration, separately from that target policy. The
 worker binding does not become the claimant worktree: source and PR claims
-still belong to the invoking managed caller. Exported policy carries
+still belong to the invoking managed caller. Publication-origin selection uses
+the delivered target declaration independently of the caller's origin policy,
+and does not activate itself merely because the file contains a declaration.
+Exported policy carries
 no credentials, self-approval, self-merge role or bypass grant, and does not
 authorize dispatch, publication, auto-completion or a human-only action.
 Status/wait and subscription routing remain unchanged by this author-only

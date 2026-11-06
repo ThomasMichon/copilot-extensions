@@ -86,6 +86,9 @@ and auto-complete-consent policy, approval requirements and completion options.
 Required description sections, labels, attribution choices and push deadlines
 are preserved too. An implicit codename default does not become explicit
 attribution consent.
+For explicitly scoped author commands, origin activation reads that target's
+declaration, not the claimant's same-named or absent origin. Activation remains
+explicit and command-scoped; merge-consent and hold labels remain forbidden.
 It explicitly excludes self-approval, self-merge roles and policy bypass.
 An explicit disabled policy remains disabled. No publication or merge is
 authorized merely by possessing the file.
