@@ -1,0 +1,9 @@
+{
+  "comment": "Close read-only SSH ownership probe connections deterministically",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

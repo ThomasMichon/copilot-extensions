@@ -33,6 +33,7 @@ def setup(tmp_path, monkeypatch, binding="bound"):
         "repository_machine_root": str(local),
     }
     monkeypatch.setattr(configuration, "owner_report", lambda root: (report, machine))
+    monkeypatch.setattr(mesh, "_find_machines_source", lambda start=None: (base, path))
     return path, base, knowledge, machine, local
 
 
@@ -134,6 +135,7 @@ def test_native_unready_legacy_owner_preserves_mesh_without_process(tmp_path, mo
     path = tmp_path / "machines.yaml"
     path.write_text("machines:\n  standalone:\n    description: native\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(mesh, "_find_machines_source", lambda start=None: (tmp_path, path))
 
     assert mesh.load_mesh(path, strict=True, preferences=True).machines[0].description == "native"
     assert not (home / ".agent-ssh" / "scripts").exists()

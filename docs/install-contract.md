@@ -1974,6 +1974,12 @@ this boundary before its driver-owned Windows broker adoption and before
 selection or launch callbacks; removal retains the adopted action until its
 owned registration is confirmed gone.
 
+Python application construction retains those helpers from the copied,
+Source-verified application's `runtime` directory, not from a plugin-only
+`scripts` layout. Standalone applications need no plugin scripts directory.
+Non-application construction continues to retain the frozen plugin helpers;
+missing application resources do not fall back to another payload.
+
 Read-only helper execution must not mutate the admitted payload. The runtime
 primitive loads its canonical sidecar source directly without creating or
 consuming bytecode caches; both native Index role probes similarly suppress
@@ -5182,6 +5188,13 @@ queue-aware foundation upgrades are not enabled by that consumer.
 
 `libs/installer-engine/installer_engine.py` is the in-progress Python ownership
 seam for the mutable-dev-slot effort, not a completed installer adoption.
+After input validation, first-touch construction requests the runtime root
+itself with mode `0700` before `.installer-inputs` can create parent directories.
+POSIX construction/retention/publication leases likewise request their root
+with `0700` before their private lease directory. `exist_ok` never repairs an
+existing root's mode or owner; existing consumers retain all refusal checks.
+No process-wide umask is changed. The Windows private-lease DACL creator and
+its ownership/repair admission remain unchanged.
 Construction follows the complete transitive local `tool.uv.sources` graph.
 The canonical dependency policy's `retain_uv_install()` transaction is the
 single owner of its source snapshot, resolver configuration and admitted argv;

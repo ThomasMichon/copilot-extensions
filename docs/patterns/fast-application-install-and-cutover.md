@@ -172,6 +172,19 @@ the owning declaration, not a universal operator API. Add receiver support and
 mixed-version tests before changing a caller; do not make all apps implement
 new command spelling merely to satisfy this document.
 
+The Source application's activation child permits native daemon breakaway
+through its retained process owner. Construction children remain contained by
+default. This allowance does not prove daemon independence: the application
+must still use attributed startup and verify survival after all caller-owned
+cleanup Jobs close, while a restrictive outer Job remains an honest refusal.
+The retained bootstrap checks native same-file interpreter-prefix identity,
+so Windows extended-path spelling can load long native-extension paths without
+accepting a different slot or bypassing completion and retention checks.
+Source activation and callback children start from a safe Windows directory,
+then enter the physical version slot inside that same isolated interpreter.
+This preserves callback arguments, exit status and working-directory semantics
+for long repair slots without changing their names.
+
 ## Additional contract for a resident service
 
 1. **Prepare independently.** An admitted incoming generation is constructed
@@ -270,6 +283,40 @@ values even with extended-path spelling. The same selected isolated interpreter
 enters the canonical native slot path before executing the original probe.
 Source/profile, wheel-content, interpreter and completion checks remain intact;
 no short-root alias, alternate environment or installed-slot rewrite is used.
+
+### Read-only installed application Source
+
+The copied canonical `runtime_application_install.py` exports
+`qualify_installed_application(slot, *, component, command, entry_point, deadline=None)`.
+Startup receivers call it in the existing isolated, no-bytecode (`-I -B`)
+interpreter context, with their expected component and declared command/entry
+point. It requires the caller's actual nested `.venv` interpreter, selected
+numbered physical slot and matching canonical completion. It reuses the
+constructor's Source/profile/construction association and bounded wheel checks,
+then verifies frozen origins and immutable installed-environment metadata.
+An inherited absolute monotonic deadline may narrow the existing 600-second
+input-reading allowance; this does not increase the install caller's deadline.
+
+The immutable `InstalledApplicationSource` result contains `slot`, `root`,
+`python`, the original canonical `SourceIdentity` as `identity`, `payload_hash`
+and `profile_lock_id`. A standalone service therefore retains component
+`ssh-service` and its original payload assembly identity: its emitted
+`uv-application-agent-ssh-service` wrapper is not treated as the original payload.
+The Source library's factored `parse_source_identity()` validates claimed
+document fields only. `read_source_identity()` still verifies the original
+payload's package identity and actual assembly bytes.
+
+The reader takes no lifecycle lease, publishes no completion or selection, starts no
+process, and imports no application. It must not be replaced with a call to the
+mutating `_qualified()` constructor. It also does **not** rerun application
+health or grant root, principal, privacy, repository or provider admission.
+Callers still own those gates and actual native readiness/custody.
+
+This is provider-first API delivery through newly emitted canonical resources,
+not a change to an existing callback protocol. Old copied helpers do not gain
+the callable automatically; missing support refuses the dependent action,
+without falling back to payload-only parsing, invented identities or a build.
+No `source_descriptor` or installation-input schema change is required.
 
 ## App-specific implementation and acceptance
 

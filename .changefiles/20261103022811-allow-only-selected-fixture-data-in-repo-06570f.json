@@ -1,0 +1,9 @@
+{
+  "comment": "Allow only selected fixture data in repository-local source-free SSH tests",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "dev"
+    }
+  ]
+}

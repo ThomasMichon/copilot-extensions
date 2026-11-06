@@ -5,7 +5,7 @@ import shutil
 import sys
 import tarfile
 import zipfile
-from typing import cast
+from typing import Any, TYPE_CHECKING, cast
 
 import pytest
 
@@ -13,6 +13,34 @@ from agent_ssh_service import __version__
 from agent_procutil.owned_process import run_caller_owned
 from fleet_manager.komodo_roles import KomodoRoleProvider
 from fleet_manager.role_bindings import parse_bindings
+
+
+def test_standalone_wheel_construction_keeps_declared_runtime_libraries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = Path(__file__).resolve().parents[1]
+    repo = source.parents[1]
+    monkeypatch.syspath_prepend(str(repo / "tools"))
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder
+        from tools.standalone_python_artifacts import build_standalone_artifacts
+    else:
+        import build_python_artifacts as builder
+        from standalone_python_artifacts import build_standalone_artifacts
+
+    construction: dict[str, Any] = {}
+    def capture(**inputs: Any) -> dict[str, Any]:
+        construction.update(inputs)
+        return inputs
+    monkeypatch.setattr(
+        builder, "build_source_artifacts",
+        capture,
+    )
+    build_standalone_artifacts("ssh-service", out_dir=tmp_path / "artifacts", builder=builder)
+    libraries = dict(construction["dependencies"])
+    assert libraries["single-instance-lease"] == repo / "libs" / "single-instance-lease"
+    assert libraries["agent-procutil"] == repo / "libs" / "agent-procutil"
+    assert libraries["zdd"] == repo / "libs" / "zdd"
 
 
 @pytest.mark.parametrize("flag", ["--help", "--version"])

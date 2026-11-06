@@ -1,0 +1,9 @@
+{
+  "comment": "Continue supersession scanning past retained uninspectable runtime roots",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Retire superseded SSH owners after exact current successor readiness",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

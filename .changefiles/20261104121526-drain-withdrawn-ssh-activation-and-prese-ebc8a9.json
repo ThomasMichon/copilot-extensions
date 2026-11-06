@@ -1,0 +1,9 @@
+{
+  "comment": "Drain withdrawn SSH activation and preserve admitted data path identity",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

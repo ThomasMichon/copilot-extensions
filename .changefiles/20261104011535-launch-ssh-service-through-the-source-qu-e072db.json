@@ -1,0 +1,9 @@
+{
+  "comment": "Launch SSH service through the Source-qualified slot interpreter",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

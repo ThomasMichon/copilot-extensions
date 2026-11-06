@@ -1,0 +1,9 @@
+{
+  "comment": "Keep SSH control endpoints independent of long data directory paths",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

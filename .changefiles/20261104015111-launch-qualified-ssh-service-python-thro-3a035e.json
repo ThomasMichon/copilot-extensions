@@ -1,0 +1,9 @@
+{
+  "comment": "Launch qualified SSH service Python through canonical native path conversion",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

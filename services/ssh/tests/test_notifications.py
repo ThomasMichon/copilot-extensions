@@ -11,6 +11,7 @@ from single_instance_lease import AlreadyRunningError, SingleInstance
 from agent_ssh_service import hosting
 from agent_ssh_service.gateway import SSHService
 from agent_ssh_service.store import DirectoryStore
+from agent_ssh_service.writer import FencedWriter
 from agent_ssh_service.config import Document, ServiceConfig, SSHServiceError, canonical, decode
 from agent_ssh_service.hosting import run
 from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest, ServiceResponse
@@ -189,6 +190,66 @@ async def test_fleet_watch_consumes_actual_service_updates_and_stops_owned_wait(
     finally:
         stop.set()
         await asyncio.gather(owner, return_exceptions=True)
+
+
+async def test_fleet_watch_retries_fenced_outgoing_route_before_successor_attaches(
+    config: ServiceConfig,
+) -> None:
+    outgoing = SSHService(FencedWriter(config, "outgoing").activate())
+    selected = outgoing
+    initial, old_request, release, refused, stop = (
+        asyncio.Event() for _ in range(5)
+    )
+    statuses: list[int] = []
+    accepted: list[int] = []
+    successor: SSHService | None = None
+
+    class Caller:
+        calls = 0
+
+        async def request(self, method: str, target: str, *, response_limit: int) -> ServiceResponse:
+            assert response_limit == 32768
+            self.calls += 1
+            held_outgoing_request = self.calls == 2
+            if held_outgoing_request:
+                old_request.set()
+                await release.wait()
+            response = await selected.handle(request(
+                "principal-worker-a", method, target.removeprefix("/ssh")))
+            statuses.append(response.status)
+            if held_outgoing_request:
+                refused.set()
+            return response
+
+    def accept(update: DirectoryUpdate) -> None:
+        accepted.append(update.revision)
+        initial.set()
+        if update.revision == 2:
+            stop.set()
+
+    watch = asyncio.create_task(SSHDirectoryClient(Caller()).watch(stop, accept))
+    try:
+        await asyncio.wait_for(initial.wait(), 2)
+        await asyncio.wait_for(old_request.wait(), 2)
+        incoming_store = FencedWriter(config, "successor").activate()
+        before = incoming_store.snapshot()
+        release.set()
+        await asyncio.wait_for(refused.wait(), 2)
+        assert statuses == [200, 503]
+        assert incoming_store.snapshot() == before
+        assert (await outgoing.handle(request("unknown", "GET", "/directory"))).status == 403
+        incoming_store.enroll("principal-worker-a", enrollment())
+        successor = SSHService(incoming_store)
+        selected = successor
+        await asyncio.wait_for(watch, 5)
+        assert statuses == [200, 503, 200] and accepted == [1, 2]
+    finally:
+        release.set()
+        stop.set()
+        await asyncio.gather(watch, return_exceptions=True)
+        await outgoing.close()
+        if successor is not None:
+            await successor.close()
 
 
 @pytest.mark.parametrize("status", [429, 503])

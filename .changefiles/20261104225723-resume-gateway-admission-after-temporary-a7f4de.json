@@ -1,0 +1,9 @@
+{
+  "comment": "Resume Gateway admission after temporary writer ownership probe failures",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

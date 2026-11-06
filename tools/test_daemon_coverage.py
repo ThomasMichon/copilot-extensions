@@ -104,6 +104,41 @@ def test_session_host_direct_serve_is_the_admitted_startup_owner():
     assert census["admission_owners"]["b:session_host/host.py"] == [key]
 
 
+def test_ssh_source_start_is_resident_with_its_real_admitted_foreground(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    census = json.loads((root / "tools/daemon-coverage.json").read_text())
+    caller = "ss:local_service.py"
+    site = caller + "::start::spawn_daemon"
+    entry = "ss:__main__.py::_foreground"
+    prefix = census["prefixes"]["ss"]
+    for name in ("local_service.py", "__main__.py"):
+        destination = tmp_path / prefix / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text((root / prefix / name).read_text())
+    selected = {
+        "schema": census["schema"], "prefixes": {"ss": prefix},
+        "sites": {"resident": {
+            key: value for key, value in census["sites"]["resident"].items() if key == site
+        }},
+        "entrypoints": {entry: census["entrypoints"][entry]},
+        "admission_owners": {
+            key: value for key, value in census["admission_owners"].items() if key == caller
+        },
+    }
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "daemon-coverage.json").write_text(json.dumps(selected))
+    assert GUARD.verify(tmp_path) == []
+    assert selected["admission_owners"][caller] == [entry]
+    tree = ast.parse((root / prefix / "local_service.py").read_text())
+    start = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "start")
+    spawn = next(node for node in ast.walk(start)
+                 if isinstance(node, ast.Call) and ast.unparse(node.func) == "spawn_daemon")
+    instance = next(keyword.value for keyword in spawn.keywords if keyword.arg == "instance")
+    assert isinstance(instance, ast.Call) and ast.unparse(instance.func) == "DaemonInstanceSpec"
+    assert ast.literal_eval(instance.args[0]) == census["entrypoints"][entry]
+
+
 def test_posix_exec_intermediary_and_observer_keep_caller_containment():
     census = json.loads(Path(__file__).with_name("daemon-coverage.json").read_text(encoding="utf-8"))
     assert census["sites"]["caller-contained"]["w:launch_seed_posix.py::execute::fork"] == 2

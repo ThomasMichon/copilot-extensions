@@ -2,39 +2,36 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 import os
 import sqlite3
+import stat
+from typing import TYPE_CHECKING
 
 from fleet_manager.gateway_ssh_provider import directory_snapshot
 from fleet_manager.private_state import create_private_file
 
 from .config import Document, ServiceConfig, absolute, canonical, check, decode, identifier, integer, policy_from_dict, public_key
 
+if TYPE_CHECKING:
+    from .writer import FencedWriter
+
 MAX_REQUESTS = 4096
 MAX_RESPONSE = 32 * 1024
 
 
 class DirectoryStore:
-    """The host must hold its canonical single-writer lease for this lifetime."""
+    """Legacy hosts hold the lease; managed owners fence every guarded transaction."""
 
-    def __init__(self, config: ServiceConfig) -> None:
+    def __init__(self, config: ServiceConfig, *, writer: FencedWriter | None = None,
+                 activate: bool = False) -> None:
         self.config = config
+        self.writer = writer
         self.root = absolute(config.to_dict()["data_dir"])
         check(self.root.is_dir(), "service-data-directory-unavailable")
         self.path = self.root / "directory.sqlite3"
-        created = False
-        try:
-            descriptor = create_private_file(self.path)
-        except FileExistsError:
-            absolute(str(self.path))
-            check(self.path.is_file() and self.path.stat().st_nlink == 1,
-                  "invalid-directory-store")
-        else:
-            os.close(descriptor)
-            created = True
-        with self._transaction() as db:
+        with self._initialization(activate=activate) as (db, created):
             if created:
                 for statement in (
                     """CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1),
@@ -75,12 +72,79 @@ class DirectoryStore:
         self.approval = PeerApproval(self)
 
     @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
+    def _initialization(self, *, activate: bool) -> Iterator[tuple[sqlite3.Connection, bool]]:
+        with self.writer.guard() if self.writer is not None else nullcontext():
+            identity = None
+            try:
+                descriptor = create_private_file(self.path)
+            except FileExistsError:
+                absolute(str(self.path))
+                check(self.path.is_file() and self.path.stat().st_nlink == 1,
+                      "invalid-directory-store")
+            else:
+                try:
+                    identity = os.fstat(descriptor)
+                finally:
+                    os.close(descriptor)
+            completed = False
+            try:
+                with self._guarded_transaction(activate=activate) as db:
+                    yield db, identity is not None
+                completed = True
+            finally:
+                if identity is not None and not completed:
+                    self._discard_empty_creation(identity)
+
+    def _discard_empty_creation(self, identity: os.stat_result) -> None:
+        """Only this guard's failed fresh file, never preexisting or committed data."""
+        try:
+            current = self.path.lstat()
+            if (
+                not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                or getattr(current, "st_file_attributes", 0) & 0x400
+                or (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino)
+            ):
+                return
+            if current.st_size:
+                db = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
+                try:
+                    if db.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is not None:
+                        return
+                finally:
+                    db.close()
+            current = self.path.lstat()
+            if (current.st_dev, current.st_ino, current.st_nlink) == (
+                identity.st_dev, identity.st_ino, 1,
+            ) and stat.S_ISREG(current.st_mode) and not getattr(current, "st_file_attributes", 0) & 0x400:
+                self.path.unlink()
+        except (OSError, sqlite3.Error):
+            return
+
+    @contextmanager
+    def _transaction(self, *, activate: bool = False) -> Iterator[sqlite3.Connection]:
+        with self.writer.guard() if self.writer is not None else nullcontext():
+            with self._guarded_transaction(activate=activate) as db:
+                yield db
+
+    @contextmanager
+    def _guarded_transaction(self, *, activate: bool) -> Iterator[sqlite3.Connection]:
+        from .writer import managed_owner
+
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
         try:
             db.execute("PRAGMA synchronous=FULL")
             db.execute("BEGIN IMMEDIATE")
+            if self.writer is None:
+                check(managed_owner(db) is None, "managed-writer-requires-transfer-owner")
+            elif activate:
+                self.writer.claim(db)
+            else:
+                self.writer.check(db)
             yield db
+            if self.writer is not None:
+                self.writer.check(db)
+                if activate:
+                    self.writer.selected()
             db.commit()
         except BaseException:
             db.rollback()

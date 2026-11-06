@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve fenced SSH service lifetime until explicit owned retirement",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}
