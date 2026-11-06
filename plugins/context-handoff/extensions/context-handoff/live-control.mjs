@@ -116,14 +116,16 @@ export function sessionOverridePath(sessionStateRoot, sessionId) {
 }
 
 // Config thresholds with any session override layered on top. An override
-// that no longer fits a reloaded config falls back to the config thresholds.
-export function effectiveThresholds(configThresholds, override) {
+// that no longer fits a reloaded config (or the live token limit, for mixed
+// percent/token tiers) falls back to the config thresholds.
+export function effectiveThresholds(configThresholds, override, tokenLimit = null) {
   if (!override?.thresholds) return { thresholds: configThresholds, warning: null };
   try {
     return {
       thresholds: validateThresholds(
         mergeThresholdConfigs(configThresholds, override.thresholds),
         "session override",
+        tokenLimit,
       ),
       warning: null,
     };
@@ -242,7 +244,7 @@ export function applyOverrideRequest(current, request, {
   if (Object.keys(requested).length === 0) {
     return reject("'set' needs at least one of soft=, hard=, or force=.");
   }
-  const before = effectiveThresholds(configThresholds, base).thresholds;
+  const before = effectiveThresholds(configThresholds, base, tokenLimit).thresholds;
   const layered = layerOverrideThresholds(base.thresholds, requested);
   let after;
   try {

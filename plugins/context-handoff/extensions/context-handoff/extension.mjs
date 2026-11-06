@@ -1562,6 +1562,58 @@ function retryLatestUsage() {
 
 // --- Live control: config reload + session override ---
 
+// Bumped whenever the live config or session override changes, so a pressure
+// evaluation or idle delivery that awaited across the change abandons its
+// stale result instead of acting on settings that no longer apply.
+let liveSettingsRevision = 0;
+
+function knownTokenLimit() {
+  return state.tokenLimit > 0 ? state.tokenLimit : null;
+}
+
+function rearmReminder(level, { logs = false } = {}) {
+  if (level === "hard") {
+    state.hardReminderSent = false;
+    if (logs) state.hardLogShown = false;
+  }
+  state.softReminderSent = false;
+  if (logs) state.softLogShown = false;
+}
+
+// Drops an undelivered nudge (pause or automatic handling disabled) and
+// re-arms it, so it can fire again once handling resumes.
+function dropPendingNudge() {
+  if (!pendingNudge) return;
+  rearmReminder(pendingNudge);
+  pendingNudge = null;
+}
+
+// Re-checks a queued nudge against the current mode, pause, and effective
+// thresholds: drop it when handling is off or paused, downgrade a hard nudge
+// whose tier moved above current usage, and re-arm whatever was not delivered.
+function revalidatePendingNudge() {
+  if (!pendingNudge) return;
+  if (!automaticPressureHandlingEnabled(handoffConfig.mode) || currentOverride().paused) {
+    dropPendingNudge();
+    return;
+  }
+  let pressure;
+  try {
+    pressure = contextPressure(state.currentTokens, state.tokenLimit, currentEffectiveThresholds());
+  } catch {
+    return;
+  }
+  if (pendingNudge === "hard" && !pressure.hard) {
+    state.hardReminderSent = false;
+    state.hardLogShown = false;
+    pendingNudge = "soft";
+  }
+  if (pendingNudge === "soft" && !pressure.soft) {
+    rearmReminder("soft", { logs: true });
+    pendingNudge = null;
+  }
+}
+
 const INVALID_CONFIG_PREFIX = /^Invalid context-handoff config; using defaults \([^)]*\): /;
 
 // Re-reads the config layers when their files changed since the last check.
@@ -1576,6 +1628,7 @@ async function refreshHandoffConfig() {
         const result = await configReloader.refresh();
         if (result.changed) {
           handoffConfig = result.config;
+          liveSettingsRevision++;
           state.thresholdWarningShown = false;
           overrideWarningShown = false;
           session.log(
@@ -1583,6 +1636,7 @@ async function refreshHandoffConfig() {
             `mode ${result.config.mode}, native_pressure ${result.config.nativePressure}, ` +
             `thresholds ${describeThresholds(result.config.thresholds)}.`,
           );
+          revalidatePendingNudge();
           retryLatestUsage();
         } else if (result.warning) {
           session.log(
@@ -1612,7 +1666,7 @@ function currentOverride() {
 }
 
 function currentEffectiveThresholds() {
-  const effective = effectiveThresholds(handoffConfig.thresholds, currentOverride());
+  const effective = effectiveThresholds(handoffConfig.thresholds, currentOverride(), knownTokenLimit());
   if (effective.warning && !overrideWarningShown) {
     overrideWarningShown = true;
     session.log(`[Context Handoff] ${effective.warning}`, { level: "warning" });
@@ -1649,7 +1703,7 @@ async function applyPressureOverride(request, actor) {
   const result = applyOverrideRequest(current, request, {
     actor,
     configThresholds: handoffConfig.thresholds,
-    tokenLimit: state.tokenLimit > 0 ? state.tokenLimit : null,
+    tokenLimit: knownTokenLimit(),
   });
   if (!result.ok) return { ok: false, text: result.message };
   const action = String(request.action).toLowerCase();
@@ -1657,6 +1711,7 @@ async function applyPressureOverride(request, actor) {
 
   sessionOverride = result.override;
   sessionOverrideFor = state.sessionId ?? null;
+  liveSettingsRevision++;
   const persisted = writeOverride(
     sessionOverridePath(SESSION_STATE_ROOT, state.sessionId),
     result.override,
@@ -1664,13 +1719,14 @@ async function applyPressureOverride(request, actor) {
   state.thresholdWarningShown = false;
   overrideWarningShown = false;
   if (result.override.paused) {
-    pendingNudge = null;
+    dropPendingNudge();
     // Only the operator may lift an active force-tier tool block this way.
     if (actor === ACTOR_OPERATOR) state.blockMutatingTools = false;
   }
-  if ((action === "set" || action === "clear") && !state.handoffGenerated && state.tokenLimit > 0) {
+  if ((action === "set" || action === "clear") && !state.handoffGenerated) {
     // Re-arm only tiers still above current usage, so they fire fresh at the
-    // new threshold instead of repeating a nudge that already landed.
+    // new threshold instead of repeating a nudge that already landed. Absolute
+    // token tiers resolve even when the window size is unknown.
     let pressure = null;
     try {
       pressure = contextPressure(state.currentTokens, state.tokenLimit, currentEffectiveThresholds());
@@ -1686,21 +1742,26 @@ async function applyPressureOverride(request, actor) {
       state.hardLogShown = false;
     }
   }
+  revalidatePendingNudge();
   retryLatestUsage();
   const note = persisted ? "" : "\n- Note: kept in memory only (session folder unavailable).";
   return { ok: true, text: `${pressureStatusText()}${note}` };
 }
 
 session.on("session.idle", async (event) => {
-  if (event.agentId || !pendingNudge) return;
+  if (event.agentId) return;
+  // Refresh on every idle boundary so config edits apply without waiting for
+  // the next usage update; a reload re-checks any queued nudge itself.
   await refreshHandoffConfig();
+  if (!pendingNudge) return;
   if (currentOverride().paused) {
-    pendingNudge = null;
+    dropPendingNudge();
     return;
   }
   const revision = state.windowRevision;
+  const settings = liveSettingsRevision;
   const observation = await observeNativeContext(true);
-  if (revision !== state.windowRevision) return;
+  if (revision !== state.windowRevision || settings !== liveSettingsRevision) return;
   await handoffConfigPromise;
   if (nativePressureDeferred(observation, handoffConfig.nativePressure)) {
     deferNativePressure();
@@ -1713,7 +1774,9 @@ session.on("session.idle", async (event) => {
       pendingNudge = null;
       return;
     }
+    if (settings !== liveSettingsRevision) return;
   }
+  revalidatePendingNudge();
   const messages = [];
   if (pendingNudge) {
     const level = pendingNudge;
@@ -1774,12 +1837,16 @@ async function handleUsage(event) {
   // A session pause (operator or operator-requested agent call) suppresses
   // every automatic tier, including the force-tier auto-handoff.
   if (currentOverride().paused) {
-    pendingNudge = null;
+    dropPendingNudge();
     persistState();
     return;
   }
+  const settings = liveSettingsRevision;
   const observation = await observeNativeContext();
   if (revision !== state.windowRevision) return;
+  // Live settings changed while observing: the change already scheduled a
+  // fresh evaluation (retryLatestUsage), so abandon this stale one.
+  if (settings !== liveSettingsRevision) return;
   if (nativePressureDeferred(observation, handoffConfig.nativePressure)) {
     deferNativePressure();
     persistState();
@@ -1817,6 +1884,7 @@ async function handleUsage(event) {
       pressure.force && !observation.native && !state.forceTriggered && !state.handoffGenerated) {
     const currentObservation = await observeNativeContext(true);
     if (revision !== state.windowRevision) return;
+    if (settings !== liveSettingsRevision) return;
     if (state.forceTriggered || state.handoffGenerated) return;
     if (currentObservation.native) {
       if (nativePressureDeferred(currentObservation, handoffConfig.nativePressure)) {

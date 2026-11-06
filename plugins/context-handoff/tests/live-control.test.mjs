@@ -179,6 +179,17 @@ test("an override that no longer fits a reloaded config falls back to config thr
   });
 });
 
+test("mixed-unit override is checked against the live token limit", () => {
+  const configThresholds = { softPercent: 40, hardPercent: 50, forcePercent: 60 };
+  const override = { ...emptyOverride(), thresholds: { softTokens: 120000 } };
+  // Without a limit the ordering is unknowable, so the override applies.
+  assert.equal(effectiveThresholds(configThresholds, override).warning, null);
+  // At 200k, 120k soft sits above the 100k hard tier: fall back to config.
+  const atLimit = effectiveThresholds(configThresholds, override, 200000);
+  assert.deepEqual(atLimit.thresholds, configThresholds);
+  assert.match(atLimit.warning, /Session threshold override ignored/);
+});
+
 test("override sidecar round-trips only inside an existing session folder", () => {
   const root = mkdtempSync(join(tmpdir(), "ch-override-"));
   try {
