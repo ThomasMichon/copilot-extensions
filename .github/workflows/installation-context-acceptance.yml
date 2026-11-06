@@ -1725,12 +1725,13 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - name: First-touch, repeat, candidate failure, selected update and exact stop
+      - name: Selected host lifecycle and SSH consumer authentication
         env:
           PYTEST_ADDOPTS: >-
             -k "(test_gateway_host and not distribution) or test_gateway_enrollment
             or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
-            or selected_gateway_application_first_touch_repeat_update_and_stop"
+            or selected_gateway_application_first_touch_repeat_update_and_stop
+            or test_ssh_machine or test_machine_identity"
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
 
   gateway-host-application-windows:

@@ -3,6 +3,7 @@ import builtins
 from copy import deepcopy
 from importlib.resources import files
 import json
+import hashlib
 from pathlib import Path
 import signal
 import sys
@@ -24,9 +25,11 @@ from test_gateway_ssh_provider import fixtures, key
 def bounded_caller(monkeypatch):
     from fleet_manager import gateway_service_caller
 
+    original = gateway_service_caller.ServiceCaller
     monkeypatch.setattr(
         gateway_service_caller, "ServiceCaller", lambda **_options: SimpleNamespace(),
     )
+    return original
 
 
 def configured(root):
@@ -48,6 +51,17 @@ def configured(root):
         "identity_file": str(root / "identity"), "public_key_file": str(root / "identity.pub"),
         "authorization_dir": str(root / "authorization"),
         "config_d": str(root / "ssh" / "config.d"), "ssh_config": str(root / "ssh" / "config"),
+    }
+    return value, policy, directory
+
+
+def machine_config(root):
+    value, policy, directory = configured(root)
+    value["version"] = 2
+    value.pop("access_token_file")
+    value["authentication"] = {
+        "profile": "machine-key-v1", "principal": "caller-a",
+        "audience": "https://fleet.example.test", "resource": "service-a",
     }
     return value, policy, directory
 
@@ -94,10 +108,218 @@ def test_config_does_not_adopt_unknown_fields_or_missing_scope(tmp_path):
         SSHMachineConfig.from_dict(value)
 
 
+@pytest.mark.parametrize("change", [
+    {"access_token_file": "unused"},
+    {"version": 1},
+    {"authentication": None},
+    {"authentication": {}},
+    {"authentication": {"profile": "machine-key-v1"}},
+    *({"authentication": {
+        "profile": "machine-key-v1", "principal": "caller-a",
+        "audience": "https://fleet.example.test", "resource": "service-a", **bad,
+    }} for bad in (
+        {"profile": "token"}, {"principal": ""}, {"resource": []},
+        {"audience": ""}, {"audience": "with spaces"}, {"audience": "x" * 513},
+        {"token": "unused"},
+    )),
+])
+def test_machine_config_refuses_mixed_incomplete_or_invalid_authentication_before_effects(
+    tmp_path, monkeypatch, change,
+):
+    from fleet_manager import credential_references
+
+    value, _, _ = machine_config(tmp_path)
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda _path: pytest.fail("invalid config read credentials"),
+    )
+    with pytest.raises(PlanError):
+        asyncio.run(ssh_machine.run(SSHMachineConfig.from_dict(value | change)))
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "ssh").exists()
+
+
+@pytest.mark.parametrize("failure", ["missing", "malformed", "public", "curve", "rsa", "jwk"])
+def test_machine_key_refuses_before_lease_or_profile_and_never_loads_tokens(
+    tmp_path, monkeypatch, failure,
+):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from fleet_manager import credential_references
+    from fleet_manager.gateway_contract import GatewayError
+
+    value, _, _ = machine_config(tmp_path)
+    path = Path(value["proof_key_file"])
+    if failure == "missing":
+        path.unlink()
+    elif failure == "malformed":
+        path.write_bytes(b"-----BEGIN PRIVATE KEY-----\nsynthetic-invalid")
+    elif failure == "public":
+        path.write_bytes(ECKey.generate_key("P-256").get_op_key("verify").public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+        ))
+    elif failure == "jwk":
+        path.write_bytes(canonical(ECKey.generate_key("P-256").as_dict(private=True)))
+    else:
+        key = (
+            ECKey.generate_key("P-384").get_op_key("sign") if failure == "curve"
+            else rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        )
+        path.write_bytes(key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ))
+    monkeypatch.setattr(
+        credential_references, "load_service_credentials",
+        lambda **_options: pytest.fail("machine mode fell back to tokens"),
+    )
+    with pytest.raises(GatewayError, match="credential-(key|reference)-unavailable"):
+        asyncio.run(ssh_machine.run(SSHMachineConfig.from_dict(value)))
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "ssh").exists()
+
+
+def test_v1_keeps_external_pem_and_fresh_token_callback(tmp_path, monkeypatch, bounded_caller):
+    from fleet_manager import gateway_service_caller
+
+    value, _, _ = configured(tmp_path)
+    observed = []
+    monkeypatch.setattr(gateway_service_caller, "ServiceCaller", bounded_caller)
+
+    async def watch(client, stop, _accept):
+        assert not client.caller._machine
+        assert not isinstance(client.caller._key, ECKey)
+        observed.append(await client.caller._access())
+        Path(value["access_token_file"]).write_text("synthetic-rotated", encoding="ascii")
+        observed.append(await client.caller._access())
+        stop.set()
+
+    monkeypatch.setattr(SSHDirectoryClient, "watch", watch)
+    asyncio.run(ssh_machine.run(SSHMachineConfig.from_dict(value)))
+    assert observed == ["synthetic-access", "synthetic-rotated"]
+
+
+def test_machine_consumer_real_tls_proofs_and_local_writer(
+    tmp_path, monkeypatch, bounded_caller,
+):
+    from aiohttp import web
+    from fleet_manager import credential_references, gateway_service_caller
+    from fleet_manager.gateway_service_connector import ServiceConnector
+    from fleet_manager.machine_identity import MachineIdentityVerifier, PROFILE
+    from gateway_service_transport_fixtures import Rig
+    from test_runtime_identity import AUDIENCE
+
+    value, policy, directory = machine_config(tmp_path)
+    gateway_root = tmp_path / "gateway"
+    gateway_root.mkdir()
+    rig = Rig(gateway_root)
+    rig.h.document["version"] = 4
+    rig.h.document["identity"] = {
+        "profile": PROFILE, "audience": AUDIENCE,
+        "trust_valid_until": rig.h.clock.value + 86400,
+    }
+    rig.h.document["enrollment"] = {"mappings": [
+        {"principal": principal, "kind": kind, "resource": "service-a",
+         "key_source": principal, "expires_at": rig.h.clock.value + 600}
+        for principal, kind in (("service-a", "service"), ("caller-a", "caller"))
+    ]}
+    value["authentication"]["audience"] = AUDIENCE
+    value["namespace"] = "/api"
+    value["gateway_ca"] = rig.ca
+    Path(value["proof_key_file"]).write_bytes(rig.h.keys[3].get_op_key("sign").private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption(),
+    ))
+    Path(tmp_path / "access").unlink()
+    monkeypatch.setattr(
+        credential_references, "load_service_credentials",
+        lambda **_options: pytest.fail("machine mode acquired a token source"),
+    )
+    callers, verified, received = [], [], []
+
+    def compose(**options):
+        caller = bounded_caller(**options)
+        callers.append(caller)
+        return caller
+
+    monkeypatch.setattr(gateway_service_caller, "ServiceCaller", compose)
+    verify = MachineIdentityVerifier.verify
+
+    def observe(verifier, principal, proof, **context):
+        identity = verify(verifier, principal, proof, **context)
+        if identity.kind == "caller":
+            verified.append((identity, context))
+        return identity
+
+    monkeypatch.setattr(MachineIdentityVerifier, "verify", observe)
+
+    async def handle(request):
+        body = await request.read()
+        received.append((request.method, request.raw_path, body))
+        if request.path == "/directory":
+            if request.query["after"] == "0":
+                return web.Response(body=update(policy, directory).encoded)
+            await asyncio.Event().wait()
+        return web.Response(body=body)
+
+    rig.backends[0].handle = handle
+
+    async def exercise():
+        stop, owner = asyncio.Event(), None
+        try:
+            await rig.start()
+            value["gateway_origin"] = rig.origin
+            connector = ServiceConnector(
+                slot="service-a", gateway_origin=rig.origin, backend_origin=rig.origins[0],
+                proof_key=rig.h.keys[1], gateway_ca=rig.ca,
+                machine_principal="service-a", machine_audience=AUDIENCE,
+            )
+            task = asyncio.create_task(connector.connect_once())
+            rig.tasks.append(task)
+            await asyncio.wait_for(connector.connected.wait(), 3)
+            config = SSHMachineConfig.from_dict(value)
+            owner = asyncio.create_task(ssh_machine.run(config, stop=stop))
+            await reached((tmp_path / "authorization" / "authorized_keys.gateway").exists, owner)
+            assert key(2) in (tmp_path / "authorization" / "authorized_keys.gateway").read_text()
+            identity, context = verified[0]
+            assert identity.subject == "caller-a" and identity.audience == AUDIENCE
+            assert context == {
+                "method": "GET", "target_uri": rig.origin + "/api/directory?after=0&wait=25",
+                "kind": "caller", "resource": "service-a",
+                "content_digest": hashlib.sha256(b"").hexdigest(),
+            }
+            assert received[0] == ("GET", "/directory?after=0&wait=25", b"")
+            caller = callers[0]
+            assert isinstance(caller._key, ECKey) and caller._access is None
+            response = await caller.request(
+                "POST", "/api/write?opaque=%2f", body=b"synthetic-intent",
+            )
+            assert response.status == 200 and response.body == b"synthetic-intent"
+            assert [context for _identity, context in verified if context["method"] == "POST"] == [{
+                "method": "POST", "target_uri": rig.origin + "/api/write?opaque=%2f",
+                "kind": "caller", "resource": "service-a",
+                "content_digest": hashlib.sha256(b"synthetic-intent").hexdigest(),
+            }]
+            assert [item for item in received if item[0] == "POST"] == [
+                ("POST", "/write?opaque=%2f", b"synthetic-intent"),
+            ]
+        finally:
+            stop.set()
+            try:
+                if owner is not None:
+                    await asyncio.wait_for(owner, 5)
+            finally:
+                await rig.close()
+        lease = ssh_machine._lease(tmp_path / "state")
+        lease.acquire()
+        lease.release()
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("field", ["config_d", "ssh_config", "authorization_dir"])
 @pytest.mark.parametrize("suffix", ["", "nested/output", "nested/../output"])
-def test_output_scope_cannot_populate_the_lease_only_state_tree(tmp_path, field, suffix):
-    value, _, _ = configured(tmp_path)
+@pytest.mark.parametrize("configure", [configured, machine_config])
+def test_output_scope_cannot_populate_the_lease_only_state_tree(tmp_path, field, suffix, configure):
+    value, _, _ = configure(tmp_path)
     value[field] = str(tmp_path / "state" / suffix)
     with pytest.raises(PlanError, match="dedicated state directory"):
         SSHMachineConfig.from_dict(value)
@@ -115,10 +337,11 @@ def test_output_scope_allows_a_distinct_sibling_with_the_same_prefix(tmp_path):
     "sources", "fragment-locks", "root-locks", "inside-sources",
     "inside-locks", "inside-fragments", "inside-authorization",
 ])
-def test_writer_derived_scope_is_checked_before_credentials_or_lease(tmp_path, scope):
+@pytest.mark.parametrize("configure", [configured, machine_config])
+def test_writer_derived_scope_is_checked_before_credentials_or_lease(tmp_path, scope, configure):
     from agent_ssh import gateway_profile, ssh_profile
 
-    value, _, _ = configured(tmp_path)
+    value, _, _ = configure(tmp_path)
     value["ssh_config"] = str(tmp_path / "root-ssh" / "config")
     destinations = {
         "sources": tmp_path / "ssh" / gateway_profile._SOURCE_DIR,
@@ -150,8 +373,9 @@ def test_older_local_adapter_refuses_before_credentials_or_state(tmp_path, monke
 
 
 @pytest.mark.parametrize("change", ["policy", "controller", "authorization"])
-def test_local_policy_is_checked_before_state_or_credentials(tmp_path, monkeypatch, change):
-    value, _, _ = configured(tmp_path)
+@pytest.mark.parametrize("configure", [configured, machine_config])
+def test_local_policy_is_checked_before_state_or_credentials(tmp_path, monkeypatch, change, configure):
+    value, _, _ = configure(tmp_path)
     if change == "policy":
         document = json.loads((tmp_path / "policy.json").read_text())
         document["machines"][0]["role"] = "offline"
@@ -304,7 +528,7 @@ def test_selected_runtime_declares_its_optional_contract_without_hosting():
     ).read_text("utf-8"))
     assert descriptor == {
         "schema": "fleet-manager.ssh-client-contract", "version": 1,
-        "configuration": {"schema": "fleet-manager.ssh-client", "versions": [1]},
+        "configuration": {"schema": "fleet-manager.ssh-client", "versions": [1, 2]},
         "directory": {"schema": "agent-ssh.service-directory", "versions": [1]},
         "entrypoint": {"command": "serve", "role": "ssh-client"},
         "automatic_invocation": False,
