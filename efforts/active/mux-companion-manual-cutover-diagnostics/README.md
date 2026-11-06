@@ -574,9 +574,17 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       installed, popup/Relay, headed-pixel or native-performance acceptance.
       #10777 qualifies private native Windows new-home allocation/exact retry,
       failed final-barrier acknowledgment/retry and complete agenda export with
-      copied readback. Its three native controls have zero skips. Combined
-      native owner composition, installed operation, archive acknowledgment
-      and D5 operational acceptance remain open.
+      copied readback. Its three native controls have zero skips. Those
+      controls do not qualify combined native owner composition, installed
+      operation, archive acknowledgment or D5 operational acceptance.
+      #10784 qualifies the private actual Worktrees/Agenda/Bridge source owners
+      through the Windows PSMux/ConPTY client, including history/live keyboard
+      behavior, healthy full/narrow views and exact reader/observer exit before
+      further original-CLI input. Its reviewed Windows packet passes 112 cases
+      with zero skips. The [readback](journal/2026/11.05-sidecar-windows-owner-composition.md)
+      retains all ten earlier failed runs, a separate cold membership-read
+      budget reliability gap, startup-stability uncertainty and every original
+      installed, performance, popup/Claims/Relay, manual/head and D5 gate.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -602,6 +610,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       demonstrate sparse healthy/full/narrow and separately degraded views.
       #10642 qualifies source/private-process/Textual comparisons, not installed
       behavior, native performance or the original popup/manual/head gates.
+
+- [x] Step 7 finite Windows private-owner/client composition: actual Worktrees,
+      managed Agenda and Bridge source owners, independent history/live input,
+      sparse full/narrow views, retained native exit handles and unchanged
+      original CLI identity accepting further input. #10784's reviewed source
+      passes 112 Windows cases with zero skips. This is not whole S5,
+      startup-stability, installed, native-performance or original Relay
+      acceptance; the separate cold membership-read budget gap remains open.
 
 - [x] Purpose-first: confirm the captured continuation preserves the request
       and distinguishes requested intent from agent-recommended sequencing.
@@ -671,6 +687,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Windows actual-owner client qualification and retained read-budget gap](journal/2026/11.05-sidecar-windows-owner-composition.md)
 - [2026-11-05 - Native Windows allocation/export qualification and remaining owner composition](journal/2026/11.05-sidecar-windows-durability.md)
 - [2026-11-05 - Actual Windows client qualification and retained startup uncertainty](journal/2026/11.05-sidecar-windows-client.md)
 - [2026-11-05 - Maintenance-aware resident recovery and retained child custody](journal/2026/11.05-sidecar-resident-recovery.md)

@@ -15,10 +15,40 @@ import pytest
 
 from agent_procutil import no_window_kwargs
 from test_companion_bridge_codec import OWNER
-from test_companion_bridge_session_source import semantic_peer as semantic_peer
+from test_companion_bridge_session_source import membership_seed, semantic_peer as semantic_peer
 from test_companion_joined_tmux import source_entrypoint
 from test_companion_joined_psmux import live_reader_pids, owner_commands_settled
 from worktree_manager import agenda_transport, companion_bridge_source, mux_companion
+
+
+@pytest.mark.parametrize("profile", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
+def test_membership_seed_diagnostics_preserve_one_call_and_original_result(
+    profile: bool, failed: bool,
+) -> None:
+    manager, result, failure = object(), object(), ValueError("capture-budget-exhausted")
+    calls, reports = [], []
+
+    def source_for(actual_manager, owner):
+        calls.append((actual_manager, owner))
+        if failed:
+            raise failure
+        return result
+
+    if failed:
+        with pytest.raises(ValueError) as caught:
+            membership_seed(manager, OWNER, source_for, reports.append if profile else None)
+        assert caught.value is failure
+    else:
+        assert membership_seed(
+            manager, OWNER, source_for, reports.append if profile else None,
+        ) is result
+    assert calls == [(manager, OWNER)]
+    assert bool(reports) is profile
+    if profile:
+        assert len(reports) == 1
+        assert ("outcome=error" if failed else "outcome=seeded") in reports[0]
+        assert "wall_ms=" in reports[0] and "thread_ms=" in reports[0]
 
 
 @pytest.mark.parametrize(

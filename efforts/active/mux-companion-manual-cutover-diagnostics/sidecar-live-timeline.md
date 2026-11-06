@@ -620,8 +620,14 @@ publication and installed support retain their separate qualification.
   startup-banner failure remains unexplained; this is not startup-stability,
   installed, popup/Relay, headed-pixel or native-performance acceptance.
   The manual Windows packet also selects the private actual-owner composition
-  in `test_companion_joined_psmux.py`; source or Linux-skipped delivery alone
-  does not qualify that still-pending native join.
+  in `test_companion_joined_psmux.py`. #10784's reviewed source passes the
+  112-case Windows packet with zero skips, including actual owner history/live
+  input and exact reader/observer exit before original CLI input. Its
+  [readback](journal/2026/11.05-sidecar-windows-owner-composition.md) closes
+  that finite native join, not startup stability, installed behavior, pixels,
+  performance or the original popup/Claims/Relay and manual/head gates.
+  The separate cold membership-read budget failure remains an open source
+  reliability gap under this effort and #8811.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
@@ -655,6 +661,15 @@ is inferred from these presentation checks.
   independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
+
+- [x] Qualify the isolated Windows PSMux/ConPTY client with the actual private
+  Worktrees/managed-Agenda/Bridge source owners, sparse full/narrow views,
+  independent history, live purpose/count/unread updates, Follow-live and
+  complete birth-qualified reader/observer exit before unchanged CLI input.
+  #10784's reviewed source passes run `42140565596`, Windows job
+  `127639558279`: 112 passed, zero skips. All ten earlier unsuccessful runs
+  remain retained. The separate cold membership-read budget gap, startup
+  stability, installed behavior, performance and original parent gates stay open.
 
 - [x] Qualify the actual private Windows PSMux/ConPTY client over the unmodified
   Companion with a synthetic wire-valid owner, independent history/live input,

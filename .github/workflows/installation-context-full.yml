@@ -1578,6 +1578,7 @@ jobs:
         env:
           UV_PYTHON: "3.12"
           EXPECTED_SOURCE: ${{ github.sha }}
+          COMPANION_MEMBERSHIP_PROFILE: "1"
         run: |
           python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

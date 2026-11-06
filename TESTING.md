@@ -2545,6 +2545,15 @@ and unknown birth stays unsettled. All source commands, readers and observer
 must still exit before further input is sent to the original CLI. The same
 run's separate 50 ms membership-seed setup failure is retained under #8811,
 not waived or hidden by this exit-check correction.
+The manual Windows Companion packet enables the fixture-only
+`COMPANION_MEMBERSHIP_PROFILE=1` diagnostic. It profiles the existing initial
+`source_for` call, reports total wall and current-thread CPU time plus the top
+25 cumulative call costs with directory paths stripped, and preserves the
+original result or exception. It does not retry, prewarm, replace an owner,
+change the 50 ms/VM budgets or make a failed read pass. Other runs remain
+unprofiled unless explicitly selected. Portable controls preserve one call
+and exact result/exception identity in both modes. Profiled timings include
+instrumentation and are diagnostic evidence, not native performance acceptance.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that
