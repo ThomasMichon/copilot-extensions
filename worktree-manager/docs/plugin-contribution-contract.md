@@ -424,6 +424,13 @@ collected values and provider effects before submission, with Cancel selected
 initially. Providers must revalidate values and target identity on submission;
 displaying a preview is not authorization to skip validation.
 
+The native repository **Authentication** adapter also uses this version-1
+list/card shell; its provider-owned observations are not a cross-provider
+authentication schema. It qualifies support from the exact selected immutable
+runtime before invoking the optional read, rather than advertising new syntax
+through a payload pivot that an older Manager could execute.
+See [Configuration](configuration.md#repository-authentication-inspection).
+
 ### Optional provider-computed preview
 
 A Configuration **row form** may add a `preview` argv alongside `run`, with

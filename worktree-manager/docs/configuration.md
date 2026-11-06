@@ -6,6 +6,36 @@ provider settings that must not be committed to a project. The existing
 `[source]` update-source, AHP provider and restart-recovery tables coexist in this file;
 `worktree-manager source set/reset` preserves all non-source tables.
 
+## Repository authentication inspection
+
+The standing **Authentication** section is a read-only view of the selected
+project's registered repository, not a credential store or a whole-harness
+readiness verdict. The native repository owner supplies credential availability,
+verified identity and exact repository-metadata access as separate rows and
+detail cards. Cards retain the target, registry revision, observation time,
+failure stage and unobserved capabilities. Git/GCM transport, write permission,
+CodeSpaces, MCP and Copilot are not verified by this API observation.
+
+The section uses the existing version-1 Configuration list/card shell. Opening
+Profiles or another section does not run its authentication read. Visiting or
+refreshing Authentication performs one bounded native inspection; retained
+observations are visibly stale during refresh, failures stay visible and
+retryable, and a background completion never changes the selected section.
+There is no executable sign-in action, account switch, credential write,
+installation, knowledge binding or first-task admission.
+
+Manager first qualifies the selected engine command against the existing
+installed-runtime resolver and reads its optional support declaration from that
+exact immutable slot. A newer marketplace payload is not support evidence.
+Missing, invalid or older declarations, a foreign explicit engine command and
+provider rollback make only this section **unsupported**, without invoking
+new syntax or disabling repository preferences. There is no equivalent legacy
+authentication read and no probe/replay downgrade. The native descriptor's
+`configuration: 1` advertises its provider-owned list projection; older consumers
+ignore this additive field. Older Managers do not discover a new payload pivot.
+The [native contract](../../plugins/agent-worktrees/docs/repository-authentication.md)
+owns provider scope, response meaning and compatibility details.
+
 ## Installation and Updates
 
 Configuration includes a standing **Installation & Updates** list. It combines
