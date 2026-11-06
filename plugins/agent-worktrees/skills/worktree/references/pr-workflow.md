@@ -455,6 +455,17 @@ fits the target repo's configured flow — they are not interchangeable:
   auto-complete affordance at PR-open time so the platform lands it once its
   gate clears, rather than polling forever in-session.
 
+Wait for the transition that can change the next action and consume its result
+before re-arming. Record the exact repository, PR/head, outstanding gate and
+current owner in the existing task record. A watcher exit, delivered event or
+captured result is not an assessed verdict or confirmed merge.
+If prerequisite jobs finish but a required check never appears, inspect the
+provider's exact check/run/head identity and declared trigger instead of
+repeating an unchanged wait. Distinguish a still-running job from a skipped,
+cancelled, absent or failed gate; none is permission to bypass required CI.
+Preserve the existing deadline/cursor and unknown-effect recovery rules above.
+Independent authorized work may continue while an external gate remains pending.
+
 **The only sanctioned deviations** from driving a PR through to merge:
 
 1. **The operator explicitly says otherwise** for this PR/session (e.g. "just

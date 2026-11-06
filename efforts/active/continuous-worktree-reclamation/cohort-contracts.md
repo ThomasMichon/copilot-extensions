@@ -11,18 +11,21 @@ tracker retirement still requires the source-specific gates below.
 
 | Original | Retained owner boundary | Required before retirement |
 |----------|-------------------------|----------------------------|
-| #1488 | Existing task-terminal reclamation custodian; separate from per-attempt #1918 | Explicit existing-owner disposition accepting the complete task-terminal contract. |
-| #1666 | Ground-layer claimant-liveness, not allocator cleanup or reviewer lineage | Named, accepted ground-layer owner for the exact explicit-conclusion liveness rule. |
-| #1918 | Assigned per-attempt cleanup owner | Explicit transfer or re-recording of that assigned scope/claim; no implied reassignment. |
+| #1488 | Existing task-terminal reclamation custodian; separate from per-attempt #1918 | Reviewed complete Plan/Validation receipt. The existing owner's recorded product/task-terminal disposition remains unchecked; it is not an issue-status veto. |
+| #1666 | Ground-layer claimant-liveness, not allocator cleanup or reviewer lineage | Reviewed separate explicit-conclusion Plan/Validation. No separate implementer/transfer is currently recorded; that does not create an owner-ACK or native-completion gate to tracker retirement. |
+| #1918 | Same current public assignee, ThomasMichon, for the exact per-attempt lane | Re-record that same assignment, scope and claim in #6620's body and this reviewed plan; preserve the child assignment and source/resource custody. No reassignment or implementation completion is required. |
 | #3114 | Existing terminal-reclamation custodian plus non-Dispatch ground-layer owner | Explicit custodian scope acceptance and an actual named open owner for the general ground-layer cases, carrying all nine clauses below. |
-| #4101 | Existing claimant is documentation/report-only | Named, accepted runtime implementation owner and all six inherited requirements. |
+| #4101 | Existing claimant is documentation/report-only | Reviewed mapping of all six inherited requirements; name the runtime implementation owner before implementation work, not before tracker retirement. |
 | #6060 | Separate semantic conclusion tidier | Excluded from this receiving proposal; its design, authorized pilot and schedule decisions remain in its own effort. |
 
-Keep all six originals open while these gates remain unresolved. Review/merge
-of this plan is not a custodian acknowledgement. No assignee, claim or
-allocation changes through this amendment. Missing native/installed/live proof
-can remain Validation work under a genuinely accepted receiver; it is not
-itself a demand to complete the whole parent before finite planning intake.
+Keep #3114 open until its literal custodian-acceptance and named general-ground
+mapping conditions are satisfied; this amendment does not satisfy them. The
+other four receiving lanes may consolidate after their complete reviewed
+Plan/Validation is recorded in the real OPEN #6620 parent and read back.
+#6060 remains separate. Review is not implementation custody or a release of
+any claim, assignee, allocation or resource. Missing native/installed/live
+proof and #1488's product disposition remain unchecked independent Validation
+work, not prerequisites to administrative tracker retirement.
 
 ## Workstream Plan
 
@@ -50,6 +53,10 @@ itself a demand to complete the whole parent before finite planning intake.
 
 ### Per-attempt allocations - #1918
 
+- Retain the same current public assignee, ThomasMichon, and existing exact
+  per-attempt source claim in both this plan and #6620's receiving body.
+  Tracker retirement preserves the child assignment and every source/resource
+  responsibility; it neither transfers nor broadens that implementation lane.
 - Persist exact worktree/session/task/reservation/attempt/driver and creating
   host/environment provenance before body execution and reservation settlement.
 - Separate proactive cleanup of a still-present exact pristine allocation from
@@ -144,7 +151,7 @@ implementation/native/resource bounds.
 | #1666 | Closed activation plus no live bound body becomes non-live immediately. Live/newer owner, crash ambiguity, remote/unreachable, incomplete activation and identity mismatch stay held. Replacement task-generation/reservation behavior creates no duplicate worker or unauthorized takeover, claim release or removal. |
 | #1918 | No-handle pristine-present, already-absent, live, dirty/ahead/untracked, unreadable/unknown, foreign-host, newer racing attempt, lost bridge handle and supervisor restart. No identity loss, success-shaped unknown/failure, lease/claim expiry or business-work replay. |
 | #3114 | One exact inbound release across both sides/retry/restart; multiple claims and concurrent add/resume cannot orphan/double-release. Partial removal, pair, foreign/unknown owner, non-Dispatch allocation, report-first adoption and post-reclaim history stay attributable/queryable. Verify all nine clauses and actual general-ground owner mapping. |
-| #4101 | Source/squash-aware rule on all three callers, conversation-only evidence, stale/restarted projection, post-finalize new clean commit, concurrent mutation and lock-held final action admission. A FINAL/COMPLETED label or report-only audit cannot bypass objective/claim/source revalidation. |
+| #4101 | Source/squash-aware rule on all three callers, valid landed-squash and zero-commit artifacts, conversation-only evidence, stale/restarted projection, post-finalize new clean commit, concurrent mutation and lock-held final action admission. A FINAL/COMPLETED label or report-only audit cannot bypass objective/claim/source revalidation. |
 | #6620 trust | Finalize then supported resume restores config/marketplace/hooks/skills; finalize-cleanup, repeat finalize, failure, stale/missing path and concurrent resume/cleanup preserve permissions, exact claims/pair custody and finality. |
 
 Each lane retains independent acceptance. Runtime source, native process/lock,

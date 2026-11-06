@@ -306,6 +306,14 @@ is the `continue-until-closed` behavior the `efforts` vision commits to: the
 rightful head keeps driving until the effort's own completion gate is
 satisfied, not until one relay leg, PR, or checklist item happens to finish.
 
+Completion ownership does not silently choose scheduling order. When an
+assignment is a finite queue of delivery slices, reconcile the larger parent
+after each slice, preserve its remaining work and owner, then select the next
+assigned item unless a real dependency or authorized priority change calls for
+deeper continuation. Do not expand "land these changes" into "finish every
+associated program first," or abandon those programs to improve queue counts.
+An assignment to finish the full effort retains that full acceptance gate.
+
 In particular, **opening or pushing a reviewable change is not a stopping
 point** — it's mid-flight. Once a PR (or equivalent reviewable gate) exists,
 stay on it: watch for the verdict, and act on it immediately — once the

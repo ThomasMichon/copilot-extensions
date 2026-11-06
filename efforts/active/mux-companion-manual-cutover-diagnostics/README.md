@@ -595,6 +595,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       with writable-bootstrap owner indexes and current native lookup/client
       qualification. The same readback retains passive old-store behavior,
       the original budgets and the unexplained one-row cold timeout.
+      #10855 qualifies the supported strict owner-codec boundaries and
+      rejects contradictory membership replay without imposing contiguous
+      owner-local sequence numbers. Its 242 source controls do not complete
+      history/append-failure, universal-source or native/installed acceptance.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -609,6 +613,20 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       whole S2-S5 and original root gates remain open.
 
 ## Validation Plan
+
+- [x] Step 7 finite supported history/live splice and gap qualification:
+      274 owner/model/actual-three-source controls preserve explicit
+      retention/replacement/append failure and distinguish coalesced
+      observations from canonical accepted history. See the
+      [source readback](journal/2026/11.05-sidecar-history-gaps.md).
+      Universal source, installed/native and whole-parent gates remain open.
+
+- [x] Step 7 finite supported owner-codec boundaries: exact fields and
+      enumerations, numeric/boolean distinctions, cursor/source identity,
+      duplicate/malformed data and no inferred rendering/custody authority.
+      #10855 qualifies 242 source/private-process/Textual controls, including
+      actual two-owner sequence gaps. Universal source coverage and the
+      remaining history, native/installed and original parent gates stay open.
 
 - [x] Step 7 finite exact-owner read scaling: avoid unrelated-registry scans
       through ordinary writable-bootstrap indexes; preserve read-only and
@@ -705,6 +723,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Supported history/live splice and gap qualification](journal/2026/11.05-sidecar-history-gaps.md)
 - [2026-11-05 - Strict codec and retained membership replay boundaries](journal/2026/11.05-sidecar-codec-boundaries.md)
 - [2026-11-05 - Cold membership diagnostics and native fixture corrections](journal/2026/11.05-sidecar-membership-diagnostics.md)
 - [2026-11-05 - Windows actual-owner client qualification and retained read-budget gap](journal/2026/11.05-sidecar-windows-owner-composition.md)
