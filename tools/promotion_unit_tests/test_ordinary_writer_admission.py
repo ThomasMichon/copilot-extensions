@@ -104,6 +104,26 @@ def test_future_admission_needs_no_impossible_prior_journal(admission):
     assert calls == [["--json", "version", "--contracts-json"], ["--json", "status"]]
 
 
+def test_selected_writer_is_observed_before_workspace_identity_exists(admission):
+    owner, health, _, _, _, calls, run = admission
+    selected = type(owner).selected_writer(run)
+    assert selected == owner.requirement["identity"]
+    health["worktree_record_writer"]["runtime_generation"] = "b" * 32
+    assert selected == owner.requirement["identity"]
+    assert calls == [["--json", "version", "--contracts-json"], ["--json", "status"]]
+
+
+@pytest.mark.parametrize("identity", [
+    None, {}, {"installation_root": "/writer", "runtime_generation": True},
+    {"installation_root": "", "runtime_generation": "a" * 32},
+], ids=["missing", "empty", "generation", "root"])
+def test_selected_writer_refuses_malformed_identity_before_preparation(admission, identity):
+    owner, health, _, _, _, _, run = admission
+    health["worktree_record_writer"] = identity
+    with pytest.raises(TaskError, match="selected writer identity"):
+        type(owner).selected_writer(run)
+
+
 def test_prepared_requirement_preserves_original_expectation_without_agent_or_journal(admission):
     owner, *_ = admission
     module = sys.modules[type(owner).__module__]

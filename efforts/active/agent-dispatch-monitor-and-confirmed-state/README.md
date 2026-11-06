@@ -80,9 +80,12 @@ owner call; this source prerequisite does not admit the actual writer cohort.
 Explicit ordinary coordinator configuration now has a conditional trusted
 admission-factory source path, merged in #11117. It retains both independent callbacks and fails
 closed for invalid selections; no permissive policy is provided or installed.
-The next prepared-workspace provider expansion retains the expected writer
+Prepared-workspace provider expansion merged in #11130, retaining the expected writer
 before the first relationship under its original nonce and request. It does
-not yet derive the expectation in ordinary startup or qualify the cohort.
+not qualify the cohort. Working consumer source now derives the new-workspace
+expectation from actual Bridge selection and retains the prepared nonce before
+the first relationship. Independent review, CI and merge of this consumer
+remain pending; no complete-cohort admission policy is supplied.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running

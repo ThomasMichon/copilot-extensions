@@ -171,6 +171,12 @@ mandatory. Unknown responses retain the same assignment and claim.
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers
       through submission, rejection and resubmission.
+      Working conditional new-workspace startup now combines observed Bridge
+      selection with the prepared nonce before the first relationship, using
+      the expanded preparation provider. It replays pending relationship
+      attachment with the retained original expectation. Review/CI/merge,
+      actual independent complete-cohort policy and installed-owner
+      qualification remain open; the expectation is not admission.
 - [ ] Run a fresh whole-stack case only after its first failed boundary changes.
       Verify repeated independent rejection and acceptance through ordinary
       callers, not internal-method fixtures or a previously failed container.
