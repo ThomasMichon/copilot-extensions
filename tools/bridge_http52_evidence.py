@@ -70,8 +70,9 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
     *(path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
+      for plugin in ("agent-codespaces", "agent-worktrees")
       for path in sorted(
-          (Path(__file__).resolve().parents[1] / "plugins/agent-codespaces/src").rglob("*.py"),
+          (Path(__file__).resolve().parents[1] / "plugins" / plugin / "src").rglob("*.py"),
       ) if "__pycache__" not in path.parts),
     *(declaration["canonicalDir"] + "/" + name
       for manifest in ("packaged-assets.json", "launch-wrapper-assets.json")
