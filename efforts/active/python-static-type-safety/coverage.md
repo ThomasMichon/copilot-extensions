@@ -7,14 +7,14 @@ not a second checker configuration.
 
 ## Snapshot and counting rules
 
-Snapshot: **2026-11-05**, merged Dev policy
-`ff44a10389f0b735a8ead7ad41e34e3ceb95047d`, reconciled with
+Snapshot: **2026-11-06**, merged Dev policy
+`5155bd04dafac9f25a72786f92a85d1fbcc63f21`, reconciled with
 `python tools/typecheck.py --inventory --json`.
 
 - **40 / 68 checker projects (58.8%)** have merged strict admission.
-- **384 / 7,981 physical Python files (4.8%)** belong to those strict scopes.
+- **400 / 8,346 physical Python files (4.8%)** belong to those strict scopes.
 - **28 projects remain pending; none are basic.**
-- All 7,981 tracked physical Python paths are classified; none are unclassified.
+- All 8,346 tracked physical Python paths are classified; none are unclassified.
   Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
@@ -52,10 +52,13 @@ Snapshot: **2026-11-05**, merged Dev policy
 The shared real-import-root/additional-version checker prerequisite
 (#10400 / merged #10553) is delivered, independently of the pending Versioned
 Runtime (#10331), Copilot Extensions Harness (#10362) and Payload Invocation
-(#10371) admissions. The refreshed inventory adds one file each to existing
-strict Credential Relay and Dispatch-service scopes; all other additions remain
-with their pending owners. No new project admission is credited. The previous
-40/68-project, 382/7,818-file snapshot remains historical journal evidence.
+(#10371) admissions. The follow-on checker-only prerequisite (#10638) remains
+pending; full-composed-consumer-qualification remains unmet under #9807 / #10362.
+Compared with the prior 384/7,981-file snapshot, this inventory adds 365 physical
+files: 16 within existing strict Machine Transport, Plugin Activation,
+Repository Policy, Venue Copilot, Harness Knowledge and SSH-service scopes,
+and 349 within pending owners. No new project admission or credit from prepared
+work is inferred. Earlier snapshots remain unchanged historical journal evidence.
 
 Project percentages are not code-volume or runtime-test percentages. Small
 shared-library projects and large plugins have very different sizes. Physical
@@ -65,11 +68,11 @@ owned files; the manifest remains authoritative for their exact boundaries.
 
 | Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
-| Shared libraries | 37 | 30 | 729 | 283 |
-| Plugins | 20 | 3 | 5,573 | 20 |
-| Services and managers | 7 | 4 | 990 | 69 |
-| Tools and support | 4 | 3 | 689 | 12 |
-| **Total** | **68** | **40** | **7,981** | **384** |
+| Shared libraries | 37 | 30 | 738 | 289 |
+| Plugins | 20 | 3 | 5,897 | 21 |
+| Services and managers | 7 | 4 | 1,017 | 78 |
+| Tools and support | 4 | 3 | 694 | 12 |
+| **Total** | **68** | **40** | **8,346** | **400** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -99,22 +102,22 @@ Admission decisions and validation details are retained in the
 | `lib-installer-engine` | 28 | Pending | Fragment composition, helper/template and caller qualification |
 | `lib-installer-readiness` | 10 | **Locked** | #10044 |
 | `lib-lazy-cli-dispatch` | 3 | **Locked** | #9951 |
-| `lib-machine-transport` | 19 | **Locked** | #10107; five consumer contracts and native qualification |
+| `lib-machine-transport` | 20 | **Locked** | #10107; five consumer contracts and native qualification |
 | `lib-payload-invocation` | 31 | Pending | #10371; canonical source/test preparation; executed/emitted helpers and consumer copies need qualification |
 | `lib-peer-launch` | 3 | **Locked** | #9967 |
-| `lib-plugin-activation` | 21 | **Locked** | #10108 / merged #10150; both targets, native fixtures and nine consumer contracts |
+| `lib-plugin-activation` | 23 | **Locked** | #10108 / merged #10150; both targets, native fixtures and nine consumer contracts |
 | `lib-plugin-resolve` | 23 | **Locked** | #10141 / merged #10165; both targets, native fixtures and ten consumer contracts |
 | `lib-process-telemetry` | 17 | **Locked** | #10083; explicit optional-SDK checker environment |
 | `lib-remote-login-shell` | 1 | **Locked** | Foundation source admission; canonical journal |
 | `lib-remote-login-shell-remaining` | 1 | **Locked** | Leaf helper/test completion; canonical journal |
-| `lib-repository-policy` | 6 | **Locked** | #10029; executable guest reader included |
+| `lib-repository-policy` | 8 | **Locked** | #10029; executable guest reader included |
 | `lib-session-liveness-probe` | 1 | **Locked** | Foundation source admission; canonical journal |
 | `lib-session-liveness-probe-remaining` | 2 | **Locked** | Leaf helper/test completion; canonical journal |
 | `lib-single-instance-lease` | 14 | **Locked** | #10084; canonical/native and copy correspondence checks |
 | `lib-ssh-manager` | 52 | Pending | Transport/native boundaries and complete fixtures |
-| `lib-update-driver` | 101 | Pending | Driver, installer/bootstrap and test cohorts |
+| `lib-update-driver` | 104 | Pending | Driver, installer/bootstrap and test cohorts |
 | `lib-update-telemetry` | 8 | **Locked** | #10043; owning consumer tests remain separately pending |
-| `lib-venue-copilot` | 12 | **Locked** | #10166 / merged #10170; both targets, native Windows/Linux and three consumer contracts |
+| `lib-venue-copilot` | 13 | **Locked** | #10166 / merged #10170; both targets, native Windows/Linux and three consumer contracts |
 | `lib-versioned-runtime` | 22 | Pending | #10331; preserve behavior with persistent 3.10/3.11 qualification, native/copy and fixture gates |
 | `lib-work-coalescing-singleton` | 8 | **Locked** | #10039 |
 | `lib-worktree-identity` | 1 | **Locked** | Foundation source admission; canonical journal |
@@ -134,38 +137,38 @@ cross-cutting qualification gate below.
 
 | Project | Python files | Merged gate | Remaining work |
 |---------|-------------:|-------------|----------------|
-| `agent-bridge` | 883 | Pending | Component-sized source, native boundary, fixture and copy cohorts |
-| `agent-codespaces` | 285 | Pending | Runtime, venue/install helpers, fixtures and copies |
+| `agent-bridge` | 899 | Pending | Component-sized source, native boundary, fixture and copy cohorts |
+| `agent-codespaces` | 294 | Pending | Runtime, venue/install helpers, fixtures and copies |
 | `agent-conduct-guidance` | 36 | Pending | Scripts, tests and owned copies |
 | `agent-containers` | 197 | Pending | Runtime, providers/install helpers, fixtures and copies |
-| `agent-dispatch` | 863 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
+| `agent-dispatch` | 865 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
 | `agent-index` | 400 | Pending | Client/server, scripts, fixtures and copies |
 | `agent-logger` | 262 | Pending | Runtime, native installer fixtures and copies |
-| `agent-machines` | 173 | Pending | Configuration/requirement engine, scripts, fixtures and copies |
-| `agent-mcp` | 220 | Pending | Adapter/auth/runtime contracts, scripts, fixtures and copies |
-| `agent-pull-requests` | 220 | Pending | Provider/runtime contracts, scripts, fixtures and copies |
-| `agent-ssh` | 159 | Pending | Transport/configuration, native helpers, fixtures and copies |
+| `agent-machines` | 178 | Pending | Configuration/requirement engine, scripts, fixtures and copies |
+| `agent-mcp` | 221 | Pending | Adapter/auth/runtime contracts, scripts, fixtures and copies |
+| `agent-pull-requests` | 237 | Pending | Provider/runtime contracts, scripts, fixtures and copies |
+| `agent-ssh` | 160 | Pending | Transport/configuration, native helpers, fixtures and copies |
 | `agent-vault` | 167 | Pending | Secret/runtime boundaries, native fixtures and copies |
-| `agent-worktrees` | 1,453 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
+| `agent-worktrees` | 1,724 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
 | `ai-attribution` | 5 | **Locked** | #10171 / merged #10176; both targets, native policy/hook controls and Python 3.9 helper compatibility |
 | `budget-guidance` | 87 | Pending | Reader/configuration/runtime contracts, fixtures and copies |
 | `context-handoff` | 6 | **Locked** | #10179 / merged #10192; both targets, native Python/Node controls and Python 3.10 helper qualification |
 | `copilot-extensions-harness` | 17 | Pending | #10362; complete Python helper/test preparation, minimum/native and emitted-copy qualification |
-| `customizing-copilot` | 95 | Pending | Authoring/review/projection scripts, fixtures and shipped copies |
+| `customizing-copilot` | 96 | Pending | Authoring/review/projection scripts, fixtures and shipped copies |
 | `efforts` | 36 | Pending | Policy/capture/lifecycle helpers and tests |
-| `harness-knowledge` | 9 | **Locked** | #10185 / merged #10201; both targets, native Linux and Python 3.10 copied-helper qualification |
+| `harness-knowledge` | 10 | **Locked** | #10185 / merged #10201; both targets, native Linux and Python 3.10 copied-helper qualification |
 
 ## Services and managers
 
 | Project | Python files | Merged gate | Remaining work |
 |---------|-------------:|-------------|----------------|
-| `fleet-manager` | 229 | Pending | Model/control/runtime subsystems, native boundaries and tests |
+| `fleet-manager` | 235 | Pending | Model/control/runtime subsystems, native boundaries and tests |
 | `service-chat` | 29 | Pending | Service/storage/admission boundaries and tests |
 | `service-dispatch` | 7 | **Locked** | #10184 / merged #10189; both targets, complete unchanged source and native fixture qualification |
 | `service-index` | 27 | **Locked** | #10206 / merged #10327; both targets, Python 3.10 native/copy qualification and exact-input CI |
 | `service-pr` | 9 | **Locked** | #10204 / merged #10332; both targets, Python 3.10 native/installed-copy qualification and exact-input CI |
-| `service-ssh` | 26 | **Locked** | #10211 / merged #10348; both targets, Python 3.10 Linux/Windows native qualification and exact-input CI |
-| `worktree-manager` | 663 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
+| `service-ssh` | 35 | **Locked** | #10211 / merged #10348; both targets, Python 3.10 Linux/Windows native qualification and exact-input CI |
+| `worktree-manager` | 675 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
 
 ## Tools and support
 
@@ -174,7 +177,7 @@ cross-cutting qualification gate below.
 | `checker` | 4 | **Locked** | #9831/#9853; typed front door, source views, cache paths and checker tests |
 | `devcontainer` | 3 | **Locked** | #10183 / merged #10193; both Python 3.11 targets, native Linux contracts and complete source/fixture correspondence |
 | `effort-helpers` | 5 | **Locked** | #10215 / merged #10360; both targets, Python 3.11 native controls and current source/composed qualification |
-| `repository-tools` | 677 | Pending | Repository/CI/release/installer tools and fixtures, excluding checker-owned files |
+| `repository-tools` | 682 | Pending | Repository/CI/release/installer tools and fixtures, excluding checker-owned files |
 
 ## Cross-cutting lockdown
 
@@ -184,6 +187,7 @@ cross-cutting qualification gate below.
 | Required source type gate | Established for admitted scopes | #9853; actual type-regression rejection recorded in the canonical effort |
 | Required exact-candidate type gate | Established for admitted scopes | #9862 and the reviewed Main adoption; actual candidate regression rejection recorded |
 | Shared import-root/additional-version prerequisite | Delivered, not consumer admission | #10400 / #10553; four exact-head source/frozen cases and 28 actual MyPy analyses qualify the version/TOML controls on both analysis platforms; consumer aliases, emitted copies and native/runtime gates remain independent |
+| Full composed-consumer qualification | Open | #9807 / #10362; #10638 remains pending and its earlier development/focused results do not qualify the failed full frozen-candidate attempts or any consumer admission |
 | All fragments/templates/generated copies qualified | Open | Complete source-map/materialization correspondence and negative drift controls |
 | Every plugin, service and tool strictly admitted | Open | All project rows locked; no pending/basic scope or omitted fixture family |
 | Final full-portfolio local/CI/release parity | Open | All declared targets, final negative controls and actual full-cohort source/candidate gates pass together |
