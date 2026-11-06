@@ -2473,6 +2473,12 @@ compile the in-process helper, and candidates whose native query is unavailable,
 retain the existing CIM ownership query and its exit/refusal behavior.
 A changed process identity is a refusal, not a reason to use the fallback.
 No owner result is retained across census calls.
+Teardown controller recognition can traverse at most four exact Python
+forwarders of the admitted binding owner's argument vector before its native
+caller. Each interpreter must be absolute and outside the selected removal
+root. Changed arguments, unrelated ancestry, non-Python images and deeper
+chains remain unrecognized; this is not stop authority or a general parent
+exemption.
 
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job

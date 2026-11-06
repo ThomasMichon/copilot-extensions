@@ -646,6 +646,7 @@ def test_missing_cim_image_requires_matching_native_birth(installation, monkeypa
     native_birth = "2026-01-01T00:00:00" if same_birth else "2026-01-01T00:00:01"
     image = str(root / "versions" / "1.0.0" / "python.exe").replace("'", "''")
     prelude = f"""
+function Add-Type {{ throw 'Fixture uses synthetic CIM creation dates' }}
 function Get-CimInstance {{
     param($ClassName, $Filter)
     $rows = @(
@@ -1131,6 +1132,63 @@ def test_only_exact_live_lifecycle_owner_and_native_caller_are_controllers(
         expected = {pid, 123} if mutation == "none" else {pid} if mutation == "unrelated-parent" else set()
         assert admitted == expected
         assert 124 not in admitted, "A legacy runtime ancestor must never become a controller"
+
+
+@pytest.mark.parametrize("mutation", ["none", "arguments", "parent", "rooted", "image", "overflow"])
+def test_lifecycle_python_forwarders_are_exact_external_and_bounded(
+    installation, monkeypatch, mutation,
+):
+    payload, root = installation
+    binding, primitive, _, _ = MODULE._ownership(payload, "agent-bridge", root)
+    lifecycle = binding._load_lifecycle()
+    if not HOST:
+        pytest.skip("Native host unavailable")
+    native = (
+        [HOST, "-NoProfile", "-File", str(payload / "scripts/install.ps1"),
+         "uninstall", "-InstallDir", str(root)] if os.name == "nt" else
+        [HOST, str(payload / "scripts/install.sh"), "uninstall", "--install-dir", str(root)]
+    )
+    owner_args = [
+        sys.executable, "-I", "-S", "-B", "-X", "utf8",
+        str(payload / "scripts/command_binding.py"),
+        "--payload-root", str(payload), "--plugin-id", "agent-bridge",
+        "--legacy-root", str(root), "--teardown", "--run-lifecycle", "--", *native,
+    ]
+    arguments = dict(
+        payload_root=payload, plugin_id="agent-bridge", legacy_root=root,
+        project_root=Path.cwd(), environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)},
+    )
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), primitive, reserve=False, teardown=True, **arguments,
+    ) as lease:
+        monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
+        pid = lease.ticket["pid"]
+        first = pid + 100000
+        count = 5 if mutation == "overflow" else 1
+        forwarders = []
+        for index in range(count):
+            argv = [str(payload / "python.exe"), *owner_args[1:]]
+            if mutation == "arguments":
+                argv[argv.index("--legacy-root") + 1] = str(root.parent / "other")
+            forwarders.append({
+                "pid": first + index, "ppid": first + index + 1,
+                "image": str(root / "python.exe") if mutation == "rooted" else
+                    str(payload / "node.exe") if mutation == "image" else str(payload / "python.exe"),
+                "command": "", "argv": argv,
+            })
+        if mutation == "parent":
+            forwarders[0]["pid"] = first + 9999
+        native_pid = first + count
+        rows = [
+            {"pid": pid, "ppid": first, "image": sys.executable, "command": "", "argv": owner_args},
+            *forwarders,
+            {"pid": native_pid, "ppid": 1, "image": HOST, "command": "", "argv": native},
+        ]
+        _, admitted = MODULE._lifecycle_controllers(rows, payload, root, "agent-bridge")
+        expected = {pid, first, native_pid} if mutation == "none" else (
+            {pid, *range(first, first + 4)} if mutation == "overflow" else {pid}
+        )
+        assert admitted == expected
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows command-line decoding")

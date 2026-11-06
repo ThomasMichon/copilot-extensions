@@ -109,7 +109,8 @@ function Read-PostToolHookFacts {
             'status', 'status_note_at', 'last_session_id', 'head_yielded'
         )
         if (($value['version'] -isnot [int] -and $value['version'] -isnot [long]) -or
-            $value['version'] -ne 1 -or $value['quality'] -cne 'advisory' -or
+            $value['version'] -ne 1 -or $value['quality'] -isnot [string] -or
+            $value['completeness'] -isnot [string] -or $value['quality'] -cne 'advisory' -or
             $value['completeness'] -cne 'partial' -or
             ($value['revision'] -isnot [int] -and $value['revision'] -isnot [long]) -or
             $value['revision'] -lt 1) { return $null }

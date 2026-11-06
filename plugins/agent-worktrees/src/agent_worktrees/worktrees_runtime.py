@@ -96,6 +96,23 @@ def owner_generation(db_path: Path) -> str | None:
 class WorktreesRuntime:
     """No request callback loads records or waits for the owner's state lock."""
 
+    @classmethod
+    def for_monitor(cls, wake, admitted, context):
+        import os
+
+        from . import status_monitor_cutover, status_monitor_runtime
+        from .hook_facts_publication import HookFactsPublisher
+        from .runtime_identity import PROCESS_GENERATION
+
+        root = status_monitor_runtime._aw_runtime_home()
+        return cls(
+            root / "worktrees-current.sqlite3", wake=wake, admitted=admitted,
+            elected=lambda: status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None,
+            hook_facts=HookFactsPublisher(
+                root, PROCESS_GENERATION, project_root=cfg.project_dir, context=context,
+            ),
+        )
+
     def __init__(
         self, db_path: Path, *, wake=None, now=time.monotonic, elected=None, admitted=None,
         hook_facts=None,

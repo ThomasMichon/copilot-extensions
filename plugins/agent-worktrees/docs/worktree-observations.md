@@ -106,6 +106,9 @@ their original admission; derived children and producer output files cannot
 be links/reparse points or hard links. Unrelated row-field/timestamp changes
 do not rewrite unchanged facts. The retained revision names the accepted row
 that last changed this view, not the latest whole-roster observation.
+The original project root resolves once per publication or withdrawal, never
+once per row or as a lifetime cache. Derived-path checks still run before each
+replacement or removal.
 
 The original runtime withdraws affected files on publication failure,
 unqualified/removed rows, admission closure and shutdown. Old publishers only

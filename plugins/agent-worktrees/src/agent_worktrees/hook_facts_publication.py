@@ -71,10 +71,13 @@ class HookFactsPublisher:
         with self._lock:
             self._active = True
 
-    def _home(self, project: str, worktree: str, *, create: bool) -> Path:
+    def _root(self, project: str) -> Path:
         root = Path(self._project_root(project))
         if not root.is_absolute() or not root.is_dir():
             raise ValueError("hook fact project root is unavailable")
+        return root
+
+    def _home(self, root: Path, worktree: str, *, create: bool) -> Path:
         home = root / "worktrees"
         _child(home, directory=True)
         for name in (worktree, "hook-facts"):
@@ -130,8 +133,8 @@ class HookFactsPublisher:
             raise ValueError("hook fact view exceeds byte bound")
         return raw
 
-    def _remove(self, project: str, path: Path) -> None:
-        home = self._home(project, path.parent.parent.name, create=False)
+    def _remove(self, root: Path, path: Path) -> None:
+        home = self._home(root, path.parent.parent.name, create=False)
         if path.parent != home:
             raise ValueError("hook fact home changed")
         try:
@@ -142,9 +145,17 @@ class HookFactsPublisher:
 
     def withdraw(self, project: str) -> None:
         with self._lock:
-            for path in tuple(self._files.get(project, {})):
+            paths = tuple(self._files.get(project, {}))
+            if not paths:
+                return
+            try:
+                root = self._root(project)
+            except (OSError, ValueError) as error:
+                self.error = type(error).__name__
+                return
+            for path in paths:
                 try:
-                    self._remove(project, path)
+                    self._remove(root, path)
                 except (OSError, ValueError) as error:
                     self.error = type(error).__name__
                 else:
@@ -174,9 +185,10 @@ class HookFactsPublisher:
                 if raw is not None:
                     desired[segment(row["id"], "hook fact worktree")] = raw
             retained = self._files.setdefault(project, {})
+            root = self._root(project) if desired or retained else None
             wanted = set()
             for worktree, raw in desired.items():
-                home = self._home(project, worktree, create=True)
+                home = self._home(root, worktree, create=True)
                 path = home / f"{self.generation}.json"
                 wanted.add(path)
                 previous = retained.get(path)
@@ -198,7 +210,7 @@ class HookFactsPublisher:
                     with tempfile.NamedTemporaryFile(dir=home, delete=False) as stream:
                         temporary = Path(stream.name)
                         stream.write(raw)
-                    self._home(project, worktree, create=False)
+                    self._home(root, worktree, create=False)
                     try:
                         _child(path, directory=False)
                     except FileNotFoundError:
@@ -209,7 +221,7 @@ class HookFactsPublisher:
                     if temporary is not None:
                         temporary.unlink(missing_ok=True)
             for path in set(retained) - wanted:
-                self._remove(project, path)
+                self._remove(root, path)
                 del retained[path]
             self.error = None
         except (OSError, ValueError, KeyError, TypeError) as error:

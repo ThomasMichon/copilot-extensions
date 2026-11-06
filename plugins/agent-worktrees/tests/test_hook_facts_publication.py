@@ -148,6 +148,49 @@ def test_same_build_replacement_has_distinct_files_and_old_close_is_local(owner,
     new.close()
 
 
+@pytest.mark.parametrize("finish", ["withdraw", "close"])
+def test_project_root_resolves_once_per_publication_and_withdrawal(
+    owner, tmp_path, monkeypatch, finish,
+):
+    runtime, publisher, project = owner
+    calls = []
+    monkeypatch.setattr(publisher, "_project_root", lambda name: calls.append(name) or project)
+    rows = [row(tmp_path, id=name) for name in ("worktree", "second", "third")]
+    runtime.publish("project", rows, observed_at=1)
+    assert calls == ["project"]
+    calls.clear()
+    runtime.publish("project", rows, observed_at=2)
+    assert calls == ["project"]
+    calls.clear()
+    if finish == "close":
+        publisher.close()
+    else:
+        publisher.withdraw("project")
+    assert calls == ["project"]
+    assert not list((project / "worktrees").rglob("*.json"))
+
+
+def test_monitor_factory_composes_the_original_runtime_and_file_owner(tmp_path, monkeypatch):
+    from agent_worktrees import status_monitor_cutover, status_monitor_runtime
+    from agent_worktrees.worktrees_runtime import cfg
+
+    project = tmp_path / "project"
+    (project / "worktrees").mkdir(parents=True)
+    monkeypatch.setattr(status_monitor_runtime, "_aw_runtime_home", lambda: tmp_path / "runtime")
+    monkeypatch.setattr(status_monitor_cutover, "active_generation_for_pid", lambda pid: "elected")
+    monkeypatch.setattr(cfg, "project_dir", lambda name: project)
+    context = {"marketplaceId": "fixture-selected-source"}
+    runtime = WorktreesRuntime.for_monitor(None, lambda: True, context)
+    try:
+        runtime.activate()
+        runtime.publish("project", [row(tmp_path)], observed_at=1)
+        value = json.loads(output_path(runtime.hook_facts, project).read_bytes())
+        assert value["producer"]["marketplaceId"] == context["marketplaceId"]
+        assert value["producer"]["runtime_root"] == str(tmp_path / "runtime")
+    finally:
+        runtime.shutdown()
+
+
 def test_failed_atomic_replace_withdraws_old_view_but_preserves_roster(owner, tmp_path, monkeypatch):
     runtime, publisher, project = owner
     runtime.publish("project", [row(tmp_path)], observed_at=1)
@@ -217,6 +260,7 @@ def test_project_overflow_withdraws_without_partial_views(owner, tmp_path, monke
         "current", "offset-note", "missing-support", "wrong-incarnation", "wrong-publisher",
         "wrong-build", "malformed", "oversized", "invalid-utf8", "unknown-field",
         "boolean-revision", "wrong-quality", "wrong-case", "typed-head",
+        "boolean-quality", "array-quality", "boolean-completeness", "array-completeness",
     ],
 )
 def test_real_shell_reads_only_the_exact_bounded_advisory_view(
@@ -269,6 +313,10 @@ def test_real_shell_reads_only_the_exact_bounded_advisory_view(
             value["Scope"] = value.pop("scope")
         elif case == "typed-head":
             value["facts"]["head_yielded"] = "false"
+        elif case in ("boolean-quality", "array-quality"):
+            value["quality"] = True if case == "boolean-quality" else []
+        elif case in ("boolean-completeness", "array-completeness"):
+            value["completeness"] = True if case == "boolean-completeness" else []
         path.write_text(json.dumps(value), encoding="utf-8")
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     script = scripts / "hook-facts.ps1"

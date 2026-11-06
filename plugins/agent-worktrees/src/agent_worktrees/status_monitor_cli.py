@@ -271,22 +271,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     segment_cache = status_segment_cache_type(cache_ttl)
     wake_event = threading.Event()
-    from .hook_facts_publication import HookFactsPublisher
-
     installation_context = registry_paths.installation_context()
     repositories_runtime = repository_map.RepositoryMapRuntime(
         status_monitor_runtime._aw_runtime_home()
     )
-    worktrees_runtime = WorktreesRuntime(
-        status_monitor_runtime._aw_runtime_home() / "worktrees-current.sqlite3",
-        wake=wake_event,
-        elected=lambda: status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None,
-        admitted=handover.read_admitted,
-        hook_facts=HookFactsPublisher(
-            status_monitor_runtime._aw_runtime_home(), PROCESS_GENERATION,
-            project_root=cfg.project_dir, context=installation_context,
-        ),
-    )
+    worktrees_runtime = WorktreesRuntime.for_monitor(wake_event, handover.read_admitted, installation_context)
     resident_push.bind(wake_event, segment_cache)
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
