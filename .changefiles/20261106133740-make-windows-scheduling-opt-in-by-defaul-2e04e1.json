@@ -1,0 +1,9 @@
+{
+  "comment": "Make Windows scheduling opt-in by default and add ownership-checked task-only absence reconciliation while retaining on-demand startup.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

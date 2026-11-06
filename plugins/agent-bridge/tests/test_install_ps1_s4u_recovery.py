@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import json
 import os
+import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +24,177 @@ def _function_body(name: str) -> str:
     start = text.index(f"function {name} ")
     end = text.find("\nfunction ", start + 1)
     return text[start:] if end == -1 else text[start:end]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="isolated Windows PowerShell installer functions")
+@pytest.mark.parametrize(
+    "policy,task,expected",
+    [
+        ("preserve", "missing", "unchanged"),
+        ("preserve", "custom", "unchanged"),
+        ("preserve", "disabled", "unchanged"),
+        ("enabled", "missing", "registered"),
+        ("enabled", "owned", "unchanged"),
+        ("enabled", "disabled", "unchanged"),
+        ("absent", "missing", "unchanged"),
+        ("absent", "owned", "removed"),
+        ("absent", "custom", "refused"),
+        ("absent", "suffix", "refused"),
+        ("absent", "ambiguous", "refused"),
+        ("absent", "disabled", "refused"),
+        ("absent", "remove-fails", "refused"),
+    ],
+)
+def test_scheduling_policy_is_task_only_and_repeatable(tmp_path, policy, task, expected):
+    root = tmp_path / "bridge"
+    root.mkdir()
+    state = root / "state"
+    state.write_text("live-daemon-and-state")
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    script = tmp_path / "scheduling.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
+        f"$InstallDir={quote(root)}; $TaskName='fixture-only'; $script:kind={quote(task)}\n"
+        "$script:registered=0; $script:removed=0; $script:task=$null\n"
+        "function Write-Ok { param($m) }; function Write-Skip { param($m) }\n"
+        f"function Get-WindowsScheduledTaskPolicy {{ {quote(policy)} }}\n"
+        "function Register-ScheduledTask_ { $script:registered++; "
+        "$script:task=[pscustomobject]@{State='Ready'; Principal=[pscustomobject]@{LogonType='Interactive'}} }\n"
+        "function Stop-ScheduledTask { throw 'service stop forbidden' }\n"
+        "function Stop-DaemonProcesses { throw 'daemon stop forbidden' }\n"
+        "function Unregister-ScheduledTask { param($TaskName,$Confirm,$ErrorAction)\n"
+        " if ($script:kind -eq 'remove-fails') { throw 'access denied' }; "
+        "$script:removed++; $script:task=$null }\n"
+        "function Get-ScheduledTask { param($TaskName,$ErrorAction) $script:task }\n"
+        "if ($script:kind -ne 'missing') {\n"
+        " $launcher=Join-Path $InstallDir 'start-agent-bridge.ps1'\n"
+        " if ($script:kind -eq 'custom') { $launcher='C:\\foreign\\service.ps1' }\n"
+        " if ($script:kind -eq 'suffix') { $launcher += '.foreign' }\n"
+        " $actions=@([pscustomobject]@{Execute='conhost.exe'; Arguments=\"--headless powershell.exe -File `\"$launcher`\"\"})\n"
+        " if ($script:kind -eq 'ambiguous') { $actions += $actions[0] }\n"
+        " $script:task=[pscustomobject]@{Actions=$actions; State=$(if ($script:kind -eq 'disabled') {'Disabled'} else {'Running'}); Principal=[pscustomobject]@{LogonType='S4U'}}\n"
+        "}\n"
+        + _function_body("Assert-OwnedBridgeTask")
+        + _function_body("Get-SchedulingPolicyTask")
+        + _function_body("Ensure-ScheduledTask")
+        + "\n$result='unchanged'; try { Ensure-ScheduledTask; Ensure-ScheduledTask } "
+        "catch { $result='refused' }\n"
+        "if ($script:registered) { $result='registered' }; if ($script:removed) { $result='removed' }\n"
+        "[Console]::WriteLine((@{result=$result; removed=$script:removed; registered=$script:registered} | ConvertTo-Json -Compress))\n",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    actual = json.loads(result.stdout)
+    assert actual["result"] == expected
+    assert actual["removed"] == (1 if expected == "removed" else 0)
+    assert actual["registered"] == (1 if expected == "registered" else 0)
+    assert state.read_text() == "live-daemon-and-state"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="isolated Windows task-query outcomes")
+@pytest.mark.parametrize(
+    "policy,query,succeeds",
+    [
+        ("absent", "missing", True),
+        ("absent", "denied", False),
+        ("absent", "cim-failure", False),
+        ("absent", "other-not-found", False),
+        ("absent", "module-unavailable", False),
+        ("preserve", "module-unavailable", True),
+        ("preserve", "missing", True),
+    ],
+)
+def test_scheduling_policy_distinguishes_missing_from_unknown(tmp_path, policy, query, succeeds):
+    script = tmp_path / "query.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'; $TaskName='fixture-only'; $script:reportedAbsent=$false\n"
+        f"$query='{query}'\n"
+        f"function Get-WindowsScheduledTaskPolicy {{ '{policy}' }}\n"
+        "function Get-Command { if ($query -ne 'module-unavailable') { 'fixture-command' } }\n"
+        "function Get-ScheduledTask { param($TaskName,$ErrorAction)\n"
+        " if ($ErrorAction -ne 'Stop') { throw 'query must be terminating' }\n"
+        " $id=if ($query -eq 'missing') {'CmdletizationQuery_NotFound_TaskName'} else {$query}\n"
+        " throw [Management.Automation.ErrorRecord]::new([Exception]::new($query),"
+        "$id,[Management.Automation.ErrorCategory]::ObjectNotFound,$TaskName)\n"
+        "}\n"
+        "function Write-Ok { param($m) $script:reportedAbsent=$true }\n"
+        "function Write-Skip { param($m) }\n"
+        "function Unregister-ScheduledTask { throw 'unexpected removal' }\n"
+        + _function_body("Get-SchedulingPolicyTask")
+        + _function_body("Ensure-ScheduledTask")
+        + "\n$succeeded=$false; try { Ensure-ScheduledTask; $succeeded=$true } catch {}\n"
+        "[Console]::WriteLine((@{success=$succeeded; absent=$script:reportedAbsent} | ConvertTo-Json -Compress))\n",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    actual = json.loads(result.stdout)
+    assert actual["success"] is succeeds
+    assert actual["absent"] is (succeeds and policy == "absent")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native configuration reader in PowerShell")
+@pytest.mark.parametrize("policy", ["preserve", "enabled", "absent", "invalid"])
+def test_scheduling_policy_reads_native_retained_config(tmp_path, policy):
+    if policy != "preserve":
+        (tmp_path / "config.yaml").write_text(f"windows_scheduled_task: {policy}\n")
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    script = tmp_path / "reader.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        f"$InstallDir={quote(tmp_path)}; $LinkPython={quote(sys.executable)}; $NonInteractive=$false\n"
+        "$env:AGENT_BRIDGE_NONINTERACTIVE=''\n"
+        + _function_body("Get-WindowsScheduledTaskPolicy")
+        + "\nGet-WindowsScheduledTaskPolicy\n",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if policy == "invalid":
+        assert result.returncode != 0
+        assert "windows_scheduled_task must be" in result.stderr
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == policy
+
+
+@pytest.mark.skipif(os.name != "nt", reason="isolated Windows installer fast paths")
+@pytest.mark.parametrize("action", ["Install", "Update", "Provision"])
+def test_native_reconcile_fast_paths_apply_scheduling_policy(tmp_path, action):
+    script = tmp_path / "fast-path.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'; $script:calls=0\n"
+        f"$LinkPython='{sys.executable}'; $SrcVersion='fixture'; $RequireGracefulCutover=$false\n"
+        "function Write-Step { param($m) }; function Write-Ok { param($m) }\n"
+        "function Ensure-Uv { $true }; function Invoke-MigrationCheck { }\n"
+        "function Get-PayloadHash { 'fixture' }; function Test-SlotContentCurrent { $true }\n"
+        "function Ensure-RuntimeSlotRetention { }; function Write-DeployManifest { }\n"
+        "function Enter-InstallLock { $true }; function Exit-InstallLock { }\n"
+        "function Test-PayloadUnchangedSinceAdmission { param([switch]$SourceIdentityOnly) }\n"
+        "function Invoke-ServingRuntimeReconcile { }\n"
+        "function Get-WindowsScheduledTaskPolicy { 'preserve' }\n"
+        "function Ensure-ScheduledTask { $script:calls++ }\n"
+        + _function_body(f"Invoke-{action}")
+        + f"\nInvoke-{action}; Invoke-{action}; [Console]::WriteLine($script:calls)\n",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "2"
 
 
 def test_scheduler_has_not_run_result_is_read_through_guarded_helper():
@@ -139,6 +313,6 @@ def test_actual_unattended_repair_keeps_task_without_prompting(tmp_path):
         timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode != 0
-    assert "unattended repair left the existing task unchanged" in result.stderr
+    assert "unattended repair left the existing task unchanged" in " ".join(result.stderr.split())
     assert "fixture refuses any elevation launch" not in result.stderr
     assert not (tmp_path / "runtime").exists()
