@@ -4294,7 +4294,7 @@
         "libs/payload-invocation/runtime_admission.py": "81505ec47141476df07f42aef3ce36b80ce99c1655e8604c96c5a6c83d8c72a2",
         "tools/promotion_unit_tests/test_runtime_admission_delivery.py": "dbb56e0d18615ff20c03f3422f49e0ace70e57a1c49a73271c5bb6c34c2a03e8",
         "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py": "535e51d9867170e9159ec5b7042469b327a0d87d70dc3b93ede7742d57a9b316",
-        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "520102eacbee7f5c203971c0fa696653d30145f81cdabdff9f3df7cb07f0e3e6",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "0ac12b68760291791aff1bb99a12d8ef21185f478265f910a830f735281632da",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
         "tools/promotion_unit_tests/test_hook_demand.py": "7d670494215a4a1ca14136430f7b9496f480f6f1f4958cca4adeb4a29954576e",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "10269ea5299c84dc925c7dc19371b3cb473f1cd00fc8342a461f03453d1a9016",
