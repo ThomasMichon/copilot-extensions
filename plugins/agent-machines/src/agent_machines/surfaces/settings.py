@@ -19,6 +19,7 @@ put-back. Locked by ``tests/test_surfaces.py::test_settings_enforce_preserves_un
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,7 @@ def apply(
     ],
     home: Path | None = None,
     dry_run: bool = True,
+    precondition: Callable[[dict[str, Any]], None] | None = None,
 ) -> SurfaceResult:
     """Converge ``settings.json`` from ``(disposition, values)`` contributions."""
     home = home or copilot_home()
@@ -73,7 +75,7 @@ def apply(
     ]
     has_removals = any(disp == "ensure-absent" for disp, _, _ in normalized)
     try:
-        _, live = read_json_object(path) if has_removals else ("", read_json(path))
+        _, live = read_json_object(path) if has_removals or precondition is not None else ("", read_json(path))
     except PluginStateError as exc:
         raise SurfaceStateError(str(exc)) from exc
     new = dict(live)
@@ -123,6 +125,8 @@ def apply(
 
     changed = new != live
     backup = None
+    if precondition is not None and not dry_run:
+        precondition(live)
     if changed and not dry_run:
         backup = backup_file(path)
         write_json_atomic(path, new)

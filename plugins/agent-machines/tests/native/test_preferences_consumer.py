@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -134,3 +135,30 @@ def test_real_cli_writers_serialize_and_refuse_the_stale_preview(tmp_path):
     failure = next(stderr for child, stdout, stderr in results if child.returncode == 2)
     assert json.loads(failure) == {"ok": False, "error": "preview-changed"}
     assert json.loads((receiver / "accepted.json").read_text())["revision"] == 1
+
+
+def test_fresh_copilot_cli_refuses_absent_native_owner_without_bootstrap(tmp_path):
+    state = _policy(tmp_path / "receiver", "example-receiver")
+    (state / "policy.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences.policy", "version": 1,
+        "publisher": "example-publisher", "participant": "example-receiver", "domains": ["copilot"],
+    }), encoding="utf-8")
+    (state / "accepted.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences", "version": 1,
+        "publisher": "example-publisher", "revision": 1, "parent": None,
+        "domains": {"copilot": {"model": "example-model"}},
+    }), encoding="utf-8")
+    environment = dict(os.environ)
+    for key in ("AGENT_HOME", "HOME", "USERPROFILE", "AGENT_RT_ROOT"):
+        environment[key] = str(tmp_path / "fresh-home")
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
+        environment.pop(key, None)
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_machines", "preferences", "copilot",
+         "--state-dir", str(state)],
+        capture_output=True, text=True, timeout=20, env=environment, **no_window_kwargs(),
+    )
+    assert result.returncode == 2, result.stderr
+    assert json.loads(result.stderr) == {"ok": False, "error": "native-context-unavailable"}
+    assert not (tmp_path / "fresh-home").exists()
+    assert sorted(path.name for path in state.iterdir()) == ["accepted.json", "policy.json"]

@@ -338,3 +338,36 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - This is isolated source/first-touch proof, not installed-runtime or Linux
   native qualification. Review and exact-source CI remain required; other
   domain adapters, carrier qualification and activation remain open.
+
+### 2026-11-06 - Native mapping owner merged
+- #11017 merged as `5df36fe7ea7135f05f4b17ec35eceb27981901ac` after current-head
+  Copilot approval with no findings, resolved threads and green required CI.
+- Reconciled the four published commits only after confirming 25 changed
+  file blobs and two contribution deltas match the squash merge. Independent
+  upstream evidence additions were preserved.
+- The parent effort remains Active. Next is explicit adoption of typed Copilot
+  scalar floors through the existing configuration/settings owner; no received
+  document becomes a requirement package or activation grant. Release,
+  installed adoption, remaining domain/carrier qualification and activation
+  remain separate gates.
+
+### 2026-11-06 - Explicit Copilot floor adapter
+- Added a separately selected `preferences copilot` preview/apply over local
+  accepted state and policy. Scope is native-owner resolved; typed floors stay
+  below native defaults/live values and enforce constraints. Only the two
+  existing scalar fields reach the settings merge, not arbitrary requirements,
+  other settings, resources, modules, bindings or activation.
+- Confirmation binds accepted/local/policy data, native context and packages,
+  target/live settings and proposed changes. The existing settings writer
+  rechecks the proposal before backup/write; malformed live settings and
+  native-owner refusals remain non-mutating and sanitized.
+- The Windows focused packet passed 123 cases with six platform-specific
+  skips. Final floor/first-touch refusal controls passed 17 cases, followed by
+  the isolated owner-refusal sanitization control. Ruff, install contracts
+  and documentation consistency passed.
+- The positive consumer used the normal in-process CLI, native collector,
+  validator and real settings writer with an explicit native-context fixture.
+  A fresh normal module process proved absent-owner refusal without bootstrap.
+  This is not a configured peer, installed-runtime, native Linux or live-carrier
+  qualification. No installer behavior changed; a full clean-room installation
+  lane was not exercised. Carrier writes and running activation remain held.

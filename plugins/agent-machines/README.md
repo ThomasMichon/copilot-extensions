@@ -87,6 +87,11 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   Machine-specific harness-to-knowledge values remain suggestions; no native
   apply, binding change or cloud enrollment occurs.
   See [the exchange contract](docs/portable-preferences.md).
+- **Explicit Copilot scalar-floor adoption.** `preferences copilot` previews
+  accepted `model`/`effortLevel` data in the qualified native scope; a separate
+  confirmed apply uses the existing settings merge. Native defaults, live
+  values and enforce constraints retain precedence. No requirement YAML,
+  resource/module execution, binding or running-session delivery is implied.
 - **Bounded local telemetry reports.** `health report` projects explicit local
   typed telemetry into 168 UTC-hour buckets and an optional static chart,
   preserving unknown coverage. It starts no collector or periodic job and never

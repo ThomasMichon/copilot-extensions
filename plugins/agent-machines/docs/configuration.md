@@ -14,6 +14,9 @@ The separate [portable preference exchange](portable-preferences.md) reads
 explicit typed snapshots, including harness-to-knowledge mapping suggestions.
 Its `preview` is read-only; explicit `accept` / `publish` transactions persist
 local snapshots only. They do not add a package source or invoke native adoption.
+The separate confirmed `preferences copilot` operation can adopt only typed
+`model`/`effortLevel` floors from accepted data through the native settings owner.
+It does not add a requirement package or change ordinary source-tier selection.
 
 ## Canonical sources
 

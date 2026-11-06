@@ -15,6 +15,8 @@ file. Neither command discovers or enrolls a cloud carrier.
 The [reviewed Phase 4 plan](../../../efforts/active/machine-health-heartbeats/preferences.md)
 owns the remaining native adoption and carrier qualification work. Local exchange
 does not establish installed adoption, synchronization health or peer receipt.
+`preferences copilot` is a separate, explicitly confirmed native scalar-floor
+operation described below; neither receiving nor accepting invokes it.
 
 ## Snapshot
 
@@ -238,3 +240,50 @@ manually, relax parsing or replay a different effectful operation.
 Provider rollback preserves the read-only preview baseline. Local policy and
 exchange output have their own strict version-1 schemas, independent of package
 versions; no retirement window is opened by this additive change.
+
+## Confirmed Copilot scalar floors
+
+```text
+agent-machines preferences copilot --state-dir <local-state> [--local-overrides <local.json>]
+agent-machines preferences copilot --state-dir <local-state> [--local-overrides <local.json>] --apply --expect <preview-token>
+```
+
+The local policy must permit `copilot`, and `accepted.json` must already contain
+a valid snapshot from that policy's publisher. No received candidate or cloud
+file is applied directly. Scope comes from the current qualified native
+configuration owner, not a supplied hostname, harness basename or target-machine
+simulation. An unavailable or unresolved owner blocks this operation without
+bootstrap, binding or fallback.
+
+Selection retains shared -> matching named-machine -> explicit local preference
+precedence. Only `model` and `effortLevel` enter the native settings owner as
+ordinary scalar floors. Native package discovery, parsing, scope, ordinary
+default selection and authority validation still run. Native defaults and
+existing live values win over these fallback floors; native enforce rules apply
+afterward and conflicting enforce declarations refuse. This does not certify
+that a running client supports the requested model or reasoning value.
+
+The adapter filters native settings contributions to the same two fields; it
+does not reconcile other native settings, resources, modules, permissions,
+bindings or schedules. It never generates requirement YAML. The existing
+settings owner preserves unrelated live keys and backs up before atomic writes.
+Malformed/duplicate-key live settings refuse rather than being repaired.
+
+Preview emits `agent-machines.preferences.copilot`, version `1`, with native
+scope, accepted revision, selected floors, preference provenance, overridden
+fields, proposed changes and a confirmation token. The token binds policy,
+accepted/local data, native context and packages, target and live settings.
+Apply recomputes it and rechecks at the native settings-write precondition;
+changed inputs require a new preview. Withdrawal contributes no floor and
+does not erase a value already adopted. No cross-domain transaction is claimed.
+
+Exit `0` is a successful preview or native settings transaction; `2` means
+invalid/unavailable input or a refused confirmation. Inspect
+`configuration_applied` and `changed` independently. `binding_changed` stays
+false and `running_session_delivery` stays `not-performed`; no active-session
+model change, runtime update or service reload is performed.
+
+Discover `copilot` with `preferences --help` on the selected runtime first.
+Older providers retain their existing preview/exchange commands and reject this
+new operation; do not fall back to a general restore or hand-written settings
+change. Snapshot and exchange schemas remain unchanged.
