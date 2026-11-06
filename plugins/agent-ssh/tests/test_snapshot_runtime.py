@@ -774,10 +774,39 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
     # duplicate legacy data could conceal a wrong-owner fallback.
     shutil.rmtree(home / ".agent-worktrees")
     shutil.rmtree(home / ".caller")
+
+    def native_state_root(cwd, own):
+        result = run_caller_owned(
+            [
+                *command[:-2], "-c",
+                "import json,sys\n"
+                "from pathlib import Path\n"
+                "from agent_ssh import _worktrees\n"
+                "assert Path(sys.prefix)==Path(sys.argv[1])\n"
+                "try:\n"
+                " path,status=_worktrees.state_root(Path.cwd(),json.load(sys.stdin))\n"
+                "except _worktrees.ContextRefused:\n"
+                " raise SystemExit(126)\n"
+                "print(json.dumps([str(path) if path else None,status]))\n",
+                str(Path(command[0]).parent.parent),
+            ],
+            cwd=cwd,
+            env=environment,
+            input_text=json.dumps(own),
+            timeout=10,
+            max_stdout_bytes=8192,
+            max_stderr_bytes=8192,
+        )
+        if result.returncode == 126:
+            raise _worktrees.ContextRefused("native optional state-root request refused")
+        assert result.returncode == 0, result.stderr
+        path, status = json.loads(result.stdout)
+        return Path(path) if path else None, status
+
     samples = []
     for _ in range(2):
         started = time.monotonic()
-        assert _worktrees.state_root(repo, active) == (machines.parent.parent, "bound")
+        assert native_state_root(repo, active) == (machines.parent.parent, "bound")
         samples.append(round(time.monotonic() - started, 3))
     with capsys.disabled():
         print(
@@ -788,6 +817,8 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
                     "samples_seconds": samples,
                     "cache": "not-controlled",
                     "state_root": "bound",
+                    "parent": "completed-ssh-runtime",
+                    "outer_observer_seconds": 10,
                     "optional_peer_deadline_seconds": 5,
                 }
             )
@@ -795,7 +826,7 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
     for field in ("generation", "namespaceGeneration", "sourceFingerprint"):
         restricted = {**active, field: "changed"}
         with pytest.raises(_worktrees.ContextRefused):
-            _worktrees.state_root(repo, restricted)
+            native_state_root(repo, restricted)
     slot = Path(argv[0]).parent.parent
     site = slot / (
         "Lib/site-packages"
@@ -806,17 +837,17 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
     supported = api.read_bytes()
     api.unlink()
     try:
-        assert _worktrees.state_root(repo, active) == (None, "unavailable")
+        assert native_state_root(repo, active) == (None, "unavailable")
     finally:
         api.write_bytes(supported)
     shutil.rmtree(contexts["agent-worktrees"].parent / "versions")
     with pytest.raises(_worktrees.ContextRefused):
-        _worktrees.state_root(repo, active)
+        native_state_root(repo, active)
     contexts["agent-worktrees"].unlink()
     with pytest.raises(_worktrees.ContextRefused):
-        _worktrees.state_root(tmp_path, active)
+        native_state_root(tmp_path, active)
     shutil.rmtree(contexts["agent-worktrees"].parent)
-    assert _worktrees.state_root(tmp_path, active) == (None, "unavailable")
+    assert native_state_root(tmp_path, active) == (None, "unavailable")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(contexts["agent-worktrees"]))
     with pytest.raises((ValueError, RuntimeError)):
         launcher.runtime_command(payloads["agent-ssh"], "agent-ssh", dict(os.environ))
