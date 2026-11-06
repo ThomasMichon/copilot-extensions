@@ -25,14 +25,15 @@ publication_case = shared_publication_case
 
 
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
+@pytest.mark.parametrize("stdout_newline", [None, "\r\n"])
 def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
-    tmp_path: Path, shell: str, executable: str,
+    tmp_path: Path, shell: str, executable: str, stdout_newline: str | None,
 ) -> None:
     from agent_procutil import no_window_kwargs
     from test_source_install_transactions import _ps, _sh
 
     plugin = Path(__file__).resolve().parents[1]
-    home = tmp_path / "home with spaces"
+    home = tmp_path / "home with spaces \u00e9"
     root = home / ".agent-worktrees"
     slot = root / "versions" / "1.0.0"
     venv.EnvBuilder(with_pip=False).create(slot)
@@ -59,11 +60,16 @@ def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
     completion = {"version": slot.name, "completed_at": "2026-01-01T00:00:00Z",
                   "pid": 1, "payload_hash": "1" * 64}
     marker.write_text(json.dumps(completion), encoding="utf-8")
+    if stdout_newline:
+        (library / "stdout_newline.pth").write_text(
+            f"import sys; sys.stdout.reconfigure(newline={stdout_newline!r})\n",
+            encoding="utf-8",
+        )
     local_bin = home / ".local" / "bin"
     shutil.copytree(plugin / "bin", local_bin)
     resolver = root / "bin"
     resolver.mkdir()
-    (resolver / "resolve-runtime.ps1").write_text(f"$AwPy = {_ps(python)}\n", encoding="utf-8")
+    (resolver / "resolve-runtime.ps1").write_text(f"$AwPy = {_ps(python)}\n", encoding="utf-8-sig")
     (resolver / "resolve-runtime.sh").write_text(f"AW_PY={_sh(python)}\n", encoding="utf-8")
     before = {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()}
     env = {key: value for key, value in os.environ.items() if key.upper() not in {
@@ -88,6 +94,7 @@ def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
     cached = {path.relative_to(first): (path.read_bytes(), path.stat().st_mtime_ns)
               for path in first.rglob("*") if path.is_file()}
     assert re.fullmatch(r"installed-[0-9a-f]{64}", first.name)
+    assert first.parent.samefile(root / "cache" / "python")
     assert any(path.name.startswith("__main__") for path in cached)
     assert invoke() == first
     assert {path.relative_to(first): (path.read_bytes(), path.stat().st_mtime_ns)

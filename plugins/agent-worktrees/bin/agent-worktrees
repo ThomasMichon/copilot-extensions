@@ -51,18 +51,22 @@ _aw_exec_resolved() {
       esac ;;
   esac
   _aw_selected_cache="$("$AW_PY" -I -B -X "pycache_prefix=$_aw_python_cache" -c '
-import sys
+import json, sys
 try:
     from agent_procutil.python_cache import cache_arguments
 except ImportError:
-    print(sys.pycache_prefix)
+    prefix = sys.pycache_prefix
 else:
-    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
+    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1]
+print(json.dumps(prefix, ensure_ascii=True))
 ' "$_aw_cache_root")" || exit 126
-  case "$_aw_selected_cache" in
-    ''|*'
-'*) printf '%s\n' '[agent-worktrees] Runtime cache selection failed.' >&2; exit 126 ;;
-  esac
+  _aw_selected_cache="$("$AW_PY" -I -B -X "pycache_prefix=$_aw_python_cache" -c '
+import json, sys
+prefix = json.loads(sys.argv[1])
+if not isinstance(prefix, str) or not prefix:
+    raise ValueError("Runtime cache selection failed")
+sys.stdout.buffer.write(prefix.encode("utf-8", "surrogateescape"))
+' "$_aw_selected_cache")" || exit 126
   exec "$AW_PY" -X "pycache_prefix=$_aw_selected_cache" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"

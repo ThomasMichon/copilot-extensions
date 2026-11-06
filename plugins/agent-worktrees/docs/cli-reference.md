@@ -10,7 +10,9 @@ Legacy global management launchers select external Python bytecode through the
 [canonical installed-cache helper](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
 An unchanged completed installation reuses its recorded namespace; changed
 completion or distribution evidence selects another. Older runtimes without
-the helper retain fresh invocation caches. This changes no account/ownership
+the helper retain fresh invocation caches. Native selector replies use
+ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
+This changes no account/ownership
 checks, command deadlines, runtime selection or immutable slot bytes.
 
 ## Explicit status refresh

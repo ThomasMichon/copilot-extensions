@@ -712,3 +712,22 @@ implementation. The exact support closure follows the consumer trace and tests.
   evidence, not a latency baseline, installed correction or successful retry.
 - Source gates, public review/CI, release and authorized normal installation
   of this prerequisite remain open. The receiving effort remains Active.
+
+### 2026-11-06 - Lossless native cache selection
+
+- Expanded the real front-door fixture with a Unicode profile and forced
+  CRLF stdout. Its native PowerShell resolver uses UTF-8 with a BOM, and the
+  cache-parent assertion compares actual filesystem identity rather than
+  unequal ordinary/extended Windows path spellings.
+- The qualified old-source control reproduced four PowerShell failures:
+  decoded paths no longer addressed the intended cache directory. Both
+  Git Bash controls passed; this did not reproduce a Git Bash CRLF defect.
+- Selector replies now carry ASCII-safe JSON. PowerShell decodes the string
+  directly; POSIX uses a separate read-only binary decoder, retaining
+  Unicode, embedded newlines and native path bytes without shell evaluation.
+  The corrected packet passes all nine cases, including original
+  old-helper fallback, repeated cache reuse and immutable-slot preservation.
+- Corrected-source actual account callback samples returned the full existing
+  JSON shape in 2.90 and 2.76 seconds without diagnostics. Earlier samples
+  remain above; this is still insufficient for tail/baseline qualification.
+  Updated-head review, CI, release, installation and live receiving remain open.
