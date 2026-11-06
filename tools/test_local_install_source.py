@@ -127,8 +127,11 @@ def test_cli_refuses_public_age_override_before_governed_source_preparation(
 
 
 def test_cli_prepares_only_the_selected_core_projects(tmp_path, monkeypatch, capsys):
-    seen = []
-    monkeypatch.setattr(local, "compose", lambda *args, **kwargs: {"projects": {}})
+    seen, composed = [], []
+    monkeypatch.setattr(
+        local, "compose",
+        lambda *args, **kwargs: (composed.append(kwargs["projects"]) or {"projects": {}}),
+    )
     monkeypatch.setattr(
         local, "build_projects",
         lambda output, record, **kwargs: seen.append((output, kwargs["projects"])),
@@ -142,11 +145,16 @@ def test_cli_prepares_only_the_selected_core_projects(tmp_path, monkeypatch, cap
     assert seen == [
         (tmp_path / "prepared", ("standalone:worktree-manager", "agent-worktrees")),
     ]
+    assert composed == [seen[0][1]]
     with pytest.raises(SystemExit) as refused:
         local.main([*arguments, "--suite"])
     assert refused.value.code == 2
     assert len(seen) == 1
     assert "not allowed with argument" in capsys.readouterr().err
+    assert local.main(arguments[:6] + ["--suite"]) == 0
+    assert composed[-1] is None and seen[-1][1] is None
+    assert local.main(arguments[:6]) == 0
+    assert composed[-1] == seen[-1][1] == ("standalone:worktree-manager",)
 
 
 @pytest.fixture

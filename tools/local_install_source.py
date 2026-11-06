@@ -6,6 +6,7 @@ The output is disposable build data, not a release or a source approval token.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from contextlib import contextmanager
 import importlib.util
 import json
@@ -25,6 +26,48 @@ import materialize_main as materialization
 
 MANIFEST = "install-source.json"
 SCHEMA = "copilot-extensions.install-source"
+
+
+def _selected_project_paths(
+    repository: Path, commit: str, projects: tuple[str, ...] | None, deadline: float,
+) -> tuple[str, ...] | None:
+    if projects is None:
+        return None
+    from promotion_python_artifacts import _PLUGIN
+    from standalone_python_artifacts import COMPONENTS
+
+    if (
+        not isinstance(projects, tuple) or not projects
+        or any(not isinstance(key, str) for key in projects)
+        or len(set(projects)) != len(projects)
+    ):
+        raise ValueError("source selection requires unique declared Python project keys")
+    paths = []
+    for key in projects:
+        if key.startswith("standalone:") and key[11:] in COMPONENTS:
+            relative = COMPONENTS[key[11:]]
+        elif _PLUGIN.fullmatch(key):
+            relative = "plugins/" + key
+        else:
+            raise ValueError("unsupported selected source project")
+        entry = preparation._git(
+            repository, "ls-tree", commit, "--", relative + "/pyproject.toml", deadline=deadline,
+        )
+        if not entry or entry.split()[0] not in {"100644", "100755"}:
+            raise ValueError("selected Python project is absent or not ordinary at the source commit")
+        paths.append(relative)
+    return tuple(paths)
+
+
+@contextmanager
+def _source_phase(
+    observer: Callable[[int, int, float], None] | None, phase: int, started: float,
+):
+    if observer is not None:
+        observer(phase, 0, time.monotonic() - started)
+    yield
+    if observer is not None:
+        observer(phase, 1, time.monotonic() - started)
 
 
 def _load_module(path: Path, name: str):
@@ -76,9 +119,14 @@ def compose(
     repository: Path, commit: str, main_head: str | None, output: Path, *,
     finalized_main: bool = False, deadline: float | None = None,
     source_descriptor: dict | None = None,
+    projects: tuple[str, ...] | None = None,
+    observer: Callable[[int, int, float], None] | None = None,
 ) -> dict:
     """Materialize one Git object; only finalized Main selection needs ancestry."""
-    deadline = deadline or time.monotonic() + 600
+    started = time.monotonic()
+    deadline = deadline or started + 600
+    if observer is not None and not callable(observer):
+        raise ValueError("source phase observer must be callable")
     repository = repository.resolve(strict=True)
     descriptor = repository_source(repository, source_descriptor, deadline=deadline)
     output = Path(native_retained_path(output))
@@ -90,6 +138,7 @@ def compose(
             raise ValueError(f"{name} requires a full Git commit")
         if preparation._git(repository, "rev-parse", f"{value}^{{commit}}", deadline=deadline) != value:
             raise ValueError(f"{name} does not name the requested Git commit")
+    project_paths = _selected_project_paths(repository, commit, projects, deadline)
     if output.exists() or output.is_symlink():
         raise ValueError("install-source output already exists; retain previous attempts")
     if finalized_main:
@@ -103,24 +152,37 @@ def compose(
             raise ValueError("last-good source ancestry against selected Main could not be verified") from error
     output.mkdir(parents=True)
     archive = output / "source.tar"
-    preparation._archive(repository, commit, archive, deadline=deadline)
+    with _source_phase(observer, 1, started):
+        preparation._archive(repository, commit, archive, deadline=deadline)
     source = output / "source"
     source.mkdir()
     file_pointer_candidates: list[Path] = []
-    preparation._extract_archive(
-        archive, source, deadline=deadline,
-        file_pointer_candidates=file_pointer_candidates,
-    )
+    with _source_phase(observer, 2, started):
+        preparation._extract_archive(
+            archive, source, deadline=deadline,
+            file_pointer_candidates=file_pointer_candidates,
+        )
     archive.unlink()
     source_tree = preparation._git(repository, "rev-parse", f"{commit}^{{tree}}", deadline=deadline)
     if not finalized_main:
-        log = materialization.materialize(
-            source, canonical_root=source,
-            file_pointer_candidates=file_pointer_candidates,
-        )
-        refused = [line for line in log if line.startswith("SKIP")]
-        if refused:
-            raise ValueError("source materialization refused:\n" + "\n".join(refused))
+        with _source_phase(observer, 3, started):
+            if project_paths is None:
+                log = materialization.materialize(
+                    source, canonical_root=source,
+                    file_pointer_candidates=file_pointer_candidates,
+                )
+                refused = [line for line in log if line.startswith("SKIP")]
+                if refused:
+                    raise ValueError("source materialization refused:\n" + "\n".join(refused))
+            else:
+                for relative in project_paths:
+                    consumer = source / relative
+                    preparation.materialize_consumer(
+                        source, consumer, consumer, deadline=deadline,
+                        file_pointer_candidates=[
+                            path for path in file_pointer_candidates if path.is_relative_to(consumer)
+                        ],
+                    )
     preparation._remaining(deadline)
     return {
         "schema": SCHEMA, "version": 1,
@@ -353,15 +415,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.toolchain_source == "governed" and args.toolchain_min_age_days is not None:
         parser.error("--toolchain-min-age-days requires --toolchain-source seasoned-public")
+    projects = None if args.suite else tuple(args.projects or ("standalone:worktree-manager",))
     record = compose(
         args.source_checkout, args.source_commit, args.main_head, args.output,
         finalized_main=args.finalized_main,
         source_descriptor=args.source_descriptor,
+        projects=projects,
     )
     build_projects(
         args.output.absolute(), record, source_policy=args.toolchain_source,
         min_age_days=args.toolchain_min_age_days,
-        projects=None if args.suite else tuple(args.projects or ("standalone:worktree-manager",)),
+        projects=projects,
     )
     print(json.dumps(record, sort_keys=True))
     return 0

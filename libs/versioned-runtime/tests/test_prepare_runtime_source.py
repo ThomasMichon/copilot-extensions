@@ -18,8 +18,192 @@ REPOSITORY = Path(__file__).resolve().parents[3]
 TOOLS = REPOSITORY / "tools"
 sys.path.insert(0, str(TOOLS))
 import prepare_runtime_source as source_runtime
+import local_install_source as local_source
 
 PLUGIN = "agent-fixture"
+
+
+@pytest.fixture
+def selected_manager_repository(repository):
+    root, _ = repository
+    declaration = json.loads((REPOSITORY / "worktree-manager/packaged-assets.json").read_text())
+    for group in declaration["groups"]:
+        for name in group["files"]:
+            destination = root / group["canonicalDir"] / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(REPOSITORY / group["canonicalDir"] / name, destination)
+    manager = root / "worktree-manager"
+    shutil.copyfile(REPOSITORY / "worktree-manager/pyproject.toml", manager / "pyproject.toml")
+    (manager / "src/worktree_manager").mkdir(parents=True)
+    (manager / "src/worktree_manager/__init__.py").write_text('__version__="0.1.0-dev97"\n')
+    (manager / "README.md").write_text("selected Manager documentation\n")
+    (manager / "tests").mkdir()
+    (manager / "tests/test_selected.py").write_text("# selected Manager test source\n")
+    (manager / "vendor").mkdir()
+    shutil.copyfile(
+        REPOSITORY / "worktree-manager/vendor/dbus_next-0.2.3-py3-none-any.whl",
+        manager / "vendor/dbus_next-0.2.3-py3-none-any.whl",
+    )
+    metadata = source_runtime.materializer.uer.tomllib.loads(
+        (manager / "pyproject.toml").read_text(),
+    )
+    libraries = []
+    for name, row in metadata["tool"]["uv"]["sources"].items():
+        if not row["path"].startswith("../libs/"):
+            continue
+        directory = root / "libs" / Path(row["path"]).name
+        libraries.append(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        text = f'[project]\nname="{name}"\nversion="1.0.0"\n'
+        if name == "agent-procutil":
+            text += '[tool.uv.sources]\nagent-zdd={path="../zdd",editable=true}\n'
+        (directory / "pyproject.toml").write_text(text)
+        (directory / "src").mkdir(exist_ok=True)
+        (directory / "src/fixture.py").write_text("# selected library source\n")
+        (directory / "README.md").write_text("selected dependency documentation\n")
+        (directory / "tests").mkdir()
+        (directory / "tests/test_selected.py").write_text("# selected dependency tests\n")
+    other = root / "plugins" / PLUGIN
+    (other / "pyproject.toml").write_text(
+        f'[project]\nname="{PLUGIN}"\nversion="1.0.0"\n'
+        '[tool.uv.sources]\nagent-zdd={path="../../libs/zdd",editable=true}\n',
+    )
+    assert len(libraries) == 13
+    # single-instance-lease is transitive in the actual Manager closure.
+    lease = root / "libs/single-instance-lease"
+    lease.mkdir()
+    (lease / "src").mkdir()
+    (lease / "src/fixture.py").write_text("# transitive source\n")
+    (lease / "README.md").write_text("transitive documentation\n")
+    (lease / "tests").mkdir()
+    (lease / "tests/test_selected.py").write_text("# transitive tests\n")
+    (lease / "pyproject.toml").write_text(
+        '[project]\nname="agent-single-instance-lease"\nversion="1.0.0"\n',
+    )
+    with (root / "libs/update-driver/pyproject.toml").open("a") as stream:
+        stream.write(
+            '[tool.uv.sources]\nagent-single-instance-lease={path="../single-instance-lease",editable=true}\n',
+        )
+    return root, _merged_commit(root), declaration
+
+
+def test_selected_manager_materialization_matches_full_selected_bytes(
+    selected_manager_repository, tmp_path, monkeypatch,
+):
+    root, commit, declaration = selected_manager_repository
+    full = tmp_path / "full"
+    selected = tmp_path / "selected"
+    before = local_source.compose(root, commit, None, full)
+    calls = []
+    actual = source_runtime.materializer.materialize_uv_editable_ref_into
+
+    def observe(**kwargs):
+        calls.append(kwargs["source_consumer_dir"].name)
+        return actual(**kwargs)
+
+    monkeypatch.setattr(source_runtime.materializer, "materialize_uv_editable_ref_into", observe)
+    events = []
+    after = local_source.compose(
+        root, commit, None, selected, projects=("standalone:worktree-manager",),
+        observer=lambda phase, state, elapsed: events.append((phase, state, elapsed)),
+    )
+    assert calls == ["worktree-manager"]
+    assert before == after
+    assert [(phase, state) for phase, state, _ in events] == [
+        (1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1),
+    ]
+    assert [elapsed for _, _, elapsed in events] == sorted(elapsed for _, _, elapsed in events)
+    full_payload = full / "source/worktree-manager"
+    selected_payload = selected / "source/worktree-manager"
+    assert local_source.materialization.uer.lib_tree_matches(full_payload, selected_payload)
+    identity = source_runtime.SourceIdentity(
+        "worktree-manager", "0.1.0-dev97", commit, before["source_tree"],
+        source_runtime._assembly_hash(full_payload),
+        source_runtime.runtime_version("0.1.0-dev97", commit, source_runtime._assembly_hash(full_payload)),
+    )
+    assert source_runtime._assembly_hash(selected_payload) == identity.assembly_hash
+    assert len(list((selected_payload / "libs").iterdir())) == 14
+    for directory in (selected_payload, *(selected_payload / "libs").iterdir()):
+        assert (directory / "README.md").is_file()
+        assert (directory / "tests/test_selected.py").is_file()
+    for group in declaration["groups"]:
+        for name in group["files"]:
+            assert (selected_payload / group["payloadDir"] / name).read_bytes() == (
+                root / group["canonicalDir"] / name
+            ).read_bytes()
+    assert sum(len(group["files"]) for group in declaration["groups"]) == 161
+    assert "../../libs/zdd" in (selected / "source/plugins" / PLUGIN / "pyproject.toml").read_text()
+    assert (full / "source/plugins" / PLUGIN / "libs/zdd").is_dir()
+
+
+@pytest.mark.parametrize("projects", [
+    (), ("standalone:worktree-manager", "standalone:worktree-manager"),
+    ("standalone:unknown",), ("composition:core",), ("../escape",), ("not-present",),
+    ["standalone:worktree-manager"],
+])
+def test_selected_projects_refuse_before_output_or_archive(repository, tmp_path, monkeypatch, projects):
+    root, commit = repository
+    monkeypatch.setattr(local_source.preparation, "_archive", lambda *args, **kwargs: pytest.fail("archive"))
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError):
+        local_source.compose(root, commit, None, output, projects=projects)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("state", [0, 1])
+def test_native_source_observer_errors_propagate_without_later_phases(
+    repository, tmp_path, monkeypatch, state,
+):
+    root, commit = repository
+    seen = []
+
+    def observer(phase, event, elapsed):
+        seen.append((phase, event))
+        if event == state:
+            raise RuntimeError("observer failed")
+
+    monkeypatch.setattr(
+        local_source.preparation, "_extract_archive", lambda *args, **kwargs: pytest.fail("later phase"),
+    )
+    with pytest.raises(RuntimeError, match="observer failed"):
+        local_source.compose(root, commit, None, tmp_path / "failed", observer=observer)
+    assert seen == ([(1, 0)] if state == 0 else [(1, 0), (1, 1)])
+
+
+def test_native_source_archive_error_has_no_phantom_completion(repository, tmp_path, monkeypatch):
+    root, commit = repository
+    events = []
+
+    def refuse(*args, **kwargs):
+        raise OSError("native archive refused")
+
+    monkeypatch.setattr(local_source.preparation, "_archive", refuse)
+    with pytest.raises(OSError, match="native archive refused"):
+        local_source.compose(
+            root, commit, None, tmp_path / "failed",
+            observer=lambda phase, state, elapsed: events.append((phase, state)),
+        )
+    assert events == [(1, 0)]
+
+
+@pytest.mark.parametrize("problem", ["pointer", "bom", "reserved"])
+def test_selected_materialization_retains_native_refusals(repository, tmp_path, problem):
+    root, _ = repository
+    plugin = root / "plugins" / PLUGIN
+    if problem == "pointer":
+        (plugin / "unsafe.py").write_text(
+            "<!-- VENDOR_POINTER: source=../outside.txt kind=file -->\n",
+        )
+    elif problem == "bom":
+        manifest = plugin / "pyproject.toml"
+        manifest.write_bytes(b"\xef\xbb\xbf" + manifest.read_bytes())
+    else:
+        (plugin / "runtime-source.json").write_text("{}")
+    commit = _merged_commit(root)
+    with pytest.raises((ValueError, source_runtime.SourcePreparationError)):
+        local_source.compose(
+            root, commit, None, tmp_path / "refused", projects=(PLUGIN,),
+        )
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows transient rename locks")
