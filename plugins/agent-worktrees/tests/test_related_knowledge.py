@@ -1,6 +1,7 @@
 """Binding-driven related discovery without topology or lifecycle writes."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from configuration_layers import ConfigurationError
@@ -160,3 +161,93 @@ def test_current_checkout_briefing_retains_aligned_state_policy(bound_source):
     assert "state-root --pair --json" in text
     assert "never the registered anchor" in text
     assert "work here directly" not in text
+
+
+@pytest.mark.parametrize("authored", [False, True])
+def test_briefing_producer_preserves_bound_source_markers(
+    bound_source, tmp_path, monkeypatch, authored,
+):
+    from agent_worktrees import related_briefing, state_root
+
+    harness, _knowledge, _registry, cfg, _anchors = bound_source
+    topology = related.RelatedConfig()
+    if authored:
+        topology.related["notes"] = related.RelatedEntry(
+            name="notes", role="product", delegate="agent-bridge",
+            locus=related.Locus(preferred="codespace"),
+        )
+    related.write_related(harness, topology)
+    original = related.related_path(harness).read_bytes()
+    source = config_sources.knowledge_config_source(cfg, base_anchor=str(harness))
+    monkeypatch.setattr(
+        state_root, "config_source_anchors",
+        lambda *_args, **_kwargs: [
+            config_sources.ConfigSource(anchor=str(harness), origin="harness"), source,
+        ],
+    )
+    monkeypatch.setattr(related_briefing.doctor, "_read_projects", lambda: {})
+    sessions = tmp_path / "sessions"
+    session = sessions / "fixture-session"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(related_briefing.sessions, "_session_state_dir", lambda: sessions)
+    written = related_briefing.write_related_briefings(
+        cfg, SimpleNamespace(repo="harness", worktree_path=str(harness)),
+        cwd=str(harness), session_id=session.name, plugin_related_anchors=[],
+    )
+    assert written == ["notes"]
+    text = (session / "files" / "related-briefings" / "notes.md").read_text()
+    assert "paired-knowledge-worktree" in text
+    assert "state-root --pair --json" in text
+    assert "never the registered anchor" in text
+    assert related.related_path(harness).read_bytes() == original
+
+
+def test_session_summary_preserves_bound_source_markers(bound_source, monkeypatch):
+    from agent_worktrees import session_context, state_root
+
+    harness, _knowledge, _registry, cfg, _anchors = bound_source
+    related.write_related(harness, related.RelatedConfig(primary="notes"))
+    source = config_sources.knowledge_config_source(cfg, base_anchor=str(harness))
+    monkeypatch.setattr(
+        state_root, "config_source_anchors",
+        lambda *_args, **_kwargs: [
+            config_sources.ConfigSource(anchor=str(harness), origin="harness"), source,
+        ],
+    )
+    primary, summary = session_context._related_summary(
+        cfg, str(harness), plugin_related_anchors=[],
+    )
+    assert primary == "notes"
+    assert "notes(role=knowledge,locus=local,delegate=none)" in summary
+
+
+def test_configuration_inspection_retains_bound_role_on_collision(
+    bound_source, monkeypatch,
+):
+    from agent_worktrees import repos_configuration_catalog as catalog, state_root
+
+    harness, _knowledge, _registry, cfg, _anchors = bound_source
+    related.write_related(harness, related.RelatedConfig(related={
+        "notes": related.RelatedEntry(
+            name="notes", role="product", delegate="agent-bridge",
+            locus=related.Locus(preferred="codespace"),
+        ),
+    }))
+    source = config_sources.knowledge_config_source(cfg, base_anchor=str(harness))
+    monkeypatch.setattr(
+        state_root, "config_source_anchors",
+        lambda *_args, **_kwargs: [
+            config_sources.ConfigSource(anchor=str(harness), origin="harness"), source,
+        ],
+    )
+    monkeypatch.setattr(catalog.cfg, "load_project_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(
+        catalog.installer, "read_projects_registry",
+        lambda **_kwargs: {"projects": {}},
+    )
+    monkeypatch.setattr(related, "installed_plugin_related_anchors", lambda **_kwargs: [])
+    inspected = catalog.inspect_project("harness", "")
+    assert not inspected.findings
+    entry = inspected.routes["notes"]
+    assert entry.role == "knowledge" and entry.bound_state_root
+    assert entry.locus.preferred == "local" and entry.delegate == "none"

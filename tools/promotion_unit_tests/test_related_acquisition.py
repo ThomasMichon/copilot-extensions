@@ -1570,7 +1570,11 @@ def _control_plane_owner(api, monkeypatch):
         if state.error == "sources":
             raise PermissionError("private source body")
         return [SimpleNamespace(anchor="control", origin="harness"),
-                SimpleNamespace(anchor="knowledge", origin="knowledge")]
+                SimpleNamespace(anchor="knowledge", origin="knowledge", state_repo="notes")]
+
+    def contribution(anchor, origin, *, state_repo=""):
+        assert state_repo == ("notes" if origin == "knowledge" else "")
+        return f"{origin}:{anchor}"
 
     def graft(anchors):
         calls.append(("graft", tuple(anchors)))
@@ -1583,7 +1587,7 @@ def _control_plane_owner(api, monkeypatch):
     api.stub("machine_identity", configured_machine_binding=lambda *a: "fixture")
     api.stub("related", find_control_plane_anchor=discover, installed_plugin_related_anchors=plugins,
              _anchor_key=lambda anchor: calls.append(("key", anchor)) or anchor,
-             config_contribution_anchor=lambda anchor, origin: f"{origin}:{anchor}", read_related_grafted=graft)
+             config_contribution_anchor=contribution, read_related_grafted=graft)
     sources_module = api.stub("state_root", config_source_anchors=sources)
     owner = _knowledge_owner(api, monkeypatch).owner
     composition = api.load("config_sources")

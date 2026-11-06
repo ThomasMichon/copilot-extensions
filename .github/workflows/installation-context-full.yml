@@ -438,11 +438,32 @@ jobs:
               selected = [case for case in cases if case.get("name") == name]
               assert len(selected) == 1, "Missing or ambiguous native reader: " + name
               assert all(selected[0].find(tag) is None for tag in ("skipped", "failure", "error")), name
+      - name: Verify dependent configuration consumers
+        id: consumers
+        shell: python
+        run: |
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+          reports = Path(os.environ["RUNNER_TEMP"]) / "related-knowledge-consumers"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              print("RELATED_KNOWLEDGE_CONSUMER_REPORTS=" + str(reports), file=output)
+          subprocess.run([
+              sys.executable, str(Path("tools") / "run-plugin-tests.py"), "agent-worktrees",
+              "--test-file", "tests/test_pr_related_binding.py",
+              "--test-file", "tests/test_session_context_registry.py",
+              "--test-file", "tests/test_session_context_companions.py",
+              "--test-file", "tests/test_repos_configuration.py",
+              "--junit-dir", str(reports),
+          ], check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
       - uses: actions/upload-artifact@v4
         if: always() && steps.readers.outcome != 'skipped'
         with:
           name: related-knowledge-${{ runner.os }}-${{ github.sha }}
-          path: ${{ env.RELATED_KNOWLEDGE_REPORTS }}
+          path: |
+            ${{ env.RELATED_KNOWLEDGE_REPORTS }}
+            ${{ env.RELATED_KNOWLEDGE_CONSUMER_REPORTS }}
           if-no-files-found: error
   related-knowledge-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'related-knowledge'

@@ -418,7 +418,18 @@ def write_related_briefings(
         else:
             plugin_anchors = plugin_related_anchors
         topology = related.read_related_grafted(
-            [*plugin_anchors, *[item.anchor for item in anchors]]
+            [
+                *plugin_anchors,
+                *[
+                    related.config_contribution_anchor(
+                        item.anchor, item.origin,
+                        directory_form=getattr(item, "directory_form", False),
+                        source_tier=getattr(item, "tier", None),
+                        state_repo=getattr(item, "state_repo", ""),
+                    )
+                    for item in anchors
+                ],
+            ]
         )
         current_machine = getattr(config, "machine", "") or ""
         current_project = getattr(config, "repo_name", "") or ""

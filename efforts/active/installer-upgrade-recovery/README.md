@@ -1883,3 +1883,41 @@ no-skip proof. Missing `coverage` initially stops before execution; the
 existing CI-declared test toolchain is then restored only in the private
 prepared environment. Native registry acquisition remains outside the pure
 unit frontier, and required revised-head review/CI must still pass.
+
+### 2026-11-06 - Preserve discovery metadata through dependent consumers
+
+Required Linux CI `42194087584` and `42194370472` pass head `830b7d631d`,
+including the unchanged no-skip, 300-second unit admission. Review still finds
+a real integration gap: downstream briefing, session summary and configuration
+inspection turn typed configuration sources into plain strings, while the
+PR-default reader omits their state identity. This loses the metadata needed
+to synthesize an unauthored binding or replace a conflicting authored route.
+
+The actual briefing producer fails both cases before correction. All four
+consumers now retain the existing directory, tier and state markers; no new
+source owner, topology writer or lifecycle operation is added. Both producer
+regressions, the session summary and configuration-inspection regression pass.
+The focused discovery and existing catalog-route packet passes 59 cases;
+the existing PR/session packet passes 44, with eight Bash-only Windows skips.
+The earlier full briefing packet passes 52 cases on the corrected producers.
+
+A broad local dependent-consumer attempt fails, then stops at the ordinary
+30-second item limit in the existing real CLI set/reset flow. A named diagnostic
+also times out in an existing preference-preview child at its unchanged
+15-second limit. Those Windows timing failures are not passing evidence or
+explained away as routing success. No anonymous progress is reused as named
+coverage. The existing opt-in Linux/Windows job now runs the four dependent
+consumer files separately from its native discovery packet, under the same
+standard limits. Both native discovery cases still must execute without skips.
+All 111 workflow controls pass, including actual inert child failure propagation.
+Hosted consumer results remain a merge gate; no timeout increase or CI bypass
+is selected.
+
+The already-admitted `config.py` source binding and its existing acquisition
+fixture are refreshed for this review correction. Five unit failures expose
+the fixture's old two-argument marker stub; it now verifies the retained state
+identity explicitly. All 157 acquisition controls pass after that correction.
+The 4,180-node set, coverage targets, effect guards and 300-second unit budget
+are unchanged. Revised-head required CI, passing review
+and native qualification remain due before merge; containing release and all
+parent acceptance boundaries remain separate.

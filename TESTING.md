@@ -6461,8 +6461,10 @@ bare/linked-worktree fixtures and the installed CLI to exercise list/resolve,
 aligned-only planning, narrative-scaffold refusal and structured nonzero
 canonical-class failure. It allocates no managed pair and preserves both
 repository trees. The `related-knowledge` portfolio in
-`installation-context-full.yml` selects only these files on Linux and Windows;
-it does not extend required unit-only CI or qualify actual write/cleanup,
+`installation-context-full.yml` selects these files on Linux and Windows.
+A separate standard-tier packet checks their dependent PR-binding, session
+context and repository-configuration consumers, including the actual CLI.
+Neither packet extends required unit-only CI or qualifies actual write/cleanup,
 late-binding retrofit or installed rollout.
 The diverged-checkout Git fixtures
 hide only the unrelated CodeSpace CLI from discovery, leaving real Git,
