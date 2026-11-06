@@ -155,3 +155,62 @@ Ordinary CLI/API/MCP migration, non-circular decline, stopped-native recovery,
 confirmation policy and actual running-service acceptance retain their separate
 gates. Neither this refinement nor a source merge enables production allocation,
 updates a runtime, retires another writer or authorizes cleanup.
+
+## Continuing provider-first slice: retained acquisition execution
+
+This is an **agent-proposed implementation refinement** of the unchecked
+delegated-writer item above, not a replacement acceptance gate. The retained
+prefix is currently available to explicit in-process callers; ordinary Bridge
+acquisition and later lineage still select dynamically. A health-selected root
+and UUID therefore cannot qualify those later writes.
+
+1. Expand the existing acquisition provider with an explicitly negotiated,
+   opt-in installed-writer requirement. Older request versions and ordinary
+   unpinned calls remain unchanged. Unsupported providers must refuse the
+   required form before allocation/native effects, never drop its fields or
+   retry without the requirement. Use the existing capability and acquisition
+   version owners; do not add a separate qualification RPC or service.
+2. Resolve the owner through the merged pinned-selection helper, then obtain
+   the executing serializer's capability response using that exact command.
+   Require its installed root/build identity, original-incarnation support
+   and preservation contract. A selector observation alone is insufficient.
+   The caller supplies an expected identity, not an executable path, command,
+   environment or claimed successful qualification.
+3. Retain the provider-selected command inside the existing acquisition
+   operation and use it for all participating owner reads and writes, including
+   delegated registration and lineage. The same operation retains its original
+   workspace, nonce, task/reservation, native conversation and delivery identity.
+   Check nonce-bearing record/transaction responses through their existing
+   owners. Do not retrofit a historical allocation or create a replacement.
+4. Store the requirement and provider-selected original-build binding with
+   the existing keyed acquisition/request journal, not a parallel registry.
+   A restart or retained retry must recover that same binding or refuse with
+   original custody intact. Never recapture a replacement build as the original,
+   infer that an unknown operation did not run, or reopen another native.
+   Missing or recreated slots retain the merged pre-import refusal.
+5. Recheck the relevant Bridge instance and selected-writer evidence through
+   existing owners when assembling independent admission. This provider slice
+   qualifies only Bridge's delegated writer behavior. It does not enumerate or
+   admit the resident, another CLI, or every producer of the shared ledger.
+   Keep ordinary Dispatch construction without a writer until the original
+   workspace and complete participating cohort are independently admitted.
+
+### Slice validation
+
+- [ ] Compatible installed writer: actual retained command capabilities precede
+      delegated registration/succession; the protected claim and original
+      creation nonce survive through the existing acquisition workflow.
+- [ ] Prior/unknown/incompatible writer and unsupported request: refuse before
+      owner writes or native effects; baseline request versions still work.
+- [ ] Runtime selector movement: later calls use the originally qualified
+      build, not the newly selected interpreter. Changed completion, same-path
+      recreation and governance refusal remain pre-import failures.
+- [ ] Lost response, concurrent replay and process recovery: preserve the
+      original journal/native/request binding or report unresolved custody,
+      with no replacement allocation, conversation or dropped requirement.
+- [ ] Native continuation and later lineage retain the same writer requirement;
+      changed workspace nonce, owner or executing build cannot be adopted.
+- [ ] Exercise actual process/delegation boundaries in the bounded integration
+      lane and retain focused contract units in the existing required packet.
+      Source controls do not stand in for the separately required running
+      Bridge, resident, closed-cohort or ordinary whole-stack acceptance.
