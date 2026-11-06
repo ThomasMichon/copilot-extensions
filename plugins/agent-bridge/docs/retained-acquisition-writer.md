@@ -48,6 +48,13 @@ the original workspace, and use it for registration, succession and lineage
 reads. Required lineage errors are not silently treated as legacy best-effort
 success. Unpinned operations keep their existing fail-open behavior.
 
+The historical `acquisition:` caller-affinity prefix is also used by keyed
+workspace creation and singleton initialization. Without an explicit writer
+pointer or a matching acquisition attempt, it does not select this journal:
+those continuations retain their existing lifecycle owner. An explicit writer
+pointer still requires its original journal, and a matching attempt with
+missing or malformed effects refuses rather than becoming an unpinned call.
+
 Registration, binding and succession carry the original requirement through
 Worktrees' [qualified executing-session option](../../agent-worktrees/docs/resource-relationship.md#qualified-executing-session-writes).
 Those commands invoke their existing registered handlers in the qualified CLI,
