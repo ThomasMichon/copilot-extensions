@@ -280,7 +280,9 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
 @pytest.mark.effect("filesystem")
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("event_case", ["mutation", "late-watch"])
+@pytest.mark.parametrize("event_case", [
+    "mutation", "late-watch", "oversized-mutation", "oversized-late-watch",
+])
 def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell, event_case):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
@@ -296,19 +298,27 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
     session.mkdir(parents=True)
     payload = {
         "sessionId": "prepared", "cwd": str(anchor),
-        "toolName": "edit" if event_case == "mutation" else "view",
+        "toolName": "edit" if event_case.endswith("mutation") else "view",
     }
-    if event_case == "late-watch":
+    if event_case.endswith("late-watch"):
         (session / "local-guidance-watch.json").write_text("{}")
+    oversized = event_case.startswith("oversized-")
+    if oversized:
+        payload["toolResult"] = "x" * 1100000
     assert module.admitted(payload, home=tmp_path)
     scripts = tmp_path / "payload" / "scripts"
     scripts.mkdir(parents=True)
     shutil.copyfile(SCRIPT, scripts / SCRIPT.name)
     shutil.copyfile(PLUGIN / "scripts" / "hook-facts.ps1", scripts / "hook-facts.ps1")
     original = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+    interpreter = str(sys.executable).replace("'", "''")
     (scripts / "managed-session.ps1").write_text(
         f". '{original}'\n"
-        "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }\n",
+        + (
+            f"function Get-ManagedWorktreesPython {{ return '{interpreter}' }}\n"
+            if oversized else
+            "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }\n"
+        ),
         encoding="utf-8",
     )
     command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
@@ -353,8 +363,17 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     anchor, registry = fixture_project(tmp_path)
+    counter_home = registry
+    case = getattr(request.node, "callspec", None)
+    case = case.params.get("case") if case else None
+    if case == "distinct-home":
+        agent_home = tmp_path / "agent-home"
+        agent_home.mkdir()
+        registry = Path(shutil.move(str(registry), str(agent_home / ".agent-worktrees")))
+        monkeypatch.setenv("AGENT_HOME", str(agent_home))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
     checkout_home = tmp_path
-    if getattr(request.node, "callspec", None) and request.node.callspec.params.get("case") == "quoted-bind":
+    if case == "quoted-bind":
         checkout_home = tmp_path / "space's $workspace; literal"
         checkout_home.mkdir()
     workspace, _ = fixture_linked_worktree(checkout_home, anchor)
@@ -408,7 +427,10 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     }
     (registry / "status-monitor.lock").write_text(json.dumps(discovery), encoding="utf-8")
     payload = {"sessionId": "prepared", "cwd": str(workspace), "toolName": "view"}
-    assert load("managed_session").admitted(payload, home=tmp_path)
+    if case == "distinct-home":
+        assert load("managed_session").admitted(payload)
+    else:
+        assert load("managed_session").admitted(payload, home=tmp_path)
     scripts = tmp_path / "payload" / "scripts"
     scripts.mkdir(parents=True)
     for name in ("post-tool-hook.ps1", "hook-facts.ps1"):
@@ -424,7 +446,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
     measured_command = command.removesuffix("exit 0") + (
         "$entrySeconds=$entryClock.Elapsed.TotalSeconds\n"
-        f"$counterPath='{str(registry / 'nudge-state' / 'worktree.lock').replace(chr(39), chr(39)*2)}'\n"
+        f"$counterPath='{str(counter_home / 'nudge-state' / 'worktree.lock').replace(chr(39), chr(39)*2)}'\n"
         "if (-not $env:COUNTER_TEST_ROLE -and [IO.File]::Exists($counterPath)) {\n"
         " $probe=[IO.File]::Open($counterPath,[IO.FileMode]::Open,"
         "[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)\n"
@@ -446,6 +468,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     env = environment(tmp_path, workspace)
     env.update(
         COPILOT_PLUGIN_ROOT=str(scripts.parent),
+        AGENT_HOME=str(registry.parent),
         AGENT_WORKTREES_NUDGE_CALLS="2", AGENT_WORKTREES_NUDGE_MINUTES="999",
     )
     env.pop("AGENT_WORKTREES_NUDGE", None)
@@ -454,7 +477,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
             env=env, harness=harness, payload=payload, facts=fact_path,
             row=row, record_heads=record_heads, runtime=runtime, session=session, registry=registry,
             home=tmp_path, tracking_path=path,
-            sidecar=registry / "nudge-state" / "worktree.json",
+            sidecar=counter_home / "nudge-state" / "worktree.json",
         )
     finally:
         runtime.shutdown()
@@ -466,7 +489,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows shell read consumer")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", [
-    "accounting", "note-reset", "bind-reminder", "quoted-bind", "malformed-counter", "disabled", "terminal",
+    "accounting", "note-reset", "bind-reminder", "quoted-bind", "distinct-home", "malformed-counter", "disabled", "terminal",
     "mixed-note", "missing-membership", "changed-input", "missing-locator", "wrong-incarnation",
     "wrong-workspace", "missing-discovery", "legacy-facts", "malformed-facts",
 ])
@@ -547,7 +570,7 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
         if sidecar.exists():
             assert json.loads(sidecar.read_text())["count"] == 1
         return
-    if case in {"bind-reminder", "quoted-bind", "malformed-counter"}:
+    if case in {"bind-reminder", "quoted-bind", "distinct-home", "malformed-counter"}:
         row = {**fixture["row"], "last_session_id": "resumable"}
         heads = {"worktree": {**fixture["record_heads"]["worktree"], "head_session": None}}
         fixture["runtime"].publish("example", [row], observed_at=2, record_heads=heads)
@@ -576,6 +599,10 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
             return
         second = invoke()["additionalContext"]
         assert "2 tool call(s)" in second and "bind-session" not in second
+        if case == "distinct-home":
+            assert json.loads(sidecar.read_text())["count"] == 0
+            assert sidecar.parent == fixture["home"] / ".agent-worktrees" / "nudge-state"
+            assert not (registry / "nudge-state").exists()
         return
     if case == "disabled":
         env["AGENT_WORKTREES_NUDGE"] = " OFF "

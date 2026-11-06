@@ -151,11 +151,13 @@ requirements are not supplied by these files.
 ### Windows read-event consumer
 
 The ordinary PowerShell entry loads the library in the same shell.
-For legacy native Windows `view`, `rg` and `glob` events without an outstanding
-late-guidance watch, evaluation has no synchronous resident request, command
+For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
+prepared-event bound and without an outstanding late-guidance watch, evaluation
+has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
-Other tools, installation cells and late-guidance watches keep their original
-entry and behavior; this is not the complete shell-only transition.
+Other tools, installation cells, oversized events and late-guidance watches
+keep their original entry and behavior; the prepared-event bound must not
+consume mutation or watched events. This is not the complete shell-only transition.
 
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's
@@ -166,7 +168,11 @@ not the advisory file being checked. Identity/path comparisons are ordinal.
 The current event must still be within the exact workspace. No home or
 incarnation is inferred from a directory name.
 
-The original discovery selects one publisher file. Version-2 facts drive the
+The original discovery selects one publisher file under `AGENT_HOME` when
+configured, otherwise `USERPROFILE`, matching prepared membership and the
+publisher. This does not relocate reminder accounting: the counter and shared
+lock remain under `USERPROFILE/.agent-worktrees/nudge-state` in both shell and
+Python. Version-2 facts drive the
 existing disposition window/call counter and bind-reminder cooldown at their
 original sidecar paths. Shell and Python counter updates and terminal clears
 share a byte-range transaction on `nudge-state/<worktree>.lock`, waiting at most

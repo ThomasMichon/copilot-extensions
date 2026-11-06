@@ -253,7 +253,7 @@ function Invoke-PreparedPostToolRead {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
         $env:COPILOT_EXTENSIONS_CONTEXT) { return $null }
     try {
-        if ($Raw.Length -gt 1048576) { return ,@{} }
+        if ($Raw.Length -gt 1048576) { return $null }
         $event = ConvertFrom-ManagedWorktreesJson $Raw
         $tool = $event['toolName']
         if (-not $tool) { $tool = $event['tool_name'] }
@@ -288,7 +288,11 @@ function Invoke-PreparedPostToolRead {
         if (-not [string]::Equals($cwd, $root, [StringComparison]::Ordinal) -and
             -not $cwd.StartsWith($root + '\', [StringComparison]::Ordinal)) { return ,@{} }
         $null = Get-PreparedWorktreesPath $locator['projectRoot']
-        $runtime = Get-ManagedWorktreesRuntimeRoot
+        $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
+            $env:AGENT_HOME.Trim()
+        } else { $env:USERPROFILE }
+        $runtime = [IO.Path]::Combine($registryHome, '.agent-worktrees')
+        $null = Get-PreparedWorktreesPath $runtime
         $discovery = Read-PostToolBoundedJson ([IO.Path]::Combine($runtime, 'status-monitor.lock')) 16384
         if ($null -eq $discovery) { return ,@{} }
         $view = Read-PostToolHookFacts -Discovery $discovery -RuntimeRoot $runtime `
@@ -298,7 +302,7 @@ function Invoke-PreparedPostToolRead {
         if ($null -eq $view -or $view['version'] -ne 2) { return ,@{} }
         $facts = $view['facts']
         $worktree = $binding['worktreeId']
-        $stateHome = [IO.Path]::Combine($runtime, 'nudge-state')
+        $stateHome = [IO.Path]::Combine((Get-ManagedWorktreesRuntimeRoot), 'nudge-state')
         $sidecar = [IO.Path]::Combine($stateHome, $worktree + '.json')
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
         $messages = [Collections.Generic.List[string]]::new()
