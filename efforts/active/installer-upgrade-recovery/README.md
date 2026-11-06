@@ -2326,3 +2326,53 @@ and prevents exporting a qualified artifact before the guards succeed.
 The updated stage-order/admission packet passes all 10 cases in 4.99 seconds,
 with touched F/E9 lint and whitespace checks passing. A fresh exact published
 checkpoint is required for the next diagnostic execution.
+
+### 2026-11-06 - Preserve native identity and partition the measured publication cost
+
+The named Ubuntu attempt `42247572862` genuinely executes the historical
+request at `9d737dba5d`. Its shared seed and both history-preservation cases
+pass; the latter take approximately 29 seconds each. It then reaches the
+HTTP-51 dirty-source case after named successes through 69 percent, but the
+combined group reaches 300 seconds, exit 124 / 303.15 seconds including cleanup.
+This identifies aggregate composition, not a failing assertion or a pass for
+the unfinished portfolio.
+
+The existing sequential cohort planner now splits only
+`test_http48_capture_guards.py` into four disjoint generation groups.
+The catch-all retains untagged/future cases; overlapping future keywords are
+assigned once. Every other selected file remains. All groups retain the
+30-second item and 300-second group bounds and share the original 900-second
+plugin aggregate, including preparation/cleanup, with unchanged process,
+memory and storage caps. There is no additional worker or capacity request.
+Nine focused collection/deadline controls use real pytest collection and the
+normal runner seam; together with the existing controller and non-Bridge
+planner controls, all 20 pass in 10.32 seconds. An initial synthetic-fixture
+error omitted declared native files and supplied the lower-level Limits
+default rather than the CLI's actual 300 seconds; only that fixture is corrected.
+This is not a qualification of the real historical packet, which still owes
+its next bounded execution.
+
+The new source review also identifies a real native root concern: the text
+`normcase` shortcut can select a foreign root or accept inconsistent roots
+without consulting file identity. Both focused controls fail on that shortcut.
+They retain real distinct directories and native `samefile`, replacing only
+the lossy normalizer seam. The reader now uses native identity first and
+permits only exact resolved spelling when a declared path is absent, never
+case-folded text as authority. The complete native Windows registration packet
+passes 39 cases with no skips, 10.13 seconds / 98.02 seconds including
+preparation and cleanup. Existing extended-path aliases, CLI/namespace,
+policy and preservation controls remain. Fresh exact-source Linux/Windows
+qualification is required; the earlier 37/37 is not relabeled.
+Touched F/E9 lint and whitespace checks pass. Same-PR review, historical
+qualification, fresh current capture/import, CI, merge/release and the parent
+remain open; no installed effect or larger deadline is introduced.
+
+Further local Windows seed trials deduplicate parent-directory creation and
+reuse copied immutable bytes for the identity index. Both still reach the
+original 30-second setup bound, the latter during the real history checker;
+neither is credited as a passing case. Those unqualified extra copy/cache
+changes are not retained. The smaller identity index and measured cohort
+composition remain. Native Windows historical-seed construction is an explicit
+unresolved owned follow-up before worktree finalization, not a flake exemption
+or installed-runtime result. The ordinary Ubuntu historical lane and the
+fresh 39-case native OS lanes still owe genuine current-source qualification.

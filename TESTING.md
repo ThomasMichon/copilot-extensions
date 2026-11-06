@@ -2739,6 +2739,11 @@ selection. The controlled HTTP-52 capture uses the same guard step.
 Historical guards precede canonical validation and export, so stale current
 metadata does not suppress their diagnostic execution and no qualified
 current artifact is exported before their success.
+The runner partitions the HTTP-48/49/50/51 publication module into sequential,
+disjoint generation cohorts, with untagged and future controls in the catch-all
+cohort. Other selected modules remain present. Every cohort retains the
+300-second group bound and shares the original 900-second plugin deadline;
+no parallel workers, larger resource limits or omitted cases are introduced.
 Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.
@@ -9389,6 +9394,10 @@ unchanged; no actual registration, installer, service or authentication provider
 is started. Hosted jobs require both native consumer cases and refuse skipped
 or failed evidence. This does not qualify caller migration, cold incoming
 construction or installed-host recovery.
+Two focused controls also supply a deliberately lossy normalizer while retaining
+real distinct directories and native file-identity checks. They reject foreign
+selection and inconsistent roots without provisioning a case-sensitive Windows
+directory or claiming that separate filesystem-mode acceptance.
 
 ## Optional paired-worktree finalization
 

@@ -42,12 +42,10 @@ def _root(value: object) -> Path:
 
 
 def _same_root(left: Path, right: Path) -> bool:
-    if os.path.normcase(str(left)) == os.path.normcase(str(right)):
-        return True
     try:
         return left.samefile(right)
     except FileNotFoundError:
-        return False
+        return str(left) == str(right)
 
 
 def _registry_path(path: Path) -> None:

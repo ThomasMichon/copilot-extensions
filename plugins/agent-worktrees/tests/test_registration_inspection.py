@@ -6,12 +6,13 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from agent_procutil import no_window_kwargs
 
-from agent_worktrees import installer, repos, repos_cli
+from agent_worktrees import installer, repos, repos_cli, repos_registration_inspect
 
 
 @pytest.fixture
@@ -123,6 +124,31 @@ def test_native_home_expansion_and_equivalent_legacy_root(registered, capsys, mo
         data = request(anchor, capsys)
         assert data["project"] == "custom-control" and data["agent"] is False
         assert {item.name: item.read_bytes() for item in root.iterdir()} == before
+
+
+@pytest.mark.parametrize("scenario", ["selection", "agreement"])
+def test_lossy_path_normalization_never_overrides_native_root_identity(
+    registered, capsys, monkeypatch, scenario,
+):
+    root, anchor, other = registered
+    assert not anchor.samefile(other)
+    monkeypatch.setattr(repos_registration_inspect, "os", SimpleNamespace(
+        name=os.name, path=SimpleNamespace(normcase=lambda _path: "same-normalized-spelling"),
+    ))
+    if scenario == "selection":
+        publish(root, {"foreign-control": repository(other, agent=False)})
+    else:
+        publish(root, {"custom-control": repository(anchor)}, {
+            "custom-control": {"anchor": str(other), "expose_agent": False},
+        }, project_version=1)
+    before = {item.name: item.read_bytes() for item in root.iterdir()}
+    data = request(anchor, capsys, expected=0 if scenario == "selection" else 2)
+    if scenario == "selection":
+        assert data["project"] == "control" and data["registered"] is False
+        assert data["agent"] is True
+    else:
+        assert data["code"] == "inconsistent-root"
+    assert {item.name: item.read_bytes() for item in root.iterdir()} == before
 
 
 @pytest.mark.parametrize("scenario,code", [

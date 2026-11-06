@@ -491,16 +491,30 @@ _CODESPACES_WINDOWS_PARTITIONS = (
     f"not (({_CODESPACES_FALSE}) or ({_CODESPACES_TRUE}) or {_CODESPACES_NEGATIVE} "
     f"or {_CODESPACES_LIFECYCLE})",
 )
+_BRIDGE_HISTORICAL_FILE = Path("tests") / "test_http48_capture_guards.py"
+_BRIDGE_HISTORICAL_PARTITIONS = (
+    "not (http49 or http50 or http51)",
+    "http49",
+    "not http49 and http50",
+    "not (http49 or http50) and http51",
+)
 
 
 def _test_group_plan(
     name: str, groups: list[list[Path]], *, windows: bool | None = None,
 ) -> list[tuple[list[Path], str | None]]:
-    """Partition only the Codespaces native contract; retain every other file."""
+    """Partition expensive owned cohorts without widening their shared deadline."""
     native = sys.platform == "win32" if windows is None else windows
     target = _plugin_dir(name) / _CODESPACES_NATIVE_FILE
+    historical = _plugin_dir(name) / _BRIDGE_HISTORICAL_FILE
     plan = []
     for group in groups:
+        if name == "agent-bridge" and historical in group:
+            other_files = [path for path in group if path != historical]
+            if other_files:
+                plan.append((other_files, None))
+            plan.extend(([historical], selector) for selector in _BRIDGE_HISTORICAL_PARTITIONS)
+            continue
         if name != "agent-codespaces" or not native or target not in group:
             plan.append((group, None))
             continue
