@@ -1,0 +1,9 @@
+{
+  "comment": "Accept source-bound Manager wheels with embedded first-party libraries during native profile preparation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

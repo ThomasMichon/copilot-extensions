@@ -5022,6 +5022,12 @@ compiler and acquisition owners. Supply `--component worktree-manager` or
 `--component agent-worktrees`, the first-party snapshot through
 `--install-source`, a fresh `--output`, and the selected absolute `--uv`.
 Consume the returned `snapshot` path, not an inferred output directory.
+Manager wheels that embed their declared `first-party-core` libraries require
+only the application distribution, not separate wheels for those libraries.
+Profile preparation binds the embedded Python, package data and license notices
+to the retained source closure through the canonical wheel/source validator.
+Those libraries remain complete construction inputs and contribute to source
+identity; unbundled libraries still require their associated distributions.
 Existing feed policy, artifact seasoning, source identity and installation
 custody still apply; a local snapshot is not independent authorization.
 Worktrees' Windows-native source entry accepts optional `-InputTimeout` with
