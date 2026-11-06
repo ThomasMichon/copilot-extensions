@@ -6,6 +6,7 @@ import stat
 import struct
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,20 @@ FIELDS = {
 }
 CAPABILITY = "synthetic-namespace-capability-0123456789"
 RESPONSE = b"protocol=https\nhost=github.com\nusername=fixture-account\ntoken=synthetic-token\n\n"
+SUPPORT = (
+    b"contract=credential-relay.account-source-lease/v1\n"
+    b"operation=get-account-source-lease\n\n"
+)
+
+
+def lease_response(issued, expires, **changes):
+    value = {
+        "protocol": "https", "host": "github.com", "username": "fixture-account",
+        "token": "synthetic-token", "lease_contract": relay.SOURCE_LEASE_CONTRACT,
+        "lease_id": "c" * 32, "lease_issued_at": str(issued), "lease_expires_at": str(expires),
+    }
+    value.update(changes)
+    return value
 
 
 def descriptor(endpoint, uid, device, inode):
@@ -33,7 +48,10 @@ def descriptor(endpoint, uid, device, inode):
     None, "descriptor-owner", "descriptor-mode", "socket-owner",
     "stale-inode", "replaced-inode", "peer-uid",
 ])
-def test_namespace_identity_is_checked_before_capability_bytes(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("source_lease", [False, True])
+def test_namespace_identity_is_checked_before_capability_bytes(
+    tmp_path, monkeypatch, failure, source_lease,
+):
     endpoint = tmp_path / ("account-" + "a" * 32 + ".sock")
     metadata = tmp_path / "active.json"
     metadata.write_text(json.dumps(descriptor(endpoint, 1002, 3, 7)), encoding="utf-8")
@@ -80,6 +98,13 @@ def test_namespace_identity_is_checked_before_capability_bytes(tmp_path, monkeyp
             self.sent.append(value)
 
         def recv(self, size):
+            if self.sent[-1] == b"describe-account-relay\n\n":
+                return SUPPORT
+            if source_lease:
+                now = time.time()
+                return ("\n".join(
+                    f"{key}={value}" for key, value in lease_response(now, now + 60).items()
+                ) + "\n\n").encode()
             return RESPONSE
 
     connection = Connection()
@@ -88,13 +113,112 @@ def test_namespace_identity_is_checked_before_capability_bytes(tmp_path, monkeyp
     monkeypatch.setattr(socket, "SO_PEERCRED", 17, raising=False)
     monkeypatch.setattr(socket, "socket", lambda *args: connection)
     transport = {"socket_descriptor": str(metadata), "owner_uid": 1002}
+    exchange = relay.exchange_source_lease if source_lease else relay.exchange
     if failure:
         with pytest.raises(RuntimeError, match="source-account-relay-unavailable"):
-            relay.exchange(transport, FIELDS, CAPABILITY)
+            exchange(transport, FIELDS, CAPABILITY)
         assert connection.sent == []
     else:
-        assert relay.exchange(transport, FIELDS, CAPABILITY) == "synthetic-token"
-        assert CAPABILITY.encode() in connection.sent[0]
+        result = exchange(transport, FIELDS, CAPABILITY)
+        assert (result.token if source_lease else result) == "synthetic-token"
+        assert CAPABILITY.encode() in connection.sent[-1]
+
+
+@pytest.mark.parametrize("support", [
+    b"", b"contract=older\n\n", SUPPORT.replace(b"\n\n", b"\nextra=unknown\n\n"),
+])
+def test_lease_client_refuses_unsupported_live_peer_before_reading_capability(tmp_path, support):
+    captured = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(5)
+        policy = tmp_path / "worker.json"
+        policy.write_text(json.dumps({
+            "schema": "credential-relay.account-worker", "version": 1,
+            "transport": {"host": "127.0.0.1", "port": listener.getsockname()[1]},
+            "bindings": [dict(FIELDS, capability_file=str(tmp_path / "absent-capability"))],
+        }))
+
+        def serve():
+            with listener.accept()[0] as client:
+                client.settimeout(5)
+                captured.append(client.recv(4096))
+                if support:
+                    client.sendall(support)
+
+        worker = threading.Thread(target=serve)
+        worker.start()
+        try:
+            with pytest.raises(RuntimeError, match="source-account-relay-lease-unsupported"):
+                relay.acquire_source_lease(policy, source=FIELDS["source"], account=FIELDS["account"])
+        finally:
+            worker.join(timeout=6)
+            assert not worker.is_alive()
+    assert captured == [b"describe-account-relay\n\n"]
+
+
+@pytest.mark.parametrize("failure", [
+    None, "expired", "latency", "rollback", "future-issued", "nan", "too-long",
+    "contract", "lease-id", "account", "token-only",
+])
+def test_lease_client_bounds_duration_and_rejects_invalid_evidence(monkeypatch, failure):
+    clock = SimpleNamespace(wall=1000.0, monotonic_value=50.0)
+    monkeypatch.setattr(relay, "time", SimpleNamespace(
+        time=lambda: clock.wall, monotonic=lambda: clock.monotonic_value,
+    ))
+    requests = []
+
+    def roundtrip(transport, wire, *, timeout):
+        requests.append((wire, timeout))
+        assert 0 < timeout <= 20
+        if wire == "describe-account-relay\n\n":
+            clock.monotonic_value += 2
+            clock.wall += 2
+            return {"contract": relay.SOURCE_LEASE_CONTRACT, "operation": "get-account-source-lease"}
+        clock.monotonic_value += 3
+        clock.wall += 3
+        value = lease_response(1002, 1062)
+        if failure == "expired":
+            value = lease_response(940, 1000)
+        elif failure == "latency":
+            clock.monotonic_value = 120
+        elif failure == "rollback":
+            clock.wall = 999
+        elif failure == "future-issued":
+            value = lease_response(1010, 1070)
+        elif failure == "nan":
+            value["lease_expires_at"] = "nan"
+        elif failure == "too-long":
+            value["lease_expires_at"] = "5000"
+        elif failure == "contract":
+            value["lease_contract"] = "unknown"
+        elif failure == "lease-id":
+            value["lease_id"] = "invalid"
+        elif failure == "account":
+            value["username"] = "other-account"
+        elif failure == "token-only":
+            value = {key: value[key] for key in ("protocol", "host", "username", "token")}
+        return value
+
+    monkeypatch.setattr(relay, "_roundtrip", roundtrip)
+    if failure:
+        with pytest.raises(RuntimeError, match="source-account-relay-unavailable"):
+            relay.exchange_source_lease({}, FIELDS, CAPABILITY)
+    else:
+        result = relay.exchange_source_lease({}, FIELDS, CAPABILITY)
+        assert result.token == "synthetic-token"
+        assert "synthetic-token" not in repr(result)
+        assert result.remaining_seconds() == 55
+        clock.monotonic_value += 54
+        assert result.remaining_seconds() == 1
+        clock.monotonic_value += 1
+        assert result.remaining_seconds() == 0
+        clock.monotonic_value = 55
+        assert result.remaining_seconds() == 0  # Old evidence cannot revive after expiry.
+    assert len(requests) == 2
+    assert requests[1][0].startswith("get-account-source-lease\n")
+    assert requests[1][1] == 18
 
 
 @pytest.mark.skipif(

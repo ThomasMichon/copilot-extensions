@@ -1,0 +1,9 @@
+{
+  "comment": "Consume declared account source leases through the existing stdlib client, preserving token APIs and conservative local deadlines.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
