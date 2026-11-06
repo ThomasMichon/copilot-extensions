@@ -39,9 +39,12 @@ changing retention, a host rollout or re-enabling any paused producer.
   #6471/#6542 retains held-housekeeping recovery and pair progress.
   Do not replace or independently implement those slices.
 - **Proposed receiving contracts:** [cohort contracts](cohort-contracts.md)
-  records each original Plan/Validation obligation and its owner-acceptance
-  gate. This is planning intake only, not an accepted custody transfer.
-  #1488/#1666/#1918/#3114/#4101 remain open until their respective gates pass;
+  records each original Plan/Validation obligation and its source-specific
+  tracking/implementation gates. Reviewed complete receipt and current
+  readback may consolidate #1488/#1666/#1918/#4101 without accepting product
+  completion or new implementation custody; #1918 keeps the same assignment
+  and scope. #3114 remains OPEN until its literal incumbent-custodian
+  acceptance and named general-ground owner mapping are satisfied.
   #6060 remains a separate semantic-tidier effort.
 
 ## Context
@@ -101,9 +104,18 @@ not additional operator requirements or authorization to execute them.
 
 _Agent-recommended execution plan; not yet authorized._
 
-- [ ] Resolve the per-original owner mappings and scope acceptance in
-  [cohort contracts](cohort-contracts.md#ownership-and-retirement-gates)
-  before any tracker retirement; do not infer acceptance from this proposal.
+Reviewed planning/tracker intake remains within the existing planning authority;
+it does not enter Phase 2 runtime execution. Administrative retirement follows
+the complete reviewed receipt/current readback and exact per-original gates in
+[cohort contracts](cohort-contracts.md#ownership-and-retirement-gates), not a
+blanket implementation-owner ACK or native-completion requirement.
+
+- [ ] Resolve the per-original implementation owner mappings and scope
+  acceptance before runtime work. Preserve #1488's unchecked product
+  disposition and #1918's same assigned per-attempt custody; naming the
+  #1666/#4101 runtime owner before work is not a tracker-retirement gate.
+  Retain #3114's distinct custodian acceptance and named general-ground
+  mapping before its retirement; this proposal does not satisfy that gate.
 - [ ] Implement the separately owned task-terminal, claimant-liveness,
   per-attempt, inbound-claim and objective-first classification workstreams
   against their [complete contracts](cohort-contracts.md#workstream-plan).
@@ -176,8 +188,10 @@ Future runtime validation is planned, not claimed by this documentation change.
 
 - [ ] Satisfy every per-original case in the
   [cohort validation matrix](cohort-contracts.md#validation-plan), including
-  the independent owner-acceptance gates; source, native, installed and live
-  proof remain distinct from documentary intake.
+  #3114's specific custodian/mapping gate and implementation ownership before
+  work. Preserve reviewed administrative receipt separately from product,
+  source, native, installed and live acceptance; add no generic ACK to the
+  #1666/#4101 retirement rules.
 - [ ] Unit: one eligibility interpretation for manual/automatic paths; all hold
   classes, grace boundaries and policy/authority isolation preserve the workspace.
 - [ ] Native integration: real Git worktrees and daemon requests across several
@@ -212,6 +226,17 @@ Planning completion means this proposal is reviewed and merged, with future
 implementation clearly gated. It does not mean any Phase 2-5 work is complete.
 
 ## Journal
+
+### 2026-11-05 - Separate tracking receipt from runtime ownership
+
+The root Coordination, Phase 2 and Validation now distinguish reviewed
+administrative consolidation from implementation owner appointment and
+product/native acceptance. This keeps the root consistent with the complete
+cohort companion without authorizing Phase 2-5 execution. #1918's same
+assignment/scope and #1488's product disposition remain; #3114's actual
+custodian-acceptance/general-ground mapping condition is unchanged.
+Draft status, planning-only authority and every runtime/cleanup/rollout
+gate remain intact.
 
 ### 2026-10-13 - Planning
 

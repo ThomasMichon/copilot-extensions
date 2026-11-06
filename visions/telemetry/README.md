@@ -2,9 +2,9 @@
 
 - **Subject:** Common observability hooks and structured logging across Copilot
   Extensions tools and services, with sinks owned by the adopting harness
-- **Scope:** leaf (cross-cutting capability)
+- **Scope:** branch (cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-11-05
 - **Reality docs:** [Suite architecture](../../docs/architecture.md) ·
   [Dispatch telemetry seam](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) ·
   [Bridge telemetry seam](../../plugins/agent-bridge/src/agent_bridge/telemetry.py)
@@ -20,8 +20,9 @@ together rather than as unrelated plugin-specific streams.
 **Implementing harnesses bring their own sink.** A harness selects its consumer
 through per-harness configuration or a user-local override, in the same adoption
 shape as configurable logger and index capabilities. The generic suite supplies
-portable producer seams, not an organization-specific sink, destination or
-retention policy. Adoption is optional: an unconfigured installation exports
+portable producer seams, not an organization-specific sink or destination.
+Selected capabilities can offer bounded history profiles without imposing them
+on unrelated telemetry. Adoption is optional: an unconfigured installation exports
 nothing and remains fully useful.
 
 ## Concepts & Components
@@ -42,6 +43,10 @@ nothing and remains fully useful.
   context. The transport does not change attribution, privacy or trace meaning.
 - **Independent local diagnostics.** Owner-local logs, status and diagnostic
   tools remain usable without export and without access to a configured sink.
+- **Machine health heartbeats.** An optional
+  [child capability](machine-heartbeats/README.md) publishes bounded hourly
+  health and diagnostic history through a separately selected user-state
+  carrier, independently of the SSH or Gateway paths being observed.
 - **User-controlled shared attribution.** Shared observations use stable,
   purpose-scoped keyed pseudonyms whose secret remains with the participating
   user across their approved machines. Controlled local/internal diagnostics
@@ -93,6 +98,15 @@ A selected consumer can deliberately deliver the same admitted observation to
 multiple approved destinations, such as operator-owned and centralized sinks.
 Destination failure and delivery accounting remain independent; fan-out does
 not authorize more fields, broader audiences or an implicit off-site default.
+
+### out-of-band-machine-heartbeats
+
+An adopter can select [hourly machine heartbeats](machine-heartbeats/README.md)
+with seven days of bounded health and diagnosed-error history. Each machine
+publishes independently; a user-owned carrier such as OneDrive provides
+high-latency multicast without requiring peer SSH or Gateway availability.
+Observation freshness, delivery uncertainty and actual domain-owned health stay
+distinct. The carrier never becomes a liveness or remediation authority.
 
 ### interoperable-signal-meaning
 
@@ -208,6 +222,9 @@ subject of [Process Telemetry](../process-telemetry/README.md).
 ## See Also
 
 - [Vision index](../README.md)
+- Child: [machine health heartbeats](machine-heartbeats/README.md)
+- [User-state carriers](../user-state-carriers/README.md) — separate health,
+  encrypted Vault and portable-preference responsibilities
 - [Agent fabric — externally observable](../agent-fabric/README.md#externally-observable)
 - [Process telemetry](../process-telemetry/README.md) — narrower spawn provenance
   and resource attribution

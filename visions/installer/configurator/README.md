@@ -4,7 +4,7 @@
   plugin-owned backstage panels it hosts.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-04
+- **Last revised:** 2026-11-05
 - **Reality docs:** [Manager configuration](../../../worktree-manager/docs/configuration.md),
   [plugin contribution contract](../../../worktree-manager/docs/plugin-contribution-contract.md)
 
@@ -138,6 +138,12 @@ It supplies a suggestion for an unconfigured machine, not authority to replace
 an existing local binding, access another account or create a repository.
 Unavailable, stale or conflicting preferences remain legible and recoverable
 through ordinary selection; no cloud-storage provider becomes mandatory.
+
+The optional [user-state carrier](../../user-state-carriers/README.md) can
+also distribute other domain-supported nonsecret preferences. The workbench
+distinguishes received suggestions, validated effective settings and running
+state; synchronization cannot override local authority or bypass a required
+adoption or confirmation.
 
 ### related-repositories-and-venues
 
