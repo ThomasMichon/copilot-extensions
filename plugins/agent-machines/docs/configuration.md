@@ -10,6 +10,10 @@ requirement packages are configuration**, with native desired-state authority,
 resource admission and package discovery. They are not interchangeable ordinary
 JSON preference overlays.
 
+The separate [portable preference preview](portable-preferences.md) reads
+explicit typed snapshots, including harness-to-knowledge mapping suggestions.
+It does not add a package source, persist acceptance or invoke native adoption.
+
 ## Canonical sources
 
 [`src/agent_machines/discover.py`](../src/agent_machines/discover.py) owns:

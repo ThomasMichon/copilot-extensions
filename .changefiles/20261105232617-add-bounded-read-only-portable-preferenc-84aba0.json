@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded read-only portable preference previews with scoped knowledge mapping defaults.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
