@@ -38,6 +38,31 @@ def test_foreign_package_version_cannot_claim_generation(tmp_path: Path) -> None
     ) == "9.0.0"
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("local", ["", "+vendor.007"])
+def test_reconstructed_slot_reports_exact_generation(tmp_path: Path, nested, local) -> None:
+    package = "1.2.3.dev4" + local
+    generation = package + ("." if local else "+") + "repair." + "0" * 31 + "1"
+    slot = tmp_path / "versions" / generation
+    prefix = slot / ".venv" if nested else slot
+    module = prefix / "lib" / "source_build.py"
+    assert effective_runtime_version(package, prefix=prefix, module_path=module) == generation
+    assert effective_runtime_version(
+        "9.0.0", prefix=prefix, module_path=module,
+    ) == "9.0.0"
+    assert effective_runtime_version(
+        package, prefix=prefix, module_path=tmp_path / "checkout" / "source_build.py",
+    ) == package
+
+
+@pytest.mark.parametrize("suffix", ["repair.bad", "repair." + "a" * 31, "repair." + "g" * 32])
+def test_malformed_reconstructed_slot_keeps_package_version(tmp_path: Path, suffix) -> None:
+    prefix = tmp_path / "versions" / (PACKAGE + "+" + suffix)
+    assert effective_runtime_version(
+        PACKAGE, prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == PACKAGE
+
+
 @pytest.mark.parametrize("qualified", [False, True])
 def test_standalone_wrapper_metadata_qualifies_only_its_own_source_slot(tmp_path, monkeypatch, qualified):
     from importlib import metadata
@@ -57,6 +82,22 @@ def test_standalone_wrapper_metadata_qualifies_only_its_own_source_slot(tmp_path
     assert effective_runtime_version(agent_dispatch._resolve_version()) == (
         generation if qualified else plugin_version
     )
+
+
+def test_reconstructed_slot_does_not_adopt_unrelated_wrapper_metadata(tmp_path, monkeypatch):
+    from importlib import metadata
+    import agent_dispatch
+    from agent_dispatch import _build_info, source_build
+
+    generation = "1.2.3.dev4+repair." + "a" * 32
+    prefix = tmp_path / "versions" / generation
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(source_build, "__file__", str(prefix / "lib" / "source_build.py"))
+    monkeypatch.setitem(_build_info.BUILD_INFO, "version", "")
+    monkeypatch.setattr(metadata, "version", lambda name: {
+        "agent-dispatch": "9.8.7", "agent-dispatch-service": "1.2.3.dev4",
+    }[name])
+    assert agent_dispatch._resolve_version() == "9.8.7"
 
 
 @pytest.mark.parametrize("suffix", [".profile.bad", f".repair.{'a' * 31}", ".extra"])

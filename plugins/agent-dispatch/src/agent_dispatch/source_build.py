@@ -11,6 +11,10 @@ _SOURCE_VERSION = re.compile(
     r"source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
     r"(?:\.profile\.[0-9a-f]{16})?(?:\.repair\.[0-9a-f]{32})?"
 )
+_REPAIR_VERSION = re.compile(
+    r"(?P<package>\d+\.\d+\.\d+(?:[.-]dev\d+)?"
+    r"(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?)[.+]repair\.[0-9a-f]{32}"
+)
 
 
 def effective_runtime_version(
@@ -23,7 +27,7 @@ def effective_runtime_version(
     if paths is None or "+" not in paths[0]:
         return package_version
     generation = paths[0]
-    match = _SOURCE_VERSION.fullmatch(generation)
+    match = _SOURCE_VERSION.fullmatch(generation) or _REPAIR_VERSION.fullmatch(generation)
     if not match:
         return package_version
     package = package_version.lower().replace("-", ".").replace("_", ".")
