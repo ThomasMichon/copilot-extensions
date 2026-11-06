@@ -169,18 +169,18 @@ def command(argv: list[str]) -> int:
     parser.add_argument("--operation", choices=("set", "reset"), default="set")
     parser.add_argument("--login", default="")
     parser.add_argument("--preview-token", default="")
-    parser.add_argument("--harness-id", default="")
-    parser.add_argument("--knowledge-id", default="")
+    parser.add_argument("--harness-id")
+    parser.add_argument("--knowledge-id")
     try:
         args = parser.parse_args(argv)
         # Native loaders may warn about source content. Return sanitized findings,
         # never those raw diagnostics through provider rows, stderr or receipts.
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             project = resource_name(args.context_project)
-            portable = bool(args.harness_id or args.knowledge_id)
+            portable = args.harness_id is not None or args.knowledge_id is not None
             if portable and (
                 not args.command.startswith("knowledge-")
-                or not args.harness_id or not args.knowledge_id or args.repository
+                or not args.harness_id or not args.knowledge_id or args.repository is not None
             ):
                 raise ConfigurationError("invalid-request", "Supply both portable IDs instead of a repository name.")
             if args.command == "identities":

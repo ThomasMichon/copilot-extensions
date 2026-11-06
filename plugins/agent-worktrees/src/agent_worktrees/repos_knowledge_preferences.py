@@ -9,11 +9,33 @@ import json
 from pathlib import Path
 import re
 
-from . import config as cfg, project_state, repos, state_root
+from dropin_registry import ScanAuthority
+
+from . import config as cfg, config_acquisition, project_state, repos, state_root
 from .config_sources import KnowledgeBindingError
 from .repos_configuration_sources import ConfigurationError, resource_name
 
 SCHEMA = "agent-worktrees.knowledge-preference"
+
+
+def _binding_config(project: str):
+    machine_path = cfg.project_dir(project) / "config.yaml"
+    yaml_sources = {str(cfg.global_config_path()), str(machine_path)}
+    dropins = machine_path.parent / "config.d"
+    try:
+        with config_acquisition.capture_config_observations() as observations:
+            config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+    except KnowledgeBindingError as error:
+        raise ConfigurationError("binding-unresolved", "The explicit local binding needs owner repair.") from error
+    for observation in observations:
+        binding_source = (
+            observation.stage == "config-yaml" and observation.source in yaml_sources
+            or observation.stage == "config-dropins" and observation.source == str(dropins)
+            or observation.stage == "config-dropin-entry" and Path(observation.source).parent == dropins
+        )
+        if binding_source and observation.authority is ScanAuthority.INDETERMINATE:
+            raise ConfigurationError("binding-unresolved", "The local binding sources need owner repair.")
+    return config
 
 
 def identities() -> dict:
@@ -67,10 +89,7 @@ def resolve(project: str, harness_id: str, knowledge_id: str) -> dict:
         raise ConfigurationError("context-mismatch", "The harness identity must match the selected native project.")
     if harness_id == knowledge_id:
         raise ConfigurationError("same-repository", "Harness and knowledge must be distinct native repositories.")
-    try:
-        config = cfg.load_project_config(project, include_control_plane_related_pr=False)
-    except KnowledgeBindingError as error:
-        raise ConfigurationError("binding-unresolved", "The explicit local binding needs owner repair.") from error
+    config = _binding_config(project)
     if not isinstance(config.knowledge_repo, str):
         raise ConfigurationError("binding-unresolved", "The explicit local binding needs owner repair.")
     binding = {"status": "absent"}

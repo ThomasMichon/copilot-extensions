@@ -172,6 +172,56 @@ def test_real_loader_keeps_unset_native_binding_sources_compatible(native, monke
     assert native.calls == []
 
 
+@pytest.mark.parametrize("source", ["global", "machine", "dropin"])
+@pytest.mark.parametrize("failure", ["malformed", "unreadable", "invalid-shape"])
+def test_real_loader_refuses_uncertain_binding_sources(native, monkeypatch, source, failure):
+    import builtins
+    import io
+
+    monkeypatch.setattr(preferences.cfg, "load_project_config", native.loader)
+    machine = preferences.cfg.project_dir("first") / "config.yaml"
+    path = (
+        preferences.cfg.global_config_path() if source == "global"
+        else machine if source == "machine"
+        else machine.parent / "config.d" / "binding.yaml"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "knowledge_repo: [\n" if failure == "malformed"
+        else "- knowledge_repo: other\n" if failure == "invalid-shape"
+        else "knowledge_repo: other\n",
+        encoding="utf-8",
+    )
+    before = path.read_bytes(), native.registry.read_bytes()
+    if failure == "unreadable":
+        def guarded_open(original):
+            def open_source(file, *args, **kwargs):
+                if isinstance(file, (str, Path)) and Path(file) == path:
+                    raise PermissionError("synthetic private source")
+                return original(file, *args, **kwargs)
+            return open_source
+
+        with monkeypatch.context() as denied:
+            denied.setattr(builtins, "open", guarded_open(builtins.open))
+            denied.setattr(io, "open", guarded_open(io.open))
+            with pytest.raises(ConfigurationError) as caught:
+                preview(native)
+    else:
+        with pytest.raises(ConfigurationError) as caught:
+            preview(native)
+    assert caught.value.code == "binding-unresolved"
+    assert (path.read_bytes(), native.registry.read_bytes()) == before
+    assert native.calls == []
+
+
+def test_real_loader_keeps_missing_binding_sources_compatible(native, monkeypatch):
+    monkeypatch.setattr(preferences.cfg, "load_project_config", native.loader)
+    assert not preferences.cfg.global_config_path().exists()
+    assert not (preferences.cfg.project_dir("first") / "config.yaml").exists()
+    assert resolve(native)["status"] == "suggested"
+    assert native.calls == []
+
+
 def test_only_explicit_confirmed_adoption_calls_the_existing_native_binding_owner(native):
     result = preview(native)
     assert native.calls == [("first", "shared", "preview", "")]
@@ -234,6 +284,25 @@ def test_normal_configuration_parser_preserves_name_baseline_and_accepts_explici
     assert native.calls == [("first", "shared", "preview", "")]
     assert repos_configuration.command(["catalog", *args]) == 1
     assert json.loads(capsys.readouterr().out)["code"] == "invalid-request"
+
+
+@pytest.mark.parametrize("command", ["knowledge-preview", "knowledge-apply"])
+@pytest.mark.parametrize("selection", ["empty-ids", "one-empty-id", "empty-repository"])
+def test_supplied_empty_selectors_never_fall_back_to_name_binding(native, capsys, command, selection):
+    ids = (
+        ["--harness-id", native.ids["first"], "--knowledge-id", native.ids["shared"]]
+        if selection == "empty-repository"
+        else ["--harness-id", "", "--knowledge-id", native.ids["shared"]]
+        if selection == "one-empty-id"
+        else ["--harness-id", "", "--knowledge-id", ""]
+    )
+    assert repos_configuration.command([
+        command, "--context-project", "first",
+        "--repository", "" if selection == "empty-repository" else "shared",
+        *ids, "--preview-token", "a" * 64,
+    ]) == 1
+    assert json.loads(capsys.readouterr().out)["code"] == "invalid-request"
+    assert native.calls == []
 
 
 def test_context_mismatch_and_unqualified_identity_refuse_before_native_preview(native):

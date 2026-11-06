@@ -189,6 +189,9 @@ The native loader validates binding-bearing global and machine sources before
 default selection. Booleans, numbers and other non-string values refuse rather
 than becoming an absent binding through truthiness; null/empty retain their
 existing unset behavior. A quoted repository name retains its string identity.
+Portable resolution also inspects the native acquisition results for global,
+project-local and drop-in binding sources. Malformed or unreadable sources
+refuse as `binding-unresolved`; genuinely missing sources remain unset.
 
 Where no binding exists, adoption remains an explicit separate operation:
 
@@ -207,7 +210,8 @@ writer and personal-plugin composer still own all effects and partial receipts.
 Pair creation and running-session delivery remain separate readiness gates.
 
 This is additive provider support. The original by-name `--repository` form is
-unchanged; do not combine it with portable IDs. Confirm the selected runtime's
+unchanged; do not combine it with portable IDs, including supplied empty
+options. Confirm the selected runtime's
 `repos configuration --help` exposes `identities`, `knowledge-resolve` and the
 two ID options before using them, then read the catalog's capability. Older
 runtimes remain usable by name but cannot promise identity-bound adoption;

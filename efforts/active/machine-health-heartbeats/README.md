@@ -306,3 +306,19 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   count and unchanged deadlines. Each passed in 3.6-4.9 seconds. Linux native,
   release/installed adoption, remaining domain adapters and carrier activation
   are still open; this is source/isolated validation, not a live rollout.
+
+### 2026-11-06 - Native mapping review corrections
+- Refuse malformed/unreadable global, project-local and drop-in binding
+  sources using the native acquisition observations, while retaining missing
+  and explicitly unset source behavior. Supplied empty portable-ID options
+  cannot downgrade to the legacy name-based flow or bypass mixed selectors.
+- The focused Windows binding/parser packet passed 61 cases; 17 knowledge
+  acquisition controls passed after updating their original-owner fixture
+  and typed-error expectations. The actual fresh-root selected-payload
+  preview/apply/readback passed again in 25.16 seconds with unchanged budgets.
+- Corrected a source-guard inventory bug: HTTP-52 completeness now selects
+  its dynamic owner modules from the captured tree rather than future source
+  additions. Its regression and the real 1,044-fixture contract check pass;
+  no historical evidence was rewritten. Ruff and install contracts pass.
+- Required exact-source Linux CI and current-head review remain open.
+  No installed update, binding change, carrier effect or activation occurred.
