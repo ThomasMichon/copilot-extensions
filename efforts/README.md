@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Bridge and Dispatch Worker Contract Qualification](active/bridge-dispatch-worker-contract-qualification/README.md) | Draft; handoff proposal, no implementation claimed | #6467/#3556/#7268 existing owners; #11106 result bindings and #11108 effective profiles; no new driver or rollout |
 | [Inactive Worktree Relocation](active/inactive-worktree-relocation/README.md) | Active; proposal before implementation, complete stopped-clean flow first | #10879; mixed roots and broader inactive continuity; existing owners retained, no live migration or rollout |
 | [Maintainer Vision Adherence Review](active/maintainer-vision-adherence-review/README.md) | Active; public lens and paired skill proposed | #10864; existing vision/pattern/conformance and review owners retained, no runtime rollout |
 | [Machine Health Heartbeats](active/machine-health-heartbeats/README.md) | Active; local report and configuration-only adoption complete, portable-preference amendment before code | #10873; native configuration/binding/domain owners retained, no new daemon; carrier and activation separately gated |
