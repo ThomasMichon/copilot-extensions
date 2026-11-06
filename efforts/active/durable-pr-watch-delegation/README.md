@@ -939,6 +939,98 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Keep metadata qualification valid on released checkouts
+
+- The real-metadata fixture now explicitly retains the required top-level
+  canonical library closure as well as each consumer's embedded closure.
+  Canonical materialization may legitimately do nothing when its input is
+  already released; that no-op is accepted without dropping canonical data.
+- Both PR/Fleet and Dispatch/PR/Fleet are exercised from checkout-form and
+  already-materialized inputs. The corrected focused packet passes 59
+  contained Windows contracts with clean sandbox removal, unchanged bounds,
+  fatal lint and diff checks. Production composition code is unchanged by
+  this fixture correction; native installed acceptance remains open.
+
+### 2026-11-06 - Refuse conditional source replacement
+
+- Dependency requirement predicates and source-mapping selectors have
+  different effects. Canonical composition retains requirement predicates,
+  but refuses `marker`, `extra` or `group` selectors in the original and
+  selected canonical source graphs before emitting overrides. This prevents
+  a conditional local/registry choice becoming an unconditional local URL.
+- Six filesystem-only controls cover the three selectors in both graphs and
+  verify refusal before resolver-input creation. The real metadata and
+  requirement-marker cases remain passing. The focused contained Windows
+  packet now passes 57 contracts with unchanged bounds, clean sandbox
+  removal, fatal lint, scoped module-size checks and diff checks.
+- This remains a source-only prerequisite. The failed hosted run is not
+  replaced with these fixtures; released-account, installed and parent
+  service/fleet acceptance remain separately open.
+
+### 2026-11-06 - Preserve real metadata activation in test-source constraints
+
+- Shared library metadata already contains platform-marked dependencies and
+  optional extras. Canonical source composition now follows the runner's
+  selected entry extras and their local dependencies, retaining target marker
+  predicates and version bounds without imposing inactive optional bounds.
+  Extra names and comparisons use normalized identities; UV still evaluates
+  marker truth for its selected target.
+- The regression uses the canonical materializer with the actual PR/Fleet and
+  Dispatch/PR/Fleet project and library metadata. Separate actual offline UV
+  cases preserve false platform predicates and reject incompatible active
+  extra or core bounds. No root-interpreter dependency was added.
+- Fifty-one focused contained Windows contracts pass with the original
+  30-second item and 300-second group bounds, clean sandbox removal, fatal
+  Python lint, scoped module-size checks and diff checks. This corrects the
+  source-preparation prerequisite; the failed fresh-account run remains
+  failure evidence, not installed acceptance or rollout.
+
+### 2026-11-06 - Retain the released-account setup failure
+
+- The single native acceptance run
+  [42151348602](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42151348602)
+  used release `32c045f081ba8d9c4b5759dfb3c9bfa21ec68d55` and selected
+  only the existing 15 PR-owner jobs, with their original deadlines.
+  Every selected job failed during environment preparation, before pytest
+  acceptance. No installed-contract or deployment success is credited.
+- Linux and macOS report conflicting `agent-procutil` URLs from the PR and
+  Fleet payloads' separate vendored libraries. Windows reports the failed
+  UV preparation command without subordinate resolver stderr. This extends
+  the existing released-checkout defect #9277; its source repair is now the
+  next prerequisite, not another installation-cell implementation.
+- The temporary qualification tag was removed after preserving the terminal
+  result and checking its exact commit. No workflow rerun, local update,
+  shared-service control or fleet rollout occurred. The retained #6286
+  installed exit and all broader parent/resource gates remain open.
+- The bounded #9277 source repair keeps canonical library selection in the
+  runner's existing cache helper and preserves version constraints separately
+  from UV source overrides. Both selected canonical bytes and their mapping
+  invalidate stale cached environments; unsupported identity or requirement
+  forms refuse rather than guessing.
+- Fifty focused Windows tests pass, including actual offline UV resolution
+  for the two-consumer PR/Fleet and three-consumer Dispatch/PR/Fleet layouts,
+  plus incompatible-version refusal. Fatal Python lint, the unchanged module
+  cap and diff checks pass. These are source/resolver proofs, not successful
+  fresh-account installation, release promotion or installed adoption.
+
+### 2026-11-05 - Land the qualified Manager source-acceptance leaf
+
+- #10671 merged at `6a6bbb0c306ca93d65e388ba97a2ff81533d9018`, after
+  current-head Copilot approval, resolved documentation feedback and green
+  required CI. The finite source-scheduling/fixture issue #10632 is closed.
+  The earlier four-construction/native evidence and its limits remain below.
+- The source workspace was pulled forward without losing work; its complete
+  published head remains on a verified recovery branch. No source PR remains
+  open for this leaf.
+- The actual parent installation-cell, governed cutover, Phase 4 and
+  Validation rows were read after merge and remain open. The next stretch
+  returns to #6286's retained isolated installed-contract acceptance;
+  source qualification alone does not close it or the broader #6007/#7188
+  outcomes. Live updates, credentials, service activation and deployment
+  still require their separately applicable authorization.
+- Existing source/resource owners and cleanup holds are unchanged. The
+  delegation worktree and parent effort are retained, not declared complete.
+
 ### 2026-11-05 - Qualify all four real Manager source constructions
 
 - The source contract passed at `4e73aecca7fe744129e5322f489686222b6f05e8`

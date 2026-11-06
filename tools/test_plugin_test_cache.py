@@ -3,6 +3,7 @@ from pathlib import Path, PureWindowsPath
 import os
 import shutil
 import subprocess
+import tomllib
 from types import SimpleNamespace
 
 import pytest
@@ -143,6 +144,215 @@ def test_retained_build_resource_body_invalidates_fleet_consumer(graph, name):
     before = runner._dep_fingerprint(name)
     body.write_text("VALUE = 2\n")
     assert runner._dep_fingerprint(name) != before
+
+
+@pytest.fixture
+def released_graph(tmp_path, monkeypatch):
+    plugin = tmp_path / "plugins" / "agent-pull-requests"
+    fleet = tmp_path / "fleet-manager"
+    for project, name in ((plugin, "agent-pull-requests"), (fleet, "fleet-manager")):
+        _project(project, name, 'shared = {path = "libs/shared"}')
+        _project(project / "libs" / "shared", "shared")
+        manifest = project / "pyproject.toml"
+        manifest.write_text(manifest.read_text().replace(
+            'version = "1.0"',
+            'version = "1.0"\ndependencies = ["shared>=1", '
+            '"shared>=999; sys_platform == \'inactive-test-platform\'"]',
+        ) + '\n[project.optional-dependencies]\nunused = ["shared>=500"]\n')
+    canonical = _project(tmp_path / "libs" / "shared", "shared")
+    for resource in runner.standalone_build_resources("fleet-manager", source_root=tmp_path):
+        resource.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    return plugin, fleet, canonical
+
+
+def test_released_library_overrides_are_canonical_and_invalidate_cache(released_graph):
+    plugin, _, canonical = released_graph
+    before = runner._dep_fingerprint("agent-pull-requests")
+    overrides, _ = cache_policy.canonical_test_sources(
+        "agent-pull-requests", plugin, runner.REPO,
+    )
+    assert overrides == {"shared": canonical.parent}
+    canonical.write_text("VALUE = 2\n")
+    assert runner._dep_fingerprint("agent-pull-requests") != before
+    (canonical.parent / "pyproject.toml").unlink()
+    with pytest.raises(ValueError, match="conflicting non-library sources"):
+        runner._dep_fingerprint("agent-pull-requests")
+
+
+def test_released_preparation_passes_overrides_through_normal_policy(released_graph, monkeypatch):
+    plugin, _, canonical = released_graph
+    (runner.VENV_ROOT / "agent-pull-requests").mkdir(parents=True)
+    monkeypatch.setattr(
+        runner.subprocess, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0),
+    )
+    calls = []
+
+    def install(uv, arguments, **options):
+        source = Path(arguments[arguments.index("--override") + 1])
+        constraints = Path(arguments[arguments.index("--constraint") + 1])
+        assert "shared>=1\n" in constraints.read_text()
+        assert "shared>=500" not in constraints.read_text()
+        calls.append((source.read_text(), options))
+
+    monkeypatch.setattr(runner, "run_uv_install", install)
+    runner._ensure_venv("agent-pull-requests", "fixture-uv", reinstall=False)
+    text, options = calls.pop()
+    assert text == f"shared @ {canonical.parent.as_uri()}\n"
+    assert options["cwd"] == plugin and options["trusted_source_roots"] == (runner.REPO,)
+    assert not calls
+
+
+def test_released_constraints_follow_selected_library_extras(released_graph):
+    plugin, _, canonical = released_graph
+    metadata = plugin / "pyproject.toml"
+    metadata.write_text(metadata.read_text().replace("shared>=1", "shared[feature]>=1"))
+    library = canonical.parent / "pyproject.toml"
+    library.write_text(library.read_text() + (
+        '\n[project.optional-dependencies]\nfeature = ["shared>=2"]\n'
+        'unused = ["shared>=500"]\n'
+    ))
+    _, constraints = cache_policy.canonical_test_sources("agent-pull-requests", plugin, runner.REPO)
+    assert "shared>=2" in constraints
+    assert not any("shared>=500" in requirement for requirement in constraints)
+
+
+@pytest.mark.parametrize("graph", ["original", "canonical"])
+@pytest.mark.parametrize("selector", [
+    "marker = \"sys_platform == 'win32'\"", 'extra = "feature"', 'group = "dev"',
+])
+def test_released_composition_refuses_source_activation_selectors(released_graph, graph, selector):
+    plugin, _, canonical = released_graph
+    metadata = (
+        plugin / "pyproject.toml" if graph == "original" else canonical.parent / "pyproject.toml"
+    )
+    if graph == "original":
+        metadata.write_text(metadata.read_text().replace(
+            'path = "libs/shared"', f'path = "libs/shared", {selector}',
+        ))
+    else:
+        metadata.write_text(metadata.read_text() + (
+            f'\n[tool.uv.sources]\nshared = {{path = ".", {selector}}}\n'
+        ))
+    with pytest.raises(ValueError, match="unconditional source mappings"):
+        cache_policy.source_resolution_arguments(
+            "agent-pull-requests", plugin, runner.REPO, runner.REPO / "uncreated-venv",
+        )
+    assert not (runner.REPO / "uncreated-venv").exists()
+
+
+def _copy_metadata_checkout(source, checkout, consumer):
+    roots = cache_policy._dependency_sources(consumer, source / "plugins" / consumer, source)
+    names = set()
+    for root in roots:
+        manifest = root / "pyproject.toml"
+        if manifest.is_file():
+            name = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("name")
+            if isinstance(name, str):
+                names.add(name)
+    for manifest in (source / "libs").glob("*/pyproject.toml"):
+        name = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("name")
+        if name in names:
+            roots.update(cache_policy._package_roots(manifest.parent))
+    for root in roots:
+        target = checkout / root.relative_to(source)
+        target.mkdir(parents=True, exist_ok=True)
+        if (root / "pyproject.toml").is_file():
+            shutil.copyfile(root / "pyproject.toml", target / "pyproject.toml")
+            (target / "src").mkdir(exist_ok=True)
+            (target / "src" / "fixture.py").write_text("# Metadata-only release fixture.\n")
+
+
+@pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
+@pytest.mark.parametrize("source_layout", ["checkout", "materialized"])
+def test_real_materialized_metadata_preserves_active_platform_constraints(
+    tmp_path, consumer, source_layout,
+):
+    import materialize_main
+
+    source = Path(__file__).resolve().parents[1]
+    if source_layout == "materialized":
+        snapshot = tmp_path / "input"
+        _copy_metadata_checkout(source, snapshot, consumer)
+        log = materialize_main.materialize_uv_editable_refs(snapshot, canonical_root=snapshot)
+        assert not any(line.startswith("SKIP") for line in log), log
+        source = snapshot
+    checkout = tmp_path / "release"
+    _copy_metadata_checkout(source, checkout, consumer)
+    log = materialize_main.materialize_uv_editable_refs(checkout, canonical_root=checkout)
+    assert not any(line.startswith("SKIP") for line in log), log
+    overrides, constraints = cache_policy.canonical_test_sources(
+        consumer, checkout / "plugins" / consumer, checkout,
+    )
+    assert "agent-zdd" in overrides
+    assert any(
+        requirement.startswith("agent-zdd;") and "sys_platform" in requirement
+        for requirement in constraints
+    )
+
+
+@pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_real_uv_resolves_released_duplicate_sources_with_canonical_override(
+    released_graph, consumer,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("actual UV resolver is unavailable")
+    plugin, fleet, canonical = released_graph
+    projects = [plugin, fleet]
+    if consumer == "agent-dispatch":
+        plugin = runner.REPO / "plugins" / consumer
+        _project(plugin, consumer, 'shared = {path = "libs/shared"}')
+        _project(plugin / "libs" / "shared", "shared")
+        metadata = plugin / "pyproject.toml"
+        metadata.write_text(metadata.read_text().replace(
+            'version = "1.0"', 'version = "1.0"\ndependencies = ["shared>=1"]',
+        ))
+        projects.insert(0, plugin)
+    metadata = plugin / "pyproject.toml"
+    metadata.write_text(metadata.read_text().replace("shared>=1", "shared[feature_name]>=1"))
+    library = canonical.parent / "pyproject.toml"
+    library.write_text(library.read_text().replace(
+        'version = "1.0"',
+        'version = "1.0"\ndependencies = ["shared>=1; extra == \'FEATURE_NAME\'"]',
+    ) + '\n[project.optional-dependencies]\nFEATURE_NAME = []\n')
+    requirements = runner.REPO / "requirements.txt"
+    requirements.write_text("".join(f"-e {project}\n" for project in projects))
+    command = [
+        uv, "pip", "compile", "--no-config", "--offline", "--no-build",
+        str(requirements),
+    ]
+    options = dict(capture_output=True, text=True, timeout=30)
+    if os.name == "nt":
+        options["creationflags"] = subprocess.CREATE_NO_WINDOW
+    refused = subprocess.run(command, **options)
+    assert refused.returncode != 0 and "conflicting URLs" in refused.stderr
+    venv = runner.REPO / "venv"
+    venv.mkdir()
+
+    def resolve():
+        arguments = cache_policy.source_resolution_arguments(
+            consumer, plugin, runner.REPO, venv,
+        )
+        return subprocess.run([*command, *arguments], **options)
+
+    accepted = resolve()
+    assert accepted.returncode == 0, accepted.stderr
+    assert canonical.parent.as_uri() in accepted.stdout
+    original_library = library.read_text()
+    library.write_text(original_library.replace("shared>=1;", "shared>=2;"))
+    active_extra = resolve()
+    assert active_extra.returncode != 0, active_extra.stdout
+    library.write_text(original_library)
+    metadata.write_text(metadata.read_text().replace("shared[feature_name]>=1", "shared[feature_name]>=2"))
+    incompatible = resolve()
+    assert incompatible.returncode != 0, incompatible.stdout
 
 
 @pytest.mark.parametrize("linked_parent", [False, True])
