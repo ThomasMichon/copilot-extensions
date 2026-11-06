@@ -35,6 +35,11 @@ _GLOBAL_COMMANDS = [
     ["podman", "container", "prune"],
     ["docker", "stop", "$(docker ps -aq)"],
     ["ssh", "fixture-host", "pkill -f copilot"],
+    ["ssh", "fixture-host", "kill", "-TERM", "-1"],
+    ["ssh", "-p", "2222", "fixture-host", "docker", "rm", "-a"],
+    ["ssh", "fixture-host", "-oBatchMode=yes", "kill -TERM -1"],
+    ["ssh", "-o", "ProxyCommand=kill -TERM -1", "fixture-host"],
+    ["ssh", "-o", "LocalCommand kill -TERM -1", "fixture-host"],
     ["sudo", "systemctl", "stop", "example"],
 ]
 
@@ -58,6 +63,8 @@ def test_source_filter_retains_every_known_global_command_family(tmp_path, comma
     [sys.executable, "-I", "-c", "print('fixture')"],
     ["psmux", "-V"],
     ["tmux", "--help"],
+    ["ssh", "-p2222", "-o", "BatchMode=yes", "fixture-host", "printf fixture"],
+    ["ssh", "fixture-host", "command -v pkill"],
 ])
 def test_bounded_commands_and_inspection_are_not_globally_banned(command):
     assert safety.command_problem(command) is None
@@ -182,6 +189,9 @@ def test_child_arguments_cannot_qualify_the_parent_mux_namespace(monkeypatch, tm
     ["pwsh", "-Command", "kill python -Force"],
     ["powershell.exe", "-Command", "spps python -Force"],
     ["pwsh", "-Command", "Restart-Service example"],
+    ["pwsh", "-Command", "if ($true) { tmux kill-session -t fixture }"],
+    ["pwsh", "-Command", "if($true){tmux kill-session -t fixture}"],
+    ["pwsh", "-Command", "& { kill python -Force }"],
 ])
 def test_shell_wrappers_do_not_hide_global_commands(command, tmp_path):
     assert safety.command_problem(command, sandbox=tmp_path)
@@ -255,6 +265,9 @@ def test_env_launcher_split_string_and_cwd_are_inspected(monkeypatch, tmp_path):
     ["bash", "-lc", "HOME=private tmux kill-session -t fixture"],
     ["bash", "-lc", "command tmux kill-session -t fixture"],
     ["bash", "-lc", "exec tmux kill-session -t fixture"],
+    ["ssh", "fixture-host", "kill", "-TERM", "-1"],
+    ["ssh", "-p2222", "fixture-host", "docker rm -a"],
+    ["pwsh", "-Command", "if ($true) { tmux kill-session -t fixture }"],
 ])
 def test_wrapped_cleanup_is_refused_at_a_synthetic_audit_boundary(command):
     with pytest.raises(safety.UnsafeTestCommand):
@@ -360,6 +373,10 @@ def test_shell_control_prefix_preserves_verified_private_mux(monkeypatch, tmp_pa
         ["sh", "-c", f"if true; then tmux {private} has-session; fi"],
         sandbox=tmp_path, environment={},
     ) is None
+    assert safety.command_problem(
+        ["pwsh", "-Command", f"if ($true) {{ tmux {private} has-session }}"],
+        sandbox=tmp_path, environment={},
+    ) is None
 
 
 @pytest.mark.parametrize("selector", ["$SOCKET", "${SOCKET}", "%SOCKET%", "!SOCKET!", "~/mux.sock", "*.sock"])
@@ -388,6 +405,7 @@ def test_shell_namespace_expansions_cannot_qualify_literal_private_paths(
     ["sh", "-c", "value=$(printf fixture); kill -TERM 123"],
     ["sh", "-c", "value=`printf fixture`; kill -TERM 123"],
     ["pwsh", "-Command", '$value = "$(Get-Date)"; Stop-Process -Id 123'],
+    ["sh", "-c", "printf '%s' '(tmux kill-session -t fixture)'"],
 ])
 def test_harmless_substitution_does_not_hide_or_ban_separate_explicit_cleanup(command, tmp_path):
     assert safety.command_problem(command, sandbox=tmp_path, environment={}) is None

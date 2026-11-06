@@ -5924,6 +5924,10 @@ scope evidence; an explicit absolute private transport can still be verified.
 Shell substitutions are inspected as nested command positions. Unresolved
 variable, home or glob expansion in a mux namespace is not private-scope proof;
 literal argument vectors do not undergo shell expansion.
+Quoted data is not a command group; unquoted parentheses and braces are
+inspected as nested command positions. SSH options and destinations are
+separated from the remote command, and explicit local/proxy command options
+are inspected independently.
 
 For real mux fixtures, use
 `plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact

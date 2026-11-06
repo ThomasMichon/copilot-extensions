@@ -172,7 +172,37 @@ def _launcher_problem(
         text = " ".join(nested)
         if check_mux_scope and re.search(r"\b(?:psmux|pmux|tmux)(?:\.exe)?\b", text, re.IGNORECASE):
             return "remote mux commands require independently verified remote fixture scope"
-        return _shell_problem(text, check_mux_scope=False)
+        index = 0
+        destination = False
+        while index < len(nested):
+            option = nested[index]
+            if not option.startswith("-"):
+                if destination:
+                    break
+                destination = True
+                index += 1
+                continue
+            if option == "--":
+                index += 1
+                if not destination and index < len(nested):
+                    index += 1
+                break
+            if len(option) > 1 and option[1] in "BbcDEeFIiJLlmOopQRSWw":
+                if len(option) == 2 and index + 1 >= len(nested):
+                    return "cannot inspect an SSH option without its value"
+                value = option[2:] if len(option) > 2 else nested[index + 1]
+                if option[1] == "o":
+                    setting = re.split(r"[=\s]+", value, maxsplit=1)
+                    if len(setting) == 2 and setting[0].lower() in {"proxycommand", "localcommand"}:
+                        problem = _shell_problem(setting[1], check_mux_scope=False)
+                        if problem:
+                            return problem
+                index += 1 if len(option) > 2 else 2
+            elif re.fullmatch(r"-[46AaCfGgKkMNnqsTtVvXxYy]+", option):
+                index += 1
+            else:
+                return "cannot inspect an unsupported SSH launcher option"
+        return _shell_problem(" ".join(nested[index:]), check_mux_scope=False)
     if name in {"sudo", "doas"}:
         # Privilege launchers may replace the environment. An inherited TMUX
         # socket is not scope evidence after crossing that boundary.
@@ -259,20 +289,37 @@ def _launcher_problem(
     )
 
 
-def _shell_substitutions(text: str, *, powershell: bool) -> Iterator[str]:
-    cursor = 0
-    while match := re.search(r"\$\(|`", text[cursor:]):
-        start = cursor + match.start()
-        if text[start] == "`":
-            end = text.find("`", start + 1) if not powershell else -1
-            cursor = start + 1 if end < 0 else end + 1
-            if end >= 0:
-                yield text[start + 1:end]
+def _shell_nested_commands(text: str, *, powershell: bool) -> Iterator[str]:
+    cursor, outer_quote = 0, ""
+    escape = "`" if powershell else "\\"
+    while cursor < len(text):
+        char = text[cursor]
+        if char == escape and outer_quote != "'":
+            cursor += 2
             continue
-        index, depth, quote = start + 2, 1, ""
+        if char in "\"'" and (not outer_quote or char == outer_quote):
+            outer_quote = "" if outer_quote else char
+            cursor += 1
+            continue
+        if char == "`" and not powershell and outer_quote != "'":
+            end = text.find("`", cursor + 1)
+            start = cursor + 1
+            cursor = cursor + 1 if end < 0 else end + 1
+            if end >= 0:
+                yield text[start:end]
+            continue
+        if text.startswith("$(", cursor) and outer_quote != "'":
+            start, opening = cursor + 2, "("
+        elif not outer_quote and char in "({":
+            start, opening = cursor + 1, char
+        else:
+            cursor += 1
+            continue
+        closing = ")" if opening == "(" else "}"
+        index, depth, quote = start, 1, ""
         while index < len(text) and depth:
             char = text[index]
-            if char == ("`" if powershell else "\\") and quote != "'":
+            if char == escape and quote != "'":
                 index += 2
                 continue
             if quote:
@@ -280,14 +327,14 @@ def _shell_substitutions(text: str, *, powershell: bool) -> Iterator[str]:
                     quote = ""
             elif char in "\"'":
                 quote = char
-            elif char == "(":
+            elif char == opening:
                 depth += 1
-            elif char == ")":
+            elif char == closing:
                 depth -= 1
             index += 1
         cursor = index
         if depth == 0:
-            yield text[start + 2:index - 1]
+            yield text[start:index - 1]
 
 
 def _shell_problem(
@@ -336,7 +383,7 @@ def _shell_problem(
         text, re.IGNORECASE,
     ):
         environment = {}
-    for nested in _shell_substitutions(text, powershell=powershell):
+    for nested in _shell_nested_commands(text, powershell=powershell):
         problem = _shell_problem(
             nested, cwd=cwd, environment=environment, sandbox=sandbox,
             check_mux_scope=check_mux_scope, powershell=powershell,
