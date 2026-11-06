@@ -1,4 +1,4 @@
-"""Finite real Worktrees CLI fixture with a reachable, unqualified resident."""
+"""Worktrees-owned finite CLI fixture with a reachable, unqualified resident."""
 
 import json
 import os

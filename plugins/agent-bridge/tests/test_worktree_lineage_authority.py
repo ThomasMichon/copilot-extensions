@@ -152,7 +152,7 @@ def test_retained_session_receiver_refuses_changed_scope_without_resident_fallba
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     (state / "writer-identity.json").write_text(json.dumps(identity), encoding="utf-8")
     prefix = [
-        sys.executable, str(Path(__file__).parent / "fixtures/worktree_record_owner.py"),
+        sys.executable, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
         str(root), str(state), "example", "host",
     ]
     snapshot(prefix, "protect")

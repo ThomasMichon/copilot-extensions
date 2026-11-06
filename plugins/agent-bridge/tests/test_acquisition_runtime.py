@@ -799,7 +799,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     identity_file = state / "writer-identity.json"
     identity_file.write_text(json.dumps(identity), encoding="utf-8")
     prefix = [
-        sys.executable, str(Path(__file__).parent / "fixtures/worktree_record_owner.py"),
+        sys.executable, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
         str(root), str(state), "test-project", "worktree-a",
     ]
     from bridge_http47_runtime import REQUEST

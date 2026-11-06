@@ -66,7 +66,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
     "plugins/agent-bridge/tests/test_acquisition_runtime.py",
     "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
-    "plugins/agent-bridge/tests/fixtures/worktree_record_owner.py",
+    "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
