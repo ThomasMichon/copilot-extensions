@@ -18,7 +18,9 @@ False so ``_run`` returns right after the relay decision, exercising the cleanup
 from __future__ import annotations
 
 import argparse
+import asyncio
 import types
+from unittest.mock import AsyncMock
 
 import pytest
 import ssh_manager
@@ -43,12 +45,19 @@ class _FakeConn:
 class _FakeManager:
     def __init__(self) -> None:
         self.disconnected: list[str] = []
+        self.commands: list[tuple[str, str, dict]] = []
 
     async def ensure_connected(self, name, source, port_forwards):
         return _FakeConn()
 
     async def disconnect(self, name):
         self.disconnected.append(name)
+
+    async def exec_command(self, name, command, **kwargs):
+        self.commands.append((name, command, kwargs))
+        return types.SimpleNamespace(
+            exit_code=0, stdout="OK\n", stderr="", timed_out=False,
+        )
 
 
 class _FakeLock:
@@ -207,6 +216,7 @@ def test_ssh_refuses_failed_relay_before_downstream_work(
     assert harness.lock.released
     assert owner.list_holds() == []
     assert harness.calls["relay"] == (0 if defer_to_owner else 1)
+    assert harness.manager.commands == []
 
 
 @pytest.mark.parametrize("mode", ["owner", "direct", "no-relay"])
@@ -234,3 +244,66 @@ def test_ssh_preserves_successful_relay_and_explicit_no_relay(
     assert calls == (["start", "stop"] if mode == "direct" else [])
     assert harness.lock.released
     assert owner.list_holds() == []
+    assert len(harness.manager.commands) == (0 if mode == "no-relay" else 1)
+
+
+@pytest.mark.parametrize("defer_to_owner", [True, False], ids=["owner", "direct"])
+@pytest.mark.parametrize("failure", ["missing", "wrong-service", "transport"])
+def test_ssh_refuses_unserved_relay_before_downstream_work(
+    monkeypatch, harness, capsys, defer_to_owner, failure,
+):
+    probes = []
+    relay = types.SimpleNamespace(stop=AsyncMock())
+    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: defer_to_owner)
+    monkeypatch.setattr(m, "_start_supervised_relay", AsyncMock(return_value=relay))
+
+    async def run(name, command, **kwargs):
+        probes.append((name, command, kwargs))
+        if failure == "transport":
+            raise ConnectionError("probe transport unavailable")
+        return types.SimpleNamespace(
+            exit_code=1 if failure == "missing" else 0,
+            stdout="" if failure == "missing" else "NOT OK\n",
+            stderr="", timed_out=False,
+        )
+
+    async def downstream(*a, **k):
+        pytest.fail("unserved relay reached downstream work")
+
+    monkeypatch.setattr(harness.manager, "exec_command", run)
+    monkeypatch.setattr(m, "_check_cross_harness_fence", downstream)
+
+    assert m.main(["ssh", "cs-test", "--remote-cmd", "true", "--timeout", "90"]) == 1
+    assert "credential relay" in capsys.readouterr().err.lower()
+    assert len(probes) == 1
+    assert probes[0][0] == "cs-test"
+    assert "/dev/tcp/127.0.0.1/3000" in probes[0][1]
+    assert probes[0][2]["timeout"] == 90.0
+    assert harness.manager.disconnected == ["cs-test"]
+    assert harness.lock.released
+    assert owner.list_holds() == []
+    assert relay.stop.await_count == (0 if defer_to_owner else 1)
+
+
+@pytest.mark.parametrize("defer_to_owner", [True, False], ids=["owner", "direct"])
+def test_ssh_cancelled_protocol_probe_preserves_cleanup(
+    monkeypatch, harness, defer_to_owner,
+):
+    relay = types.SimpleNamespace(stop=AsyncMock())
+    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: defer_to_owner)
+    monkeypatch.setattr(m, "_start_supervised_relay", AsyncMock(return_value=relay))
+    monkeypatch.setattr(
+        harness.manager, "exec_command", AsyncMock(side_effect=asyncio.CancelledError),
+    )
+
+    async def downstream(*a, **k):
+        pytest.fail("cancelled protocol probe reached downstream work")
+
+    monkeypatch.setattr(m, "_check_cross_harness_fence", downstream)
+
+    with pytest.raises(asyncio.CancelledError):
+        m._cmd_ssh(_args())
+    assert harness.manager.disconnected == ["cs-test"]
+    assert harness.lock.released
+    assert owner.list_holds() == []
+    assert relay.stop.await_count == (0 if defer_to_owner else 1)
