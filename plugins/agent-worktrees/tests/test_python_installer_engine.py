@@ -1650,7 +1650,7 @@ def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
     import test_installer_closed_wheels as closed
     from installer_wheel_inputs import WheelDeadlineError
 
-    plugin = closed.plugin.__wrapped__(tmp_path, engine)
+    plugin = closed.negative_source_plugin.__wrapped__(tmp_path)
     sentinel = tmp_path / "unrelated.txt"
     sentinel.write_bytes(b"preserved")
     freeze = engine.freeze_inputs
@@ -1681,6 +1681,9 @@ def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
         monkeypatch.setattr(engine.time, "monotonic", lambda: clock[0])
         monkeypatch.setattr(engine, "freeze_inputs", snapshot)
         monkeypatch.setattr(Path, "write_bytes", copy_and_expire)
+        monkeypatch.setattr(
+            engine, "_procutil", lambda *a, **k: pytest.fail("snapshot refusal invoked process owner"),
+        )
         monkeypatch.setattr(engine, "_construct", lambda *a, **k: pytest.fail("snapshot refusal built"))
         monkeypatch.setattr(
             engine, "_prepare_installed", lambda *a, **k: pytest.fail("snapshot refusal ran callback"),

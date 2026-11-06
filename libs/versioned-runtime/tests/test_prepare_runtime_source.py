@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import io
 import importlib.util
 import json
@@ -19,12 +20,17 @@ TOOLS = REPOSITORY / "tools"
 sys.path.insert(0, str(TOOLS))
 import prepare_runtime_source as source_runtime
 import local_install_source as local_source
+from plugin_test_containment import TestSandbox as _TestSandbox
 
 PLUGIN = "agent-fixture"
 
 
 @pytest.fixture
 def selected_manager_repository(repository):
+    return _selected_manager_repository_data(repository)
+
+
+def _selected_manager_repository_data(repository):
     root, _ = repository
     declaration = json.loads((REPOSITORY / "worktree-manager/packaged-assets.json").read_text())
     for group in declaration["groups"]:
@@ -34,6 +40,7 @@ def selected_manager_repository(repository):
             shutil.copyfile(REPOSITORY / group["canonicalDir"] / name, destination)
     manager = root / "worktree-manager"
     shutil.copyfile(REPOSITORY / "worktree-manager/pyproject.toml", manager / "pyproject.toml")
+    shutil.copyfile(REPOSITORY / "worktree-manager/packaged-assets.json", manager / "packaged-assets.json")
     (manager / "src/worktree_manager").mkdir(parents=True)
     (manager / "src/worktree_manager/__init__.py").write_text('__version__="0.1.0-dev97"\n')
     (manager / "README.md").write_text("selected Manager documentation\n")
@@ -68,14 +75,14 @@ def selected_manager_repository(repository):
         f'[project]\nname="{PLUGIN}"\nversion="1.0.0"\n'
         '[tool.uv.sources]\nagent-zdd={path="../../libs/zdd",editable=true}\n',
     )
-    assert len(libraries) == 13
-    # single-instance-lease is transitive in the actual Manager closure.
+    assert len(libraries) == 14
+    # Retain the shared dependency edge even when lease is also a direct core input.
     lease = root / "libs/single-instance-lease"
-    lease.mkdir()
-    (lease / "src").mkdir()
+    lease.mkdir(exist_ok=True)
+    (lease / "src").mkdir(exist_ok=True)
     (lease / "src/fixture.py").write_text("# transitive source\n")
     (lease / "README.md").write_text("transitive documentation\n")
-    (lease / "tests").mkdir()
+    (lease / "tests").mkdir(exist_ok=True)
     (lease / "tests/test_selected.py").write_text("# transitive tests\n")
     (lease / "pyproject.toml").write_text(
         '[project]\nname="agent-single-instance-lease"\nversion="1.0.0"\n',
@@ -87,53 +94,221 @@ def selected_manager_repository(repository):
     return root, _merged_commit(root), declaration
 
 
-def test_selected_manager_materialization_matches_full_selected_bytes(
-    selected_manager_repository, tmp_path, monkeypatch,
-):
-    root, commit, declaration = selected_manager_repository
-    full = tmp_path / "full"
-    selected = tmp_path / "selected"
-    before = local_source.compose(root, commit, None, full)
-    calls = []
-    actual = source_runtime.materializer.materialize_uv_editable_ref_into
+_COMPARISON_PHASES = (
+    "fixture", "full_compose", "selected_compose", "full_equivalence", "sdk_bytes",
+)
+_COMPARISON_TESTS = tuple(
+    f"test_{index:02d}_{name}" for index, name in enumerate(_COMPARISON_PHASES, 1)
+)
 
-    def observe(**kwargs):
-        calls.append(kwargs["source_consumer_dir"].name)
-        return actual(**kwargs)
 
-    monkeypatch.setattr(source_runtime.materializer, "materialize_uv_editable_ref_into", observe)
-    events = []
-    after = local_source.compose(
-        root, commit, None, selected, projects=("standalone:worktree-manager",),
-        observer=lambda phase, state, elapsed: events.append((phase, state, elapsed)),
+def _require_complete_comparison_selection(names):
+    if tuple(names) != _COMPARISON_TESTS:
+        raise ValueError("Materialization comparison requires all five ordered phases")
+
+
+class _ManagerMaterializationComparison:
+    def __init__(self, workspace):
+        self.started = time.monotonic()
+        self.storage = _TestSandbox(prefix="sequence-", dir=workspace)
+        self.workspace = Path(self.storage.name)
+        self.completed = []
+        self.failed = False
+        self.sdk_members = 0
+        self.commit = None
+
+    def evidence(self, phase, event, **values):
+        target = os.environ.get("COPILOT_EXTENSIONS_MATERIALIZATION_PHASE_EVIDENCE")
+        if target:
+            row = {
+                "phase": phase, "event": event, "elapsed": time.monotonic() - self.started,
+                "completed": self.completed.copy(), "workspace": str(self.workspace),
+                "source_commit": self.commit, "sdk_members": self.sdk_members, **values,
+            }
+            with Path(target).open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(row) + "\n")
+
+    @contextmanager
+    def phase(self, name):
+        if (
+            self.failed or len(self.completed) >= len(_COMPARISON_PHASES)
+            or name != _COMPARISON_PHASES[len(self.completed)]
+        ):
+            raise ValueError("Materialization phase requires its successful predecessor")
+        started = time.monotonic()
+        budget = 60 if name == "full_equivalence" else 30
+        self.evidence(name, "start")
+        try:
+            assert started - self.started < 300, "Materialization aggregate deadline"
+            yield
+            assert time.monotonic() - started < budget, "Materialization phase deadline"
+            assert time.monotonic() - self.started < 300, "Materialization aggregate deadline"
+        except BaseException:
+            self.failed = True
+            self.evidence(name, "failed")
+            raise
+        self.completed.append(name)
+        self.evidence(name, "passed", phase_seconds=time.monotonic() - started, phase_budget=budget)
+
+    def close(self):
+        try:
+            if self.failed or tuple(self.completed) != _COMPARISON_PHASES:
+                raise ValueError("Materialization comparison is incomplete")
+        finally:
+            self.storage.cleanup()
+            self.evidence("cleanup", "complete", workspace_removed=not self.workspace.exists())
+            assert time.monotonic() - self.started < 300, "Materialization cleanup deadline"
+
+
+@pytest.fixture(scope="class")
+def manager_materialization_comparison(request, tmp_path_factory):
+    _require_complete_comparison_selection(
+        item.name for item in request.session.items if item.cls is request.cls
     )
-    assert calls == ["worktree-manager"]
-    assert before == after
-    assert [(phase, state) for phase, state, _ in events] == [
-        (1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1),
-    ]
-    assert [elapsed for _, _, elapsed in events] == sorted(elapsed for _, _, elapsed in events)
-    full_payload = full / "source/worktree-manager"
-    selected_payload = selected / "source/worktree-manager"
-    assert local_source.materialization.uer.lib_tree_matches(full_payload, selected_payload)
-    identity = source_runtime.SourceIdentity(
-        "worktree-manager", "0.1.0-dev97", commit, before["source_tree"],
-        source_runtime._assembly_hash(full_payload),
-        source_runtime.runtime_version("0.1.0-dev97", commit, source_runtime._assembly_hash(full_payload)),
-    )
-    assert source_runtime._assembly_hash(selected_payload) == identity.assembly_hash
-    assert len(list((selected_payload / "libs").iterdir())) == 14
-    for directory in (selected_payload, *(selected_payload / "libs").iterdir()):
-        assert (directory / "README.md").is_file()
-        assert (directory / "tests/test_selected.py").is_file()
-    for group in declaration["groups"]:
-        for name in group["files"]:
-            assert (selected_payload / group["payloadDir"] / name).read_bytes() == (
-                root / group["canonicalDir"] / name
-            ).read_bytes()
-    assert sum(len(group["files"]) for group in declaration["groups"]) == 161
-    assert "../../libs/zdd" in (selected / "source/plugins" / PLUGIN / "pyproject.toml").read_text()
-    assert (full / "source/plugins" / PLUGIN / "libs/zdd").is_dir()
+    state = _ManagerMaterializationComparison(tmp_path_factory.mktemp("comparison"))
+    try:
+        yield state
+    finally:
+        state.close()
+
+
+class TestSelectedManagerMaterialization:
+    def test_01_fixture(self, manager_materialization_comparison):
+        state = manager_materialization_comparison
+        with state.phase("fixture"):
+            state.root, state.commit, state.declaration = _selected_manager_repository_data(
+                _repository_data(state.workspace),
+            )
+            state.full = state.workspace / "full"
+            state.selected = state.workspace / "selected"
+
+    def test_02_full_compose(self, manager_materialization_comparison):
+        state = manager_materialization_comparison
+        with state.phase("full_compose"):
+            state.before = local_source.compose(state.root, state.commit, None, state.full)
+
+    def test_03_selected_compose(self, manager_materialization_comparison, monkeypatch):
+        state = manager_materialization_comparison
+        with state.phase("selected_compose"):
+            state.calls = []
+            actual = source_runtime.materializer.materialize_uv_editable_ref_into
+
+            def observe(**kwargs):
+                state.calls.append(kwargs["source_consumer_dir"].name)
+                return actual(**kwargs)
+
+            monkeypatch.setattr(source_runtime.materializer, "materialize_uv_editable_ref_into", observe)
+            state.events = []
+            state.after = local_source.compose(
+                state.root, state.commit, None, state.selected,
+                projects=("standalone:worktree-manager",),
+                observer=lambda phase, event, elapsed: state.events.append((phase, event, elapsed)),
+            )
+
+    @pytest.mark.timeout(60)
+    def test_04_full_equivalence(self, manager_materialization_comparison):
+        state = manager_materialization_comparison
+        with state.phase("full_equivalence"):
+            assert state.calls == ["worktree-manager"]
+            assert state.before == state.after
+            assert [(phase, event) for phase, event, _ in state.events] == [
+                (1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1),
+            ]
+            assert [elapsed for _, _, elapsed in state.events] == sorted(
+                elapsed for _, _, elapsed in state.events
+            )
+            state.full_payload = state.full / "source/worktree-manager"
+            state.selected_payload = state.selected / "source/worktree-manager"
+            assert local_source.materialization.uer.lib_tree_matches(
+                state.full_payload, state.selected_payload,
+            )
+            identity = source_runtime.SourceIdentity(
+                "worktree-manager", "0.1.0-dev97", state.commit, state.before["source_tree"],
+                source_runtime._assembly_hash(state.full_payload),
+                source_runtime.runtime_version(
+                    "0.1.0-dev97", state.commit, source_runtime._assembly_hash(state.full_payload),
+                ),
+            )
+            assert source_runtime._assembly_hash(state.selected_payload) == identity.assembly_hash
+            assert len(list((state.selected_payload / "libs").iterdir())) == 14
+            for directory in (state.selected_payload, *(state.selected_payload / "libs").iterdir()):
+                assert (directory / "README.md").is_file()
+                assert (directory / "tests/test_selected.py").is_file()
+
+    def test_05_sdk_bytes(self, manager_materialization_comparison):
+        state = manager_materialization_comparison
+        with state.phase("sdk_bytes"):
+            for group in state.declaration["groups"]:
+                for name in group["files"]:
+                    assert (state.selected_payload / group["payloadDir"] / name).read_bytes() == (
+                        state.root / group["canonicalDir"] / name
+                    ).read_bytes()
+                    state.sdk_members += 1
+            assert sum(len(group["files"]) for group in state.declaration["groups"]) == 161
+            assert state.sdk_members == 161
+            assert "../../libs/zdd" in (
+                state.selected / "source/plugins" / PLUGIN / "pyproject.toml"
+            ).read_text()
+            assert (state.full / "source/plugins" / PLUGIN / "libs/zdd").is_dir()
+
+
+@pytest.mark.parametrize("missing", range(5))
+def test_comparison_refuses_filtered_phases(missing):
+    names = list(_COMPARISON_TESTS)
+    names.pop(missing)
+    with pytest.raises(ValueError, match="all five ordered"):
+        _require_complete_comparison_selection(names)
+
+
+def test_comparison_refuses_reordered_phases():
+    with pytest.raises(ValueError, match="all five ordered"):
+        _require_complete_comparison_selection(reversed(_COMPARISON_TESTS))
+
+
+@pytest.mark.parametrize("complete", [False, True])
+@pytest.mark.parametrize("readonly", [False, True])
+def test_comparison_completion_always_cleans_owned_workspace(tmp_path, complete, readonly):
+    state = _ManagerMaterializationComparison(tmp_path)
+    workspace = state.workspace
+    object_file = workspace / ".git/objects/aa/object"
+    object_file.parent.mkdir(parents=True)
+    object_file.write_text("fixture")
+    if readonly:
+        object_file.chmod(0o444)
+    if complete:
+        for name in _COMPARISON_PHASES:
+            with state.phase(name):
+                pass
+        state.close()
+    else:
+        with pytest.raises(ValueError, match="incomplete"):
+            state.close()
+    assert not workspace.exists()
+
+
+def test_comparison_refuses_later_phase_before_any_work(tmp_path):
+    state = _ManagerMaterializationComparison(tmp_path)
+    workspace = state.workspace
+    with pytest.raises(ValueError, match="predecessor"):
+        with state.phase("selected_compose"):
+            pytest.fail("Later phase performed work")
+    with pytest.raises(ValueError, match="incomplete"):
+        state.close()
+    assert not workspace.exists()
+
+
+def test_comparison_failed_phase_blocks_successors_and_cleans(tmp_path):
+    state = _ManagerMaterializationComparison(tmp_path)
+    workspace = state.workspace
+    with pytest.raises(RuntimeError, match="fixture refused"):
+        with state.phase("fixture"):
+            raise RuntimeError("fixture refused")
+    with pytest.raises(ValueError, match="predecessor"):
+        with state.phase("full_compose"):
+            pytest.fail("Failed phase allowed later work")
+    with pytest.raises(ValueError, match="incomplete"):
+        state.close()
+    assert not workspace.exists()
 
 
 @pytest.mark.parametrize("projects", [
@@ -275,6 +450,10 @@ def _merged_commit(root: Path) -> str:
 
 @pytest.fixture
 def repository(tmp_path: Path) -> tuple[Path, str]:
+    return _repository_data(tmp_path)
+
+
+def _repository_data(tmp_path: Path) -> tuple[Path, str]:
     root = tmp_path / "checkout"
     root.mkdir()
     _git(root, "init", "-q", "--initial-branch=dev")

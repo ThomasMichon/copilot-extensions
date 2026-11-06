@@ -344,6 +344,7 @@ def test_packaged_assets_retain_exact_bytes_only_when_requested(
     (consumer / "scripts").mkdir(parents=True)
     retained = consumer / "scripts" / "prepare.py"
     retained.write_text("changed\n" if changed else "canonical\n", encoding="utf-8")
+    original_bytes = retained.read_bytes()
     original_stat = retained.stat()
     (consumer / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
         "schema": "copilot-extensions.packaged-assets", "version": 1,
@@ -355,8 +356,15 @@ def test_packaged_assets_retain_exact_bytes_only_when_requested(
     )
     assert bool(report) is (not reuse or changed)
     assert all(line.startswith("SKIP ") for line in report)
-    assert retained.stat() == original_stat
-    assert retained.read_text() == ("changed\n" if changed else "canonical\n")
+    assert retained.read_bytes() == original_bytes
+    retained_stat = retained.lstat()
+    for field in (
+        "st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns",
+    ):
+        assert getattr(retained_stat, field) == getattr(original_stat, field), field
+    for field in ("st_birthtime_ns", "st_file_attributes", "st_reparse_tag"):
+        if hasattr(original_stat, field):
+            assert getattr(retained_stat, field) == getattr(original_stat, field), field
 
 
 @pytest.mark.parametrize("directory", ["../outside", "..\\outside", "C:\\outside"])

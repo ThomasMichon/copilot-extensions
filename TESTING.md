@@ -5799,6 +5799,39 @@ guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 
+The `TestSelectedManagerMaterialization` source-equivalence class is one ordered,
+fresh-fixture sequence: fixture creation, full compose, selected compose,
+full equivalence, then all 161 SDK byte comparisons and trailing rewrite checks.
+Select the complete class, not an individual method. Partial/reordered collection
+and missing predecessors fail; the class finalizer removes its owned workspace
+and rejects incomplete evidence. Whole-tree equivalence alone has a 60-second
+item limit; fixture creation, both compose phases, and SDK comparison retain
+30 seconds each.
+The native packet retains one 300-second clock from before fixture creation
+through cleanup. This allocation does not turn the former compound item's
+30-second timeout into a monolithic pass.
+
+Closed-wheel deadline negatives use `negative_source_plugin`: a fresh real
+three-package local source graph with non-Python resources, not the full
+procutil/ZDD process-owner input. Invalid deadlines use an absent source path
+to prove refusal before source lookup. The full `plugin` fixture remains
+unchanged for native construction, child lifetime and positive consumers;
+the negative graph does not qualify those integrations or replace cold proof.
+
+Source-only tooling preparation selects the owning project's declared `dev`
+extra (or flat `dev` dependency group) through
+`declared_test_tooling_requirements`, plus the existing runner requirements.
+The group is a fallback only when the extra is absent. Malformed metadata
+tables or non-flat selected lists refuse before installation; group inclusion
+objects are not implicitly resolved.
+It does not promote runtime dependencies or `first-party-core` build inputs
+into tooling. Source-only cache identity includes that selected requirement
+set, so a pre-selection environment cannot silently retain missing dev tools.
+A selected packet still uses each owner's source-bound native
+environment and lease; package-cache warming alone is not preparation evidence.
+The optional declared-tooling proof checks a real isolated tooling environment's
+import after canonical retained installation, not application construction.
+
 Worktrees' managed-session admission packet is explicitly selectable:
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
 It uses temporary profiles, real hook subprocesses, both available PowerShell

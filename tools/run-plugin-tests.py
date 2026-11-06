@@ -63,7 +63,8 @@ from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 from plugin_test_cache import (
-    clear_cache_contents, dependency_fingerprint, ordinary_cache_root, source_resolution_arguments,
+    clear_cache_contents, declared_test_requirements, dependency_fingerprint,
+    ordinary_cache_root, source_resolution_arguments,
 )
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
@@ -289,7 +290,14 @@ def _dep_fingerprint(name: str) -> str:
     """Bind cached installs to complete canonical/transitive local source bytes."""
     return dependency_fingerprint(
         name, _plugin_dir(name), REPO,
-        (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
+        declared_test_tooling_requirements(name) if name in SOURCE_ONLY_TEST_TARGETS
+        else (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
+    )
+
+
+def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
+    return declared_test_requirements(
+        _plugin_dir(name), (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
     )
 
 
@@ -377,8 +385,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # Source-only targets and pyproject-less plugins import their
             # owning scripts directly; they need test tooling, not an editable.
             run_uv_install(
-                uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
-                     *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
+                uv, ["--python", str(py), *declared_test_tooling_requirements(name)],
                 cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")

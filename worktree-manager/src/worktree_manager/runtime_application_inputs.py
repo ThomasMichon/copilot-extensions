@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 
+import agent_procutil
+
 
 def _ordinary(path: Path) -> Path:
     if ".." in path.parts:
@@ -80,10 +82,6 @@ def prepare_application_inputs(
         root / "libs" / "installer-engine" / "installer_engine_process.py",
         __name__ + "._process",
     )
-    procutil = _load(
-        root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py",
-        __name__ + "._procutil",
-    )
     command = [
         str(tooling_python), "-I", "-B", "-X", "utf8", str(entry),
         "--install-source", str(snapshot), "--output", str(output),
@@ -96,7 +94,7 @@ def prepare_application_inputs(
                 key: value for key, value in os.environ.items()
                 if key.upper() not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"}
             }, timeout=min(180, deadline - time.monotonic()), deadline=deadline,
-            procutil=procutil, construction_fd=None,
+            procutil=agent_procutil, construction_fd=None,
         )
     except subprocess.CalledProcessError as error:
         raise RuntimeError(

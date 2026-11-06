@@ -15,7 +15,9 @@ _CLEAR = (
 _FLAGS = "run --locked --no-dev --no-editable --link-mode hardlink"
 
 
-def slot_binstubs(name: str, module: str) -> dict[str, str]:
+def slot_binstubs(
+    name: str, module: str, *, python_platform: str | None = None,
+) -> dict[str, str]:
     """Return relocatable app/install stubs without publishing any of them."""
     package, separator, attribute = module.partition(":")
     if (
@@ -23,6 +25,11 @@ def slot_binstubs(name: str, module: str) -> dict[str, str]:
         or (separator and not _MODULE.fullmatch(attribute))
     ):
         raise ValueError("application launchers require an ordinary name and Python module")
+    if python_platform is not None and re.fullmatch(
+        r"[a-z0-9_]+(?:-[a-z0-9_]+){1,4}", python_platform,
+    ) is None:
+        raise ValueError("application launchers require an ordinary Python platform")
+    flags = _FLAGS + (f" --python-platform {python_platform}" if python_platform else "")
     result = {}
     for command, target in (
         (name, f"-I -X utf8 -B -m {module}" if not separator else None),
@@ -48,7 +55,7 @@ def slot_binstubs(name: str, module: str) -> dict[str, str]:
             "} else {\n"
             "    $forwarded = @($args | ForEach-Object { if ($_ -eq '') { '\"\"' } else { $_ } })\n"
             "}\n"
-            f"& uv {_FLAGS} --project $slot python {ps_target} @forwarded\n"
+            f"& uv {flags} --project $slot python {ps_target} @forwarded\n"
             "exit $LASTEXITCODE\n"
         )
         result[command + ".cmd"] = (
@@ -57,7 +64,7 @@ def slot_binstubs(name: str, module: str) -> dict[str, str]:
             + "".join(f'set "{key}="\r\n' for key in _CLEAR)
             + 'if not defined UV_CACHE_DIR for %%I in ("%SLOT%\\..\\..") do '
             'set "UV_CACHE_DIR=%%~fI\\cache\\uv"\r\n'
-            + f'uv {_FLAGS} --project "%SLOT%" python {cmd_target} %*\r\n'
+            + f'uv {flags} --project "%SLOT%" python {cmd_target} %*\r\n'
             + "exit /b %errorlevel%\r\n"
         )
         shell = (
@@ -73,7 +80,7 @@ def slot_binstubs(name: str, module: str) -> dict[str, str]:
             '    UV_CACHE_DIR=$(cygpath -w "$UV_CACHE_DIR") || exit\n'
             "fi\n"
             "export UV_CACHE_DIR\n"
-            f'exec uv {_FLAGS} --project "$slot" python {sh_target} "$@"\n'
+            f'exec uv {flags} --project "$slot" python {sh_target} "$@"\n'
         )
         result[command + ".sh"] = shell
         result[command] = shell

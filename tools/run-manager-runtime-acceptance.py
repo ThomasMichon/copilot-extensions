@@ -140,7 +140,7 @@ def _engine_routing(root: Path, venv_root: Path, *, prepare_only: bool = False) 
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
     fixture = REPO / "plugins" / "agent-worktrees" / "tests" / "fixtures" / "update_driver_context.py"
-    with tempfile.TemporaryDirectory(prefix="routing-acceptance-", dir=root) as raw:
+    with TestSandbox(prefix="routing-acceptance-", dir=root) as raw:
         sandbox = Path(raw)
         env = isolated_environment(os.environ, sandbox)
         env["UPDATE_DRIVER_TEST_PHASE_LOG"] = str(root / "routing-preparation-phases.jsonl")

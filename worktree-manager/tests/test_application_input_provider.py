@@ -144,6 +144,34 @@ def test_provider_child_receives_no_mixed_case_python_overrides(tmp_path, monkey
     }
 
 
+def test_provider_requester_preserves_normal_procutil_identity(provider_files, tmp_path, monkeypatch):
+    import agent_procutil
+
+    root, _tools, _declaration, _entry = provider_files
+    output = tmp_path / "output"
+    output.mkdir()
+    identity = {"fixture": "admitted-source"}
+    loads = []
+
+    def run_owned(_command, **options):
+        assert options["procutil"] is agent_procutil
+        return SimpleNamespace(stdout=json.dumps({"snapshot": str(output), "identity": identity}))
+
+    def load(path, namespace):
+        loads.append(path)
+        assert namespace.endswith("._process")
+        return SimpleNamespace(run_owned=run_owned)
+
+    monkeypatch.setattr(provider, "_load", load)
+    executable = Path(sys.executable).resolve()
+    record = provider.prepare_application_inputs(
+        tmp_path, output, identity=identity, python=executable, tooling_python=executable,
+        uv=executable, deadline=time.monotonic() + 10,
+    )
+    assert record["identity"] == identity
+    assert loads == [root / "libs/installer-engine/installer_engine_process.py"]
+
+
 @pytest.mark.parametrize("deadline", [True, float("nan"), 0])
 def test_provider_refuses_invalid_or_expired_budget_before_resource_loading(
     tmp_path, monkeypatch, deadline,

@@ -17,6 +17,8 @@ from .core import (
     ensure_worker,
     foundation_status,
     runtime_command,
+    runtime_script_command,
+    run_explicit,
     status,
     wait,
 )
@@ -32,7 +34,8 @@ __all__ = [
     "DriverError", "InterruptedError", "InvalidRequestError", "Request",
     "RequestNotFoundError", "RequestSpec", "SpawnError", "StateError",
     "Transaction", "TrustedRunner", "default_root", "drain", "enqueue",
-    "ensure_worker", "runtime_command", "status", "wait", "ParticipantError",
+    "ensure_worker", "runtime_command", "runtime_script_command", "status", "wait", "ParticipantError",
+    "run_explicit",
     "FoundationOperation", "foundation_status", "recover_foundation_after_restart",
     "borrowed_custody", "participant",
     "participant_environment",

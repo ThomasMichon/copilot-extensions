@@ -650,6 +650,104 @@ def selectable_tests(tmp_path, monkeypatch):
     return tests
 
 
+def test_source_tooling_selects_declared_dev_not_runtime_or_first_party_core(tmp_path, monkeypatch):
+    import json
+    import tomllib
+
+    manager = tomllib.loads((runner.REPO / "worktree-manager/pyproject.toml").read_text())
+    dev = manager["project"]["optional-dependencies"]["dev"]
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="tooling-fixture"\nversion="1"\n'
+        'dependencies=["runtime-must-not-be-selected"]\n'
+        '[project.optional-dependencies]\ndev=' + json.dumps(dev) + '\n'
+        '[dependency-groups]\nfirst-party-core=["core-must-not-be-selected"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    selected = runner.declared_test_tooling_requirements("installation-context")
+    assert set(dev) <= set(selected)
+    assert "pydantic>=2" in selected
+    assert "runtime-must-not-be-selected" not in selected
+    assert "core-must-not-be-selected" not in selected
+
+
+def test_declared_manager_tooling_preparation_imports_in_own_runtime():
+    import json
+    import os
+    import subprocess
+
+    value = os.environ.get("COPILOT_EXTENSIONS_DECLARED_TOOLING_PROOF")
+    if not value:
+        pytest.skip("Explicit native tooling-preparation proof was not supplied")
+    proof = json.loads(Path(value).read_text(encoding="utf-8"))
+    assert proof["requirements"] == list(runner.declared_test_tooling_requirements("worktree-manager"))
+    assert proof["created_by_real_native_uv"] and proof["canonical_retained_install_succeeded"]
+    process = subprocess.run(
+        [
+            proof["python"], "-I", "-B", "-c",
+            "import json,sys,pydantic;from importlib.metadata import version;"
+            "assert int(version('pydantic').split('.')[0])>=2;"
+            "print(json.dumps({'prefix':sys.prefix,'pydantic':pydantic.__version__,"
+            "'module':pydantic.__file__}))",
+        ],
+        capture_output=True, text=True, check=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    observed = json.loads(process.stdout)
+    assert Path(observed["prefix"]).resolve() == Path(proof["environment"]).resolve()
+    assert Path(observed["module"]).resolve().is_relative_to(Path(proof["environment"]).resolve())
+
+
+@pytest.mark.parametrize("extras", ["", '[project.optional-dependencies]\nother=["unselected"]\n'])
+def test_source_tooling_falls_back_to_flat_dev_group(tmp_path, monkeypatch, extras):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="tooling-fixture"\nversion="1"\n'
+        'dependencies=["runtime-must-not-be-selected"]\n' + extras
+        + '[dependency-groups]\ndev=["pydantic>=2"]\n'
+        'first-party-core=["core-must-not-be-selected"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    selected = runner.declared_test_tooling_requirements("installation-context")
+    assert "pydantic>=2" in selected
+    assert "runtime-must-not-be-selected" not in selected
+    assert "core-must-not-be-selected" not in selected
+    assert "unselected" not in selected
+
+
+@pytest.mark.parametrize("metadata", [
+    'project="not-a-table"\n',
+    '[project]\noptional-dependencies="not-a-table"\n',
+    '[project]\noptional-dependencies=[]\n',
+    'dependency-groups="not-a-table"\n',
+    'dependency-groups=[]\n',
+    '[project.optional-dependencies]\ndev="not-a-list"\n',
+    '[project.optional-dependencies]\ndev=[1]\n',
+    '[dependency-groups]\ndev="not-a-list"\n',
+    '[dependency-groups]\ndev=[1]\n',
+    '[dependency-groups]\ndev=[{include-group="other"}]\nother=["pydantic>=2"]\n',
+    'dependency-groups=[]\n[project.optional-dependencies]\ndev=["pydantic>=2"]\n',
+])
+def test_source_tooling_refuses_malformed_metadata_before_install(tmp_path, monkeypatch, metadata):
+    (tmp_path / "pyproject.toml").write_text(metadata, encoding="utf-8")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "ordinary_cache_root", lambda path: path)
+    monkeypatch.setattr(runner, "run_uv_install", lambda *a, **k: pytest.fail("install attempted"))
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: pytest.fail("subprocess attempted"))
+    with pytest.raises(ValueError, match="Test tooling requires"):
+        runner._ensure_venv("installation-context", "unused-uv", reinstall=False)
+
+
+def test_source_only_cache_invalidates_the_previous_tooling_selection():
+    name = "installation-context"
+    previous = runner.dependency_fingerprint(
+        name, runner._plugin_dir(name), runner.REPO,
+        (*runner.RUNNER_DEPENDENCIES, *runner.EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
+    )
+    assert runner._dep_fingerprint(name) != previous
+
+
 @pytest.mark.parametrize("name,extra", [
     ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
     ("agent-dispatch", "service-gateway"), ("agent-ssh", ""),

@@ -412,7 +412,15 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
             "copilot-extensions-worktree-manager" if component == "worktree-manager"
             else "agent-index-engine" if component == "index-engine" else component
         )
-        (payload / "pyproject.toml").write_text(f'[project]\nname="{name}"\nversion="{version}"\n')
+        (payload / "pyproject.toml").write_text(
+            '[build-system]\nrequires=["setuptools>=68"]\n'
+            'build-backend="setuptools.build_meta"\n'
+            f'[project]\nname="{name}"\nversion="{version}"\n',
+        )
+        if component == "worktree-manager":
+            (payload / "setup.py").write_bytes(
+                (Path(__file__).resolve().parents[1] / "worktree-manager/setup.py").read_bytes(),
+            )
         if ":" not in key:
             (payload / "plugin.json").write_text(json.dumps({"name": component, "version": version}))
     monkeypatch.setattr(promotion_python_artifacts, "candidate_projects", lambda root: projects)

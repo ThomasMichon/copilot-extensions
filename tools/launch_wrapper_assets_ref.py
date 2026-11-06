@@ -74,7 +74,7 @@ def load_manifest_groups(
     if data.get("schema") != schema:
         raise ValueError(f"{manifest_path}: unsupported launch-wrapper-assets schema")
     if data.get("version") == 1:
-        return (_manifest_group(manifest_path, data),)
+        return (_manifest_group(manifest_path, data, manifest_name=manifest_name),)
     if (
         manifest_name != PACKAGED_MANIFEST_NAME or type(data.get("version")) is not int
         or data.get("version") != 2
@@ -83,7 +83,10 @@ def load_manifest_groups(
         or any(not isinstance(group, dict) for group in data["groups"])
     ):
         raise ValueError(f"{manifest_path}: unsupported packaged-asset groups")
-    groups = tuple(_manifest_group(manifest_path, group) for group in data["groups"])
+    groups = tuple(
+        _manifest_group(manifest_path, group, manifest_name=manifest_name)
+        for group in data["groups"]
+    )
     targets = [
         Path(group.payload_dir_raw) / name for group in groups for name in group.files
     ]
@@ -94,7 +97,9 @@ def load_manifest_groups(
     return groups
 
 
-def _manifest_group(manifest_path: Path, data: dict) -> LaunchWrapperAssets:
+def _manifest_group(
+    manifest_path: Path, data: dict, *, manifest_name: str = MANIFEST_NAME,
+) -> LaunchWrapperAssets:
     canonical_dir = data.get("canonicalDir")
     files = data.get("files")
     payload_dir = data.get("payloadDir", "bin")
