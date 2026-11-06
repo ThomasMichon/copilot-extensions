@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit machine-key authentication to the foreground SSH directory consumer",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
