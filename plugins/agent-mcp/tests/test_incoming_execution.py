@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -67,8 +68,13 @@ def test_lost_reply_after_application_write_preserves_uncertainty(monkeypatch, c
     writes = []
 
     class Reader:
+        def __init__(self):
+            self.replies = iter([
+                b'{"ok":true,"pong":true,"configuration_context":1}\n', wire,
+            ])
+
         async def readline(self):
-            return wire
+            return next(self.replies)
 
     class Writer:
         def write(self, data):
@@ -100,7 +106,8 @@ def test_lost_reply_after_application_write_preserves_uncertainty(monkeypatch, c
     monkeypatch.setattr(cli, "_run_call", replay)
     assert cli.main(["call", "bridge", "mutate", "{}"]) == 1
     assert not cold
-    assert [request["tool"] for request in writes] == ["mutate"]
+    assert [request["op"] for request in writes] == ["ping", "call"]
+    assert writes[1]["tool"] == "mutate"
     assert "no cold replay" in capsys.readouterr().err
 
 
@@ -164,12 +171,16 @@ def test_mixed_case_explicit_control_credential_is_part_of_windows_context(monke
     request = {"execution_context": {
         "contract": execution_context.descriptor()["contract"], "digest": first,
     }}
-    assert execution_context.load_config("bridge", request, lambda bridge: cfg) is cfg
+    assert execution_context.load_config(
+        "bridge", request, lambda bridge, **kwargs: cfg, repository_root=Path.cwd(),
+    ) is cfg
     monkeypatch.setenv("AGENT_MCP_CONTROL_TOKEN", "fixture-account-b")
     assert os.environ[cfg.auth.source_env] == "fixture-account-b"
     assert execution_context._identity(cfg, key) != first
     with pytest.raises(execution_context.SharingUnavailable):
-        execution_context.load_config("bridge", request, lambda bridge: cfg)
+        execution_context.load_config(
+            "bridge", request, lambda bridge, **kwargs: cfg, repository_root=Path.cwd(),
+        )
 
 
 def test_caller_context_is_derived_in_each_callers_environment(monkeypatch):
@@ -180,10 +191,14 @@ def test_caller_context_is_derived_in_each_callers_environment(monkeypatch):
     request = {"execution_context": {
         "contract": execution_context.descriptor()["contract"], "digest": first,
     }}
-    assert execution_context.load_config("bridge", request, lambda bridge: cfg) is cfg
+    assert execution_context.load_config(
+        "bridge", request, lambda bridge, **kwargs: cfg, repository_root=Path.cwd(),
+    ) is cfg
     monkeypatch.setenv("FIXTURE_CALLER", "account-b")
     with pytest.raises(execution_context.SharingUnavailable):
-        execution_context.load_config("bridge", request, lambda bridge: cfg)
+        execution_context.load_config(
+            "bridge", request, lambda bridge, **kwargs: cfg, repository_root=Path.cwd(),
+        )
     assert execution_context._identity(cfg, key) != first
 
 
@@ -207,7 +222,7 @@ def test_default_home_shares_but_custom_and_explicit_home_remain_significant(tmp
     assert execution_context._identity(cfg, key) == original
     assert execution_context.load_config("bridge", {"execution_context": {
         "contract": execution_context.descriptor()["contract"], "digest": original,
-    }}, lambda bridge: cfg) is cfg
+    }}, lambda bridge, **kwargs: cfg, repository_root=Path.cwd()) is cfg
     monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "custom"))
     assert execution_context._identity(cfg, key) != original
     cfg.auth = AuthSpec(kind="env", source_env="AGENT_MCP_HOME")
@@ -227,7 +242,7 @@ def test_installed_context_request_does_not_transfer_credentials(monkeypatch):
     monkeypatch.setattr(incoming, "_ping", lambda handle: {
         "execution_context": execution_context.descriptor(),
     })
-    monkeypatch.setattr("agent_mcp.config.load_config", lambda bridge: cfg)
+    monkeypatch.setattr("agent_mcp.config.load_config", lambda bridge, **kwargs: cfg)
     fields = execution_context.request_fields("private", "bridge")
     assert set(fields["execution_context"]) == {"contract", "digest"}
     assert "fixture-private-value" not in json.dumps(fields)

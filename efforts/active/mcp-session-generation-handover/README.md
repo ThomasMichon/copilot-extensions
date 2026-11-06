@@ -1091,3 +1091,46 @@ migration already works.
   runtime rollout or handover claim was made. The prior preliminary-accounting
   cleanup fix and its **246 tests/2 skips** qualification are preserved;
   #10742, full handover #10486 and pre-feature adoption holds remain open.
+
+### 2026-11-06 - Caller-root contract reconciliation and unmasked native controls
+
+- Rebased the actual conflicting PR onto merged caller-context correction
+  `4cecd3fe3f677041e0beb0118397b2deb18b3227`, after preserving its published
+  predecessor and tree. Resolved the three runtime modules, generated footprint
+  and two effort documents without discarding either implementation or any
+  historical journal. Upstream #10951 participation and source-owner contracts
+  remain intact; separate SDK observation planning retains its existing owner.
+- Async capability negotiation now receives the already-enriched request,
+  preserving physical generation, installation root and execution challenge.
+  Both attach clients retain those fields alongside the versioned caller-root
+  context. The resident advertises both capabilities and resolves configuration
+  for the validated root before equivalence checking; pool identity retains
+  caller-root/configuration-source isolation.
+- Client challenge construction uses the same explicit root as the resident,
+  including relative configuration references. Credential and cwd significance,
+  pre-effect legacy-provider fallback and unknown-outcome no-replay remain
+  unchanged. Existing context/dependency helper owners absorb the small
+  responsibilities that otherwise exceeded module caps; no ceiling, budget or
+  policy was widened.
+- Final focused controls passed **74 tests**, plus **11** preparation-owner
+  controls, with verified cleanup. After native serialization was released, the
+  existing generated-CMD controls and both ordinary-installer variants passed
+  **4 tests**, with verified cleanup. The ordinary witness now removes both
+  retirement/cutover opt-outs; its held upstream PID, single initialization and
+  incoming physical Pipeline-code assertions still pass. No calibration,
+  observer, debugger attachment or production mutation was performed.
+- Both ordinary installer source paths retain no legacy cutover/reaper/reset or
+  slot-GC fallthrough; two focused source guards cover that boundary. This does
+  not attribute individual victims from aggregate historical cleanup output or
+  qualify the full POSIX ordinary-install matrix.
+- Fresh upstream inventory is **4234 nodes**, **598 sources**, unchanged coverage
+  targets and the original **300-second** unit budget. Canonical verification
+  required no eligible binding refresh or native-actor admission. MCP footprint
+  revision **36** retains its identical non-derived contract with canonical
+  producer regeneration. F/E9, strict runtime-resolution, headless source guard,
+  install contract, module caps, documentation consistency and dependency guard
+  **567/0** passed.
+- Current-head native Linux unit CI and review remain required before merge;
+  no whole local unit packet or Windows-native substitute was run. Publication,
+  release and consumer acceptance remain coordinator-owned. #10742, full
+  handover #10486 and pre-feature adoption holds remain open.

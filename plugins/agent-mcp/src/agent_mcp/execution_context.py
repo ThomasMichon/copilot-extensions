@@ -8,6 +8,7 @@ import hmac
 import json
 import os
 import secrets
+from pathlib import Path
 
 
 class SharingUnavailable(OSError):
@@ -96,16 +97,16 @@ def request_fields(handle, bridge) -> dict:
     if not isinstance(key, str) or len(key) != 64:
         raise SharingUnavailable("serving peer has an invalid execution context")
     try:
-        digest = _identity(load_config(bridge), key)
+        digest = _identity(load_config(bridge, repository_root=Path.cwd()), key)
     except (ValueError, TypeError) as exc:
         raise SharingUnavailable("caller execution context cannot be qualified") from exc
     return {"execution_context": {"contract": _CONTRACT, "digest": digest}}
 
 
-def load_config(bridge, request, loader):
+def load_config(bridge, request, loader, *, repository_root):
     from . import incoming
 
-    cfg = loader(bridge)
+    cfg = loader(bridge, repository_root=repository_root)
     supplied = request.get("execution_context")
     if supplied is None and incoming.launch_generation() is None:
         return cfg

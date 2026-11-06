@@ -154,11 +154,12 @@ async def test_ordinary_install_publishes_without_predecessor_extinction(
     environment = isolated_environment(os.environ, private / "profile")
     root = Path(environment["USERPROFILE"]) / ".agent-mcp"
     environment.pop("AGENT_MCP_HOME", None)
+    environment.pop("AGENT_MCP_NO_VERSION_REAP", None)
+    environment.pop("AGENT_MCP_NO_CUTOVER", None)
     data = root
     bin_dir = Path(environment["USERPROFILE"]) / ".local" / "bin"
     environment.update(
-        AGENT_MCP_INSTALL_DIR=str(root), AGENT_MCP_NO_VERSION_REAP="1",
-        AGENT_MCP_NO_CUTOVER="", AGENT_MCP_NO_SERVE="", AGENT_MCP_NO_ENSURE_SERVE="",
+        AGENT_MCP_INSTALL_DIR=str(root), AGENT_MCP_NO_SERVE="", AGENT_MCP_NO_ENSURE_SERVE="",
         AGENT_MCP_NO_MULTIPLEX="", AGENT_MCP_NO_SELFPROVISION="1",
         COPILOT_EXTENSIONS_HUMAN_UTF8="", PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
         UV_CACHE_DIR=str(Path(os.environ["COPILOT_EXTENSIONS_TEST_VENV_ROOT"]) / ".uv-cache"),

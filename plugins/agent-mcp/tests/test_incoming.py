@@ -2,11 +2,25 @@
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from agent_mcp import cutover, forward, incoming
+
+
+@pytest.mark.parametrize("filename,publish,deploy", [
+    ("init.ps1", "Publish-IncomingMcp", "Deploy-SelfProvisioningBinstub"),
+    ("init.sh", "_publish_incoming_mcp || exit 1", "deploy_binstub"),
+])
+def test_ordinary_installers_publish_without_retirement_fallthrough(filename, publish, deploy):
+    script = (Path(__file__).parents[1] / "scripts" / filename).read_text(encoding="utf-8")
+    commands = "\n".join(line.partition("#")[0] for line in script.splitlines())
+    assert commands.rindex(publish) < commands.rindex(deploy)
+    assert "Predecessor retirement and slot collection deferred" in commands
+    assert "reap_versions.py" not in commands
+    assert not re.search(r"\b(?:cutover|reset-control|Invoke-VersionedGC|_versioned_gc|gc)\b", commands)
 
 
 @pytest.fixture

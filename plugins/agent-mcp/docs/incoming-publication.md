@@ -70,6 +70,15 @@ configuration references remain significant.
 The private MCP control token is not inherited by an upstream unless explicitly
 configured. Process-custody metadata remains available to its lifetime owners.
 
+Caller-root capability negotiation preserves the same request's physical
+generation and execution-context challenge. The resident resolves native
+configuration for that validated root before checking execution equivalence;
+warm-pool identity includes both caller root and configuration source. Client
+challenge construction uses the same explicit root for relative references.
+Neither configuration selection nor equivalence checking changes daemon cwd or
+environment. An older provider without caller-root support receives no
+application request before direct fallback.
+
 This conservative sharing boundary supports equivalent stdio configurations
 with none/env authentication. Different contexts, dynamic acquisition, routed
 targets and CLI/HTTP transports use current direct execution rather than

@@ -37,7 +37,6 @@ import logging
 import os
 import secrets
 import time
-from functools import partial
 from pathlib import Path
 
 from . import execution_context, incoming, source_serving
@@ -441,9 +440,7 @@ class Server:
                 return {"ok": False, "error": "missing 'bridge'"}
             try:
                 root = request_root(req)
-                cfg = execution_context.load_config(
-                    bridge, req, partial(load_config, repository_root=root),
-                )
+                cfg = execution_context.load_config(bridge, req, load_config, repository_root=root)
             except Exception as exc:
                 return execution_context.config_failure(exc)
             key = json.dumps([str(root), str(cfg.source_path)])
@@ -499,8 +496,7 @@ class Server:
             return
         try:
             cfg = execution_context.load_config(
-                bridge, req, partial(load_config, repository_root=request_root(req)),
-            )
+                bridge, req, load_config, repository_root=request_root(req))
         except Exception as exc:
             await self._send(writer, execution_context.config_failure(exc))
             return
