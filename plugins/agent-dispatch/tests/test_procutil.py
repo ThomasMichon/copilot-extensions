@@ -342,7 +342,7 @@ def test_peer_python_observation_and_launch_share_actual_resolver(
 
 @pytest.mark.parametrize("nested", [False, True])
 def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypatch, nested):
-    from agent_dispatch import peer_launch
+    from agent_dispatch import peer_launch, worktree_owner_launch
 
     cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
     own = _make_namespaced_context(cell)
@@ -362,13 +362,13 @@ def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypa
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     arguments = ("agent-dispatch", own.parent, str(own), "agent-worktrees")
     (peer / "current-version").write_text("1.0.0", encoding="utf-8")
     with monkeypatch.context() as child_free:
         child_free.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("pinning launched"))
-        pinned, python = peer_launch.pinned_launch_prefix(*arguments)
-    assert python == first
+        pinned = list(worktree_owner_launch.retained_selection())
     (peer / "current-version").write_text("2.0.0", encoding="utf-8")
     for prefix, selected in ((pinned, first), (peer_launch.launch_prefix(*arguments), second)):
         result = subprocess.run(
@@ -447,6 +447,80 @@ def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypa
     # A retained slot does not bypass current receipt/activation governance.
     _update_receipt(peer / "installation-activation.json", lambda data: data.update(state="inactive"))
     _assert_peer_refused(pinned)
+
+
+def test_retained_legacy_worktree_owner_uses_original_build_and_rechecks_ownership(tmp_path, monkeypatch):
+    from agent_dispatch import worktree_owner_launch
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    first = _make_live_peer(cell, "agent-worktrees", "1.0.0", nested=True)
+    _make_live_peer(cell, "agent-worktrees", "2.0.0", nested=True)
+    peer = cell / "plugins" / "agent-worktrees"
+    scripts = Path(__file__).resolve().parents[2] / "agent-worktrees" / "scripts"
+    for version in ("1.0.0", "2.0.0"):
+        slot = peer / "versions" / version
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        for source in (scripts / "runtime_launcher.py", *scripts.glob("versioned_runtime*.py")):
+            shutil.copyfile(source, bootstrap / source.name)
+        (bootstrap / "runtime-generation").write_text("1" * 32, encoding="ascii")
+        _update_receipt(slot / ".install-complete.json", lambda data: data.update(payload_hash="a" * 64))
+    legacy = tmp_path / ".agent-worktrees"
+    relative_python = first.relative_to(peer)
+    peer.rename(legacy)
+    first = legacy / relative_python
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / ".agent-dispatch"))
+    monkeypatch.setenv("AGENT_WORKTREES_ROOT", "/must-not-leak")
+    monkeypatch.setenv("AGENT_HOME", "/must-not-leak")
+    (legacy / "current-version").write_text("1.0.0", encoding="utf-8")
+    pinned = worktree_owner_launch.retained_selection()
+    (legacy / "current-version").write_text("2.0.0", encoding="utf-8")
+    result = subprocess.run(
+        [*pinned, "streams"], input="retained input\n", capture_output=True,
+        encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (7, "retained input\n", "peer-stderr\n")
+    observed = subprocess.run(
+        [*pinned, "probe"], capture_output=True, encoding="utf-8",
+        timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert observed.returncode == 0, observed.stderr
+    value = json.loads(observed.stdout)
+    assert value["python"] == str(first)
+    assert "AGENT_WORKTREES_ROOT" not in value["env"] and "AGENT_HOME" not in value["env"]
+    tombstone = legacy / ".installation-ownership.json"
+    tombstone.write_text("{}", encoding="utf-8")
+    refused = subprocess.run(
+        [*pinned, "probe"], capture_output=True, encoding="utf-8",
+        timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert refused.returncode == 126 and refused.stdout == ""
+    assert "installation-cell ownership" in refused.stderr
+    with pytest.raises(ValueError, match="installation-cell ownership"):
+        worktree_owner_launch.retained_selection()
+
+
+@pytest.mark.parametrize("kind", ["missing", "no-bootstrap", "non-legacy"])
+def test_retained_worktree_selection_has_no_ambient_fallback(tmp_path, monkeypatch, kind):
+    from agent_dispatch import worktree_owner_launch
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv(
+        "AGENT_DISPATCH_INSTALL_DIR",
+        str(tmp_path / (".agent-dispatch" if kind != "non-legacy" else "other-dispatch")),
+    )
+    monkeypatch.setattr(procutil.shutil, "which", lambda _name: pytest.fail("ambient PATH lookup"))
+    if kind == "no-bootstrap":
+        root = tmp_path / ".agent-worktrees"
+        _make_slot(root, "1.0.0")
+        (root / "current-version").write_text("1.0.0", encoding="utf-8")
+    with pytest.raises(ValueError, match="unavailable|retention bootstrap|installation context"):
+        worktree_owner_launch.retained_selection()
 
 
 @pytest.mark.parametrize("python_resolver", [False, True])

@@ -56,6 +56,160 @@ def receipt(workspace):
     }
 
 
+def test_selected_factory_retains_command_and_observes_actual_resident_each_time(monkeypatch):
+    from agent_dispatch import worktree_owner_launch
+
+    workspace = AssignmentWorkspace("host", "project", "worktree", "/workspace", "original")
+    prefix = ("retained-python", "original-build")
+    monkeypatch.setattr(worktree_owner_launch, "retained_selection", lambda: prefix)
+    calls = []
+    current_generation = "resident-first"
+
+    def capture(argv, **kwargs):
+        nonlocal current_generation
+        assert tuple(argv[:2]) == prefix
+        calls.append(argv)
+        if "capabilities" in argv:
+            result = {**support(), "resident_inspect": 1}
+        elif "--resident-only" in argv:
+            payload = json.loads(kwargs["input_text"])
+            assert payload == {
+                "request_id": "original-request", "allow_missing": True,
+                "expected_creation_nonce": workspace.creation_nonce,
+            }
+            result = {
+                **receipt(workspace), "schema": "copilot-extensions.resource-relationship",
+                "version": 1, "request_id": "original-request", "absent": True,
+                "writer_identity": {**WRITER_IDENTITY, "runtime_generation": "2" * 32},
+                "resident": {"generation": current_generation, "runtime_generation": "resident-runtime"},
+            }
+        elif "record" in argv:
+            result = {"ok": True, "worktree": {
+                "id": workspace.worktree, "repo": workspace.project,
+                "path": workspace.path, "creation_nonce": workspace.creation_nonce,
+            }}
+        else:
+            assert calls[-3][-1] == "--json" and "--resident-only" in calls[-3]
+            result = receipt(workspace)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
+
+    monkeypatch.setattr(module, "run_background_capture", capture)
+    admissions = []
+    writer = module.WorktreeRelationshipWriter.selected(
+        admit_workspace=lambda workspace, identity: admissions.append((workspace, identity)),
+        admit_request=lambda workspace, identity, request: None,
+    )
+    # Exercise the actual write boundary; full request matching has separate controls.
+    for generation in ("resident-first", "resident-requalified"):
+        current_generation = generation
+        writer._write(workspace, "inspect", {"request_id": "original-request"})
+    assert len(admissions) == 2
+    assert sum("--resident-only" in argv for argv in calls) == 2
+    with pytest.raises(TaskError, match="bound original request"):
+        writer(workspace, "inspect", {"request_id": "original-request"})
+
+
+@pytest.mark.parametrize("change", [
+    "contract", "nonce", "owner", "request", "identity", "unknown-build",
+    "foreign-installation", "resident", "resident-generation", "version", "transport",
+])
+def test_required_resident_observation_refuses_without_direct_fallback(monkeypatch, change):
+    workspace = AssignmentWorkspace("host", "project", "worktree", "/workspace", "original")
+    calls = []
+
+    def capture(argv, **kwargs):
+        calls.append(argv)
+        if "capabilities" in argv:
+            value = {**support(), "resident_inspect": 1}
+        else:
+            assert "--resident-only" in argv
+            value = {
+                **receipt(workspace), "schema": "copilot-extensions.resource-relationship",
+                "version": 1, "request_id": "request", "absent": True,
+                "resident": {"generation": "resident", "runtime_generation": "build"},
+            }
+            if change == "transport":
+                return None
+            if change == "contract":
+                value["writer_contract"] = {}
+            elif change in {"nonce", "owner", "request"}:
+                field = {"nonce": "creation_nonce", "owner": "owner", "request": "request_id"}[change]
+                value[field] = "changed"
+            elif change == "identity":
+                value["writer_identity"] = None
+            elif change == "unknown-build":
+                value["writer_identity"]["runtime_generation"] = None
+            elif change == "foreign-installation":
+                value["writer_identity"]["installation_root"] = "/another/installation"
+            elif change == "resident":
+                value.pop("resident")
+            elif change == "resident-generation":
+                value["resident"]["generation"] = ""
+            elif change == "version":
+                value["version"] = True
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(module, "run_background_capture", capture)
+    writer = module.WorktreeRelationshipWriter(
+        ["retained"], admit_workspace=lambda workspace, identity: None,
+        require_resident=True,
+    )
+    with pytest.raises(TaskError, match="unconfirmed|unresolved"):
+        writer(workspace, "reserve", {"request_id": "request"})
+    assert len(calls) == 2
+    assert "record" not in calls[-1] and "reserve" not in calls[-1]
+
+
+@pytest.mark.parametrize("declaration", [None, False, True, 0, 2])
+def test_required_resident_syntax_is_negotiated_before_probe(monkeypatch, declaration):
+    calls = []
+
+    def capture(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0, json.dumps({**support(), "resident_inspect": declaration}), "",
+        )
+
+    monkeypatch.setattr(module, "run_background_capture", capture)
+    with pytest.raises(TaskError, match="cannot protect"):
+        module.WorktreeRelationshipWriter(
+            ["retained"], admit_workspace=lambda workspace, identity: None,
+            require_resident=True,
+        )
+    assert len(calls) == 1 and "capabilities" in calls[0]
+
+
+def test_selected_factory_keeps_independent_cohort_and_original_request_gates(monkeypatch):
+    from agent_dispatch import worktree_owner_launch
+
+    monkeypatch.setattr(worktree_owner_launch, "retained_selection", lambda: ("retained",))
+    calls = []
+
+    def capture(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({**support(), "resident_inspect": 1}), "")
+
+    monkeypatch.setattr(module, "run_background_capture", capture)
+
+    def unqualified(workspace, identity):
+        raise TaskError("another participating writer remains unqualified")
+
+    writer = module.WorktreeRelationshipWriter.selected(
+        admit_workspace=unqualified,
+        admit_request=lambda workspace, identity, request: None,
+    )
+    with pytest.raises(TaskError, match="another participating writer"):
+        writer._write(
+            AssignmentWorkspace("host", "project", "tree", "/workspace", "nonce"),
+            "reserve", {"request_id": "request"},
+        )
+    assert len(calls) == 1
+    with pytest.raises(ValueError, match="original request admission"):
+        module.WorktreeRelationshipWriter.selected(
+            admit_workspace=unqualified, admit_request=None,
+        )
+
+
 def test_selected_prefix_and_authoritative_record_keep_original_identity(monkeypatch, tmp_path):
     workspace = AssignmentWorkspace("host", "project", "worktree", str(tmp_path), "original")
     calls = []

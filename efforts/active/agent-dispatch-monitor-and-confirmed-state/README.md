@@ -54,6 +54,10 @@ Independent queue-owned request revalidation subsequently merged in #11034.
 The source now rereads durable queue/authority/audit/request facts before each
 external relationship call, retaining post-I/O CAS. Actual installed participant
 and complete-cohort observations remain unqualified.
+Ordinary keyed-create CLI requirement transport subsequently merged in #11040,
+including early remote-target refusal and existing per-attempt capability
+negotiation. It carries an independently qualified requirement; it does not
+construct that admission or enable ordinary allocation.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running
