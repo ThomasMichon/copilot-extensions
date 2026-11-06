@@ -141,8 +141,9 @@ def test_native_windows_three_owner_history_live_and_same_cli(
 
             def wait_for(
                 condition: Callable[[], bool], describe: Callable[[], dict[str, Any]] | None = None,
+                *, deadline: float | None = None,
             ) -> None:
-                deadline = time.monotonic() + 15
+                deadline = time.monotonic() + 15 if deadline is None else deadline
                 while time.monotonic() < deadline:
                     assert not client.exited(client.process.process), client.output.decode("utf-8", "replace")
                     assert client.read_error is None, client.read_error
@@ -215,9 +216,18 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                 focus("Select")
                 wait_for(lambda: "Bridge feed" in screen()
                          and app_state().get("bridge_members", 0) > 0)
-                client.send(b"\r\x1b[B\r")
+                selection_deadline = time.monotonic() + 15
+                client.send(b"\r")
+                wait_for(lambda: app_state().get("bridge_select", {}).get("expanded") is True
+                         and app_state().get("focus") == "SelectOverlay",
+                         deadline=selection_deadline)
+                client.send(b"\x1b[B")
+                wait_for(lambda: app_state().get("bridge_select", {}).get("highlighted") == 1,
+                         deadline=selection_deadline)
+                client.send(b"\r")
                 wait_for(lambda: "140 starts (observed range)" in screen()
-                         and "Bridge: retained / observed" in screen())
+                         and "Bridge: retained / observed" in screen(),
+                         deadline=selection_deadline)
                 focus("CollapsibleTitle")
                 client.send(b"\r")
                 wait_for(lambda: "\u25b6 Evidence" in screen() and "Tool started" in screen())

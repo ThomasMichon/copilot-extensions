@@ -131,6 +131,7 @@ def test_observer_retries_only_native_sharing_without_advancing(
     callbacks = []
     timeline = SimpleNamespace(
         size=(80, 20), window=SimpleNamespace(follow_live=True, events=[], sources={}),
+        expanded=False, value="membership", query_one=lambda _kind: SimpleNamespace(highlighted=0),
     )
     app = SimpleNamespace(
         size=(80, 24), focused=None, query_one=lambda _kind: timeline,
@@ -249,7 +250,7 @@ def test_native_client_deadline_is_checked_after_the_blocking_poll(
     source = ast.parse(Path(__file__).with_name(filename).read_text(encoding="utf-8"))
     wait = next(node for node in ast.walk(source)
                 if isinstance(node, ast.FunctionDef) and node.name == "wait_for")
-    clock = [0.0]
+    clock = [5.0 if filename == "test_companion_joined_psmux.py" else 0.0]
     client = SimpleNamespace(
         process=SimpleNamespace(process=1), output=b"", read_error=None, exited=lambda _handle: False,
     )
@@ -267,10 +268,14 @@ def test_native_client_deadline_is_checked_after_the_blocking_poll(
         return True
 
     if observed_at < 15:
-        namespace["wait_for"](observe)
+        namespace["wait_for"](
+            observe, **({"deadline": 15} if filename == "test_companion_joined_psmux.py" else {}),
+        )
     else:
         with pytest.raises(pytest.fail.Exception):
-            namespace["wait_for"](observe)
+            namespace["wait_for"](
+                observe, **({"deadline": 15} if filename == "test_companion_joined_psmux.py" else {}),
+            )
 
 
 def test_native_cleanup_timeout_does_not_query_the_departed_observer(tmp_path: Path) -> None:

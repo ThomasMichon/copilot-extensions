@@ -2567,6 +2567,11 @@ and single-flight completion, not `wait_for_complete()` over the intentionally
 cancelled predecessor worker. They still release and observe the late old read
 and assert it cannot replace the new head or its idle result. This avoids a
 test-only `WorkerCancelled` race without changing production cancellation.
+Actual keyboard selection waits for the fixture-observed menu expansion and
+highlight before committing the session choice, rather than batching keys across
+asynchronous widget transitions. Expansion, highlight and source admission share
+the original single 15-second deadline. These observations do not set widget
+state or replace real client input.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that
