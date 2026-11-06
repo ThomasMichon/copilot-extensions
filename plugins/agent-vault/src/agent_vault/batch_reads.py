@@ -61,6 +61,12 @@ def cmd_batch_get(args):
                 "error": "cache_protection_failed; protected cache requires repair before retrying",
             })
             continue
+        except OSError:
+            results.append({
+                "entry": entry, "field": field, "value": None, "ok": False, "source": "cache",
+                "error": "cache_read_failed; credential cache could not be read",
+            })
+            continue
         ok = result.code == 0 and isinstance(result.value, str)
         record = {
             "entry": entry, "field": field, "value": result.value if ok else None,

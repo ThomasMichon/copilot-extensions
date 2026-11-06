@@ -343,6 +343,53 @@ def test_batch_get_preserves_cached_order_duplicates_and_values(
     ]}
 
 
+@pytest.mark.parametrize("failure", [OSError, PermissionError])
+def test_batch_cache_io_failure_keeps_successes_and_continues(
+    enabled_cache, monkeypatch, capsys, failure,
+):
+    persistent = get_cache()
+    assert persistent.put("Example/one", "password", "cached-value")
+    cache_before = persistent._cache_file.read_bytes()
+    key_before = persistent._key_file.read_bytes()
+    original_cipher = persistent._get_fernet
+    reads = []
+
+    def cipher(**kwargs):
+        reads.append(None)
+        if len(reads) == 2:
+            raise failure("private-cache-path-diagnostic")
+        return original_cipher(**kwargs)
+
+    monkeypatch.setattr(persistent, "_get_fernet", cipher)
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(
+        cli, "ensure_service",
+        lambda: pytest.fail("cache I/O failure fell back to the service"),
+    )
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps([
+        {"entry": "Example/one"}, {"entry": "Example/two"}, {"entry": "Example/one"},
+    ])))
+
+    assert cli.main(["batch-get"]) == 2
+    captured = capsys.readouterr()
+    results = json.loads(captured.out)["results"]
+    assert [row["entry"] for row in results] == [
+        "Example/one", "Example/two", "Example/one",
+    ]
+    assert [row["ok"] for row in results] == [True, False, True]
+    assert [row["value"] for row in results] == ["cached-value", None, "cached-value"]
+    assert results[1]["source"] == "cache"
+    assert results[1]["error"].startswith("cache_read_failed;")
+    assert "private-cache-path-diagnostic" not in captured.out
+    assert captured.err == ""
+    assert persistent._cache_file.read_bytes() == cache_before
+    assert persistent._key_file.read_bytes() == key_before
+
+    reads[:] = [None]
+    with pytest.raises(failure, match="private-cache-path-diagnostic"):
+        cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
+
+
 @pytest.mark.parametrize("succeed", [False, True])
 def test_batch_get_refresh_returns_ordered_partial_or_total_failure(
     enabled_cache, monkeypatch, capsys, succeed,
