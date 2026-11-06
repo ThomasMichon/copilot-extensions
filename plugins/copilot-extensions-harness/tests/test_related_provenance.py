@@ -4,7 +4,7 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_copilot_extensions_related_provenance_is_shipped():
+def test_copilot_extensions_related_provenance_is_shipped() -> None:
     path = PLUGIN_ROOT / ".agent-worktrees" / "related.yaml"
     text = path.read_text(encoding="utf-8")
 

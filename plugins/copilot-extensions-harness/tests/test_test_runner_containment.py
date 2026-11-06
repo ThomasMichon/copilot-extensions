@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -13,18 +14,24 @@ sys.path.insert(0, str(REPO))
 # This budget includes fresh interpreter/helper imports before the PID receipt.
 DESCENDANT_WALL_SECONDS = 10
 
-from tools.plugin_test_containment import (
-    CONTAINED_ENV,
-    SANDBOX_ENV,
-    Limits,
-    isolated_environment,
-    partition,
-    run_contained,
-)
-from tools.pytest_portfolio_guard import (
-    validate_contained_environment,
-    validate_declaration,
-)
+if TYPE_CHECKING:
+    from plugin_test_containment import (
+        CONTAINED_ENV, SANDBOX_ENV, Limits, isolated_environment, partition, run_contained,
+    )
+    from pytest_portfolio_guard import validate_contained_environment, validate_declaration
+else:
+    from tools.plugin_test_containment import (
+        CONTAINED_ENV,
+        SANDBOX_ENV,
+        Limits,
+        isolated_environment,
+        partition,
+        run_contained,
+    )
+    from tools.pytest_portfolio_guard import (
+        validate_contained_environment,
+        validate_declaration,
+    )
 
 
 def _pid_exists(pid: int) -> bool:
@@ -41,7 +48,7 @@ def _pid_exists(pid: int) -> bool:
     from ctypes import wintypes
 
     process_query_limited_information = 0x1000
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel32.OpenProcess.restype = wintypes.HANDLE
     handle = kernel32.OpenProcess(
         process_query_limited_information, False, pid
@@ -52,7 +59,7 @@ def _pid_exists(pid: int) -> bool:
     return True
 
 
-def test_isolated_environment_redirects_mutable_state(tmp_path):
+def test_isolated_environment_redirects_mutable_state(tmp_path: Path) -> None:
     env = isolated_environment(
         {
             "PATH": os.environ.get("PATH", ""),
@@ -81,7 +88,9 @@ def test_isolated_environment_redirects_mutable_state(tmp_path):
         Path(env[name]).resolve().relative_to(tmp_path.resolve())
 
 
-def test_run_contained_returns_child_exit_code_and_preserves_output(tmp_path, capfd):
+def test_run_contained_returns_child_exit_code_and_preserves_output(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
     env = isolated_environment(os.environ, tmp_path)
     rc = run_contained(
         [sys.executable, "-c", "print('contained-output');raise SystemExit(7)"],
@@ -95,7 +104,7 @@ def test_run_contained_returns_child_exit_code_and_preserves_output(tmp_path, ca
     assert "contained-output" in capfd.readouterr().out
 
 
-def test_timeout_reaps_recursive_descendant(tmp_path):
+def test_timeout_reaps_recursive_descendant(tmp_path: Path) -> None:
     pid_file = tmp_path / "descendant.pid"
     script = (
         "import subprocess,sys,time;"
@@ -126,7 +135,7 @@ def test_timeout_reaps_recursive_descendant(tmp_path):
     assert not _pid_exists(pid)
 
 
-def test_timeout_reaps_descendant_requesting_detachment(tmp_path):
+def test_timeout_reaps_descendant_requesting_detachment(tmp_path: Path) -> None:
     pid_file = tmp_path / "detached-descendant.pid"
     procutil_src = REPO / "libs" / "agent-procutil" / "src"
     script = (
@@ -162,7 +171,7 @@ def test_timeout_reaps_descendant_requesting_detachment(tmp_path):
     assert not _pid_exists(pid)
 
 
-def test_temp_budget_stops_tree(tmp_path):
+def test_temp_budget_stops_tree(tmp_path: Path) -> None:
     script = (
         "import os,pathlib,time;"
         "root=pathlib.Path(os.environ['COPILOT_EXTENSIONS_TEST_SANDBOX']);"
@@ -187,7 +196,7 @@ def test_temp_budget_stops_tree(tmp_path):
     assert rc == 124
 
 
-def test_process_budget_stops_tree(tmp_path):
+def test_process_budget_stops_tree(tmp_path: Path) -> None:
     script = (
         "import subprocess,sys,time;"
         "children=[subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])"
@@ -212,7 +221,7 @@ def test_process_budget_stops_tree(tmp_path):
     assert rc == 124
 
 
-def test_memory_budget_stops_tree(tmp_path):
+def test_memory_budget_stops_tree(tmp_path: Path) -> None:
     script = "import time;payload=bytearray(160*1024*1024);time.sleep(60)"
     env = isolated_environment(os.environ, tmp_path)
     rc = run_contained(
@@ -232,7 +241,9 @@ def test_memory_budget_stops_tree(tmp_path):
     assert rc == 124
 
 
-def test_environment_validation_fails_closed_on_escaped_tmpdir(tmp_path, monkeypatch):
+def test_environment_validation_fails_closed_on_escaped_tmpdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     env = isolated_environment(os.environ, tmp_path)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -242,13 +253,15 @@ def test_environment_validation_fails_closed_on_escaped_tmpdir(tmp_path, monkeyp
         validate_contained_environment()
 
 
-def test_injected_pytest_policy_loads_and_enforces_declarations(tmp_path, capfd):
+def test_injected_pytest_policy_loads_and_enforces_declarations(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
     test_file = tmp_path / "test_invalid.py"
     test_file.write_text(
         "import pytest\n"
         "@pytest.mark.portfolio_tier('T0')\n"
         "@pytest.mark.effect('process')\n"
-        "def test_invalid(): pass\n",
+        "def test_invalid() -> None: pass\n",
         encoding="utf-8",
     )
     env = isolated_environment(os.environ, tmp_path)
@@ -273,7 +286,7 @@ def test_injected_pytest_policy_loads_and_enforces_declarations(tmp_path, capfd)
     test_file.write_text(
         "import pytest\n"
         "@pytest.mark.portfolio_tier('T0')\n"
-        "def test_valid(): pass\n",
+        "def test_valid() -> None: pass\n",
         encoding="utf-8",
     )
     rc = run_contained(
@@ -292,16 +305,16 @@ def test_injected_pytest_policy_loads_and_enforces_declarations(tmp_path, capfd)
     assert rc == pytest.ExitCode.OK
 
 
-def test_effect_declarations_enforce_tier_boundaries():
+def test_effect_declarations_enforce_tier_boundaries() -> None:
     assert validate_declaration("T0", set()) is None
     assert validate_declaration("T1", {"filesystem"}) is None
     assert validate_declaration("T2", {"filesystem", "process"}) is None
-    assert "does not allow" in validate_declaration("T0", {"process"})
-    assert "require a portfolio_tier" in validate_declaration(None, {"filesystem"})
-    assert "unknown" in validate_declaration("T2", {"telepathy"})
+    assert "does not allow" in cast(str, validate_declaration("T0", {"process"}))
+    assert "require a portfolio_tier" in cast(str, validate_declaration(None, {"filesystem"}))
+    assert "unknown" in cast(str, validate_declaration("T2", {"telepathy"}))
 
 
-def test_partition_bounds_sequential_subsuites():
+def test_partition_bounds_sequential_subsuites() -> None:
     assert partition(list(range(7)), 3) == [[0, 1, 2], [3, 4, 5], [6]]
     with pytest.raises(ValueError, match="positive"):
         partition([1], 0)

@@ -29,7 +29,7 @@ def guard_scope(
     extra.write_bytes(b"value: int = 1\n")
     (tmp_path / "libs/installer-engine").mkdir(parents=True)
     project = checker.Project(
-        "copilot-extensions-harness", ("plugins/copilot-extensions-harness",), (),
+        "copilot-extensions-harness", ("plugins/copilot-extensions-harness/scripts",), (),
         "pending", "3.10", ("linux",), "requirements.txt",
         import_roots=("plugins/copilot-extensions-harness/scripts",),
     )

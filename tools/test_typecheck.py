@@ -20,6 +20,232 @@ from tools import typecheck_source_views as views
 from installer_dependency_policy import DependencyPolicyError
 
 
+def _harness_emitted_fixture(root: Path) -> tuple[str, ...]:
+    declaration = json.loads((typecheck.ROOT / views.HARNESS_DECLARATION).read_bytes())
+    paths = tuple(row["path"] for row in declaration["members"])
+    for relative in (*paths, *(row["path"] for row in declaration["assets"]), views.HARNESS_DECLARATION):
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((typecheck.ROOT / relative).read_bytes())
+    return paths
+
+
+def test_harness_emitted_exact_roles_and_escaping(tmp_path: Path) -> None:
+    paths = _harness_emitted_fixture(tmp_path)
+    inputs, programs = views.harness_emitted_inputs(tmp_path, paths)
+    assert len(programs) == 18
+    assert len(inputs) == len(paths) + 4
+    assert any(b"pytest.mark.effect('process')" in body for _, body, _, _ in programs)
+    assert any(b"raise SystemExit(7)" in body for _, body, _, _ in programs)
+    assert sum(b"\r\n" in body for _, body, _, _ in programs) == 4
+    for _, body, first, last in programs:
+        compile(body, "<portable-typing-witness>", "exec")
+        assert 1 <= first <= last
+
+
+@pytest.mark.parametrize("change", ["private-record", "drop-epoch", "extra-member", "hidden-producer"])
+def test_harness_emitted_refuses_incomplete_or_private_declaration(
+    tmp_path: Path, change: str,
+) -> None:
+    import hashlib
+    paths = _harness_emitted_fixture(tmp_path)
+    path = tmp_path / views.HARNESS_DECLARATION
+    data = json.loads(path.read_bytes())
+    if change == "private-record":
+        data["capture_record_id"] = "private-record"
+    elif change == "drop-epoch":
+        data["programs"].pop()
+    elif change == "extra-member":
+        paths = (*paths, views.HARNESS_PREFIX + "new_owned.py")
+    else:
+        import ast
+        source = tmp_path / data["members"][0]["path"]
+        source.write_bytes(source.read_bytes() + b"\nnew_unreviewed = ['-c', 'print(1)']\n")
+        data["members"][0]["sha256"] = [hashlib.sha256(source.read_bytes()).hexdigest()]
+        data["members"][0]["structure"] = views._shape(ast.parse(source.read_bytes()))
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(views.SourceViewError):
+        views.harness_emitted_inputs(tmp_path, paths)
+
+
+@pytest.mark.parametrize("change", ["module", "class", "async", "duplicate-epoch", "reassignment"])
+def test_harness_emitted_census_rejects_reviewed_digest_hidden_sites(
+    tmp_path: Path, change: str,
+) -> None:
+    import ast
+    import hashlib
+    paths = _harness_emitted_fixture(tmp_path)
+    declaration_path = tmp_path / views.HARNESS_DECLARATION
+    data = json.loads(declaration_path.read_bytes())
+    relative = views.HARNESS_PREFIX + "tests/test_test_runner_containment.py"
+    source = tmp_path / relative
+    content = source.read_text(encoding="utf-8")
+    if change == "module":
+        content += "\nsubprocess.run([sys.executable, '-c', \"x: int = 'wrong'\"])\n"
+    elif change == "class":
+        content += "\nclass Hidden:\n    def run(self) -> None:\n        subprocess.run([sys.executable, '-c', 'pass'])\n"
+    elif change == "async":
+        content += "\nasync def hidden() -> None:\n    subprocess.run([sys.executable, '-c', 'pass'])\n"
+    elif change == "duplicate-epoch":
+        content = content.replace(
+            "    assert rc == pytest.ExitCode.OK\n",
+            "    assert rc == pytest.ExitCode.OK\n"
+            "    test_file.write_text(\"import pytest\\n@pytest.mark.portfolio_tier('T0')\\n"
+            "@pytest.mark.effect('process')\\ndef test_invalid() -> None: pass\\n\", encoding='utf-8')\n"
+        )
+    else:
+        launch = (
+            "    env = isolated_environment(os.environ, tmp_path)\n    rc = run_contained(\n"
+            "        [sys.executable, \"-c\", script],"
+        )
+        content = content.replace(launch, "    script = 'pass'\n" + launch, 1)
+    source.write_text(content, encoding="utf-8")
+    tree = ast.parse(source.read_bytes())
+    member = next(row for row in data["members"] if row["path"] == relative)
+    member["sha256"] = [hashlib.sha256(source.read_bytes()).hexdigest()]
+    member["structure"] = views._shape(tree)
+    declaration_path.write_text(json.dumps(data), encoding="utf-8")
+    match = (
+        "Incomplete/extra" if change == "duplicate-epoch" else
+        "ambiguous reassigned" if change == "reassignment" else
+        "Unsupported module/class/async"
+    )
+    with pytest.raises(views.SourceViewError, match=match):
+        views.harness_emitted_inputs(tmp_path, paths)
+
+
+def test_harness_emitted_candidate_data_does_not_follow_host_drift(tmp_path: Path) -> None:
+    paths = _harness_emitted_fixture(tmp_path / "source")
+    _harness_emitted_fixture(tmp_path / "candidate")
+    candidate = views.harness_emitted_views(tmp_path / "candidate", paths, tmp_path / "stage")
+    assert len(candidate) == 18
+    host = tmp_path / "source" / paths[0]
+    host.write_bytes(host.read_bytes() + b"\n# host drift\n")
+    for view in candidate:
+        view.verify(tmp_path / "candidate")
+    changed = tmp_path / "candidate" / paths[0]
+    changed.write_bytes(changed.read_bytes() + b"\n# candidate drift\n")
+    with pytest.raises(views.SourceViewError, match="source changed"):
+        candidate[0].verify(tmp_path / "candidate")
+    for view in candidate:
+        view.output.unlink()
+
+
+def test_harness_shared_binding_verification_still_checks_every_output(tmp_path: Path) -> None:
+    paths = _harness_emitted_fixture(tmp_path)
+    owner = typecheck._SourceViews(tmp_path, tmp_path / "stage")
+    emitted = owner.add_harness(paths)
+    last = emitted[-1].output
+    content = last.read_bytes()
+    last.write_bytes(content + b"\n# changed output\n")
+    with pytest.raises(views.SourceViewError, match="Checker output changed"):
+        owner.verify()
+    last.write_bytes(content)
+    extra = tmp_path / views.HARNESS_PREFIX / "unexpected.py"
+    extra.write_text("pass\n", encoding="utf-8")
+    with pytest.raises(views.SourceViewError, match="membership changed"):
+        owner.verify()
+    extra.unlink()
+    owner.verify()
+    owner.cleanup()
+
+
+def test_harness_emitted_procutil_provider_is_candidate_local_and_unambiguous(tmp_path: Path) -> None:
+    directory = tmp_path / "libs/agent-procutil/src"
+    package = directory / "agent_procutil"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    assert typecheck._harness_procutil_provider(tmp_path, [str(directory)]) == package
+    foreign = tmp_path / "other"
+    foreign.mkdir()
+    (foreign / "agent_procutil.py").write_text("", encoding="utf-8")
+    assert typecheck._harness_procutil_provider(tmp_path, [str(directory), str(foreign)]) == package
+    with pytest.raises(typecheck.TypecheckError, match="winning candidate-local"):
+        typecheck._harness_procutil_provider(tmp_path, [str(foreign), str(directory)])
+    (package / "__init__.pyi").write_text("", encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError, match="stub"):
+        typecheck._harness_procutil_provider(tmp_path, [str(directory)])
+    (package / "__init__.pyi").unlink()
+    (directory / "agent_procutil.pyi").write_text("", encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError, match="stub"):
+        typecheck._harness_procutil_provider(tmp_path, [str(directory)])
+    (directory / "agent_procutil.pyi").unlink()
+    stub = directory / "agent_procutil-stubs"
+    stub.mkdir()
+    (stub / "__init__.pyi").write_text("", encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError, match="stub"):
+        typecheck._harness_procutil_provider(tmp_path, [str(directory)])
+
+
+def test_harness_emitted_actual_mypy_ordered_provider_precedence(tmp_path: Path) -> None:
+    canonical = tmp_path / "canonical"
+    later = tmp_path / "later"
+    for root, annotation, value in [(canonical, "int", "1"), (later, "str", "'later'")]:
+        package = root / "agent_procutil"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text(
+            f"def answer() -> {annotation}:\n    return {value}\n", encoding="utf-8",
+        )
+    client = tmp_path / "client.py"
+    client.write_text("from agent_procutil import answer\nvalue: int = answer()\n", encoding="utf-8")
+    selected = next(p for p in typecheck.load_projects() if p.name == "checker")
+    environment, _digest = typecheck.environment_path(typecheck.ROOT, selected)
+    env = dict(os.environ)
+    env["MYPYPATH"] = os.pathsep.join((str(canonical), str(later)))
+    for platform in ("linux", "win32"):
+        result = typecheck._run([
+            str(typecheck.environment_python(environment)), "-I", "-m", "mypy",
+            "--strict", "--python-version", "3.10", "--platform", platform,
+            "--cache-dir", os.devnull, "--follow-imports", "silent", str(client),
+        ], tmp_path, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_harness_emitted_real_body_error_maps_to_producer_range(tmp_path: Path) -> None:
+    import ast
+    import hashlib
+    paths = _harness_emitted_fixture(tmp_path)
+    declaration_path = tmp_path / views.HARNESS_DECLARATION
+    declaration = json.loads(declaration_path.read_bytes())
+    row = next(r for r in declaration["programs"] if r["role"] == "exit-seven")
+    source = tmp_path / row["path"]
+    source.write_bytes(source.read_bytes().replace(
+        b"print('contained-output');raise SystemExit(7)",
+        b"x: int = 'wrong';print('contained-output');raise SystemExit(7)",
+    ))
+    tree = ast.parse(source.read_bytes())
+    member = next(r for r in declaration["members"] if r["path"] == row["path"])
+    member["sha256"] = [hashlib.sha256(source.read_bytes()).hexdigest()]
+    member["structure"] = views._shape(tree)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == row["function"])
+    expression = next(
+        n.elts[i + 1] for n in ast.walk(fn) if isinstance(n, ast.List)
+        for i, value in enumerate(n.elts[:-1])
+        if isinstance(value, ast.Constant) and value.value == "-c"
+    )
+    row["expression"] = views._shape(expression)
+    container = next(
+        n for n in ast.walk(fn) if isinstance(n, ast.List) and expression in n.elts
+    )
+    row["sites"] = [[container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]]
+    declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
+    emitted = views.harness_emitted_views(tmp_path, paths, tmp_path / "stage")
+    item = next(v for v in emitted if b"x: int = 'wrong'" in v.content)
+    selected = next(p for p in typecheck.load_projects() if p.name == "checker")
+    environment, _digest = typecheck.environment_path(typecheck.ROOT, selected)
+    result = typecheck._run([
+        str(typecheck.environment_python(environment)), "-I", "-m", "mypy",
+        "--strict", "--python-version", "3.10", "--platform", "win32",
+        "--cache-dir", os.devnull, "--follow-imports", "silent",
+        str(item.output),
+    ], tmp_path)
+    assert result.returncode != 0
+    message = item.diagnostics(result.stdout, tmp_path)
+    assert "[assignment]" in message
+    assert row["path"] in message
+    assert "emitted expression range" in message
+
+
 def project(name: str = "sample", level: typecheck.Level = "strict") -> typecheck.Project:
     """Declare one synthetic Python input under its test workspace."""
     return typecheck.Project(
@@ -1600,7 +1826,7 @@ def guard_source(
     monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
     monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: lease)
     item = typecheck.Project(
-        "copilot-extensions-harness", ("plugins/copilot-extensions-harness",), (),
+        "copilot-extensions-harness", ("plugins/copilot-extensions-harness/scripts",), (),
         "pending", "3.10", ("linux", "win32"), "requirements.txt",
         import_roots=("plugins/copilot-extensions-harness/scripts",),
     )

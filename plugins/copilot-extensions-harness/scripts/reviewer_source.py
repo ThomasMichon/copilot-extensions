@@ -4,16 +4,28 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import os as os
 import shutil
 import subprocess
 import sys
 import time
+import typing as _typing
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
-Runner = Callable[..., subprocess.CompletedProcess[str]]
+if _typing.TYPE_CHECKING:
+    class ProcessResult(_typing.Protocol):
+        returncode: int
+        stdout: str
+        stderr: str
+
+    def _verify_process_result(result: subprocess.CompletedProcess[str]) -> ProcessResult:
+        return result
+
+    Runner = Callable[..., ProcessResult]
+else:
+    Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 _QUERY = """
 query($owner:String!, $name:String!, $after:String) {
@@ -104,7 +116,7 @@ def load_policy(path: str | Path) -> dict[str, Any]:
     if policy["landing"] not in {"self", "author"}:
         raise ReviewerSourceError("policy landing must be 'self' or 'author'")
     policy["_root"] = str(policy_path.parent.parent)
-    return policy
+    return cast(dict[str, Any], policy)
 
 
 def _gh_environment(
@@ -200,7 +212,7 @@ def _pull_request(
         runner=runner,
         env=_gh_environment(policy, runner=runner),
     )
-    return data["data"]["repository"]["pullRequest"]
+    return cast("dict[str, Any] | None", data["data"]["repository"]["pullRequest"])
 
 
 def _completed_payload_refs(
@@ -452,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     wait_parser.add_argument("--interval", type=float, default=60.0)
     wait_parser.add_argument("--timeout", type=float, default=7 * 24 * 60 * 60)
     args = parser.parse_args(argv)
+    result: list[dict[str, Any]] | dict[str, Any]
     try:
         policy = load_policy(args.policy)
         if args.command == "discover":

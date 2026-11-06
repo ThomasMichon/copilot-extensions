@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -11,11 +12,14 @@ import pytest
 _SCRIPT = Path(__file__).parents[1] / "scripts" / "reviewer_source.py"
 _SPEC = importlib.util.spec_from_file_location("reviewer_source", _SCRIPT)
 assert _SPEC and _SPEC.loader
-reviewer_source = importlib.util.module_from_spec(_SPEC)
+if TYPE_CHECKING:
+    import reviewer_source as reviewer_source
+else:
+    reviewer_source = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(reviewer_source)
 
 
-def _policy(tmp_path, **over):
+def _policy(tmp_path: Path, **over: Any) -> dict[str, Any]:
     guidance = tmp_path / "guidance.md"
     guidance.write_text("trusted guidance", encoding="utf-8")
     policy = {
@@ -34,7 +38,7 @@ def _policy(tmp_path, **over):
     return policy
 
 
-def _pr(**over):
+def _pr(**over: Any) -> dict[str, Any]:
     value = {
         "number": 42,
         "title": "Contribute feature",
@@ -52,7 +56,7 @@ def _pr(**over):
     return value
 
 
-def test_eligibility_excludes_owner_and_allows_external_fork(tmp_path):
+def test_eligibility_excludes_owner_and_allows_external_fork(tmp_path: Path) -> None:
     policy = _policy(tmp_path)
     assert reviewer_source.eligibility(_pr(), policy)[0] is True
     assert reviewer_source.eligibility(
@@ -60,10 +64,10 @@ def test_eligibility_excludes_owner_and_allows_external_fork(tmp_path):
     )[0] is False
 
 
-def test_render_task_uses_stock_recipe_and_untrusted_guidance(tmp_path):
+def test_render_task_uses_stock_recipe_and_untrusted_guidance(tmp_path: Path) -> None:
     calls = []
 
-    def runner(argv, **_kwargs):
+    def runner(argv: list[str], **_kwargs: object) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(
             returncode=0,
@@ -91,7 +95,7 @@ def test_render_task_uses_stock_recipe_and_untrusted_guidance(tmp_path):
     assert "self-hosted-review" in task["labels"]
 
 
-def test_side_load_excluded_pull_request_emits_nothing(tmp_path):
+def test_side_load_excluded_pull_request_emits_nothing(tmp_path: Path) -> None:
     responses = [
         {
             "data": {
@@ -102,7 +106,7 @@ def test_side_load_excluded_pull_request_emits_nothing(tmp_path):
         }
     ]
 
-    def runner(_argv, **_kwargs):
+    def runner(_argv: list[str], **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             returncode=0,
             stdout=json.dumps(responses.pop(0)),
@@ -116,7 +120,7 @@ def test_side_load_excluded_pull_request_emits_nothing(tmp_path):
     ) == []
 
 
-def test_discovery_watermark_skips_completed_head(tmp_path):
+def test_discovery_watermark_skips_completed_head(tmp_path: Path) -> None:
     responses = [
         [
             {
@@ -140,7 +144,7 @@ def test_discovery_watermark_skips_completed_head(tmp_path):
         },
     ]
 
-    def runner(_argv, **_kwargs):
+    def runner(_argv: list[str], **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             returncode=0,
             stdout=json.dumps(responses.pop(0)),
@@ -150,10 +154,10 @@ def test_discovery_watermark_skips_completed_head(tmp_path):
     assert reviewer_source.discover(_policy(tmp_path), runner=runner) == []
 
 
-def test_terminal_watermark_queries_all_terminal_outcomes(tmp_path):
+def test_terminal_watermark_queries_all_terminal_outcomes(tmp_path: Path) -> None:
     calls = []
 
-    def runner(argv, **_kwargs):
+    def runner(argv: list[str], **_kwargs: object) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(returncode=0, stdout="[]", stderr="")
 
@@ -166,7 +170,7 @@ def test_terminal_watermark_queries_all_terminal_outcomes(tmp_path):
     )
 
 
-def test_discovery_bootstrap_watermark_skips_old_open_pull_request(tmp_path):
+def test_discovery_bootstrap_watermark_skips_old_open_pull_request(tmp_path: Path) -> None:
     responses = [
         [],
         {
@@ -184,7 +188,7 @@ def test_discovery_bootstrap_watermark_skips_old_open_pull_request(tmp_path):
         },
     ]
 
-    def runner(_argv, **_kwargs):
+    def runner(_argv: list[str], **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             returncode=0,
             stdout=json.dumps(responses.pop(0)),
@@ -198,14 +202,14 @@ def test_discovery_bootstrap_watermark_skips_old_open_pull_request(tmp_path):
 
 
 @pytest.mark.parametrize("value", ["x", "other/repo#42", "0"])
-def test_change_ref_validation(value):
+def test_change_ref_validation(value: str) -> None:
     with pytest.raises(reviewer_source.ReviewerSourceError):
         reviewer_source._parse_change_ref(
             value, "ThomasMichon/copilot-extensions"
         )
 
 
-def test_wait_for_change_returns_on_new_head(tmp_path):
+def test_wait_for_change_returns_on_new_head(tmp_path: Path) -> None:
     responses = [
         {
             "data": {
@@ -223,7 +227,7 @@ def test_wait_for_change_returns_on_new_head(tmp_path):
         },
     ]
 
-    def runner(_argv, **_kwargs):
+    def runner(_argv: list[str], **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             returncode=0,
             stdout=json.dumps(responses.pop(0)),
@@ -244,7 +248,7 @@ def test_wait_for_change_returns_on_new_head(tmp_path):
     assert result["head"] == "new"
 
 
-def test_wait_for_change_returns_on_base_retarget(tmp_path):
+def test_wait_for_change_returns_on_base_retarget(tmp_path: Path) -> None:
     responses = [
         {
             "data": {
@@ -257,7 +261,7 @@ def test_wait_for_change_returns_on_base_retarget(tmp_path):
         }
     ]
 
-    def runner(_argv, **_kwargs):
+    def runner(_argv: list[str], **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             returncode=0,
             stdout=json.dumps(responses.pop(0)),
@@ -278,7 +282,7 @@ def test_wait_for_change_returns_on_base_retarget(tmp_path):
     assert result["base"] == "release"
 
 
-def test_discovery_paginates_all_open_pull_requests(tmp_path):
+def test_discovery_paginates_all_open_pull_requests(tmp_path: Path) -> None:
     responses = [
         [],
         {
@@ -310,7 +314,7 @@ def test_discovery_paginates_all_open_pull_requests(tmp_path):
     ]
     calls = []
 
-    def runner(argv, **_kwargs):
+    def runner(argv: list[str], **_kwargs: object) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(
             returncode=0,
@@ -328,7 +332,9 @@ def test_discovery_paginates_all_open_pull_requests(tmp_path):
 
 @pytest.mark.parametrize("platform", ["nt", "posix"])
 @pytest.mark.parametrize("suffix", ["cmd", "bat", "exe"])
-def test_windows_command_shim_uses_cmd(monkeypatch, platform, suffix):
+def test_windows_command_shim_uses_cmd(
+    monkeypatch: pytest.MonkeyPatch, platform: str, suffix: str,
+) -> None:
     native_os = reviewer_source.os
     native_name = native_os.name
     monkeypatch.setattr(reviewer_source, "os", SimpleNamespace(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -19,11 +20,11 @@ RETIRED_AGGREGATE_FILES = {
 }
 
 
-def _json(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))
+def _json(path: Path) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
-def _session_start_entries(plugin: Path, manifest: dict[str, object]) -> list[object]:
+def _session_start_entries(plugin: Path, manifest: dict[str, Any]) -> list[object]:
     configured = manifest.get("hooks", "hooks.json")
     hook_paths = [configured] if isinstance(configured, str) else configured
     entries: list[object] = []
