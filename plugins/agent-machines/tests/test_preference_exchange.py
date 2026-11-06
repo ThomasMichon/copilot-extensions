@@ -207,6 +207,74 @@ def test_failed_output_replacement_retains_intent_and_allows_exact_retry(inputs,
     assert publish(inputs, output)["local_published"]
 
 
+@pytest.mark.parametrize("operation", ["accept", "publish"])
+def test_state_directory_is_synced_before_output_or_success_including_unchanged_retries(
+    inputs, tmp_path, monkeypatch, operation,
+):
+    output = tmp_path / "published.json"
+    events = []
+    original_write = exchange._write
+
+    def synced(path):
+        assert path == inputs["state"]
+        watermark = "accepted.json" if operation == "accept" else "publication.json"
+        assert codec.read(path / watermark) == snapshot()
+        events.append("sync")
+
+    def written(path, value):
+        if path == output:
+            assert events[-1] == "sync"
+            events.append("output")
+        return original_write(path, value)
+
+    monkeypatch.setattr(exchange, "_sync_directory", synced)
+    monkeypatch.setattr(exchange, "_write", written)
+    for _ in range(2):
+        result = apply(inputs) if operation == "accept" else publish(inputs, output)
+        assert result["applied"]
+        assert events[-1] == ("sync" if operation == "accept" else "output")
+    assert events == (["sync", "sync"] if operation == "accept" else ["sync", "output"] * 2)
+
+
+def test_failed_directory_sync_never_publishes_and_identical_intent_can_retry(inputs, tmp_path, monkeypatch):
+    output = tmp_path / "published.json"
+
+    def fail(_path):
+        raise OSError("directory sync failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(exchange, "_sync_directory", fail)
+        with pytest.raises(codec.PreferenceError, match="state-sync-pending"):
+            publish(inputs, output)
+    assert not output.exists()
+    assert codec.read(inputs["state"] / "publication.json") == snapshot()
+    assert publish(inputs, output)["local_published"]
+
+
+def test_posix_directory_sync_closes_descriptor_even_when_fsync_fails(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    events = []
+
+    def opened(path, flags):
+        assert path == tmp_path and flags == 3
+        events.append("open")
+        return 42
+
+    def sync(descriptor):
+        assert descriptor == 42
+        events.append("sync")
+        raise OSError("synthetic fsync failure")
+
+    monkeypatch.setattr(exchange, "os", SimpleNamespace(
+        name="posix", O_RDONLY=1, O_DIRECTORY=2, open=opened, fsync=sync,
+        close=lambda descriptor: events.append(("close", descriptor)),
+    ))
+    with pytest.raises(OSError):
+        exchange._sync_directory(tmp_path)
+    assert events == ["open", "sync", ("close", 42)]
+
+
 @pytest.mark.parametrize(("current", "reason"), [
     (snapshot(publisher="other"), "output-publisher-mismatch"),
     (snapshot(domains={}), "output-revision-conflict"),

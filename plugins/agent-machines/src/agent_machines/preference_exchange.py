@@ -74,6 +74,16 @@ def _admitted(candidate: dict | None, policy: dict) -> bool:
     return domains <= set(policy["domains"])
 
 
+def _sync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _state(state: Path):
     state = _plain_path(state, directory=True)
     policy_path = _plain_path(state / "policy.json")
@@ -180,6 +190,10 @@ def exchange(operation: str, *, apply=False, expected="", **arguments) -> dict:
             raise codec.PreferenceError(result["status"])
         if accepted != candidate:
             _write(selected, candidate)
+        try:
+            _sync_directory(selected.parent)
+        except OSError as error:
+            raise codec.PreferenceError("state-sync-pending") from error
         if operation == "publish":
             # Record intent before output: a failed replacement can retry this revision,
             # but a missing/stale carrier can never lower the publisher's local watermark.

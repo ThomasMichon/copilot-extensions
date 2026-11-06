@@ -202,7 +202,11 @@ and recovery of lost local publication state remain explicit future
 reconciliation work, not permission for another participant to take over.
 
 Files are written as complete same-directory temporary files, flushed before
-atomic replacement, with bounded output and temporary-file cleanup. The local
+atomic replacement, with bounded output and temporary-file cleanup. On POSIX,
+the local watermark directory is synced before publication or success, including
+unchanged/retry paths. A failure reports `state-sync-pending` and does not
+publish; refresh the preview and retry. This is not a qualification of Windows
+or synchronized-provider crash durability. The local
 `exchange.lock` is retained for OS writer serialization, not synchronized or
 used as a fleet claim. Existing directory chains, inputs, outputs and state
 files must be ordinary nonlinked paths; aliases among the selected files refuse.
