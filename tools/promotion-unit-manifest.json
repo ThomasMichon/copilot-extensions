@@ -5088,7 +5088,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/git_tree_diff.py": "e853a447a1daebe7ea5dd1ca43946269774b8866444145501f78ce01552a6020",
         "plugins/agent-worktrees/src/agent_worktrees/machine_instructions.py": "a0953814f08b643afba94887d527720421a7674e4522acab0916174af63e10ff",
         "plugins/agent-worktrees/src/agent_worktrees/obligations.py": "7ac1929a3543f98a50ed303bfb21d631346298eb202a33e3d0e0003b8dcc80ff",
-        "plugins/agent-worktrees/src/agent_worktrees/output.py": "c8bdaf7841a20e3884acde928326a38ea4bf448f2d818d7e7010262139e8429a",
+        "plugins/agent-worktrees/src/agent_worktrees/output.py": "165db8990733896d7c7cf086fcff4549a445ebacd9adb1124cd3f36fd9a3900a",
         "plugins/agent-worktrees/src/agent_worktrees/pr_observation_config.py": "ee6c3fde312e21f30c9825c131628c15683c9cd0deab2ae1d219deaa1d7c4eaf",
         "plugins/agent-worktrees/src/agent_worktrees/pr_publication_config.py": "90a5caff767b47717774f41e2cfae2d91aa0a15c10efd59903a75c9d3de41558",
         "plugins/agent-worktrees/src/agent_worktrees/pr_publish.py": "af2466bd58d2c543ed647340a6554d039602af20a3cea4803b8995e4374ed626",
