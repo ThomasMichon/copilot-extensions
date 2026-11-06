@@ -248,6 +248,9 @@ rechecks its own admission and the monitor's live published/non-draining state,
 requires a finite unexpired deadline at most one second ahead, and records the
 original 120-second recent-tool idle grace. It does not invoke policy,
 advisory accounting, mutation invalidation, a sweep wake or lifecycle startup.
+Admission and renewal take the monitor's existing state lock before the handler
+lock, serializing them with the final idle-check/drain transition. A contended
+receiver waits at most 50 ms, then skips the optional renewal without replay.
 The existing active-handler drain accounting and all other idle predicates
 remain in force. A sent notice is not an acknowledgement, durable delivery,
 fresh-status observation, permission or readiness proof. A missed notice may

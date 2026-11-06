@@ -4754,6 +4754,12 @@ so collection continues to match the exact admitted node inventory.
 
 Packet input readers use bounded chunks while retaining the original byte cap
 and overflow sentinel; a tiny file must not allocate the full evidence limit.
+`test_hook_demand.py` exercises the original IPC handler with in-memory streams:
+completed tool replies and capability-qualified send-only read demand preserve
+the same monotonic idle grace. Generation, admission, malformed and expired
+notifications cannot renew it or invoke policy. Actual sockets, the final
+idle-check/drain interleaving and Windows shell delivery remain in the explicit
+Worktrees consumer packet, not this actor-free inventory.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
 once per test session, then execute that code in fresh per-case module globals.
 They do not share module state, results, provider observations or qualification

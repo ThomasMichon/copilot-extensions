@@ -365,14 +365,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 lifecycle_completed = True
                 targets = hook_policy.mutation_targets(payload) if kind == "postToolUse" else None
                 if _kind_wakes_sweep(kind, targets):
-                    # This tool call actually invalidated one or more
-                    # cached segments (or all of them, when targets is
-                    # None), or this was an explicit non-postToolUse wake
-                    # kind (e.g. handoffWake) -- wake the sweep loop now
-                    # rather than waiting out `interval`, same as an
-                    # explicit `status` push (resident_push.notify). A
-                    # read-only postToolUse tool call (empty targets)
-                    # never wakes.
+                    # Mutations and explicit wake kinds bypass the backstop.
+                    # Read-only calls do not wake recomputation.
                     wake_event.set()
                 return result
             finally:
@@ -429,6 +423,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     read_demand_admitted=lambda: (
                         published_lock and not admission_closed and not shutdown_requested.is_set()
                     ),
+                    read_demand_lock=state_lock,
                 )
                 hook_server.start()
             except Exception:

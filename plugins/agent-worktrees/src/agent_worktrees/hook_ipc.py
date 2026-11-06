@@ -142,7 +142,10 @@ class _Handler(socketserver.StreamRequestHandler):
 class HookIpcServer:
     """Dynamic-port, loopback-only server advertised through rendezvous files."""
 
-    def __init__(self, decide: Decision, *, read_demand_admitted: Callable[[], bool] | None = None):
+    def __init__(
+        self, decide: Decision, *, read_demand_admitted: Callable[[], bool] | None = None,
+        read_demand_lock=None,
+    ):
         self.token = secrets.token_urlsafe(32)
         self.generation = secrets.token_hex(16)
         self.server = _Server(
@@ -159,6 +162,7 @@ class HookIpcServer:
         self._clock = time.monotonic
         self._last_completed_hook: float | None = None
         self._read_demand_admitted = read_demand_admitted
+        self._read_demand_lock = read_demand_lock if read_demand_lock is not None else threading.RLock()
 
     def start(self) -> None:
         self.thread.start()
@@ -218,14 +222,20 @@ class HookIpcServer:
         deadline = request["deadline"]
         if not math.isfinite(deadline) or not 0 < deadline - time.time() <= 1.0:
             return
-        with self._active_handlers_lock:
-            if (
-                self.server.admission_closed
-                or self._read_demand_admitted is None
-                or not self._read_demand_admitted()
-            ):
-                return
-            self._last_completed_hook = self._clock()
+        if not self._read_demand_lock.acquire(timeout=0.05):
+            return
+        try:
+            with self._active_handlers_lock:
+                if (
+                    self.server.admission_closed
+                    or deadline <= time.time()
+                    or self._read_demand_admitted is None
+                    or not self._read_demand_admitted()
+                ):
+                    return
+                self._last_completed_hook = self._clock()
+        finally:
+            self._read_demand_lock.release()
 
     def _on_request_accepted(self) -> None:
         with self._active_handlers_lock:
