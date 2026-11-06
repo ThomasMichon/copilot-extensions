@@ -54,7 +54,6 @@ import subprocess
 import sys
 import tempfile as tempfile  # Preserve the cleanup adapter used by runner contracts.
 import time
-import tomllib
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -64,7 +63,8 @@ from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 from plugin_test_cache import (
-    clear_cache_contents, dependency_fingerprint, ordinary_cache_root, source_resolution_arguments,
+    clear_cache_contents, dependency_fingerprint, has_dev_extra,
+    ordinary_cache_root, source_resolution_arguments,
 )
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
@@ -86,6 +86,7 @@ from plugin_test_containment import (
     partition,
     run_contained,
 )
+from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -213,15 +214,7 @@ def _has_pyproject(name: str) -> bool:
 
 
 def _has_dev_extra(name: str) -> bool:
-    pyproject = _plugin_dir(name) / "pyproject.toml"
-    if not pyproject.is_file():
-        return False
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    extras = data.get("project", {}).get("optional-dependencies", {})
-    return "dev" in extras
+    return has_dev_extra(_plugin_dir(name))
 
 
 def all_plugins_with_suites() -> list[str]:
@@ -543,10 +536,18 @@ def run_plugin(
         _ensure_venv(name, uv, reinstall=reinstall)
         print(f"[PASS] {name} (prepared)")
         return 0
+    plugin_started = time.monotonic()
+    try:
+        check_test_sources(_plugin_dir(name) / "tests")
+    except UnsafeTestCommand as error:
+        print(f"[FAIL] {name}: {error}", file=sys.stderr)
+        return 2
+    if time.monotonic() - plugin_started >= plugin_timeout:
+        print(f"[LIMIT] {name}: source preflight exhausted the plugin budget", file=sys.stderr)
+        return 124
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
-    plugin_started = time.monotonic()
     report_directory = None
     if junit_dir is not None:
         report_directory = junit_dir.expanduser().resolve() / name

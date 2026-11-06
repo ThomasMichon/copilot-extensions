@@ -5933,6 +5933,105 @@ integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/
 and unverified cleanup. These explicit native packets do not expand required
 unit-only CI, and skips are not native platform qualification.
 
+### Shared-host command safety
+
+The host may contain live work from other sessions or users. A temporary home,
+`USERPROFILE`, `PSMUX_DATA_DIR`, redirected config, Windows Job or POSIX process
+group does **not** prove that an external command targets a private service.
+Jobs/groups contain child lifetime, not IPC to an already-running mux, Docker
+engine, service manager or WSL distribution.
+
+`run-plugin-tests.py` checks test/helper source before dependency preparation
+or collection for literal destructive cleanup, including helpers later started
+with Python `-I`/`-S`. The injected pytest portfolio guard and repository-tool
+conftest also install a Python audit guard before tests execute. It rejects
+server-wide mux shutdown, name/pattern/image-based process termination, global
+signals, shared service/WSL shutdown, container/image pruning and known bulk
+container cleanup. It also rejects real mux commands without a runner-owned
+transport. Neither `--allow-host-state` nor `--allow-explicit-tiers` disables
+command safety.
+
+Supported local launchers retain scope validation through their effective
+environment and working directory, including `env` assignment/unset/reset,
+split-string and directory options. Privilege launchers cannot use inherited
+`TMUX` as scope proof, and local scope does not authorize remote mux commands.
+Shell inspection covers combined command flags such as `bash -lc`, literal
+shell argv bodies and encoded PowerShell bodies in both runtime and source checks.
+Source checks also recognize literal exec/spawn signatures and PowerShell
+termination aliases. Executable lookups (`command -v`/`-V`) remain harmless
+inspection, not commands to execute.
+Recognized shell state changes invalidate inherited environment or relative-directory
+scope evidence; an explicit absolute private transport can still be verified.
+Shell substitutions are inspected as nested command positions. Unresolved
+variable, home or glob expansion in a mux namespace is not private-scope proof;
+literal argument vectors do not undergo shell expansion.
+Quoted data is not a command group; unquoted parentheses and braces are
+inspected as nested command positions. SSH options and destinations are
+separated from the remote command, and explicit local/proxy command options
+are inspected independently.
+The supported `env -S` subset excludes GNU-specific expansions and escape
+sequences that a shell tokenizer cannot safely interpret. Prefer an explicit
+argument vector instead of relying on those additional parsing rules.
+
+For real mux fixtures, use
+`plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact
+arguments to **every** client and owner-pool operation. On Windows it creates
+a fresh `-L` namespace bound to this runner sandbox; on POSIX it selects a
+private `-S` socket. Only POSIX tmux's documented, sandbox-contained `TMUX`
+socket is accepted as an inherited transport. A different home/data directory
+alone never qualifies Windows routing. An isolated Python fixture owner must
+explicitly install the same command guard and validate the received namespace
+before starting native work.
+
+Cleanup must retire only the fixture's sessions or identity-pinned process
+handles. Do not call `kill-server`, `pkill`, `killall`, `taskkill /IM`,
+`Stop-Process -Name`, `wsl --shutdown`, `systemctl stop/restart`, or container
+pruning from a test. Exact-PID commands are not ownership proof: establish
+birth/handle identity first, refuse changed targets and preserve pre-existing
+processes. Never broaden cleanup after a timeout or failed assertion. Preserve
+evidence and report an unreaped fixture rather than terminating unrelated work.
+Do not install/update the operator's runtimes or rewrite Terminal settings as
+test setup.
+
+These are accident-prevention guards, **not an OS security sandbox**. Source
+checks recognize literal call shapes, not arbitrary generated code; audit
+hooks do not automatically propagate through `-I`/`-S`, native shells or
+third-party processes. A trusted fixture must carry its explicit scope through
+those boundaries. If routing/ownership or child isolation cannot be proved,
+mock the operation or run in a disposable VM/container without live host
+sockets, credentials or work mounted. Do not add an annotation or opt-out to
+execute a global cleanup on a shared host.
+
+Validate refusal with pure command classification, source-only controls and
+harmless executable stand-ins. Never execute the dangerous command as a
+negative control, even when expecting rejection. Native qualification belongs
+on a disposable worker: keep a fixture-owned sentinel in a separate namespace,
+prove it and all pre-existing mux identities survive, and clean up only
+identity-verified fixture resources. A passing pytest result without those
+checks is not proof of host isolation.
+
+The existing optional `installation-context-acceptance.yml` dispatch with
+`interactive_completion=true` qualifies the real mux lifetime fixture on
+disposable Linux and Windows workers, plus the private POSIX pane fixture.
+Windows uses portable PSMux 3.4.0 in runner temp, pinned by archive SHA-256;
+it does not install or register a host service. This lane remains manual and
+outside required unit CI. Do not substitute a shared developer desktop for it.
+The older 3.3.5 fixture can lose a cursor-response wakeup when control requests
+overlap pane creation, blocking even direct Python before its first instruction.
+The fixture pin does not change installed muxes or production compatibility.
+Windows startup controls overlap private mux requests with four detached
+launches, using direct Python and the PowerShell wrapper.
+The original worker-startup deadline, real TTY, owner-death and sentinel
+assertions remain unchanged. A cursor-position response is sent only after a
+startup failure, to diagnose a blocked shell; it never converts that failure
+into a passing qualification.
+
+Manager's source-bound test environment installs its ordinary wheel, preserving
+the declared metadata of its embedded first-party libraries. Other plugin
+test environments remain editable; Manager's separate Bridge test dependency
+also remains editable. The cache distinguishes this preparation mode from
+an older editable Manager environment, without changing runtime installations.
+
 The actor-free `tests/test_resident_configuration.py` selection executes the
 native configuration consumer and qualified owner-report reader with a synthetic
 peer transport. It compares direct and resident call/attach loading from a

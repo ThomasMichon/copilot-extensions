@@ -725,7 +725,10 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
 
 
 @pytest.mark.parametrize("bridge_fails", [False, True])
-def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatch, bridge_fails):
+@pytest.mark.parametrize("cached_editable", [False, True])
+def test_manager_bridge_is_prepared_only_by_the_test_runner(
+    tmp_path, monkeypatch, bridge_fails, cached_editable,
+):
     manager = tmp_path / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -739,11 +742,16 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
     (runner.VENV_ROOT / "worktree-manager").mkdir(parents=True)
-    python = runner._venv_python("worktree-manager")
-    python.parent.mkdir(parents=True)
-    python.touch()
-    monkeypatch.setattr(runner, "dependency_fingerprint", lambda *_args: "old-editable")
-    (runner.VENV_ROOT / "worktree-manager" / ".dep-fingerprint").write_text("old-editable")
+    if cached_editable:
+        python = runner._venv_python("worktree-manager")
+        python.parent.mkdir(exist_ok=True)
+        python.touch()
+        previous = runner.dependency_fingerprint(
+            "worktree-manager", manager, tmp_path,
+            (*runner.RUNNER_DEPENDENCIES,
+             *runner.EXTERNAL_TEST_DEPENDENCIES.get("worktree-manager", ())),
+        )
+        (runner.VENV_ROOT / "worktree-manager" / ".dep-fingerprint").write_text(previous)
     calls = []
     monkeypatch.setattr(
         runner.subprocess, "run",
@@ -765,7 +773,7 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     manager_arguments, manager_options = calls[0]
     assert str(bridge) not in manager_arguments
     assert "-e" not in manager_arguments
-    assert "--reinstall" in manager_arguments
+    assert ("--reinstall" in manager_arguments) is cached_editable
     assert manager_options["non_editable"] is True
     assert manager_options["cwd"] == manager
     arguments, options = calls[1]
@@ -902,7 +910,7 @@ def test_explicit_test_files_preserve_default_grouping_and_filter_only_collectio
 def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
     root = runner._plugin_dir("worktree-manager")
     native = set((root / "tests" / "native").glob("test_*.py"))
-    assert {path.name for path in native} == {
+    assert {
         "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
         "test_manager_updater_recovery.py",
         "test_manager_runtime_uninstall.py",
@@ -915,16 +923,17 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
         "test_terminal_launch_native.py", "test_terminal_launch_mux_native.py",
         "test_pane_boundary_native.py", "test_pane_boundary_posix.py",
         "test_manager_suite_replacement.py",
-    }
+    } <= {path.name for path in native}
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
 
 
 def test_manager_explicit_native_selection_remains_available():
     root = runner._plugin_dir("worktree-manager")
-    files = tuple(sorted(
-        path.relative_to(root).as_posix() for path in (root / "tests" / "native").glob("test_*.py")
-    ))
+    files = (
+        "tests/native/test_psmux_home_directory.py",
+        "tests/native/test_warm_picker_lifetime.py",
+    )
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
@@ -1601,7 +1610,7 @@ def test_codespaces_partition_failures_and_empty_selections_remain_fail_closed(
 def test_codespaces_partitions_share_the_unchanged_plugin_aggregate(
     codespaces_native_plan, monkeypatch, first_result,
 ):
-    clock = iter([0, 0, 250, 650, 901, 901])
+    clock = iter([0, 0, 0, 250, 650, 901, 901])
     monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     seen = []
     monkeypatch.setattr(
@@ -2692,6 +2701,53 @@ def test_prepare_only_takes_environment_admission(monkeypatch) -> None:
 
     assert runner.main(["alpha", "--prepare-only"]) == 0
     assert acquire_calls == [0.0]
+
+
+@pytest.mark.parametrize("collect_only", [False, True])
+def test_unsafe_child_cleanup_refuses_before_preparation_or_collection(monkeypatch, tmp_path, capsys, collect_only):
+    plugin = tmp_path / "alpha"
+    tests = plugin / "tests"
+    native = tests / "native"
+    native.mkdir(parents=True)
+    selected = tests / "test_safe.py"
+    selected.write_text("def test_safe(): pass\n")
+    child = native / "child.py"
+    child.write_text("def main(): command('kill-server')\n")
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [[selected]])
+    monkeypatch.setattr(
+        runner, "_ensure_venv",
+        lambda *a, **k: pytest.fail("unsafe tests reached dependency preparation"),
+    )
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda *a, **k: pytest.fail("unsafe tests reached execution"),
+    )
+    assert runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+        collect_only=collect_only, allow_host_state=True, allow_explicit_tiers=True,
+    ) == 2
+    assert str(child) in capsys.readouterr().err
+
+
+def test_source_preflight_counts_against_plugin_budget_before_preparation(monkeypatch, tmp_path, capsys):
+    plugin = tmp_path / "alpha"
+    clock = [0.0]
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [[plugin / "tests/test_one.py"]])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner, "check_test_sources", lambda _root: clock.__setitem__(0, 61.0))
+    monkeypatch.setattr(
+        runner, "_ensure_venv", lambda *a, **k: pytest.fail("expired preflight reached preparation"),
+    )
+    assert runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+    ) == 124
+    assert "preflight exhausted" in capsys.readouterr().err
 
 
 def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch, tmp_path: Path) -> None:

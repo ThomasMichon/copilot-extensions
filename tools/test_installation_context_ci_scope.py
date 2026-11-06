@@ -484,6 +484,33 @@ def test_dispatch_maintenance_native_acceptance_is_manual_bounded_and_source_pin
         assert not any(step.get("continue-on-error", False) for step in job["steps"])
 
 
+def test_optional_mux_safety_qualification_uses_disposable_pinned_windows_tooling() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for key, platform in (
+        ("interactive-completion-linux", "ubuntu-latest"),
+        ("interactive-completion-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][key]
+        assert job["if"] == "${{ inputs.interactive_completion }}"
+        assert job["runs-on"] == platform
+        steps = job["steps"]
+        tooling = next(step for step in steps if step.get("name", "").startswith("Prepare pinned PSMux"))
+        assert tooling["if"] == "${{ runner.os == 'Windows' }}"
+        assert "RUNNER_TEMP" in tooling["run"] and "GITHUB_PATH" in tooling["run"]
+        assert "v3.4.0/psmux-v3.4.0-windows-x64.zip" in tooling["run"]
+        assert "a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721" in tooling["run"]
+        assert "Get-FileHash" in tooling["run"]
+        native = next(step for step in steps if step.get("name") == "Qualify warm UI lifetime in a private native mux")
+        assert native["if"] == "${{ runner.os == 'Linux' || runner.os == 'Windows' }}"
+        assert "--allow-explicit-tiers" in native["run"]
+        assert "tests/native/test_warm_picker_lifetime.py" in native["run"]
+        assert "tests/test_mux_active_pane.py" in native["run"]
+        assert "--allow-host-state" not in native["run"]
+        assert "kill-server" not in native["run"]
+
+
 def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() -> None:
     root = HERE.parent
     for source in (
@@ -1000,6 +1027,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "gateway-role-tunnels", "gateway-host-application-linux", "gateway-host-application-windows",
+        "gateway-continuity-application-linux", "gateway-continuity-application-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
