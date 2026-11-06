@@ -408,8 +408,21 @@ def test_trusted_manager_setup_accepts_git_line_endings_but_not_changed_body(
         )["project"]["version"] == "1.0"
 
 
-def _build(tmp_path, monkeypatch, component, *, embedded=False):
-    source = _embedded_source(tmp_path)[0] if embedded else _source(tmp_path, component)
+def _build(tmp_path, monkeypatch, component, *, embedded=False, materialized=False):
+    if embedded:
+        source, library = _embedded_source(tmp_path)
+        if materialized:
+            destination = source / "libs" / library.name
+            destination.parent.mkdir()
+            shutil.move(str(library), destination)
+            manifest = source / "pyproject.toml"
+            manifest.write_text(
+                manifest.read_text().replace("../libs/agent-procutil", "libs/agent-procutil")
+                .replace("editable = true", "editable = false"),
+                encoding="utf-8",
+            )
+    else:
+        source = _source(tmp_path, component)
     monkeypatch.setattr(builder, "REPO", tmp_path)
     monkeypatch.setattr(builder, "LIBS_DIR", tmp_path / "libs")
 
@@ -464,9 +477,13 @@ def test_standalone_build_bundle_candidate_roundtrip(tmp_path, monkeypatch, comp
     assert publisher.artifact_label(entry) == f"standalone-{component}"
 
 
-def test_embedded_manager_build_bundle_candidate_roundtrip(tmp_path, monkeypatch):
-    _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, "worktree-manager", embedded=True)
-    assert manifest["build_resources"][-1] == "libs/agent-procutil"
+@pytest.mark.parametrize("materialized", [False, True])
+def test_embedded_manager_build_bundle_candidate_roundtrip(tmp_path, monkeypatch, materialized):
+    _source_dir, wheels, manifest = _build(
+        tmp_path, monkeypatch, "worktree-manager", embedded=True, materialized=materialized,
+    )
+    expected = "worktree-manager/libs/agent-procutil" if materialized else "libs/agent-procutil"
+    assert manifest["build_resources"][-1] == expected
     assert len(manifest["wheels"]) == 1
     output = tmp_path / "bundles"
     output.mkdir()
@@ -478,6 +495,7 @@ def test_embedded_manager_build_bundle_candidate_roundtrip(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("resource", [
     "libs/unknown", "libs/../foreign", "foreign/agent-procutil", "libs/versioned-runtime",
+    "worktree-manager/libs/unknown", "services/ssh/libs/agent-procutil",
 ])
 def test_embedded_manager_resource_closure_refuses_substitution(tmp_path, monkeypatch, resource):
     _source_dir, _wheels, manifest = _build(tmp_path, monkeypatch, "worktree-manager", embedded=True)

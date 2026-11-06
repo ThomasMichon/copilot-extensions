@@ -4547,7 +4547,7 @@
         "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
         "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
         "tools/promotion_bundle_members.py": "b4e8c2455f1de09d8a3a794c077e9cb34d2ed3ce6171a60254f13d3f6daab23d",
-        "tools/promotion_python_artifacts.py": "a6c3a9c51e0ccf1b07899a543bd95b3b1f241d4462624aff3922c793ea34b45c",
+        "tools/promotion_python_artifacts.py": "4faf83ee3d5756d7edf9e417b00ed5239d3c2ea86b362cea06b5eab993c4544e",
         "tools/promotion_release_evidence.py": "e905ca27bb247ae5822f812aedcb3531b0fc46fb5386782a05baafad53c683f5",
         "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
         "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",

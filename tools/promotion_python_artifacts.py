@@ -646,7 +646,7 @@ def validate_manifest(manifest: dict) -> None:
                 and len(resources) > len(expected_resources)
                 and all(
                     isinstance(path, str)
-                    and re.fullmatch(r"libs/[a-z0-9]+(?:-[a-z0-9]+)*", path)
+                    and re.fullmatch(r"(?:worktree-manager/)?libs/[a-z0-9]+(?:-[a-z0-9]+)*", path)
                     for path in resources
                 )
                 and len(resources) == len(set(resources))
