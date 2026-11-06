@@ -28,6 +28,7 @@ def test_log_fds_are_duplicated_and_only_unique_stdio_handles_are_inherited(
     )
     kernel.UpdateProcThreadAttribute.return_value = True
     kernel.ResumeThread.return_value = 1
+    kernel.GetConsoleMode.return_value = False
     kernel.CloseHandle.side_effect = lambda handle: handle != 502 or thread_close
     kernel.WaitForSingleObject.return_value = 0
     kernel.GetExitCodeProcess.side_effect = lambda handle, code: setattr(code._obj, "value", 0) or True
