@@ -59,6 +59,7 @@ reinspection, not consent. Autopilot is continuation, not operator-presence
 evidence; do not default to presence polling. Explicit all-work holds and
 privacy/resource bounds remain stronger. "Pause here" is not an alternative
 to useful work already permitted; neither is unrelated busywork.
-Use `using-standing-authority` to capture, qualify or recover a pre-clearance.
+Use `using-standing-authority` for pre-clearance and actionable waits; preserve
+original holds separately from agent precautions.
 Actual enforcement, peer custody, review, security and elevation remain with
 their existing owners; this guidance is not automatic tool approval.

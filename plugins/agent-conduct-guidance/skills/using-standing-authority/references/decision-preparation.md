@@ -21,6 +21,23 @@ Tree growth derives from the accepted goal, not unrelated work chosen to fill
 the operator's absence. Revisit at a recorded condition-check point or an actual
 new response; neither permits replay of a blocked or unknown effect.
 
+## Make the wait actionable
+
+In the existing task/effort or wait record, name the exact blocked action, the
+original instruction or observed failure, its current effect, who can change
+it, and the condition that permits another attempt. Distinguish an explicit
+operator hold, an agent's temporary precaution, missing authority, a provider
+transition and an unresolved effect. A warning or precaution must not become a
+permanent operator prohibition merely by being repeated in a schedule.
+
+For a precaution, preserve the concern and inspect relevant evidence before
+changing it; never clear an actual operator, safety or resource-owner hold.
+State what authorized work can continue independently. Use an existing event
+notification or a proportionate bounded check, not a new per-agent poller.
+Record what changed and the next action rather than copying the same blocker
+on every wake. A timeout or reply triggers reconciliation, not assumed consent,
+successful completion or a fresh attempt at an unknown effect.
+
 ## A self-contained return packet
 
 | Component | What the returning operator needs |

@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile exact PR gate transitions before repeating a wait",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

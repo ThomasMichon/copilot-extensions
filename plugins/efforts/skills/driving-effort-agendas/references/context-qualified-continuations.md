@@ -17,6 +17,28 @@ then continue `B`. These labels describe positions, not new JSON fields or CLI
 operations. Incidental discoveries remain parked until assigned or justified
 as necessary prerequisites.
 
+### Finite queue versus a retained program
+
+An assigned queue item can be a bounded delivery slice of a larger effort.
+Keep both acceptance gates visible. After the slice passes, reconcile its parent
+record, then explicitly select the permitted continuation: the next queued
+item, deeper parent work required by the assignment or a real dependency, or an
+accepted transfer to a named owner. Parent reconciliation is bookkeeping and
+acceptance work, not an automatic depth-first scheduling rule.
+
+For example, a queue asks to land existing changes `A, B, C`, and `A` belongs
+to a larger unfinished program. Landing `A` does not complete that program, but
+neither does it silently expand the queue item into finishing the whole program
+before `B`. Preserve the remaining program and return action with its rightful
+owner, then follow the assigned order unless a dependency or authoritative
+priority change justifies another selection. A note or parked reference alone
+does not transfer ownership. Conversely, an assignment to finish the whole
+program is not satisfied by landing `A`.
+
+Do not adopt or rewrite a managed agenda merely to apply this distinction.
+Use the existing assignment/effort record, or its supported transition when a
+lane is already adopted. Preserve all open parents through final completion.
+
 ## Qualify a revisit, not a counter
 
 Before revisiting the same stable item, identify:

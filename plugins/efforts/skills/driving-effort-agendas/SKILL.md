@@ -196,6 +196,9 @@ After completing one root, choose the next already-authorized queued root, if
 any. New unrelated objectives require assignment, not opportunistic queue
 growth. Finish only when the canonical effort/task gates and assigned queue
 are resolved, or preserve the open stack through a real blocker or handoff.
+For a bounded delivery queue whose items belong to larger programs, distinguish
+[queue acceptance from retained-parent completion](references/context-qualified-continuations.md#finite-queue-versus-a-retained-program)
+before selecting deeper work over the next item.
 
 ## Resume, reminders and manual limitations
 

@@ -99,6 +99,8 @@ Before a blocking question, build the
 investigation, planning and documentation. Preserve the affected branch and
 original return through the adopted agenda when available, record a real
 attempt/revisit or response reference, and pursue another accepted avenue.
+The same reference defines an actionable wait: exact blocked action, source,
+responsible owner, release condition and independently permitted work.
 The clock, Autopilot and guessed presence do not grant authority. An explicit
 all-work hold still stops the lane; unavailable approval alone does not.
 
