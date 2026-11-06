@@ -1809,7 +1809,7 @@ jobs:
           PYTEST_ADDOPTS: >-
             -vv --durations=20
             -k "test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
-        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180 --ephemeral-native-ssh-setup
 
   gateway-normal-setup-windows:
     if: ${{ inputs.pr_artifacts }}

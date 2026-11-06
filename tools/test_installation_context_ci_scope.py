@@ -118,7 +118,8 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     normal_steps = [step for step in normal["steps"] if "run" in step]
     assert [shlex.split(step["run"]) for step in normal_steps] == [
         ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
-        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
+         "--ephemeral-native-ssh-setup"],
     ]
     assert not any(step.get("continue-on-error") for step in normal_steps)
     assert normal_steps[1]["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"

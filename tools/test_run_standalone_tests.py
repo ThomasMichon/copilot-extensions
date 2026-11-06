@@ -26,6 +26,47 @@ def runner_scratch(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path.parent / "runner-scratch"))
 
 
+def test_native_ssh_setup_refuses_ordinary_host_before_preparation(monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_NATIVE", "1")
+    monkeypatch.setattr(runner, "prepare", lambda *args, **kwargs: pytest.fail("host preparation"))
+    with pytest.raises(SystemExit) as refused:
+        runner.main(["fleet-manager", "--prepare", "--ephemeral-native-ssh-setup"])
+    assert refused.value.code == 2
+
+
+def test_native_ssh_setup_keeps_sandbox_lease_and_original_limits(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_NATIVE", "1")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    root = tmp_path / "fleet-manager"
+    (root / "tests").mkdir(parents=True)
+    python = runner.default_python("fleet-manager")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    events = []
+    monkeypatch.setattr(runner, "acquire", lambda *args: type(
+        "Lease", (), {"release": lambda self: events.append("released")},
+    )())
+
+    def run(*args, **kwargs):
+        assert kwargs["sandbox"].is_relative_to(tmp_path)
+        assert kwargs["native_application"] is True
+        assert kwargs["limits"] == runner.Limits(wall_seconds=180)
+        assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        events.append("run")
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    assert runner.main([
+        "fleet-manager", "--timeout", "180", "--ephemeral-native-ssh-setup",
+    ]) == 0
+    assert events == ["run", "released"]
+
+
 def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
     tmp_path, monkeypatch, capsys,
 ):

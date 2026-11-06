@@ -104,6 +104,70 @@ def test_interactive_daemons_require_an_explicit_runner_policy(tmp_path, monkeyp
         )
 
 
+@pytest.mark.parametrize("refusal", ["host", "self-hosted", "outside", "contained"])
+def test_native_application_refuses_without_disposable_owner(tmp_path, monkeypatch, refusal):
+    monkeypatch.setenv("GITHUB_ACTIONS", "false" if refusal == "host" else "true")
+    monkeypatch.setenv(
+        "RUNNER_ENVIRONMENT", "self-hosted" if refusal == "self-hosted" else "github-hosted",
+    )
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv(plugin_test_containment.CONTAINED_ENV, "1" if refusal == "contained" else "0")
+    monkeypatch.setattr(
+        plugin_test_containment, "daemon_test_lifecycle",
+        lambda **kwargs: pytest.fail("native refusal must precede lifecycle or process effects"),
+    )
+    with pytest.raises(plugin_test_containment.ContainmentError, match="disposable"):
+        plugin_test_containment.run_contained(
+            ["unused"], cwd=tmp_path, env={}, limits=Limits(), native_application=True,
+            sandbox=tmp_path.parent if refusal == "outside" else tmp_path,
+        )
+
+
+@pytest.mark.parametrize("held", [False, True])
+def test_native_application_retains_runner_lease_limits_and_cleanup(tmp_path, monkeypatch, held):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.delenv(plugin_test_containment.CONTAINED_ENV, raising=False)
+    events = []
+    limits = Limits(wall_seconds=180)
+    environment = {plugin_test_containment.CONTAINED_ENV: "1", "KEEP": "yes"}
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        events.append("lease")
+        yield {"LEASE": "owned"}
+        events.append("cleanup")
+        kwargs["cleanup_results"].append(SimpleNamespace(status="held" if held else "settled"))
+
+    def run(command, **kwargs):
+        assert kwargs["limits"] is limits and kwargs["native_application"] is True
+        assert kwargs["env"] == {"KEEP": "yes", "LEASE": "owned"}
+        events.append("run")
+        return 0
+
+    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", run)
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    if held:
+        with pytest.raises(plugin_test_containment.UnreapedProcessError, match="unsettled"):
+            plugin_test_containment.run_contained(
+                ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
+                limits=limits, native_application=True,
+            )
+    else:
+        assert plugin_test_containment.run_contained(
+            ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
+            limits=limits, native_application=True,
+        ) == 0
+    assert events == ["lease", "run", "cleanup"]
+    assert environment[plugin_test_containment.CONTAINED_ENV] == "1"
+
+
 def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path, monkeypatch):
     from contextlib import contextmanager
 

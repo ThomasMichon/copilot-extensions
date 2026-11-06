@@ -100,6 +100,9 @@ def private_json(path, value):
 def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     tmp_path_factory, wheel, monkeypatch, capfd,
 ):
+    assert os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1", (
+        "normal SSH application lifetime requires the explicit ephemeral native owner"
+    )
     def progress(message):
         with capfd.disabled():
             print(message, flush=True)

@@ -371,12 +371,13 @@ class _WindowsJob:
 
     _JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
     _JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
+    _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
     _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
     _PROCESS_SET_QUOTA = 0x0100
     _PROCESS_TERMINATE = 0x0001
 
-    def __init__(self, limits: Limits) -> None:
+    def __init__(self, limits: Limits, *, native_application: bool = False) -> None:
         import ctypes
         from ctypes import wintypes
 
@@ -458,6 +459,8 @@ class _WindowsJob:
             | self._JOB_OBJECT_LIMIT_JOB_MEMORY
             | self._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         )
+        if native_application:
+            extended.BasicLimitInformation.LimitFlags |= self._JOB_OBJECT_LIMIT_BREAKAWAY_OK
         emergency_processes = max(
             limits.max_processes * 2, limits.max_processes + 16
         )
@@ -719,6 +722,7 @@ def _run_contained_process(
     sandbox: Path,
     limits: Limits,
     qualification: Qualification | None = None,
+    native_application: bool = False,
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
@@ -782,7 +786,10 @@ def _run_contained_process(
             qualification.capture.start((proc.stdout, proc.stderr))
         if os.name == "nt":
             try:
-                job = _WindowsJob(limits)
+                job = (
+                    _WindowsJob(limits, native_application=True)
+                    if native_application else _WindowsJob(limits)
+                )
                 job.assign(proc.pid)
             except BaseException:
                 try:
@@ -915,8 +922,26 @@ def run_contained(
     daemon_purpose: str = "unattended-test",
     daemon_lease: DaemonLeasePolicy | None = None,
     qualification: Qualification | None = None,
+    native_application: bool = False,
 ) -> int:
     """Run an owned test tree; interactive tests require an explicit lease policy."""
+    if type(native_application) is not bool:
+        raise ValueError("native application testing must be explicitly selected")
+    if native_application:
+        temporary = os.environ.get("RUNNER_TEMP")
+        if (
+            qualification is not None
+            or os.environ.get("GITHUB_ACTIONS") != "true"
+            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+            or not temporary or not Path(temporary).is_absolute()
+            or not sandbox.resolve().is_relative_to(Path(temporary).resolve())
+            or os.environ.get(CONTAINED_ENV) == "1"
+        ):
+            raise ContainmentError("Native application testing requires its disposable hosted CI owner.")
+        env = dict(env)
+        # Native application daemons use their production escape, with the
+        # runner-renewed test lease below retaining independent cleanup custody.
+        env.pop(CONTAINED_ENV, None)
     lifecycle_results: list[Any] = []
     if qualification is not None:
         if os.name != "nt":
@@ -936,7 +961,9 @@ def run_contained(
             lease=daemon_lease,
             **(
                 {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
-                if qualification is not None else {}
+                if qualification is not None else (
+                    {"cleanup_results": lifecycle_results} if native_application else {}
+                )
             ),
         ) as daemon_environment:
             result = _run_contained_process(
@@ -946,7 +973,12 @@ def run_contained(
                 sandbox=sandbox,
                 limits=limits,
                 **({"qualification": qualification} if qualification is not None else {}),
+                **({"native_application": True} if native_application else {}),
             )
+        if native_application and any(
+            outcome.status not in ("settled", "missing") for outcome in lifecycle_results
+        ):
+            raise UnreapedProcessError("Native application daemon cleanup remains unsettled.")
         if qualification is not None:
             qualification.boundary.require(time.monotonic)
             qualification.lifecycle_settled = all(

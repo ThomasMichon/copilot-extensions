@@ -531,7 +531,7 @@ startup or fleet adoption. Required unit-only CI is unchanged.
 
 Its further dependent normal-setup jobs prepare the engine's declared test
 dependencies, then run `test_ssh_setup.py` and the whole
-`test_repository_ssh_setup_installed.py` sequence under the same180-second
+`test_repository_ssh_setup_installed.py` sequence under the same 180-second
 runner/six-minute job limits. The latter builds the engine wheel with its
 packaged Source API and drives the actual Manager/engine handoff into synthetic
 TLS enrollment and the complete Source application installer, repeat,
@@ -541,6 +541,17 @@ product-cohort, provider, fresh-adopter or rollout proof. These jobs are
 sequenced after the retained explicit continuity cases, not parallel replacement
 coverage. Local helper/ordering controls and a packaged-API refusal probe do
 not substitute for their actual native outcomes.
+
+Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
+requires an explicitly selected Fleet lane on a GitHub-hosted disposable runner,
+with its owned sandbox beneath `RUNNER_TEMP`; ordinary hosts, self-hosted
+runners and nested contained callers refuse before preparation. The native
+envelope retains the original bounded-worker limits and runner-renewed daemon
+lease, but permits explicit application-daemon escape from caller cleanup
+Jobs/process groups. Bounded descendants remain caller-owned; held daemon
+cleanup fails and retains the sandbox. Ordinary tests still suppress daemon
+escape. This distinction matters because the real Source constructor closes
+an inner cleanup scope before the engine checks the selected host's readiness.
 
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
