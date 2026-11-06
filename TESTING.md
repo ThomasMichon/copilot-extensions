@@ -6360,6 +6360,10 @@ canonical sources, direct library URLs and replacement dependency metadata
 refuse preparation rather than choosing an arbitrary copy. Development graphs
 already sharing one source keep their existing behavior. This is test-environment
 composition only: installers and independent payload closures remain unchanged.
+Source mappings with `marker`, `extra` or `group` selectors also refuse composed
+overrides across the original and selected canonical graphs; unlike dependency
+requirement markers, their conditional local/registry choice cannot become an
+unconditional canonical URL.
 
 The manual `installation-context-acceptance.yml` workflow retains its derived
 diagnostic matrix by default. Dispatch it at the candidate ref with

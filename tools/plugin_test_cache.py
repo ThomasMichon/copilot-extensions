@@ -151,6 +151,20 @@ def _active_library_constraints(
     return tuple(sorted(constraints))
 
 
+def _require_unconditional_sources(roots: set[Path]) -> None:
+    for root in roots:
+        manifest = root / "pyproject.toml"
+        if not manifest.is_file():
+            continue
+        mappings = tomllib.loads(manifest.read_text(encoding="utf-8")).get(
+            "tool", {},
+        ).get("uv", {}).get("sources", {})
+        for entries in mappings.values():
+            for entry in entries if isinstance(entries, list) else [entries]:
+                if isinstance(entry, dict) and {"marker", "extra", "group"} & entry.keys():
+                    raise ValueError("Canonical test composition requires unconditional source mappings")
+
+
 def canonical_test_sources(
     name: str, plugin: Path, repo: Path,
 ) -> tuple[dict[str, Path], tuple[str, ...]]:
@@ -183,9 +197,11 @@ def canonical_test_sources(
     packages = {key: canonical.get(key, next(iter(paths))) for key, paths in sources.items()}
     for source in canonical.values():
         for root in _package_roots(source):
+            roots.add(root)
             manifest = root / "pyproject.toml"
             package = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]["name"]
             packages.setdefault(re.sub(r"[-_.]+", "-", package).lower(), root)
+    _require_unconditional_sources(roots)
     return canonical, _active_library_constraints(
         _dependency_entries(name, plugin, repo), packages, canonical,
     )

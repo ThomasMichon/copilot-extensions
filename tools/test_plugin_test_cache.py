@@ -219,6 +219,30 @@ def test_released_constraints_follow_selected_library_extras(released_graph):
     assert not any("shared>=500" in requirement for requirement in constraints)
 
 
+@pytest.mark.parametrize("graph", ["original", "canonical"])
+@pytest.mark.parametrize("selector", [
+    "marker = \"sys_platform == 'win32'\"", 'extra = "feature"', 'group = "dev"',
+])
+def test_released_composition_refuses_source_activation_selectors(released_graph, graph, selector):
+    plugin, _, canonical = released_graph
+    metadata = (
+        plugin / "pyproject.toml" if graph == "original" else canonical.parent / "pyproject.toml"
+    )
+    if graph == "original":
+        metadata.write_text(metadata.read_text().replace(
+            'path = "libs/shared"', f'path = "libs/shared", {selector}',
+        ))
+    else:
+        metadata.write_text(metadata.read_text() + (
+            f'\n[tool.uv.sources]\nshared = {{path = ".", {selector}}}\n'
+        ))
+    with pytest.raises(ValueError, match="unconditional source mappings"):
+        cache_policy.source_resolution_arguments(
+            "agent-pull-requests", plugin, runner.REPO, runner.REPO / "uncreated-venv",
+        )
+    assert not (runner.REPO / "uncreated-venv").exists()
+
+
 @pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
 def test_real_materialized_metadata_preserves_active_platform_constraints(tmp_path, consumer):
     import materialize_main

@@ -939,6 +939,22 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Refuse conditional source replacement
+
+- Dependency requirement predicates and source-mapping selectors have
+  different effects. Canonical composition retains requirement predicates,
+  but refuses `marker`, `extra` or `group` selectors in the original and
+  selected canonical source graphs before emitting overrides. This prevents
+  a conditional local/registry choice becoming an unconditional local URL.
+- Six filesystem-only controls cover the three selectors in both graphs and
+  verify refusal before resolver-input creation. The real metadata and
+  requirement-marker cases remain passing. The focused contained Windows
+  packet now passes 57 contracts with unchanged bounds, clean sandbox
+  removal, fatal lint, scoped module-size checks and diff checks.
+- This remains a source-only prerequisite. The failed hosted run is not
+  replaced with these fixtures; released-account, installed and parent
+  service/fleet acceptance remain separately open.
+
 ### 2026-11-06 - Preserve real metadata activation in test-source constraints
 
 - Shared library metadata already contains platform-marked dependencies and
