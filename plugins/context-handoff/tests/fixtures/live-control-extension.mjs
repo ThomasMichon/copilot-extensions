@@ -89,3 +89,13 @@ await mkdir(sessionDir, { recursive: true });
 await command.handler({ args: "pause", sessionId: "live-control-sid" });
 const sidecar = JSON.parse(await readFile(join(sessionDir, "context-handoff-override.json"), "utf-8"));
 assert.equal(sidecar.paused, true);
+
+// While paused, neither nudges nor the force tier fire (custom recovery).
+await emit("session.context_cleared", { messagesCleared: 8 });
+await writeFile(join(process.env.COPILOT_HOME, "settings.json"), '{"contextManagementTools":false}');
+await emit("session.tools_updated", { model: "synthetic" });
+await emit("session.usage_info", usage(900));
+await emit("session.idle");
+assert.equal(session.prompts.length, 5);
+assert.doesNotMatch(session.logs.join("\n"), /Force threshold reached/);
+assert.match(await status(), /PAUSED for this session/);
