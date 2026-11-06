@@ -121,20 +121,20 @@ def _probe(value: dict) -> dict | None:
 
 def inspect(root: Path, selection: dict) -> dict:
     if not os.path.lexists(root / host.STATE):
-        return {"role": "gateway", "state": "not-running", "mutations_performed": False}
+        return {"role": selection["role"], "state": "not-running", "mutations_performed": False}
     lock = _lock(root, time.monotonic() + 5)
     try:
         if pending_launch(root) is not None:
             return {
-                "role": "gateway", "state": "launch-unresolved", "native_exit_confirmed": False,
+                "role": selection["role"], "state": "launch-unresolved", "native_exit_confirmed": False,
                 "mutations_performed": False,
             }
         value = _record(root)
         if value is None:
-            return {"role": "gateway", "state": "not-running", "mutations_performed": False}
+            return {"role": selection["role"], "state": "not-running", "mutations_performed": False}
         result = _probe(value)
         if result is None:
-            return {"role": "gateway", "state": "not-running", "mutations_performed": False}
+            return {"role": selection["role"], "state": "not-running", "mutations_performed": False}
         result["selected"] = (
             value["generation"] == host.selected_version(root)
             and value["selection"] == host.selection_digest(selection)
@@ -189,7 +189,7 @@ def stop(root: Path, selection: dict) -> dict:
                 raise PlanError("Gateway stop does not address the current selected host")
             _stop(root, value, replacement=None, deadline=deadline)
             clear_launch(root, value["token"])
-        return {"role": "gateway", "state": "stopped", "native_exit_confirmed": True}
+        return {"role": selection["role"], "state": "stopped", "native_exit_confirmed": True}
     finally:
         lock.release()
 

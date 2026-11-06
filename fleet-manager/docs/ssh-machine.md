@@ -14,6 +14,11 @@ installation, planning and diagnostics remain inert. General-purpose node
 hosting, automatic setup selection and managed install/update/uninstall are not
 implemented by this role.
 
+An explicitly selected [installed host](gateway-host.md#selected-ssh-participant)
+can embed this same consumer through the existing Source application lifecycle.
+It requires both `gateway-host` and `ssh-client`; this does not change the
+foreground command or make ordinary thin-client installation active.
+
 ## Configuration and authority
 
 Supply strict bounded `fleet-manager.ssh-client` JSON in one explicitly selected
@@ -48,6 +53,34 @@ Before policy/credential reads or lease creation, the existing agent-ssh adapter
 also checks the writers' derived source and lock directories. The lease state
 cannot contain or sit inside any profile, authorization, source or lock scope;
 no second copy of those writer-owned path names is maintained by Fleet.
+Installed hosting additionally excludes the entire application installation
+root from those writer scopes. Local public-key bytes are bounded and parsed
+through the existing canonical ed25519 validator before watch or lease creation;
+they are still reread and matched to the authenticated directory at each write.
+Preflight checks existing lease-state directory privacy, its lease-file shape
+and absence of unowned contents without creating or acquiring anything. A missing
+state directory requires an existing ordinary parent; regular files and invalid
+lease state refuse before the watch or an installed selection can change.
+No policy, credential, identity, CA or host configuration reference may occupy
+that lease-only tree, including its canonical lock filename.
+Existing output kinds and path ancestors are checked too: configuration and
+authorization roots must be directories, the SSH configuration must be a file,
+and no selected path may traverse an existing regular-file parent. Runtime
+writers retain their own permission, lock and content checks.
+The selected adapter must expose `validate_writer_destinations`; an older
+partial adapter refuses before credential reads rather than skipping this check.
+Writer scopes must not overlap each other or the root configuration; the
+canonical fragment/root lock directories may share their existing lock scope.
+An existing authorization directory must already satisfy the authorization
+owner's privacy and dedicated-content checks. Preflight neither creates missing
+authorization directories nor repairs existing ownership or grants.
+Existing authorization bindings must match the configured target/controller,
+and retained key-file receipts must remain internally consistent. Fresh
+directory admission, remote login identity and monotonic revision checks remain
+with the authenticated update and its original writers.
+Preflight also reuses their static alias/path renderers and existing root-config
+decoder, and validates the retained revision record's shape without advancing
+its floor. It does not manufacture a fresh directory or an admission receipt.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an
@@ -60,6 +93,11 @@ changed. Profiles retain the existing route/pin and unrelated-fragment guards.
 In v1, the external PEM proof key and access-token callback retain their existing
 meaning. Access-token contents are reread on each actual admission through the
 existing bounded credential reference.
+Preparation validates that same token's readability and bounded text format,
+without caching it or treating token claims as admission authority.
+After trimming surrounding file whitespace, both preparation and fresh
+callbacks require the caller's visible-ASCII token format, excluding internal
+spaces, non-ASCII characters and DEL.
 
 In v2, replace `access_token_file` with this explicit record:
 
@@ -125,6 +163,14 @@ be orphaned as a background thread. Embeddings can call
 `ssh_machine.run(config, stop=event)` inside their existing lifetime; signal
 ownership stays with the embedding unless it explicitly selects
 `install_signals=True`.
+
+An embedding may pass `on_applied=callback` to observe the completed directory
+revision. This synchronous notification runs only after the existing local
+transaction succeeds, including a successful unchanged snapshot on restart.
+Starting the watch or a failed writer never emits it. An observer failure stops
+the watch without advancing its notification position; the existing lease and
+cancellation cleanup still settle. The callback observes convergence, not
+enrollment, current connection health or SSH route readiness.
 
 Replacement is explicitly stop-before-start, not a side-by-side/ZDD claim.
 The existing lifecycle owner stops the old foreground role; the OS lease

@@ -86,6 +86,53 @@ ET.ElementTree(root).write(reports / "native.xml")
     assert "--allow-host-state" not in arguments
 
 
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform):
+    from _pytest.mark.expression import Expression
+
+    root = HERE.parent
+    workflow = yaml.safe_load(
+        (root / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"]["gateway-host-application-" + platform]
+    steps = [step for step in job["steps"] if "run" in step]
+    assert job["timeout-minutes"] == 6 and len(steps) == 2
+    assert [shlex.split(step["run"]) for step in steps] == [
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
+    ]
+    assert not any(step.get("continue-on-error") for step in steps)
+    expressions = []
+    for step in steps:
+        arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
+        expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
+    original = Expression.compile(
+        "test_gateway_host or test_gateway_enrollment "
+        "or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies "
+        "or test_ssh_machine or test_machine_identity or test_credential_references"
+    )
+    nodes = {
+        path.name + "::" + node.name
+        for path in (root / "fleet-manager" / "tests").rglob("test_*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig")))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")
+    }
+
+    def selected(expression):
+        return {
+            node for node in nodes
+            if expression.evaluate(lambda keyword: keyword.casefold() in node.casefold())
+        }
+
+    groups = [selected(expression) for expression in expressions]
+    assert groups[0] == {
+        "test_gateway_host_distribution.py::test_selected_gateway_application_first_touch_repeat_update_and_stop",
+    }
+    assert groups[0].isdisjoint(groups[1])
+    assert groups[0] | groups[1] == selected(original)
+    assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
+
+
 @pytest.mark.parametrize(
     "path",
     [
