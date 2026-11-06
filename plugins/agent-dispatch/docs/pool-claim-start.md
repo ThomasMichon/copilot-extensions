@@ -108,7 +108,7 @@ Ordinary coordinator construction still supplies no relationship writer;
 this conditional consumer does not enable governed assignment or allocation.
 
 Before a qualified first create, the caller uses `version --contracts-json` to
-check the executing CLI's `agent-bridge.cli-contracts/v1` create/status capabilities and reads passive
+check the executing CLI's `agent-bridge.cli-contracts/v1` create/status/resume capabilities and reads passive
 running Bridge health. The actual active instance must advertise retained
 keyed-creation/inspection support and select the expected Worktrees build.
 The existing keyed `create --worktree-writer-file -` carries that requirement
@@ -137,6 +137,10 @@ the caller never substitutes a worktree-head resume.
 Before strict resume or a new send, exact-session full status requests
 `--worktree-writer` and checks the original keyed journal's workspace, native,
 serializer contract, retained requirement and active Bridge instance.
+Strict exact-session resume carries the original requirement through the same
+`--worktree-writer-file -` transport. Its client negotiates the distinct
+`retained_workspace_creation_writer_resume: 1` capability on every attempt;
+an earlier successful inspection cannot qualify a replacement daemon.
 This path deliberately does not adopt the daemon's newer dynamic Worktrees
 selection: a still-qualified original retained build can continue after that
 selector moves. Without a stored Bridge identity, the caller can only replay

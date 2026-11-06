@@ -1,12 +1,12 @@
-# Managed validation: preparation, diagnostics and attributable artifacts
+# Managed validation: preparation, diagnostics, readiness and artifacts
 
-Two existing OPEN parents directly retain three finite source trackers.
+Two existing OPEN parents directly retain four finite source contracts.
 The actual 9,345-character #6917 and 5,859-character #4217 bodies were read
 back in full after exact provider-body and assignment verification. Original
 parent and child descriptions remain in those bodies; original discussions
 remain unchanged at their source issues. All technical acceptance is unchecked.
-The subordinate trackers remain OPEN pending reviewed documentary delivery
-and a separate fresh tracking disposition.
+At intake the subordinate trackers remained OPEN pending reviewed documentary
+delivery and a separate fresh tracking disposition.
 
 ## Managed runner lifecycle
 
@@ -14,6 +14,8 @@ and a separate fresh tracking disposition.
 its grouped-execution diagnostic contract. Correct dependency reuse, truthful
 preparation diagnostics and complete independent group results share the
 same managed runner lifecycle without becoming one causal incident.
+The later #6779 intake adds honest timeout/descendant-readiness validation,
+not the unrelated full native-landing, purge, WSL-selector or stamp portfolios.
 
 - [ ] MR1 / MRV1 preserve ordinary assertion exit-1 continuation for general
   independent groups, sticky aggregate failure, focused aggregation/later-
@@ -39,12 +41,24 @@ same managed runner lifecycle without becoming one causal incident.
 - [ ] MRV5 separates source, tests, native results, merge, release and adopter
   acceptance. Unit-only required PR/promotion policy remains; retained
   manual/periodic runner work is not a new required native integration gate.
+- [ ] MR5 / MRV6 retain #6779's distinction between cold fixture startup and
+  an actually exercised descendant timeout/cleanup. An absent startup receipt
+  is unexercised/failed validation, never a pass or accepted flake. Preserve
+  the five-second bound, other item/group/resource limits, real windowless
+  parent and console descendant, visibility/focus, ownership and reap checks.
+  Add focused classification units if needed; actual Windows validation stays
+  in the existing periodic/explicit lane. No clock reset, deadline increase,
+  production-policy change, retry waiver or new required native matrix.
 
 The original accepted #6909 integrator retains #6917's single-writer runner/
 tests/guide custody. Its separate aggregation workspace yielded without edits,
 commits or a competing PR. The preparation lanes retain their actual source,
 fixture and private-environment owners; no writer, environment or claim moves.
 Each lane can progress independently through its existing owner.
+#6779's fixture owner retains its acceptance and native/cleanup duties.
+Any overlapping shared runner/tests/guide hunk coordinates through #6909's
+accepted single writer. MR1 still aborts timeout/containment/resource failures;
+readiness classification does not turn them into ordinary assertion exit 1.
 
 ## Deterministic clean-room evidence
 
@@ -95,5 +109,31 @@ The current periodic inventory blob equals the earlier #4217 study's blob;
 the acceptance workflow blob differs. Path-history commit IDs are not file
 blob IDs. Neither those metadata comparisons nor merged #10278/#11023
 establish the requested allocator repair or complete deterministic enrollment.
+
+## Reviewed tracking disposition
+
+#11076 merged as `34bb0f9adfed292457c0b4ed48e4b002648c7d08`.
+Current-head Copilot approval, nine complete successful pre-merge contexts,
+zero review threads and all five reviewed/merged/current document blobs were
+verified. The entire published intake and actual campaign Plan/Validation
+were read back; 133 bounded documentation contracts and the 24-plugin guard
+passed with cleanup verified.
+
+Only then #7136/#8521 retired NOT_PLANNED under independently OPEN #6917,
+and #8511 retired NOT_PLANNED under independently OPEN #4217, audits 244-246.
+Fresh complete eligibility, actual parent bodies and original child body,
+title, assignment and prior discussion were checked unchanged. This is
+tracking consolidation, not a dependency, diagnostic, cleanup, aggregation,
+allocator or CI-enrollment fix. Every technical row and existing source/
+native/effort/resource responsibility remains with its original custodian.
+
+## Timeout-readiness intake
+
+The actual expanded OPEN #6917 body, 13,056 characters, was verified and read
+in full. It retains the whole original #6779 description beside additive
+MR5/MRV6 and explicit coordination; every technical row remains unchecked.
+The original parent, earlier preparation lanes, assignments and discussions
+remain. At this intake #6779 remains OPEN pending reviewed documentary
+delivery and a separately audited tracking disposition.
 
 See the [campaign](README.md) for the continuing Plan and Validation Plan.

@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
+independently verifies eighteen PR records and twenty-four source identities.
+It distinguishes a delivered staging-lease repair, one satisfied WSL-fixture
+sub-clause and published SSH/supervisor source from unresolved native,
+installed, correlation and ownership outcomes. A direct managed-runner lane
+is evaluated separately from an unsupported all-native umbrella.
+
 The 2026-11-05 operator clarification makes cohort-sized canonical bugs and
 audited individual dispositions the principal deliverable. Research related
 originals together, ensure the actual parent encompasses the planned work and
@@ -331,12 +338,24 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The [managed validation cohorts](managed-validation-evidence-cohorts.md)
+record reviewed #11076 and three separately audited NOT_PLANNED tracking
+retirements beneath still-OPEN #6917/#4217, without technical completion
+or custody transfer. Two identical complete scans measure 802 whole OPEN
+and 1,025 audited outcomes, 73 above fixed 729. Before these dispositions,
+three eligible arrivals outweighed one external departure; no subset count
+replaces the whole-queue gate. The campaign and all remaining acceptance stay Active.
+
+The [managed validation cohorts](managed-validation-evidence-cohorts.md)
 retain #7136/#8521 directly in OPEN #6917 and #8511 directly in OPEN
 #4217. Complete actual parent bodies preserve independent preparation,
 diagnostics, grouped results, deterministic CI and default-artifact ownership
 acceptance. All technical rows and existing source/resource custodians remain;
-the three subordinate trackers await reviewed delivery and fresh disposition.
-Newer runner source and path metadata are not assumed semantic repairs.
+those three subordinate trackers retired only after reviewed delivery.
+The later whole #6779 timeout-readiness contract is now directly retained
+in the 13,056-character OPEN #6917 body through MR5/MRV6 and unchanged
+single-writer/fixture custody. Only this fourth tracker still awaits reviewed
+delivery and fresh disposition. Newer source/path metadata is not assumed
+semantic repair, and the full native portfolio stays separate.
 
 The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
 reviewed #11060 and #6186's separately audited NOT_PLANNED retirement
@@ -2778,6 +2797,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
+keeps actual provider checks distinct from reported tests, source definitions,
+release and installed acceptance. Complete original clauses, genuine holds,
+source/resource custody and unit-only required CI remain; sampled progress
+or assignment alone is not a completion or refusal criterion.
 
 The [release/stamp/inventory study](finite-release-stamp-inventory-contracts.md)
 separates fourteen whole-message, one protected-message, one fresh

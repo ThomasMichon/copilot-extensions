@@ -16,6 +16,7 @@ from .acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
 from . import acquisition_worktree_writer as writers
 
 CAPABILITY = "retained_workspace_creation_writer"
+RESUME_CAPABILITY = "retained_workspace_creation_writer_resume"
 JOURNAL_KEY = "_agent_bridge_creation_writer"
 
 
@@ -240,10 +241,13 @@ def observe_native(db: Any, session: Any) -> None:
 async def continue_session(
     manager: Any, session: Any, method: Callable[..., Awaitable[Any]],
     session_id: str, args: tuple[Any, ...], kwargs: dict[str, Any],
+    *, requirement: WorktreeWriterRequirement | None = None,
 ) -> tuple[bool, Any]:
     """Recover one creation's writer through strict native resume and lineage."""
     digest = (session.target.venue or {}).get(JOURNAL_KEY) if session else None
     if digest is None:
+        if requirement is not None:
+            raise _refuse("required native continuation has no original keyed creation writer")
         rows = manager._db.execute_read(
             "SELECT 1 FROM workspace_embodiments WHERE session_id=? AND creation_writer_json IS NOT NULL",
             (session_id,),
@@ -254,6 +258,8 @@ async def continue_session(
     original = _read(manager._db, digest)
     if original is None:
         raise _refuse("native continuation lost its keyed creation journal")
+    if requirement is not None and _binding(original)[0].worktree_writer != requirement:
+        raise _refuse("native continuation changed its required creation writer")
     if original["session_id"] == session.session_id:
         native = original["native_session_id"]
     else:
@@ -270,6 +276,8 @@ async def continue_session(
             native = matches[0].get("native_session_id")
         except (ValueError, TypeError, KeyError) as exc:
             raise _refuse("native continuation changed its original creation lineage") from exc
+    if requirement is not None and not native:
+        raise _refuse("required native continuation has no original native identity")
     if native is not None and native != session.acp_session_id:
         raise _refuse("native continuation changed its original creation identity")
     async with retained(manager._db, original):

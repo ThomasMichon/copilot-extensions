@@ -120,6 +120,7 @@ class OrdinaryWriterAdmission:
         required = {
             "agent-bridge.create": {"keyed-worktree-writer"},
             "agent-bridge.status": {"health-json", "exact-session-worktree-writer"},
+            "agent-bridge.resume": {"keyed-worktree-writer"},
         }
         if not (
             support.get("schema") == "agent-bridge.cli-contracts"

@@ -318,10 +318,11 @@ support separately declares those status forms and keyed-create requirement
 transport. The 252-control current capture and actor-free units qualify this
 source boundary, not the actual installed owners or complete writer cohort.
 
-The conditional ordinary Dispatch consumer now accepts an explicit original
+The conditional ordinary Dispatch consumer merged in #11063. It accepts an explicit original
 writer requirement for a prepared workspace, checks actual CLI/daemon support
-and sends it through keyed creation. It retains that requirement in the existing
-reservation agent facts, rejects removal/replacement/retrofit, and requalifies
+and sends it through keyed creation. The existing allocation transaction retains
+the immutable requirement before create, independently of absent agent facts.
+It rejects removal/replacement/retrofit and requalifies
 the original exact-session journal before strict resume and a new send.
 A retained journal may still use its qualified original build after dynamic
 selection moves. A governed reservation without its requirement refuses.
@@ -359,6 +360,17 @@ and independent original-request/complete-cohort assembly remains open.
       Source passes do not close installed/cohort or ordinary lifecycle gates.
       #11022 passes 4,335 admitted units and a fetchable-source 229-control
       HTTP-52 capture with separate no-write verification.
+- [x] Consume the optional requirement through ordinary keyed creation and
+      retain it before create, including omitted-argument lost replies and
+      moved-selector recovery. #11063 passes 243 affected source controls,
+      the actual CLI discovery parser and 4,525 admitted units. No ordinary
+      writer is constructed by that bounded source slice.
+- [ ] Require retained-writer continuation support on every explicit-resume
+      effect attempt, including daemon cutover after observation. Current
+      hosting-only negotiation is insufficient. Preserve the exact original
+      journal/native and never fall back to another target or unpinned resume.
+      Keyed send already uses receiver-side `no_resume=True`; do not infer
+      an implicit-resume defect from its CLI option validation.
 
 ## Continuing provider-first slice: original relationship request admission
 
