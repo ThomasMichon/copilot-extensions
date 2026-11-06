@@ -371,6 +371,52 @@ function Enter-PostToolCounterLock {
     return $null
 }
 
+function Send-PostToolReadDemand {
+    param([Collections.IDictionary]$Discovery)
+    $client = $null
+    try {
+        $capabilities = $Discovery.hook_capabilities
+        if ($PSVersionTable.PSVersion.Major -ge 6 -and
+            $capabilities -is [Newtonsoft.Json.Linq.JArray]) {
+            $capabilities = @(
+                foreach ($capability in $capabilities) {
+                    if ($capability -is [Newtonsoft.Json.Linq.JValue]) { $capability.Value }
+                }
+            )
+        }
+        if ($null -eq $Discovery -or $Discovery.hook_transport -cne 'tcp' -or
+            $capabilities -isnot [array] -or
+            $capabilities -cnotcontains 'read-hook-demand-v1' -or
+            $Discovery.hook_generation -isnot [string] -or
+            $Discovery.hook_generation -cnotmatch '^[0-9a-f]{32}$' -or
+            $Discovery.hook_endpoint -isnot [string] -or
+            $Discovery.hook_endpoint -cnotmatch '^127\.0\.0\.1:([0-9]{1,5})$' -or
+            $Discovery.hook_token -isnot [string] -or
+            $Discovery.hook_token -cnotmatch '^[A-Za-z0-9_-]{1,256}$' -or
+            $Discovery.installReceipt -or $Discovery.marketplaceId -or $Discovery.pluginRoot) { return }
+        $port = [int]($Discovery.hook_endpoint.Substring(10))
+        if ($port -lt 1 -or $port -gt 65535) { return }
+        $request = @{
+            version = 1; kind = 'readHookDemand'; token = $Discovery.hook_token
+            hook_generation = $Discovery.hook_generation
+            deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 + 1.0
+        }
+        $bytes = ([Text.UTF8Encoding]::new($false)).GetBytes(
+            (ConvertTo-Json -InputObject $request -Compress) + "`n"
+        )
+        if ($bytes.Length -gt 2048) { return }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $client = [Net.Sockets.TcpClient]::new()
+        if (-not $client.ConnectAsync('127.0.0.1', $port).Wait(50)) { return }
+        $remaining = 50 - [int]$clock.ElapsedMilliseconds
+        if ($remaining -le 0) { return }
+        $null = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)
+        # A completed write is not receiver acceptance; never read, retry or replay.
+    } catch {} finally {
+        if ($null -ne $client) { $client.Dispose() }
+    }
+}
+
 function Invoke-PreparedPostToolRead {
     param([string]$Raw)
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
@@ -393,9 +439,15 @@ function Invoke-PreparedPostToolRead {
         elseif ($event.ContainsKey('workingDirectory')) { $cwd = $event['workingDirectory'] }
         else { $cwd = $env:COPILOT_PROJECT_DIR }
         $cwd = Get-PreparedWorktreesPath $cwd
+        $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
+            $env:AGENT_HOME.Trim()
+        } else { $env:USERPROFILE }
+        $runtime = Get-PreparedWorktreesPath ([IO.Path]::Combine($registryHome, '.agent-worktrees'))
+        $discovery = Read-PostToolBoundedJson ([IO.Path]::Combine($runtime, 'status-monitor.lock')) 16384
+        Send-PostToolReadDemand -Discovery $discovery
         $notice = Get-PostToolLateGuidanceNotice -SessionHome $sessionHome -Session $session -Cwd $cwd
         $result = Invoke-PreparedPostToolReminders -SessionHome $sessionHome -Session $session `
-            -Cwd $cwd -SkipCounter:([bool]$notice)
+            -Cwd $cwd -SkipCounter:([bool]$notice) -Discovery $discovery
         if ($notice) {
             $text = if ($result.additionalContext) { $notice + "`n`n" + $result.additionalContext } else { $notice }
             return ,@{ additionalContext = $text }
@@ -407,7 +459,10 @@ function Invoke-PreparedPostToolRead {
 }
 
 function Invoke-PreparedPostToolReminders {
-    param([string]$SessionHome, [string]$Session, [string]$Cwd, [switch]$SkipCounter)
+    param(
+        [string]$SessionHome, [string]$Session, [string]$Cwd, [switch]$SkipCounter,
+        [Collections.IDictionary]$Discovery
+    )
     try {
         $binding = Read-PostToolBoundedJson ([IO.Path]::Combine($sessionHome, 'worktree-binding.json')) 16384
         if ($null -eq $binding -or $binding['sessionId'] -isnot [string] -or
@@ -429,7 +484,6 @@ function Invoke-PreparedPostToolReminders {
         } else { $env:USERPROFILE }
         $runtime = [IO.Path]::Combine($registryHome, '.agent-worktrees')
         $null = Get-PreparedWorktreesPath $runtime
-        $discovery = Read-PostToolBoundedJson ([IO.Path]::Combine($runtime, 'status-monitor.lock')) 16384
         if ($null -eq $discovery) { return ,@{} }
         $view = Read-PostToolHookFacts -Discovery $discovery -RuntimeRoot $runtime `
             -ProjectRoot $locator['projectRoot'] -Project $binding['project'] `

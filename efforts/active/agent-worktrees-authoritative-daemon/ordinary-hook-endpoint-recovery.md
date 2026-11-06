@@ -203,6 +203,19 @@ only disposition accounting, not independent binding advice. Native tests
 exercise the registered entry and competing consumers in both Windows shells.
 This does not qualify installed behavior, complete hook composition or throughput.
 
+The next additive read-event checkpoint separates idle demand from advisory
+evaluation. The existing IPC owner advertises `read-hook-demand-v1` and its own
+process generation before a prepared Windows reader sends a notification.
+That compact message renews only the original recent-tool idle grace; it
+cannot classify mutations, run policy/advice, wake recomputation or start a
+resident. The shell reads no reply and shares a 50 ms connect/write wait;
+unsupported discovery skips it, and uncertain delivery never causes replay.
+The [optional read-demand contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#optional-read-demand)
+defines wire bounds, source selection, live admission and upgrade/rollback.
+Real registered-entry, non-replying-peer, original-receiver and idle-expiry
+controls must prove that composition. Mutation invalidation, optional boot,
+other scopes and whole-hook/throughput acceptance remain separate open gates.
+
 The existing `WorktreesRuntime` publishes a small advisory view only after its
 current-roster store accepts a publication. The original project-state owner
 resolves the home: `project_dir(project)/worktrees/<id>/hook-facts/`.
