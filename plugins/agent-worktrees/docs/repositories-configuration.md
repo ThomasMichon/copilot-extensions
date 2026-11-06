@@ -192,6 +192,8 @@ existing unset behavior. A quoted repository name retains its string identity.
 Portable resolution also inspects the native acquisition results for global,
 project-local and drop-in binding sources. Malformed or unreadable sources
 refuse as `binding-unresolved`; genuinely missing sources remain unset.
+Existing binding names use the native resolver's whitespace normalization before
+resolution and canonical-ID comparison.
 
 Where no binding exists, adoption remains an explicit separate operation:
 
@@ -205,6 +207,12 @@ confirmation token binding canonical registration, execution machine, existing
 binding and the native transaction token. Apply re-resolves and previews before
 passing that native token to the existing version-2 binding transaction. Changed
 IDs, registry data, scope or bindings refuse rather than adopting a new target.
+Portable apply additionally requires the binding owner's
+`portable_binding_precondition: 1` capability. It carries the confirmed
+resolution into the registry-locked worker and rechecks it inside the existing
+pointer-write precondition, including machine changes while waiting for locks.
+An older owner refuses portable apply rather than silently skipping that check;
+the original name-based version-2 flow remains supported.
 The existing locked registration/pointer rechecks, selected payload, preserving
 writer and personal-plugin composer still own all effects and partial receipts.
 Pair creation and running-session delivery remain separate readiness gates.
@@ -241,6 +249,7 @@ Portable-ID controls live in `tests/test_knowledge_preferences.py`. The opt-in
 `tests/native/test_portable_knowledge_binding.py` uses actual fresh Git roots,
 canonical registrations and the real selected `harness-knowledge` payload to
 prove preview -> confirmed pointer -> registration/state-root readback, within
-the native operation budgets. Its example non-GitHub origins require no account
+the native operation budgets, and refuse a global-machine change after the
+portable check but before the locked worker. Its example non-GitHub origins require no account
 credentials or network. This is isolated source execution, not installed-runtime,
 cloud-carrier or cross-platform deployment qualification.

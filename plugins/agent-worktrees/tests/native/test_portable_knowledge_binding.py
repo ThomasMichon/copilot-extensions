@@ -18,7 +18,8 @@ from agent_worktrees.repos_configuration_sources import ConfigurationError
 
 
 @pytest.mark.timeout(75)
-def test_fresh_portable_mapping_uses_real_native_binding_transaction(tmp_path, monkeypatch):
+@pytest.mark.parametrize("change_machine", [False, True])
+def test_fresh_portable_mapping_uses_real_native_binding_transaction(tmp_path, monkeypatch, change_machine):
     for key in ("AGENT_HOME", "HOME", "USERPROFILE"):
         monkeypatch.setenv(key, str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -28,6 +29,8 @@ def test_fresh_portable_mapping_uses_real_native_binding_transaction(tmp_path, m
 
     def measured(argv, **kwargs):
         phase = "capabilities" if "--capabilities" in argv else "preview" if "--configuration" in argv else "apply"
+        if change_machine and phase == "apply" and "apply" in argv:
+            cfg.global_config_path().write_text("machine: changed-worker\n", encoding="utf-8")
         started = time.monotonic()
         try:
             result = original_run(argv, **kwargs)
@@ -77,9 +80,10 @@ def test_fresh_portable_mapping_uses_real_native_binding_transaction(tmp_path, m
         local.mkdir()
         config_path = local / "config.yaml"
         config_path.write_text(yaml.safe_dump({
-            "repo_name": project, "machine": "example-worker",
+            "repo_name": project,
             "repos": {project: {"anchor": str(roots[project]), "worktree_root": str(tmp_path / "trees")}},
         }), encoding="utf-8")
+        cfg.global_config_path().write_text("machine: example-worker\n", encoding="utf-8")
         (registry.parent / "projects.yaml").write_text(yaml.safe_dump({
             "schema_version": 2, "projects": {project: {"config_dir": str(local)}},
         }), encoding="utf-8")
@@ -103,12 +107,20 @@ def test_fresh_portable_mapping_uses_real_native_binding_transaction(tmp_path, m
         except ConfigurationError as error:
             pytest.fail(f"{error.code}; cause={type(error.__cause__).__name__}; stages={calls}", pytrace=False)
         assert proposed["status"] == "suggested"
+        assert proposed["execution_machine"] == "example-worker"
         assert proposed["native_preview"]["operation"] == "set"
         assert config_path.read_bytes() == before_config
         try:
             result = repos_knowledge_preferences.apply(project, args[3], args[5], proposed["token"])
         except ConfigurationError as error:
+            if change_machine:
+                assert error.code == "binding-owner-refused", calls
+                assert config_path.read_bytes() == before_config
+                assert registry.read_bytes() == before_registry
+                assert not (tmp_path / "trees").exists()
+                return
             pytest.fail(f"{error.code}; cause={type(error.__cause__).__name__}; stages={calls}", pytrace=False)
+        assert not change_machine, "changed machine scope committed"
         assert result["status"] == "persisted" and result["pointer_committed"]
         assert result["registration_status"] == result["state_root_status"] == "ready"
         assert yaml.safe_load(config_path.read_text())["knowledge_repo"] == "example-knowledge"

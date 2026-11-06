@@ -322,3 +322,19 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   no historical evidence was rewritten. Ruff and install contracts pass.
 - Required exact-source Linux CI and current-head review remain open.
   No installed update, binding change, carrier effect or activation occurred.
+
+### 2026-11-06 - Portable scope guarded at pointer commit
+- Carry the confirmed portable resolution into the registry-locked worker and
+  recheck it through the existing pointer-write precondition. Portable apply
+  requires the selected payload's additive precondition capability; older
+  name-based callers retain their version-2 behavior.
+- Normalize effective binding names using the native resolver's whitespace
+  rule before resolution and identity comparison. Existing bindings still win.
+- The focused Windows owner packet passed 79 tests and the binding-payload
+  packet passed 78. Two old-capability refusal controls and the real fresh-root
+  success case passed. The new late-global-machine control exposed a missing
+  structured error receipt; after correction its residual run passed in
+  27.87 seconds, preserving pointer/registry bytes and the original budgets.
+- This is isolated source/first-touch proof, not installed-runtime or Linux
+  native qualification. Review and exact-source CI remain required; other
+  domain adapters, carrier qualification and activation remain open.

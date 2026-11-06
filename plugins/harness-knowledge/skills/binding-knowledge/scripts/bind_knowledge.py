@@ -866,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
             "version": 1, "registration_classes": ["knowledge", "worktree"],
             "preserves_registration_class": True, "control_plane_pair": True,
             "existing_binding_configuration": 2,
+            "portable_binding_precondition": 1,
         }))
         return 0
     if not args.control_plane and not (args.harness and args.knowledge):

@@ -262,6 +262,27 @@ def test_existing_binding_rechecks_preview_without_overwriting_new_state(
     assert (config.read_bytes() if config.exists() else None) == before
 
 
+def test_existing_binding_runs_portable_precondition_inside_pointer_lock(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, *_ = pair
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    config = home / ".harness" / "config.yaml"
+    checks = []
+
+    def changed() -> None:
+        checks.append(True)
+        assert config.with_name(".knowledge-binding.lock").exists()
+        assert not config.exists()
+        raise RuntimeError("portable machine scope changed")
+
+    monkeypatch.setattr(bk, "_NATIVE_BINDING_PRECONDITION", changed, raising=False)
+    with pytest.raises(RuntimeError, match="portable machine scope changed"):
+        configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
+    assert checks == [True] and not config.exists()
+
+
 def test_existing_binding_refuses_registration_changed_during_final_preflight(
     pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -38,10 +38,11 @@ def native(tmp_path, monkeypatch):
     monkeypatch.setattr(preferences.cfg, "load_project_config", lambda *args, **kwargs: config)
     calls = []
 
-    def invoke(project, name, operation, token=""):
+    def invoke(project, name, operation, token="", **kwargs):
         calls.append((project, name, operation, token))
         if operation == "preview":
             return {"version": 1, "token": "a" * 64, "operation": "set", "target": {"resource": f"{project}/{name}"}}
+        assert kwargs["portable_resolution"] == preferences.resolve(project, ids[project], ids[name])
         return {"status": "persisted", "pointer_committed": True}
 
     monkeypatch.setattr(repos_knowledge_configuration, "invoke", invoke)
@@ -126,22 +127,59 @@ def test_missing_ambiguous_stale_or_local_only_registration_never_falls_back_to_
     assert native.calls == []
 
 
-@pytest.mark.parametrize("binding", ["shared", "other", "unresolved"])
+@pytest.mark.parametrize("binding", ["shared", "other", "unresolved", " shared ", " other "])
 def test_existing_binding_is_authoritative_and_unresolved_binding_is_never_absence(native, monkeypatch, binding):
     native.config.knowledge_repo = binding
-    monkeypatch.setattr(preferences.state_root, "resolve_state_root", lambda *args, **kwargs: SimpleNamespace(
-        bound=binding != "unresolved", path=str(native.root / binding), error="failure" if binding == "unresolved" else "",
-    ))
+
+    def state_root(*args, **kwargs):
+        assert kwargs["repo_override"] == binding.strip()
+        return SimpleNamespace(
+            bound=binding != "unresolved", path=str(native.root / binding.strip()),
+            error="failure" if binding == "unresolved" else "",
+        )
+
+    monkeypatch.setattr(preferences.state_root, "resolve_state_root", state_root)
     if binding == "unresolved":
         with pytest.raises(ConfigurationError) as caught:
             preview(native)
         assert caught.value.code == "binding-unresolved"
     else:
         result = preview(native)
-        assert result["status"] == ("already-bound" if binding == "shared" else "binding-preserved")
+        assert result["status"] == ("already-bound" if binding.strip() == "shared" else "binding-preserved")
+        assert result["binding"]["repository_id"] == native.ids[binding.strip()]
         assert result["token"] is None and result["native_preview"] is None
         assert not result["binding_changed"]
     assert native.calls == []
+
+
+@pytest.mark.parametrize("timing", ["registry-wait", "pointer-precondition"])
+def test_locked_worker_rechecks_portable_scope_at_the_pointer_boundary(native, monkeypatch, timing):
+    from contextlib import contextmanager
+    from agent_worktrees import repos_registry_transaction
+
+    expected = resolve(native)
+    script = native.root / "selected-binding.py"
+    script.touch()
+    monkeypatch.setattr(repos_knowledge_configuration, "owner_script", lambda _project: script)
+
+    @contextmanager
+    def lock(_path):
+        if timing == "registry-wait":
+            native.config.machine = "changed-worker"
+        yield
+
+    def selected(_path, *, run_name, init_globals):
+        if timing == "pointer-precondition":
+            init_globals["_NATIVE_BINDING_PRECONDITION"]()
+            native.config.machine = "changed-worker"
+        init_globals["_NATIVE_BINDING_PRECONDITION"]()
+        pytest.fail("changed portable scope reached pointer commit")
+
+    monkeypatch.setattr(repos_registry_transaction, "registry_lock", lock)
+    monkeypatch.setattr(repos_knowledge_configuration.runpy, "run_path", selected)
+    with pytest.raises(ConfigurationError) as caught:
+        repos_knowledge_configuration._apply_worker("first", "shared", "a" * 64, str(script), expected)
+    assert caught.value.code == "preview-conflict"
 
 
 @pytest.mark.parametrize(("source", "value"), [

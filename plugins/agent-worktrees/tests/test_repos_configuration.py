@@ -290,7 +290,8 @@ def test_binding_owner_uses_selected_home_and_project_activation(native, monkeyp
     assert tree(native) == before
 
 
-def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
+@pytest.mark.parametrize("portable", [False, True])
+def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch, portable):
     from agent_procutil import owned_process
     from agent_worktrees import repos_knowledge_configuration as binding
 
@@ -299,11 +300,17 @@ def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
 
     def execute(argv, **kwargs):
         calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, json.dumps({"version": 1}), "")
+        capabilities = {"version": 1}
+        if portable:
+            capabilities["existing_binding_configuration"] = 2
+        return subprocess.CompletedProcess(argv, 0, json.dumps(capabilities), "")
 
     monkeypatch.setattr(owned_process, "run_caller_owned", execute)
     with pytest.raises(ConfigurationError) as caught:
-        binding.invoke("sample", "sample", "apply", "a" * 64)
+        binding.invoke(
+            "sample", "sample", "apply", "a" * 64,
+            **({"portable_resolution": {"execution_machine": "example-worker"}} if portable else {}),
+        )
     assert caught.value.code == "binding-owner-unsupported"
     assert len(calls) == 1 and "--capabilities" in calls[0]
     assert "--configuration" not in calls[0]

@@ -85,6 +85,12 @@ and unsupported reads retain their ordinary subprocess path. Without the
 optional adapter the payload behaves as before; no new CLI, execution grant,
 cached-read authority or changed native deadline is introduced.
 
+For portable-ID apply, `portable_binding_precondition: 1` advertises an
+additional native-worker callback at that same pointer-write precondition.
+It rechecks the confirmed portable resolution, including logical machine scope,
+after registry-lock waits. Workers require this capability before portable apply;
+older name-based version-2 callers retain their existing behavior.
+
 `bind_knowledge.py` writes or refreshes these local artifacts:
 
 | Artifact | What it contains |

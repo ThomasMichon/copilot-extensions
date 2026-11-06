@@ -92,18 +92,19 @@ def resolve(project: str, harness_id: str, knowledge_id: str) -> dict:
     config = _binding_config(project)
     if not isinstance(config.knowledge_repo, str):
         raise ConfigurationError("binding-unresolved", "The explicit local binding needs owner repair.")
+    binding_name = config.knowledge_repo.strip()
     binding = {"status": "absent"}
-    if config.knowledge_repo:
+    if binding_name:
         current = state_root.resolve_state_root(
-            config, repo_override=config.knowledge_repo, cwd=config.default_repo.anchor,
+            config, repo_override=binding_name, cwd=config.default_repo.anchor,
         )
         if not current.bound or not current.path or current.error:
             raise ConfigurationError("binding-unresolved", "The explicit local binding needs owner repair.")
         binding = {
-            "status": "present", "repository": config.knowledge_repo,
+            "status": "present", "repository": binding_name,
             "repository_id": next(
                 (entry["repository_id"] for entry in catalog["entries"]
-                 if entry["repository"] == config.knowledge_repo), None,
+                 if entry["repository"] == binding_name), None,
             ),
         }
     return {
@@ -144,6 +145,7 @@ def apply(project: str, harness_id: str, knowledge_id: str, token: str) -> dict:
         raise ConfigurationError("preview-conflict", "Registration or binding changed; preview again.")
     result = invoke(
         project, proposed["knowledge"]["repository"], "apply", proposed["native_preview"]["token"],
+        portable_resolution={key: value for key, value in proposed.items() if key not in {"token", "native_preview"}},
     )
     return {
         **result, "preference_schema": SCHEMA, "preference_version": 1,
