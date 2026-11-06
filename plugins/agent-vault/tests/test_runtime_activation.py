@@ -662,7 +662,7 @@ def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path, layout)
                 for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
                     shutil.copyfile(source, bootstrap / source.name)
             for filename in ("__init__.py", "config.py", "configuration.py",
-                             "configuration_scope.py", "_peer_launch.py"):
+                             "configuration_scope.py", "invocation.py", "_peer_launch.py"):
                 shutil.copyfile(PLUGIN / "src" / name / filename, package / filename)
             for source in (PLUGIN / "src" / name).glob("_installation_context*.py"):
                 shutil.copyfile(source, package / source.name)
