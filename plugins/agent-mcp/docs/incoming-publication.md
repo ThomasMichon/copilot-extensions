@@ -111,6 +111,18 @@ activation inhibition, foreign installation refusal, changed selection/endpoint,
 failed candidate health and occupied legacy discovery with an empty global
 catalog. These are isolated source-boundary controls, not installed acceptance.
 
+On Windows, the explicitly selected
+`tests/test_installer_native_capture_ps1.py -k generated_cmd_uses_marker_owner_and_preserves_stdin`
+packet executes the actual generated CMD and its completed-slot resolver twice.
+It checks selected interpreter identity, quoted arguments, independent stdin,
+stdout/stderr and zero/nonzero exit propagation through caller-owned native
+settlement. An invalid completion marker refuses before module execution.
+Use the canonical bounded runner with `--allow-explicit-tiers`; these native
+actors are not promotion-unit inventory. MCP functional acceptance does not
+depend on desktop quiet, focus/window observers, terminal-host attribution,
+calibration or debugger attachment. Headless launch behavior retains its
+canonical process-owner contract; this packet makes no desktop-visibility claim.
+
 The opt-in Windows `tests/test_incoming_installer.py` witness sets
 `COPILOT_EXTENSIONS_MCP_NATIVE_INSTALL_QUALIFICATION=1` and runs through the
 [canonical bounded runner](../../../TESTING.md). It performs two ordinary native

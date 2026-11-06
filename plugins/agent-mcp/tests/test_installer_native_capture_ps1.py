@@ -141,6 +141,7 @@ def _run(
 @pytest.mark.skipif(os.name != "nt", reason="literal generated Windows CMD launch")
 @pytest.mark.parametrize("complete", [True, False], ids=["complete", "unqualified"])
 def test_generated_cmd_uses_marker_owner_and_preserves_stdin(tmp_path, complete):
+    from agent_procutil.owned_process import OwnedExecutionBudget, run_caller_owned
     from plugin_test_environment import isolated_environment
 
     host = shutil.which("pwsh")
@@ -179,29 +180,38 @@ def test_generated_cmd_uses_marker_owner_and_preserves_stdin(tmp_path, complete)
     package = modules / "agent_mcp"
     package.mkdir(parents=True)
     (package / "__main__.py").write_text(
-        "import json,sys\nprint(json.dumps({'prefix':sys.prefix,'argv':sys.argv[1:],"
-        "'stdin':sys.stdin.readline().rstrip('\\n')}))\n", encoding="utf-8",
+        "import json,sys\ncycle=int(sys.argv[-1])\n"
+        "print(json.dumps({'prefix':sys.prefix,'argv':sys.argv[1:],"
+        "'stdin':sys.stdin.readline().rstrip('\\n')}))\n"
+        "sys.stderr.write('fixture stderr '+str(cycle)+'\\n')\nsys.exit(cycle)\n",
+        encoding="utf-8",
     )
     environment.update(
         USERPROFILE=str(home), HOME=str(home), PYTHONPATH=str(modules),
         PATH=str(local_bin) + os.pathsep + environment["PATH"],
         AGENT_MCP_NO_SELFPROVISION="1",
     )
-    result = subprocess.run(
-        f'"{os.environ["ComSpec"]}" /d /s /c agent-mcp --fixture "two words"',
-        cwd=tmp_path, env=environment, input="untouched stdin\n",
-        capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
-    if complete:
-        assert result.returncode == 0, result.stderr
-        value = json.loads(result.stdout)
-        assert Path(value["prefix"]) == python_home
-        assert value["argv"] == ["--fixture", "two words"]
-        assert value["stdin"] == "untouched stdin"
-    else:
-        assert result.returncode != 0 and not result.stdout
-        assert "runtime not provisioned" in result.stderr
+    for cycle in range(2 if complete else 1):
+        settled = []
+        result = run_caller_owned(
+            [os.environ["ComSpec"], "/d", "/s", "/c",
+             "agent-mcp", "--fixture", "two words", "--cycle", str(cycle)],
+            cwd=tmp_path, env=environment, input_text=f"untouched stdin {cycle}\n",
+            capture=True, timeout=15, max_stdout_bytes=65536, max_stderr_bytes=65536,
+            budget=OwnedExecutionBudget.from_timeout(20, cleanup_reserve=5),
+            on_settled=lambda: settled.append(True),
+        )
+        assert settled == [True]
+        if complete:
+            assert result.returncode == cycle, result.stderr
+            value = json.loads(result.stdout)
+            assert Path(value["prefix"]) == python_home
+            assert value["argv"] == ["--fixture", "two words", "--cycle", str(cycle)]
+            assert value["stdin"] == f"untouched stdin {cycle}"
+            assert result.stderr == f"fixture stderr {cycle}\n"
+        else:
+            assert result.returncode != 0 and not result.stdout
+            assert "runtime not provisioned" in result.stderr
 
 
 @pytest.mark.parametrize("host", HOSTS)

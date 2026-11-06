@@ -1058,3 +1058,36 @@ migration already works.
   visibility proof. Current native Linux CI, review, visibility qualification,
   release and consumer acceptance remain coordinator gates; #10742 and full
   handover #10486 remain open.
+
+### 2026-11-06 - MCP functional qualification independent of desktop focus
+
+- The operator clarified that MCP acceptance must not depend on desktop quiet,
+  focus/window observers, terminal-host attribution, calibration or debugger
+  attachment. This supersedes the preceding journal's MCP visibility gate;
+  separate SDK visibility work under #10925 is not MCP qualification. No visible
+  calibration or focus observer was executed, and the unused approval remains
+  held. The canonical headless implementation is unchanged; no desktop-visibility
+  proof is claimed.
+- Extended the existing actual generated-CMD control to execute the completed
+  slot's canonical resolver twice with distinct stdin and quoted arguments.
+  Selected physical interpreter, stdout/stderr and zero/nonzero exit propagation
+  are checked on each invocation. The canonical caller-owned native executor
+  settles each owned process tree within the original 20-second bound, including
+  its five-second cleanup reserve. The invalid-marker control still refuses
+  before module execution. Both explicitly selected native cases passed with
+  verified outer cleanup; no native actor entered promotion-unit inventory.
+- The initial preparation attempt failed before tests when the running cached
+  interpreter prevented its own environment rebuild. The independent existing
+  bootstrap then completed canonical preparation and the functional packet.
+  The failed attempt is retained as a failure, not qualification.
+- F/E9, strict runtime-resolution, headless source guard, install contract, module
+  caps, documentation consistency, whitespace and dependency guard **552/0**
+  passed. Canonical source verification retains **4160 nodes**, **596 sources**,
+  coverage targets and the
+  original **300-second** unit budget. The MCP footprint remains revision **36**
+  with unchanged producer digests; no source binding needed refresh.
+- Current-head native Linux CI, review, publication, release and installed
+  consumer acceptance remain coordinator-owned. No local whole-packet repeat,
+  runtime rollout or handover claim was made. The prior preliminary-accounting
+  cleanup fix and its **246 tests/2 skips** qualification are preserved;
+  #10742, full handover #10486 and pre-feature adoption holds remain open.
