@@ -450,6 +450,24 @@ def test_incomplete_switch_recovery_requires_capabilities_and_is_atomic(area, mo
     assert refused.started_at is None
 
 
+@pytest.mark.parametrize(("field", "value"), [
+    ("started_at", 1.0), ("finished_at", 1.0), ("boot_id", "unverified-boot"),
+])
+def test_incomplete_switch_never_refuses_pending_execution_evidence(area, monkeypatch, field, value):
+    root = area / "state"
+    late_suite = _prevalidated_legacy_submission(area, "e" * 32, "engine")
+    _interrupt_first_authority_switch(root, monkeypatch)
+    _commit_legacy_submission(root, late_suite)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute(f"UPDATE requests SET {field}=? WHERE id=?", (value, late_suite[0]))
+    with pytest.raises(InterruptedError, match="execution evidence"):
+        change_authority("project", project="example", root=root, timeout=1,
+                         verify_capabilities=lambda _deadline: True)
+    assert status(late_suite[0], root=root).state == "pending"
+    with pytest.raises(StateError, match="authority"):
+        current_authority(root=root)
+
+
 def test_process_death_mid_switch_leaves_a_retryable_fence(area):
     import agent_procutil
     import single_instance_lease

@@ -380,6 +380,13 @@ def change(
                     ]
                     verified = False
                     if late:
+                        if any(
+                            request.started_at is not None or request.finished_at is not None
+                            or request.boot_id is not None for request in late
+                        ):
+                            raise core.InterruptedError(
+                                "pending suite request carries unconfirmed execution evidence",
+                            )
                         verify()
                         verified = True
                         execution.assert_owned()
