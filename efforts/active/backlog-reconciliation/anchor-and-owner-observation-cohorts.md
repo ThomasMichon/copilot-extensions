@@ -14,9 +14,9 @@ remain. The original #7689 body is included verbatim; #7180's complete
 meaning is transcribed with malformed symbol/example control characters
 normalized. Both original issues and refinements remain unchanged.
 
-Both source trackers stay OPEN pending normal planning review and separate
-fresh disposition. This intake is not source repair, actual implementation
-acceptance, claimant release or a resource operation.
+The initial intake left both source trackers OPEN for normal planning review
+and separate fresh disposition. The reviewed tracking outcomes below do not
+declare either identity correction implemented or release any custodian.
 
 ## Independent project-context Plan
 
@@ -101,7 +101,7 @@ does not settle a resource or declare either fix complete.
 | #8551 | Preserve the original implementation claimant and opt-in exact source/account/recipient/host/action relay, private account-only listener, bounded worker/renewal/lifecycle and legacy defaults. OPEN #8575 is not a merge, accepted transfer, credential ceremony or new login issuer. |
 | #8796 | Credit exact-target source repair and reported authorized control-only recovery with original native history. The same claimant's promised explicit completion/release disposition remains; do not repeat recovery, replace the task or expire custody by age. |
 | #7020 | Existing narrow accepted repair owner retains hosted/native purge-timeout cause discrimination and focused correction. Preserve the 20-second bound, purge/refusal and alias controls, sentinels, stage/lock retention and containment. Later passes and separate supervisor progress are not a cause, retry grant or repair. |
-| #7039 | Credit reported metadata/path batching; remaining repeated revision/reachability work and response validation must preserve exact objects/paths/commits, merge/gitlink exclusions, strict refusal and the 30-second deadline. Its stated bounded follow-through and #8855 prerequisite link remain, but the complete receiver has not been qualified or adopted here. No new parent or whole-issue dependency is inferred. |
+| #7039 | Independently verified finite batching correction in actually merged #8855; CLOSED COMPLETED after current source, exact original, final review/CI and disposition readback. The reference is an implementation PR, not a receiving issue. Current final-diff CI policy is distinct from its historical whole-history publication contract; no native rerun, broader completion or claimant release is inferred. |
 | #7076 | Credit explicit synthetic WSL/private-profile and native account-home fixture repairs without repeating the old 55 failures as current. Preserve full-selector equivalent-venue and real timing provenance, production identity refusals, native/container negatives and actual concurrency assertions; unrelated declaration failures remain causally unassigned. |
 | #7136 | Canonical-root library dependency manifests must participate in the runner fingerprint while legacy layout remains valid. Estimator progress and explicit reinstall are not cache invalidation. Retain canonical-only change coverage, leases/containment/time limits, without changing environments or requiring a new all-host matrix. |
 | #7247 | Preserve recurrence-contingent discrimination of two original 30-second Windows item timeouts: owned-process stage, CPU/wall time, governance/publication, pipes and runner integration. Later unchanged-bound passes neither diagnose a fix nor reopen completed consent work. No new diagnostic run or timeout widening. |
@@ -116,10 +116,41 @@ does not settle a resource or declare either fix complete.
 #7136/#8521 suggest complementary cache/diagnostic work, not an accepted
 parent or common cause. #7117 is already its recovery parent; this study
 does not reopen its held source bodies or acquire its child implementations.
-The #7039-to-#8855 relationship remains a receiver-research candidate.
+The original #7039-to-#8855 reference was subsequently resolved as an actual
+merged implementation PR, not a possible receiving issue.
 Every original's alternatives, finite tiers, current holder and actual
-activation conditions survive. All twenty are accounted for without a new
-technical completion, native effect, tracker retirement or custody release.
+activation conditions survive. All twenty were accounted for at intake;
+the independently verified later outcomes follow.
+
+## Reviewed tracking outcomes and one finite source completion
+
+#11048 actually merged the complete study as
+`7f74107d3e77ffa4d540688ede398f5d4852f0c5`, with current-head Copilot
+approval, no threads and complete green required checks. All three
+reviewed/merged/current document blobs match. Full published study and
+actual campaign Plan/Validation readback preceded separate dispositions:
+#7689 retired NOT_PLANNED under OPEN #4173 and #7180 under OPEN #4619.
+Every RA/OA technical row and original source/resource custodian remains;
+neither tracking fold claims an implemented identity correction.
+
+Fresh full #7039 and merged #8855 description/source qualification then
+corrected the earlier packet's missing-fix assumption. Actual merge
+`4c0b59f7e00eb23cc56a97b9e060f1ebf93643a0` batches references, object
+metadata and introducing paths while retaining exact novelty/refusal
+semantics, complete published reachability and the unchanged thirty-second
+publication deadline. The source owner's rebased Windows packet and
+successful managed publication are historical reported results, not
+rerun native tests. Final same-head approval, thirteen resolved threads
+and eleven complete good check contexts were independently verified.
+
+Actual current Dev retains byte-equivalent batched reference/object/type/
+size helpers and focused regression definitions. Its later final-diff CI
+contract intentionally replaces the old whole-history publication-hook
+walk; restoring that older policy is not remaining optimization work.
+After complete preservation/readback, #7039 closed COMPLETED, without
+claiming the separate #6079/#6088/#8803 work, release or installed rollout
+complete. None of these three issue dispositions releases a source claim
+or resource obligation.
 
 See the [canonical campaign](README.md) and
 [acquisition journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>).
