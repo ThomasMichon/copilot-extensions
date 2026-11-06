@@ -1866,8 +1866,8 @@
       "sha256": "55d50b75d31d09b450b01aafaa8f26c80d6882c89eddecbea97c851e6c860843"
     },
     "plugins/agent-bridge/contract/README.md": {
-      "blob": "2c5a2ec50ce55df5e589a953bd5367fb16901370",
-      "sha256": "7d1d5e4686335b79ba64e08ec9d5d7e2f7f39a21385213c0fe4d632abb55b170"
+      "blob": "108ce98ab990b819d4aa5f6f70eabaad7623ebde",
+      "sha256": "5a5e9227ae9073330784565d6cbe5ca88b3bd92c55ed27bd47ef1feed019ecc5"
     },
     "plugins/agent-bridge/contract/inputs/http47/capture-cases.json": {
       "blob": "758c89a061c301140849ee6be7d12aadf35e2294",
@@ -8066,8 +8066,8 @@
       "sha256": "deed0f52458e44ab05e6ff3450a8b179e76f598ef2fe7c016758cb7f1255c948"
     },
     "tools/test_installation_context_ci_scope.py": {
-      "blob": "f09d7c3c48ba3fe0983ff47ade21c984e217ba4c",
-      "sha256": "b0583db6054d4eb476e34fe03f6ce7988cf9cd516b80f8929074438ca5538457"
+      "blob": "de53afe219d6d09bda075fd4019777a6dd2f3042",
+      "sha256": "516bf7bb3bfff3ae3631abddbaf3dabc7137053b29a6476991119858862cc01f"
     },
     "tools/test_installation_context_packaging.py": {
       "blob": "e154cd885167ec7645b1fd8e3a27caa4a92e2f72",
@@ -8694,7 +8694,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "3c102529f450ea9b09e8dbcbb4cf54afc3346041d92fe21433595442bb91a488",
+  "execution_closure_sha256": "aebf1f8f58f27028786c764271f896d3a6aa45bd049fab97f1f7fed8f0783226",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -8804,7 +8804,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "02480557974dada7b8e43b5d7cfdc1e098f0af85",
+    "commit": "0216ba8567f7cae5c0eec74584af0324b5c2302d",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
