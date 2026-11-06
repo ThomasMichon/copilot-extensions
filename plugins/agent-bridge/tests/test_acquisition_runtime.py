@@ -785,6 +785,9 @@ async def test_required_cli_writer_is_explicitly_unsupported_before_any_owner_ca
 @pytest.mark.asyncio
 @pytest.mark.timeout(90)
 async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes(rig, tmp_path, monkeypatch):
+    import time
+
+    started = time.monotonic()
     import os
     import sys
     from agent_procutil import direct_python
@@ -829,6 +832,26 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         environment["PYTHONPATH"] = os.pathsep.join((
             str(root / "tools/http47_capture_bootstrap"), str(root / "tools"),
         ))
+        lineage_run = worktree_lineage._run
+
+        def traced_lineage(command, *args, **kwargs):
+            print(f"lineage {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
+            try:
+                return lineage_run(command, *args, **kwargs)
+            finally:
+                print(f"lineage {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
+
+        async def traced_owner(command, *args, **kwargs):
+            print(f"owner {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
+            try:
+                return await rig.owner_command(command, *args, **kwargs)
+            finally:
+                print(f"owner {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
+
+        monkeypatch.setattr(worktree_lineage, "_run", traced_lineage)
+        receiving_command = traced_owner
+    else:
+        receiving_command = rig.owner_command
     for owner in (acquisition_authority, worktree_lineage):
         monkeypatch.setattr(owner, "_agent_worktrees_environment", lambda: environment.copy())
     protected = owner_command(prefix, "protect")
@@ -851,8 +874,8 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     )
     # The rig substitutes native ACP transport only. Worktrees uses its real
     # parser, record serializer and transaction handlers in finite child processes.
-    monkeypatch.setattr(acquisition_authority, "worktree_command", rig.owner_command)
-    monkeypatch.setattr(acquisition_runtime, "worktree_command", rig.owner_command)
+    monkeypatch.setattr(acquisition_authority, "worktree_command", receiving_command)
+    monkeypatch.setattr(acquisition_runtime, "worktree_command", receiving_command)
     monkeypatch.setattr(acquisition_authority, "_agent_worktrees_launch_prefix", lifecycle._agent_worktrees_launch_prefix)
     monkeypatch.setattr(worktree_lineage, "_agent_worktrees_launch_prefix", lifecycle._agent_worktrees_launch_prefix)
     monkeypatch.setattr(worktree_lineage, "register_session", rig.register_session)

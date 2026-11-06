@@ -1309,3 +1309,12 @@ head-command behavior, canonical projections without importing the CLI and
 loaded overrides, with a successful 90.84-second contained runner. F/E9 and
 all 615 admitted source hashes pass. Guarded real-flow timing and the complete
 capture remain required; this is not yet a new qualification result.
+
+The named two-case diagnostic identifies the original acquisition flow reaching
+its 90-second limit during `note-handoff`; it terminates before the keyed flow
+starts. The finite owner unnecessarily boots and closes a resident server for
+every bounded record, head and capability read. Dispatch those same real
+read-only parsers and handlers before constructing the server. All session
+writes still use the full CLI with the reachable unqualified-resident trap.
+Add the same capture-only command timings to acquisition so either flow's
+next failure names its phase. Preserve all commands, assertions and deadlines.
