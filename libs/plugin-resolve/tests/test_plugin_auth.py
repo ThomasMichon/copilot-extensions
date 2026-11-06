@@ -160,6 +160,28 @@ def test_enterprise_environment_token_is_not_used_for_a_public_host_lookup(
     assert original["GH_TOKEN"] == "enterprise-value"
 
 
+@pytest.mark.parametrize("locale", ["de_DE.UTF-8", "fr_FR.UTF-8"])
+def test_localized_host_refusal_does_not_fall_back_to_another_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locale: str,
+) -> None:
+    original = {
+        "LC_ALL": locale, "LANG": locale, "LANGUAGE": locale,
+        "GH_TOKEN": "ambient-account-value",
+    }
+    before = dict(original)
+    monkeypatch.setattr(plugin_auth, "execution_executable", lambda *args: "selected-git")
+
+    def capture(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        pinned = all(kwargs["env"][key] == "C" for key in ("LC_ALL", "LANG", "LANGUAGE"))
+        diagnostic = "fatal: credential helper told us to quit" if pinned else "fatal: Abbruch"
+        return subprocess.CompletedProcess(arguments, 128, "", diagnostic)
+
+    monkeypatch.setattr(plugin_auth, "_credential_run", capture)
+    with pytest.raises(RuntimeError, match="credential owner refused"):
+        plugin_auth.plugin_management_environment(GITHUB, original, tmp_path)
+    assert original == before
+
+
 def test_credential_from_another_authority_is_not_forwarded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -195,11 +217,13 @@ def test_credential_lookup_respects_the_remaining_budget(
         plugin_auth.plugin_management_environment(GITHUB, {}, tmp_path, timeout=0)
 
 
-def test_plugin_diagnostics_redact_the_exact_opaque_child_credential() -> None:
+@pytest.mark.parametrize("binary", [False, True])
+def test_plugin_diagnostics_redact_the_exact_opaque_child_credential(binary: bool) -> None:
     token = "opaque-value-without-a-recognizable-prefix"
-    diagnostic = plugin_auth.redact_plugin_credentials(
-        "plugin failure: " + token,
-        {"COPILOT_GITHUB_TOKEN": token},
+    message = "plugin failure: " + token
+    environment = {"COPILOT_GITHUB_TOKEN": token}
+    diagnostic = (
+        plugin_auth.redact_plugin_credentials(message.encode(), environment) if binary
+        else plugin_auth.redact_plugin_credentials(message, environment)
     )
-    assert token not in diagnostic
-    assert "[redacted]" in diagnostic
+    assert diagnostic == (b"plugin failure: [redacted]" if binary else "plugin failure: [redacted]")

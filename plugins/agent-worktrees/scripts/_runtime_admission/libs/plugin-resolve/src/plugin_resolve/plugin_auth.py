@@ -7,6 +7,7 @@ import json
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from typing import overload
 from urllib.parse import urlsplit
 
 from .execution import GIT_REPOSITORY_SELECTORS, execution_environment, execution_executable
@@ -95,6 +96,9 @@ def _git_token(
             "GIT_TERMINAL_PROMPT": "0",
             "GCM_INTERACTIVE": "never",
             "GCM_GUI_PROMPT": "false",
+            "LC_ALL": "C",
+            "LANG": "C",
+            "LANGUAGE": "C",
         }
     )
     lookup.pop("GIT_ASKPASS", None)
@@ -177,10 +181,23 @@ def plugin_management_environment(
     return child
 
 
-def redact_plugin_credentials(text: str, environment: Mapping[str, str]) -> str:
+@overload
+def redact_plugin_credentials(text: str, environment: Mapping[str, str]) -> str: ...
+
+
+@overload
+def redact_plugin_credentials(text: bytes, environment: Mapping[str, str]) -> bytes: ...
+
+
+def redact_plugin_credentials(
+    text: str | bytes, environment: Mapping[str, str],
+) -> str | bytes:
     """Remove exact child credentials before rendering subprocess diagnostics."""
     for key in _TOKEN_KEYS:
         token = environment.get(key)
         if token:
-            text = text.replace(token, "[redacted]")
+            if isinstance(text, bytes):
+                text = text.replace(token.encode("utf-8"), b"[redacted]")
+            else:
+                text = text.replace(token, "[redacted]")
     return text

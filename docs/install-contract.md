@@ -2258,6 +2258,8 @@ not an ambient fallback. Lookups are non-interactive, headless and bounded to
 ten seconds or the caller's shorter remaining budget.
 The existing stdlib process supervisor contains the lookup and its credential
 helper descendants, reaping them on completion, timeout or caller cancellation.
+Lookup-only C-locale diagnostics keep explicit refusals recognizable on localized
+hosts without changing the caller's locale.
 
 Only the maintenance child's copied environment receives `COPILOT_GITHUB_TOKEN`
 and `GH_TOKEN`; ordinary prompts, ACP launches, the parent environment and saved

@@ -25,7 +25,7 @@ from plugin_resolve.execution import (
 )
 from plugin_resolve.inventory import inventory_paths
 from plugin_resolve.payload import plugin_manifest
-from plugin_resolve.plugin_auth import plugin_management_environment
+from plugin_resolve.plugin_auth import plugin_management_environment, redact_plugin_credentials
 from plugin_resolve.preparation import _failure
 from plugin_resolve.reflection import identity
 from plugin_resolve.registration import _settings_document, strict_json
@@ -425,6 +425,10 @@ def refresh_registered_origin(
             raise ValueError("Acquired payload provenance differs from selected origin")
         return actual
     except subprocess.TimeoutExpired as error:
+        if isinstance(error.output, (str, bytes)):
+            error.output = redact_plugin_credentials(error.output, child)
+        if isinstance(error.stderr, (str, bytes)):
+            error.stderr = redact_plugin_credentials(error.stderr, child)
         detail = f"Native acquisition timed out after {error.timeout:g} seconds"
         diagnostics = [str(_error("Registered origin refresh", origin.source, detail))]
         for channel, value in (("stdout", error.stdout), ("stderr", error.stderr)):

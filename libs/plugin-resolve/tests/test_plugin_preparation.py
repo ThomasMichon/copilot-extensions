@@ -499,6 +499,42 @@ def test_plugin_failure_redacts_the_exact_opaque_child_credential() -> None:
     assert "[redacted]" in str(failure)
 
 
+@pytest.mark.parametrize("binary", [False, True])
+def test_maintenance_timeout_redacts_both_streams_without_changing_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binary: bool,
+) -> None:
+    token = "opaque-repository-value"
+    monkeypatch.setattr("plugin_resolve.plugin_auth._git_token", lambda *args, **kwargs: token)
+    target = tmp_path / "target"
+    init_checkout(target)
+    environment = {**os.environ, "COPILOT_GITHUB_TOKEN": "inference-value"}
+    before = dict(environment)
+    diagnostic = token.encode() if binary else token
+    failure = subprocess.TimeoutExpired(
+        ["synthetic-copilot"], 240, output=diagnostic, stderr=diagnostic,
+    )
+    run = subprocess.run
+
+    def timeout(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if argv[:2] == [sys.executable, "synthetic-copilot"]:
+            assert kwargs["env"]["COPILOT_GITHUB_TOKEN"] == token
+            raise failure
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        prepare({
+            "repo": str(target),
+            "plugins": [{
+                "source": "sample@remote", "enable": True,
+                "marketplace": {"source": {"source": "github", "repo": "example/synthetic"}},
+            }],
+        }, environment=environment, copilot_command=(sys.executable, "synthetic-copilot"))
+    assert caught.value is failure
+    assert failure.output == failure.stderr == (b"[redacted]" if binary else "[redacted]")
+    assert environment == before
+
+
 def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
     import threading

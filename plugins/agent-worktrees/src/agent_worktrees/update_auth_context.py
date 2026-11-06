@@ -194,13 +194,7 @@ def run_acquisition(
             value.record_use(report, overlay, required=required)
 
     def redact(value):
-        if marketplace is not None and isinstance(value, bytes):
-            for key in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
-                token = (kwargs.get("env") or {}).get(key)
-                if token:
-                    value = value.replace(token.encode("utf-8"), b"[redacted]")
-            return value
-        if marketplace is not None and isinstance(value, str):
+        if marketplace is not None and isinstance(value, (str, bytes)):
             from plugin_resolve.plugin_auth import redact_plugin_credentials
 
             return redact_plugin_credentials(value, kwargs.get("env") or {})

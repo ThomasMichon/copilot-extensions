@@ -217,11 +217,18 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
             command_prefix[0] = execution_executable(command_prefix[0], env, execution_cwd or repo)
         def command(arguments: list[str], operation: str) -> None:
             check_cancelled()
-            result = subprocess.run(
-                [*command_prefix, *arguments], cwd=neutral, env=env,
-                capture_output=True, text=True, timeout=240,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            try:
+                result = subprocess.run(
+                    [*command_prefix, *arguments], cwd=neutral, env=env,
+                    capture_output=True, text=True, timeout=240,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except subprocess.TimeoutExpired as error:
+                if isinstance(error.output, (str, bytes)):
+                    error.output = redact_plugin_credentials(error.output, env)
+                if isinstance(error.stderr, (str, bytes)):
+                    error.stderr = redact_plugin_credentials(error.stderr, env)
+                raise
             if result.returncode:
                 raise _failure(operation, source, result, environment=env)
             check_cancelled()
