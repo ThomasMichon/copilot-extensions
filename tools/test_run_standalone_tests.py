@@ -246,19 +246,96 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
 
-def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch):
-    monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
-        [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key not in ("trusted_source_roots", "retained_resource_roots")},
-    ))
+def test_manager_preparation_uses_persistent_core_layout(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
-    monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
+    monkeypatch.setattr(runner, "run_uv_install",
+                        lambda _uv, args, **kwargs: calls.append((args, kwargs)))
     python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
     python.parent.mkdir(parents=True)
     (python.parent.parent / "pyvenv.cfg").write_text("home = fixture-base\n")
     python.touch()
     runner.prepare("worktree-manager", python)
-    assert calls[-1][-2:] == ["--editable", str(tmp_path / "worktree-manager") + "[dev]"]
+    arguments, options = calls[0]
+    assert arguments[-1] == str(tmp_path / "worktree-manager") + "[dev]"
+    assert "-e" not in arguments and "--editable" not in arguments
+    assert options["non_editable"] is True
+
+
+def test_manager_preparers_preserve_the_same_noneditable_cache(tmp_path, monkeypatch):
+    import tomllib
+
+    spec = importlib.util.spec_from_file_location(
+        "alternating_plugin_runner", SCRIPT.with_name("run-plugin-tests.py"),
+    )
+    plugin = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, plugin)
+    spec.loader.exec_module(plugin)
+    checkout = tmp_path / "checkout"
+    for relative, name in (
+        ("worktree-manager", "worktree-manager"),
+        ("plugins/agent-bridge", "agent-bridge"),
+        ("libs/core", "fixture-core"),
+    ):
+        project = checkout / relative
+        (project / "src").mkdir(parents=True)
+        (project / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
+            f'[project]\nname="{name}"\nversion="1.0"\n'
+            '[project.optional-dependencies]\ndev=[]\n'
+            '[tool.setuptools.packages.find]\nwhere=["src"]\n', encoding="utf-8",
+        )
+    manager = checkout / "worktree-manager"
+    with (manager / "pyproject.toml").open("a", encoding="utf-8") as manifest:
+        manifest.write(
+            '[dependency-groups]\nfirst-party-core=["fixture-core"]\n'
+            '[tool.uv.sources]\nfixture-core={path="../libs/core",editable=true}\n',
+        )
+    for name in ("versioned-runtime", "installer-engine"):
+        (checkout / "libs" / name).mkdir()
+    monkeypatch.setattr(plugin, "REPO", checkout)
+    monkeypatch.setattr(plugin, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "REPO", checkout)
+    monkeypatch.setattr(runner, "venv_root", lambda _repo: plugin.VENV_ROOT)
+    python = runner.default_python("worktree-manager")
+    assert python == plugin._venv_python("worktree-manager")
+    python.parent.parent.mkdir(parents=True)
+    manager_installs = []
+
+    def command(arguments, **kwargs):
+        if arguments[1] == "venv":
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.touch()
+        elif "--show-settings" in arguments:
+            return subprocess.CompletedProcess(arguments, 0, """PipInstallSettings {
+                settings: PipSettings {
+                    index_locations: IndexLocations { indexes: [], flat_index: [], },
+                    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+                },
+            }""", "")
+        else:
+            selected = [
+                Path(value.partition("[")[0]) for value in arguments
+                if value.endswith("worktree-manager[dev]")
+            ]
+            if ".[dev]" in arguments:
+                selected.append(Path(kwargs["cwd"]))
+            if selected:
+                assert "-e" not in arguments and "--editable" not in arguments
+                metadata = tomllib.loads((selected[0] / "pyproject.toml").read_text("utf-8"))
+                assert metadata["tool"]["uv"]["sources"]["fixture-core"]["editable"] is False
+                manager_installs.append(selected[0])
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", command)
+    plugin._ensure_venv("worktree-manager", "uv", reinstall=False)
+    stamp = python.parent.parent / ".dep-fingerprint"
+    fingerprint = stamp.read_bytes()
+    runner.prepare("worktree-manager", python)
+    assert stamp.read_bytes() == fingerprint
+    plugin._ensure_venv("worktree-manager", "uv", reinstall=False)
+    assert len(manager_installs) == 2
+    assert all(not directory.exists() for directory in manager_installs)
 
 
 @pytest.mark.parametrize("component", [

@@ -197,10 +197,6 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             str(REPO / "libs" / "agent-procutil"),
         ]
     extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
-    if component == "worktree-manager":
-        # The Manager distribution includes sibling bin/references payloads,
-        # not just an importable wheel; exercise its real source layout.
-        sources.append("--editable")
     sources.append(str(REPO / component) + f"[{extra}]")
     # Keep retained source/override topology below the Windows relative-path limit.
     with TestSandbox(prefix=run_prefix(component), dir=runs_root(REPO)) as temporary:
@@ -260,6 +256,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             check=True,
             capture_output=True,
             text=True,
+            **({"non_editable": True} if component == "worktree-manager" else {}),
             **flags,
         )
 

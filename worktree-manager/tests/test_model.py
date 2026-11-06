@@ -18,9 +18,8 @@ from worktree_manager.model import build_model, coverage
 
 
 def test_build_model_from_checkout_overlays_catalog():
-    root = find_repo_root()
-    if root is None:
-        return
+    root = find_repo_root(__file__)
+    assert root is not None, "test checkout not found"
     m = build_model(repo_root=root, allow_remote=False)
     assert m.source.kind == "checkout"
     aw = m.get("agent-worktrees")

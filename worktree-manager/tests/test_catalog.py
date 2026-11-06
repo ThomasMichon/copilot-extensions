@@ -86,7 +86,7 @@ def test_plugins_command_unknown_name_errors(capsys):
     assert "unknown plugin" in capsys.readouterr().out
 
 
-# ── coverage against a real checkout (only when running inside one) ─────────
+# ── coverage against the test checkout ─────────────────────────────────────
 
 def test_coverage_against_checkout_has_no_errors():
     """Inside a checkout, membership is *discovered*, so uncatalogued plugins are
@@ -95,9 +95,8 @@ def test_coverage_against_checkout_has_no_errors():
     catalog fails to carry. Those are the forcing functions that keep the
     knowledge overlay honest.
     """
-    root = find_repo_root()
-    if root is None:
-        return  # no checkout — discovery would go remote; skip the local assertion
+    root = find_repo_root(__file__)
+    assert root is not None, "test checkout not found"
     cov = coverage(repo_root=root, allow_remote=False)
     assert cov.source_kind == "checkout"
     assert not cov.phantom, f"catalog names not in the marketplace (phantom/renamed): {cov.phantom}"
@@ -107,10 +106,28 @@ def test_coverage_against_checkout_has_no_errors():
 
 
 def test_published_prereq_reader_matches_service_yaml():
-    root = find_repo_root()
-    if root is None:
-        return
+    root = find_repo_root(__file__)
+    assert root is not None, "test checkout not found"
     # agent-codespaces publishes gh + ssh + python3 in its service.yaml.
     names = set(published_prereq_names(root, "agent-codespaces"))
     if names:  # present only inside a checkout that ships the service.yaml
         assert {"gh", "ssh", "python3"} <= names
+
+
+def test_checkout_coverage_runs_with_an_installed_manager(tmp_path, monkeypatch):
+    import worktree_manager.catalog as catalog
+
+    root = find_repo_root(__file__)
+    assert root is not None, "test checkout not found"
+    monkeypatch.setattr(catalog, "__file__", str(tmp_path / "site-packages/catalog.py"))
+    assert find_repo_root() is None
+    checked = []
+    actual_coverage = coverage
+
+    def observe_coverage(**kwargs):
+        checked.append(kwargs["repo_root"])
+        return actual_coverage(**kwargs)
+
+    monkeypatch.setitem(globals(), "coverage", observe_coverage)
+    test_coverage_against_checkout_has_no_errors()
+    assert checked == [root]
