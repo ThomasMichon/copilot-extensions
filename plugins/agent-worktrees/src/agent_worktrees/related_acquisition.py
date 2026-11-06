@@ -224,11 +224,17 @@ def installed(root=None, *, home=None, report=None, observations=None):
     override = os.environ.get(r.INSTALLED_PLUGINS_ENV)
     if root is not None or override:
         return filesystem_anchors(root or r.installed_plugins_root(), observations)
+    from .config_acquisition import current_observations
+
+    diagnostics = observations if observations is not None else current_observations()
     try:
         report = report or r.resolve_active_plugins(home=home)
     except (OSError, ValueError) as exc:
-        failed(observations, "plugin-activation", "plugin-activation", "activation-unavailable", type(exc).__name__)
+        failed(diagnostics, "plugin-activation", "plugin-activation", "activation-unavailable", type(exc).__name__)
         return []
+    if observations is None and report.authority is ScanAuthority.INDETERMINATE:
+        failed(diagnostics, "plugin-activation", "plugin-activation", "activation-indeterminate",
+               "plugin activation could not be resolved")
     observe(observations, "plugin-activation", "plugin-activation", report.authority, findings=owner_findings(report.findings))
     if observations is not None:
         if report.plugin_names is not None:

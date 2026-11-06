@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from dropin_registry import ScanAuthority
 
 from agent_worktrees import companion_pr_associations as owner
 from agent_worktrees import config, git_ops, pr_related_binding, repos, tracking
@@ -1100,6 +1101,52 @@ def test_native_installation_context_failure_cannot_qualify_base_related(
     monkeypatch.setattr(config, "_control_plane_related_pr_map", config._CONTROL_PLANE_PR_OWNER)
     monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(anchor))
     monkeypatch.setattr(related, "installed_plugin_related_anchors", lambda: [])
+    monkeypatch.setattr(
+        repos,
+        "list_repos",
+        lambda **kwargs: [
+            SimpleNamespace(
+                name="sample",
+                remote="https://github.com/example/repository.git",
+                local_path=lambda: None,
+            )
+        ],
+    )
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is available for entry in entries), [
+        entry["binding"] for entry in entries
+    ]
+
+
+@pytest.mark.parametrize(
+    ("activation", "available"),
+    [("empty", True), ("indeterminate", False), ("malformed", False)],
+)
+def test_native_activation_failure_cannot_qualify_base_related(
+    source, monkeypatch, activation, available
+):
+    from agent_worktrees import related
+
+    anchor = source.path.parent / "repository"
+    directory = anchor / related.CANONICAL_RELATED_DIR
+    directory.mkdir(parents=True)
+    (directory / related.RELATED_FILENAME).write_text("related:\n  sample:\n")
+
+    def resolve_active_plugins(**kwargs):
+        if activation == "malformed":
+            raise ValueError("malformed activation settings")
+        authority = (
+            ScanAuthority.INDETERMINATE if activation == "indeterminate" else ScanAuthority.COMPLETE
+        )
+        return SimpleNamespace(
+            authority=authority, findings=(), plugin_names=None, decisions={}, active={}
+        )
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    monkeypatch.setattr(config, "_control_plane_related_pr_map", config._CONTROL_PLANE_PR_OWNER)
+    monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(anchor))
+    monkeypatch.setattr(related, "resolve_active_plugins", resolve_active_plugins)
     monkeypatch.setattr(
         repos,
         "list_repos",
