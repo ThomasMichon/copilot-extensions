@@ -111,6 +111,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies "
         "or test_ssh_machine or test_machine_identity or test_credential_references"
         " or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
+        " or test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
     )
     nodes = {
         path.name + "::" + node.name
@@ -135,6 +136,10 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert (
         "test_continuity_bootstrap.py::"
         "test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
+    ) in groups[1]
+    assert (
+        "test_continuity_bootstrap.py::"
+        "test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
     ) in groups[1]
 
 

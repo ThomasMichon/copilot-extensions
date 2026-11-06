@@ -22,7 +22,7 @@ from .gateway_service_connector import verified_tls
 from .gateway_service_context import fields
 from .gateway_enrollment import enrollment_scope
 from .machine_identity import PROFILE, machine_headers, make_machine_proof
-from .private_state import create_private_file, private_directory, read_private_file
+from .private_state import create_private_file, private_directory, read_private_file, validate_private_directory
 from .operations import OperationIntent
 from .runtime_identity import _text, _time
 
@@ -76,7 +76,7 @@ def _state(root: Path, projection: dict, *, apply: bool) -> dict | None:
               and not getattr(info, "st_file_attributes", 0) & 0x400,
               "continuity-state-indirection")
     if root.exists():
-        private_directory(root)
+        validate_private_directory(root)
     if path.exists():
         value = fields(planning.decode(read_private_file(path, 16384)), {
             "version", "source_digest", "private_key", "request"})

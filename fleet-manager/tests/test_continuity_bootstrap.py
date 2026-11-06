@@ -61,13 +61,13 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
             enrollment.document["policy"]["manifest"]["revision"] += 1
             rig.save()
             await rig.state.reload()
-            source.write_bytes(planning.canonical({
-                "schema": "fleet-manager.continuity-projection", "version": 1,
-                "provider": "local-projection-v1", "authority": "authority-a",
-                "audience": "example-gateway", "delegation": enrollment.delegation,
-                "grant": GRANT, "gateway_ca": rig.ca,
-            }))
-            source.chmod(0o600)
+            with os.fdopen(private_state.create_private_file(source), "wb") as stream:
+                stream.write(planning.canonical({
+                    "schema": "fleet-manager.continuity-projection", "version": 1,
+                    "provider": "local-projection-v1", "authority": "authority-a",
+                    "audience": "example-gateway", "delegation": enrollment.delegation,
+                    "grant": GRANT, "gateway_ca": rig.ca,
+                }))
             arguments = dict(
                 source=source, harness="harness-a", state_root=state, machine="machine-a",
                 gateway_origin=rig.origin, principal="new-caller", audience="example-gateway",
@@ -137,6 +137,48 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
             await rig.close()
 
     asyncio.run(scenario())
+
+
+def test_provider_caller_does_not_recreate_a_concurrently_removed_identity(tmp_path, monkeypatch):
+    import time
+
+    enrollment = EnrollmentHarness(tmp_path)
+    enrollment.scope["expires_at"] = int(time.time()) + 600
+    enrollment.delegation["grant_expires_at"] = int(time.time()) + 300
+    projection = {
+        "schema": "fleet-manager.continuity-projection", "version": 1,
+        "provider": "local-projection-v1", "authority": "authority-a",
+        "audience": "example-gateway", "delegation": enrollment.delegation,
+        "grant": GRANT, "gateway_ca": None,
+    }
+    projection_root = tmp_path / "projection"
+    projection_root.mkdir(mode=0o700)
+    source = projection_root / "selected.json"
+    with os.fdopen(private_state.create_private_file(source), "wb") as stream:
+        stream.write(planning.canonical(projection))
+    state, retained = tmp_path / "machine-state", tmp_path / "retained-owner-state"
+    _state(state, projection, apply=True)
+    before = (state / "machine.json").read_bytes()
+    exists = Path.exists
+    moved = False
+
+    def remove_after_check(path, **kwargs):
+        nonlocal moved
+        present = exists(path, **kwargs)
+        if path == state and present and not moved:
+            moved = True
+            state.rename(retained)
+        return present
+
+    monkeypatch.setattr(Path, "exists", remove_after_check)
+    with pytest.raises((TransportError, OSError)):
+        continuity_bootstrap.machine_caller(
+            source, harness="harness-a", state_root=state, machine="machine-a",
+            gateway_origin=enrollment.scope["destination"], principal="new-caller",
+            audience="example-gateway", resource="service-a",
+        )
+    assert moved and not state.exists()
+    assert (retained / "machine.json").read_bytes() == before
 
 
 @pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine"])

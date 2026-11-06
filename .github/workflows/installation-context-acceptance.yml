@@ -1740,7 +1740,8 @@ jobs:
             or selected_gateway_application_first_touch_repeat_update_and_stop
             or selected_ssh_application_first_touch_repeat_update_and_stop
             or test_gateway_host or test_ssh_machine or test_machine_identity or test_credential_references
-            or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment)
+            or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment
+            or test_provider_caller_does_not_recreate_a_concurrently_removed_identity)
             and not selected_gateway_application_first_touch_repeat_update_and_stop"
         run: python tools/run-standalone-tests.py fleet-manager --timeout 180
 
