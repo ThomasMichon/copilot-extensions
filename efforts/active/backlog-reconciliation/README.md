@@ -331,6 +331,39 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records proposed direct #3941 all-plugin runtime-advice acceptance under the
+existing materials inventory and a separate #4046 generic-command lane under
+the remote-lifetime parent. Neither is actual receiving delivery or retirement
+yet. The old failed-ACP-start separation remains technical, not a claim that
+Copilot APIs implement generic jobs; complete independent Plan/Validation and
+all current owners remain. Canonical planning review precedes the next effects.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11021 merge, both delivered blobs and continuing
+Active Plan/Validation. Twenty-four following whole-contract reports retain
+source/native and owner boundaries; seven nominated historical subordinate
+trackers are already CLOSED and supply no new credit. Two bounded planned
+fit studies continue for public runtime-advice wording and separate remote
+work lifetimes, without accepting a receiver or changing any source/resource.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records complete actual #2830 receiving/readback and separate `NOT_PLANNED`
+retirement of #2974/#3369. Mux-exit and independent extension research,
+nonblocking dead-session/content advisories, the original blank-mux incident
+and narrow watchdog work retain distinct unchecked acceptance and custodians.
+Complete07:08 PST scans measure817 whole OPEN,1005 effective audited
+dispositions and88 above729. Twenty-four next qualified originals have three
+new disjoint Luna studies; no incident, native or content-recovery fix is claimed.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11019 merge, complete two-blob delivery agreement
+and bounded133-test/24-plugin documentation validation. Only its publication
+child finalized; the canonical Active campaign Plan/Validation and fixed729
+whole-queue checkpoint remain open. The next finite study assesses separate
+retirement/recoverable-content lanes without inventing a common incident cause
+or releasing their actual source, session, native and resource custodians.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records #2882's finite completed vision reconciliation and #2914's complete
 fallback-transaction intake under existing OPEN #2709. The corrected
 campaign-supplied assignee guard is not an original owner hold; actual
