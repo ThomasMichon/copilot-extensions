@@ -2,6 +2,7 @@ import asyncio
 import json
 import socket
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -109,18 +110,24 @@ async def test_source_lease_requires_explicit_valid_grant(source_policy, monkeyp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", [
-    "policy", "capability", "expiry", "lease-expiry", "clock-backwards", "binding",
+    "policy", "capability", "expiry", "lease-expiry", "clock-backwards",
+    "grant-monotonic-expiry", "binding",
 ])
 async def test_source_lease_fences_acquisition_before_delivery(source_policy, monkeypatch, change):
     filename, policy, fields, capability = source_policy
     policy["grants"][0]["source_lease_seconds"] = 60
-    filename.write_text(json.dumps(policy))
     now = time.time()
-    monkeypatch.setattr("credential_relay.account_relay.time.time", lambda: now)
+    elapsed = 0.0
+    if change == "grant-monotonic-expiry":
+        policy["grants"][0]["expires_at"] = now + 5
+    filename.write_text(json.dumps(policy))
+    monkeypatch.setattr("credential_relay.account_relay.time", SimpleNamespace(
+        time=lambda: now, monotonic=lambda: elapsed,
+    ))
     secret = capability.read_text()
 
     async def resolve(self, action, request, *, timeout):
-        nonlocal now
+        nonlocal now, elapsed
         if change == "policy":
             filename.write_text("{}")
         elif change == "capability":
@@ -131,6 +138,9 @@ async def test_source_lease_fences_acquisition_before_delivery(source_policy, mo
             now += 60
         elif change == "clock-backwards":
             now -= 1
+        elif change == "grant-monotonic-expiry":
+            now += 1
+            elapsed += 6
         account = "other-account" if change == "binding" else self._account
         return f"protocol=https\nhost=github.com\nusername={account}\ntoken=isolated-credential\n\n"
 

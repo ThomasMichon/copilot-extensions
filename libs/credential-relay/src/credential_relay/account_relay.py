@@ -344,7 +344,7 @@ class AccountRelay:
                 deadline = min(now + grant["source_lease_seconds"], grant["expires_at"])
                 if (
                     not now <= time.time() < deadline
-                    or time.monotonic() - started >= grant["source_lease_seconds"]
+                    or time.monotonic() - started >= deadline - now
                 ):
                     return None
                 response = {}
