@@ -83,6 +83,20 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+Dispatch's `--test-file tests/test_submission_consumer.py --test-file
+tests/test_submission_preparation.py --test-file tests/test_submission_readiness.py
+--test-file tests/test_submission_advancement.py --test-file
+tests/test_submission_resubmission.py --allow-explicit-tiers` packet exercises
+ordinary protected completion, exact proposal custody, nonfinalizing readiness,
+rollback refusal and rejection/resubmission. It covers the actual task HTTP route
+and registered HTTP MCP completion operation, concurrent calls, status-change
+fences and retained manual-assignment incompatibility. Worktrees observations
+remain synthetic owner boundaries; this packet does not qualify an installed
+writer cohort, stopped-native recovery or permanent finalization.
+The ten controls in `tools/promotion_unit_tests/test_submission_consumer.py`
+separately admit actor-free retry/order/failure logic with production coverage;
+database, thread and transport controls remain outside required unit-only CI.
+
 Worktrees' opt-in `--test-file tests/test_post_tool_shell.py --test-file
 tests/test_hook_ipc.py --test-file tests/test_status_monitor.py
 --allow-explicit-tiers -k "native_mutation or

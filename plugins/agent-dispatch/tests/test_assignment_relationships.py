@@ -150,6 +150,31 @@ def claim(queue, workspace, task):
     return queue.claim_one(workspace.worker_id, task_id=task.id, assignment_workspace=workspace)
 
 
+@pytest.fixture
+def independent_readiness(monkeypatch):
+    from agent_dispatch import queue_submission_advancement
+
+    monkeypatch.setattr(queue_submission_advancement, "observe_owner_state", lambda *_: {})
+
+
+def start_managed(queue, workspace, task, *, native="native"):
+    publish(queue, pool())
+    reservation, _ = place(queue, task)
+    queue.record_spawn_worktree(
+        reservation.key, workspace.worktree, ownership="created",
+        execution_machine=workspace.machine, allocation_project=workspace.project,
+        worktree_path=workspace.path, driver="cli", creation_nonce=workspace.creation_nonce,
+    )
+    queue.record_spawn(
+        reservation.key, session_handle=native, worktree=workspace.worktree,
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    return queue.start(
+        task.id, workspace.worker_id, owner_session_id=native,
+        expected_generation=queue.get(task.id).generation,
+    )
+
+
 def test_prepared_writer_is_committed_before_first_relationship_and_survives_lost_reply(assignment):
     from tests.test_pool_placement_client import connected
 
@@ -451,7 +476,7 @@ def test_caller_snapshot_cannot_substitute_the_original_queue_request(assignment
 ])
 @pytest.mark.parametrize("boundary", ["reserve", "bind", "close"])
 def test_original_prepared_reservation_is_read_before_each_relationship_effect(
-    assignment, field, replacement, boundary,
+    assignment, field, replacement, boundary, independent_readiness,
 ):
     queue, owner, workspace, task = assignment
     publish(queue, pool())
@@ -513,10 +538,11 @@ def test_original_prepared_reservation_is_read_before_each_relationship_effect(
     assert len(owner.claims) == 1
 
 
-def test_submission_and_abandonment_keep_responsibility_until_independent_completion(assignment):
+def test_submission_and_abandonment_keep_responsibility_until_independent_completion(
+    assignment, independent_readiness,
+):
     queue, owner, workspace, task = assignment
-    claim(queue, workspace, task)
-    queue.start(task.id, workspace.worker_id, owner_session_id="native")
+    start_managed(queue, workspace, task)
     queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
     assert queue.task_relationship(task.id)["state"] == "bound"
     assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
@@ -898,11 +924,10 @@ def test_request_bound_retirement_tombstones_absence_under_original_admission(re
 
 
 def test_request_bound_submission_rejection_resubmission_keeps_same_native_and_relationship(
-    request_assignment,
+    request_assignment, independent_readiness,
 ):
     queue, owner, workspace, task, control = request_assignment
-    claim(queue, workspace, task)
-    queue.start(task.id, workspace.worker_id, owner_session_id="original-native")
+    start_managed(queue, workspace, task, native="original-native")
     original = queue.task_relationship(task.id)["request"]
     for _ in range(2):
         queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
@@ -918,6 +943,7 @@ def test_request_bound_submission_rejection_resubmission_keeps_same_native_and_r
         assert current.status == Status.STARTED
         assert current.owner == workspace.worker_id and current.owner_session_id == "original-native"
         assert queue.task_relationship(task.id)["request"] == original
+        queue.take_steer(task.id, workspace.worker_id, all_pending=True)
     queue.complete(task.id, workspace.worker_id, result={"answer": "accepted"})
     queue.confirm(task.id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"

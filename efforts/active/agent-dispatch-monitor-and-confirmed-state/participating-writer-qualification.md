@@ -171,11 +171,11 @@ mandatory. Unknown responses retain the same assignment and claim.
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers
       through submission, rejection and resubmission.
-      Working conditional new-workspace startup now combines observed Bridge
+      Conditional new-workspace startup merged in #11145 and combines observed Bridge
       selection with the prepared nonce before the first relationship, using
       the expanded preparation provider. It replays pending relationship
-      attachment with the retained original expectation. Review/CI/merge,
-      actual independent complete-cohort policy and installed-owner
+      attachment with the retained original expectation. Actual independent
+      complete-cohort policy and installed-owner
       qualification remain open; the expectation is not admission.
 - [ ] Run a fresh whole-stack case only after its first failed boundary changes.
       Verify repeated independent rejection and acceptance through ordinary
@@ -470,10 +470,10 @@ nonce conflicts and retrofit after a historical unpinned relationship/native.
 An omitted retry preserves the original expectation; a lost relationship
 reply does not allocate another request.
 
-This is the provider-first prerequisite, not ordinary consumer assembly.
-The future consumer must derive an expectation from actual negotiated Bridge
-selection and authoritative preparation, then use this existing owner before
-the first relationship. Independent first-request admission must not require
+The provider prerequisite merged in #11130; conditional ordinary consumer
+assembly followed in #11145. That consumer derives an expectation from actual
+negotiated Bridge selection and authoritative preparation, then uses this
+existing owner before the first relationship. Independent first-request admission must not require
 an acquisition journal that can exist only after that relationship.
 Actual closed-cohort policy and installed-owner qualification remain open;
 no permissive callback or running configuration is supplied.

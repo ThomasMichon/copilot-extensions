@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict
+from typing import Literal
 
-from .assignment_workspace import AssignmentWorkspace
+from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_common import CompletionOutcome, StructuredResult, Task, _task_transition_spec
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import TaskError
@@ -39,6 +40,18 @@ def require_unprepared_submission(conn: sqlite3.Connection, task_id: str) -> Non
             "task has a retained submission preparation;"
             " authoritative readiness is not yet available"
         )
+
+
+def submission_required_condition(task: Literal["t", "NEW"]) -> str:
+    """Persist positive governed assignment evidence across provider rollback."""
+    return (
+        "EXISTS (SELECT 1 FROM task_events e"  # noqa: S608 -- fixed aliases
+        f" WHERE e.task_id={task}.id AND e.task_relationship IS NOT NULL)"
+        f" OR EXISTS (SELECT 1 FROM task_events e WHERE e.task_id={task}.id"
+        " AND e.submission_preparation IS NOT NULL)"
+        f" OR EXISTS (SELECT 1 FROM spawn_reservations s WHERE s.task_id={task}.id"
+        " AND s.task_relationship_required=1)"
+    )
 
 
 def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
@@ -100,6 +113,16 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " AND NEW.result_ref IS json_extract(e.submission_preparation, '$.request.result_ref'))"
         " BEGIN SELECT RAISE(ABORT,"
         " 'submission preparation requires authoritative readiness'); END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard"  # noqa: S608 -- fixed predicate
+        " BEFORE UPDATE OF status ON tasks"
+        " WHEN NEW.status IN ('submitted','completed')"
+        " AND OLD.status NOT IN ('submitted','completed')"
+        " AND (" + submission_required_condition("NEW") + ")"
+        " AND NOT EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
+        " AND e.submission_preparation IS NOT NULL)"
+        " BEGIN SELECT RAISE(ABORT, 'submission requires retained preparation and readiness'); END"
     )
     conn.execute(
         "CREATE TRIGGER IF NOT EXISTS submission_preparation_consume_admission"
@@ -218,6 +241,7 @@ class QueueSubmissionPreparationMixin:
         workspace: AssignmentWorkspace,
         result: StructuredResult | None = None,
         result_ref: str | None = None,
+        expected_status: str | None = None,
         now: float | None = None,
     ) -> dict:
         """Internal custody only; no readiness proof or caller support is advertised."""
@@ -225,10 +249,14 @@ class QueueSubmissionPreparationMixin:
         _text(expected_owner_session_id, "native owner_session_id", 256)
         if type(expected_generation) is not int or expected_generation < 0:
             raise TaskError("submission preparation requires an exact generation")
-        if not isinstance(workspace, AssignmentWorkspace) or workspace.worker_id != worker_id:
+        if not isinstance(workspace, AssignmentWorkspace) or not same_assignment_worker(
+            workspace.worker_id, worker_id,
+        ):
             raise TaskError("submission preparation requires the assigned workspace worker")
         if result_ref is not None:
             _text(result_ref, "result_ref", 4096)
+        if expected_status is not None and expected_status not in _task_transition_spec("complete")[0]:
+            raise TaskError("submission preparation has an invalid expected status")
         encoded_result = self._encode_result(result)
         ts = self._now(now)
         with self._connect() as conn:
@@ -236,6 +264,8 @@ class QueueSubmissionPreparationMixin:
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
+            if expected_status is not None and task.status != expected_status:
+                raise TaskError("submission preparation expected status changed")
             request = _binding(
                 conn, task, worker_id=worker_id, expected_generation=expected_generation,
                 expected_owner_session_id=expected_owner_session_id, workspace=workspace,
@@ -245,6 +275,8 @@ class QueueSubmissionPreparationMixin:
                 result=json.loads(encoded_result) if encoded_result is not None else None,
                 result_ref=result_ref,
             )
+            if expected_status is not None:
+                request["expected_status"] = expected_status
             previous = _latest(conn, task_id)
             if previous is not None:
                 from .queue_submission_resubmission import rejected_preparation, retained_lineage
