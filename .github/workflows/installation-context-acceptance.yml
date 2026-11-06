@@ -446,6 +446,18 @@ jobs:
               for case in cases for child in case
           ), "Hosted qualification requires positive, non-skipped controls"
 
+      - name: Diagnose Bash controller ancestry without removing any runtime
+        if: failure()
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([
+             sys.executable, "tools/run-plugin-tests.py", "agent-worktrees",
+             "--test-file", "tests/native/test_uninstall_bash_diagnostic.py",
+             "--allow-explicit-tiers",
+          ], check=True)
+
   runtime-removal-macos:
     if: ${{ inputs.runtime_removal }}
     name: Native macOS finite runtime removal
