@@ -87,6 +87,68 @@ if mode == "route-nonzero":
     sys.exit(9)
 '''
 
+MULTI_CLIENT = r'''
+import http.client
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from urllib.parse import urlsplit
+
+mode = os.environ["SYNTHETIC_CAPTURE_MODE"]
+endpoint = urlsplit(os.environ["COPILOT_PROVIDER_BASE_URL"])
+assert [sys.argv[index + 1] for index, value in enumerate(sys.argv) if value == "--allow-tool"] == ["glob", "view"]
+assert "--allow-all" not in sys.argv and "--add-dir" not in sys.argv
+payload = {
+    "model": "synthetic-model", "stream": mode == "stream", "messages": [],
+    "tools": [
+        {"type": "function", "function": {"name": name, "parameters": {
+            "type": "object", "properties": properties, "required": list(properties),
+        }}}
+        for name, properties in [
+            ("glob", {"pattern": {"type": "string"}, "paths": {"type": "string"}}),
+            ("view", {"path": {"type": "string"}, "forceReadLargeFiles": {"type": "boolean"}}),
+        ]
+    ],
+}
+scheme = "Bear" + "er "
+headers = {"Authorization": scheme + os.environ["COPILOT_PROVIDER_API_KEY"]}
+for round_number in range(1, 4):
+    connection = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=5)
+    connection.request("POST", "/v1/chat/completions", json.dumps(payload).encode(), headers)
+    response = connection.getresponse()
+    body = response.read()
+    assert response.status == 200
+    connection.close()
+    if payload["stream"]:
+        assert body.endswith(b"data: [DONE]\n\n")
+        choice = json.loads(body.split(b"\n\n")[0][6:])["choices"][0]
+        message = choice["delta"]
+        for index, call in enumerate(message.get("tool_calls", [])):
+            assert call.pop("index") == index
+    else:
+        choice = json.loads(body)["choices"][0]
+        message = choice["message"]
+    if round_number == 3:
+        assert choice["finish_reason"] == "stop"
+        assert message["content"] == "LOCAL_REQUEST_CAPTURE_COMPLETE"
+        break
+    assert choice["finish_reason"] == "tool_calls"
+    payload["messages"].append(message)
+    for call in message["tool_calls"]:
+        arguments = json.loads(call["function"]["arguments"])
+        if round_number == 1:
+            assert call["function"]["name"] == "glob"
+            content = "\n".join(str(path) for path in sorted(Path(arguments["paths"]).glob(arguments["pattern"])))
+        else:
+            assert call["function"]["name"] == "view" and arguments["forceReadLargeFiles"] is True
+            content = Path(arguments["path"]).read_text(encoding="utf-8")
+        payload["messages"].append({"role": "tool", "tool_call_id": call["id"], "content": content})
+    if mode == "stall":
+        time.sleep(20)
+'''
+
 
 def run_capture(tmp_path, monkeypatch, mode, timeout=8, **preferences):
     monkeypatch.setenv("SYNTHETIC_CAPTURE_MODE", mode)
@@ -154,7 +216,44 @@ def test_real_launcher_passes_operator_effort_context_and_owned_session(tmp_path
     assert result["status"] == "captured", result
 
 
-def test_selected_native_cli_captures_synthetic_harness_only(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("mode", ["valid", "stream", "stall"])
+def test_three_round_transport_and_stalled_round_cleanup(tmp_path, monkeypatch, mode):
+    session_id = "11111111-2222-4333-8444-555555555555"
+    home = tmp_path / "home"
+    root = home / "session-state" / session_id / "instructions"
+    root.mkdir(parents=True)
+    for name in ("one", "two"):
+        (root / f"{name}.md").write_text(f"SYNTHETIC_LATE_{name}\n", encoding="utf-8")
+    monkeypatch.setenv("COPILOT_HOME", str(home))
+    monkeypatch.setenv("SYNTHETIC_CAPTURE_MODE", mode)
+    client = tmp_path / "synthetic_client.py"
+    client.write_text(MULTI_CLIENT, encoding="utf-8")
+    target = tmp_path / "request.json"
+    before = set(threading.enumerate())
+    result = capture.capture(
+        [sys.executable, str(client)], tmp_path, target,
+        prompt="synthetic", model="synthetic-model", timeout=10,
+        session_id=session_id, load_session_guidance=True, round_timeout=2,
+    )
+    assert set(threading.enumerate()) == before
+    assert target.exists() and b"SYNTHETIC_LATE" not in target.read_bytes()
+    if mode == "stall":
+        assert result["status"] == "failed" and result["error"] == "round_timeout"
+        assert result["multi_round"]["status"] == "incomplete"
+        assert len(result["multi_round"]["rounds"]) == 1
+        assert not (tmp_path / "request.round-2.json").exists()
+        assert not (tmp_path / "request.round-3.json").exists()
+    else:
+        assert result["status"] == "captured", result
+        assert result["multi_round"]["status"] == "complete"
+        assert len(result["multi_round"]["rounds"]) == 3
+        final = (tmp_path / "request.round-3.json").read_bytes()
+        assert b"SYNTHETIC_LATE_one" in final and b"SYNTHETIC_LATE_two" in final
+        assert result["captured_bytes"] == sum(row["wire_bytes"] for row in result["multi_round"]["rounds"])
+
+
+@pytest.mark.parametrize("multi_round", [False, True])
+def test_selected_native_cli_captures_synthetic_harness_only(tmp_path, monkeypatch, capsys, multi_round):
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable:
         pytest.skip("Set COPILOT_NATIVE_TEST_EXECUTABLE for offline synthetic CLI qualification")
@@ -176,14 +275,31 @@ def test_selected_native_cli_captures_synthetic_harness_only(tmp_path, monkeypat
         monkeypatch.setenv(name, str(home / name.lower()))
     (home / "settings.json").write_text(json.dumps({"model": "gpt-4.1"}), encoding="utf-8")
     target = tmp_path / "request.json"
+    extra = []
+    if multi_round:
+        session_id = "11111111-2222-4333-8444-555555555555"
+        monkeypatch.setattr(capture, "uuid4", lambda: session_id)
+        instructions = home / "session-state" / session_id / "instructions" / "synthetic-plugin"
+        instructions.mkdir(parents=True)
+        (instructions / "session-guidance.instructions.md").write_text(
+            "SYNTHETIC_LATE_GUIDANCE_MARKER\nA second line of synthetic guidance.\n", encoding="utf-8",
+        )
+        extra.append("--load-session-guidance")
     code = capture.main([
         "--copilot-command", executable,
         "--working-directory", str(workspace), "--output", str(target),
         "--prompt", "Acknowledge this synthetic fixture without using tools.",
         "--timeout-seconds", "45",
+        *extra,
     ])
     metadata = json.loads(capsys.readouterr().out)
     assert code == 0, metadata
     raw = target.read_bytes()
     present = marker.encode() in raw
     assert present, "the native client's request omitted the synthetic harness instruction"
+    if multi_round:
+        final = (tmp_path / "request.round-3.json").read_bytes()
+        assert b"SYNTHETIC_LATE_GUIDANCE_MARKER" not in raw
+        assert b"SYNTHETIC_LATE_GUIDANCE_MARKER" in final
+        assert metadata["multi_round"]["status"] == "complete"
+        assert len(metadata["multi_round"]["rounds"]) == 3
