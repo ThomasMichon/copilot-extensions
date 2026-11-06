@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import gzip
 import os
 import asyncio
 import datetime
@@ -130,11 +131,36 @@ async def test_malformed_lease_is_refused_without_retry(tmp_path, monkeypatch, c
         methods.append(request.method)
         if request.method == "GET":
             return httpx.Response(200, json=discovery())
-        return httpx.Response(200, content=json.dumps(response(**changes)).encode())
+        return httpx.Response(
+            200, content=json.dumps(response(**changes)).encode(),
+            headers={"Content-Type": "application/json"},
+        )
     client, _, _, _ = fixture_client(tmp_path, monkeypatch, handler)
     with pytest.raises(wire.SourceLeaseError):
         await client.acquire()
     assert methods == ["GET", "POST"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["encoding", "media-type"])
+async def test_unexpected_discovery_representation_refuses_before_capability_post(tmp_path, monkeypatch, kind):
+    methods = []
+    def handler(request):
+        methods.append(request.method)
+        if request.method == "POST":
+            return httpx.Response(200, json=response())
+        raw = json.dumps(discovery()).encode()
+        headers = {"Content-Type": "application/json"}
+        if kind == "encoding":
+            raw = gzip.compress(raw)
+            headers["Content-Encoding"] = "gzip"
+        else:
+            headers["Content-Type"] = "text/plain"
+        return httpx.Response(200, content=raw, headers=headers)
+    client, _, _, _ = fixture_client(tmp_path, monkeypatch, handler)
+    with pytest.raises(wire.SourceLeaseError, match="response-invalid"):
+        await client.acquire()
+    assert methods == ["GET"]
 
 
 @pytest.mark.asyncio
@@ -245,7 +271,9 @@ async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(t
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
-@pytest.mark.parametrize("kind", ["symlink", "public", "malformed", "missing-account", "hardlink"])
+@pytest.mark.parametrize("kind", [
+    "symlink", "public", "malformed", "header-duplicate", "nonfinite", "missing-account", "hardlink",
+])
 def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
     root = tmp_path / ".copilot"
     root.mkdir(mode=0o700)
@@ -262,6 +290,10 @@ def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
         config.chmod(0o644)
     elif kind == "malformed":
         config.write_text('{"authTokens":{},"authTokens":{}}')
+    elif kind == "header-duplicate":
+        config.write_text('// Native header\n{"authTokens":{},"authTokens":{}}')
+    elif kind == "nonfinite":
+        config.write_text('{"authTokens":{"https://github.com:synthetic":{"token":"old-token"}},"value":NaN}')
     elif kind == "missing-account":
         config.write_text('{"authTokens":{}}')
     elif kind == "hardlink":
@@ -272,6 +304,64 @@ def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
     with pytest.raises(CopilotFileAuthError):
         CopilotAccountFile(config, account="synthetic").install(lease)
     assert config.read_bytes() == original
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file staging")
+@pytest.mark.parametrize("characters,oversized", [(100000, False), (180000, True)])
+def test_serialized_size_cannot_lock_the_owner_out_of_renewal_or_withdrawal(
+    tmp_path, monkeypatch, characters, oversized,
+):
+    root = tmp_path / ".copilot"
+    root.mkdir(mode=0o700)
+    config = root / "config.json"
+    original = {
+        "label": "\u00e9" * characters,
+        "authTokens": {"https://github.com:synthetic": {"token": "old-token"}},
+    }
+    config.write_bytes(json.dumps(original, ensure_ascii=False).encode("utf-8"))
+    config.chmod(0o600)
+    before = config.read_bytes()
+    assert len(before) < 1024 * 1024
+    monkeypatch.setattr(wire, "time", SimpleNamespace(time=lambda: 1000, monotonic=lambda: 200))
+    lease = wire.HttpSourceLease(
+        "new-token", "synthetic", "github.com", "b" * 32, 999, 1060, 1000, 200, 60,
+    )
+    store = CopilotAccountFile(config, account="synthetic")
+    if oversized:
+        with pytest.raises(CopilotFileAuthError, match="too-large"):
+            store.install(lease)
+        assert config.read_bytes() == before
+    else:
+        store.install(lease)
+        assert config.stat().st_size <= 1024 * 1024
+        store.withdraw()
+        assert "token" not in json.loads(config.read_bytes())["authTokens"]["https://github.com:synthetic"]
+        store.install(lease)
+        assert json.loads(config.read_bytes())["label"] == original["label"]
+    assert not list(root.glob(".bridge-account-auth-*"))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file staging")
+def test_exclusive_stage_collision_preserves_the_existing_file(tmp_path, monkeypatch):
+    from agent_bridge import copilot_file_auth as storage
+
+    root = tmp_path / ".copilot"
+    root.mkdir(mode=0o700)
+    config = root / "config.json"
+    config.write_text('{"authTokens":{"https://github.com:synthetic":{"token":"old-token"}}}')
+    config.chmod(0o600)
+    collision = root / ".bridge-account-auth-collision"
+    collision.write_bytes(b"existing-other-writer-stage")
+    before = config.read_bytes()
+    monkeypatch.setattr(storage.secrets, "token_hex", lambda _: "collision")
+    monkeypatch.setattr(wire, "time", SimpleNamespace(time=lambda: 1000, monotonic=lambda: 200))
+    lease = wire.HttpSourceLease(
+        "new-token", "synthetic", "github.com", "b" * 32, 999, 1060, 1000, 200, 60,
+    )
+    with pytest.raises(CopilotFileAuthError):
+        CopilotAccountFile(config, account="synthetic").install(lease)
+    assert collision.read_bytes() == b"existing-other-writer-stage"
+    assert config.read_bytes() == before
 
 
 @pytest.mark.skipif(os.name == "posix", reason="Other platforms must refuse before acquisition")

@@ -8,7 +8,9 @@ import secrets
 import stat
 from pathlib import Path
 
-from .source_lease_http import HttpSourceLease, HttpSourceLeaseClient, _pairs, _text
+from .source_lease_http import HttpSourceLease, HttpSourceLeaseClient, _invalid_constant, _pairs, _text
+
+_MAX_CONFIG_BYTES = 1024 * 1024
 
 
 class CopilotFileAuthError(RuntimeError):
@@ -79,8 +81,8 @@ class CopilotAccountFile:
             with os.fdopen(descriptor, "rb") as stream:
                 before = os.fstat(stream.fileno())
                 self._private(before)
-                raw = stream.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024:
+                raw = stream.read(_MAX_CONFIG_BYTES + 1)
+            if len(raw) > _MAX_CONFIG_BYTES:
                 raise ValueError
             text = raw.decode("utf-8-sig")
             header = "\ufeff" if raw.startswith(b"\xef\xbb\xbf") else ""
@@ -91,7 +93,9 @@ class CopilotAccountFile:
                     body_start += len(line)
                 else:
                     break
-            value = json.loads(text[body_start:], object_pairs_hook=_pairs)
+            value = json.loads(
+                text[body_start:], object_pairs_hook=_pairs, parse_constant=_invalid_constant,
+            )
             if not isinstance(value, dict) or not isinstance(value.get("authTokens"), dict):
                 raise ValueError
             slot = value["authTokens"].get(self._key)
@@ -108,16 +112,19 @@ class CopilotAccountFile:
                 del slot["token"]
             else:
                 slot["token"] = token
-            temporary = ".bridge-account-auth-" + secrets.token_hex(16)
+            candidate = ".bridge-account-auth-" + secrets.token_hex(16)
             descriptor = os.open(
-                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                 0o600, dir_fd=directory,
             )
+            temporary = candidate
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 stream.write(header)
                 json.dump(value, stream, ensure_ascii=True)
                 stream.write("\n")
                 stream.flush()
+                if os.fstat(stream.fileno()).st_size > _MAX_CONFIG_BYTES:
+                    raise CopilotFileAuthError("copilot-account-file-too-large")
                 os.fsync(stream.fileno())
             current = os.stat(self._path.name, dir_fd=directory, follow_symlinks=False)
             if (

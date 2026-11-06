@@ -26,6 +26,8 @@ headers through the approved injector. Custom CA contexts must retain certificat
 and hostname verification; omitting one uses ordinary system trust. The caller's
 whole-acquisition deadline governs both requests; no shorter implicit HTTPX read
 timeout cuts off an otherwise valid source acquisition.
+The response must be identity-encoded JSON within the fixed byte limit;
+unexpected media/encoding and non-finite JSON are refused.
 
 Response account, host, token shape, exact lease fields, numeric bounds and
 generation are checked before returning an in-memory lease. The conservative
@@ -63,7 +65,10 @@ must match the selected native account and `github.com`.
 
 The adapter serializes its own writers with an OS lock and uses an exclusive
 private staging file plus atomic replacement. It rechecks config identity and
-the live source lease immediately before replacement. The embedding must
+the live source lease immediately before replacement. The serialized stage must
+also fit the same read limit, so escaping or token growth cannot prevent later
+renewal/withdrawal. Cleanup owns a stage only after exclusive creation succeeds;
+a collision never deletes another writer's file. The embedding must
 separately retain **exclusive native config-writer custody**: native writers
 do not promise to cooperate with this adapter's lock, so the stat check is not
 a universal compare-and-swap against arbitrary concurrent writers. Do not start

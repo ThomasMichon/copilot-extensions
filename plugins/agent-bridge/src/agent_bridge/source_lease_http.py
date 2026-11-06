@@ -64,6 +64,10 @@ def _pairs(values: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
+def _invalid_constant(value: str) -> None:
+    raise ValueError("Non-finite JSON value")
+
+
 def _text(value: object, limit: int = 2048) -> bool:
     return (
         isinstance(value, str) and 0 < len(value) <= limit
@@ -216,17 +220,25 @@ class HttpSourceLeaseClient:
         )
         headers = httpx.Headers(await auth.headers(context))
         headers[INSTALLATION_HEADER] = self._installation_id
+        headers["Accept"] = "application/json"
+        headers["Accept-Encoding"] = "identity"
         async with client.stream(
             method, endpoint, headers=headers, json=payload, follow_redirects=False,
         ) as response:
             if response.status_code != 200:
                 raise SourceLeaseError("source-lease-unavailable")
+            if (
+                response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                != "application/json"
+                or response.headers.get("Content-Encoding", "identity").strip().lower() != "identity"
+            ):
+                raise SourceLeaseError("source-lease-response-invalid")
             raw = bytearray()
             async for chunk in response.aiter_bytes():
-                raw.extend(chunk)
-                if len(raw) > 65536:
+                if len(raw) + len(chunk) > 65536:
                     raise SourceLeaseError("source-lease-response-invalid")
-            value = json.loads(raw, object_pairs_hook=_pairs)
+                raw.extend(chunk)
+            value = json.loads(raw, object_pairs_hook=_pairs, parse_constant=_invalid_constant)
             if not isinstance(value, dict):
                 raise SourceLeaseError("source-lease-response-invalid")
             return value
