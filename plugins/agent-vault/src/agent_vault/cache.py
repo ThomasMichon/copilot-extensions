@@ -110,7 +110,7 @@ class PersistentCache:
         return self._available
 
     def _get_fernet(self, *, readonly: bool = False):
-        if self._fernet is not None:
+        if self._fernet is not None and not readonly:
             return self._fernet
         if not self._crypto_available():
             return None

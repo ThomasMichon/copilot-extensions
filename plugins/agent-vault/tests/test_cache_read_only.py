@@ -75,7 +75,9 @@ def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
             def decrypt(self, _value):
                 raise CacheProtectionError("private-protection-diagnostic")
 
-        cache._fernet = UnavailableCipher()
+        module = ModuleType("cryptography.fernet")
+        module.Fernet = lambda _key: UnavailableCipher()
+        monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
     monkeypatch.setattr(cache_module, "get_cache", lambda: cache)
     monkeypatch.setattr(
         cli, "ensure_service",
@@ -156,6 +158,8 @@ def test_readonly_corrupt_legacy_store_never_becomes_missing(monkeypatch, tmp_pa
         def decrypt(self, value):
             raise ValueError("fixture-backend-diagnostic")
 
-    cache._fernet = BrokenCipher()
+    module = ModuleType("cryptography.fernet")
+    module.Fernet = lambda _key: BrokenCipher()
+    monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
     with pytest.raises(CacheProtectionError, match="invalid; not replaced"):
         cache.get("Identity/x", readonly=True)

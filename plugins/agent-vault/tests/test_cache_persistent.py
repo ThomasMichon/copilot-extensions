@@ -525,15 +525,27 @@ def test_batch_preserves_valid_pending_journal_semantics(
 
 
 @pytest.mark.parametrize("refresh", [False, True])
+@pytest.mark.parametrize("failure", ["ciphertext", "key", "changed-key"])
 def test_batch_does_not_replace_cache_corrupted_during_service_read(
-    enabled_cache, monkeypatch, capsys, refresh,
+    enabled_cache, monkeypatch, capsys, refresh, failure,
 ):
+    from cryptography.fernet import Fernet
+
+    from agent_vault import kek
+
     persistent = get_cache()
     assert persistent.put("Example/retained", "password", "cached-value")
+    cache_before = persistent._cache_file.read_bytes()
     key_before = persistent._key_file.read_bytes()
+    changed_key = kek.wrap_bytes(Fernet.generate_key())
 
     def send(*_args, **_kwargs):
-        persistent._cache_file.write_bytes(b"corrupted-during-read")
+        if failure == "ciphertext":
+            persistent._cache_file.write_bytes(b"corrupted-during-read")
+        else:
+            persistent._key_file.write_bytes(
+                changed_key if failure == "changed-key" else b"corrupted-during-read",
+            )
         return {"ok": True, "value": "not-published"}
 
     monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
@@ -548,8 +560,13 @@ def test_batch_does_not_replace_cache_corrupted_during_service_read(
     assert result["value"] is None
     assert "could not be reconciled" in result["error"]
     assert "not-published" not in captured.out + captured.err
-    assert persistent._cache_file.read_bytes() == b"corrupted-during-read"
-    assert persistent._key_file.read_bytes() == key_before
+    assert persistent._cache_file.read_bytes() == (
+        b"corrupted-during-read" if failure == "ciphertext" else cache_before
+    )
+    assert persistent._key_file.read_bytes() == (
+        key_before if failure == "ciphertext"
+        else changed_key if failure == "changed-key" else b"corrupted-during-read"
+    )
 
 
 @pytest.mark.parametrize("value,ok", [("cached-value", True), (42, False)])
