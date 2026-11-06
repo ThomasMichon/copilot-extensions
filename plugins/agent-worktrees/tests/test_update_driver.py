@@ -99,6 +99,87 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["wait"] == request.id
 
 
+@pytest.mark.parametrize("root_form", ["default", "relative", "registered"])
+def test_controller_shortcut_keeps_automatic_manager_policy(
+    queued, monkeypatch, tmp_path, root_form,
+):
+    from pathlib import Path
+    from agent_worktrees import control_plane_providers, manager_launch_cli
+    from update_driver.core import automatic_update_refusal
+
+    seen, _request = queued
+    home, caller = tmp_path / "home", tmp_path / "caller"
+    home.mkdir()
+    caller.mkdir()
+    root = {
+        "default": home / ".worktree-manager",
+        "relative": caller / "manager",
+        "registered": tmp_path / "registered-manager",
+    }[root_form]
+    root.mkdir()
+    (root / "config.toml").write_text(
+        "[maintenance]\nautomatic = false\n", encoding="utf-8",
+    )
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json"))
+    monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
+    if root_form == "relative":
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
+    else:
+        monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    manifest = (
+        SimpleNamespace(provider="worktree-manager", provider_root=str(root))
+        if root_form == "registered" else None
+    )
+    monkeypatch.setattr(
+        manager_launch_cli, "_control_plane_provider_selection",
+        lambda **_kwargs: (manifest, ""),
+    )
+    monkeypatch.setattr(
+        control_plane_providers, "_machine_control_plane_providers_dir",
+        lambda: home / "providers",
+    )
+    assert boundary.cmd_update_request(_args(auto=True)) == 4
+    request = seen["spec"]
+    assert dict(request.context)["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
+    assert "maintenance.automatic is false" in automatic_update_refusal(request)
+    assert "AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER" not in boundary.os.environ
+
+
+@pytest.mark.parametrize("provider", ["other", "worktree-manager"])
+def test_controller_shortcut_rejects_a_conflicting_manager(
+    queued, monkeypatch, tmp_path, provider,
+):
+    from agent_worktrees import control_plane_providers, manager_launch_cli
+
+    seen, _request = queued
+    monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "selected"))
+    monkeypatch.setattr(
+        control_plane_providers, "_machine_control_plane_providers_dir",
+        lambda: tmp_path / "providers",
+    )
+    monkeypatch.setattr(
+        manager_launch_cli, "_control_plane_provider_selection",
+        lambda **_kwargs: (
+            SimpleNamespace(provider=provider, provider_root=str(tmp_path / "other")), "",
+        ),
+    )
+    assert boundary.cmd_update_request(_args()) == 1
+    assert "spec" not in seen
+
+
+def test_uncontrolled_cell_does_not_inherit_manager_policy(queued, monkeypatch, tmp_path):
+    seen, _request = queued
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json"))
+    monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", raising=False)
+    assert boundary.cmd_update_request(_args(auto=True)) == 4
+    assert "WORKTREE_MANAGER_ROOT" not in dict(seen["spec"].context)
+
+
 @pytest.mark.parametrize("values,repair", [
     ({}, True), ({"auto": True}, False), ({"auto": True, "force": True}, False),
     ({"force": True}, True),

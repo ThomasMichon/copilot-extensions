@@ -44,6 +44,8 @@ def test_configured_project_update_routes_before_manager_bootstrap(
         "if 'get' in sys.argv:\n"
         "    print('tools/update.py')\n"
         "    raise SystemExit(0)\n"
+        "with open(os.environ['ENGINE_ENV'], 'w', encoding='utf-8') as stream:\n"
+        "    json.dump({'msys_excl': os.environ.get('MSYS2_ARG_CONV_EXCL')}, stream)\n"
         "raise SystemExit(47)\n",
         encoding="utf-8",
     )
@@ -52,6 +54,7 @@ def test_configured_project_update_routes_before_manager_bootstrap(
     resolver = runtime / "bin" / "resolve-runtime.ps1"
     resolver.write_text("$AwPy = '" + str(command).replace("'", "''") + "'\n")
     monkeypatch.setenv("ENGINE_CALLS", str(tmp / "engine-calls.jsonl"))
+    monkeypatch.setenv("ENGINE_ENV", str(tmp / "engine-env.json"))
     arguments = (
         ["--project", "sample", "update", "--force", "--skip-modules", "a b"]
         if project_position == "before"
@@ -71,6 +74,7 @@ def test_configured_project_update_routes_before_manager_bootstrap(
         command = [native_powershell, "-NoProfile", "-File", str(harness)]
     elif front == "git-sh":
         monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD", "0")
+        monkeypatch.setenv("MSYS2_ARG_CONV_EXCL", "*")
         monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
         command = [
             native_powershell, "-NoProfile", "-File",
@@ -98,6 +102,7 @@ def test_configured_project_update_routes_before_manager_bootstrap(
     assert len(calls) == 2, calls
     assert calls[0][-4:] == ["--project", "sample", "get", "update-controller"]
     assert calls[1][-len(arguments):] == arguments
+    assert json.loads((tmp / "engine-env.json").read_text(encoding="utf-8"))["msys_excl"] is None
     assert (manager / "config.toml").read_text(encoding="utf-8") == policy
 
 

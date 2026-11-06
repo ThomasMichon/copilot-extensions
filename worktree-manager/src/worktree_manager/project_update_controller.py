@@ -20,7 +20,10 @@ def handoff(arguments: list[str], *, observer: list[str] | None = None) -> int |
         detail = str(error)
         if error.install_hint or "Unknown key: 'update-controller'" in detail:
             return None
-        if project is None and "No active project could be resolved" in detail:
+        if project is None and (
+            "No active project could be resolved" in detail
+            or "Could not resolve a project for 'get'." in detail
+        ):
             return None
         raise
     if not selected:

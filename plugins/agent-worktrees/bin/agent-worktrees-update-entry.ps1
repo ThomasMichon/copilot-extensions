@@ -41,6 +41,8 @@ if (@($_updateArgs | Where-Object {
         '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
+# The Git-sh handoff disables conversion only for the native invocation.
+Remove-Item Env:MSYS2_ARG_CONV_EXCL -ErrorAction SilentlyContinue
 if (-not $_updateHasProject) {
     for ($_index = 1; $_index -lt $_updateArgs.Count; $_index++) {
         $_argument = $_updateArgs[$_index]
@@ -113,14 +115,19 @@ if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
     } finally { $_process.Dispose() }
     if ($_controller) {
         $_previousSkip = $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP
+        $_previousController = $env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER
         try {
             $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP = '1'
+            $env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER = '1'
             & $_awUpdateCaller @_originalUpdateArgs
             $_controllerRc = $LASTEXITCODE
         } finally {
             if ($null -eq $_previousSkip) {
                 Remove-Item Env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP -ErrorAction SilentlyContinue
             } else { $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP = $_previousSkip }
+            if ($null -eq $_previousController) {
+                Remove-Item Env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER -ErrorAction SilentlyContinue
+            } else { $env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER = $_previousController }
         }
         if ($_awUpdateStandalone) { exit $_controllerRc }
         $_awUpdateHandled = $true
@@ -130,9 +137,6 @@ if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
 }
 $_awUpdateHandled = $true
 $ErrorActionPreference = 'Stop'
-# The Git-sh handoff disables conversion for this native invocation only.
-# Retaining it would also disable Git's own file-transport path conversion.
-Remove-Item Env:MSYS2_ARG_CONV_EXCL -ErrorAction SilentlyContinue
 if ($env:AGENT_WORKTREES_CONTROL_PLANE_PROVIDER -and
     $env:AGENT_WORKTREES_CONTROL_PLANE_PROVIDER -cne 'worktree-manager') {
     throw 'Update bootstrap requires the selected Manager provider.'

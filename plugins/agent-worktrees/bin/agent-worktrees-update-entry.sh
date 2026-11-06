@@ -78,6 +78,7 @@ _aw_update_entry() (
     esac
     if _aw_project_controller_selected "$@"; then
         AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP=1 \
+            AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER=1 \
             exec bash "$_aw_update_caller" "$@"
     fi
     _project=""

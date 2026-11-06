@@ -358,6 +358,20 @@ def test_project_controller_preserves_explicit_manager_skip(queued, monkeypatch)
     assert calls == [("example", ["update", "--no-manager", "--force"])]
 
 
+@pytest.mark.parametrize("project", [None, "missing"])
+def test_neutral_controller_probe_does_not_block_manager_update(queued, monkeypatch, project):
+    from worktree_manager import engine_client
+
+    def missing_project(*_args):
+        raise engine_client.EngineError("Could not resolve a project for 'get'.")
+
+    seen, _request = queued
+    monkeypatch.setattr(engine_client, "get_value", missing_project)
+    flags = ["--project", project] if project else []
+    assert driver.cmd_update_request(flags) == (1 if project else 6)
+    assert ("spec" in seen) is (project is None)
+
+
 def test_project_controller_routes_borrowed_request_before_manager_source(
     queued, monkeypatch, tmp_path,
 ):
