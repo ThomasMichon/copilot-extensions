@@ -330,6 +330,28 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [target-to-delivery and reconcile study](bridge-target-and-reconcile-contracts.md)
+accounts for 24 more whole originals and actual OPEN #6394's complete
+#6752 target-diagnostic intake, preserving mechanical receipt/nudge
+acceptance and the original source owner's unresolved phase decision.
+Twenty-two other contracts retain their finite outcomes and custodians;
+the Fleet reconcile proposal has no invented receiving issue.
+The journal records reviewed #11044 and three separately audited
+NOT_PLANNED tracking retirements. Complete 09:12 PST scans measure
+806 whole OPEN, 1,016 audited dispositions and 77 above 729.
+The canonical Plan/Validation and fixed checkpoint remain Active.
+
+The [pipe lifecycle and Logger quality cohorts](launch-pipe-and-logger-quality-cohorts.md)
+retain 24 complete originals and two additive actual parent intakes:
+#5650 under OPEN #5716, and #6004/#6026 under OPEN #5665. Complete
+current bodies preserve incumbent scope, independent Plan/global Validation,
+native recurrence/type-reuse conditions and actual custodians. Source
+trackers remain OPEN pending reviewed planning delivery and separate
+disposition; no implementation, retry or resource release follows.
+The journal records reviewed #11042 outcome delivery and a further 24
+qualified originals assigned to three disjoint studies. The campaign
+Plan/Validation and fixed whole-queue checkpoint remain Active.
+
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records actual reviewed #11039 merge, complete published cohort readback
 and separate #4205/#5003 NOT_PLANNED tracking retirements under OPEN

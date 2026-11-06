@@ -653,7 +653,7 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
-    workspace_creation_cli.validate_arguments(args)
+    worktree_writer = workspace_creation_cli.validate_arguments(args)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
         print("[FAIL] --detach requires --cli", file=sys.stderr)
         sys.exit(2)
@@ -691,7 +691,9 @@ def _cmd_create(args: argparse.Namespace) -> None:
 
     creation_key = getattr(args, "creation_key", None)
     if creation_key is not None:
-        workspace_creation_cli.create(args, client, caller_id=caller_id)
+        workspace_creation_cli.create(
+            args, client, caller_id=caller_id, worktree_writer=worktree_writer,
+        )
         return
 
     try:
