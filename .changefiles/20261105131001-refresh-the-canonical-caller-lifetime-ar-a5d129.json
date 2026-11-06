@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the canonical caller-lifetime archive for native Darwin reconciliation",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}

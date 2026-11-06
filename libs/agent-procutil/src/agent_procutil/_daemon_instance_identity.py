@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import select
 import signal
@@ -162,7 +163,10 @@ def birth_identity(pid: int, *, include_exited: bool = False) -> str:
         ]
         query.restype = ctypes.c_int
         info = _BSDInfo()
+        ctypes.set_errno(0)
         size = query(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info))
+        if size == 0 and ctypes.get_errno() == errno.ESRCH:
+            raise ProcessLookupError(pid)
         if size != ctypes.sizeof(info) or info.pid != pid:
             raise OSError("daemon birth identity unavailable")
         if not include_exited and info.status == 5:

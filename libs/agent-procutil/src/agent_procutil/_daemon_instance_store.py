@@ -990,7 +990,7 @@ def reconcile(root, limit, max_seconds=5, *, _caller_pid=None):
                 except (OSError, ValueError, KeyError):
                     results.append(InstanceCleanupResult(path.stem, "held", "invalid-record"))
                     continue
-                options = {"stop_timeout": min(5, remaining)}
+                options = {"stop_timeout": min(5, remaining), "deadline": deadline}
                 if _caller_pid is not None:
                     options["_caller_pid"] = _caller_pid
                 results.append(cleanup(DaemonInstanceReceipt(path.stem, root), **options))
