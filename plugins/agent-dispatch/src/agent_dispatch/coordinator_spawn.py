@@ -117,6 +117,7 @@ class RecordSpawnWorktreeBody(BaseModel):
 class RecordSpawnAllocationBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project: str = Field(min_length=1)
+    worktree_writer_requirement: dict | None = None
 
 
 class ReservationDetailBody(BaseModel):
@@ -544,7 +545,9 @@ def register_spawn_routes(
     )
     @app.post("/spawn-reservations/{key}/allocation")
     def record_spawn_allocation(key: str, body: RecordSpawnAllocationBody) -> dict:
-        result = _reservation_guard(lambda: queue.record_spawn_allocation(key, body.project))
+        result = _reservation_guard(lambda: queue.record_spawn_allocation(
+            key, body.project, worktree_writer_requirement=body.worktree_writer_requirement,
+        ))
         bus.publish({"type": "spawn.allocation_bound", "reservation": result})
         return result
 

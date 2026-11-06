@@ -1,0 +1,9 @@
+{
+  "comment": "Retain qualified ordinary Bridge writer requirements through keyed creation and exact-session continuation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

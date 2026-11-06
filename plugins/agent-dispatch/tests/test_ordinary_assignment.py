@@ -61,6 +61,10 @@ def assigned(tmp_path, monkeypatch, request):
     calls = []
 
     class Client:
+        def pool_placement_contract(self):
+            from agent_dispatch.queue_pool_placement import pool_placement_contract
+            return pool_placement_contract()
+
         def get(self, task_id):
             return asdict(queue.get(task_id))
 
@@ -71,8 +75,10 @@ def assigned(tmp_path, monkeypatch, request):
                 **reservation_native_facts(queue, key),
             }
 
-        def record_spawn_allocation(self, key, project):
-            return asdict(queue.record_spawn_allocation(key, project))
+        def record_spawn_allocation(self, key, project, **kwargs):
+            if kwargs:
+                calls.append("writer-intent")
+            return asdict(queue.record_spawn_allocation(key, project, **kwargs))
 
         def record_created_agent(self, key, **facts):
             calls.append("created-store")
@@ -96,6 +102,18 @@ def assigned(tmp_path, monkeypatch, request):
         assert argv[0] == "bridge" and argv[1] == "--json"
         command = argv[2]
         calls.append("receipt" if "--receipt-only" in argv else command)
+        requirement = snapshot.get("_writer_requirement")
+        if command == "version":
+            assert argv == ["bridge", "--json", "version", "--contracts-json"]
+            return subprocess.CompletedProcess(argv, 0, json.dumps({
+                "schema": "agent-bridge.cli-contracts", "version": 1,
+                "contracts": {
+                    "agent-bridge.create": {"version": 1, "capabilities": ["keyed-worktree-writer"]},
+                    "agent-bridge.status": {
+                        "version": 1, "capabilities": ["health-json", "exact-session-worktree-writer"],
+                    },
+                },
+            }), "")
         if command == "resume":
             saved = queue.get_reservation(snapshot["spawn_reservation_key"])
             target = saved.agent_info["session_id"] if saved.agent_info else "worktree-a"
@@ -107,17 +125,47 @@ def assigned(tmp_path, monkeypatch, request):
                 "session_id": response["session_id"], "status": "idle", "verb": "loaded",
             }), "")
         if command == "status":
+            if len(argv) == 3:
+                return subprocess.CompletedProcess(argv, 0, json.dumps({
+                    "service": "agent-bridge", "status": "ok", "ready": True, "draining": False,
+                    "slot": {"role": "active", "pid": 42, "active": {"pid": 42, "generation": 7}},
+                    "capabilities": {
+                        "worktree_record_delegation": 1, "retained_workspace_creation_writer": 1,
+                        "retained_workspace_creation_writer_inspection": 1,
+                    },
+                    "worktree_record_writer": snapshot.get("_selected_writer", requirement["identity"]),
+                }), "")
             if "--full" not in argv:
                 assert argv == ["bridge", "--json", "status", "bridge-a"]
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"status": response["status"]}), "")
-            assert argv == ["bridge", "--json", "status", "bridge-a", "--full"]
-            return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+            expected = ["bridge", "--json", "status", "bridge-a", "--full"]
+            if requirement is not None:
+                expected += ["--worktree-writer"]
+            assert argv == expected
+            observed = {}
+            if requirement is not None:
+                from agent_dispatch.queue_task_relationships import WRITER
+                observed["worktree_writer_observation"] = {
+                    "schema": "copilot-extensions.creation-worktree-writer", "version": 1,
+                    "session_id": "bridge-a", "native_session_id": "native-a",
+                    "bridge_instance": {"installation_root": "/bridge", "pid": 42, "generation": 7},
+                    "project": "execution-project", "worktree_id": "worktree-a",
+                    "worktree_path": worktree_path, "worktree_writer": requirement,
+                    "writer_scope": "executing-process", "writer_contract": WRITER,
+                    "retained_session_writes": 1,
+                }
+            return subprocess.CompletedProcess(argv, 0, json.dumps({**response, **observed}), "")
         if command == "create":
             assert "--worktree-id" in argv
             assert argv[argv.index("--worktree-id") + 1] == "worktree-a"
             assert argv[argv.index("--creation-key") + 1] == reservation.creation_key
             assert argv[3] == "execution-project@local"
-            assert kwargs.get("input") is None
+            if requirement is not None:
+                assert argv[-2:] == ["--worktree-writer-file", "-"]
+                assert json.loads(kwargs["input"]) == requirement
+                assert queue.get_reservation(reservation.key).worktree_writer_requirement == requirement
+            else:
+                assert kwargs.get("input") is None
             record.update(last_session_id="native-a", session_count=1)
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
@@ -160,6 +208,236 @@ def assigned(tmp_path, monkeypatch, request):
     monkeypatch.setattr(ordinary_assignment, "subprocess", process_api)
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *_a, **_kw: "changed-routing")
     return queue, snapshot, Client(), record, response, calls
+
+
+def _qualified_start(assigned, *, explicit=True):
+    _, task, client, _, _, _ = assigned
+    return ordinary_bridge.start(
+        task, client=client, agent="local", project="execution-project", prompt="assigned work",
+        **({"worktree_writer": task["_writer_requirement"]} if explicit else {}),
+    )
+
+
+def _required_writer(assigned):
+    _, task, _, record, _, _ = assigned
+    record.update(last_session_id=None, session_count=0)
+    task["_writer_requirement"] = {
+        "version": 1, "creation_nonce": record["creation_nonce"],
+        "identity": {"installation_root": "/worktrees", "runtime_generation": "a" * 32},
+    }
+
+
+def test_qualified_ordinary_create_retains_requirement_and_rechecks_original_journal(assigned):
+    queue, task, _, _, response, calls = assigned
+    _required_writer(assigned)
+    first = _qualified_start(assigned)
+    assert first["native_session_id"] == "native-a"
+    stored = queue.get_reservation(task["spawn_reservation_key"]).agent_info
+    assert stored["worktree_writer_requirement"] == task["_writer_requirement"]
+    assert calls.index("version") < calls.index("writer-intent") < calls.index("create") < calls.index("created-store")
+    assert calls[-3:] == ["status", "status", "send"]
+    calls.clear()
+    response["status"] = "stopped"
+    original = ordinary_bridge.subprocess.run
+
+    def resume(argv, **kwargs):
+        result = original(argv, **kwargs)
+        if argv[0] == "bridge" and argv[2] == "resume":
+            response["status"] = "idle"
+        return result
+
+    ordinary_bridge.subprocess.run = resume
+    _qualified_start(assigned, explicit=False)
+    assert "create" not in calls and "version" not in calls
+    assert calls.count("resume") == 1 and calls.count("send") == 1
+    assert queue.get_reservation(task["spawn_reservation_key"]).agent_info[
+        "worktree_writer_requirement"
+    ] == task["_writer_requirement"]
+
+
+@pytest.mark.parametrize("change", ["drop", "replace", "nonce"])
+def test_qualified_ordinary_storage_cannot_drop_or_replace_requirement(assigned, change):
+    from agent_dispatch.ordinary_agent_storage import record_created_agent
+    queue, task, _, record, _, _ = assigned
+    _required_writer(assigned)
+    _qualified_start(assigned)
+    key = task["spawn_reservation_key"]
+    before = asdict(queue.get_reservation(key))
+    incoming = copy.deepcopy(before["agent_info"])
+    if change == "drop":
+        incoming.pop("worktree_writer_requirement")
+    elif change == "replace":
+        incoming["worktree_writer_requirement"]["identity"]["runtime_generation"] = "b" * 32
+    else:
+        incoming["worktree_writer_requirement"]["creation_nonce"] = "other-incarnation"
+    with pytest.raises(TaskError, match="writer requirement"):
+        record_created_agent(
+            queue, key, task_generation=task["generation"], agent_info=incoming,
+            worktree_record=record, startup_invocation=incoming["startup_invocation"],
+        )
+    assert asdict(queue.get_reservation(key)) == before
+
+
+def test_qualified_ordinary_does_not_resume_a_journalless_head(assigned):
+    _, _, _, record, _, calls = assigned
+    _required_writer(assigned)
+    record.update(last_session_id="native-a", session_count=1)
+    original = ordinary_bridge.subprocess.run
+
+    def missing(argv, **kwargs):
+        if argv[0] == "bridge" and argv[2] == "create":
+            calls.append("refused-create")
+            return subprocess.CompletedProcess(argv, 1, "", "original keyed writer unavailable")
+        return original(argv, **kwargs)
+
+    ordinary_bridge.subprocess.run = missing
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="original keyed writer unavailable"):
+        _qualified_start(assigned)
+    assert "refused-create" in calls and "resume" not in calls and "send" not in calls
+
+
+@pytest.mark.parametrize("versions", [None, [], [True], [0]])
+def test_qualified_ordinary_refuses_older_coordinator_before_owner_or_native_effects(assigned, versions):
+    queue, task, client, _, _, calls = assigned
+    _required_writer(assigned)
+    before = asdict(queue.get_reservation(task["spawn_reservation_key"]))
+    client.pool_placement_contract = lambda: {"ordinary_writer_requirement_versions": versions}
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="storage is unqualified"):
+        _qualified_start(assigned)
+    assert not calls and asdict(queue.get_reservation(task["spawn_reservation_key"])) == before
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("selector_changed", [False, True])
+def test_qualified_ordinary_lost_create_reply_replays_original_key_not_worktree_resume(
+    assigned, explicit, selector_changed,
+):
+    queue, task, _, record, _, calls = assigned
+    _required_writer(assigned)
+    original = ordinary_bridge.subprocess.run
+    keys = []
+
+    def interrupted(argv, **kwargs):
+        result = original(argv, **kwargs)
+        if argv[0] == "bridge" and argv[2] == "create":
+            keys.append(argv[argv.index("--creation-key") + 1])
+            if len(keys) == 1:
+                raise subprocess.TimeoutExpired(argv, 1)
+        return result
+
+    ordinary_bridge.subprocess.run = interrupted
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        _qualified_start(assigned)
+    retained = queue.get_reservation(task["spawn_reservation_key"])
+    assert retained.agent_info is None and record["last_session_id"] == "native-a"
+    assert retained.worktree_writer_requirement == task["_writer_requirement"]
+    if selector_changed:
+        task["_selected_writer"] = {"installation_root": "/new", "runtime_generation": "b" * 32}
+    _qualified_start(assigned, explicit=explicit)
+    assert keys == [retained.creation_key, retained.creation_key]
+    assert "resume" not in calls and calls.count("send") == 1
+    assert queue.get_reservation(task["spawn_reservation_key"]).agent_info[
+        "worktree_writer_requirement"
+    ] == task["_writer_requirement"]
+
+
+@pytest.mark.parametrize("change", ["identity", "nonce", "drop"])
+def test_allocation_writer_intent_survives_omission_and_refuses_replacement(assigned, change):
+    queue, task, client, _, _, _ = assigned
+    _required_writer(assigned)
+    requirement = task["_writer_requirement"]
+    key = task["spawn_reservation_key"]
+    client.record_spawn_allocation(key, "execution-project", worktree_writer_requirement=requirement)
+    before = asdict(queue.get_reservation(key))
+    incoming = copy.deepcopy(requirement)
+    if change == "drop":
+        client.record_spawn_allocation(key, "execution-project")
+        assert queue.get_reservation(key).worktree_writer_requirement == requirement
+    else:
+        if change == "identity":
+            incoming["identity"]["runtime_generation"] = "b" * 32
+        else:
+            incoming["creation_nonce"] = "other-incarnation"
+        with pytest.raises(TaskError, match="writer requirement"):
+            client.record_spawn_allocation(key, "execution-project", worktree_writer_requirement=incoming)
+        assert asdict(queue.get_reservation(key)) == before
+
+
+def test_original_allocation_retry_carries_requirement_before_agent_facts_exist(assigned):
+    queue, task, client, _, _, _ = assigned
+    _required_writer(assigned)
+    key = task["spawn_reservation_key"]
+    client.record_spawn_allocation(
+        key, "execution-project", worktree_writer_requirement=task["_writer_requirement"],
+    )
+    queue.defer_spawn(key, detail="create not attempted")
+    retry, reserved = queue.reserve_spawn(task["id"], reserved_by="supervisor", driver="ordinary-bridge")
+    assert reserved and retry.key != key
+    assert retry.creation_key == queue.get_reservation(key).creation_key
+    assert retry.worktree_writer_requirement == task["_writer_requirement"]
+    assert retry.agent_info is None
+
+
+def test_qualified_ordinary_refuses_retrofit_of_historical_unpinned_agent(assigned):
+    queue, task, _, _, _, calls = assigned
+    _start(assigned)
+    before = asdict(queue.get_reservation(task["spawn_reservation_key"]))
+    calls.clear()
+    task["_writer_requirement"] = {
+        "version": 1, "creation_nonce": "original-incarnation",
+        "identity": {"installation_root": "/worktrees", "runtime_generation": "a" * 32},
+    }
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no original writer requirement"):
+        _qualified_start(assigned)
+    assert not calls and asdict(queue.get_reservation(task["spawn_reservation_key"])) == before
+
+
+def test_governed_ordinary_storage_refuses_older_unqualified_caller(assigned):
+    from agent_dispatch.ordinary_agent_storage import record_resumed_agent
+    queue, task, _, record, _, _ = assigned
+    _start(assigned)
+    key = task["spawn_reservation_key"]
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET task_relationship_required=1 WHERE key=?", (key,))
+    before = asdict(queue.get_reservation(key))
+    with pytest.raises(TaskError, match="original writer requirement"):
+        record_resumed_agent(
+            queue, key, task_generation=task["generation"], session_info=before["agent_info"],
+            worktree_record=record, startup_invocation=before["agent_info"]["startup_invocation"],
+        )
+    assert asdict(queue.get_reservation(key)) == before
+
+
+@pytest.mark.parametrize("change", ["journal", "native", "instance", "nonce"])
+def test_qualified_ordinary_refusal_retains_created_handle_without_resume_or_send(assigned, change):
+    queue, task, _, _, _, calls = assigned
+    _required_writer(assigned)
+    _qualified_start(assigned)
+    before = asdict(queue.get_reservation(task["spawn_reservation_key"]))
+    calls.clear()
+    original = ordinary_bridge.subprocess.run
+
+    def changed(argv, **kwargs):
+        result = original(argv, **kwargs)
+        if "--worktree-writer" not in argv:
+            return result
+        value = json.loads(result.stdout)
+        observed = value["worktree_writer_observation"]
+        if change == "journal":
+            value.pop("worktree_writer_observation")
+        elif change == "native":
+            observed["native_session_id"] = "changed"
+        elif change == "instance":
+            observed["bridge_instance"]["generation"] += 1
+        else:
+            observed["worktree_writer"]["creation_nonce"] = "changed"
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    ordinary_bridge.subprocess.run = changed
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="resume failed"):
+        _qualified_start(assigned, explicit=False)
+    assert "create" not in calls and "resume" not in calls and "send" not in calls
+    assert asdict(queue.get_reservation(task["spawn_reservation_key"])) == before
 
 
 def _legacy(queue, task, *, native="native-a", handle="legacy-bridge"):
@@ -632,6 +910,41 @@ def test_ordinary_assignment_resumed_client_route_and_raw_facts(assigned):
             assert result["agent_info"]["acp_session_id"] == "native-a"
             assert result["agent_info"]["fact_kind"] == "resumed"
             assert "ready" not in result["agent_info"]
+    finally:
+        api.close()
+
+
+def test_qualified_allocation_requirement_uses_actual_client_and_provider_before_create(assigned):
+    from agent_dispatch.client import DispatchError
+    queue, task, _, _, _, _ = assigned
+    _required_writer(assigned)
+    api = TestClient(create_app_for(queue))
+
+    def exchange(request):
+        result = api.request(request.method, str(request.url), content=request.content,
+                             headers=dict(request.headers))
+        return httpx.Response(result.status_code, json=result.json())
+
+    try:
+        with DispatchClient("http://testserver", transport=httpx.MockTransport(exchange)) as client:
+            key = task["spawn_reservation_key"]
+            requirement = task["_writer_requirement"]
+            result = client.record_spawn_allocation(
+                key, "execution-project", worktree_writer_requirement=requirement,
+            )
+            assert result["agent_info"] is None
+            assert result["worktree_writer_requirement"] == requirement
+            assert client.get_reservation(key)["worktree_writer_requirement"] == requirement
+            assert client.record_spawn_allocation(key, "execution-project")[
+                "worktree_writer_requirement"
+            ] == requirement
+            changed = copy.deepcopy(requirement)
+            changed["identity"]["runtime_generation"] = "b" * 32
+            with pytest.raises(DispatchError, match="writer requirement"):
+                client.record_spawn_allocation(
+                    key, "execution-project", worktree_writer_requirement=changed,
+                )
+            assert queue.get_reservation(key).worktree_writer_requirement == requirement
     finally:
         api.close()
 

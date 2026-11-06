@@ -215,7 +215,7 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
 def start(
     task: dict, *, client: Any, agent: str, prompt: str,
     project: str | None = None, charter: str | None = None,
-    timeout: float = 180, no_pair: bool = False,
+    timeout: float = 180, no_pair: bool = False, worktree_writer: dict | None = None,
 ) -> dict:
     """Create without a prompt, durably store, then send to the retained handle."""
     prefix = agent_bridge_launch_prefix()
@@ -253,6 +253,32 @@ def start(
     except TaskError as exc:
         raise BridgeCarriedSessionBusy(str(exc)) from exc
     info = reservation.get("agent_info")
+    from .ordinary_writer_admission import REQUIREMENT, OrdinaryWriterAdmission, writer_requirement
+
+    retained_writer = reservation.get(REQUIREMENT)
+    writer_retained = retained_writer is not None
+    if retained_writer is not None:
+        retained_writer = writer_requirement(retained_writer)
+        if info and info.get(REQUIREMENT) != retained_writer:
+            raise BridgeCarriedSessionBusy("ordinary agent differs from original allocation writer requirement")
+        if worktree_writer is not None and writer_requirement(worktree_writer) != retained_writer:
+            raise BridgeCarriedSessionBusy("ordinary Bridge original writer requirement changed")
+        worktree_writer = retained_writer
+    elif info and (worktree_writer is not None or REQUIREMENT in info):
+        raise BridgeCarriedSessionBusy("historical ordinary agent has no original writer requirement")
+    if reservation.get("task_relationship_required") is True and worktree_writer is None:
+        raise BridgeCarriedSessionBusy("governed ordinary startup lacks its qualified writer requirement")
+    writer_admission = (
+        OrdinaryWriterAdmission(worktree_writer, reservation) if worktree_writer is not None else None
+    )
+    if writer_admission is not None:
+        try:
+            support = client.pool_placement_contract()
+            versions = support.get("ordinary_writer_requirement_versions")
+            if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                raise TaskError("coordinator lacks original ordinary writer requirement storage")
+        except (AttributeError, DispatchError, TaskError) as exc:
+            raise BridgeCarriedSessionBusy(f"ordinary writer storage is unqualified: {exc}") from exc
     if execution_machine is not None:
         from .client_pool_placement import _validate_contract
         try:
@@ -320,10 +346,13 @@ def start(
         )
 
     def resumed_info(session_id: str) -> dict:
-        result = run(["--json", "status", session_id, "--full"])
-        if result.returncode:
-            raise BridgeCarriedSessionBusy("resumed ordinary agent full identity is unavailable")
-        response = _json_result(result)
+        if writer_admission is not None:
+            response = writer_admission.inspect_session(run, info)
+        else:
+            result = run(["--json", "status", session_id, "--full"])
+            if result.returncode:
+                raise BridgeCarriedSessionBusy("resumed ordinary agent full identity is unavailable")
+            response = _json_result(result)
         validate_resumed(response, project=project)
         if response["session_id"] != session_id:
             raise TaskError("resumed ordinary agent full identity changed bridge session")
@@ -333,6 +362,8 @@ def start(
     def assignment_record() -> dict:
         current_task(client, task)
         record = read_owner(reservation, task["id"], timeout=timeout)
+        if writer_admission is not None:
+            writer_admission.check_record(record)
         if reservation.get("worktree_path") is None:
             reservation["worktree_path"] = record["path"]
         try:
@@ -355,6 +386,8 @@ def start(
                 record = initial_record
             else:
                 record = assignment_record()
+        if writer_admission is not None:
+            info[REQUIREMENT] = writer_requirement(writer_admission.requirement)
         invocation = prepare(task, reservation, info, prompt, worktree_record=record,
                              agent=agent, charter=charter)
         if info.get("fact_kind") == "resumed":
@@ -376,6 +409,9 @@ def start(
         from .bridge_remote import normalize_host
         if (
             not isinstance(readback, dict) or not same_facts(readback.get("startup_invocation"), invocation)
+            or writer_admission is not None and (
+                writer_requirement(readback.get(REQUIREMENT)) != writer_admission.requirement
+            )
             or execution_machine is not None and (
                 not isinstance(stored.get("execution_machine"), str)
                 or normalize_host(stored["execution_machine"]) != normalize_host(execution_machine)
@@ -436,6 +472,8 @@ def start(
             raise BridgeUnavailable("retained ordinary agent has retired or unknown conversation authority")
         try:
             current_task(client, task)
+            if writer_admission is not None:
+                writer_admission.inspect_session(run, info)
             status_result = run(["--json", "status", session_id], read_only=True)
             if status_result.returncode:
                 raise BridgeCarriedSessionBusy("retained ordinary agent status is unproven")
@@ -473,7 +511,12 @@ def start(
             ):
                 raise BridgeCarriedSessionBusy("coordinator native bindings are unproven")
             head = record.get("last_session_id")
-            if head:
+            if head and writer_admission is not None:
+                if native_conflict(head, known, retired):
+                    raise BridgeCarriedSessionBusy("ground head conflicts with known or retired native identity")
+                # Only the original keyed owner can recover a lost create reply.
+                initial_record = record
+            elif head:
                 if native_conflict(head, known, retired):
                     raise BridgeCarriedSessionBusy("ground head conflicts with known or retired native identity")
                 if reservation.get("legacy_acquisition"):
@@ -520,7 +563,22 @@ def start(
             if charter:
                 argv += ["--charter", charter]
             try:
-                created = run(argv)
+                writer_input = None
+                if writer_admission is not None:
+                    writer_admission.admit_create(run, retained=writer_retained)
+                    retained = client.record_spawn_allocation(
+                        key, project, worktree_writer_requirement=writer_admission.requirement,
+                    )
+                    if (
+                        retained.get("creation_key") != reservation["creation_key"]
+                        or any(retained.get(field) != reservation.get(field)
+                               for field in ("worktree", "worktree_path", "allocation_project"))
+                        or writer_requirement(retained.get(REQUIREMENT)) != writer_admission.requirement
+                    ):
+                        raise TaskError("coordinator did not retain the original ordinary writer requirement")
+                    argv += ["--worktree-writer-file", "-"]
+                    writer_input = json.dumps(writer_admission.requirement)
+                created = run(argv, prompt_input=writer_input)
                 if created.returncode:
                     raise CreatedAgentUnrecorded(created.stderr or created.stdout or "ordinary bridge create failed")
                 info = _json_result(created)
@@ -538,6 +596,8 @@ def start(
         from .ordinary_invocation import native_payload
         store_info()
         actual = identity(info)
+        if writer_admission is not None:
+            writer_admission.inspect_session(run, info)
         invocation = info["startup_invocation"]
         sent = run(["--json", "send", session_id, "--expected-native-session-id",
                     actual.native, "--native-invocation-file", "-", "--no-wait"],
