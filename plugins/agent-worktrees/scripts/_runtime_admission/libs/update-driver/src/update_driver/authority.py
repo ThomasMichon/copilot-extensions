@@ -333,6 +333,15 @@ def change(
     except (OSError, AuthorityError) as error:
         raise core.StateError("update authority state is unavailable or invalid") from error
     deadline = time.monotonic() + timeout
+
+    def verify():
+        try:
+            capable = verify_capabilities(deadline)
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            raise core.StateError("update authority capability check failed") from error
+        if capable is not True or time.monotonic() > deadline:
+            raise core.StateError("update authority capabilities are not established in time")
+
     while True:
         execution = _wait_operation(root / "execution.lock", deadline, "installation execution")
         pending = False
@@ -361,6 +370,30 @@ def change(
                     ]
                     if any(request.state == "running" for request in requests):
                         raise core.InterruptedError("update authority cannot change while execution is unsettled")
+                    try:
+                        incomplete = version != SCHEMA_VERSION and guarded(root)
+                    except (OSError, AuthorityError) as error:
+                        raise core.StateError("update authority state is unavailable or invalid") from error
+                    late = [
+                        request for request in requests
+                        if incomplete and request.state == "pending" and suite_request(request.spec)
+                    ]
+                    verified = False
+                    if late:
+                        verify()
+                        verified = True
+                        execution.assert_owned()
+                        gate.assert_owned()
+                        core._assert_database_identity(database, identity)
+                        for request in late:
+                            db.execute(
+                                """UPDATE requests SET state='completed',exit_code=3,error=?,
+                                finished_at=? WHERE id=? AND state='pending'""",
+                                ("suite update refused after an interrupted authority switch", time.time(),
+                                 request.id),
+                            )
+                        late_ids = {request.id for request in late}
+                        requests = [request for request in requests if request.id not in late_ids]
                     pending = any(
                         request.state == "pending" and (
                             version != SCHEMA_VERSION
@@ -368,15 +401,16 @@ def change(
                         ) for request in requests
                     )
                     if pending:
+                        execution.assert_owned()
+                        gate.assert_owned()
+                        core._assert_database_identity(database, identity)
                         db.commit()
                     else:
+                        if not verified:
+                            verify()
                         try:
-                            capable = verify_capabilities(deadline)
-                        except (OSError, RuntimeError, TypeError, ValueError) as error:
-                            raise core.StateError("update authority capability check failed") from error
-                        if capable is not True or time.monotonic() > deadline:
-                            raise core.StateError("update authority capabilities are not established in time")
-                        try:
+                            execution.assert_owned()
+                            gate.assert_owned()
                             ensure_guard(root)
                             if version != SCHEMA_VERSION:
                                 initialize(db)

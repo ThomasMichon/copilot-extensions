@@ -358,12 +358,105 @@ def test_interrupted_authority_switch_fails_closed_and_can_be_retried(area, monk
     assert result.mode == "project" and result.project == "example"
 
 
+def _prevalidated_legacy_submission(area, identifier, backend):
+    from update_driver import core
+
+    spec = core._spec_document(core._spec(RequestSpec(backend, project="example")))
+    runner = asdict(core._runner(_runner(area)))
+    spec_json, runner_json = core._json(spec), core._json(runner)
+    identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
+    return identifier, identity, spec_json, runner_json, time.time()
+
+
+def _commit_legacy_submission(root, request):
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute(
+            "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,'pending',?)",
+            request,
+        )
+
+
+def _interrupt_first_authority_switch(root, monkeypatch):
+    from update_driver import authority
+
+    write = authority.write
+
+    def interrupt(*args):
+        write(*args)
+        raise RuntimeError("interrupted before commit")
+
+    with monkeypatch.context() as change:
+        change.setattr(authority, "write", interrupt)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            change_authority("project", project="example", root=root, timeout=1,
+                             verify_capabilities=lambda _deadline: True)
+    assert (root / "authority.guard").is_file()
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+
+
+def test_retry_refuses_late_legacy_suite_without_discarding_unrelated_work(area, monkeypatch):
+    root = area / "state"
+    late_suite = _prevalidated_legacy_submission(area, "a" * 32, "engine")
+    unrelated = _prevalidated_legacy_submission(area, "b" * 32, "other-product")
+    _interrupt_first_authority_switch(root, monkeypatch)
+    _commit_legacy_submission(root, late_suite)
+    _commit_legacy_submission(root, unrelated)
+    with pytest.raises(StateError, match="pending"):
+        change_authority("project", project="example", root=root, timeout=.1,
+                         verify_capabilities=lambda _deadline: True)
+    refused = status(late_suite[0], root=root)
+    assert refused.state == "completed" and refused.exit_code == 3
+    assert refused.started_at is None and "authority" in refused.error
+    assert status(unrelated[0], root=root).state == "pending"
+    ran = []
+    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    assert ran == [unrelated[0]]
+    assert change_authority(
+        "project", project="example", root=root, timeout=1,
+        verify_capabilities=lambda _deadline: True,
+    ).mode == "project"
+
+
+def test_incomplete_switch_recovery_requires_capabilities_and_is_atomic(area, monkeypatch):
+    from update_driver import authority
+
+    root = area / "state"
+    late_suite = _prevalidated_legacy_submission(area, "c" * 32, "engine")
+    _interrupt_first_authority_switch(root, monkeypatch)
+    _commit_legacy_submission(root, late_suite)
+    with pytest.raises(StateError, match="capabilit"):
+        change_authority("project", project="example", root=root, timeout=.2,
+                         verify_capabilities=lambda _deadline: False)
+    assert status(late_suite[0], root=root).state == "pending"
+    write = authority.write
+
+    def interrupt(*args):
+        write(*args)
+        raise RuntimeError("recovery interrupted")
+
+    with monkeypatch.context() as change:
+        change.setattr(authority, "write", interrupt)
+        with pytest.raises(RuntimeError, match="recovery interrupted"):
+            change_authority("project", project="example", root=root, timeout=1,
+                             verify_capabilities=lambda _deadline: True)
+    assert status(late_suite[0], root=root).state == "pending"
+    assert change_authority(
+        "project", project="example", root=root, timeout=1,
+        verify_capabilities=lambda _deadline: True,
+    ).mode == "project"
+    refused = status(late_suite[0], root=root)
+    assert refused.state == "completed" and refused.exit_code == 3
+    assert refused.started_at is None
+
+
 def test_process_death_mid_switch_leaves_a_retryable_fence(area):
     import agent_procutil
     import single_instance_lease
     import update_driver
 
     root = area / "state"
+    late_suite = _prevalidated_legacy_submission(area, "d" * 32, "engine")
     paths = [
         str(Path(module.__file__).resolve().parent.parent)
         for module in (update_driver, single_instance_lease, agent_procutil)
@@ -388,10 +481,13 @@ change_authority('project', project='example', root=pathlib.Path(sys.argv[2]),
     assert child.returncode == 42, child.stderr.decode(errors="replace")
     with pytest.raises(StateError, match="authority"):
         current_authority(root=root)
+    _commit_legacy_submission(root, late_suite)
     assert change_authority(
         "project", project="example", root=root, timeout=5,
         verify_capabilities=lambda _deadline: True,
     ).mode == "project"
+    refused = status(late_suite[0], root=root)
+    assert refused.state == "completed" and refused.exit_code == 3 and refused.started_at is None
 
 
 @pytest.mark.parametrize("missing", ["database", "guard"])

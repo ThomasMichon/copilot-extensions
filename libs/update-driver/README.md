@@ -194,9 +194,13 @@ publish a mode. Schema 5 alone cannot fence a process that bypasses the queue.
 No public mode-switch command is supplied by this primitive.
 
 An interrupted first switch leaves a guard that makes capable clients refuse
-until the switch is retried under the same checks. A missing guard or database,
-malformed selection, or uncertain execution refuses rather than restoring
-legacy mode. Neither inspection nor switching starts an update or a service.
+until the switch is retried under the same checks. If an already-prevalidated
+legacy writer committed a never-started suite request after that guard, a
+capability-verified retry terminally refuses that request instead of letting it
+strand the queue. Unrelated pending work remains pending and must settle before
+the initial schema upgrade. A missing guard or database, malformed selection,
+or uncertain execution refuses rather than restoring legacy mode. Neither
+inspection nor switching starts an update or a service.
 
 ### Automatic-update KillSwitch and explicit/manual admission
 
