@@ -74,14 +74,15 @@ def _selected_inputs(description: dict):
             raise protocol.SetupError("SSH setup requires a prepared Source application.")
         application = module._member(snapshot, selected.project["application"])
         declaration = module._read(application / "application.json")
+        if declaration.get("construction") != module.application_inputs(selected, inputs):
+            raise protocol.SetupError("SSH setup application construction differs from its owned Source/profile.")
         if (
-            declaration.get("construction") != module.application_inputs(selected, inputs)
-            or declaration.get("name") != "fleet-manager"
-            or declaration.get("module") != "fleet_manager"
+            declaration.get("name") != "fleet-manager"
+            or declaration.get("module") != "fleet_manager.__main__:main"
             or declaration.get("setup") != ["__source-setup"]
             or declaration.get("start") != ["__source-start"]
         ):
-            raise protocol.SetupError("SSH setup application differs from its owned Source/profile.")
+            raise protocol.SetupError("SSH setup application lacks the supported Fleet hosting entrypoints.")
         yield module, selected
 
 

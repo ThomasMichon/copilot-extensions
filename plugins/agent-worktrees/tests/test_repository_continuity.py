@@ -123,6 +123,23 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         "selection": selection, "request_digest": "d" * 64, "host": {},
     }
     project = SimpleNamespace(identity=identity, project={"application": "application"}, payload=tmp_path)
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    import runtime_application_project as application
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+    metadata = tomllib.loads((root / "fleet-manager" / "pyproject.toml").read_text())["project"]
+    archive = tmp_path / "fleet_manager-0.1.0-py3-none-any.whl"
+    archive.write_bytes(b"fixture wheel reference; never installed")
+    emitted = tmp_path / "application"
+    callbacks = application.install_callbacks("fleet-manager", extras=("gateway-host", "ssh-client"))
+    application.emit(
+        emitted, distribution="fleet-manager", version="0.1.0", requires_python=">=3.10",
+        commands=metadata["scripts"], wheels={"fleet-manager": archive},
+        construction={"prepared": True}, setup=callbacks[0], start=callbacks[1],
+    )
 
     @contextmanager
     def inputs(*_args):
@@ -142,11 +159,8 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
             "extras": ["gateway-host"] if failure == "profile" else ["gateway-host", "ssh-client"],
         },
         application_inputs=lambda *_args: {"prepared": True},
-        _member=lambda *_args: tmp_path,
-        _read=lambda *_args: {
-            "construction": {"prepared": True}, "name": "fleet-manager", "module": "fleet_manager",
-            "setup": ["__source-setup"], "start": ["__source-start"],
-        },
+        _member=lambda *_args: emitted,
+        _read=lambda path: json.loads(path.read_text()),
         install_application=install,
     )
     monkeypatch.setattr(ssh_setup, "_installer", lambda: owner)
