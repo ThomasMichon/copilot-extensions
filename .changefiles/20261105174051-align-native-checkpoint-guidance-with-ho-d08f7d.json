@@ -1,0 +1,9 @@
+{
+  "comment": "Align native checkpoint guidance with host read budgets, mutation receipts and terminal rollover ordering.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
