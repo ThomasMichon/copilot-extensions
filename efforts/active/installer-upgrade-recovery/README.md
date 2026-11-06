@@ -2115,3 +2115,57 @@ writers, #7500 forced-registration preservation, and #4205 family-wide routing
 retain their owners and scope. No writer or ordinary front-door behavior is
 changed by this proposal. Source handle `dusty-contraption` owns only U17.
 The parent remains Active; the proposal clears review before implementation.
+
+The proposal clears that gate in #10997: exact head
+`0d0e7ac88b6d89a6b9e6f4211670bbfe10b60e2f` receives Approve with no active
+issues, required CI `42219424666` passes, and the normal managed flow merges
+at 12:44:02 UTC as `3ca033f94686a7ee3f054e3825b619745fa86b0f`.
+Public body, codename source marker, empty labels and closing references are
+read back. Managed terminal status and pull-forward succeed; #10377 remains
+open. The Plan and Validation Plan are reread before implementation. This
+resolves only the U17 proposal gate, not its source, release or caller outcome.
+
+### 2026-11-06 - Native registration inspection candidate qualified locally
+
+The additive `repos registration inspect` candidate declares
+`copilot-extensions.project-registration-inspection`, version 1, through the
+actual executing read-only response. Existing routing, inventory and writers
+are unchanged. It composes the strict repository owner with the original strict
+project parser before migration can discard legacy anchors. Canonical exposure
+remains authoritative over a stale adoption mirror; known empty legacy defaults
+and singleton mode survive. Unsupported versions and unknown arguments fail
+before acquisition, while malformed/unknown sources do not become absence.
+
+The first actual native-parser regression is red against the old source:
+both exposure variants return the old unknown-subcommand error rather than
+the required unique alias. The first 26 controls then pass. A later namespace
+fixture fails before registry acquisition because it supplies the cell root as
+the payload root; correcting only that fixture yields the residual pass without
+changing product behavior, budgets or containment. That failed attempt is not
+credited as a passing native packet.
+
+Direct review also confirms that Windows extended-path and ordinary spellings
+can identify the same directory while comparing as different strings.
+The candidate uses native file identity for those aliases, retaining ambiguity
+when two project names refer to that anchor. The final complete 34-control
+Windows packet passes in 10.38 seconds, 66.64 seconds including preparation and
+verified cleanup, under the unchanged standard limits. Its actual neutral-CWD
+new-read/old-inventory consumer takes 4.197 seconds for both invocations; this
+is a local functional sample, not fleet throughput, cold provisioning or a
+tail-latency claim.
+
+Nine separate tool controls execute the optional workflow's evidence-admission
+and source-pin predicates against explicitly synthetic fixture reports. Missing,
+duplicate, skipped, empty and failed evidence is refused. These are workflow
+controls, not fabricated product-native evidence. The opt-in
+`registration-inspection` portfolio uses the existing bounded owner on Linux
+and Windows only, requires the exact published source SHA, and adds no
+scheduled or required-unit work or larger resource limits. Its hosted native
+executions remain pending.
+
+F/E9 lint, install-contract, documentation consistency and strict runtime
+resolution checks pass. The actual admitted-unit source-binding check is
+unchanged; no inventory, coverage or budget is relaxed. Source publication,
+current-head review/required CI, exact-source hosted qualification and
+containing release observation remain gates. The provider does not yet migrate
+setup callers or qualify an installed host; #10377 remains Active.

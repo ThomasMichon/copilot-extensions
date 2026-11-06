@@ -1620,6 +1620,57 @@ JSON has no authority marker and must not be interpreted as a completeness
 attestation. An older runtime that does not return the strict marker cannot
 establish inventory completeness even if it accepts or ignores the new flag.
 
+### Read-only project registration inspection (`repos registration inspect`)
+
+Setup callers can inspect an explicit absolute anchor and proposed fresh
+default without selecting or changing a project:
+
+```text
+agent-worktrees repos registration inspect --anchor "<absolute-anchor>" --default-name "<default-project>" --contract-version 1
+```
+
+The command always returns JSON. The selected executing runtime declares
+`contract: "copilot-extensions.project-registration-inspection"`,
+`contract_version: 1` and `supported_contract_versions: [1]` in both successful
+and failed replies. Success has exit 0 and `status: "ready"` with `project`,
+canonical native `anchor`, `registered`, `agent`, `exposure_source` and
+`repository_class`. A registered alias wins over the proposed default even
+when another checkout legitimately owns that default name. A genuinely
+unregistered anchor receives the default only when that command name is
+unclaimed.
+
+The existing strict repository reader owns canonical location/class/exposure;
+the existing strict project parser supplies unmigrated legacy adoption facts.
+Canonical `agent` takes precedence over a stale adoption mirror. Supported
+documents are repository schema 1 (including its unversioned legacy form) and
+project schemas 1/2; native home/path expansion and validated installation-cell
+selection remain with their current owners. Inspection neither migrates these
+documents nor infers permission from an exposed agent or editing class.
+Existing directory aliases compare by native file identity, including Windows
+extended-path spellings; a second name for the same anchor remains ambiguous.
+The project owner's known empty-document/null-project defaults stay empty;
+invalid scalar/list documents do not become absence. Legacy base-repository
+mode remains singleton rather than being promoted to worktree editing.
+
+Failures have exit 2, `status: "failed"`, `code` and `message`. Ambiguous aliases,
+inconsistent roots, occupied defaults, unknown adopted roots, command-name
+collisions, malformed/unreadable/unsupported documents and invalid paths or
+policies are not fresh absence. Unknown arguments and unsupported requested
+contract versions fail before registry acquisition. No registry, binding,
+launcher, service, worktree or command is created, changed or reserved.
+The result is a point-in-time read, not a write permit or transaction token;
+the actual writer still owns its mutation-time checks.
+
+This is provider-first expansion only. Existing commands/routing retain their
+syntax and behavior. Callers must establish support from this exact executing
+runtime's versioned response, not a package version or newer payload. A legacy
+runtime may reject the new read-only request; do not strip required semantics
+and retry a registration writer. Later latest-flow adoption must use an
+independently runnable incoming reader through the existing construction owner
+when the installed provider cannot answer, rather than make old capability
+support a replacement veto. No caller migration or installed recovery is
+implied by publication of this read contract.
+
 ### Bare-anchor sync (`repos sync`)
 
 `repos sync` fast-forwards a bare anchor (`core.bare=true`) by moving its

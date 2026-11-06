@@ -9358,6 +9358,30 @@ Follow the same contract so it stays safe-by-default and reproducible:
 - Assert observable end-state, not exact model output (turns vary).
 - Document the module and its variables in this file.
 
+## Optional native registration inspection
+
+The `registration-inspection` portfolio in `installation-context-full.yml`
+runs only the focused native registration reader/CLI controls on Linux and
+Windows. Supply the published branch and its exact `source_sha`; both jobs
+verify that commit before testing. The existing bounded runner's process,
+storage and 30/300/900-second item/group/plugin limits are unchanged, and the
+portfolio adds no scheduled or required-unit work.
+
+The same local selection is:
+
+```text
+python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_registration_inspection.py
+```
+
+It exercises unique canonical/legacy aliases, preserved exposure/editing mode,
+fresh default and conflict/unknown-source refusals, native installation-cell
+selection and the actual CLI from a neutral directory. Existing repository
+inventory remains a separate old-caller control. Configuration bytes stay
+unchanged; no actual registration, installer, service or authentication provider
+is started. Hosted jobs require both native consumer cases and refuse skipped
+or failed evidence. This does not qualify caller migration, cold incoming
+construction or installed-host recovery.
+
 ## Optional paired-worktree finalization
 
 For paired-worktree finalization, select
