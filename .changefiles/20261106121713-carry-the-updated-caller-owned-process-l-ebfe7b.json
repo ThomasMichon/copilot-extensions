@@ -1,0 +1,9 @@
+{
+  "comment": "Carry the updated caller-owned process library into the SSH service dependency closure",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

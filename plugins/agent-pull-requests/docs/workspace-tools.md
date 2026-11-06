@@ -177,6 +177,123 @@ owner-v3 storage and serving adoption. It is read-only and capability-selected;
 unbound/prior hosts remain usable for their existing operations. A returned
 cursor is not an ACK or a handled-review baseline.
 
+### Read-only client profiles
+
+The optional `workspace --client-profile NAME` frontdoor constructs the existing
+authenticated ServiceCaller, WorkspaceClient and one-shot facade without a Python
+host embedding. The selected application runtime must already include
+`agent-pull-requests[fleet]` and its `fleet-manager[service-gateway]` dependency
+closure. The ordinary plugin installation does not select that optional extra.
+Missing dependencies report unavailable; a read never installs them, starts a
+service or borrows the watch runtime. Standalone Python applications need no
+Copilot installation or marketplace.
+
+```text
+agent-pull-requests workspace --client-profile selected capabilities
+agent-pull-requests workspace --client-profile selected load --request request.json
+agent-pull-requests workspace --client-profile selected sync --request -
+agent-pull-requests workspace --client-profile selected materialize --request request.json
+agent-pull-requests workspace --client-profile selected events --request request.json
+```
+
+Only `capabilities`, `load`, `sync`, `materialize` and negotiated `events` are
+exposed. `submit`, `inspect`, `source` and `source-read` refuse before request,
+profile or credential access. Supplying a profile alongside `workspace_host`
+also refuses; it cannot replace an embedding's owner. Without the selector,
+all existing unbound and embedded behavior remains unchanged.
+An ambiguous embedded selection returns exit 4 before worker or stdio access,
+without emitting a response frame.
+
+The existing application root is `AGENT_PULL_REQUESTS_HOME`, or its legacy
+`~/.agent-pull-requests` default. An explicit installation context instead uses
+the canonical installation resolver's active `stateRoot`, validated against the
+selected plugin, payload, cell and governance. A conflicting home override,
+foreign cell, disabled/malformed context or incomplete migration refuses rather
+than falling back to legacy state. No watch runtime-slot capture is required.
+Managed legacy selection follows the installation owner's existing
+`legacy-active` entrypoint decision, including its default-off compatibility
+for an unattributed legacy payload; it does not invent an installation receipt.
+
+The configuration owner adopts the following connection record in that root.
+The paths below are synthetic POSIX examples; Windows references use absolute
+Windows paths with normal JSON escaping. This example does not provision keys,
+tokens, targets, grants, storage or a service:
+
+```json
+{
+  "schema": "agent-pull-requests.workspace-client-profiles",
+  "version": 1,
+  "configuration_owner": {
+    "mode": "application",
+    "plugin": "agent-pull-requests"
+  },
+  "profiles": {
+    "selected": {
+      "gateway_origin": "https://gateway.example",
+      "route_prefix": "/api",
+      "proof_key_file": "/example/private/proof.pem",
+      "access_token_file": "/example/private/access",
+      "gateway_ca": null,
+      "binding": {
+        "fleet": "fleet-a",
+        "gateway": "gateway-a",
+        "slot": "service-a",
+        "namespace": "namespace",
+        "principal": "caller-a",
+        "target": "project",
+        "consumer": "consumer-a",
+        "account": "account-a",
+        "repo": "project/repository"
+      },
+      "scope": {
+        "provider": "azure-devops",
+        "endpoint": "https://dev.azure.com/example",
+        "project_id": "project-id",
+        "repository_id": "repository-id",
+        "principal_id": "reviewer-id"
+      }
+    }
+  }
+}
+```
+
+For an active cell, `configuration_owner.mode` is `namespaced` and the owner
+additionally supplies `marketplace`, exactly matching the canonical receipt's
+`marketplaceId`. This prevents accidental cross-cell profile reuse; it grants no
+permission. Names contain only lowercase ASCII letters, digits, `_` and `-`,
+start with a letter/digit and have at most 64 characters. They are never paths,
+executables, modules or factories. All shown fields are required; unknown or
+duplicate fields, unsupported versions and mismatched owners refuse before
+credential reads or service contact. The record is bounded to 32 KiB.
+
+The proof-key and access-token fields reference externally provisioned absolute
+files through Fleet's existing credential reader. `gateway_ca` is an absolute
+CA-file reference or `null` for platform trust. The token is read afresh for
+each authenticated request. Worktrees still owns target/provider/account
+registration and PR policy; the Gateway and PR host establish actual caller and
+operation permission. Profile labels and expected replay/scope values cannot
+grant or relabel that authority. Request JSON cannot override those inputs.
+No endpoint/account fallback, retry or local observation store is added.
+
+One canonical caller-owned process budget starts before request, profile and
+credential IO: **60 seconds total**, including discovery, chunks, decoding,
+serialization, output and native cleanup. Client request timeouts decrease
+against that same absolute deadline; no request renews it. Request/generation
+limits are unchanged, and output permits JSON escaping expansion. Borrowed
+stdin and stdout remain inside the finite worker, so blocked pipes do not
+escape the deadline. On timeout, exit is nonzero and output may be absent or
+partial; no replacement JSON frame, successful drain or remote rollback is
+inferred. Original unconfirmed physical cleanup retains its process owner.
+The separate prepared-source SDK qualification bounds remain unchanged.
+
+Each invocation negotiates the executing service contract. Older hosts retain
+supported metadata operations without fabricated event support or cursors.
+Success is response delivery, not cache/journal commit acknowledgement or review
+completion. Event reads do not acknowledge or handle a review. Source release
+is separate from adopting a real profile, preparing its runtime dependencies
+and qualifying real-provider observation; this source feature performs none of
+those operational changes.
+
 ## Exact local source adapter
 
 `source` materializes the selected generation, then calls the existing
