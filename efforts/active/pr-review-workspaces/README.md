@@ -82,6 +82,12 @@ canonical effort.
 The verbatim operator inputs, scope selections and preceding design discussion
 are preserved in [inception-transcript.md](inception-transcript.md).
 
+The current adopter direction is CLI-first PR observation; the later
+[operator clarification](inception-transcript.md#operator---cli-observation-and-mcp-question)
+preserves its wording. The agent-recommended CLI observer proposal below is
+planning-only. It does not replace the wider reviewer workflow or confer
+implementation, configuration-adoption or live-effect authority.
+
 ## Plan
 
 The decomposition and technical acceptance below are **agent-recommended**.
@@ -170,8 +176,11 @@ extension of the existing `ReplayStore` envelope, not a second posting ledger.
   data, even if they share an owning service or physical database.
 
 ### Phase 4 - Integrate and qualify the reviewer after admission
-The next source admission is the [existing-owner tool surface](tool-surface-slice.md),
-with explicit unavailable exact-source acquisition rather than a broad fetch fallback.
+The [existing-owner tool surface](tool-surface-slice.md) is source-accepted in
+#9845/#9928; actual adoption remains open. The next planning-only
+[CLI observer adopter](cli-observer-adopter-slice.md) composes the existing
+read-only service host without another backend or an MCP prerequisite.
+Exact-source acquisition remains explicitly unavailable, not a broad fetch fallback.
 - [ ] Let the reviewer own load/sync, local analysis and explicit submission
   without an ADO interpretation intermediary.
 - [ ] Preserve caller-owned rubric, consent and required independent finding
@@ -217,6 +226,17 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-05 - Plan the CLI-first observer adopter
+- The operator clarified CLI tools as the intended PR-observation interface;
+  the full wording is retained in the inception record. MCP was discussed as
+  an optional adapter, not selected for this continuation.
+- Planning advances to Phase 4 under the Planning coordinator. The read-only
+  native workspace host from #10609/#10631 stays with its #6007 owner.
+- The proposed client slice adds explicit read-only CLI binding without
+  another service, credential issuer, cache, PR-policy store or source owner.
+  It preserves one-shot async-source refusal and all eight Plan/eleven
+  Validation gates. Implementation and operational adoption are not admitted.
 
 ### 2026-11-05 - Accept the prepared-source asynchronous SDK
 - #9928 merged as `4e0f62e810bd0a91971f3dbd58903f002447a5c9` after
