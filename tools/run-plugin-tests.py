@@ -72,6 +72,10 @@ from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
 from plugin_test_selection import (
     TestSelection, load_selection, resolve_plugin_root, validate_test_file,
+    _CODESPACES_NATIVE_FILE as _CODESPACES_NATIVE_FILE,
+    _CODESPACES_WINDOWS_PARTITIONS as _CODESPACES_WINDOWS_PARTITIONS,
+    _BRIDGE_HISTORICAL_FILE as _BRIDGE_HISTORICAL_FILE,
+    plan_test_groups as _plan_test_groups,
 )
 from plugin_test_containment import (
     ContainmentError,
@@ -470,59 +474,16 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                 raise failure
 
 
-_CODESPACES_NATIVE_FILE = Path("tests") / "test_installer_engine_adoption.py"
 _CODESPACES_PROFILE_ENV = "CODESPACES_INSTALLER_TEST_PROFILE"
-_CODESPACES_ADMISSION = (
-    "codespaces_library_install_order_retry_and_errors or "
-    "codespaces_real_admission_replays_captured_source"
-)
-_CODESPACES_FALSE = f"({_CODESPACES_ADMISSION}) and False"
-_CODESPACES_TRUE = f"({_CODESPACES_ADMISSION}) and True"
-_CODESPACES_NEGATIVE = "codespaces_admission_spy_refuses_incorrect_or_bypassed_calls"
-_CODESPACES_LIFECYCLE = "stamp_snapshot or native_dev_generation_dependency_failure"
-_CODESPACES_WINDOWS_PARTITIONS = (
-    f"({_CODESPACES_FALSE}) and healthy",
-    f"({_CODESPACES_FALSE}) and not healthy",
-    f"not ({_CODESPACES_FALSE}) and ({_CODESPACES_TRUE}) and healthy",
-    f"not ({_CODESPACES_FALSE}) and "
-    f"((({_CODESPACES_TRUE}) and not healthy) or {_CODESPACES_NEGATIVE})",
-    f"not (({_CODESPACES_FALSE}) or ({_CODESPACES_TRUE}) or {_CODESPACES_NEGATIVE}) "
-    f"and ({_CODESPACES_LIFECYCLE})",
-    f"not (({_CODESPACES_FALSE}) or ({_CODESPACES_TRUE}) or {_CODESPACES_NEGATIVE} "
-    f"or {_CODESPACES_LIFECYCLE})",
-)
-_BRIDGE_HISTORICAL_FILE = Path("tests") / "test_http48_capture_guards.py"
-_BRIDGE_HISTORICAL_PARTITIONS = (
-    "not (http49 or http50 or http51)",
-    "http49",
-    "not http49 and http50",
-    "not (http49 or http50) and http51",
-)
 
 
 def _test_group_plan(
     name: str, groups: list[list[Path]], *, windows: bool | None = None,
 ) -> list[tuple[list[Path], str | None]]:
-    """Partition expensive owned cohorts without widening their shared deadline."""
-    native = sys.platform == "win32" if windows is None else windows
-    target = _plugin_dir(name) / _CODESPACES_NATIVE_FILE
-    historical = _plugin_dir(name) / _BRIDGE_HISTORICAL_FILE
-    plan = []
-    for group in groups:
-        if name == "agent-bridge" and historical in group:
-            other_files = [path for path in group if path != historical]
-            if other_files:
-                plan.append((other_files, None))
-            plan.extend(([historical], selector) for selector in _BRIDGE_HISTORICAL_PARTITIONS)
-            continue
-        if name != "agent-codespaces" or not native or target not in group:
-            plan.append((group, None))
-            continue
-        other_files = [path for path in group if path != target]
-        if other_files:
-            plan.append((other_files, None))
-        plan.extend(([target], selector) for selector in _CODESPACES_WINDOWS_PARTITIONS)
-    return plan
+    return _plan_test_groups(
+        name, _plugin_dir(name), groups,
+        windows=sys.platform == "win32" if windows is None else windows,
+    )
 
 
 def run_plugin(

@@ -2376,3 +2376,52 @@ composition remain. Native Windows historical-seed construction is an explicit
 unresolved owned follow-up before worktree finalization, not a flake exemption
 or installed-runtime result. The ordinary Ubuntu historical lane and the
 fresh 39-case native OS lanes still owe genuine current-source qualification.
+
+### 2026-11-06 - Current capture and every historical cohort genuinely qualify
+
+Exact source `50e4bbebc56244f8cdb849a1bdc8aed52269f74b` now independently
+qualifies in native run `42251432592`: Linux and Windows each have 39 unique
+passing cases, no skips/errors and identical complete downloaded sets matching
+the local packet. Both actual source-pin/execution steps and native CLI,
+namespace, prefix and physical-identity controls are audited. Earlier 37/37
+results keep their original attribution.
+
+Full run `42251455469` succeeds, including every preparation, boundary,
+capture, independent verification, historical guard, canonical validation and
+export step. Current capture and independent verification each pass 197 cases
+in 216.68 and 215.44 seconds. The five retained historical JUnit reports contain
+6, 31, 26, 26 and 26 cases: 115 distinct passing cases, no skips/errors, exactly
+three HTTP-47 history/seed cases, three archive cases and 109 publication cases.
+Per-group case durations are 64.006, 100.569, 67.005, 66.134 and 69.841 seconds.
+The historical request takes 376.97 seconds including preparation and cleanup,
+within the original shared 900-second aggregate; each group and item keeps its
+original bounds. This is complete current qualification, not an anonymous
+partial subset or a pass copied from the failed attempts.
+
+The actual export manifest digest
+`5c920b85dcec0bfbbb3835373a58c26ecf1ba08e8d73b00b3246edb2ff459864`
+matches the downloaded producer bytes. At the unchanged source HEAD, the
+native artifact owner validates 3,059 input preimages and materializes all
+132 declared outputs. Independent byte/hash comparison matches every output;
+only declared output paths differ and HTTP-51 remains untouched. The failed
+earlier portfolio's provisional artifact is never used.
+
+Current required CI `42251397433` separately exposes the runner's actual module
+cap failure, not a flake or just stale evidence. The cohort evaluator and its
+policy constants move mechanically into the existing `plugin_test_selection`
+owner; the root wrapper, platform selection, `_plugin_dir` test seam and
+existing constant re-exports remain. No baseline/cap exemption, parallelism,
+deadline or source/protocol behavior changes. All 123 focused runner,
+selection, cohort and workflow controls pass in 139.84 seconds; F/E9 lint and
+whitespace pass. The actual modified runner CLI separately collects exactly
+the 115 previously executed hosted cases, once each, in 98.89 seconds including
+preparation/cleanup. It is collection equivalence, not another full execution.
+The canonical checker passes with 2 contracts / 1,044 fixtures after the move.
+
+The registration implementation, native fixture and hosted registration
+steps remain those genuinely qualified at `50e4`; the subsequent delta is
+canonical evidence plus mechanical test-planner componentization, qualified
+separately rather than relabeling the source pin. The next committed branch
+must pass the exact module guard and fresh review/required CI before merge
+and containing-release observation. The local Windows historical-seed
+performance follow-up and all caller/installed/parent gates remain open.

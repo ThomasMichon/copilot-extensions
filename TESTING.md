@@ -2744,6 +2744,8 @@ disjoint generation cohorts, with untagged and future controls in the catch-all
 cohort. Other selected modules remain present. Every cohort retains the
 300-second group bound and shares the original 900-second plugin deadline;
 no parallel workers, larger resource limits or omitted cases are introduced.
+`tools/plugin_test_selection.py` owns that cohort policy; the runner retains
+containment, execution, cleanup and aggregate deadline enforcement.
 Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.
