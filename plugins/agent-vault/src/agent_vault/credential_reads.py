@@ -36,6 +36,7 @@ def read_credential(args) -> CredentialRead:
     max_cache_age = getattr(args, "max_cache_age", None)
     cache = get_cache()
     pinned = config.PINNED_CONTEXT_ENV in os.environ
+    readonly_cache = pinned or getattr(args, "strict_cache", False)
 
     if cache.enabled and not refresh:
         try:
@@ -44,7 +45,7 @@ def read_credential(args) -> CredentialRead:
                 field,
                 max_age_seconds=max_cache_age,
                 legacy_entry=None if pinned else entry,
-                **({"readonly": True} if pinned else {}),
+                **({"readonly": True} if readonly_cache else {}),
             )
         except (OSError, RuntimeError, ValueError):
             if not pinned:

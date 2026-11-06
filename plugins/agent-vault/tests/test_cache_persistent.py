@@ -425,6 +425,88 @@ def test_batch_get_refresh_returns_ordered_partial_or_total_failure(
         assert persistent.get("Example/one", "password") == "fresh"
 
 
+@pytest.mark.parametrize("failure", ["ciphertext", "schema", "key"])
+def test_batch_refuses_corrupt_fernet_cache_without_replacement(
+    enabled_cache, monkeypatch, capsys, failure,
+):
+    from cryptography.fernet import Fernet
+
+    from agent_vault import kek
+
+    monkeypatch.delenv("AGENT_VAULT_PINNED_CONTEXT", raising=False)
+    enabled_cache.mkdir()
+    persistent = get_cache()
+    key = Fernet.generate_key()
+    cipher = Fernet(key)
+    persistent._key_file.write_bytes(kek.WRAP_MAGIC + b"R" + key)
+    persistent._cache_file.write_bytes(cipher.encrypt(json.dumps({
+        "v": 1, "entries": {"Example/one": {"password": {"value": "cached-value"}}},
+    }).encode()))
+    if failure == "ciphertext":
+        persistent._cache_file.write_bytes(b"corrupt-ciphertext")
+    elif failure == "schema":
+        persistent._cache_file.write_bytes(cipher.encrypt(b'{"v":1,"entries":[]}'))
+    else:
+        persistent._key_file.write_bytes(kek.WRAP_MAGIC + b"Rmalformed-fernet-key")
+    cache_before = persistent._cache_file.read_bytes()
+    key_before = persistent._key_file.read_bytes()
+    persistent = PersistentCache()
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(
+        cli, "ensure_service",
+        lambda: pytest.fail("corrupt cache fell back to the service"),
+    )
+    requests = [
+        {"entry": "Example/one"}, {"entry": "Example/two"}, {"entry": "Example/one"},
+    ]
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(requests)))
+
+    assert cli.main(["batch-get"]) == 1
+    captured = capsys.readouterr()
+    results = json.loads(captured.out)["results"]
+    assert [row["entry"] for row in results] == [row["entry"] for row in requests]
+    assert all(row["ok"] is False and row["value"] is None for row in results)
+    assert all(row["error"].startswith("cache_protection_failed;") for row in results)
+    assert captured.err == ""
+    assert persistent._cache_file.read_bytes() == cache_before
+    assert persistent._key_file.read_bytes() == key_before
+    if failure == "key":
+        with pytest.raises(ValueError):
+            cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
+    else:
+        assert persistent.get("Example/one") is None
+
+
+@pytest.mark.parametrize("value,ok", [("cached-value", True), (42, False)])
+def test_batch_validates_legacy_alias_without_migrating(
+    enabled_cache, monkeypatch, capsys, value, ok,
+):
+    from agent_vault import config
+
+    monkeypatch.delenv("AGENT_VAULT_PINNED_CONTEXT", raising=False)
+    monkeypatch.setattr(config, "resolve_context", lambda: SimpleNamespace(group="Example"))
+    persistent = get_cache()
+    assert persistent.put("token", "password", value)
+    cache_before = persistent._cache_file.read_bytes()
+    key_before = persistent._key_file.read_bytes()
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(
+        cli, "ensure_service",
+        lambda: pytest.fail("legacy cached alias contacted the service"),
+    )
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"token"}]'))
+
+    assert cli.main(["batch-get"]) == (0 if ok else 1)
+    result, = json.loads(capsys.readouterr().out)["results"]
+    assert result["ok"] is ok
+    assert result["value"] == (value if ok else None)
+    assert result["source"] == "cache"
+    if not ok:
+        assert result["error"].startswith("cache_protection_failed;")
+    assert persistent._cache_file.read_bytes() == cache_before
+    assert persistent._key_file.read_bytes() == key_before
+
+
 def test_batch_get_does_not_publish_unreconciled_refresh_value(
     enabled_cache, monkeypatch, capsys,
 ):

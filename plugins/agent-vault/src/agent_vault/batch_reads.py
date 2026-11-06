@@ -53,9 +53,9 @@ def cmd_batch_get(args):
     for entry, field in requests:
         try:
             result = read_credential(SimpleNamespace(
-                entry=entry, field=field, refresh=args.refresh, prompt=False,
+                entry=entry, field=field, refresh=args.refresh, prompt=False, strict_cache=True,
             ))
-        except (CacheProtectionError, KekError):
+        except (CacheProtectionError, KekError, ValueError):
             results.append({
                 "entry": entry, "field": field, "value": None, "ok": False, "source": "cache",
                 "error": "cache_protection_failed; protected cache requires repair before retrying",

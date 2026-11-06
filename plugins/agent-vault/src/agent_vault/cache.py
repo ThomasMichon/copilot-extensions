@@ -324,6 +324,13 @@ class PersistentCache:
             if readonly else self._read_store()
         )
         rec = self._field_record(store, entry, field)
+        if rec is None and legacy_entry and legacy_entry != entry:
+            rec = self._field_record(store, legacy_entry, field)
+            if rec is not None and not readonly:
+                self.migrate_entry(legacy_entry, entry, field)
+                migrated = self._field_record(self._read_store(), entry, field)
+                if migrated is not None:
+                    rec = migrated
         if readonly and rec is not None and (
             not isinstance(rec, dict)
             or ("rotation" not in rec and not isinstance(rec.get("value"), str))
@@ -331,13 +338,6 @@ class PersistentCache:
             from .cache_dpapi import CacheProtectionError
 
             raise CacheProtectionError("Selected protected cache record is invalid")
-        if not readonly and rec is None and legacy_entry and legacy_entry != entry:
-            rec = self._field_record(store, legacy_entry, field)
-            if rec is not None:
-                self.migrate_entry(legacy_entry, entry, field)
-                migrated = self._field_record(self._read_store(), entry, field)
-                if migrated is not None:
-                    rec = migrated
         if not isinstance(rec, dict) or "rotation" in rec:
             return None
         if max_age_seconds is not None:
