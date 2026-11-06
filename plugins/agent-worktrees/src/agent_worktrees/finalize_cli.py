@@ -582,7 +582,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         try:
             if getattr(args, "repo", None) and getattr(args, "from_branch", None):
                 from .pr_author_cli import load_author_config
-                config = load_author_config(args.config, args.repo)
+                config = load_author_config(args.config, args.repo, claimant=True)
             else:
                 config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:

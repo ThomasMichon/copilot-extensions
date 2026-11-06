@@ -44,8 +44,10 @@ write.
 
 The reserved exported `pr-worker` binding is target-scoped in memory. Author
 operations use its declared PR policy without inheriting a same-slug registry
-entry or checkout policy. It does not become the claimant worktree: source and
-PR claims still belong to the invoking managed caller. Exported policy carries
+entry or checkout policy. Caller custody and metadata locking still use the
+invoking project's configuration, separately from that target policy. The
+worker binding does not become the claimant worktree: source and PR claims
+still belong to the invoking managed caller. Exported policy carries
 no credentials, self-approval, self-merge role or bypass grant, and does not
 authorize dispatch, publication, auto-completion or a human-only action.
 Status/wait and subscription routing remain unchanged by this author-only

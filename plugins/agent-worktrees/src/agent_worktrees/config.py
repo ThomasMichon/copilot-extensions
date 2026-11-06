@@ -582,7 +582,7 @@ class Config:
     copilot_identity_switch_enabled: bool = False
     """Master switch for :mod:`copilot_identity`; default false, config-file based. See docs/config-reference.md."""
     checkout_free_pr: dict[str, PRConfig] = field(default_factory=dict, kw_only=True)
-    explicit_pr_target: str = field(default="", kw_only=True, repr=False)
+    explicit_pr_target: RepoConfig | None = field(default=None, kw_only=True, repr=False)
     ordinary_provenance: dict[str, Any] = field(default_factory=dict, kw_only=True)
 
     @property

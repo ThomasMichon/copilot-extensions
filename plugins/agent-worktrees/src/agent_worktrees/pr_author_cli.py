@@ -10,7 +10,7 @@ from .providers.base import ProviderError
 SCHEMA = "agent-worktrees.pr-author-capabilities"
 
 
-def load_author_config(path, repository: str):
+def load_author_config(path, repository: str, *, claimant: bool = False):
     if path is None:
         return cfg.load_config()
     from .pr_read_context import read_explicit_config
@@ -28,10 +28,10 @@ def load_author_config(path, repository: str):
     config = cfg.load_config(
         source, include_control_plane_related_pr=False, include_knowledge_preferences=False,
     )
-    return replace(
-        config, explicit_pr_target=repository, checkout_free_pr={},
-        repos={"pr-worker": replace(config.default_repo, pr=policy)},
-    )
+    target = replace(config.default_repo, pr=policy)
+    if claimant:
+        config = cfg.load_config()
+    return replace(config, explicit_pr_target=target)
 
 
 def add_parsers(sub):
@@ -98,7 +98,7 @@ def cmd_update(args):
         _, error = pr_cli.require_claimant_worktree("pr-update")
         if error:
             raise ValueError(error)
-        config = load_author_config(args.config, args.repo)
+        config = load_author_config(args.config, args.repo, claimant=True)
         if args.number < 1:
             raise ValueError("--number must be positive")
         body = Path(args.body_file).read_bytes().decode("utf-8") if args.body_file else args.body
@@ -121,7 +121,7 @@ def cmd_push(args):
         identity, error = pr_cli.require_claimant_worktree("pr-push")
         if error:
             raise ValueError(error)
-        config = load_author_config(args.config, args.repo)
+        config = load_author_config(args.config, args.repo, claimant=True)
         config = labels.activate(config, args.publication_origin, args.publication_label)
         origin = labels.selected(config.default_repo.pr)
         resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)

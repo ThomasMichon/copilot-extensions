@@ -124,6 +124,38 @@ def test_central_cli_publishes_admitted_source_with_exact_lease(publication, mon
     assert result["expected_remote_head"] == "" and result["observed_head"] == remote_head(p) == p.head
 
 
+def test_configured_push_validates_the_invoking_managed_caller(publication, monkeypatch, tmp_path):
+    import json
+    from agent_worktrees import __main__ as cli, output, pr_cli
+
+    p = publication
+    policy = tmp_path / "worker-author.json"
+    target = replace(p.target, pr=replace(
+        p.target.pr, api_base="https://forge.invalid", repository=p.repo,
+    ))
+    pr_worker_config.export_config(
+        p.repo, target, str(p.workspace), "origin/master", policy, include_author=True,
+    )
+    monkeypatch.setattr(cli.front_door_cli, "resolve_invocation_project", lambda *args: True)
+    monkeypatch.setattr(
+        source.cfg, "load_config",
+        lambda path=None, **options: (
+            p.caller if path is None else source.cfg._load_config_uncached(path, **options)
+        ),
+    )
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda config, repo:
+                        pr_config.ForeignRepoResolution(config.explicit_pr_target, "pr-worker"))
+    monkeypatch.setattr(pr_cli, "require_claimant_worktree", lambda *_: (p.wid, ""))
+    with output.capture_json_output() as capture:
+        code = cli.main([
+            "pr-push", "--repo", p.repo, "--workspace", str(p.workspace), "--branch", p.branch,
+            "--expected-head", p.head, "--expected-remote-head=", "--config", str(policy), "--json",
+        ])
+    result = json.loads(capture.getvalue())
+    assert code == 0 and result["publication_state"] == "pushed", result
+    assert result["observed_head"] == remote_head(p) == p.head
+
+
 @pytest.mark.parametrize("change", ["dirty", "untracked", "wrong-branch", "wrong-head", "subfolder"])
 def test_refuses_unreviewed_or_inexact_workspace(publication, change):
     p = publication

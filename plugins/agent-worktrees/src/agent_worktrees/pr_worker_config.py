@@ -138,10 +138,16 @@ def export_config(
         pr.update({
             key: getattr(repo.pr, key) for key in (
                 "enabled", "required", "automerge_label", "approval_required",
-                "allow_stale_approval", "squash", "delete_source_branch",
+                "allow_stale_approval", "squash", "delete_source_branch", "push_timeout_seconds",
             )
         })
         pr.update(bypass_policy=False, self_approve=False, merge_actor="", roles=None)
+        pr.update(
+            required_body_sections=list(repo.pr.required_body_sections),
+            labels=list(repo.pr.labels),
+        )
+        if repo.pr.source_attribution_configured or repo.pr.source_attribution != "codename":
+            pr["source_attribution"] = repo.pr.source_attribution
     if (
         parse_publication_checks(pr["publication_checks"]) != publication
         or parse_observation(pr["observation"]) != repo.pr.observation

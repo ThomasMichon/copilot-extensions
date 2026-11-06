@@ -83,6 +83,9 @@ policy, first confirm `operations.worker-policy-export: true` from the selected
 runtime's `pr-author-capabilities --repo <target> --json`, then add
 `--include-author` to `export-config`. This preserves PR enablement, required-PR
 and auto-complete-consent policy, approval requirements and completion options.
+Required description sections, labels, attribution choices and push deadlines
+are preserved too. An implicit codename default does not become explicit
+attribution consent.
 It explicitly excludes self-approval, self-merge roles and policy bypass.
 An explicit disabled policy remains disabled. No publication or merge is
 authorized merely by possessing the file.
