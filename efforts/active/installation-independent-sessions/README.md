@@ -292,6 +292,11 @@ retains the operator's wording.
 - [ ] Reconcile restart and missed-boundary evidence through the existing
   lifecycle owner, preserving unknown effects rather than blind replay.
 - [ ] Land directly related tests, docs and required changefiles.
+  - [x] Land current-controller bootstrap preparation/custody and legacy
+    application compatibility repairs (#10559), with exact-head native,
+    retention and legacy controls. Containing release, installed reconstruction
+    and interrupted-request settlement remain separate; see the
+    [source journal](<journal/2026/11.06 bootstrap-custody-source.md>) and R11.
   - [x] Land incoming-start-first monitor replacement, exact native rollback
     validation, bounded old-port exclusion and truthful cleanup scope (#10148).
     The six-stage handoff/grace target is reviewed documentation, not full
@@ -599,6 +604,12 @@ operator's installation-survival contract.
     uncertain-publication retention; existing pinned native PSMux controls
     qualify both pane producers over two cycles (#9418). Installed survival
     and representative Picker input-ready latency remain separate.
+  - [x] Qualify #10559's current-controller bootstrap boundary with all four
+    native bootstrap/retention jobs, both native legacy-monitor jobs and the
+    complete declared source/asset closure on the exact reviewed head. Local
+    full retention preserves all 3,373 files and 54,153,397 bytes. This is
+    component evidence, not a cold-machine performance promise, selected-host
+    reconstruction or either real installation cycle.
 - [ ] Real overlapping same-worktree attempts create one mux and join it;
   different-worktree launches overlap independently. Admission releases when
   the mux is discoverable, not when Copilot exits.
@@ -910,6 +921,12 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-11-06 - Bootstrap preparation and custody source merged
+
+[Detailed journal](<journal/2026/11.06 bootstrap-custody-source.md>).
+Exact-head source/native qualification is complete; containing release,
+installed reconstruction and the parent survival gates remain open.
 
 ### 2026-11-03 - Successor announcement and resident grace source merged
 
