@@ -69,6 +69,15 @@ and no selected path may traverse an existing regular-file parent. Runtime
 writers retain their own permission, lock and content checks.
 The selected adapter must expose `validate_writer_destinations`; an older
 partial adapter refuses before credential reads rather than skipping this check.
+Writer scopes must not overlap each other or the root configuration; the
+canonical fragment/root lock directories may share their existing lock scope.
+An existing authorization directory must already satisfy the authorization
+owner's privacy and dedicated-content checks. Preflight neither creates missing
+authorization directories nor repairs existing ownership or grants.
+Existing authorization bindings must match the configured target/controller,
+and retained key-file receipts must remain internally consistent. Fresh
+directory admission, remote login identity and monotonic revision checks remain
+with the authenticated update and its original writers.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an

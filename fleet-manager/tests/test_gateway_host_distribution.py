@@ -331,6 +331,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
     from test_gateway_ssh_provider import key
     from test_runtime_identity import AUDIENCE
     from test_ssh_machine import update
+    from agent_ssh import gateway_authorization
 
     tmp_path = tmp_path_factory.mktemp("s")
     snapshot, application, updated_application = prepared_application(
@@ -496,6 +497,36 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             assert (root / "current-version").read_text().strip() == first.name
             assert (root / "last-known-good").read_text().strip() == first.name
             assert state_file.read_bytes() == b"retained owner state"
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
+            foreign = gateway_authorization._root(tmp_path / "foreign-authorization")
+            retained = foreign / "retained"
+            retained.write_bytes(b"retained owner content")
+            host.write_private(Path(selection["configuration"]), value | {
+                "authorization_dir": str(foreign),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            assert retained.read_bytes() == b"retained owner content"
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
+            foreign_owner = gateway_authorization._root(tmp_path / "foreign-owner")
+            binding = foreign_owner / "owner.json"
+            gateway_authorization.atomic_write_text(binding, json.dumps({
+                "target": {"machine": "other-machine", "environment": value["environment"]},
+                "controller": value["controller"], "user": "fixture",
+            }))
+            before_binding = binding.read_bytes()
+            host.write_private(Path(selection["configuration"]), value | {
+                "authorization_dir": str(foreign_owner),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            assert binding.read_bytes() == before_binding
             host.write_private(Path(selection["configuration"]), value)
             await preserved_owner(initial["pid"])
             host.write_private(Path(selection["configuration"]), value | {

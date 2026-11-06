@@ -30,6 +30,8 @@ def _consumer(config):
     validate_writer_destinations(
         config_d=absolute(value["config_d"]), ssh_config=absolute(value["ssh_config"]),
         authorization_dir=absolute(value["authorization_dir"]) if value["authorization_dir"] else None,
+        authorization_target={"machine": value["machine"], "environment": value["environment"]},
+        authorization_controller=value["controller"],
     )
     validate_consumer_state(
         absolute(value["state_dir"]), config_d=absolute(value["config_d"]),

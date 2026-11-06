@@ -123,6 +123,27 @@ def test_native_file_repeat_public_keys_and_unrelated_state(tmp_path, capsys):
     assert result.returncode == 0 and result.stdout.count("ED25519") == 2
 
 
+@pytest.mark.parametrize("failure", ["target", "controller", "missing-owner", "modified-keys"])
+def test_read_only_preflight_preserves_invalid_authorization_namespace(tmp_path, capsys, failure):
+    argv, directory = arguments(tmp_path)
+    assert main(argv + ["--apply"]) == 0
+    path = Path(json.loads(capsys.readouterr().out)["authorization_file"])
+    target, controller = {"machine": "worker-a", "environment": "linux"}, directory["controller"]
+    authorization.validate_state(path.parent, target=target, controller=controller)
+    if failure == "target":
+        target = target | {"machine": "other-machine"}
+    elif failure == "controller":
+        controller = "other-controller"
+    elif failure == "missing-owner":
+        (path.parent / "owner.json").unlink()
+    else:
+        path.write_text("foreign unrelated keys\n", encoding="utf-8")
+    before = {entry: (entry.read_bytes(), entry.stat().st_mtime_ns) for entry in path.parent.iterdir()}
+    with pytest.raises(ValueError):
+        authorization.validate_state(path.parent, target=target, controller=controller)
+    assert all((entry.read_bytes(), entry.stat().st_mtime_ns) == content for entry, content in before.items())
+
+
 @pytest.mark.parametrize("change", [
     "older", "equal-different", "wrong-key", "foreign-file", "missing-owner", "different-user",
 ])

@@ -200,8 +200,8 @@ def prepare(root: Path, selection: dict) -> tuple[object, object]:
                 path, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
                 authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,
             )
-        startup_digest(selection, configuration=config)
         prepare_ssh(config)
+        startup_digest(selection, configuration=config)
         return config, None
     from .gateway_enrollment import EnrollmentPolicy
     from .ledger import OperationLedger

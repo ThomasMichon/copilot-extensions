@@ -6,6 +6,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from functools import lru_cache
+import json
 import os
 from pathlib import Path
 import socket
@@ -200,7 +201,7 @@ def ssh_selected(root):
     local = root.parent / ("ssh-local-" + root.name)
     local.mkdir()
     value.update(
-        state_dir=str(local / "state"), authorization_dir=str(local / "authorization"),
+        state_dir=str(local / "state"), authorization_dir=str(local / "ssh" / "authorization"),
         config_d=str(local / "ssh" / "config.d"), ssh_config=str(local / "ssh" / "config"),
     )
     host.write_private(root / "ssh-client.json", value)
@@ -391,6 +392,57 @@ def test_invalid_derived_writer_directory_refuses_before_host_state(tmp_path, sc
     assert destination.read_bytes() == b"retained owner content"
     assert not (root / host.STATE).exists()
     assert not Path(value["state_dir"]).exists()
+
+
+@pytest.mark.parametrize("failure", [
+    "conflicting-root", "conflicting-authorization", "foreign-authorization", "foreign-owner",
+])
+def test_host_preflight_preserves_conflicting_or_unowned_authorization_state(tmp_path, failure):
+    from agent_ssh import gateway_authorization
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    if failure == "conflicting-root":
+        value["ssh_config"] = str(Path(value["config_d"]) / "config")
+    elif failure == "conflicting-authorization":
+        value["authorization_dir"] = value["config_d"]
+    else:
+        selected_authorization = Path(value["authorization_dir"])
+        selected_authorization.parent.mkdir(parents=True, exist_ok=True)
+        path = gateway_authorization._root(selected_authorization)
+        if failure == "foreign-authorization":
+            (path / "retained").write_bytes(b"retained owner content")
+        else:
+            gateway_authorization.atomic_write_text(path / "owner.json", json.dumps({
+                "target": {"machine": "other-machine", "environment": value["environment"]},
+                "controller": value["controller"], "user": "fixture",
+            }))
+            before_owner = (path / "owner.json").read_bytes()
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(ValueError):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    if failure == "foreign-authorization":
+        assert (path / "retained").read_bytes() == b"retained owner content"
+    elif failure == "foreign-owner":
+        assert (path / "owner.json").read_bytes() == before_owner
+
+
+def test_host_requires_current_adapter_before_fingerprinting_credentials(tmp_path, monkeypatch):
+    from agent_ssh import gateway_directory
+    from fleet_manager import credential_references
+
+    root = tmp_path / "i"
+    selection, _, _, _ = ssh_selected(root)
+    monkeypatch.delattr(gateway_directory, "validate_writer_destinations")
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda *_args: pytest.fail("partial adapter read credentials"),
+    )
+    with pytest.raises(ImportError):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
 
 
 @pytest.mark.parametrize("failure", [

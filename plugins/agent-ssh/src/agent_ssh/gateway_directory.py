@@ -9,25 +9,43 @@ import stat
 from . import gateway_authorization, gateway_provider
 
 
-def _writer_directories(config_d: Path, ssh_config: Path, authorization_dir: Path | None) -> set[Path]:
+def _writer_directories(config_d: Path, ssh_config: Path, authorization_dir: Path | None) -> dict[str, Path]:
     from . import gateway_profile, ssh_profile
 
     directories = {
-        config_d,
-        config_d.parent / gateway_profile._SOURCE_DIR,
-        config_d.parent / ssh_profile._LOCK_DIR_NAME,
-        ssh_config.parent / ssh_profile._LOCK_DIR_NAME,
+        "fragments": config_d,
+        "sources": config_d.parent / gateway_profile._SOURCE_DIR,
+        "fragment-locks": config_d.parent / ssh_profile._LOCK_DIR_NAME,
+        "root-locks": ssh_config.parent / ssh_profile._LOCK_DIR_NAME,
     }
     if authorization_dir is not None:
-        directories.add(authorization_dir)
+        directories["authorization"] = authorization_dir
     return directories
 
 
 def validate_writer_destinations(
     *, config_d: Path, ssh_config: Path, authorization_dir: Path | None,
+    authorization_target: dict, authorization_controller: str,
 ) -> None:
     """Validate existing direct and derived writer kinds without creating anything."""
-    for path in _writer_directories(config_d, ssh_config, authorization_dir):
+    directories = _writer_directories(config_d, ssh_config, authorization_dir)
+    scopes = [(name, path.resolve()) for name, path in directories.items()]
+    for index, (name, path) in enumerate(scopes):
+        for other_name, other in scopes[index + 1:]:
+            if name.endswith("-locks") and other_name.endswith("-locks") and path == other:
+                continue
+            if path.is_relative_to(other) or other.is_relative_to(path):
+                raise ValueError("SSH writer directory scopes must be separate")
+        selected = ssh_config.resolve()
+        if selected.is_relative_to(path) or path.is_relative_to(selected):
+            raise ValueError("SSH configuration must be separate from writer directories")
+    from . import ssh_profile
+
+    for path in (*directories.values(), ssh_config):
+        for parent in path.parents:
+            if os.path.lexists(parent):
+                ssh_profile._regular_config_directory(parent)
+    for path in directories.values():
         if os.path.lexists(path):
             info = path.lstat()
             if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
@@ -36,6 +54,15 @@ def validate_writer_destinations(
         info = ssh_config.lstat()
         if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("SSH writer configuration must be an ordinary file")
+    if authorization_dir is not None:
+        parent = authorization_dir.parent.resolve()
+        if not parent.is_dir() and not any(
+            planned.resolve().is_relative_to(parent) for planned in (config_d, ssh_config.parent)
+        ):
+            raise ValueError("Authorization parent must exist or be created by the profile writer")
+        gateway_authorization.validate_state(
+            authorization_dir, target=authorization_target, controller=authorization_controller,
+        )
 
 
 def validate_consumer_state(
@@ -43,7 +70,7 @@ def validate_consumer_state(
 ) -> None:
     """Keep a consumer's private state outside every directory owned by these writers."""
     state = state_dir.resolve()
-    for destination in _writer_directories(config_d, ssh_config, authorization_dir) | {ssh_config}:
+    for destination in set(_writer_directories(config_d, ssh_config, authorization_dir).values()) | {ssh_config}:
         selected = destination.resolve()
         if selected.is_relative_to(state) or state.is_relative_to(selected):
             raise ValueError("SSH consumer requires a dedicated state directory outside local writer scopes")
