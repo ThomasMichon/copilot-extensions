@@ -143,6 +143,30 @@ requirements are not supplied by these files.
 The ordinary hook does not load this library yet, so the provider expansion
 does not add its parsing/definition cost to the current hot path.
 
+### Prepared Windows membership reuse
+
+The existing `managed-session.ps1` admission entry first checks the original
+owner's exact-session `agent-worktrees/managed-session.json` association.
+For a supported legacy Windows caller it validates the session, workspace,
+registry, platform, original project/repository sources and every recorded
+filesystem witness in process before returning positive membership. The
+reader uses the original size, kind and 100-nanosecond timestamp semantics;
+path and scope equality is ordinal, and event extraction preserves JSON array
+types instead of treating singleton arrays as scalar identities.
+It does not reparse registries, run Git, discover a runtime or start Python.
+Membership remains distinct from permission, head custody and liveness.
+
+The read is capped at 1 MiB plus one overflow byte, 256 witnesses, 4,096
+characters per path and 128 path components. Only canonical local Windows
+paths without reparse components are eligible. Missing, changed, malformed,
+oversized, installation-cell, UNC and alias observations retain the existing
+owner admission path. Cold reconstruction still uses that original path.
+This is validated warm-path reuse, not a complete shell-only hook transition
+or a replacement for installation-context validation. Registered post-tool
+tests compose the actual owner association, unchanged shell entry and private
+resident with interpreter lookup trapped; their synthetic project/provider
+does not establish installed, ACP/model or whole-hook throughput acceptance.
+
 ## Qualified resident native saves
 
 The resident can additionally ingest complete committed-save receipts from

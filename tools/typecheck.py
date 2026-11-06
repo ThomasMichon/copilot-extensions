@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 from itertools import product
 import json
@@ -14,7 +14,7 @@ import shutil
 import stat
 import subprocess
 import sys
-from typing import Literal, cast
+from typing import Callable, Literal, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,7 +22,10 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 from tools._admission_protocol import acquire as acquire_environment  # noqa: E402
 from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
-from tools.typecheck_source_views import INSTALLATION_ENTRY, SourceView, installation_view  # noqa: E402
+from tools.typecheck_source_views import (  # noqa: E402
+    GUARD_ENTRY, GUARD_MODULE, INSTALLATION_ENTRY, SourceView, SourceViewError,
+    _write_view, guard_alias_view, installation_view,
+)
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -257,6 +260,135 @@ def _import_inputs(root: Path, roots: tuple[str, ...], paths: tuple[str, ...]) -
     )
 
 
+@dataclass
+class _SourceViews:
+    root: Path
+    stage: Path
+    views: list[SourceView] = field(default_factory=list)
+    directories: dict[Path, tuple[int, int]] = field(default_factory=dict)
+    sources: dict[Path, tuple[tuple[int, int], bytes]] = field(default_factory=dict)
+    outputs: dict[Path, tuple[tuple[int, int], bytes]] = field(default_factory=dict)
+    guard_search: tuple[str, ...] = ()
+
+    def _parents(self, directory: Path, *, create: bool = False) -> None:
+        current = Path(directory.anchor)
+        self._directory(current, create=False)
+        for part in directory.parts[1:]:
+            current /= part
+            self._directory(current, create=create)
+
+    def _directory(self, path: Path, *, create: bool) -> None:
+        if create:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                try:
+                    path.mkdir()
+                except FileExistsError:
+                    pass
+        identity = _import_identity(path, directory=True)
+        if path in self.directories and self.directories[path] != identity:
+            raise TypecheckError(f"Checker view directory identity changed: {path}")
+        self.directories[path] = identity
+
+    def _membership(self) -> None:
+        expected = {path for path in self.outputs if path.parent == self.stage}
+        if self.stage.exists() and set(self.stage.iterdir()) != expected:
+            raise TypecheckError("Checker view stage contains unexpected or missing members")
+
+    def add(
+        self, factory: Callable[[Path, tuple[str, ...], Path], SourceView],
+        paths: tuple[str, ...], inputs: tuple[str, ...], filename: str,
+    ) -> SourceView:
+        self._parents(self.stage, create=True)
+        self._membership()
+        for relative in inputs:
+            source = self.root / relative
+            self._parents(source.parent)
+            identity = _import_identity(source)
+            content = source.read_bytes()
+            if _import_identity(source) != identity:
+                raise TypecheckError(f"Checker source identity changed during capture: {relative}")
+            self.sources[source] = identity, content
+        view = factory(self.root, paths, self.stage / filename)
+        self.views.append(view)
+        self.outputs[view.output] = view.identity, view.content
+        self.verify()
+        return view
+
+    def write(self, path: Path, content: bytes) -> None:
+        self._parents(path.parent)
+        identity = _write_view(path, content)
+        self.outputs[path] = identity, content
+
+    def _guard_providers(self) -> None:
+        allowed = {
+            view.output for view in self.views
+            if view.output.name == GUARD_MODULE + ".py" and view.output in self.outputs
+        }
+        for entry in self.guard_search:
+            directory = Path(entry)
+            if not directory.exists():
+                continue
+            self._parents(directory)
+            for child in directory.iterdir():
+                name = os.path.normcase(child.name)
+                module = os.path.normcase(GUARD_MODULE)
+                if name == module or (
+                    _import_suffix(child) in {".py", ".pyi"}
+                    and os.path.normcase(child.stem) == module
+                ):
+                    if child not in allowed:
+                        raise TypecheckError(f"Competing {GUARD_MODULE} provider: {child}")
+                    if _import_identity(child) != self.outputs[child][0]:
+                        raise TypecheckError(f"Guard alias output identity changed: {child}")
+
+    def verify_inputs(self) -> None:
+        for directory, identity in self.directories.items():
+            if _import_identity(directory, directory=True) != identity:
+                raise TypecheckError(f"Checker view directory identity changed: {directory}")
+        for source, (identity, content) in self.sources.items():
+            if _import_identity(source) != identity:
+                raise TypecheckError(f"Checker source identity changed: {source}")
+            if source.read_bytes() != content:
+                raise SourceViewError(f"{source.relative_to(self.root).as_posix()}: source changed during type checking")
+
+    def verify(self) -> None:
+        self.verify_inputs()
+        for output, (identity, content) in self.outputs.items():
+            if _import_identity(output) != identity:
+                raise TypecheckError(f"Checker output identity changed: {output}")
+            if output.read_bytes() != content:
+                raise SourceViewError("Checker output changed during type checking")
+        self._membership()
+        self._guard_providers()
+        for view in self.views:
+            view.verify(self.root)
+
+    def cleanup(self) -> None:
+        errors: list[ValueError | OSError] = []
+        for output, (identity, _content) in tuple(self.outputs.items()):
+            try:
+                self._parents(output.parent)
+                if output.exists():
+                    if _import_identity(output) != identity:
+                        raise TypecheckError(f"Replaced checker output retained: {output}")
+                    output.unlink()
+                del self.outputs[output]
+            except (OSError, ValueError) as error:
+                errors.append(error)
+        if errors:
+            raise errors[0]
+        self.verify_inputs()
+        self._membership()
+        self._guard_providers()
+
+    def diagnostics(self, text: str) -> str:
+        for view in self.views:
+            text = view.diagnostics(text, self.root)
+        return text
+
+
 def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv, cwd=root, env=env, capture_output=True, text=True, encoding="utf-8",
@@ -412,7 +544,9 @@ def check_project(
     if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
         raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
     lease = acquire_environment(0, path)
-    view: SourceView | None = None
+    views = _SourceViews(
+        root, path.parent / ("source-views-" + path.name) / project.name,
+    )
     import_inputs: _ImportInputs | None = None
     try:
         if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
@@ -429,14 +563,32 @@ def check_project(
             directory = _import_directory(root, relative)
             if str(directory) not in ordered_imports:
                 ordered_imports.append(str(directory))
+        guard = project.name == "copilot-extensions-harness"
+        if guard:
+            if (
+                files.count(GUARD_ENTRY) != 1 or all_paths.count(GUARD_ENTRY) != 1
+                or not project.owns(GUARD_ENTRY) or len(set(files)) != len(files)
+                or set(files) != {file for file in all_paths if project.owns(file)}
+            ):
+                raise TypecheckError(
+                    f"{project.name}: guard alias requires its complete owned physical binding"
+                )
+            views.guard_search = tuple(ordered_imports)
+            views.verify()
         env = {
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
         if INSTALLATION_ENTRY in files or INSTALLATION_ENTRY in all_paths:
-            view = installation_view(
-                root, all_paths,
-                path.parent / ("source-views-" + path.name) / project.name / "installation_context.py",
+            installation_inputs = tuple(
+                file for file in all_paths if file == INSTALLATION_ENTRY or (
+                    file.startswith(INSTALLATION_ENTRY.rsplit("/", 1)[0] + "/_installation_context_")
+                    and "/" not in file[len(INSTALLATION_ENTRY.rsplit("/", 1)[0]) + 1:]
+                    and not file.endswith("_installation_context_worker.py")
+                )
+            )
+            view = views.add(
+                installation_view, all_paths, installation_inputs, "installation_context.py",
             )
             if INSTALLATION_ENTRY in files:
                 members = {name for name, _content in view.inputs}
@@ -444,13 +596,19 @@ def check_project(
                     raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
                 files = (*tuple(file for file in files if file not in members), str(view.output))
             ordered_imports.insert(0, str(view.output.parent))
-        if project.import_roots and any(os.pathsep in entry for entry in ordered_imports):
+        if guard:
+            view = views.add(guard_alias_view, files, (GUARD_ENTRY,), GUARD_MODULE + ".py")
+            files = tuple(str(view.output) if file == GUARD_ENTRY else file for file in files)
+            if str(view.output.parent) not in ordered_imports:
+                ordered_imports.insert(0, str(view.output.parent))
+            views.guard_search = tuple(ordered_imports)
+        if (project.import_roots or guard) and any(os.pathsep in entry for entry in ordered_imports):
             raise TypecheckError("Import search paths contain the native path-list separator")
         env["MYPYPATH"] = os.pathsep.join(ordered_imports)
         targets = path / "typecheck-targets.txt"
-        targets.write_text("\n".join(files) + "\n", encoding="utf-8")
+        views.write(targets, ("\n".join(files) + "\n").encode("utf-8"))
         config = path / "typecheck-mypy.ini"
-        config.write_text("[mypy]\n", encoding="utf-8")
+        views.write(config, b"[mypy]\n")
         failure = 0
         versions = (project.python_version, *project.additional_python_versions)
         for version, platform in product(versions, project.platforms):
@@ -460,7 +618,7 @@ def check_project(
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
                 "--cache-dir", (
-                    os.devnull if project.import_roots
+                    os.devnull if project.import_roots or guard
                     else str(path / "mypy-cache" / project.name / platform / version)
                 ),
             ]
@@ -469,16 +627,18 @@ def check_project(
             argv.append("@" + str(targets))
             if import_inputs is not None:
                 import_inputs.verify(root)
+            views.verify()
             try:
                 result = _run(argv, root, env=env)
             finally:
-                if import_inputs is not None:
-                    import_inputs.verify(root)
-            if view is not None:
-                view.verify(root)
+                try:
+                    views.verify()
+                finally:
+                    if import_inputs is not None:
+                        import_inputs.verify(root)
             print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
-            print(view.diagnostics(result.stdout, root) if view is not None else result.stdout, end="")
-            print(result.stderr, end="", file=sys.stderr)
+            print(views.diagnostics(result.stdout), end="")
+            print(views.diagnostics(result.stderr), end="", file=sys.stderr)
             if result.returncode:
                 if not project.additional_python_versions:
                     return result.returncode
@@ -486,10 +646,10 @@ def check_project(
         return failure
     finally:
         try:
-            if view is not None:
-                view.output.unlink(missing_ok=True)
-            (path / "typecheck-targets.txt").unlink(missing_ok=True)
-            (path / "typecheck-mypy.ini").unlink(missing_ok=True)
+            try:
+                views.verify()
+            finally:
+                views.cleanup()
         finally:
             try:
                 if import_inputs is not None:

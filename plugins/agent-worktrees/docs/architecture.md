@@ -1186,6 +1186,17 @@ session id across projects, and closes the latest open activation interval. It
 does **not** conclude the session or move the head: an exited session remains
 resumable until an explicit lifecycle transition says otherwise.
 
+Registration's existing exact-session `worktree-binding.json` stamp can include
+`project`, `creationNonce` and an optional `sessionActivation` observation. The
+writer holds nonblocking record-sidecar ownership through its uncached
+project/worktree/incarnation/lifecycle/head recheck and atomic publication.
+`sessionActivation` version 1 records the latest unique open interval's
+`ordinal`, `startedAt`, `startRecordedAt` and exact `sourceIdentity`. Missing,
+ambiguous, ended, pruned or saturated source evidence omits that observation;
+a pending candidate alone does not establish an activation. Non-head sessions
+can have qualified observations. These fields are optional evidence for
+handoff receipts, not head authority or proof of a later running process.
+
 ### Reciprocal bound and controller projections
 
 Each session with a changed bound relation receives a versioned

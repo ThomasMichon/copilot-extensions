@@ -331,8 +331,10 @@ https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321
 
 - The [independent expected-head source sequence](expected-head-observation.md)
   realizes P3/P4 through the existing owner receipts and an optional passive
-  comparison. Its reviewed admission precedes implementation; legacy identity
-  stays unknown and all original clauses below remain unchanged.
+  comparison. Plan #10865 is merged; H1 captures optional original/consumer
+  identity in source. The passive comparison reader and Companion consumer remain
+  unimplemented. Legacy identity stays unknown and all original clauses below
+  remain unchanged.
 
 - [ ] P1. Retain all original four steps and earned source delivery: scoped vision,
   explicit one-call context-handoff force option, one-worktree on-demand existing
@@ -731,6 +733,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Reviewed independent expected-head source sequence](journal/2026/11.05-companion-expected-head-plan.md)
 - [2026-11-05 - Supported history/live splice and gap qualification](journal/2026/11.05-sidecar-history-gaps.md)
 - [2026-11-05 - Strict codec and retained membership replay boundaries](journal/2026/11.05-sidecar-codec-boundaries.md)
 - [2026-11-05 - Cold membership diagnostics and native fixture corrections](journal/2026/11.05-sidecar-membership-diagnostics.md)

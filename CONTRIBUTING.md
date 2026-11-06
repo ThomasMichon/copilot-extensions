@@ -21,6 +21,15 @@ its destination.
 
 ## Contribution flow (PR-required)
 
+### Conceptual direction review
+
+The public [Maintainer's Vision Adherence Review](plugins/copilot-extensions-harness/references/maintainer-vision-adherence-review.md)
+explains the conceptual lens for vision alignment, architectural coherence and
+proportionate planning. Substantial work benefits from PR -> effort -> vision
+citations; targeted architecture-neutral fixes do not need a new campaign.
+This lens is separate from tactical review, required CI, Maintainer acceptance
+and merge authority. It does not change the contribution flow below.
+
 ### Required source attribution on dev PRs
 
 Every PR targeting `dev`, including manually opened and automated PRs, must
