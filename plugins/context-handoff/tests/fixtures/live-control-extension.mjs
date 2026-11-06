@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 await import(pathToFileURL(process.argv[2]).href);
 const session = globalThis.nativeTestSession;
@@ -47,3 +47,34 @@ assert.match(await status(), /Config thresholds: soft 65%/);
 await writeConfig("mode: off\n");
 await emit("session.idle");
 assert.match(await status(), /disabled by config \(mode: off\)/);
+
+// An idle-boundary reload that lowers a threshold below current usage (66%)
+// delivers at that same idle, not the next one.
+await writeConfig("mode: auto\nnative_pressure: nudge\nthresholds:\n  soft_percent: 69\n");
+await emit("session.idle");
+assert.equal(session.prompts.length, 2);
+await writeConfig("mode: auto\nnative_pressure: nudge\nthresholds:\n  soft_percent: 61 # lowered\n");
+await emit("session.idle");
+assert.equal(session.prompts.length, 3);
+
+// nudge -> defer -> nudge: a reminder dropped while deferred is re-armed and
+// delivered once nudging is restored.
+await writeConfig("mode: auto\nnative_pressure: nudge\nthresholds:\n  soft_percent: 68 # raised again\n");
+await emit("session.idle");
+await writeFile(join(process.env.COPILOT_HOME, "settings.json"), '{"contextManagementTools":true}');
+await emit("session.tools_updated", { model: "synthetic" });
+await emit("session.usage_info", usage(690));
+await writeConfig("mode: auto\nnative_pressure: defer\nthresholds:\n  soft_percent: 68\n");
+await emit("session.idle");
+assert.equal(session.prompts.length, 3);
+await writeConfig("mode: auto\nnative_pressure: nudge\nthresholds:\n  soft_percent: 68 # nudge restored\n");
+await emit("session.idle");
+assert.equal(session.prompts.length, 4);
+
+// The command binds the invocation's session ID, so a pause persists to that
+// session's sidecar even before any tool call initialized state.
+const sessionDir = join(process.env.COPILOT_HOME, ".copilot", "session-state", "live-control-sid");
+await mkdir(sessionDir, { recursive: true });
+await command.handler({ args: "pause", sessionId: "live-control-sid" });
+const sidecar = JSON.parse(await readFile(join(sessionDir, "context-handoff-override.json"), "utf-8"));
+assert.equal(sidecar.paused, true);

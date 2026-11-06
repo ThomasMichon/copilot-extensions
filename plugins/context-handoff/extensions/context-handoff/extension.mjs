@@ -1394,6 +1394,7 @@ const session = await joinSession({
           session.log(`[Context Handoff] /handoff-pressure: ${error.message}`, { level: "warning" });
           return;
         }
+        ensureState(ctx);
         const result = await applyPressureOverride(request, ACTOR_OPERATOR);
         session.log(
           result.ok ? result.text : `[Context Handoff] /handoff-pressure: ${result.text}`,
@@ -1541,7 +1542,9 @@ let usageRetryTimer = null;
 // compaction, not by tool/cwd changes). Manual entry points are unaffected.
 let nativeDeferralNoticeShown = false;
 function deferNativePressure() {
-  pendingNudge = null;
+  // Re-arm rather than discard, so a later switch back to `nudge` (config
+  // reload) can still deliver the reminder that was never sent.
+  dropPendingNudge();
   if (nativeDeferralNoticeShown) return;
   nativeDeferralNoticeShown = true;
   session.log(
@@ -1779,7 +1782,15 @@ session.on("session.idle", async (event) => {
   if (event.agentId) return;
   // Refresh on every idle boundary so config edits apply without waiting for
   // the next usage update; a reload re-checks any queued nudge itself.
+  const settingsBeforeRefresh = liveSettingsRevision;
   await refreshHandoffConfig();
+  if (settingsBeforeRefresh !== liveSettingsRevision && !pendingNudge && latestUsageEvent) {
+    // A reload may have lowered a threshold below current usage; evaluate now
+    // so the nudge lands at this idle boundary instead of the next one.
+    clearTimeout(usageRetryTimer);
+    usageRetryTimer = null;
+    await handleUsage(latestUsageEvent);
+  }
   if (!pendingNudge) return;
   if (currentOverride().paused) {
     dropPendingNudge();

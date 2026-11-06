@@ -6,7 +6,7 @@
 //     never written back to any config file.
 // Pure helpers live here so they are unit-testable without the SDK session.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -98,12 +98,17 @@ export function readOverride(path) {
   }
 }
 
+// Writes via a sibling temp file and rename, so a concurrent reader sees the
+// complete previous or new override, never a truncated one.
 export function writeOverride(path, override) {
   if (!path) return false;
+  const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
   try {
-    writeFileSync(path, JSON.stringify(normalizeOverride(override)), "utf-8");
+    writeFileSync(temp, JSON.stringify(normalizeOverride(override)), "utf-8");
+    renameSync(temp, path);
     return true;
   } catch {
+    try { rmSync(temp, { force: true }); } catch { /* best effort */ }
     return false;
   }
 }
