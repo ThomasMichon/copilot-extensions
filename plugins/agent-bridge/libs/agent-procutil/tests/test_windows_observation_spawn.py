@@ -105,6 +105,10 @@ def launch(monkeypatch):
             calls.append(("close", handle))
             return True
 
+        def TerminateJobObject(self, handle, code):
+            calls.append(("request-termination", handle))
+            return True
+
         def WaitForSingleObject(self, handle, timeout):
             calls.append(("wait", timeout))
             return 0
@@ -175,7 +179,7 @@ def test_attribute_capability_failure_has_no_create(launch):
     assert not any(isinstance(event, tuple) and event[0] == "create" for event in launch.calls)
 
 
-def test_post_create_interruption_at_D_retains_exact_streams_job_and_original_cause(launch):
+def test_post_create_interruption_at_D_retains_exact_streams_job_and_original_cause(launch, monkeypatch):
     launch.kernel.interrupt = True
     error = None
     try:
@@ -190,6 +194,7 @@ def test_post_create_interruption_at_D_retains_exact_streams_job_and_original_ca
     assert error.process.stderr is launch.streams[1] and not error.process.stderr.closed
     assert isinstance(error.__cause__, KeyboardInterrupt)
     assert error.operation_error is error.__cause__
+    assert ("request-termination", 501) in launch.calls and error._job_empty_confirmed is False
     assert not any(isinstance(event, tuple) and event[0] in {"wait", "terminate"} for event in launch.calls)
 
 
@@ -259,3 +264,92 @@ def test_sdk_budget_also_refuses_execution_after_native_setup_cutoff(launch, mon
         )
     assert "resume" not in launch.calls
     assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)
+
+
+@pytest.mark.parametrize("outcome", ["admitted", "refused", "expired", "replacement"])
+def test_scoped_admission_precedes_resume_and_keeps_original_cleanup(launch, outcome):
+    seen = []
+
+    def admission(process, job, deadline, cleanup_deadline):
+        assert process._handle == 601 and process._thread_handle == 602
+        assert process._observation_pending is True
+        assert job is launch.jobs[0] and job.handle == 501
+        assert deadline == 105 and cleanup_deadline == 110
+        native.require_pre_resume_admission(process, job, deadline, cleanup_deadline)
+        assert "resume" not in launch.calls
+        launch.calls.append("admitted")
+        seen.append(process)
+        if outcome == "refused":
+            raise RuntimeError("observer refused")
+        if outcome == "expired":
+            launch.clock[0] = 106
+        return "replacement" if outcome == "replacement" else None
+
+    def spawn():
+        return native.spawn(
+            ["fixture.exe"], command_deadline=105, cleanup_deadline=110,
+            before_resume=admission, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    if outcome == "admitted":
+        process, job = spawn()
+        assert launch.calls.index("admitted") < launch.calls.index("resume")
+        process.close()
+        job.close()
+    else:
+        with pytest.raises((RuntimeError, ValueError, subprocess.TimeoutExpired)):
+            spawn()
+        assert "resume" not in launch.calls
+        assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)
+        assert ("close", 601) in launch.calls
+        assert ("terminate", 4 if outcome == "expired" else 10) in launch.calls
+    assert seen[0]._observation_pending is False
+    assert native._pre_resume_context.get() is None
+
+
+@pytest.mark.parametrize("options", [
+    {"before_resume": True},
+    {"before_resume": lambda *args: None, "command_deadline": 105},
+    {"before_resume": lambda *args: None, "cleanup_deadline": 110},
+    {"before_resume": lambda *args: None, "command_deadline": 105,
+     "cleanup_deadline": 110, "allow_breakaway": True},
+])
+def test_scoped_admission_without_original_execution_and_cleanup_budget_starts_nothing(launch, options):
+    with pytest.raises(ValueError, match="observer admission"):
+        native.spawn(["fixture.exe"], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
+    assert launch.calls == []
+
+
+@pytest.mark.parametrize("terminated", [True, False])
+def test_expired_callback_still_requests_exact_owned_job_termination_without_wait_budget(launch, monkeypatch, terminated):
+    original = RuntimeError("callback exhausted the original deadline")
+    attempts = []
+
+    def expired(*args):
+        launch.clock[0] = 111
+        raise original
+
+    logical_queries = []
+    monkeypatch.setattr(
+        native.JobHandle, "try_terminate_and_confirm_empty",
+        lambda job: logical_queries.append(job.handle) or True,
+    )
+    monkeypatch.setattr(
+        launch.kernel, "TerminateJobObject",
+        lambda handle, code: attempts.append((handle, code)) or terminated, raising=False,
+    )
+    settled = []
+    with pytest.raises(OwnedCleanupError) as caught:
+        native.spawn(["fixture.exe"], before_resume=expired, on_settled=lambda: settled.append(True),
+                     command_deadline=105, cleanup_deadline=110,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert caught.value.operation_error is original and caught.value.__cause__ is original
+    assert caught.value.process._handle == 601 and caught.value.job.handle == 501
+    assert caught.value._job_empty_confirmed is False
+    assert not logical_queries and not settled
+    assert not any(isinstance(row, tuple) and row[0] == "wait" for row in launch.calls)
+    assert ("close", 601) not in launch.calls
+    assert attempts == [(501, 1)]
+    assert not any(isinstance(row, tuple) and row[0] == "terminate" for row in launch.calls)

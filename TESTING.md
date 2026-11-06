@@ -1859,6 +1859,27 @@ stream, calibration witnesses and original coverage ceilings remain required.
 Its portable policy controls are in
 `tools/promotion_unit_tests/test_sdk_desktop_observer.py`; actual desktop proof
 is a different lane and must never appear in required unit-only CI.
+The distinct scoped-root foundation is documented in
+`libs/agent-procutil/README.md` under pre-resume observation admission.
+`libs/agent-procutil/tests/test_windows_observation_spawn.py` checks the existing
+owner's opt-in barrier and original cleanup with synthetic native calls.
+`libs/agent-procutil/tests/test_sdk_scoped_observer.py` uses synthetic USER32
+filters and portable pump threads to check scoped acquisition, source/epoch
+binding, visibility/focus violations and unqualified coverage/cleanup failures.
+These threaded controls are outside the admitted actor-free promotion packet.
+They acquire no native desktop and do not qualify opaque CMD descendants,
+terminal attribution or calibration. The independent SDK case is
+`libs/agent-procutil/tests/test_caller_owned_native.py::test_scoped_observer_managed_root`.
+It uses the original SDK finite owner and requires its exact source-admitted
+enrollment; no application-specific selector or compatibility alias is accepted.
+Its native driver integration and actual execution are independent SDK gates,
+not MCP prerequisites. Actor-free collection and its default skip are not native
+qualification; the whole-desktop self-profile cannot enroll it.
+Integrated synthetic launch controls also cover successful observer admission
+followed by native resume failure, independent original Job cleanup failure,
+same-exception propagation and retained hook/pin custody. Context exit and
+explicit close do not replay uncertain native closes or qualify an unfinished
+observation.
 The source manifest must include the runner helpers and the explicit SDK
 closure declared in `sdk_visibility_sources.py`, all beneath the selected
 SDK root. It must match that exact closure, not mix in separately located

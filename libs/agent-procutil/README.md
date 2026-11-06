@@ -151,6 +151,134 @@ that those gates have passed or introduce another cleanup policy.
 
 ## Windows bootstrap and shell admission
 
+### Opt-in pre-resume observation admission
+
+The qualification-facing `_windows_caller_owned.spawn` accepts an optional
+`before_resume(process, job, execution_deadline, cleanup_deadline)` callback.
+The existing owner creates the root suspended and atomically Job-bound, invokes
+the callback with its actual held process/thread objects, and resumes only after
+successful admission within the original execution deadline. Both deadlines and
+non-breakaway containment are required. The callback returns `None`; it does not
+replace the process, transfer cleanup ownership or authorize effects.
+`require_pre_resume_admission` checks the existing owner's transient creation
+context and its original objects/handles/deadlines; a caller-set flag or PID
+cannot substitute for that transaction.
+The scoped helper checks the selected owner's explicit seam before launch:
+an older `**kwargs` provider cannot silently ignore observer admission.
+Failure uses the original exact-root/Job cleanup and retained-custody errors.
+Calls without the callback retain their existing behavior.
+If a callback exhausts its cleanup deadline, the owner still requests termination
+of its exact Job without querying accounting, closing the Job or waiting again.
+Termination is not an exit proof: this path always retains unconfirmed native
+process/Job custody and never invokes the settlement-success callback.
+
+The separate `tests/sdk_scoped_observer.py` qualification helper composes this
+seam with process-filtered USER32 hooks and an initial owned-thread window query.
+It never calls `EnumWindows` or samples global foreground state. It retains
+duplicates of the launch owner's process/thread handles, derives process birth
+from the held object, and admits the subscription/message-pump barrier before
+resume.
+The pinned initial thread must remain live and retain its native identity across
+the query. As documented by
+[EnumThreadWindows](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumthreadwindows),
+FALSE with no callbacks is a valid empty result; callback errors, partial
+enumeration and changed/expired native thread identity still refuse qualification.
+The caller must invoke `finish()` after root exit while its original
+Job is still queryable, then settle the original owner's resources normally.
+Finishing retains the hooks and pump for a full delivery-ceiling interval after
+confirmed root exit, within the original execution budget; insufficient budget,
+late callbacks or a failed tail cannot become zero-window evidence.
+Keeping the process object alive also prevents
+[PID reuse during callback drain](https://devblogs.microsoft.com/oldnewthing/20110107-00/?p=11803);
+its duplicate closes only after confirmed unhooking.
+Unconfirmed unhooking retains the callback, hook handles and pins rather than
+claiming cleanup or releasing their identity protection.
+
+Wrap the **launch itself** in the observer's context, including the path where
+`spawn` raises before it returns process/Job values:
+
+```python
+with ScopedObserver(api, enrollment) as observer:
+    process, job = spawn(
+        argv, before_resume=observer.admit,
+        command_deadline=work_deadline, cleanup_deadline=cleanup_deadline,
+        **original_stdio_and_launch_options,
+    )
+    try:
+        # Existing caller-owned I/O and whole-Job exit, keeping the Job queryable.
+        ...
+        evidence = observer.finish()
+    finally:
+        # Existing caller-owned root/Job retirement and handle settlement.
+        ...
+```
+
+The placeholders are the caller's existing lifecycle operations, not new SDK
+functions. The observer never takes over root/Job or stream settlement.
+Its context exit closes the pump/hooks/pins even when native resume or a later
+launch step fails after successful admission. It propagates the **same original
+exception**, preserving any `OwnedCleanupError` process/Job custody and cause,
+and attaches `scoped_observer` plus `scoped_observer_evidence`.
+Failed startup admission signals stop and returns immediately to the native
+owner; it does not join the observer while the root is still suspended. The
+outer context performs potentially blocking observer teardown only after the
+native owner's failure settlement, within the original cleanup deadline.
+Interrupted thread start retains the attempted worker even before its Python
+`ident` exists. The existing pipe-worker owner's proven-precreation-refusal rule
+is the only discard path. Observer pins remain held until the worker's completion
+event and bounded join confirm settlement; unknown startup cannot become closed
+or qualified evidence.
+Failure logging and evidence capture never wait for the observer lock. If a
+stalled callback owns that lock, evidence is explicitly unknown and unqualified,
+with no invented empty raw stream; the original error and live observer retain
+the exact unresolved custody.
+If observer cleanup is also unconfirmed, `scoped_observer_cleanup_error`
+retains that independent failure without replacing the original.
+
+Without a body exception, unconfirmed cleanup raises `ScopedCleanupError`,
+which retains the observer, evidence and underlying `cleanup_error`.
+Retain these references for the existing custody/recovery owner; do not report
+the operation closed. Direct `close()` follows the same rule. A repeated close
+reports the cached result/error without replaying unknown native closes.
+Neither context exit nor explicit close substitutes for `finish()`: closing
+without confirmed root/Job exit leaves the observation unqualified.
+
+`sdk_visibility_sources.enroll_scoped_consumer` binds the exact SDK case
+`tests/test_caller_owned_native.py::test_scoped_observer_managed_root` and its
+declared function and complete SDK source closure. It provides source
+integrity and case/epoch binding, not provenance, execution consent or native
+qualification. Those remain the admitting native driver's responsibilities.
+`verify_scoped_root_packet` accepts only the distinct
+`copilot-extensions.scoped-native-observation/v1` root schema. It does not accept
+the original SDK self-profile packet or promote root-only evidence into full
+consumer coverage.
+
+The SDK native case uses the existing finite owner and one managed root, not an
+application command chain. Its fixture accepts only the SDK driver's already
+source-admitted `ScopedEnrollment` through pytest configuration
+`_agent_procutil_scoped_enrollment`. Missing enrollment skips the opt-in case;
+wrong-case or invalid source enrollment refuses before native binding.
+This typed input transports earlier admission, not effect consent.
+The case's own finally helper also handles late return/interruption: after its
+original cleanup deadline it requests exact retained-Job termination only, with
+no accounting query, wait, handle close or positive exit claim. Its
+`OwnedCleanupError` retains the original process/Job, operation cause and native
+termination error independently of observer teardown.
+The old self-profile's literal packets are unchanged and do not enroll this case.
+Native driver qualification and execution remain separately gated in
+[Fixture-Scoped Native Observation](../../efforts/active/fixture-scoped-native-observation/README.md).
+Collection or default skip is not native acceptance; no application lifecycle
+depends on this SDK objective.
+
+**Coverage is root-only.** Every unadmitted descendant, including one that exits
+between samples, makes Job accounting unqualified. This helper does not provide
+before-first-effect admission for opaque subprocess trees. Console and Default
+Terminal associations are unsupported; `GetConsoleWindow` in a pseudoconsole
+does not identify the displayed terminal. No shared-host hook is installed.
+Packets always retain `consumer_qualified: false`; a root-scope pass does not
+qualify opaque graphs, terminal hosts or full desktop visibility. The existing
+whole-desktop SDK self-profile, literal cases and verifier remain separate.
+
 ### Compiler-free migration boundary
 
 `daemon_instances.ps1` uses the shared standard-library Python owner. The

@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import importlib
+import ast
+from dataclasses import dataclass
+import hashlib
+import json
+import math
 from pathlib import Path
 import sys
+import time
+import uuid
 
 from sdk_desktop_observer import ObservationBlocked
 
@@ -86,3 +93,161 @@ def bind_sdk_import(sdk: Path) -> Path:
     if Path(package.__file__).resolve() != expected.resolve():
         raise ObservationBlocked("SDK worker imported procutil outside its verified source")
     return expected
+
+
+SCOPED_PROFILE = "copilot-extensions.scoped-native-observation/v1"
+SCOPED_CONSUMER = (
+    "libs/agent-procutil/tests/test_caller_owned_native.py"
+    "::test_scoped_observer_managed_root"
+)
+SCOPED_FILES = (*SDK_FILES, "libs/agent-procutil/tests/sdk_scoped_observer.py")
+
+
+@dataclass(frozen=True)
+class ScopedEnrollment:
+    """Source integrity and exact case binding, not permission for native effects."""
+
+    root: Path
+    case: str
+    epoch: str
+    deadline: float
+    sources: tuple[tuple[str, int, str], ...]
+
+    def verify(self) -> str:
+        if (type(self.deadline) not in (int, float) or not math.isfinite(self.deadline)
+                or not 0 < self.deadline - time.monotonic() <= 180):
+            raise ObservationBlocked("scoped source enrollment expired")
+        filename, separator, function = self.case.partition("::")
+        expected_file, _, expected_function = SCOPED_CONSUMER.partition("::")
+        if (
+            not separator or filename != str(self.root / expected_file)
+            or function != expected_function
+            or not isinstance(self.epoch, str) or len(self.epoch) != 32
+            or any(c not in "0123456789abcdef" for c in self.epoch)
+            or not self.root.is_absolute() or self.root.resolve() != self.root
+            or Path(__file__) != self.root / "libs/agent-procutil/tests/sdk_visibility_sources.py"
+        ):
+            raise ObservationBlocked("scoped consumer escaped its exact source-bound case")
+        expected = {str(self.root / name) for name in (*SCOPED_FILES, expected_file)}
+        if len(self.sources) != len(expected) or {row[0] for row in self.sources} != expected:
+            raise ObservationBlocked("scoped source closure is incomplete or rebound")
+        for name, length, digest in self.sources:
+            path = Path(name)
+            if (
+                path.resolve() != path or not path.is_file()
+                or type(length) is not int or length < 0
+                or not isinstance(digest, str) or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+            ):
+                raise ObservationBlocked("scoped source entry is indirect or invalid")
+            data = path.read_bytes()
+            if len(data) != length or hashlib.sha256(data).hexdigest() != digest:
+                raise ObservationBlocked("scoped source changed after enrollment")
+        try:
+            declaration = ast.parse((self.root / expected_file).read_bytes())
+        except (SyntaxError, ValueError) as error:
+            raise ObservationBlocked("scoped SDK consumer source is invalid") from error
+        if not any(isinstance(node, ast.FunctionDef) and node.name == expected_function
+                   for node in declaration.body):
+            raise ObservationBlocked("scoped SDK consumer case is not declared")
+        for name in (Path(filename).stem for filename in (*RUNNER_FILES, "sdk_scoped_observer.py")):
+            loaded = sys.modules.get(name)
+            if loaded is not None and Path(getattr(loaded, "__file__", "")) != (
+                self.root / "libs/agent-procutil/tests" / (name + ".py")
+            ):
+                raise ObservationBlocked("loaded scoped helper belongs to another source root")
+        return hashlib.sha256(json.dumps(self.sources, separators=(",", ":")).encode()).hexdigest()
+
+
+def enroll_scoped_consumer(
+    sdk: Path, case: str, sources: list[dict], deadline: float,
+) -> ScopedEnrollment:
+    """Enroll only the literal SDK managed-root case through the source owner.
+
+    The admitting native driver still owns provenance, consent and containment.
+    A caller-computed file digest cannot grant any of those authorities.
+    """
+    if not isinstance(case, str) or not isinstance(sources, list) or any(
+        not isinstance(row, dict) or set(row) != {"path", "bytes", "sha256"}
+        or not isinstance(row["path"], str) for row in sources
+    ):
+        raise ObservationBlocked("invalid scoped source enrollment")
+    enrollment = ScopedEnrollment(
+        sdk, case, uuid.uuid4().hex, deadline,
+        tuple(sorted((row["path"], row["bytes"], row["sha256"]) for row in sources)),
+    )
+    enrollment.verify()
+    return enrollment
+
+
+def verify_scoped_root_packet(
+    packet: dict, enrollment: ScopedEnrollment, identity: dict,
+) -> bool:
+    """Validate root-only evidence; never promote it to full consumer coverage."""
+    expected = {
+        "schema", "case", "epoch", "source_digest", "scope", "descendants", "console_hosts",
+        "consumer_qualified", "identity", "started", "barrier", "ended", "sealed",
+        "root_exit_observed", "delivery_tail",
+        "root_and_job_settled", "hooks_closed", "pins_closed", "hook_count", "pumps",
+        "maximum_gap", "overflow", "errors", "raw_events", "qualified", "passed",
+    }
+    if not isinstance(packet, dict) or set(packet) != expected or (
+        packet["schema"] != SCOPED_PROFILE or packet["case"] != enrollment.case
+        or packet["epoch"] != enrollment.epoch
+        or packet["source_digest"] != enrollment.verify()
+        or packet["scope"] != "sdk-pre-resume-root-only"
+        or packet["descendants"] != "unmanaged-unsupported"
+        or packet["console_hosts"] != "unverified-unsupported"
+        or packet["consumer_qualified"] is not False
+        or packet["identity"] != identity or not isinstance(identity, dict)
+        or set(identity) != {"pid", "birth", "initial_thread"}
+    ):
+        raise ObservationBlocked("scoped evidence schema, source, epoch or identity differs")
+    if any(type(identity[key]) is not int or not 0 < identity[key] < maximum for key, maximum in (
+        ("pid", 1 << 32), ("birth", 1 << 64), ("initial_thread", 1 << 32),
+    )):
+        raise ObservationBlocked("scoped evidence lacks its exact native identity")
+    if (
+        any(packet[key] is not True for key in (
+            "sealed", "root_and_job_settled", "hooks_closed", "pins_closed", "qualified",
+        ))
+        or packet["overflow"] is not False or packet["errors"] != []
+        or type(packet["hook_count"]) is not int or packet["hook_count"] != 2
+        or type(packet["pumps"]) is not int or packet["pumps"] <= 0
+        or any(type(packet[key]) not in (int, float) or not math.isfinite(packet[key])
+               for key in ("started", "barrier", "ended", "maximum_gap",
+                           "root_exit_observed", "delivery_tail"))
+        or not packet["started"] <= packet["barrier"] <= packet["root_exit_observed"]
+        <= packet["ended"] < enrollment.deadline
+        or not .5 <= packet["delivery_tail"] <= packet["ended"] - packet["root_exit_observed"]
+        or not 0 <= packet["maximum_gap"] <= .5
+    ):
+        raise ObservationBlocked("scoped evidence has incomplete startup, coverage or cleanup")
+    events = packet["raw_events"]
+    if not isinstance(events, list) or len(events) > 4096:
+        raise ObservationBlocked("scoped evidence exceeded its event bound")
+    event_fields = {
+        "kind", "hwnd", "pid", "birth", "thread", "generated_ms", "delay_ms", "received", "violation",
+    }
+    previous = packet["started"]
+    for event in events:
+        if (
+            not isinstance(event, dict) or set(event) != event_fields
+            or event["kind"] not in {"create", "destroy", "show", "hide", "foreground"}
+            or event["pid"] != identity["pid"] or event["birth"] != identity["birth"]
+            or any(type(event[key]) is not int or not 0 < event[key] < maximum for key, maximum in (
+                ("hwnd", 1 << 64), ("thread", 1 << 32),
+            ))
+            or type(event["generated_ms"]) is not int or not 0 <= event["generated_ms"] < 1 << 32
+            or type(event["delay_ms"]) is not int or not 0 <= event["delay_ms"] <= 500
+            or type(event["received"]) not in (int, float) or not math.isfinite(event["received"])
+            or not previous <= event["received"] <= packet["ended"]
+            or type(event["violation"]) is not bool
+            or event["kind"] in {"foreground", "show"} and event["violation"] is not True
+        ):
+            raise ObservationBlocked("scoped raw event escaped its identity, epoch or coverage")
+        previous = event["received"]
+    passed = not any(event["violation"] for event in events)
+    if packet["passed"] is not passed:
+        raise ObservationBlocked("scoped verdict differs from its raw root evidence")
+    return passed
