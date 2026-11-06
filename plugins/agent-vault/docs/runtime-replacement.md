@@ -9,6 +9,8 @@ Parent: [Architecture](architecture.md). User-facing setup and commands:
 `service_handoff.py` owns private transfer; `cutover.py` owns the auth-state
 contract and expiration rules. `service_predecessor.py` applies the existing
 shared native process/custody primitives to one displaced central Vault owner.
+`service_unix_alias.py` retains fixed-path socket custody independently of
+the advertised primary endpoint.
 
 The Windows updater constructs and selects the incoming runtime, then invokes
 its selected-generation ensure operation. It does not stop the predecessor or
@@ -130,12 +132,22 @@ and releasing its lease. Prior readers tolerate and ignore the additive field;
 prior senders omit it. Both mixed directions retain auth transfer and the
 original process-exit gate. No CLI syntax or auth-payload version is retired.
 
-After confirmed predecessor exit, the newcomer can reclaim the captured legacy
+Each fixed Unix bind atomically records its installation, native owner birth
+and socket device/inode in a private `legacy-unix-owner.json` under the run
+directory. A suffixed primary does not overwrite that separate owner record.
+It is pathname custody only, never another retirement target. Legacy fixed-primary
+owners can also be captured before exit; unknown ownership leaves the alias
+untouched without blocking incoming discovery.
+
+After confirmed alias-owner exit, the newcomer can reclaim the captured legacy
 Unix socket only when its owned socket type and device/inode still match and
 connection is refused or the pathname is absent. Permission denial and unknown
 probe failures are not stale-listener proof. Live listeners, replacement paths and unrelated files
 remain untouched. PID reuse is positive exit of the original incarnation, not
-permission to signal the reused PID.
+permission to signal the reused PID. Alias mutation and cleanup share the
+publication lease; cleanup only unlinks the socket identities bound by that
+generation, preserving a later owner's path. Alias retries continue until its
+actual owner exits, including when that owner predates the discovery predecessor.
 
 The payload contains unlocked KeePass master passwords, their original set
 times, and absolute expiration deadlines. It does not copy credential-value
@@ -161,7 +173,8 @@ opt-in encrypted cache or an explicit unlock if no unexpired state transferred.
 
 The focused packet is `python tools/run-plugin-tests.py agent-vault --test-file
 tests/test_service_generation.py --test-file tests/test_service_predecessor.py
---allow-explicit-tiers`. Isolated child-process tests cover private transfer,
+--test-file tests/test_service_unix_alias.py --allow-explicit-tiers`.
+Isolated child-process tests cover private transfer,
 both mixed receipt directions, no-overlap retirement, held connections during
 grace, hung credential work and transport cleanup, original native-process exit,
 writer exclusion, retained durable bytes, successor-safe cleanup and legacy TCP
@@ -171,7 +184,10 @@ KeePassXC edit constructor proves refusal while backend mutation remains live,
 followed by cooperative settlement. Unit controls separately cover
 owner/selection/birth refusal, changed lease holders, unconfirmed retirement,
 PID reuse, literal receipt admission, stale/live/replaced Unix aliases and
-expiration preservation.
+expiration preservation. Endpoint-derived fixture requests use the advertised
+native transport, including Unix-only discovery; explicit fixed TCP requests
+remain TCP controls. Linux controls also cover successive cold replacements
+and a fixed alias held by the older writer in a three-generation chain.
 These are not installed whole-suite adoption evidence.
 
 Native pinned cold retirement is implemented for Windows and Linux. macOS

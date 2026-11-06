@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import re
 import socket
-import stat
 import sys
 import time
 from typing import Any
@@ -24,6 +23,7 @@ from .config import home_dir, installation_id
 from .rendezvous import Endpoint, read_endpoint
 from .service_connections import settle_owned
 from .service_handoff import AuthReceiver, send_auth_state
+from .service_unix_alias import UnixAlias, socket_identity
 
 log = logging.getLogger(__name__)
 PROTOCOL = 1
@@ -173,7 +173,8 @@ class ServiceGeneration:
         self.writer_candidate_pid: int | None = None
         self.writer_predecessor = None
         self.writer_predecessor_retirement = "not-requested"
-        self.legacy_socket_identity: tuple[int, int] | None = None
+        self.unix_alias = UnixAlias(self.root, api.SOCKET_PATH)
+        self.owned_sockets: dict[str, tuple[int, int]] = {}
 
     def _take_writer(self) -> bool:
         if self.has_writer:
@@ -226,9 +227,12 @@ class ServiceGeneration:
                 self.service._shutdown = True
                 return
             self.previous = read_endpoint(self.root)
-            if self.previous and self.previous.transport == "unix":
-                if self.previous.address == api.SOCKET_PATH:
-                    self.legacy_socket_identity = self._socket_identity(api.SOCKET_PATH)
+            if (
+                self.previous and self.previous.transport == "unix"
+                and self.previous.address == api.SOCKET_PATH
+                and self.previous.installation_id == installation_id()
+            ):
+                self.unix_alias.capture_previous(self.previous.pid)
             self.legacy_predecessor = bool(
                 self.previous and pid_alive(self.previous.pid)
             )
@@ -257,6 +261,7 @@ class ServiceGeneration:
                 )
                 self.servers.append(listener)
                 os.chmod(self.socket, 0o600)
+                self._record_socket(self.socket)
             self.requested_port = api.configured_tcp_port() if tcp_port is None else tcp_port
             try:
                 await self._tcp(self.requested_port)
@@ -301,15 +306,40 @@ class ServiceGeneration:
         pending.write_text(str(os.getpid()), encoding="utf-8")
         pending.replace(path)
 
-    async def _legacy_aliases(self) -> None:
+    def _record_socket(self, path: str) -> None:
+        identity = socket_identity(path)
+        if identity is None:
+            raise OSError("Bound Unix socket identity unavailable")
+        self.owned_sockets[path] = identity
+        if path == self.api.SOCKET_PATH:
+            self.unix_alias.publish()
+
+    async def _legacy_aliases(self) -> bool:
+        try:
+            self.publication.acquire()
+        except AlreadyRunningError:
+            return False
+        try:
+            endpoint = read_endpoint(self.root)
+            if not (
+                selected() and endpoint and endpoint.pid == os.getpid()
+                and endpoint.installation_id == installation_id()
+            ):
+                return False
+            await self._bind_legacy_aliases()
+            return not self.socket or self.api.SOCKET_PATH in self.owned_sockets
+        finally:
+            self.publication.release()
+
+    async def _bind_legacy_aliases(self) -> None:
         api = self.api
         if self.socket and self.socket != api.SOCKET_PATH:
+            identity = self.unix_alias.dead_identity()
             if (
-                self.legacy_socket_identity is not None
-                and self.predecessor_retirement in {"exited", "cold-retired"}
-                and self._socket_identity(api.SOCKET_PATH) == self.legacy_socket_identity
+                identity is not None
+                and socket_identity(api.SOCKET_PATH) == identity
                 and await asyncio.to_thread(self._unix_stale, api.SOCKET_PATH)
-                and self._socket_identity(api.SOCKET_PATH) == self.legacy_socket_identity
+                and socket_identity(api.SOCKET_PATH) == identity
             ):
                 try:
                     os.unlink(api.SOCKET_PATH)
@@ -322,7 +352,7 @@ class ServiceGeneration:
                 )
                 self.servers.append(listener)
                 os.chmod(api.SOCKET_PATH, 0o600)
-                self.legacy_socket = api.SOCKET_PATH
+                self._record_socket(api.SOCKET_PATH)
             except OSError:
                 log.warning("Legacy Unix alias unavailable; generation discovery remains active")
         if self.pipe and self.pipe != api.PIPE_PATH:
@@ -339,18 +369,6 @@ class ServiceGeneration:
                 await self._tcp(self.requested_port)
             except OSError:
                 log.warning("Legacy TCP alias unavailable; generation discovery remains active")
-
-    @staticmethod
-    def _socket_identity(path: str) -> tuple[int, int] | None:
-        try:
-            info = os.lstat(path)
-            if stat.S_ISSOCK(info.st_mode) and (
-                os.name == "nt" or info.st_uid == os.getuid()
-            ):
-                return info.st_dev, info.st_ino
-        except OSError:
-            pass
-        return None
 
     @staticmethod
     def _unix_stale(path: str) -> bool:
@@ -419,9 +437,6 @@ class ServiceGeneration:
                 previous_exited = bool(
                     self.predecessor and self.predecessor.exited()
                 )
-        if previous_exited and self.hooks_started and not self.aliases_after_exit:
-            await self._legacy_aliases()
-            self.aliases_after_exit = True
         if self.writer_predecessor_retirement == "grace":
             if self.writer_predecessor.exited():
                 self.writer_predecessor_retirement = "exited"
@@ -436,8 +451,6 @@ class ServiceGeneration:
             await self.close_handoff()
             self.service._runtime_can_work = True
             self._write_pid()
-            await self._legacy_aliases()
-            self.aliases_after_exit = previous_exited or self.previous is None
             context = self.api.resolve_context()
             self.api.get_registry().run_startup(
                 self.service,
@@ -447,6 +460,9 @@ class ServiceGeneration:
                 ),
             )
             self.hooks_started = True
+        if not self.aliases_after_exit:
+            aliases_ready = await self._legacy_aliases()
+            self.aliases_after_exit = aliases_ready and (previous_exited or self.previous is None)
 
     async def _retire(self) -> None:
         if self.retiring is None:
@@ -524,15 +540,23 @@ class ServiceGeneration:
 
     def cleanup(self) -> None:
         self.service._runtime_can_work = False
-        self.api.clear_endpoint(self.root)
-        for path in (self.socket, getattr(self, "legacy_socket", None)):
-            if path:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(path)
-        pid = Path(self.api.PID_FILE)
-        with contextlib.suppress(FileNotFoundError, ValueError):
-            if int(pid.read_text(encoding="utf-8").strip()) == os.getpid():
-                pid.unlink()
+        try:
+            self.publication.acquire()
+        except AlreadyRunningError:
+            pass
+        else:
+            try:
+                self.api.clear_endpoint(self.root)
+                for path, identity in self.owned_sockets.items():
+                    if socket_identity(path) == identity:
+                        with contextlib.suppress(FileNotFoundError):
+                            os.unlink(path)
+                pid = Path(self.api.PID_FILE)
+                with contextlib.suppress(FileNotFoundError, ValueError):
+                    if int(pid.read_text(encoding="utf-8").strip()) == os.getpid():
+                        pid.unlink()
+            finally:
+                self.publication.release()
         self._release_writer()
         if self.has_generation:
             self.generation_lease.release()

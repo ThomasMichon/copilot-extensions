@@ -991,3 +991,33 @@ implementation. The exact support closure follows the consumer trace and tests.
   All seven affected native/census controls pass again. The two retained reports
   contain 240 named testcases, zero failures/errors and the single platform skip;
   repeated controls are not counted as new portfolio coverage.
+
+### 2026-11-06 - Independent Unix alias custody and native fixture routing
+
+- The second review confirmed the first corrections but found that the fixed
+  Unix alias can belong to a suffixed-primary predecessor or an even older
+  writer. Track its installation, native birth and socket identity separately
+  from discovery, using a private bounded atomic owner record for each fixed
+  bind. Legacy fixed-primary owners can be captured before exit. Missing or
+  invalid ownership never invents another process-retirement target.
+- Alias mutation and identity-checked cleanup share the publication lease.
+  Retry until the actual alias owner exits; preserve live, replaced and unknown
+  paths. This closes the existing replacement intent rather than extending it.
+- Endpoint-derived fixture requests now use the advertised native transport;
+  Unix-only discovery no longer requires a TCP alternative. Explicit fixed TCP
+  controls remain intact. Added portable ownership, invalid-record, selection
+  and cleanup controls, plus Linux-native successive-cold and older-writer
+  fixed-alias assertions.
+- The affected lifecycle, settlement, handoff, discovery and readiness packet
+  passes 251 tests with two platform skips. A CPython closed-pipe destructor
+  warning remains visible; it is not silently described as a clean run.
+  After the final reader-bound and invalid-record fallback tightening, all
+  eighteen alias controls pass separately. Named JUnit remains retained.
+- Windows source evidence does not qualify the Linux-native controls, macOS,
+  installer clean-room, installed whole-suite update or external receiving
+  acceptance. The PR remains unmerged pending final gates and fresh review/CI;
+  no live predecessor was terminated by this source correction.
+- Final lint, install contract, serialized documentation, headless launch,
+  module-size and shared-contract checks pass. All forty admitted strict
+  projects pass both declared type targets; Vault's pending type migration
+  is not implicitly qualified.

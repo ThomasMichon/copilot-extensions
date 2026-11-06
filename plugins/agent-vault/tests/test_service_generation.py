@@ -152,7 +152,7 @@ def test_confirmed_predecessor_exit_does_not_repeat_native_process_probes(
         asyncio.run(controller.tick())
 
 
-@pytest.mark.parametrize("condition", ("stale", "live", "replaced", "grace"))
+@pytest.mark.parametrize("condition", ("stale", "live", "replaced", "owner-live"))
 def test_unix_alias_reclaims_only_the_captured_dead_listener(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, condition: str,
 ) -> None:
@@ -164,8 +164,9 @@ def test_unix_alias_reclaims_only_the_captured_dead_listener(
     controller.pipe = None
     controller.port = controller.requested_port = 0
     controller.servers = []
-    controller.legacy_socket_identity = (1, 2)
-    controller.predecessor_retirement = "grace" if condition == "grace" else "cold-retired"
+    controller.unix_alias = SimpleNamespace(
+        dead_identity=lambda: None if condition == "owner-live" else (1, 2),
+    )
     controller.connections = SimpleNamespace(callback=lambda _: object())
 
     def stale(path: str) -> bool:
@@ -175,7 +176,8 @@ def test_unix_alias_reclaims_only_the_captured_dead_listener(
         return condition != "live"
 
     controller.api = SimpleNamespace(SOCKET_PATH=legacy)
-    monkeypatch.setattr(controller, "_socket_identity", lambda _: state["identity"])
+    monkeypatch.setattr(generation, "socket_identity", lambda _: state["identity"])
+    monkeypatch.setattr(controller, "_record_socket", lambda _: None)
     monkeypatch.setattr(controller, "_unix_stale", stale)
     monkeypatch.setattr(generation.os.path, "lexists", lambda _: state["exists"])
 
@@ -192,7 +194,7 @@ def test_unix_alias_reclaims_only_the_captured_dead_listener(
     monkeypatch.setattr(generation.os, "unlink", unlink)
     monkeypatch.setattr(generation.os, "chmod", lambda *args: None)
     monkeypatch.setattr(generation.asyncio, "start_unix_server", listen, raising=False)
-    asyncio.run(controller._legacy_aliases())
+    asyncio.run(controller._bind_legacy_aliases())
     assert events == (["unlink", "listen"] if condition == "stale" else [])
     assert len(controller.servers) == (1 if condition == "stale" else 0)
 
@@ -757,7 +759,9 @@ def _endpoint(root: Path) -> dict | None:
     return endpoint.to_record() if endpoint is not None else None
 
 
-def _port(endpoint: dict) -> int:
+def _target(endpoint: dict) -> int | str:
+    if endpoint["transport"] == "unix":
+        return endpoint["endpoint"]
     candidates = [endpoint, *endpoint.get("alt", [])]
     return next(
         int(item["endpoint"].rsplit(":", 1)[1])
@@ -765,19 +769,59 @@ def _port(endpoint: dict) -> int:
     )
 
 
-def _send(port: int, request: dict) -> dict:
-    with socket.create_connection(("127.0.0.1", port), timeout=1) as connection:
+def _send(target: int | str, request: dict) -> dict:
+    if isinstance(target, str):
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.settimeout(1)
+            connection.connect(target)
+        except BaseException:
+            connection.close()
+            raise
+    else:
+        connection = socket.create_connection(("127.0.0.1", target), timeout=1)
+    with connection:
         connection.settimeout(10)
         connection.sendall((json.dumps(request) + "\n").encode())
         with connection.makefile("rb") as stream:
             return json.loads(stream.readline())
 
 
-def _serving(port: int, pid: int) -> bool:
+def _serving(port: int | str, pid: int) -> bool:
     try:
         return _send(port, {"action": "ping"}).get("pid") == pid
     except (OSError, ValueError):
         return False
+
+
+def test_unix_only_discovery_uses_the_advertised_native_transport(monkeypatch):
+    events = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def settimeout(self, value):
+            pass
+
+        def connect(self, target):
+            events.append(target)
+
+        def sendall(self, payload):
+            assert json.loads(payload)["action"] == "ping"
+
+        def makefile(self, mode):
+            from io import BytesIO
+            return BytesIO(b'{"ok":true,"pid":123}\n')
+
+    monkeypatch.setattr(socket, "AF_UNIX", object(), raising=False)
+    monkeypatch.setattr(socket, "socket", lambda family, kind: Connection())
+    target = _target({"transport": "unix", "endpoint": "fixture.sock"})
+    assert _send(target, {"action": "ping"}) == {"ok": True, "pid": 123}
+    assert events == ["fixture.sock"]
 
 
 def _until(predicate: Callable[[], bool], processes: list[subprocess.Popen], timeout: float = 10) -> None:
@@ -878,7 +922,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
             endpoint = _endpoint(tmp_path)
             new_pid = endpoint["pid"]
             assert process_start_time(new_pid)
-            new_port = _port(endpoint)
+            new_port = _target(endpoint)
             health = _send(new_port, {"action": "ping"})
             assert health["runtime_generation"] == "older"
             assert not health["accepting_work"]
@@ -945,7 +989,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
         lifetime = _capture_process(first["pid"])
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
-                _send, _port(first), {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+                _send, _target(first), {"action": "has", "kpdb": str(durable), "entry": "fixture"},
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             (tmp_path / "selection").write_text("middle")
@@ -953,7 +997,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
             children.append(middle)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
             second = _endpoint(tmp_path)
-            assert not _send(_port(second), {"action": "ping"})["accepting_work"]
+            assert not _send(_target(second), {"action": "ping"})["accepting_work"]
             (tmp_path / "selection").write_text("older")
             new = _start(tmp_path, "older", 0, "bounded-successor")
             children.append(new)
@@ -962,7 +1006,7 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
                 [new],
             )
             incoming = _endpoint(tmp_path)
-            port = _port(incoming)
+            port = _target(incoming)
             _until(lambda: _send(port, {"action": "ping"})["accepting_work"], [new], timeout=8)
             lifetime.wait_exit(Deadline(1))
             old.communicate(timeout=2)
@@ -974,11 +1018,58 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
             assert _send(port, {"action": "has", "kpdb": str(durable), "entry": "fixture"})["ok"]
             assert durable.read_bytes() == b"fixture durable bytes"
             assert _endpoint(tmp_path)["pid"] == incoming["pid"]
+            if os.name != "nt":
+                _until(lambda: _serving(str(tmp_path / "vault.sock"), incoming["pid"]), [new])
     finally:
         _settle(tmp_path, children)
         if lifetime is not None:
             lifetime.close()
     assert not (tmp_path / "vault.pid").exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Native Linux fixed Unix alias")
+def test_successive_cold_replacements_recover_the_fixed_unix_alias(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    identities = ("newer", "middle", "older")
+    for identity in identities:
+        shutil.copytree(
+            Path(generation.__file__).parent, tmp_path / "versions" / identity / "agent_vault",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    (tmp_path / "selection").write_text("newer")
+    durable = tmp_path / "fixture.kdbx"
+    durable.write_bytes(b"fixture durable bytes")
+    children = [_start(tmp_path, "newer", 0, "bounded-successor")]
+    fixed = str(tmp_path / "vault.sock")
+    try:
+        _until(lambda: _endpoint(tmp_path) is not None, children)
+        endpoint = _endpoint(tmp_path)
+        for outgoing, incoming in zip(identities, identities[1:]):
+            _until(lambda: _serving(fixed, endpoint["pid"]), [children[-1]])
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                pending = worker.submit(
+                    _send, fixed, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+                )
+                _until(lambda: (tmp_path / (outgoing + ".entered")).exists(), [children[-1]])
+                (tmp_path / "selection").write_text(incoming)
+                previous = children[-1]
+                new = _start(tmp_path, incoming, 0, "bounded-successor")
+                children.append(new)
+                old_pid = endpoint["pid"]
+                _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, [new])
+                endpoint = _endpoint(tmp_path)
+                assert endpoint["endpoint"] != fixed
+                _until(lambda: _send(_target(endpoint), {"action": "ping"})["accepting_work"], [new])
+                previous.communicate(timeout=2)
+                assert previous.returncode != 0
+                with pytest.raises((OSError, ValueError)):
+                    pending.result(timeout=2)
+            _until(lambda: _serving(fixed, endpoint["pid"]), [new])
+        assert _send(fixed, {"action": "ping"})["pid"] == children[-1].pid
+        assert durable.read_bytes() == b"fixture durable bytes"
+    finally:
+        _settle(tmp_path, children)
 
 
 def test_failed_successor_does_not_remove_or_stop_the_incumbent(tmp_path: Path) -> None:
@@ -988,7 +1079,7 @@ def test_failed_successor_does_not_remove_or_stop_the_incumbent(tmp_path: Path) 
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
         endpoint = _endpoint(tmp_path)
-        old_port = _port(endpoint)
+        old_port = _target(endpoint)
         (tmp_path / "selection").write_text("older")
         failed = _start(tmp_path, "older", 0, "fail")
         children.append(failed)
@@ -1027,7 +1118,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
         initial = _endpoint(tmp_path)
-        old_pid, old_port = initial["pid"], _port(initial)
+        old_pid, old_port = initial["pid"], _target(initial)
         lifetime = _capture_process(old_pid)
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
@@ -1041,7 +1132,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
             children.append(new)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, children)
             incoming = _endpoint(tmp_path)
-            port, pid = _port(incoming), incoming["pid"]
+            port, pid = _target(incoming), incoming["pid"]
             assert old.poll() is None
             assert not _send(port, {"action": "ping"})["accepting_work"]
             assert _send(port, {"action": "has", "kpdb": str(durable), "entry": "fixture"}) == {
