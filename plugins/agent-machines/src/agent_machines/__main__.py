@@ -10,6 +10,7 @@ Verbs:
 * ``restore``  -- converge the machine (``--dry-run`` prints the plan; apply lands in #4006)
 * ``self-update`` -- run unattended watchdog / sweep tiers
 * ``fleet-update`` -- run the unattended daily worktree-manager update sweep
+* ``health report`` -- summarize explicit local telemetry without activating a service
 * ``installation-repair`` -- observe or explicitly repair selected enabled owner modules
 * ``git-config rollback`` -- preview or explicitly reverse a recorded global-file transaction
 * ``bootstrap-killswitch`` -- pause/resume every plugin's sessionStart
@@ -792,6 +793,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     add("version", _cmd_version)
     add("discover", _cmd_discover)
+    from .cli_health import add_parser as add_health_parser
+
+    add_health_parser(sub)
     doctor = add("doctor", _cmd_doctor)
     doctor.add_argument(
         "--repo",

@@ -127,8 +127,8 @@ not again on each PR update. Admitted Dev-push executions retain that diagnostic
 strict source guards and required validation remain in PR CI. A cancelled or
 superseded execution is not diagnostic or test evidence.
 
-Before the Agent Bridge contract guard, CI explicitly acquires each HTTP-47,
-HTTP-48, HTTP-49 and HTTP-50 packet's exact captured source commit from the
+Before the Agent Bridge contract guard, CI explicitly acquires each HTTP-47
+through HTTP-52 packet's exact captured source commit from the
 CI-selected, credential-free HTTPS repository URL when it is not already
 available. The separate bounded
 `tools/prepare_bridge_contract_evidence.py` step accepts only a full commit ID,

@@ -33,7 +33,6 @@ from __future__ import annotations
 import os
 import asyncio
 import time
-from dataclasses import dataclass, field
 from threading import Event
 
 from rich.text import Text
@@ -41,13 +40,18 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
-    Button, DataTable, Footer, Header, Select, Static, TabbedContent, TabPane,
+    Button, Collapsible, DataTable, Footer, Header, Select, Static, TabbedContent, TabPane,
 )
 
 from . import engine_client as ec
 from . import companion_client as cc
 from . import companion_observations as co
 from . import companion_attention as ca
+from .companion_head_observation import observation_details, observation_text
+from .companion_recovery import (
+    CompanionData as _CompanionData,
+    load_current_worktree as _load_current_worktree,
+)
 from .companion_topology import topology_view
 from . import handoff_client as hc
 from .companion_agenda import agenda_text, subscribe
@@ -108,81 +112,6 @@ _STATE_COLOR: dict[str, str] = {
     "GONE": "grey35",
 }
 _STATE_COLOR_DEFAULT = "grey35"
-
-
-@dataclass
-class _CompanionData:
-    """Everything the view needs, fetched once at startup."""
-
-    worktree: dict = field(default_factory=dict)
-    sessions: list[dict] = field(default_factory=list)
-    pending_handoff: dict | None = None
-    error: str | None = None
-    bundle: dict = field(default_factory=dict)
-    bundle_error: str | None = None
-    sessions_error: str | None = None
-    session_observation: dict | None = None
-    observation_error: str | None = "not-loaded"
-    attention: dict | None = None
-    attention_error: str | None = "not-loaded"
-    agenda: dict | None = None
-    agenda_error: str | None = "not-loaded"
-    agenda_pending: bool = False
-
-
-def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
-    """Resolve the worktree containing ``cwd`` (default: the real cwd) and
-    fetch its status + session lineage.
-
-    Uses the cheap, non-daemon ``status-segment --json`` snapshot (see
-    :func:`engine_client.current_worktree_status`) rather than
-    ``list --json --classify --worktree-id``, which still pays the resident
-    classify daemon's whole-fleet negotiation cost even when scoped to one
-    id. Degrades gracefully: a resolved worktree with no registered sessions
-    (or an older engine that can't list them) still renders its status with
-    an empty lineage section rather than failing outright.
-    """
-    target = cwd if cwd is not None else os.getcwd()
-    try:
-        payload = ec.current_worktree_status(path=target, runner=runner)
-    except ec.EngineError as exc:
-        return _CompanionData(error=str(exc))
-    if not isinstance(payload, dict):
-        return _CompanionData(error="No current worktree status is available.")
-    if payload.get("error"):
-        return _CompanionData(error=str(payload["error"]))
-
-    worktree_id = payload.get("id")
-    sessions: list[dict] = []
-    sessions_error = None
-    bundle: dict = {}
-    bundle_error = None
-    if worktree_id:
-        try:
-            sessions = ec.list_worktree_sessions(None, worktree_id, runner=runner)
-        except ec.EngineError as exc:
-            sessions_error = str(exc)
-        try:
-            bundle = cc.worktree_status_bundle(None, worktree_id, runner=runner)
-        except ec.EngineError as exc:
-            bundle_error = str(exc)
-
-    # Phase 8 (worktrees-pivot-ux-overhaul #3307): situational-awareness-only
-    # pending context-handoff baton headline (visions/mux-companion
-    # §companion-reads-handoff-schema-never-drives-it) -- best-effort, never
-    # blocks the rest of the view.
-    pending = None
-    worktree_path = payload.get("path")
-    if worktree_path:
-        try:
-            pending = hc.pending_handoff(None, worktree_path, runner=runner)
-        except ec.EngineError:
-            pending = None
-
-    return _CompanionData(
-        worktree=payload, sessions=sessions, pending_handoff=pending,
-        bundle=bundle, bundle_error=bundle_error, sessions_error=sessions_error,
-    )
 
 
 def _fallback_label(row: dict) -> str:
@@ -290,6 +219,13 @@ class MuxCompanionApp(App):
 
     #attention {
         height: auto;
+    }
+
+    #head-comparison, #head-evidence {
+        height: auto;
+        max-height: 10;
+        padding: 0 2;
+        overflow-y: auto;
     }
 
     #lineage {
@@ -415,6 +351,9 @@ class MuxCompanionApp(App):
                 with VerticalScroll():
                     yield Static(id="topology")
             with TabPane("Recovery", id="recovery-tab"):
+                yield Static(id="head-comparison")
+                with Collapsible(title="Comparison evidence"):
+                    yield Static(id="head-evidence")
                 yield Static(
                     "Session lineage (\u25cf marks the current head):",
                     id="lineage-label",
@@ -868,6 +807,10 @@ class MuxCompanionApp(App):
         if self._data.sessions_error:
             lineage_label += f"\nUnavailable: {self._data.sessions_error}"
         self.query_one("#lineage-label", Static).update(Text(lineage_label))
+        self.query_one("#head-comparison", Static).update(observation_text(
+            self._data.head_observation, self._data.head_observation_error,
+        ))
+        self.query_one("#head-evidence", Static).update(observation_details(self._data.head_observation))
         table = self.query_one("#lineage", DataTable)
         table.clear(columns=True)
         table.cursor_type = "row"

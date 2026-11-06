@@ -441,6 +441,27 @@ polling/timeout limits.
 
 Recovery retains session lineage and the explicit, human-gated Cut over action
 for an already-prepared handoff. Selecting a tab never triggers cutover.
+Opening and explicit Refresh retain the selected engine's existing session-list
+declaration. When it supports
+[`agent-worktrees.handoff-head-observation` version 1](../plugins/agent-worktrees/docs/handoff-head-observation.md),
+one additional passive read compares the actually recorded handoff consumer with
+the durable head and the Picker's sampled resume target. Recovery shows all
+three separately beside previous/new lineage. Match, mismatch, unknown and
+unavailable are distinct; a known empty head is not a failed read. Detailed
+baton/incarnation/activation evidence is collapsed by default.
+
+The optional read runs off the UI/render path through the same selected-cwd,
+caller-owned process boundary, with a five-second hard deadline and existing
+child cleanup. Discovery and its optional read retain one resolved engine argv,
+so activation or rollback between requests cannot transfer a declaration to
+another runtime. It publishes only to the current load generation. Reopening
+derives another observation; there is no timer, cache or persistent Companion
+registry. Legacy, unsupported, malformed, failed or rolled-back providers leave
+all other views and existing actions usable. Detection performs no head repair,
+report filing, handoff consumption, session launch/switch/retirement or input.
+This is a sampled source comparison, not a future Picker launch guarantee or
+qualification of the original live manual-cutover tests.
+
 The existing Ctrl+K popup also offers **Show Summary pane**. It opens or
 reuses an observer in the CLI's existing mux window and zooms it; **Return
 to CLI** restores the original CLI pane without restarting its process.

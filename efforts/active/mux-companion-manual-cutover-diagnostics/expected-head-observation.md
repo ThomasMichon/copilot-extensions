@@ -6,9 +6,10 @@ not a replacement effort or a new head authority. Coordination remains
 [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
 Plan #10865 merged as `5c8cf8466cbaca830af80ebe7347efad83d3111f`.
 The source captures optional identity in the existing binding and consumption
-records. The passive comparison reader and Companion consumer remain
-unimplemented. H1 merged in #10870 as
-`0c51500c9284d4aeaaa6b4706ef969c8c49b4111`.
+records. The passive comparison reader is source-qualified; the Companion
+consumer remains unimplemented. H1 merged in #10870 as
+`0c51500c9284d4aeaaa6b4706ef969c8c49b4111`; H2 merged in #10884 as
+`23780cb6d5fa0b1d3147408ee8d0012b322b061b`.
 
 ## Intent and existing evidence
 
@@ -88,28 +89,28 @@ distinction; a durable-head match alone cannot promise the same resume target.
 
 ### H2 - Passive owning read and separate comparison
 
-- [ ] Add one optional, versioned Worktrees read over an exact current record and
+- [x] Add one optional, versioned Worktrees read over an exact current record and
       the existing delivery schemas. Use current record ownership/incarnation
       and bounded exact-ID reads, never a session-state-root sweep. Candidate
       discovery is confined to the exact worktree's own existing handoff
       directory: actual consumption can precede recording a token in the head
       ledger. A missing state directory is not created by this read.
-- [ ] Return the independently admitted expected consumer/predecessor/token,
+- [x] Return the independently admitted expected consumer/predecessor/token,
       the durable head and the existing Picker resolver's read-time choice as
       separate facts. Retain the source kind, exact subject/activation and
       observation limitations. Exclude prompt text and unrelated session data.
-- [ ] Select the most recent actual qualified consumption using its owning
+- [x] Select the most recent actual qualified consumption using its owning
       receipt evidence. An incomplete newer delivery, ambiguous ordering,
       conflicting records, invalid identity or unreadable/budget-limited
       candidate cannot fall back to an older matching receipt and report a pass.
       A source timestamp helps order observations; it is not permission or an
       expiry/repair rule.
-- [ ] Recheck current record incarnation and relevant lifecycle/head revisions
+- [x] Recheck current record incarnation and relevant lifecycle/head revisions
       after the bounded read. Changed source state, a replaced worktree, a
       superseded consumer activation, legacy identity or an unsupported schema
       remains explicitly stale/unknown/unavailable. Do not infer identity from
       `is_head`, returned head values, file mtime or whichever process is alive.
-- [ ] Keep qualified match, qualified mismatch, unknown and unavailable distinct.
+- [x] Keep qualified match, qualified mismatch, unknown and unavailable distinct.
       A known empty durable head is different from a failed head read.
       A different read-time Picker choice cannot be hidden behind a matching
       durable-head marker. This is sampled comparison, not a future-launch,
@@ -168,12 +169,12 @@ latency; unit duration is not native input-ready performance.
       Cover non-head registration, exact source/incarnation, failed promotion
       after successful consume, preparation without consumption, optional legacy
       absence, same-session retry and unchanged refusal/unknown outcomes.
-- [ ] H2: actual private files/current tracking records prove independent
+- [x] H2: actual private files/current tracking records prove independent
       matching and mismatched identities, both receipt kinds, predecessor and
       token correlation, reused worktree identity, superseded activation,
       ambiguous ordering, newer incomplete delivery, missing/legacy/malformed
       records and changed-during-read results.
-- [ ] H2: verify exact reads do not enumerate unrelated sessions, create state,
+- [x] H2: verify exact reads do not enumerate unrelated sessions, create state,
       acquire mutation ownership, wake a daemon, fetch Git or invoke handoff,
       head, process or input actions. Oversized or interrupted reads remain
       unavailable, not absence or an older successful comparison.
@@ -181,6 +182,8 @@ latency; unit duration is not native input-ready performance.
       new/new, old caller/new provider, new caller/old provider and supported
       rollback. Unknown CLI syntax remains strict; optional additive JSON is not
       support proof.
+      H2's real parser/dispatch, actual consume writers and passive declaration
+      controls pass; the conditional Manager consumer remains the next slice.
 - [ ] H3: real Textual controls verify Refresh and reopen, separate previous/new
       lineage and comparison, narrow/literal rendering, partial errors,
       selection replacement, late-result fencing and blocked-read dismissal with
