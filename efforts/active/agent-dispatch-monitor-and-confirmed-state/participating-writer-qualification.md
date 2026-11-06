@@ -365,12 +365,15 @@ and independent original-request/complete-cohort assembly remains open.
       moved-selector recovery. #11063 passes 243 affected source controls,
       the actual CLI discovery parser and 4,525 admitted units. No ordinary
       writer is constructed by that bounded source slice.
-- [ ] Require retained-writer continuation support on every explicit-resume
-      effect attempt, including daemon cutover after observation. Current
-      hosting-only negotiation is insufficient. Preserve the exact original
+- [x] Require retained-writer continuation support on every explicit-resume
+      effect attempt, including daemon cutover after observation. Preserve the exact original
       journal/native and never fall back to another target or unpinned resume.
       Keyed send already uses receiver-side `no_resume=True`; do not infer
       an implicit-resume defect from its CLI option validation.
+      #11078 passes source parser/client/HTTP controls, including the production
+      observer moving the shared endpoint during health. Health and mutation
+      remain pinned to one destination; each safe retry qualifies its next
+      destination. Actual installed/cohort and running-lifecycle gates stay open.
 
 ## Continuing provider-first slice: original relationship request admission
 
