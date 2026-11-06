@@ -307,6 +307,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   and the negotiated CLI/client/Gateway path. Complete B3/A2, historical
   per-operation readback, normal-host/provider/installed serving and the remaining
   parent acceptance stay open.
+- [ ] Review and land [B4 historical original-position readback](captured-attention-feedback.md#b4---historical-original-position-readback-proof)
+  before changing the strict owner layout or executing behavior.
+- [ ] Deliver B4's finite existing-owner storage, protected proof and negotiated
+  read-consumer leaves; qualify overlapping operations, original identity,
+  capacity, restart, unavailable evidence and old/new compatibility without
+  weakening B2/B3 or closing broader attention/provider/installed acceptance.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.

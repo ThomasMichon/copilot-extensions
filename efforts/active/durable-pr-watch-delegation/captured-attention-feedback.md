@@ -121,6 +121,118 @@ Keep captured handled work and later proven echo coverage distinguishable.
 Do not silently rewrite the original capture to the later observed cursor or
 turn an ACK/read into handled progress.
 
+## B4 - Historical original-position readback proof
+
+This **agent-recommended, review-first refinement** addresses the retained
+reader's historical limitation exposed by #10906. Owner v5 retains immutable
+captures and native receipts, but an interest has only its latest handled
+provenance. A newer confirmed operation can replace that provenance. Cursor
+order then cannot establish whether an older operation ever completed its own
+readback. Keep reporting `feedback-operation-readback-unavailable` until this
+refinement is implemented and qualified; the following is not executing support.
+
+### Explicit existing-owner expansion
+
+Expand owner v5 to v6 through the existing lifecycle exclusion and complete-
+envelope transaction, with a distinct `feedback-captures/v2` section. Retain
+each original capture's selection fields unchanged and add one nullable,
+body-free original-readback proof per capture. This is a protected tracking
+result inside the same section, not another effect ledger, file, lock,
+database, cache or queue. Native attempt states and receipts remain authoritative
+in their existing review records.
+
+The proof binds that exact capture's operation, immutable intent,
+generation/source, scoped PR, candidate, original epoch/sequence and captured
+interests to every selected confirmed action's original attempt and receipt
+identity. It records successful protected readback of the original handled
+position, not a provider response body, current vote, transport success,
+latest handled cursor or proof borrowed from another operation.
+An existing proof is immutable and retries reconcile its exact binding;
+conflicting, partial, orphaned or foreign proof refuses without rewriting bytes.
+
+Keep the existing retained-operation and interest limits. Reserve bounded proof
+capacity before the first native attempt, including exact serialized capture,
+proof and complete-envelope byte limits. Explicit adoption adds its bounded
+reservation to the owner's total capacity; it cannot consume another section's
+reservation. Saturation refuses without eviction. A retained v5 capture gains
+only a null proof during explicit adoption, never inferred historical success.
+Retrying such an operation must reserve its proof capacity before any remaining
+effect or protected readback. Capacity refusal after earlier effects preserves
+their native outcomes and reports tracking unavailable.
+
+All replay, review, conversation, attention and feedback entrypoints preserve
+v6 under the same operation lock and atomic replacement. Earlier adoption
+cannot downgrade it. Ordinary v2/v3/v4/v5 behavior stays supported without
+historical proof; strict prior disk readers refuse v6 without rewriting it.
+Repeated adoption reconciles an uncertain replacement against the same
+reservation and layout. No automatic migration, provisioning, backfill,
+deletion or lifecycle takeover is introduced.
+
+### Protected proof and independent handled frontier
+
+Only B2's existing trusted protected reconciliation may commit a proof, after
+all selected native actions are confirmed and the original operation's required
+fresh readback succeeds. Revalidate the unchanged capture and native operation
+inside the complete-envelope commit; perform no network IO under its lock.
+Record proof and any admissible original handled update atomically. A storage
+failure preserves confirmed native receipts, exposes tracking unavailable and
+retries that same reconciliation with zero resends of confirmed actions.
+Attempted operations without an original capture remain unbound; migration or
+current acquisition cannot manufacture their missing selection.
+
+Historical proof and an interest's current handled frontier are distinct.
+Successful original readback can be retained even when a newer operation has
+already advanced that frontier; it must not regress the frontier, replace its
+provenance, reset pending age or change another interest. Missing current
+interests, journal gaps or a reopened epoch cannot invent a handled update.
+Where the original pinned readback itself is no longer admissible, retain null
+proof and explicit unavailability rather than weakening B2's source/target,
+policy, credential, freshness or deadline checks.
+
+The proof says readback succeeded at that original position, not that feedback
+is still present or that today's acquisition is fresh. Subsequent edits,
+deletions, votes, replies and candidate motion remain actual journal input.
+Current unavailable acquisition remains unavailable. Unknown/partial native
+outcomes, unsupported vote attribution and unresolved unbound operations
+cannot be cleared by another capture's proof or by close/reopen.
+
+B3 echo coverage stays separate from original readback. A certificate for one
+capture cannot classify later positions, rewrite that capture, certify another
+operation or cross an epoch. Preserve the existing exact original version,
+contiguous-position, complete-readback and interest-specific echo requirements;
+longer chains and unsupported attribution remain unavailable.
+
+### Reader sequencing and finite exits
+
+First land and qualify v6 storage preservation, then protected proof commits,
+then the existing optional reader/CLI/client/Gateway consumer. The consumer
+checks each attempted capture's own proof and retained native identities before
+considering the current handled frontier. Only that frontier and its admissible
+echo coverage determine remaining input; an older certified capture cannot
+make already-handled work unclassified merely because it precedes the frontier.
+An uncertified capture remains explicitly unavailable even if a later cursor
+is handled. Reads never create or repair proof, advance handled state, ACK or
+emit Dispatch.
+
+Use a parallel negotiated attention-read contract for v6 if the current strict
+v1 declaration cannot represent it. Do not advertise v6 as v5, mutate v1's
+strict fields or send new syntax to an old receiver. Preserve the real
+executing-owner advertisement, unchanged default hosts, old wire behavior and
+explicit unsupported/rollback results. Storage support alone does not enable
+serving or authorize installed adoption.
+
+Focused qualification must cover two overlapping operations in both completion
+orders and across reopen/restart; exact all-confirmed retry with zero sends;
+old null-proof adoption; missing capture and wrong operation/generation/source/
+candidate/interest/action/attempt/receipt proof; partial/unknown outcomes;
+readback versus storage failure; pre-effect capacity exhaustion; same-cursor
+operations; independent input and aging; unsupported vote/echo evidence;
+strict old-reader refusal; uncertain adoption and every whole-envelope writer.
+Exercise the actual protected owner before the real reader/CLI/Gateway path.
+Distinguish synthetic source fixtures, native platforms, live providers and
+installed/shadow evidence. Each storage/protected/consumer leaf has a finite
+source exit; none closes full B3/A2 or the parent acceptance.
+
 ## Sequencing and qualification
 
 Land this refinement before persisted/runtime changes. Implement B1 separately,
