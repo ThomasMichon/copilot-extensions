@@ -49,6 +49,22 @@ installed-runtime or authentication/inference acceptance. The source release
 controller requires it for every frozen candidate, separately from unit coverage;
 live enforcement depends on the independently governed Main controller.
 
+Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
+--allow-explicit-tiers` packet exercises the emitted Windows census script in
+Windows PowerShell and PowerShell 7. A controlled census verifies the real
+native token/creation-time query, compilation-unavailable and native-access
+CIM fallbacks, and hard refusal of an incarnation mismatch without fallback.
+It does not qualify desktop census completeness or runtime removal. Existing
+`tests/test_native_uninstall_footprint.py` entrypoint controls preserve their
+original deadlines and the explicit unrelated-consumer refusal classification.
+The manual `installation-context-acceptance.yml` `runtime_removal` selection
+also runs this packet on Windows at the dispatch SHA and requires all eleven
+controls, including the three positive entrypoints, to pass without skips.
+Native capture uses the existing caller-owned root-exit/cleanup boundary,
+with 64 KiB per stream for token probes and 8 MiB for entrypoint captures.
+The original ten-second probe and per-item entrypoint deadlines are unchanged.
+Required unit-only CI is unchanged.
+
 Worktrees' opt-in `--test-file tests/test_resident_recovery.py
 --test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py
 --test-file tests/test_status_monitor.py --allow-explicit-tiers` packet checks

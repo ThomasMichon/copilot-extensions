@@ -52,11 +52,33 @@ def lifecycle_controllers(rows, payload, root, plugin, *, load, authority_payloa
                               owner["pid"], arguments=native) for origin in origins)):
         return origins, admitted
     admitted.add(owner["pid"])
-    admitted.update(row["pid"] for row in rows if row["pid"] == owner["ppid"] and any(
+    caller = owner
+    for _ in range(4):
+        forwarder = next((row for row in rows if row["pid"] == caller["ppid"]), None)
+        if forwarder is None or forwarder["pid"] in admitted:
+            break
+        image = Path(forwarder["image"])
+        if (
+            not image.is_absolute() or image.is_relative_to(root)
+            or not re.fullmatch(r"(?:python|pythonw|pypy)[0-9.]*", image.stem.lower())
+            or arguments(forwarder)[1:] != argv[1:]
+        ):
+            break
+        admitted.add(forwarder["pid"])
+        caller = forwarder
+    admitted.update(row["pid"] for row in rows if row["pid"] == caller["ppid"] and any(
         parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
                arguments=row.get("argv"))
         for origin in origins
     ))
+    for _ in range(4):
+        admitted.update({
+            row["pid"] for row in rows if row["ppid"] in admitted and any(
+                parent(row["pid"], row["image"], row["command"], origin, root, plugin,
+                       row["pid"], arguments=row.get("argv"))
+                for origin in origins
+            )
+        })
     if payload.parent.parent == Path.home() / ("." + plugin) / ".install-stage":
         commands = load(dependency(payload, "installer_engine_commands.py"))
         body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")

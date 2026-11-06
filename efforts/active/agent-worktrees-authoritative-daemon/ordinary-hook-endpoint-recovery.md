@@ -160,6 +160,51 @@ and event-time rechecks. No broad acknowledgement grants permission.
 
 ## Implementation plan
 
+### First additive producer contract
+
+The existing `WorktreesRuntime` publishes a small advisory view only after its
+current-roster store accepts a publication. The original project-state owner
+resolves the home: `project_dir(project)/worktrees/<id>/hook-facts/`.
+Only rows with sampled live-session membership/flags are eligible; inactive rows
+do not create file homes. That sample is not a new process-liveness authority.
+The filename is `<hook_facts_generation>.json`. The monitor's passive discovery
+record separately advertises `hook_facts_version` and this publisher's process-local
+generation; its existing `runtime_generation` is a build identity, not a process
+identity. No hook enumerates that directory or picks the newest file.
+An old process only owns its own
+generation's files, including during withdrawal and shutdown.
+
+Version 1 contains exact project/worktree/incarnation/workspace scope, selected
+runtime root, build and publisher generations, the existing installation-context fields,
+projection generation and row semantic revision. Its only row facts are
+disposition status, last disposition-note timestamp, asserted listing session
+and yielded-head flag. Record provenance must be current. The whole view remains
+**advisory and partial**: it is neither managed-session admission nor permission,
+head custody, daemon liveness, a complete record or a lifecycle result.
+Missing fields stay null; no unknown head becomes an asserted binding.
+
+Bounds are 16 KiB UTF-8 per view, 4 KiB per string, depth 4 and at most 4096
+selected views per project publication. Producer paths use safe single
+segments; the admitted project root may be a configured alias, but derived
+children and output files must not be links/reparse points or hard-linked files.
+Replacement is atomic in the same directory, with no wait/retry loop.
+Timestamp-only observations and changes to unsampled row fields do not rewrite
+an unchanged view. Its revision identifies the accepted row that last changed
+the sampled view, not a claim to have observed the latest whole roster.
+Publication failure, removed/unqualified rows, admission closure and shutdown
+withdraw affected files. Failure of this optional projection does not invalidate
+the existing roster or advertise a successful hook transition.
+
+The corresponding reader selects one exact generation from passive original-owner
+discovery and reads one bounded regular file. It validates the entire envelope
+and exact current caller/installation/workspace scope before using any advisory
+field. It never joins generations, treats missing as complete-empty, waits for a
+file, refreshes via Python or infers current authority after a crash.
+PowerShell's in-process JSON decoder is available; the POSIX decoder and
+managed-admission file remain separate unresolved gates. This producer expansion
+adds no hook registration, notification syntax, boot request or active selector.
+The post-tool transition still requires those complete consumer contracts.
+
 - [ ] Review this shell-facts/async amendment, preserving the original reviewed
   proposal and failed prototype as history, not implementation acceptance.
 - [ ] Finalize bounded per-fact producer/reader interfaces and actual shell

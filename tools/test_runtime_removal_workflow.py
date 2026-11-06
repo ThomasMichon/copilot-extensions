@@ -1,4 +1,4 @@
-"""The Darwin uninstall qualification is explicit, immutable and bounded."""
+"""Native uninstall qualification is explicit, immutable and bounded."""
 from __future__ import annotations
 
 import os
@@ -31,7 +31,7 @@ def test_native_removal_is_an_isolated_manual_selection():
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert inputs["runtime_removal"] == {
-        "description": "Qualify bounded native macOS runtime removal and process inspection",
+        "description": "Qualify bounded native macOS and Windows runtime removal and process inspection",
         "type": "boolean", "default": False,
     }
     defaults = {name: item["default"] for name, item in inputs.items() if item["type"] == "boolean"}
@@ -39,7 +39,7 @@ def test_native_removal_is_an_isolated_manual_selection():
         name for name, job in WORKFLOW["jobs"].items()
         if _enabled(job["if"], {**defaults, "runtime_removal": True})
     }
-    assert enabled == {"runtime-removal-macos"}
+    assert enabled == {"runtime-removal-macos", "runtime-removal-windows"}
     assert JOB["runs-on"] == "macos-latest" and JOB["timeout-minutes"] == 12
     assert WORKFLOW["permissions"] == {"contents": "read"}
     checkout = next(step for step in JOB["steps"] if step.get("uses") == "actions/checkout@v4")
@@ -57,6 +57,55 @@ def test_native_removal_is_an_isolated_manual_selection():
         assert '"$REMOVAL_SOURCE"' in command
         assert 'sudo -n -H -u "$REMOVAL_USER" -- env -i' in command
         assert '"HOME=$REMOVAL_HOME" "PATH=$REMOVAL_PATH"' in command
+
+
+@pytest.mark.parametrize("outcome", ["passed", "skipped", "failed", "missing", "wrong-source"])
+def test_windows_packet_requires_exact_source_and_all_positive_controls(
+    tmp_path, monkeypatch, outcome,
+):
+    import xml.etree.ElementTree as ET
+
+    job = WORKFLOW["jobs"]["runtime-removal-windows"]
+    assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 12
+    assert not job.get("continue-on-error")
+    checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+    step = next(step for step in job["steps"] if step.get("shell") == "python")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setattr(subprocess, "check_output", lambda *_a, **_k: (
+        ("b" if outcome == "wrong-source" else "a") * 40 + "\n"
+    ))
+    calls = []
+
+    def run(command, *, check):
+        assert check is True
+        assert command == [
+            sys.executable, "tools/run-plugin-tests.py", "agent-worktrees",
+            "--test-file", "tests/native/test_uninstall_windows_owner.py",
+            "--test-file", "tests/test_native_uninstall_footprint.py",
+            "-k", "native_owner_preserves_fallback_and_identity or native_default_uninstall_removes_writer_footprint",
+            "--allow-explicit-tiers", "--junit-dir", str(Path(".validation/windows-removal-results")),
+        ]
+        calls.append(command)
+        report = tmp_path / ".validation/windows-removal-results/agent-worktrees/results.xml"
+        report.parent.mkdir(parents=True)
+        suite = ET.Element("testsuite")
+        for index in range(10 if outcome == "missing" else 11):
+            case = ET.SubElement(suite, "testcase", name=f"control-{index}")
+            if index == 0 and outcome in {"skipped", "failed"}:
+                ET.SubElement(case, "skipped" if outcome == "skipped" else "failure")
+        ET.ElementTree(suite).write(report)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    body = compile(step["run"], "<windows-removal-workflow-step>", "exec")
+    if outcome == "passed":
+        exec(body, {})
+        assert len(calls) == 1
+    else:
+        with pytest.raises(AssertionError):
+            exec(body, {})
+        assert len(calls) == (0 if outcome == "wrong-source" else 1)
 
 
 @pytest.mark.parametrize("failure", [None, "account", "ownership", "probe"])
