@@ -34,7 +34,7 @@ AFFECTED = (
         "cli_mode_models.py", "cli_mode_provider.py", "db_inbox_custody.py",
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
-        "session_lifecycle_cli.py",
+        "session_lifecycle_cli.py", "worktree_writer_observation.py",
         "_peer_launch.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
@@ -99,8 +99,9 @@ PROBES = {
     "test_bridge_provider_receiver_and_extensions_share_one_conversation": 2,
     "test_provider_owner_uses_the_actual_client_interface": 1,
     "test_health_observes_canonical_writer_selection_without_launch": 5,
-    "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 1,
+    "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 2,
     "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
+    "test_unknown_or_changed_slot_never_certifies_a_build": 10,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {

@@ -115,7 +115,7 @@ async def test_missing_legacy_owner_refuses_foreign_compatible_path_command(proc
     _, start = process
     monkeypatch.setattr(session_lifecycle_cli, "_agent_bridge_installation_context", lambda: "")
     monkeypatch.setattr(session_lifecycle_cli, "_agent_bridge_owner_root", lambda: tmp_path / "bridge")
-    monkeypatch.setattr(session_lifecycle_cli, "_legacy_worktrees_launch_prefix", lambda root: None)
+    monkeypatch.setattr(session_lifecycle_cli, "_legacy_worktrees_selection", lambda root: None)
     foreign = Mock(return_value=str(tmp_path / "foreign" / "agent-worktrees"))
     monkeypatch.setattr(session_lifecycle_cli.shutil, "which", foreign)
     monkeypatch.setattr(authority, "_agent_worktrees_launch_prefix", session_lifecycle_cli._agent_worktrees_launch_prefix)
