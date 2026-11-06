@@ -2196,3 +2196,42 @@ that owner at the corrected exact source and materialize its genuine outputs.
 No stale hashes are hand-edited, no module is relocated to blind the guard,
 and no signing, evidence, CI or containment rule is bypassed. Native inspection,
 retained closure, source merge/release and caller recovery stay separate gates.
+
+### 2026-11-06 - Exact-source native and retained closure qualified
+
+The revised source `61ed09ec2a75fc1ecbda378abd5f01f1ab96928d` receives a
+current-head Comment with no open findings; the prefix defect is resolved.
+Actual optional run
+[42230420118](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42230420118)
+passes both Linux and Windows source-pin and native-consumer jobs.
+Downloaded JUnit contains 37 unique passing cases on each platform, identical
+complete case sets and zero skipped/failed/error cases. Both real neutral-CWD
+CLI and namespaced-owner witnesses and all four prefix variants execute.
+These are complete native results, not an aggregate inferred from local samples.
+
+The existing controlled source-proof run
+[42230558753](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42230558753)
+also succeeds at that exact source. Declared preparation, artifact-boundary
+controls, immutable peer-prefix consumer, current HTTP-52 capture, independent
+verification, canonical validator and historical publication guards all pass.
+The actual exporter records generation 52, 190 cases, 131 canonical outputs
+and manifest digest
+`c9b23ae01243fcca3c38c639f93bfab494bd2daf2138053e10bcb185d1199bb7`.
+
+The downloaded canonical artifact's manifest bytes match that actual producer
+receipt. With the local HEAD still exactly the captured source and the original
+inputs intact, the existing native publication owner validates all paths,
+identities and original preimages and materializes 131 outputs. All 131
+published bytes then match the manifest; only those current contract outputs
+change and prior HTTP-51 evidence remains unchanged. No hashes are hand-edited,
+no capture is relabeled, and no new registration/runtime behavior is introduced
+by the evidence refresh.
+
+The previously failing local required checker now reports
+`OK (2 contracts, 1043 fixtures)`. Admitted-unit source bindings are unchanged.
+An agent-bridge patch changefile accompanies its generated current-evidence
+delta, without changing protocol generation. The implementation and all native
+inspection fixtures remain the qualified source. The next normal same-PR push
+refreshes actual review and required CI for the canonical metadata delta before
+source merge and containing-release observation. No redundant native rerun is
+credited, and the parent/caller/installed gates remain open.
