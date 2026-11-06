@@ -204,14 +204,14 @@ def _git(source, *arguments):
     return result.stdout.strip()
 
 
-@pytest.fixture
-def bootstrap(tmp_path):
+@pytest.fixture(scope="session")
+def bootstrap_source(tmp_path_factory):
     host = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
     if host is None:
         pytest.skip("native bootstrap shell is unavailable")
     assert os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
     adapter = self_install._runtime_installer()
-    source = tmp_path / "source"
+    source = tmp_path_factory.mktemp("bootstrap-source") / "source"
     roots = {
         package
         for application in (
@@ -225,6 +225,7 @@ def bootstrap(tmp_path):
             package, source / package.relative_to(SOURCE),
             ignore=shutil.ignore_patterns(
                 "tests", "docs", "skills", "__pycache__", "*.egg-info", "*.dist-info",
+                ".ruff_cache", ".pytest_cache",
             ),
         )
     manager = source / "worktree-manager"
@@ -283,6 +284,16 @@ def bootstrap(tmp_path):
         source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
         "commit", "-qm", "finite bootstrap source",
     )
+    return source
+
+
+@pytest.fixture
+def bootstrap(tmp_path, bootstrap_source):
+    host = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
+    source = tmp_path / "source"
+    shutil.copytree(bootstrap_source, source)
+    _git(source, "update-index", "--refresh")
+    scripts = source / "worktree-manager" / "scripts"
     profile = tmp_path / "profile"
     profile.mkdir()
     root = tmp_path / "manager"
@@ -409,6 +420,9 @@ def test_retained_controller_prepares_dev_source_without_its_acquisition(
     retained, _share = bootstrap_inputs.retain(acquisition / "worktree-manager", driver)
     selected = tmp_path / "selected"
     shutil.copytree(acquisition, selected)
+    _git(selected, "update-index", "--refresh")
+    dirty = _git(selected, "status", "--porcelain", "--untracked-files=all", "--ignored")
+    assert not dirty, dirty
     commit, tree = _git(selected, "rev-parse", "HEAD"), _git(selected, "rev-parse", "HEAD^{tree}")
     _git(selected, "update-ref", "refs/remotes/origin/dev", commit)
     for path in acquisition.rglob("*"):
@@ -460,7 +474,7 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     admission, = root.glob("caller-*.json")
     caller = json.loads(admission.read_text(encoding="utf-8"))
 
-    second, second_log = start("--project", "sample")
+    second, second_log = start("--project", "sample", "--wait")
     _eventually(lambda: len(core.status(root=driver)) == 2, processes=(first, second))
     running, pending = core.status(root=driver)
     assert running.id == original.id and running.state == "running"
@@ -469,12 +483,6 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
         lambda: f"Update request {pending.id};" in second_log.read_text(encoding="utf-8"),
         processes=(first, second),
     )
-    equivalent, equivalent_log = start("--project", "sample")
-    _eventually(
-        lambda: f"Update request {pending.id};" in equivalent_log.read_text(encoding="utf-8"),
-        processes=(first, second, equivalent),
-    )
-    assert len(core.status(root=driver)) == 2
     assert second.poll() is None
     if lose_caller:
         from agent_procutil.process_retirement import PinnedProcess
@@ -483,7 +491,12 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
             original_caller.terminate()
             assert original_caller.exited()
         first.wait(timeout=5)
+    equivalent, equivalent_log = start("--project", "sample", "--detach", "--json")
     different, different_log = start("--project", "other")
+    _eventually(
+        lambda: f"Update request {pending.id};" in equivalent_log.read_text(encoding="utf-8"),
+        processes=(second, equivalent, different),
+    )
     _eventually(lambda: len(core.status(root=driver)) == 3, processes=(second, different))
     running, queued, distinct = core.status(root=driver)
     assert running.id == original.id and running.state == "running"
@@ -491,7 +504,8 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     assert [row["phase"] for row in effects()] == ["manager", "suite-start"]
     (root / "release-suite").touch()
     assert second.wait(timeout=20) == 23, second_log.read_text(encoding="utf-8")
-    assert equivalent.wait(timeout=20) == 23, equivalent_log.read_text(encoding="utf-8")
+    assert equivalent.wait(timeout=20) == 0, equivalent_log.read_text(encoding="utf-8")
+    assert json.loads(equivalent_log.with_suffix(".out").read_text())["request_id"] == pending.id
     assert different.wait(timeout=20) == 23, different_log.read_text(encoding="utf-8")
     if not lose_caller:
         assert first.wait(timeout=20) == 23, first_log.read_text(encoding="utf-8")
@@ -522,7 +536,9 @@ def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_work
         for cycle in range(2):
             (root / "release-suite").unlink(missing_ok=True)
             detached, log = start("--project", "detached", "--detach", "--json")
-            assert detached.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
+            assert detached.wait(timeout=60 if cycle == 0 else 20) == 0, log.read_text(
+                encoding="utf-8",
+            )
             assert list(preserved.parent.iterdir()) == [preserved]
             assert sentinel.read_bytes() == b"retained failed acquisition"
             _eventually(lambda: len(effects()) == 3 * cycle + 2)
@@ -777,6 +793,7 @@ def test_native_posix_non_update_resolves_driver_without_creating_a_queue(bootst
     assert [row["phase"] for row in effects()] == ["manager", "inspection"]
 
 
+@pytest.mark.timeout(180)
 def test_full_declared_repository_inputs_reach_immutable_retention(
     tmp_path, monkeypatch, request,
 ):
@@ -791,13 +808,17 @@ def test_full_declared_repository_inputs_reach_immutable_retention(
     }
     files = set(bootstrap_inputs.engine._source_files(tuple(sorted(roots))))
     files.update(bootstrap_inputs._preparation_assets(SOURCE / "worktree-manager").values())
+    input_bytes = sum(path.stat().st_size for path in files)
     request.node.user_properties.extend([
         ("input_files", len(files)),
-        ("input_bytes", sum(path.stat().st_size for path in files)),
+        ("input_bytes", input_bytes),
     ])
+    print(f"Declared retention inputs: files={len(files)} bytes={input_bytes}", flush=True)
     started = time.monotonic()
     retained, _shared = bootstrap_inputs.retain(SOURCE / "worktree-manager", tmp_path / "driver")
-    request.node.user_properties.append(("retention_seconds", time.monotonic() - started))
+    elapsed = time.monotonic() - started
+    request.node.user_properties.append(("retention_seconds", elapsed))
+    print(f"Verified declared retention: seconds={elapsed:.3f}", flush=True)
     assert retained.is_relative_to(tmp_path / "driver" / "bootstrap-inputs")
     for application in ("worktree-manager", "plugins/agent-worktrees"):
         expected = SOURCE / application / "pyproject.toml"

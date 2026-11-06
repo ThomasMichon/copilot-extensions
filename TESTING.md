@@ -718,8 +718,13 @@ the actual UV stage entry; its native POSIX controls are separate from Windows
 execution and the required unit-only CI packet.
 
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
-and for relevant PR paths on Linux and Windows. Its packet is
+and for relevant PR paths on Linux and Windows. Its complete local packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers`.
+Hosted acceptance runs complementary behavioral and full-retention selections
+in separate jobs on each platform; no case is removed from acceptance. Every
+job retains its five-minute ceiling, and the runner's 300-second packet ceiling
+is unchanged. Local workers may use smaller serial selections when the complete
+packet exceeds their available capacity; that is not a full-packet passing claim.
 The real shell acquisition, canonical freezing, queue, finite worker, runtime
 adapter and borrowed participant remain intact; only constructor and suite
 bodies use finite fixtures with a minimal declared source graph and a real
@@ -732,7 +737,16 @@ acquisition, participant validation and the suite's source locator.
 An independent case verifies that detached acceptance removes only that caller's acquisition
 checkout while the retained worker continues to its recorded final result.
 The detached control runs twice and observes native Windows windows and focus
-changes without weakening the enclosing test lifecycle.
+changes without weakening the enclosing test lifecycle. Its first acceptance
+wait allows 60 seconds; the second remains 20 seconds. Behavioral cases retain
+their 90-second limit. After the first pending receipt, equivalent and distinct
+callers acquire concurrently within the unchanged 40-second finite suite hold.
+The pending callers mix explicit wait and detached JSON observation. Observer
+modes remain local, while the durable installation recipe contains only
+forwarded installation arguments and a normalized selected acquisition budget.
+Source fixtures initialize one committed template, then use independent copies
+and Git indexes per case. Generated tool caches are excluded; the selected
+preparation source must still pass the real pristine-source check.
 An ordinary two-request control delays only the second executor entry until
 the successful first caller has removed its acquisition checkout, then runs the
 canonical executor and verifies retained process-utility imports and both results.
@@ -759,7 +773,18 @@ and daemon-instance leases retain cleanup. This is source-boundary evidence,
 not full-graph performance, escape from a caller-owned cleanup Job, actual
 runtime installation, installed rollout or migration of an existing queue.
 A separate full-repository retention control records real input count, bytes
-and blocking retention time as test properties. It exercises canonical
+and blocking retention time as test properties and hosted log output. Its fixed
+180-second case ceiling is separate from the 90-second behavioral limit. The
+five-minute retention job still includes setup and cleanup, and a ceiling
+overrun remains a failure requiring diagnosis, not automatic budget growth.
+Calibration of a 3,330-file, approximately 50.8 MB closure completed in 102.58
+and 113.92 seconds on a CPU-contended Windows control. Inventory took about a
+second; first source and retained-copy reads dominated, while later reads were
+substantially faster. These measurements justify headroom for the complete
+verification cost, not a production latency guarantee or a security-scanner
+attribution. Source growth or repeated overruns require rechecking input volume,
+phase costs and host capacity before changing the limit.
+It exercises canonical
 freezing/readback against the complete declared Manager/SDK graph, not the
 full acquisition/installation latency of an ordinary update.
 The source-preparation control removes its disposable acquisition checkout,

@@ -27,23 +27,28 @@ jobs:
       UV_PYTHON: "3.12"
       QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps: &bootstrap-update-steps
-      - uses: actions/checkout@v4
+      - &bootstrap-update-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - &bootstrap-update-python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
+      - &bootstrap-update-uv
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - name: Record exact qualification source
+      - &bootstrap-update-source
+        name: Record exact qualification source
         run: >-
           python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['QUALIFICATION_SHA']; print('source='+actual)"
       - name: Qualify whole-operation joins, waiter loss and prepared-source compatibility
         run: >-
           python tools/run-plugin-tests.py worktree-manager
           --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers
+          -k "not full_declared_repository_inputs_reach_immutable_retention"
 
   bootstrap-update-windows:
     name: Whole bootstrap update (Windows)
@@ -51,3 +56,28 @@ jobs:
     timeout-minutes: 5
     env: *bootstrap-update-env
     steps: *bootstrap-update-steps
+
+  bootstrap-retention-linux:
+    name: Declared source retention (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: &bootstrap-retention-steps
+      - *bootstrap-update-checkout
+      - *bootstrap-update-python
+      - *bootstrap-update-uv
+      - *bootstrap-update-source
+      - name: Measure and verify the complete declared Manager and SDK source closure
+        env:
+          PYTEST_ADDOPTS: "-rP --durations=1"
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers
+          -k "full_declared_repository_inputs_reach_immutable_retention"
+
+  bootstrap-retention-windows:
+    name: Declared source retention (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: *bootstrap-retention-steps

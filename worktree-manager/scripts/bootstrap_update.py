@@ -28,13 +28,14 @@ def execute(args, driver, *, source_digest: str) -> int:
     options, forwarded = parse_options(command[1:])
     if _request_control(options, forwarded):
         raise ValueError("Request inspection and recovery must run outside installation submission")
+    command = ["update", *forwarded]
     budget = options.engine_acquisition_timeout
     if budget is None and options.target is None:
         budget = os.environ.get(TIMEOUT_ENV)
     if budget is not None:
-        selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
-        if options.engine_acquisition_timeout is None:
-            command = [*command, "--engine-acquisition-timeout", selected_budget]
+        command.extend([
+            "--engine-acquisition-timeout", str(acquisition_timeout({TIMEOUT_ENV: budget})),
+        ])
     source_anchor = request_source_anchor()
     context = {**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
     _update_context_directory(context)

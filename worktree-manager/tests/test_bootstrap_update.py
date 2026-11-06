@@ -92,11 +92,12 @@ def test_bootstrap_update_journals_scope_and_waits_for_the_whole_result(
     assert execute(args, driver, source_digest="a" * 64) == exit_code
     spec, runner = seen["spec"], seen["runner"]
     assert spec.backend == "manager"
-    assert spec.argv == tuple(command[2:])
+    participant = ["--", "update", "--project", "sample", *(["--auto"] if automatic else [])]
+    assert spec.argv == tuple(participant[2:])
     assert spec.source == "configured-source"
     assert spec.repair is not automatic
     assert dict(spec.context)["WORKTREE_MANAGER_ROOT"] == str(root)
-    assert runner.argv[-len(command):] == tuple(command)
+    assert runner.argv[-len(participant):] == tuple(participant)
     assert "--update-participant" in runner.argv
     assert seen["retention"]["expected_payload_digest"] == ("a" * 64 if materialize else None)
     assert runner.argv[runner.argv.index("--source-digest") + 1] == (
@@ -214,7 +215,7 @@ def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monk
 
 @pytest.mark.parametrize("flags,expected", [
     ([], "600.0"),
-    (["--engine-acquisition-timeout", "420"], "420"),
+    (["--engine-acquisition-timeout", "420"], "420.0"),
     (["--target", "agent-bridge"], None),
 ])
 def test_bootstrap_retains_effective_budget_only_for_suite_execution(
@@ -245,6 +246,55 @@ def test_bootstrap_retains_effective_budget_only_for_suite_execution(
         index = spec.argv.index("--engine-acquisition-timeout")
         assert spec.argv[index + 1] == expected
         assert runner.argv[runner.argv.index("--engine-acquisition-timeout") + 1] == expected
+
+
+def test_observer_modes_share_the_actual_pending_installation_recipe(tmp_path, monkeypatch, capsys):
+    import bootstrap_update
+    import runtime_install
+
+    monkeypatch.setenv(TIMEOUT_ENV, "600")
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+    monkeypatch.setattr(runtime_install.engine, "_package_roots", lambda payload: (tmp_path,))
+    monkeypatch.setattr(runtime_install.engine, "_package_name", lambda path: "agent-procutil")
+    queue = tmp_path / "queue"
+    events = []
+
+    def worker(*args, **kwargs):
+        events.append("worker")
+        return "worker-handle"
+
+    def wait(identifier, **kwargs):
+        events.append("wait")
+        return SimpleNamespace(state="completed", exit_code=23)
+
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        default_root=lambda: queue,
+        enqueue=lambda spec, **kwargs: core.enqueue(spec, root=queue, **kwargs),
+        ensure_worker=worker, wait=wait, drain=lambda: events.append("drain"),
+    )
+    for mode, budget in (
+        ([], ["--engine-acquisition-timeout", "600"]),
+        (["--wait"], []),
+        (["--detach", "--json"], ["--engine-acquisition-timeout", "600.0"]),
+        (["--supervised-debug"], []),
+    ):
+        args = SimpleNamespace(
+            payload=tmp_path, root=tmp_path / "manager",
+            command=["update", "--project", "sample", *mode, *budget],
+            repair_update=False, install_source=None,
+        )
+        assert bootstrap_update.execute(args, driver, source_digest="a" * 64) == (
+            0 if "--detach" in mode else 23
+        )
+    request, = core.status(root=queue)
+    assert request.state == "pending"
+    assert request.spec.argv == (
+        "--project", "sample", "--engine-acquisition-timeout", "600.0",
+    )
+    assert json.loads(capsys.readouterr().out)["request_id"] == request.id
+    assert events == ["worker", "wait", "worker", "wait", "worker", "drain", "wait"]
 
 
 @pytest.mark.parametrize("flags", [
