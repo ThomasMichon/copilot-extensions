@@ -4,15 +4,18 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
+import pytest
 
 from agent_worktrees import health
 from agent_worktrees.tracking import (
     HeadTransition,
+    ResourceClaim,
     SessionEntry,
     SessionHandoff,
     WorktreeRecord,
@@ -80,6 +83,84 @@ class TestStaleStatus:
         ]
         stale = health.find_stale_status(recs)
         assert [r.worktree_id for r in stale] == ["a"]
+
+
+class TestRetirementHolds:
+    @pytest.fixture(autouse=True)
+    def local_identity(self, monkeypatch):
+        monkeypatch.setattr(health.cfg, "load_config", lambda **kwargs: SimpleNamespace())
+        monkeypatch.setattr(
+            "agent_worktrees.execution_spaces.require_owner_identity",
+            lambda owner, config: owner == "local",
+        )
+
+    def _record(self, path: Path, *, status: str = "finalized", released: bool = False):
+        return SimpleNamespace(
+            worktree_id=path.name, worktree_path=str(path), status=status, prs=[],
+            execution_machine="local", platform=health.cfg.detect_platform(),
+            sessions=[SessionEntry("saved-session", "2026-01-01T00:00:00")],
+            resources=[ResourceClaim(
+                kind="session", ref="host/project/worktree#saved-session",
+                state="released" if released else "active",
+            )],
+        )
+
+    def test_registered_terminal_record_reports_both_holds_without_mutation(
+        self, tmp_path, monkeypatch
+    ):
+        record = self._record(tmp_path)
+        before = deepcopy(record)
+        blocker = "live process(es) still use the checkout: psmux.exe(42)"
+        monkeypatch.setattr(
+            "agent_worktrees.procs.checkout_retirement_blocker", lambda root: blocker,
+        )
+        report = health.audit_retirement_holds([record])
+        assert report["report_only"] is True
+        assert report["found"] == 1
+        assert report["items"][0]["ownership"]["bucket"] == "held-claims"
+        assert report["items"][0]["checkout"] == blocker
+        assert record == before
+
+    def test_process_hold_survives_released_session_claim(self, tmp_path, monkeypatch):
+        record = self._record(tmp_path, released=True)
+        monkeypatch.setattr(
+            "agent_worktrees.procs.checkout_retirement_blocker",
+            lambda root: "live process still uses the checkout: shell(42)",
+        )
+        item = health.audit_retirement_holds([record])["items"][0]
+        assert item["ownership"] is None
+        assert "shell(42)" in item["checkout"]
+
+    def test_active_and_removed_checkouts_do_not_trigger_process_probes(
+        self, tmp_path, monkeypatch
+    ):
+        records = [
+            self._record(tmp_path, status="active"),
+            self._record(tmp_path / "removed", released=True),
+        ]
+        def unexpected(root):
+            raise AssertionError("active or removed checkout was probed")
+        monkeypatch.setattr("agent_worktrees.procs.checkout_retirement_blocker", unexpected)
+        assert health.audit_retirement_holds(records)["found"] == 0
+
+    def test_unavailable_inspection_remains_a_hold(self, tmp_path, monkeypatch):
+        record = self._record(tmp_path, released=True)
+        unavailable = "cwd inspection unavailable: access denied; checkout removal deferred"
+        monkeypatch.setattr(
+            "agent_worktrees.procs.checkout_retirement_blocker", lambda root: unavailable,
+        )
+        item = health.audit_retirement_holds([record])["items"][0]
+        assert item["checkout"] == unavailable
+
+    def test_foreign_record_never_uses_local_checkout_processes(self, tmp_path, monkeypatch):
+        record = self._record(tmp_path, released=True)
+        record.execution_machine = "remote"
+        def unexpected(root):
+            raise AssertionError("foreign execution space was probed locally")
+        monkeypatch.setattr("agent_worktrees.procs.checkout_retirement_blocker", unexpected)
+        report = health.audit_retirement_holds([record])
+        assert report["found"] == 0
+        assert report["other_execution_spaces"] == 1
 
 
 # --------------------------------------------------------------------------- #

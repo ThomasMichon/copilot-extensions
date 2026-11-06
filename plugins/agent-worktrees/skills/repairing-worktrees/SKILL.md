@@ -49,6 +49,16 @@ health. It is **per-project** (run it through each project's binstub, e.g.
    age / lock / current-session / registered-session.
 5. **Alignment audit** (report-only) — session-less worktrees whose
    `parent_session` cwd differs from their own path.
+6. **Terminal retirement holds** (report-only, including with `--fix`) —
+   finalized or archived records whose ownership remains unsettled or whose
+   retained checkout is still used by a process. Both causes are reported
+   independently, including for records with an existing session registry.
+   A warm mux server or shell can hold a checkout without a live Copilot.
+   These findings preserve the normal cleanup guards: inspect the named
+   worktree's claims and settle process use with its owner. Doctor never
+   releases claims, stops processes, or declares an unavailable process
+   inspection safe. Local process probes exclude other execution spaces;
+   unresolved execution identity is reported rather than probed as local.
 
 ## Procedure
 

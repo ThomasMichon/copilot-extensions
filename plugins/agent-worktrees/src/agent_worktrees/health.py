@@ -60,6 +60,65 @@ from . import handoff_trace
 from . import tracking
 from .handoff_diagnostics import HANDOFF_STAGES
 
+
+def audit_retirement_holds(records: list[tracking.WorktreeRecord]) -> dict:
+    """Report retained terminal worktrees without concluding or releasing them."""
+    from . import procs, retirement_safety
+    from .execution_spaces import require_owner_identity
+
+    items = []
+    checked = 0
+    other_spaces = 0
+    locality = {}
+    try:
+        config = cfg.load_config(include_control_plane_related_pr=False)
+    except (OSError, ValueError, RuntimeError, yaml.YAMLError):
+        config = None
+    for record in records:
+        if record.status not in {"finalized", "archived"}:
+            continue
+        checked += 1
+        ownership = retirement_safety.retirement_blocker(record)
+        checkout = None
+        local = False
+        if record.platform != cfg.detect_platform():
+            other_spaces += 1
+        else:
+            try:
+                if config is None:
+                    raise ValueError("project execution identity unavailable")
+                owner = record.execution_machine
+                if owner not in locality:
+                    locality[owner] = require_owner_identity(owner, config)
+                local = locality[owner]
+                if not local:
+                    other_spaces += 1
+            except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
+                checkout = f"checkout execution identity unavailable: {exc}; removal deferred"
+        if local and record.worktree_path:
+            try:
+                Path(record.worktree_path).stat()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                checkout = f"checkout inspection unavailable: {exc}; removal deferred"
+            else:
+                checkout = procs.checkout_retirement_blocker(record.worktree_path)
+        if ownership is not None or checkout is not None:
+            items.append({
+                "worktree_id": record.worktree_id,
+                "ownership": (
+                    {"bucket": ownership.bucket, "reason": ownership.reason}
+                    if ownership is not None else None
+                ),
+                "checkout": checkout,
+            })
+    return {
+        "checked": checked, "found": len(items), "report_only": True,
+        "other_execution_spaces": other_spaces, "items": items,
+    }
+
+
 # Mirrors the serializer's quoting predicate in ``tracking.save_record`` so a
 # repaired scalar is quoted on exactly the same chars the writer would have.
 _NEEDS_QUOTE = set(":{}[]#&*!|>'\",")
