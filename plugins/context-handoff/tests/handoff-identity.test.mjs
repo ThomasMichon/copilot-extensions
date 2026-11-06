@@ -10,6 +10,7 @@ import {
   consumeDispatchHandoffTask,
   consumeFileHandoff,
   decodeHandoffPayload,
+  dispatchHandoff,
   encodeHandoffPayload,
   makeHandoffMetadata,
   readSessionStateHandoff,
@@ -71,6 +72,59 @@ test("metadata and predecessor request retain the original binding, not a later 
       .metadata.authorIdentity, meta.authorIdentity);
   });
 });
+
+for (const mode of ["inline", "spilled", "legacy", "unreadable"]) {
+  test(`deduplicated task save retains original metadata with ${mode} payload`, () => {
+    fixture(({ binding, stateDir, worktreeDir, activation, request }) => {
+      binding("predecessor");
+      let payload = null;
+      const calls = [];
+      const options = {
+        get: (key) => ({
+          "worktree-dir": worktreeDir, "worktree-state-dir": stateDir, machine: "example",
+        })[key],
+        execute: (_bin, argv) => {
+          calls.push(argv[0]);
+          if (argv[0] === "create") {
+            if (payload === null) {
+              payload = readFileSync(argv[argv.indexOf("--payload-file") + 1], "utf-8");
+              if (mode === "legacy") {
+                const decoded = decodeHandoffPayload(payload);
+                delete decoded.metadata.authorIdentity;
+                payload = encodeHandoffPayload(decoded.text, decoded.metadata);
+              }
+            }
+            return JSON.stringify({
+              id: "task-example", target_worktree: "wt-example",
+              payload_inline: ["spilled", "unreadable"].includes(mode) ? null : payload,
+            });
+          }
+          if (argv[0] === "payload") {
+            if (mode === "unreadable") throw new Error("payload unavailable");
+            return payload;
+          }
+          if (argv[0] === "list") return "[]";
+          return JSON.stringify({ status: "proposed" });
+        },
+      };
+      const first = dispatchHandoff("same brief", "predecessor", worktreeDir, "Continue", options);
+      binding("predecessor", { sessionActivation: {
+        ...activation, ordinal: 4, sourceIdentity: "native:resumed",
+      } });
+      const again = dispatchHandoff("same brief", "predecessor", worktreeDir, "Continue", options);
+      assert.equal(first.id, "task-example");
+      assert.equal(again.id, first.id);
+      assert.deepEqual(again.metadata.authorIdentity, first.metadata.authorIdentity);
+      if (mode === "legacy") assert.equal(Object.hasOwn(again.metadata, "authorIdentity"), false);
+      else if (mode === "unreadable") assert.equal(again.metadata.authorIdentity, null);
+      else assert.equal(again.metadata.authorIdentity.activation.ordinal, 3);
+      assert.deepEqual(request(again.metadata, again.id, "agent-dispatch")
+        .record.authorIdentity, first.metadata.authorIdentity || null);
+      assert.equal(calls.filter((name) => name === "payload").length,
+        ["spilled", "unreadable"].includes(mode) ? 2 : 0);
+    });
+  });
+}
 
 for (const invalid of ["absent", "legacy", "wrong-session", "wrong-worktree", "oversized", "invalid"]) {
   test(`optional ${invalid} binding does not qualify or block ordinary consumption`, () => {

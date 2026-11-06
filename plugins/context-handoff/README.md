@@ -146,6 +146,11 @@ persistence remains host-owned, not implemented or certified by this plugin.
 
 Handoff metadata and the predecessor's existing `handoff-request.json` retain
 an `authorIdentity` snapshot from the author's exact `worktree-binding.json`.
+Task creation returns metadata from the retained task payload, including on a
+same-content deduplication after resume. It uses the returned inline payload
+when available, otherwise the existing read-only task-payload command. A legacy
+payload does not acquire fresh author identity, and a failed metadata read
+leaves author identity unknown rather than substituting today's binding.
 On successful consumption, the existing file record or task-delivery checkpoint
 also retains `consumerIdentity`; that same snapshot is copied to the matching
 predecessor request. Preparing a delivery, attempting an uncertain consume or

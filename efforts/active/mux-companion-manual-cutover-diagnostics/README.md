@@ -331,7 +331,8 @@ https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321
 
 - The [independent expected-head source sequence](expected-head-observation.md)
   realizes P3/P4 through the existing owner receipts and an optional passive
-  comparison. Plan #10865 is merged; identity capture and comparison remain
+  comparison. Plan #10865 is merged; H1 captures optional original/consumer
+  identity in source. The passive comparison reader and Companion consumer remain
   unimplemented. Legacy identity stays unknown and all original clauses below
   remain unchanged.
 

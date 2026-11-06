@@ -2059,13 +2059,13 @@ export function agentDispatchJson(argv, cwd, execute = runCli) {
   }
 }
 
-export function abandonSupersededHandoffs(cwd, worktree, keepId) {
+export function abandonSupersededHandoffs(cwd, worktree, keepId, execute = runCli) {
   const tasks = agentDispatchJson(
-    ["list", "--status", "proposed,queued", "--label", "handoff"], cwd,
+    ["list", "--status", "proposed,queued", "--label", "handoff"], cwd, execute,
   );
   for (const id of supersededHandoffIds(tasks, worktree, keepId)) {
     try {
-      runCli("agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
+      execute("agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
         ["abandon", id, "--permit", "--reason", "superseded by a newer handoff for this worktree"],
         { cwd, timeout: 15000 });
     } catch { /* best-effort -- GC orphan pass is the backstop */ }
@@ -2178,16 +2178,19 @@ export function handoffDedupKey(sid, promptText) {
   return `handoff-${sid}-${contentHash}`;
 }
 
-export function dispatchHandoff(promptText, sid, cwd, title) {
-  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
+export function dispatchHandoff(
+  promptText, sid, cwd, title,
+  { get = agentWorktreesGet, execute = runCli } = {},
+) {
+  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" }, get);
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   const tmp = join(dir, `${metadata.id}-payload-${process.pid}.md`);
   try {
     mkdirSync(dir, { recursive: true });
     writeFileSync(tmp, encodeHandoffPayload(promptText, metadata), "utf-8");
-    const machine = agentWorktreesGet("machine", cwd, sid);
-    const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
+    const machine = get("machine", cwd, sid);
+    const wtDir = get("worktree-dir", cwd, sid);
     const worktree = wtDir ? basename(wtDir) : null;
     // A handoff must land in its OWN worktree; without one, bail to the file
     // flow rather than file an unpinned, anyone-can-claim task.
@@ -2199,17 +2202,27 @@ export function dispatchHandoff(promptText, sid, cwd, title) {
       "--target-worktree", worktree, "--affinity", `worktree=${worktree}`,
     ];
     if (machine) argv.push("--target-machine", machine);
-    const task = JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
+    const task = JSON.parse(execute("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
     if (task?.id) {
-      addHandoffClaim(cwd, task.id, worktree);
+      addHandoffClaim(cwd, task.id, worktree, execute);
       // #3248 review comment 9: the task was already publicly claimable
       // above, before this claim existed -- close that race's window right
       // here rather than trusting only the async server-side hook, which
       // may already have lost it.
-      releaseHandoffClaimIfTerminal(cwd, task.id, worktree);
-      abandonSupersededHandoffs(cwd, worktree, task.id);
+      releaseHandoffClaimIfTerminal(cwd, task.id, worktree, execute);
+      abandonSupersededHandoffs(cwd, worktree, task.id, execute);
     }
-    return task?.id ? { id: task.id, metadata: { ...metadata, taskId: task.id } } : null;
+    if (!task?.id) return null;
+    const retained = decodeHandoffPayload(
+      typeof task.payload_inline === "string"
+        ? task.payload_inline : readTaskPayloadRaw(cwd, task.id, execute),
+    ).metadata;
+    return {
+      id: task.id,
+      metadata: {
+        ...(retained || { ...metadata, authorIdentity: null }), taskId: task.id,
+      },
+    };
   } catch {
     return null;
   } finally {
