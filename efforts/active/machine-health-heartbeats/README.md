@@ -484,3 +484,25 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Review and exact-source CI must pass after publishing these corrections.
   No live configuration, runtime installation, service activation or carrier
   publication was performed.
+
+### 2026-11-06 - Projected task authority preserved
+- The second provider review found that Dispatch's early telemetry route
+  bypassed task-only admission. It now uses the same projected-environment
+  guard as the adjacent local namespaces and falls through to native admission.
+- Nine focused Windows controls passed, including empty projected-field
+  admission and a real CLI apply using a valid preview token with projected
+  task credentials. Native admission refused the command before any
+  configuration, lock or spool write.
+- The Bridge contract failure was stale CLI source inventory. Comparison
+  with the captured HTTP-52 source shows only offline telemetry registration
+  in the parser. Its current execution closure still binds the exact captured
+  CLI, so non-semantic inventory refresh was not admissible. Telemetry now
+  registers through the existing configuration registrar, preserving the
+  imported parser's behavior and restoring the wire-bound CLI bytes.
+  Historical inventory, fixtures and provenance remain unchanged.
+- The Bridge adoption/configuration packet passed 107 cases with one platform
+  skip; the immutable contract checker passed two contracts and 1,051 fixtures.
+  Ruff and whitespace passed.
+- Required current-head CI and review still gate this provider slice.
+  Machines adoption, carrier exchange, probes, scheduling and activation
+  remain open; no installed or running qualification is inferred.

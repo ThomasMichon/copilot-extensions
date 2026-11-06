@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from agent_dispatch import early_cli, telemetry
 
 
@@ -80,3 +82,44 @@ def test_normal_cli_preview_apply_and_custom_refusal(tmp_path, monkeypatch):
     assert (root / "telemetry.json").read_text(encoding="utf-8") == custom
     assert list((directory / "retained").iterdir()) == []
     assert call(arguments + ["--unsupported"]).returncode == 2
+
+
+@pytest.mark.parametrize("key", [
+    "AGENT_DISPATCH_TASK_TOKEN", "AGENT_DISPATCH_TASK_ID", "AGENT_DISPATCH_TASK_URL",
+    "AGENT_DISPATCH_TASK_WORKER_ID", "AGENT_DISPATCH_TASK_TOKEN_FILE",
+])
+def test_projected_task_retains_full_cli_admission(monkeypatch, key):
+    monkeypatch.setenv(key, "")
+    assert early_cli.dispatch(["telemetry", "capabilities"]) is None
+    assert early_cli.dispatch([
+        "telemetry", "retained", "--directory", "unused", "--apply", "--confirm", "unused",
+    ]) is None
+
+
+def test_normal_projected_task_cli_cannot_apply_configuration(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "native"
+    root.mkdir()
+    directory = tmp_path / "spool"
+    (directory / "retained").mkdir(parents=True)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    monkeypatch.delenv(telemetry.SINK_ENV_VAR, raising=False)
+    arguments = ["telemetry", "retained", "--directory", str(directory)]
+    assert early_cli.dispatch(arguments) == 0
+    token = json.loads(capsys.readouterr().out)["confirmation"]
+    environment = dict(os.environ)
+    environment.update({
+        "AGENT_DISPATCH_TASK_TOKEN": "synthetic-task-credential",
+        "AGENT_DISPATCH_TASK_ID": "synthetic-task",
+        "AGENT_DISPATCH_TASK_URL": "http://127.0.0.1:1",
+        "AGENT_DISPATCH_TASK_WORKER_ID": "synthetic-worker",
+    })
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_dispatch", *arguments, "--apply", "--confirm", token],
+        env=environment, capture_output=True, text=True, timeout=25,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 1, result.stderr
+    assert "command is outside the projected task authority" in result.stderr
+    assert result.stdout == ""
+    assert list(root.iterdir()) == []
+    assert list((directory / "retained").iterdir()) == []
