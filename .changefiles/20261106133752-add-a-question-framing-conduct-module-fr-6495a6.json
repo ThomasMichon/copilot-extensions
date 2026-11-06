@@ -1,0 +1,9 @@
+{
+  "comment": "Add a question-framing conduct module: frame how-to-proceed questions at decision or operation-class scope, recommend the broadest option within the requested authority, avoid self-invented narrowing qualifiers, and keep operator-chosen narrowing binding",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

@@ -22,6 +22,7 @@ owns publication, recovery and provider upgrade/rollback mechanics.
 | Module | Instruction projection | Skill | What it covers |
 |--------|------------------------|-------|-----------------|
 | Useful autonomy and standing authority | [`useful-autonomy`](instructions/useful-autonomy.instructions.md) | [`using-standing-authority`](skills/using-standing-authority/SKILL.md) | Ordinary charter-bounded work without repeated permission questions; explicit effect-scope pre-clearance with original evidence, blast radius, limits and non-widening continuity |
+| Operator question framing | [`question-framing`](instructions/question-framing.instructions.md) | [`using-standing-authority`](skills/using-standing-authority/SKILL.md) | How-to-proceed questions framed at the real decision or operation class: broadest default within the requested authority including routine follow-through, a standing option for recurring questions, no self-invented narrowing qualifiers, and operator-chosen narrowing still binding |
 | Per-machine maintenance standby | [`maintenance-standby`](instructions/maintenance-standby.instructions.md) | Projection only | Read an owner-attributed local maintenance notice and wait using native Copilot 30-minute scheduled prompts when supporting agent tools are intentionally unavailable |
 | Consented Windows elevation | [`elevation-fallback`](instructions/elevation-fallback.instructions.md) | [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) | One reviewed administrator operation through a temporary limited interactive task, genuine RunAs consent, specified private output log, matching terminal marker and scoped task cleanup; no persistent elevation grant |
 | Multi-agent rules of engagement | [`multi-agent-rules-of-engagement`](instructions/multi-agent-rules-of-engagement.instructions.md) | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | In-scope same-operator peer authority without redundant approval, scope attenuation, real custody and gates, collective decisions/handoff, authoritative countermand, external ingress and minimal provenance |
@@ -150,6 +151,16 @@ reviewed fix as an ordinary bounded retry, and turn a repeated ask for one
 class into a single class-level pre-clearance request. The procedure
 works without a runtime, broker or companion plugin; it does not certify model
 compliance or replace execution-owner enforcement.
+
+The separate `question-framing` module covers how any how-to-proceed question
+is framed. Options name the real decision or operation class. The
+recommendation is the broadest choice that completes the goal within the
+requested authority, including routine follow-through such as retries after
+reviewed fixes. Questions that could recur include a standing option. Agents do
+not add self-invented narrowing qualifiers ("exact", "one", "only", "read-only",
+a revision pin) unless they name a concrete risk and still offer the broader
+option. An operator who picks a narrower option over an offered broader one has
+set a binding limit.
 
 At an unapproved effect boundary, the
 [decision-preparation procedure](skills/using-standing-authority/references/decision-preparation.md)
@@ -332,6 +343,7 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 | Path | Purpose |
 |------|---------|
 | [`instructions/useful-autonomy.instructions.md`](instructions/useful-autonomy.instructions.md) | Concise charter-bounded continuation and explicit effect-authority policy |
+| [`instructions/question-framing.instructions.md`](instructions/question-framing.instructions.md) | Decision-scoped operator question framing without self-invented narrowing qualifiers |
 | [`skills/using-standing-authority/SKILL.md`](skills/using-standing-authority/SKILL.md) | Capture, qualify, reuse and recover original scoped operator approvals |
 | [`skills/using-standing-authority/references/approval-evidence.md`](skills/using-standing-authority/references/approval-evidence.md) | Procedural record fields, synthetic pre-clearance and decision cases; not a grant API |
 | [`instructions/maintenance-standby.instructions.md`](instructions/maintenance-standby.instructions.md) | Static per-machine missing-tool standby policy, independent of removed payload helpers |

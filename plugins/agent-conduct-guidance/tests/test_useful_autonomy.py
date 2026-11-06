@@ -150,6 +150,17 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
         "A mechanical rebase or conflict-only push meets a review-round, revision or attempt cap",
         "Do not count it against the cap; caps bind intent-changing revisions.",
     ),
+    (
+        "Agent drafts a how-to-proceed question whose options are all narrow "
+        '("exact", "one", "only", "read-only", a revision pin)',
+        "Rewrite it: recommend the broadest option within the requested authority, add a "
+        "standing option if it can recur and keep narrower options beside it with a named risk.",
+    ),
+    (
+        "Operator picks a narrower option offered beside a broader one",
+        "The narrowing binds; record it as operator-chosen and ask once at class level if the "
+        "work later needs more.",
+    ),
 ])
 def test_record_preserves_explicit_decision_cases(situation, required):
     assert f"| {situation} | {required} |" in _RECORD.read_text()

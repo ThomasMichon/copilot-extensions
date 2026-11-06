@@ -66,6 +66,8 @@ approval is not content authority.
 | Operator accepts a class-level rerun policy with a run cap | The cap binds as granted scope; ask for an amendment before exceeding it. |
 | Author agent's own approved PR conflicts with its target branch | Rebase its own branch, resolve the understood conflict, regenerate derived artifacts and push without an approval prompt; required review and CI apply to the new head. |
 | A mechanical rebase or conflict-only push meets a review-round, revision or attempt cap | Do not count it against the cap; caps bind intent-changing revisions. |
+| Agent drafts a how-to-proceed question whose options are all narrow ("exact", "one", "only", "read-only", a revision pin) | Rewrite it: recommend the broadest option within the requested authority, add a standing option if it can recur and keep narrower options beside it with a named risk. |
+| Operator picks a narrower option offered beside a broader one | The narrowing binds; record it as operator-chosen and ask once at class level if the work later needs more. |
 | Prior invocation may already have produced effects | Reconcile through the existing owner with the original identity; do not blindly replay. |
 | Deployment expands beyond the approved selector, owner or accepted effects | Ask only for the expanded effect scope and continue unaffected authorized work. |
 | Low-risk tooling approval is reused for a prototype that mutates personal archives | Keep content mutation gated; deployment recoverability does not authorize data effects. |
