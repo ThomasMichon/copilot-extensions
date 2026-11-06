@@ -113,11 +113,28 @@ persistable resume permissions or token-expiry attestations.
 
 `exchange_source_lease_for(path, fields, capability, host=...)` additionally
 checks the configured binding for an embedding. Like `exchange_for`, it uses
-only the caller-supplied capability, never the worker's stored one. The
-existing HTTP `/source-credentials` facade remains token-only; this client
-addition does not advertise lease support on that independently deployed
-boundary. Its owning implementation must add and declare that capability
-before an HTTP lease consumer can use it.
+only the caller-supplied capability, never the worker's stored one.
+
+The existing HTTP `/source-credentials` facade also accepts an explicit
+`lease_contract=credential-relay.account-source-lease/v1` JSON field alongside
+the ordinary request. The running core's `/health` advertises
+`source_credentials_contract` with that `lease_contract` and `exchange=http/v1`.
+Select this declaration from the intended installation before sending a lease
+request; missing or incompatible support is not permission to fall back to a
+token-only operation. Older cores reject the added request field. Unknown
+lease contracts and a declaring-but-incompatible account listener return
+`source-lease-unsupported` (HTTP 409) without ordinary-token fallback.
+
+A lease response adds `lease_contract`, `lease_id`, `lease_issued_at`,
+`lease_expires_at` and `lease_remaining_seconds` to the existing token/account/
+host/installation fields. The remaining time is the native SDK's conservative
+budget at serialization. Each forwarding/receiving owner must deduct its whole
+exchange latency and apply the earlier wall deadline and local monotonic budget;
+never restart the full source interval at a later hop or persist it as a new
+authorization. Source unavailability, withdrawal or elapsed budget returns no
+credential. Requests without `lease_contract` retain the exact token-only
+response. No old form is retired. HTTP metadata declares provider support, not
+a signed-in source, file renewal or execution-owner enforcement.
 
 The Bridge publishes `account-relay-port.json` beside the policy, containing
 only the actual loopback port, process ID and generation. This dedicated listener accepts
