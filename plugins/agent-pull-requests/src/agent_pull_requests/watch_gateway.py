@@ -93,6 +93,7 @@ class WatchGateway:
         bindings: tuple[WatchScopeBinding, ...],
         checkpoint: Callable[[], None] | None = None,
         workspaces=None,
+        attention=None,
     ) -> None:
         for name in (fleet, gateway, slot):
             identifier(name)
@@ -124,6 +125,16 @@ class WatchGateway:
         ):
             raise ValueError("workspace operations must use an existing admitted scope/storage owner")
         self.workspaces = MappingProxyType(workspaces)
+        from .attention_read import AttentionReader
+        attention = {} if attention is None else dict(attention)
+        if any(
+            key not in workspaces or not isinstance(value, AttentionReader)
+            or value.workspace is not workspaces[key]
+            or value.consumer != selected[key].consumer
+            for key, value in attention.items()
+        ):
+            raise ValueError("attention must use the admitted consumer and existing workspace owners")
+        self.attention = MappingProxyType(attention)
         self._tasks: set[asyncio.Task[ServiceResponse]] = set()
         self._closing = False
 
@@ -143,7 +154,7 @@ class WatchGateway:
             or caller.expires_at <= self.store.clock()
         ):
             return _response(403, {"error": "watch_caller_refused"})
-        if request.target.startswith("/v2/review/"):
+        if request.target.startswith(("/v2/review/", "/v1/attention/")):
             return await self._handle_workspace(request)
         matched = _PATH.fullmatch(request.target)
         if matched is None:
@@ -206,11 +217,15 @@ class WatchGateway:
 
     async def _handle_workspace(self, request):
         from .workspace_operations import OPERATIONS
-        matched = re.fullmatch(r"/v2/review/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)", request.target)
-        if matched is None or matched[2] not in OPERATIONS:
+        is_attention = request.target.startswith("/v1/attention/")
+        prefix = "/v1/attention/" if is_attention else "/v2/review/"
+        operations = ("capabilities", "read") if is_attention else OPERATIONS
+        matched = re.fullmatch(prefix + r"([a-z0-9][a-z0-9-]{0,63})/([a-z]+)", request.target)
+        if matched is None or matched[2] not in operations:
             return _response(404, {"error": "workspace_route_not_found"})
         target, operation = matched.groups()
-        workspace = self.workspaces.get((request.context.principal, target))
+        owners = self.attention if is_attention else self.workspaces
+        workspace = owners.get((request.context.principal, target))
         if workspace is None:
             return _response(404, {"error": "workspace_unsupported"})
         if request.method != "POST":
@@ -244,6 +259,7 @@ class WatchGateway:
             raise
 
     async def _execute_workspace(self, workspace, operation, payload, request, target, expected):
+        from .attention_read import AttentionUnavailable, MAX_BATCH_BYTES
         from .generation_cache import CacheInvalid
         from .owner_read import OwnerReadResponseTooLarge
         from .workspace_operations import WorkspaceUnavailable
@@ -260,7 +276,8 @@ class WatchGateway:
             )
             checkpoint()
             value = dict(value, binding=expected.document())
-            if len(json.dumps(value, allow_nan=False).encode("utf-8")) > BODY_BYTES:
+            limit = MAX_BATCH_BYTES if request.target.startswith("/v1/attention/") else BODY_BYTES
+            if len(json.dumps(value, allow_nan=False).encode("utf-8")) > limit:
                 return _response(503, {"error": "workspace_response_limit"})
             return _response(200, value)
         except RequestDisconnected:
@@ -273,7 +290,7 @@ class WatchGateway:
             return _response(503, {"error": "workspace_response_limit"})
         except (CacheInvalid, ReplayStoreInvalid, OperationOwnershipError):
             return _response(503, {"error": "workspace_state_unavailable"})
-        except (WorkspaceUnavailable, OSError, RuntimeError):
+        except (WorkspaceUnavailable, AttentionUnavailable, OSError, RuntimeError):
             return _response(503, {"error": "workspace_owner_unavailable"})
         except (ValueError, OverflowError):
             return _response(400, {"error": "invalid_workspace_operation"})
