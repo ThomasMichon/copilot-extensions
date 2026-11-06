@@ -446,6 +446,33 @@ installation-context vendoring owner must qualify correspondence before any copy
 can inherit canonical checking. Other fragment families and independent
 package/module environments remain separate campaign work.
 
+### Fixed guard module alias
+
+Only the `copilot-extensions-harness` project substitutes its owned
+`plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py` target
+with a derived `copilot_mention_guard.py` view. The alias contains exactly the
+original bytes: no header, newline normalization, annotations, stub or runtime
+loader change. Every diagnostic line and column maps to the original source.
+The physical inventory is unchanged, and all other current owned targets remain
+selected; this substitution preserves N physical files as N targets.
+Another project's inventory-only appearance of the guard never activates it.
+Missing, unowned or incomplete bindings are refused.
+
+The alias shares the already-owned source-view directory with Installation
+Context, without changing its fragment composition or adding a duplicate import
+root. The project's declared ordinary import roots remain separate captured
+source providers. Competing canonical module, stub, package and namespace
+providers in the search roots are refused using native filename semantics.
+The alias uses the null cache rather than crediting mutable-source cache results.
+
+Ordinary source, ancestor-directory and generated-output identities, source and
+view bytes, and exact stage membership are checked before every analysis, after
+every result or failure, and during final cleanup. Cleanup removes only
+still-owned outputs; unknown or replaced files/directories are retained and
+reported. Each view retains its own source correspondence. These safeguards do
+not execute the guard, admit its pending consumer, qualify emitted programs or
+extend the adapter to other hyphenated modules.
+
 ## Exact-candidate release enforcement
 
 The source controller prepares and checks MyPy from the imported frozen
