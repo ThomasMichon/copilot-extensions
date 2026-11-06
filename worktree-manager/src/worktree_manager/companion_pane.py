@@ -9,6 +9,8 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from collections import OrderedDict
+from threading import Lock
 from threading import Event
 from pathlib import Path
 
@@ -20,10 +22,55 @@ from .self_install import default_root
 
 _PANE = re.compile(r"%\d+\Z")
 _INCARNATION = re.compile(r"\$\d+:\d+\Z")
+_PSMUX_TARGETS: OrderedDict[tuple[str, tuple[int, ...]], str] = OrderedDict()
+_PSMUX_TARGET_LOCK = Lock()
 
 
 class PaneError(RuntimeError):
     """No verified same-window navigation target is available."""
+
+
+def _psmux_pane_separator(binary: str, identity: tuple[int, ...], timeout: float) -> str:
+    key = (binary, identity)
+    with _PSMUX_TARGET_LOCK:
+        if key in _PSMUX_TARGETS:
+            _PSMUX_TARGETS.move_to_end(key)
+            return _PSMUX_TARGETS[key]
+    result = run_mux_child(
+        [binary, "-V"], capture_output=True, text=True, timeout=timeout,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if result.returncode:
+        raise PaneError((result.stderr or "PSMux version is unavailable.").strip())
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    version = re.fullmatch(r"tmux (\d+)\.(\d+)\.(\d+)", first_line)
+    if version is None:
+        raise PaneError("PSMux did not report a supported pane-target version.")
+    release = tuple(map(int, version.groups()))
+    if release[:2] == (3, 3):
+        separator = ":"
+    elif release[:2] == (3, 4):
+        separator = ":."
+    else:
+        raise PaneError(f"PSMux {first_line[5:]} has no qualified pane-target syntax.")
+    with _PSMUX_TARGET_LOCK:
+        _PSMUX_TARGETS[key] = separator
+        _PSMUX_TARGETS.move_to_end(key)
+        if len(_PSMUX_TARGETS) > 8:
+            _PSMUX_TARGETS.popitem(last=False)
+    return separator
+
+
+def _psmux_pane_target(binary: str, session: str, pane: str, *, timeout: float = 5) -> str:
+    """Keep the session explicit without confusing a pane ID with an index."""
+    try:
+        selected = Path(binary).resolve(strict=True)
+        stat = selected.stat()
+        identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        separator = _psmux_pane_separator(str(selected), identity, timeout)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        raise PaneError(f"PSMux pane-target discovery failed: {exc}") from exc
+    return session + separator + pane
 
 
 def _call(mapping: dict, *args: str, cancelled=None, timeout=5) -> str:
@@ -36,7 +83,15 @@ def _call(mapping: dict, *args: str, cancelled=None, timeout=5) -> str:
         if "-t" in arguments:
             index = arguments.index("-t") + 1
             if index < len(arguments) and _PANE.fullmatch(arguments[index]):
-                arguments[index] = mapping["mux_session"] + ":" + arguments[index]
+                deadline = time.monotonic() + timeout
+                arguments[index] = _psmux_pane_target(
+                    mapping["mux_bin"], mapping["mux_session"], arguments[index], timeout=timeout,
+                )
+                if cancelled is not None and cancelled.is_set():
+                    raise PaneError("View switch cancelled.")
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    raise PaneError("Mux navigation deadline expired during pane-target discovery.")
     elif arguments[0] in {"show-options", "set-option"} and "-t" in arguments:
         index = arguments.index("-t") + 1
         if arguments[index] == "=" + mapping["mux_session"]:

@@ -52,7 +52,7 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         args = list(args)
         if "-t" in args and args[args.index("-t") + 1].startswith("%"):
             index = args.index("-t") + 1
-            args[index] = session + ":" + args[index]
+            args[index] = companion_pane._psmux_pane_target(binary, session, args[index])
         result = subprocess.run(
             [binary, *args], capture_output=True, text=True, timeout=10,
             env=environment, creationflags=subprocess.CREATE_NO_WINDOW,

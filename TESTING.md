@@ -2391,7 +2391,7 @@ This explicit five-minute job does not expand required unit-only CI.
 The manual `installation-context-full.yml` portfolio `mux-companion` runs
 `tests/native/test_companion_pane_tmux.py` on Ubuntu 24.04 with tmux 3.4 and
 `tests/native/test_companion_pane_native.py` on Windows with digest-pinned
-disposable PSMux 3.3.6 against the dispatch's recorded immutable source.
+disposable PSMux 3.4.0 against the dispatch's recorded immutable source.
 It verifies actual native option targeting, a fresh
 synthetic constructed-prefix invocation, same-window reuse and the unchanged
 CLI process in an isolated socket. It is not a required PR lane or a production
@@ -2461,6 +2461,17 @@ state; 3.4.0 removes that startup handshake, with an upstream first-pane
 regression control. This narrows the failure to the additional PSMux/ConPTY
 layer, not a virtualenv-only failure or Companion behavior. The version change
 does not erase the failed 3.3.6 runs or qualify 3.4.0 without actual execution.
+All three startup controls pass on 3.4.0, exposing a separate target-parser
+refusal: `session:%id` is treated as a window by its client validator.
+Companion and the three native wrappers select exact, explicitly session-scoped
+pane IDs using the selected executable's `-V` release: `session:%id` for 3.3.x
+and `session:.%id` for 3.4.x. The latter is not sent to 3.3.x, whose parser
+silently drops that pane ID. Other or unrecognized release lines refuse pane
+actions before mutation rather than guessing or replaying effects. The bounded,
+headless version query is cached per executable filesystem identity, not per
+event; replacement invalidates it. POSIX tmux targeting remains unchanged.
+Portable controls cover both grammars, replacement and pre-effect refusal;
+they are not native integration qualification.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

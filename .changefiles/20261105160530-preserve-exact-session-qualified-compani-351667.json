@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve exact session-qualified Companion pane targeting across PSMux 3.3 and 3.4.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

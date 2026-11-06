@@ -79,7 +79,9 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
         if "-t" in arguments:
             index = arguments.index("-t") + 1
             if arguments[index].startswith("%"):
-                arguments[index] = session + ":" + arguments[index]
+                arguments[index] = companion_pane._psmux_pane_target(
+                    binary, session, arguments[index],
+                )
         result = subprocess.run(
             [binary, *arguments], capture_output=True, encoding="utf-8", timeout=5,
             env=dict(environment, PSMUX_SESSION=session),
