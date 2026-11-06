@@ -282,3 +282,21 @@ adopter pilot feedback gates subsequent widening.
   not a reported identifier leak. Required source CI passed. Preserve a fresh
   scanner result and an actual passing current-head review before merge;
   neither the infrastructure error nor resolved threads substitute for them.
+
+### 2026-11-06 — Operational-reference alias review
+- A subsequent review's summary listed four substantive findings despite its
+  “No open issues” heading. Treated the findings, not that heading, as the gate.
+- Synchronized both new history-directory ancestors before journal rotation;
+  normalized native reference containment, including parent-component and
+  filesystem aliases; rechecked nested permission bindings under owner locks;
+  and used a bounded, read-only database predicate for retained client paths.
+  Unqualified network and relative-parent references refuse explicitly.
+- The complete native packet passed **35 controls**, with explicit skips for
+  the unenrolled second volume and the POSIX-only descriptor control.
+  Subsequently the corrected production path passed **1 real bounded
+  cross-filesystem roundtrip, no skips**; exact owned cleanup was confirmed.
+  Parent-alias workspace/database references, capture–modify–apply races and
+  history-ancestor barriers have focused regression coverage.
+- Review convergence and source merge are still required. No runtime
+  activation, real retained-checkout move or allocation-default change follows
+  from this source qualification.
