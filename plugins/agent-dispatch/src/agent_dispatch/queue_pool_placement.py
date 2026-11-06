@@ -49,6 +49,7 @@ def pool_placement_contract() -> dict[str, object]:
         "supported_drivers": ["cli", "ordinary-bridge"],
         "ordinary_initial_start_versions": [1],
         "ordinary_writer_requirement_versions": [1],
+        "prepared_writer_requirement_versions": [1],
         "cli_initial_start_versions": [1],
         "instance_bound_placement_versions": [1],
         "instance_scoped_reservation_versions": [1],

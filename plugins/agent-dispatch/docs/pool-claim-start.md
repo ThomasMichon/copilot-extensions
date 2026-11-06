@@ -100,6 +100,25 @@ held. A keyed recovery receipt cannot authorize a newly held task's launch.
 
 ### Conditional ordinary writer consumer
 
+The prepared-workspace provider can retain the same optional
+`worktree_writer_requirement` in `POST /spawn-reservations/{key}/worktree`,
+atomically with the original nonce and audited relationship request, before
+the first external relationship call. This is distinct from later allocation
+storage: its capability is `prepared_writer_requirement_versions: [1]` in the
+existing placement descriptor. The client negotiates that support before
+sending the field; an older provider is not retried without it.
+The requirement must match the original ordinary creation key, complete
+workspace and nonce. Replays preserve it when omitted, reject replacement,
+and cannot retrofit it after an unpinned relationship or native exists.
+A lost relationship reply retains the same expectation and original request.
+
+This provider-first expansion stores an expectation, not successful admission.
+Independent queue/request, ground-owner and complete participating-writer
+checks still govern the first relationship. Ordinary startup does not yet
+derive a requirement for a new workspace: that consumer must use the actual
+negotiated Bridge selection and authoritative prepared nonce, not a future
+acquisition journal or caller-ready boolean. No admission policy is installed.
+
 The internal ordinary Bridge caller accepts an explicit `worktree_writer`
 expectation for an already prepared workspace. It is the existing version-1
 Bridge keyed-creation requirement: installed writer identity and original

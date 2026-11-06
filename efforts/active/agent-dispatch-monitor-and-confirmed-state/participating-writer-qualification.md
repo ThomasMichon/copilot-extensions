@@ -452,3 +452,22 @@ and original event/generation facts. Bounded SQLite and actor-free controls
 cover changed preparation and original-request recovery. This closes that
 source defect only; independent ground-record/allocation, actual selected
 participants and complete-cohort admission remain open.
+
+### Prepared-workspace expectation ordering
+
+The existing attachment operation is the provider owner for the expected
+future Bridge writer. It already stores the original workspace nonce and
+audited relationship request before reconciliation. Its optional requirement
+is now retained in that same transaction, with independently advertised
+placement support and client negotiation. It rejects changed expectations,
+nonce conflicts and retrofit after a historical unpinned relationship/native.
+An omitted retry preserves the original expectation; a lost relationship
+reply does not allocate another request.
+
+This is the provider-first prerequisite, not ordinary consumer assembly.
+The future consumer must derive an expectation from actual negotiated Bridge
+selection and authoritative preparation, then use this existing owner before
+the first relationship. Independent first-request admission must not require
+an acquisition journal that can exist only after that relationship.
+Actual closed-cohort policy and installed-owner qualification remain open;
+no permissive callback or running configuration is supplied.
