@@ -173,6 +173,16 @@ def test_native_scoped_first_use_retains_discovery_and_native_file_separately(tm
     assert not runtime.exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="drive-relative paths are Windows-specific")
+def test_native_cold_scope_rejects_drive_relative_before_provisioning(tmp_path):
+    home, payload, runtime, _project, receipt, env = _scoped_first_use_fixture(tmp_path)
+    result = invoke(payload, env, home, "--configuration-root", home.drive + ".", "unlock")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "existing absolute directory" in result.stderr
+    assert not receipt.exists()
+    assert not runtime.exists()
+
+
 @pytest.mark.parametrize("arguments,enabled,code,diagnostic", [
     (["identity-key", "setup", "--require-running"], True, 1, "service_unavailable"),
     (["ssh-key", "prepare", "--require-running"], True, 1, "service_unavailable"),

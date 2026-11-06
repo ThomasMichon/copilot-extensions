@@ -51,8 +51,13 @@ for ($index = 0; $index -lt $forwardArgs.Count; $index++) {
         }
         $validRoot = $false
         try {
+            $selectedPathRoot = [IO.Path]::GetPathRoot($selectedRoot)
             $validRoot = [IO.Path]::IsPathRooted($selectedRoot) -and
-                [bool][IO.Path]::GetPathRoot($selectedRoot).TrimEnd([char[]]'\/') -and
+                [string]::Equals(
+                    $selectedPathRoot,
+                    [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($selectedRoot)),
+                    [StringComparison]::OrdinalIgnoreCase
+                ) -and
                 (Test-Path -LiteralPath $selectedRoot -PathType Container)
         } catch { }
         if (-not $validRoot) {
