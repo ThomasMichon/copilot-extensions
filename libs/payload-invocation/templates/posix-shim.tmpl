@@ -177,7 +177,7 @@ _resolve_runtime() {
             *.exe) _selector_root="$(cygpath -aw "$_runtime_root")" || _selector_root="" ;;
         esac
         if [ -n "$_selector_root" ]; then
-            _selected_cache="$("$AGENT_RT_PY" -I -B -X "pycache_prefix=$_python_cache" -c '
+            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -X "pycache_prefix=$_python_cache" -c '
 import os, sys
 try:
     from agent_procutil.python_cache import cache_arguments
@@ -188,7 +188,9 @@ except Exception:
 if "\n" not in prefix and "\r" not in prefix:
     sys.stdout.write(prefix)
 ' "$_selector_root" 2>/dev/null)" || _selected_cache=""
-            [ -n "$_selected_cache" ] && _python_cache="$_selected_cache"
+            if [ -n "$_selected_cache" ]; then
+                _python_cache="$_selected_cache"
+            fi
         fi
     fi
 }

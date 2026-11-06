@@ -1478,13 +1478,27 @@ It is conservative and fails closed:
 - A candidate is skipped (`non-bytecode-content`) unless its whole tree holds
   only directories and `.pyc` files.
 - A candidate containing any symlink, junction or other reparse point is
-  skipped (`reparse-point`). Links are never followed.
+  skipped (`reparse-point`). Links are never followed. A cache root whose
+  `cache/python`, `cache` or runtime-root component is itself a link is
+  reported as `cache-root-linked-or-not-directory` and not scanned.
 - A candidate whose newest entry was modified within the grace period is
   skipped. A live process still writing bytecode keeps it fresh.
-  `--min-age-hours` defaults to 1 and must be at least 1 with `--apply`.
-- Each candidate is re-inventoried immediately before removal. An I/O error
-  marks the candidate `error`, leaves the rest of it in place, and makes the
-  command exit 1.
+  `--min-age-hours` defaults to 1, must be a finite number, and must be at
+  least 1 with `--apply`.
+- Liveness evidence is reported as `liveness`. On Linux every readable
+  process environment and command line is scanned. A candidate named there
+  is kept (`referenced-by-live-process`); if the scan fails, every candidate
+  is kept (`liveness-unknown`). Other platforms rely on the grace period
+  (`age-only`). Removing an idle namespace a process still names is benign:
+  CPython treats bytecode reads and writes as best-effort and recreates
+  missing cache directories.
+- Each candidate is re-inventoried immediately before removal. Removal is
+  anchored to the inventoried directories (directory handles on POSIX,
+  non-delete-sharing guard handles on Windows). If any directory was replaced
+  in the meantime the candidate becomes `error` (`changed-during-removal`).
+  Any I/O error, including on the cache root itself, marks an `error` entry,
+  leaves the rest in place, and makes the command exit 1.
+- `python-cache` needs no project, so it runs from any directory.
 
 ## Installation & Config
 

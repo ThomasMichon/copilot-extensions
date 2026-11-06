@@ -78,7 +78,7 @@ def _sh_binstub() -> str:
         '    fi\n'
         '    selector_root="$root"\n'
         '    [[ "$python" != *.exe ]] || selector_root="$(cygpath -aw "$root")"\n'
-        f'    selected="$("$python" -I -B -X "pycache_prefix=$cache" -c \'{_CACHE_SELECTOR_SH}\' "$selector_root" 2>/dev/null)" '
+        f'    selected="$("$python" -I -B -X utf8 -X "pycache_prefix=$cache" -c \'{_CACHE_SELECTOR_SH}\' "$selector_root" 2>/dev/null)" '
         '&& [[ -n "$selected" && "$selected" != *$\'\\n\'* ]] && cache="$selected"\n'
         '    exec "$python" -I -X utf8 -X "pycache_prefix=$cache" -m worktree_manager "$@"\n'
         'fi\n'

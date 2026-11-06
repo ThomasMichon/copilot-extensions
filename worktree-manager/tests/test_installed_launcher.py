@@ -231,12 +231,24 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
             Path("\\\\?\\" + env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
         )
     )
-    assert cache.is_file()
-    cached_before = (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino)
+    # Without a procutil selector the fixture has no sealed cache: waiting
+    # launchers remove the unsealed prefix they minted, exec launchers cannot.
+    cleaned = Path(argv[-1]).suffix in (".cmd", ".ps1")
+    cache_root = Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
+    assert any(part.startswith("unsealed-") for part in cache.parts)
+    assert cache.is_file() is not cleaned
+    if cleaned:
+        assert list(cache_root.iterdir()) == []
+        cached_before = None
+    else:
+        cached_before = (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino)
     assert not Path(env["UV_PROJECT_ENVIRONMENT"]).exists()
     failed = _run(argv + ["--fail"], env=env, cwd=tmp_path)
     assert failed.returncode == 7, failed.stderr
-    assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
+    if cleaned:
+        assert list(cache_root.iterdir()) == []
+    else:
+        assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
     assert {
         str(path.relative_to(slot)): (
             path.read_bytes() if path.is_file() else None,
@@ -259,7 +271,47 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
     assert replacement["version"] == "1.2.4"
     assert replacement["file"] == output["file"]
     assert Path(replacement["cached"]) != cache
-    assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
+    if cleaned:
+        assert list(cache_root.iterdir()) == []
+    else:
+        assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
+
+
+def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
+    argv, env, slot = launcher
+    _payload(slot)
+    runtime = slot / ".venv"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    uv = shutil.which("uv")
+    assert uv, "the contained runner requires uv"
+    installed = _run(
+        [uv, "pip", "install", "--python", str(python), "--no-deps", str(slot)],
+        env=env, cwd=slot,
+    )
+    assert installed.returncode == 0, installed.stderr
+    site = Path(_run([str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_paths()[\"purelib\"])"],
+                     env=env, cwd=tmp_path).stdout.strip())
+    procutil = site / "agent_procutil"
+    procutil.mkdir()
+    (procutil / "__init__.py").touch()
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
+        procutil / "python_cache.py",
+    )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    cache_root = Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
+    caches = []
+    for extra in ([], ["--fail"]):
+        result = _run(argv + extra, env=env, cwd=tmp_path)
+        assert result.returncode == (7 if extra else 0), result.stderr
+        cache = Path(json.loads(result.stdout)["cached"])
+        caches.append(cache)
+        assert cache.is_file()
+        assert [path.name.startswith("installed-") for path in cache_root.iterdir()] == [True]
+    assert caches[0] == caches[1]
 
 
 def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_path, monkeypatch):

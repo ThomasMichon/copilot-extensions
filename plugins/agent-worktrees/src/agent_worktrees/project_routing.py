@@ -30,6 +30,7 @@ _NO_PROJECT_COMMANDS = {
     "picker",
     "doctor",
     "hygiene",
+    "python-cache",
     "reap-shells",
     "status-updater",
     "status-monitor",

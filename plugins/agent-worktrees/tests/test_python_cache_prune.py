@@ -108,8 +108,8 @@ def test_reparse_points_are_never_followed(tmp_path: Path, nested: bool) -> None
 def test_removal_error_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = _bytecode_dir(tmp_path, "unsealed-" + "1" * 32)
 
-    def deny(path: str) -> None:
-        raise PermissionError(13, "denied", path)
+    def deny(*args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "denied")
 
     monkeypatch.setattr(prune.os, "unlink", deny)
     report = prune.prune_unsealed(tmp_path, apply=True)
@@ -142,3 +142,102 @@ def test_cli_apply_requires_grace_period(tmp_path: Path, capsys: pytest.CaptureF
     assert prune.cmd_python_cache(_args(tmp_path, "--apply", "--min-age-hours", "0.5")) == 2
     assert target.is_dir()
     assert "--min-age-hours" in capsys.readouterr().err
+
+
+def test_non_finite_age_is_rejected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    target = _bytecode_dir(tmp_path / "cache" / "python", "unsealed-" + "4" * 32)
+
+    for value in (float("nan"), float("inf"), -1.0):
+        with pytest.raises(ValueError):
+            prune.prune_unsealed(target.parent, apply=True, min_age_seconds=value)
+    assert prune.cmd_python_cache(_args(tmp_path, "--apply", "--min-age-hours", "nan")) == 2
+    assert target.is_dir()
+    assert "--min-age-hours" in capsys.readouterr().err
+
+
+def test_root_scan_error_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def deny(*args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr(prune.os, "scandir", deny)
+    report = prune.prune_unsealed(tmp_path, apply=True)
+
+    assert [(c.status, c.reason.split(":")[0]) for c in report.candidates] == [("error", "PermissionError")]
+
+
+def test_linked_runtime_cache_root_is_skipped(tmp_path: Path) -> None:
+    real = tmp_path / "elsewhere"
+    target = _bytecode_dir(real / "python", "unsealed-" + "5" * 32)
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    _link_directory(runtime / "cache", real)
+
+    report = prune.prune_unsealed(runtime / "cache" / "python", apply=True)
+
+    assert [(c.status, c.reason) for c in report.candidates] == [
+        ("skipped", "cache-root-linked-or-not-directory")]
+    assert target.is_dir()
+
+
+def test_replacement_during_removal_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    target = _bytecode_dir(cache, "unsealed-" + "6" * 32)
+    outside = _bytecode_dir(tmp_path, "outside")
+    victim = outside / "C" / "pkg" / "__pycache__" / "mod.cpython-313.pyc"
+
+    def swap(candidate: str) -> None:
+        package = Path(candidate) / "C" / "pkg"
+        moved = Path(candidate) / "C" / "moved"
+        package.rename(moved)
+        _link_directory(package, outside / "C" / "pkg")
+
+    monkeypatch.setattr(prune, "_before_remove", swap)
+    report = prune.prune_unsealed(cache, apply=True)
+
+    assert _statuses(report)[target.name][0] == "error"
+    assert victim.is_file()
+
+
+def test_old_but_live_directory_is_preserved(tmp_path: Path) -> None:
+    live = _bytecode_dir(tmp_path, "unsealed-" + "7" * 32)
+    idle = _bytecode_dir(tmp_path, "unsealed-" + "8" * 32)
+
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=("process-scan", {live.name}))
+
+    assert _statuses(report) == {
+        live.name: ("skipped", "referenced-by-live-process"), idle.name: ("removed", "")}
+    assert report.as_dict()["liveness"] == "process-scan"
+    assert live.is_dir() and not idle.exists()
+
+
+def test_unknown_liveness_retains_everything(tmp_path: Path) -> None:
+    target = _bytecode_dir(tmp_path, "unsealed-" + "0" * 32)
+
+    report = prune.prune_unsealed(tmp_path, apply=True, liveness=("unknown", None))
+
+    assert _statuses(report) == {target.name: ("skipped", "liveness-unknown")}
+    assert target.is_dir()
+
+
+def test_real_cli_runs_from_neutral_directory(tmp_path: Path) -> None:
+    import subprocess
+
+    neutral = tmp_path / "neutral"
+    neutral.mkdir()
+    target = _bytecode_dir(tmp_path / "rt" / "cache" / "python", "unsealed-" + "c" * 32)
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        [str(Path(prune.__file__).resolve().parents[1]), os.environ.get("PYTHONPATH", "")])}
+    kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+
+    result = subprocess.run(
+        [sys.executable, "-B", "-m", "agent_worktrees", "python-cache", "prune",
+         "--root", str(tmp_path / "rt"), "--json"],
+        cwd=neutral, env=env, capture_output=True, text=True, timeout=60, **kwargs,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["apply"] is False
+    assert payload["roots"][0]["summary"]["eligible"] == 1
+    assert target.is_dir()
