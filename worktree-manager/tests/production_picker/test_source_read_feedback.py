@@ -117,6 +117,12 @@ def test_cached_notices_and_knowledge_changes_do_not_rebuild_or_move_list(monkey
             assert queries == ["one"]
             await pilot.press("escape")
             assert app.screen is not doctor
+            for orphans in ([{"kind": "worktree", "ref": "missing-row"}], []):
+                screen._orphans = orphans
+                screen.refresh(cause="pulse")
+                await pilot.pause()
+                painted = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
+                assert ("o: Doctor" in painted) == bool(orphans)
 
     asyncio.run(run())
 
@@ -194,6 +200,28 @@ def test_failed_replacement_loader_keeps_cached_presentation(provider, kind, row
     assert "Updates paused" in body(screen) and "Press r to retry" not in body(screen)
     tab = screen._machine_group([screen.machine_idx], True).plain
     assert "~" in tab and "✗" not in tab and "✓" not in tab
+
+
+def test_all_scope_cached_failure_is_not_hidden_by_an_earlier_refreshing_source():
+    screen, _loader, source = screen_and_loader()
+    other = data_ssh.Source("other-host", "Win", None)
+    screen.machines.append(("Other source", other.machine, other.env, True))
+    screen.source_tabs.append({
+        "label": "Other source", "machine": other.machine, "env": other.env,
+        "source_kind": other.source_kind, "source_id": other.source_id,
+    })
+    screen.machine_idx = 0
+    screen.loader = data_ssh.LiveLoader([source, other])
+    for current in (source, other):
+        screen.loader._feed_commit(current, 0, [])
+    worktree_read_feedback(screen)
+    screen.loader = data_ssh.LiveLoader([source, other])
+    screen.loader._feed_error(other, 0, "fixture unavailable")
+    notices = worktree_read_feedback(screen)
+    assert notices[0].state == "loading" and notices[1].state == "failed"
+    text = screen.worktrees_view.notice_lines()[1].plain
+    assert "Other source" in text and "Updates paused" in text
+    assert "+1 sources" in text
 
 
 def test_off_scope_empty_completion_is_remembered_before_loader_replacement():

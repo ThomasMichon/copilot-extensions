@@ -5696,6 +5696,7 @@ def test_orphan_chip_appears_in_status_text_when_orphans_present():
     compact = s.status_text(True).plain
     assert compact.endswith("\u26a0")
     assert "obligation" not in compact
+    assert "o: Doctor" in s.footer(48).plain
 
 
 def test_poll_orphan_state_fetches_from_source_orphans(monkeypatch):

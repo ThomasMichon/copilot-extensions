@@ -334,13 +334,7 @@ class PickerScreenWorktreeActionsMixin:
             except Exception:
                 continue
 
-        # View details (fold-the-claims-list follow-up): the menu's header
-        # used to spell out the FULL held-claims/asset list inline, unbounded,
-        # which could push the always-needed verb list past the modal's
-        # max-height with no scrollbar. That full breakdown (plus path/id/
-        # session/relation detail) now lives behind this always-available,
-        # last-listed verb instead, so the core Actions menu itself never
-        # grows past a few fixed header lines.
+        # Full diagnostics live in View details/Doctor, not the compact menu header.
         # Supervised remote workers (venue-pivots-ux): one "Worker: <venue>"
         # verb each, jumping to that venue row's own action menu.
         worker_verbs, self._wt_submenu_workers = self._worker_menu_verbs(rec)

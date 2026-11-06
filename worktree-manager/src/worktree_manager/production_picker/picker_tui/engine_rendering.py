@@ -606,6 +606,11 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
             if "nf-notices" not in seg_ids:
                 seg_ids = (*seg_ids, "nf-notices")
             self._notice_state = notice_state
+        orphan_hint = self._kind() == "worktrees" and bool(self._orphans)
+        if orphan_hint != getattr(self, "_orphan_hint", False):
+            if "nf-footer" not in seg_ids:
+                seg_ids = (*seg_ids, "nf-footer")
+            self._orphan_hint = orphan_hint
         # A replacement read can settle without changing rows or the global busy state.
         if getattr(self, "_registered_refresh_note", None) is not None:
             from .registered_scopes import refresh_footer

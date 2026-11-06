@@ -309,7 +309,7 @@ class WorktreesView:
         from .source_read_notices import worktree_read_feedback
         notices = [notice for notice in worktree_read_feedback(eng) if notice.cached]
         if notices:
-            notice = notices[0]
+            notice = next((notice for notice in notices if notice.state != "loading"), notices[0])
             status = (
                 "Refreshing" if notice.state == "loading" else
                 "Updates paused · connection unavailable" if notice.failure_kind == "connection"
