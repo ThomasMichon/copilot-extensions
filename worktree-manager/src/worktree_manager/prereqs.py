@@ -14,6 +14,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
+from agent_procutil import no_window_kwargs
+
 from .catalog import Prereq, load_catalog
 
 
@@ -53,9 +55,11 @@ class PrereqStatus:
 
     @property
     def satisfied(self) -> bool:
-        """Present and (if a minimum is declared and detectable) new enough."""
+        """Presence/version readiness; Python must prove its declared floor."""
         if not self.present:
             return self.optional
+        if self.name == "python3" and self.min_required and not self.version:
+            return False
         if self.min_required and self.version:
             return _ge(self.version, self.min_required)
         return True
@@ -83,8 +87,13 @@ def _which(name: str) -> tuple[str, str | None]:
 def _probe_version(exe: str) -> str | None:
     for flag in ("--version", "-V", "version"):
         try:
-            r = subprocess.run([exe, flag], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                [exe, flag], capture_output=True, text=True, timeout=5,
+                **no_window_kwargs(),
+            )
         except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode != 0:
             continue
         blob = f"{r.stdout}\n{r.stderr}"
         m = _VERSION_RE.search(blob)
@@ -94,8 +103,8 @@ def _probe_version(exe: str) -> str | None:
 
 
 def detect_prereq(pr: Prereq) -> PrereqStatus:
-    exe, path = _which(pr.name)
-    version = _probe_version(exe) if path else None
+    _, path = _which(pr.name)
+    version = _probe_version(path) if path else None
     return PrereqStatus(
         name=pr.name,
         present=path is not None,
