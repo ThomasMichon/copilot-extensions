@@ -563,7 +563,7 @@ def test_apr_owned_process_adapter_uses_canonical_implementation():
     assert run_owned is watch_process.run_owned
 
 
-def test_native_watch_uses_shared_command_adapter_without_widening_budget(monkeypatch):
+def test_native_watch_uses_shared_snapshot_deadline(monkeypatch):
     seen = []
 
     def run(argv, *, timeout):
@@ -573,7 +573,7 @@ def test_native_watch_uses_shared_command_adapter_without_widening_budget(monkey
     monkeypatch.setattr(watch_provider, "run_command", run)
     result = watch_provider._run_native(["owned-command", "argument"])
     assert result.stdout == "snapshot"
-    assert seen == [(["owned-command", "argument"], 20.0)]
+    assert seen == [(["owned-command", "argument"], 60.0)]
 
 
 @pytest.mark.parametrize("outcome", ["success", "timeout", "cancel"])
