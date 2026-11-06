@@ -17,6 +17,8 @@ def drift_description(entry: dict) -> str:
     if entry.get("running_generation"):
         running = f"build {entry['running_generation']} ({entry.get('running_slot') or 'unknown slot'})"
         installed = f"{entry['installed_generation']} ({entry.get('installed_slot') or 'unknown slot'})"
+    elif entry.get("installed_slot"):
+        running, installed = entry["running"], entry["installed_slot"]
     else:
         running, installed = entry["running"], entry["payload"]
     return (

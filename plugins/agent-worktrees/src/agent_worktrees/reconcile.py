@@ -1149,7 +1149,7 @@ def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
     Build UUIDs distinguish repair/dev generations with the same package.
     Legacy missing evidence is unknown, not equality or fabricated drift.
     """
-    from .reconcile_freshness import runtime_package_version
+    from .reconcile_freshness import _resolved_selection, runtime_package_version
 
     lags: list[dict[str, Any]] = []
     try:
@@ -1168,6 +1168,16 @@ def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
             drift = runtime_identity.generation_drift(
                 _read_json(root / "deploy-manifest.json"), record,
             )
+            if running and runtime_package_version(running) != running:
+                try:
+                    selected = _resolved_selection(pdir, root)
+                except (OSError, TypeError, ValueError):
+                    selected = None
+                if (
+                    selected and not _versions_equal(running, selected)
+                    and _versions_equal(runtime_package_version(running), runtime_package_version(selected))
+                ):
+                    drift = drift or {"running_slot": running, "installed_slot": selected}
             if (running is not None and payload is not None
                     and (not _versions_equal(runtime_package_version(running), payload) or drift)):
                 lags.append({

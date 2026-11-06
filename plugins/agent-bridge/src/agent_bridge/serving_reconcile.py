@@ -28,15 +28,18 @@ class ServingReconcileError(RuntimeError):
 
 
 def compare_serving_version(running: str, target: str) -> str:
-    from .source_build import is_repair_build_version, is_source_build_version
+    from .source_build import is_repair_build_version, is_source_build_version, package_version
 
     try:
         left, right = Version(running), Version(target)
+        left_package, right_package = Version(package_version(running)), Version(package_version(target))
     except (InvalidVersion, TypeError) as exc:
         raise ServingReconcileError("serving version could not be verified") from exc
     if left == right:
         return "current"
-    if left.public == right.public and (
+    if left_package != right_package:
+        return "older" if left_package < right_package else "newer"
+    if (
         is_source_build_version(target) or is_source_build_version(running)
         or is_repair_build_version(target) or is_repair_build_version(running)
     ):

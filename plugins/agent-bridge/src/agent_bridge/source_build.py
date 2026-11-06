@@ -5,11 +5,15 @@ from pathlib import Path
 import re
 import sys
 
-_SOURCE_LOCAL = re.compile(
-    r"(?:[a-z0-9]+\.)*source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
+_SOURCE_TAIL = (
+    r"source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
     r"(?:\.profile\.[0-9a-f]{16})?(?:\.repair\.[0-9a-f]{32})?"
 )
-_REPAIR_LOCAL = re.compile(r"(?:[a-z0-9]+\.)*repair\.[0-9a-f]{32}")
+_REPAIR_TAIL = r"repair\.[0-9a-f]{32}"
+_SOURCE_LOCAL = re.compile(r"(?:[a-z0-9]+\.)*" + _SOURCE_TAIL)
+_REPAIR_LOCAL = re.compile(r"(?:[a-z0-9]+\.)*" + _REPAIR_TAIL)
+_SOURCE_END = re.compile(r"(?:^|\.)" + _SOURCE_TAIL + r"\Z")
+_REPAIR_END = re.compile(r"(?:^|\.)" + _REPAIR_TAIL + r"\Z")
 
 
 def _matches_local(value: str, pattern: re.Pattern) -> bool:
@@ -32,6 +36,18 @@ def is_source_build_version(value: str) -> bool:
 
 def is_repair_build_version(value: str) -> bool:
     return _matches_local(value, _REPAIR_LOCAL)
+
+
+def package_version(value: str) -> str:
+    """Remove only a recognized generated suffix, retaining vendor-local labels."""
+    source = is_source_build_version(value)
+    if not source and not is_repair_build_version(value):
+        return value
+    public, local = value.strip().split("+", 1)
+    local = local.lower().replace("-", ".").replace("_", ".")
+    suffix = (_SOURCE_END if source else _REPAIR_END).search(local)
+    prefix = local[:suffix.start()] if suffix else local
+    return public + ("+" + prefix if prefix else "")
 
 
 def effective_runtime_version(
