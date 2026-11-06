@@ -338,3 +338,81 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - This is isolated source/first-touch proof, not installed-runtime or Linux
   native qualification. Review and exact-source CI remain required; other
   domain adapters, carrier qualification and activation remain open.
+
+### 2026-11-06 - Native mapping owner merged
+- #11017 merged as `5df36fe7ea7135f05f4b17ec35eceb27981901ac` after current-head
+  Copilot approval with no findings, resolved threads and green required CI.
+- Reconciled the four published commits only after confirming 25 changed
+  file blobs and two contribution deltas match the squash merge. Independent
+  upstream evidence additions were preserved.
+- The parent effort remains Active. Next is explicit adoption of typed Copilot
+  scalar floors through the existing configuration/settings owner; no received
+  document becomes a requirement package or activation grant. Release,
+  installed adoption, remaining domain/carrier qualification and activation
+  remain separate gates.
+
+### 2026-11-06 - Explicit Copilot floor adapter
+- Added a separately selected `preferences copilot` preview/apply over local
+  accepted state and policy. Scope is native-owner resolved; typed floors stay
+  below native defaults/live values and enforce constraints. Only the two
+  existing scalar fields reach the settings merge, not arbitrary requirements,
+  other settings, resources, modules, bindings or activation.
+- Confirmation binds accepted/local/policy data, native context and packages,
+  target/live settings and proposed changes. The existing settings writer
+  rechecks the proposal before backup/write; malformed live settings and
+  native-owner refusals remain non-mutating and sanitized.
+- The Windows focused packet passed 123 cases with six platform-specific
+  skips. Final floor/first-touch refusal controls passed 17 cases, followed by
+  the isolated owner-refusal sanitization control. Ruff, install contracts
+  and documentation consistency passed.
+- The positive consumer used the normal in-process CLI, native collector,
+  validator and real settings writer with an explicit native-context fixture.
+  A fresh normal module process proved absent-owner refusal without bootstrap.
+  This is not a configured peer, installed-runtime, native Linux or live-carrier
+  qualification. No installer behavior changed; a full clean-room installation
+  lane was not exercised. Carrier writes and running activation remain held.
+
+### 2026-11-06 - Copilot adapter review corrections
+- Resolve native admitted aliases for the owner-selected logical machine and
+  retain that same set through discovery, layering and token confirmation.
+  Alias-gated packages, directories and overlays preserve enforcement without
+  leaking native-host aliases into guests.
+- Serialize all native settings applies at the shared target, not a preference
+  state directory, across read/merge/recheck/backup/replacement. Previews remain
+  lock-free. A retained local lock is not fleet-state coordination.
+- The Windows correction packet passed 48 cases with six platform-specific
+  skips. Six alias/source/host-guest controls and a real two-process overlapping
+  writer control passed: a stale writer refused, then a refreshed writer
+  preserved both adopted fields and unmanaged state.
+- Current-head review and CI remain required. These source corrections do not
+  activate a carrier, install a runtime or change a running session.
+
+### 2026-11-06 - Stable settings lock identity
+- The settings lock resolves only its parent, preserving the final filename.
+  The existing linked-target check now refuses a symlinked settings file
+  before read/merge/write instead of selecting the referent's lock and then
+  switching lock identities after replacement.
+- Both focused Windows controls passed without skips: a real file symlink
+  remained intact with unchanged referent bytes and no lock creation; the real
+  two-process ordinary-target serialization/refreshed-write flow still passed.
+  Ruff and whitespace passed. Review and exact-source CI remain open.
+
+### 2026-11-06 - Empty native scope refuses portable adoption
+- Refuse `native-defaults-unavailable` when the repository/knowledge requirement
+  union is empty. The existing ordinary-default collector cannot carry native
+  user or repository-machine floors through that empty union; refusing preserves
+  their authority without generating a placeholder requirement.
+- Both empty-scope controls with native user/repository-machine defaults and
+  the supported-scope normal CLI adoption/withdrawal control passed. Ruff and
+  whitespace passed. Empty-union adoption remains unsupported, not silently
+  qualified by these refusal tests. Review and current-head CI remain open.
+
+### 2026-11-06 - Deterministic native scalar contributors
+- The native ordinary-default collector now orders its scalar fields before
+  recording contributors. Set iteration cannot change the manifest digest and
+  spuriously invalidate an unchanged Copilot preview in another process.
+- A forced field-order regression reproduced the original token mismatch.
+  Separate-process CLI preview/apply controls retain native collection,
+  validation and the real settings writer, with fixture-resolved context only.
+  This does not qualify an installed owner or carrier. Review and exact-source
+  CI remain required; the parent effort stays Active.

@@ -103,7 +103,7 @@ def eligible_values(package):
         payload = spec.get("values", spec.get("value"))
         if not isinstance(payload, dict):
             continue
-        for field in FIELDS:
+        for field in sorted(FIELDS):
             value = payload.get(field)
             if field not in payload or value is not None and not isinstance(value, (str, bool, int, float)):
                 continue
