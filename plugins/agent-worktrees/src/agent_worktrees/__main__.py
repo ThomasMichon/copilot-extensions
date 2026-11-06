@@ -4112,23 +4112,17 @@ class _ResidentHookPolicy:
         if tool in _HOOK_WRITE_TOOLS:
             args = payload.get("toolArgs") or payload.get("tool_input") or {}
             cwd = _hook_payload_cwd(payload)
-            if isinstance(args, dict):
-                for key in (
-                    "path",
-                    "file_path",
-                    "filePath",
-                    "filename",
-                    "fileName",
-                    "target_file",
-                    "targetFile",
-                ):
-                    value = args.get(key)
-                    if value:
-                        path = str(value)
-                        if not os.path.isabs(path):
-                            path = os.path.join(cwd, path)
-                        return [path]
-            return [cwd]
+            forms = self._module("tool_call_forms.py")
+            if forms is None:
+                return None
+            try:
+                targets = forms.write_targets(tool, args)
+            except ValueError:
+                return None
+            return [
+                path if os.path.isabs(path) else os.path.join(cwd, path)
+                for path in targets
+            ] or [cwd]
         if tool not in _HOOK_SHELL_TOOLS:
             return []
         args = payload.get("toolArgs") or payload.get("tool_input") or {}
@@ -4157,6 +4151,23 @@ def _resident_hook_decision(
 ) -> dict:
     if kind == "preToolUse":
         return policy.pre(payload)
+
+    if kind == "nativeToolMutation":
+        tool = payload.get("toolName") or payload.get("tool_name")
+        if (
+            not isinstance(tool, str) or tool.lower() not in _HOOK_WRITE_TOOLS
+            or "toolCalls" in payload
+        ):
+            from .hook_ipc import HookUnavailable
+
+            raise HookUnavailable
+        targets = policy.mutation_targets(payload)
+        if targets is None:
+            segment_cache.invalidate_all()
+        else:
+            for target in targets:
+                segment_cache.invalidate(target)
+        return {}
 
     # Stage D: status_updater_cli/session_binding_cli are cluster-free.
     from . import session_binding_cli as _session_binding_cli

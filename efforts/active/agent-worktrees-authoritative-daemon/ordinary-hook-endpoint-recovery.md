@@ -216,6 +216,18 @@ Real registered-entry, non-replying-peer, original-receiver and idle-expiry
 controls must prove that composition. Mutation invalidation, optional boot,
 other scopes and whole-hook/throughput acceptance remain separate open gates.
 
+The next finite consumer extends that same prepared Windows shell evaluation
+to recognized single native writes. A separate `native-hook-mutation-v1`
+capability on the original IPC owner admits a bounded send-only event, not an
+advisory/policy request or another lifecycle. The original native target
+extractor supplies every structured-edit and patch-move destination; unknown
+targets and overflow preserve conservative invalidation. The receiver retains
+current-generation, managed-session, publication, governance and drain
+checks, while the shell never waits for a reply or retries uncertain delivery.
+The existing sweep/TTL remains the delivery-loss backstop. Batch and shell
+classification remain on their prior path, not silently declared complete.
+See the [native-write consumer contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#windows-native-write-consumer).
+
 The existing `WorktreesRuntime` publishes a small advisory view only after its
 current-roster store accepts a publication. The original project-state owner
 resolves the home: `project_dir(project)/worktrees/<id>/hook-facts/`.
