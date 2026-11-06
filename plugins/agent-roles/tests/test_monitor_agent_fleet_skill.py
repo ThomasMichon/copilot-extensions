@@ -76,3 +76,50 @@ def test_fabric_reader_suppresses_worktrees_provisioning() -> None:
     assert "AGENT_WORKTREES_NO_SELFPROVISION=1" in text
     assert "for every Worktrees invocation, including on the remote host" in text
     assert "refusal or missing runtime as unavailable evidence" in text
+
+
+def test_watchdog_checks_never_block_and_classify_waits() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    checks = " ".join(_read(SKILL / "references" / "watchdog-checks.md").split())
+    patterns = " ".join(_read(
+        SKILL / "references" / "misdirection-patterns.md"
+    ).split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    for requirement in (
+        "**The watchdog never asks a blocking question**",
+        "**Classify every wait as required, productive or waste**",
+        "A merge is not done when the root needs live behavior",
+        "after two unheeded steers on one issue",
+        "defer loop rules to `review-pull-requests`",
+    ):
+        assert requirement in skill, requirement
+    for requirement in (
+        "**The watchdog never asks a blocking question.**",
+        "never raises another agent's budget",
+        "not its live context window",
+        "names no failed parent boundary",
+        "Unreadable state is `unknown`, never healthy",
+        "ask whether the work is excessive before asking anyone for a larger limit",
+        "Never steer an agent to deploy without separate deployment authority",
+        "Do not count all waiting as waste",
+        "Escalate once, with the evidence, a recommended decision and its default",
+        "never repeat it unchanged",
+        "../../review-pull-requests/references/throughput-and-loops.md",
+    ):
+        assert requirement in checks, requirement
+    for pattern in (
+        "Unbounded question",
+        "Self-added prerequisite",
+        "Merged treated as done",
+        "Handoff rewrites intent",
+        "Disproportionate validation",
+        "Superseded agent untold",
+        "whether the work itself is excessive",
+    ):
+        assert pattern in patterns, pattern
+    for requirement in (
+        "Active and parked cadences",
+        "Question revisit time and required default",
+        "The monitor asked no blocking question",
+    ):
+        assert requirement in charter, requirement
