@@ -62,13 +62,13 @@ def _feedback_reason(
             continue
         if any(value["state"] != "confirmed" for value in actions):
             return "feedback-reconciliation-pending"
+        if historical and capture["readback"] is None:
+            return "feedback-operation-readback-unavailable"
         if capture["cursor"]["epoch"] != facts["cursor"]["epoch"]:
             continue
         if handled is None or handled["cursor"]["sequence"] < capture["cursor"]["sequence"]:
             return "feedback-tracking-unavailable"
         if historical:
-            if capture["readback"] is None:
-                return "feedback-operation-readback-unavailable"
             continue
         proof = row["provenance"]
         if (

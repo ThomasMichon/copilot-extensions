@@ -356,6 +356,40 @@ def test_historical_reader_preserves_unknown_native_outcomes_across_reopen(
 
 
 @pytest.mark.parametrize("reading", [True], indirect=True)
+@pytest.mark.parametrize("proof", ["unsupported_verdict", "failed_readback", "certified"])
+def test_reopen_does_not_retire_confirmed_but_uncertified_historical_feedback(
+    feedback_environment: tuple, reading: tuple, proof: str,
+) -> None:
+    value = feedback_environment
+    backend = value[4]
+    if proof == "unsupported_verdict":
+        value[1]["actions"].append({"id": "verdict", "kind": "verdict", "verdict": "APPROVED"})
+    elif proof == "failed_readback":
+        backend.after_write = lambda current: setattr(current, "read_late", True)
+    result = run(value)
+    assert all(action["state"] == "confirmed" for action in result["actions"])
+    data = json.loads(value[0].path.read_bytes())
+    assert (data["feedback_captures"]["records"][0]["readback"] is not None) is (proof == "certified")
+    observe(value, change="completed", second=10)
+    observe(value, change="active", second=12)
+    reader = reading[0]
+    before = value[0].path.read_bytes()
+    calls = len(backend.calls)
+    item = read(reader, value[6])["items"][0]
+    assert item["cursor"]["epoch"] == 2
+    if proof == "certified":
+        assert item["status"] == "actionable" and item["reasons"] == ("initial-review",)
+    else:
+        assert item["status"] == "unavailable"
+        assert item["reasons"] == ("feedback-operation-readback-unavailable",)
+    other = AttentionReader(
+        reader.workspace, consumer="consumer-b", max_age_seconds=60, aging_seconds=30, historical=True,
+    )
+    assert read(other, value[6])["items"][0]["status"] == "actionable"
+    assert value[0].path.read_bytes() == before and len(backend.calls) == calls
+
+
+@pytest.mark.parametrize("reading", [True], indirect=True)
 def test_newer_handled_cursor_cannot_replace_older_historical_readback(
     feedback_environment: tuple, reading: tuple,
 ) -> None:

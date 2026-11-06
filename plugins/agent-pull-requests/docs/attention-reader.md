@@ -97,7 +97,8 @@ cannot borrow a later handled cursor or another operation's proof. Once all
 applicable captures qualify, the current handled frontier and its existing
 provenance determine remaining input. An older certified capture therefore
 does not make already-handled work unclassified merely because it precedes
-the frontier. Unknown/partial native outcomes remain pending across reopen;
+the frontier. Unknown/partial native outcomes and confirmed captures without
+their own readback proof remain unavailable across reopen;
 independent consumers retain their own work. Unsupported verdict attribution
 and unclassified later input remain unavailable.
 
