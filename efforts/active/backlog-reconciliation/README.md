@@ -330,6 +330,23 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records complete actual #1419 receiving/readback and `NOT_PLANNED` retirement
+of #2467/#2475/#3004/#5543 with every original and source/resource duty retained.
+No new parent was created: #3005's already-audited lineage identified #1419.
+The [knowledge-pair contract](knowledge-pair-receiving-cohort.md) preserves all
+distinct unchecked work and the current bounded release observation.
+Complete01:53 PST scans measure830 whole OPEN,989 audited dispositions and
+101 above fixed729; five arrivals offset four retirements. The campaign is Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #10957 and all seven delivered record blobs.
+The [knowledge-pair cohort](knowledge-pair-receiving-cohort.md) is reviewed,
+not yet an actual receiving issue; strongest-existing-receiver selection and
+complete current receipt still precede four proposed tracking retirements.
+Two newly qualified inflow originals remain open on distinct acceptance;
+held-parent readback and source custody are not waived.
+
 The [knowledge-pair receiving proposal](knowledge-pair-receiving-cohort.md)
 preserves four separately owned tracks and complete focused original records;
 actual recipient creation/readback still precedes any tracking retirement.
