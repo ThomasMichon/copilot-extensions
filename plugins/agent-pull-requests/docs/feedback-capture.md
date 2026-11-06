@@ -4,7 +4,7 @@ Back to [attention](attention.md). The reviewed
 [captured-feedback contract](../../../efforts/active/durable-pr-watch-delegation/captured-attention-feedback.md)
 owns protected integration and the remaining echo qualification.
 
-`FeedbackCaptureStore` implements only B1's explicit owner-v4 to owner-v5
+`FeedbackCaptureStore.adopt` implements B1's explicit owner-v4 to owner-v5
 data expansion. It uses the current ReplayStore lock, atomic replacement and
 actual lifecycle checkpoint to exclude incompatible readers. It does not admit
 captures, send feedback, record handled progress or enable a service route.
@@ -139,7 +139,46 @@ Optional cache lookup contention/unavailability and echo-store lock contention
 also return unavailable echo evidence without discarding the original result.
 This conservative leaf is not B3/A2's full exit or A3 serving adoption.
 
-Adoption adds an 8 MiB default reservation to the existing total owner-byte
+## Historical readback storage prerequisite
+
+The reviewed [B4 refinement](../../../efforts/active/durable-pr-watch-delegation/captured-attention-feedback.md#b4---historical-original-position-readback-proof)
+owns historical original-position proof. `FeedbackCaptureStore.adopt_readback`
+implements only its explicit data expansion from owner v5 to v6. The same
+lifecycle checkpoint, operation lock and complete-envelope replacement remain
+the owners; construction, snapshot reads and existing hosts do not adopt it.
+
+The distinct `feedback-captures/v2` section preserves every capture's original
+selection fields and adds a required nullable `readback`. Adoption sets it to
+null for every prior capture. A structurally valid non-null proof contains
+the digest of the entire original capture and ordered references to each
+selected confirmed action, original attempt and immutable native receipt
+digest. Original receipts remain in the review section; no bodies or response
+payloads are copied. Verdict-containing operations cannot carry proof while
+exact vote readback remains unsupported. Structural validation is not proof
+that protected readback occurred: this data-only slice has no proof-ingest or
+protected proof-commit API.
+
+Capture metadata retains its existing 64 KiB bound and reservation. Each
+readback has a separate 64 KiB maximum; its full slot plus 32 bytes of per-record
+encoding overhead is reserved even while null, with 1 KiB section overhead.
+Explicit adoption adds an 8 MiB default `feedback_readback_bytes` reservation
+within the existing total owner limit. The retained-operation count is still
+1,024, but actual capture/proof byte capacity can refuse a smaller population.
+Every later envelope transaction checks that reservation before replacement;
+there is no eviction or capacity borrowed from replay, attention or receipts.
+Interrupted adoption reconciles the same reservation; changing it refuses.
+
+Replay/review/conversation/attention writes and repeated earlier adoptions
+preserve v6. Prior strict capture-v1 readers refuse capture-v2, and existing
+v3 conversation capabilities and v5 attention serving do not advertise v6.
+The current protected feedback path likewise returns
+`capture_layout_unavailable` for v6 rather than starting new selected effects.
+Ordinary native operations retain their existing behavior without claiming
+historical tracking. Protected proof commits and negotiated v6 attention reads
+remain separate B4 leaves; null proof cannot be replaced by current handled
+provenance, a later cursor or an automatic migration.
+
+B1 capture adoption adds an 8 MiB default reservation to the existing total owner-byte
 limit and preserves every replay, conversation, attention and review record.
 Capacity exhaustion refuses rather than evicting. Repeating the same adoption
 reconciles an uncertain replacement; changing its reservation refuses.
