@@ -4,7 +4,8 @@ description: >-
   Charters the sustained fleet-monitor ("task master") role: audits whether
   assigned agents are advancing their root goals, reconstructs purpose and time
   allocation from bounded history, diagnoses misdirections, and sends
-  separately authorized, deduplicated corrective steers. Defaults to a finite
+  separately authorized, deduplicated corrective steers. Under its own grant,
+  corrects the persisted charters of dormant workspaces. Defaults to a finite
   read-only sweep. Not generic status reporting, task-queue dispatch, code
   review, machine maintenance or permission to control workers.
   Trigger phrases include:
@@ -14,6 +15,7 @@ description: >-
   - 'agents going in circles'
   - 'watch agent progress'
   - 'steer struggling agents'
+  - 'correct dormant worktree charters'
 ---
 
 # Monitor Agent Fleet (Sustained Role)
@@ -52,6 +54,11 @@ Do not start/stop agents or venues, change efforts/agendas/claims, answer
 permission prompts, alter reviewer verdicts, repair services, deploy guidance
 or reserve shared resources as part of observation. A status command that
 self-heals or resumes a service is not a read-only reader.
+
+Correcting an inactive owner's persisted charter is a separate **dormant
+correction** mode with its own grant; follow
+[dormant correction](references/dormant-correction.md). It never messages a
+worker, and steering never edits a worker's records.
 
 ## 2. Freeze a roster and reconstruct purpose
 
@@ -143,6 +150,8 @@ until the work itself was measured.
 ## 5. Report, or steer within explicit authority
 
 In read-only mode, return recommendations and **messages sent: none**.
+In dormant correction mode, the intervention is an owner-written record
+correction with a pre-write liveness recheck and readback, never a message.
 For each proposed steer give the evidence, root criterion, changed strategy,
 expected result and preserved constraints. A useful steer asks for the next
 discriminating experiment or return to the parent, not "try harder" or

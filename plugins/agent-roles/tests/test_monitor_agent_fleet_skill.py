@@ -58,10 +58,12 @@ def test_offline_scenarios_have_distinct_evidence_and_explicit_modes() -> None:
     ids = [case["id"] for case in cases]
     assert cases and len(ids) == len(set(ids))
     for case in cases:
-        assert case["mode"] in {"read-only", "steering-authorized"}
+        assert case["mode"] in {
+            "read-only", "steering-authorized", "dormant-correction",
+        }
         assert case["facts"].strip() and case["expected"].strip()
     assert {case["mode"] for case in cases} == {
-        "read-only", "steering-authorized",
+        "read-only", "steering-authorized", "dormant-correction",
     }
 
 
@@ -124,3 +126,65 @@ def test_watchdog_checks_never_block_and_classify_waits() -> None:
         "The monitor asked no blocking question",
     ):
         assert requirement in charter, requirement
+
+
+def test_dormant_correction_edits_records_only_under_its_own_grant() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    text = " ".join(_read(
+        SKILL / "references" / "dormant-correction.md"
+    ).split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    steering = " ".join(_read(SKILL / "references" / "steering.md").split())
+    patterns = " ".join(_read(
+        SKILL / "references" / "misdirection-patterns.md"
+    ).split())
+    assert "(references/dormant-correction.md)" in skill
+    assert "steering never edits a worker's records" in skill
+    for requirement in (
+        "**records changed: none**",
+        "A read-only or steering grant does not authorize record edits; "
+        "a correction grant does not authorize messages",
+        "they never establish a verdict",
+        "Unknown liveness blocks mutation for that target only",
+        "A finalized workspace is not a Done objective",
+        "it is that owner's subordinate: exclude it",
+        "an operator-set marker stays",
+        "Report filing and other bookkeeping separately",
+        "Do not ask per target",
+        "A newly active target is excluded and reported, never interrupted "
+        "or messaged",
+        "A write without readback is unknown, not done",
+        "Never infer a correction from metadata",
+        "**recommend retirement**",
+        "Only the handoff owner's verified record-only supersede",
+        "makes every existing locator resolve to the replacement",
+        "An ordinary handoff save is not that operation",
+    ):
+        assert requirement in text, requirement
+    assert text.index("## Clear versus ambiguous") < text.index(
+        "## Write safely"
+    )
+    assert text.index("Recheck liveness through the native owner") < (
+        text.index("Write through the owner, then read back")
+    )
+    for requirement in (
+        "| dormant correction",
+        "Dormant correction scope (only if explicitly granted; else \"none\")",
+        "live-idle, newly active and unknown targets were left unchanged",
+    ):
+        assert requirement in charter, requirement
+    assert "[dormant correction](dormant-correction.md)" in steering
+    assert "Over-narrow self-proposed grant" in patterns
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    dormant = {
+        case["id"] for case in scenarios["cases"]
+        if case["mode"] == "dormant-correction"
+    }
+    assert {
+        "dormant-stale-blocker",
+        "dormant-ambiguous-root",
+        "dormant-newly-active",
+        "dormant-finalized-open-effort",
+        "dormant-unavailable-evidence",
+        "dormant-stale-baton",
+    } <= dormant
