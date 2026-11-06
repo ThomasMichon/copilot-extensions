@@ -48,6 +48,15 @@ the original workspace, and use it for registration, succession and lineage
 reads. Required lineage errors are not silently treated as legacy best-effort
 success. Unpinned operations keep their existing fail-open behavior.
 
+Provider refresh treats that pointer as session-owned rather than provider
+metadata and preserves it across stopped-session recovery. Required handoffs
+retain the original successor, native identity, opening seed and progress in
+the same acquisition journal before launch. Post-spawn lineage failures retry
+against that successor, not a new conversation. An unconfirmed start with no
+recoverable holder, changed inputs/native identity or unknown seed outcome
+refuses with the retained handoff intact. A completed retry returns the same
+successor without reseeding.
+
 The merged pinned launcher owns retention, current installation governance and
 pre-import checks of the original completion/build identity. Selector movement
 does not replace this writer. Removed or recreated slots refuse; this feature

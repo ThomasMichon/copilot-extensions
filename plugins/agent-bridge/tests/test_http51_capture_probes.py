@@ -144,6 +144,12 @@ from test_acquisition_runtime import (
     rig as rig, writer_rig as writer_rig,
     test_required_writer_round_trips_through_the_existing_http_owner
     as test_required_writer_round_trips_through_the_existing_http_owner,
+    test_required_writer_survives_stopped_resume_and_later_acquisition
+    as test_required_writer_survives_stopped_resume_and_later_acquisition,
+    test_required_handoff_retry_reuses_original_successor_after_lineage_failure
+    as test_required_handoff_retry_reuses_original_successor_after_lineage_failure,
+    test_required_handoff_retains_unknown_effect_without_replacement
+    as test_required_handoff_retains_unknown_effect_without_replacement,
 )
 
 ROOT = Path(__file__).resolve().parents[3]

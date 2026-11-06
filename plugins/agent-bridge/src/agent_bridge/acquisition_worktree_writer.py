@@ -199,6 +199,46 @@ def require_scope(args: list[str], *, cwd: str | None = None, project: str | Non
                 raise AcquisitionRefused("worktree_writer_unconfirmed", "owner operation changed workspace")
 
 
+def handoff_state(
+    db: Any, predecessor: str, *, create: dict | None = None, stage: str | None = None,
+    native_session_id: str | None = None,
+):
+    """Retain continuation effects in the original acquisition journal."""
+    writer = current()
+    if writer is None:
+        return None
+    request = writer.request
+    with db._runtime_transaction(write=create is not None or stage is not None, full_sync=True) as conn:
+        row = conn.execute(
+            "SELECT a.request_digest,e.data_json FROM acquisition_attempts a "
+            "JOIN acquisition_effects e USING(delivery_id) WHERE a.delivery_id=?",
+            (request.delivery_id,),
+        ).fetchone()
+        if row is None or row["request_digest"] != _digest(request):
+            raise AcquisitionRefused("worktree_writer_unconfirmed", "handoff lost its original acquisition")
+        data = json.loads(row["data_json"])
+        handoffs = data.setdefault("_writer_handoffs", {})
+        retained = handoffs.get(predecessor)
+        if create is not None:
+            if retained is not None:
+                raise AcquisitionRefused("handoff_pending", "original successor must be reconciled")
+            retained = handoffs[predecessor] = {**create, "stage": "prepared"}
+        if stage is not None:
+            if retained is None:
+                raise AcquisitionRefused("handoff_pending", "original handoff is unavailable")
+            if native_session_id is not None:
+                if retained.get("native_session_id", native_session_id) != native_session_id:
+                    raise AcquisitionRefused("handoff_pending", "original successor native identity changed")
+                retained["native_session_id"] = native_session_id
+            retained["stage"] = stage
+        if create is not None or stage is not None:
+            conn.execute(
+                "UPDATE acquisition_effects SET data_json=? WHERE delivery_id=?",
+                (json.dumps(data, sort_keys=True), request.delivery_id),
+            )
+        return retained
+
+
 def session_writer(method):
     """Retain the same journal owner through later native resume and lineage."""
     @wraps(method)

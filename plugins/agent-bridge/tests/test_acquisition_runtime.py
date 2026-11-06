@@ -247,6 +247,168 @@ async def test_retained_writer_recovery_uses_original_journal_without_reselectio
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider_metadata", [False, True])
+async def test_required_writer_survives_stopped_resume_and_later_acquisition(
+    writer_rig, monkeypatch, provider_metadata,
+):
+    from agent_bridge import acquisition_worktree_writer as writer
+    from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    session = rig.manager.get_session(first.session_id)
+    if provider_metadata:
+        session.target.venue["provider"] = {"fixture": True}
+        session.target.venue[REQUEST_OVERRIDES_KEY].update(env={}, copilot_args=[])
+        rig.manager._resolver = rig.resolver
+    assert rig.manager._provider_backed_target(session.target) is provider_metadata
+    rig.db.update_session_target(session.session_id, session.target.to_json(), session.target.cwd)
+    await rig.manager.stop_session(session.session_id, force=True)
+    assert session.status == SessionStatus.STOPPED
+    resumed = await rig.manager.resume_session(session.session_id, drain=False)
+    assert resumed is session and resumed.acp_session_id == first.native_session_id
+    assert resumed.target.venue[writer.DELIVERY_KEY] == request.delivery_id
+    assert REQUEST_OVERRIDES_KEY in resumed.target.venue
+    persisted = SpawnTarget.from_json(rig.db.get_session(session.session_id)["target_json"])
+    assert persisted.venue[writer.DELIVERY_KEY] == request.delivery_id
+    rig.source["acquisition_reservation"]["worktree_ownership"] = "reused"
+    later = await rig.runtime.acquire(request.model_copy(update={
+        "delivery_id": "delivery-later", "allocation": "reused",
+    }))
+    assert later.session_id == first.session_id and later.native_session_id == first.native_session_id
+    assert len(rig.manager.list_sessions()) == 1
+    assert writer_rig.selected.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", ["link", "note", "role", "digest"])
+async def test_required_handoff_retry_reuses_original_successor_after_lineage_failure(
+    writer_rig, monkeypatch, failed,
+):
+    from agent_bridge import worktree_lineage
+    from agent_bridge import acquisition_worktree_writer as writer
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    predecessor = rig.manager.get_session(first.session_id)
+    predecessor.status = SessionStatus.IDLE
+    rig.client.acp_session_id = "native-successor"
+    start = AsyncMock(wraps=rig.manager.start_session)
+    monkeypatch.setattr(rig.manager, "start_session", start)
+    seed = AsyncMock(return_value=0)
+    monkeypatch.setattr(rig.manager, "submit_prompt", seed)
+
+    async def stop(session_id, **_kwargs):
+        session = rig.manager.get_session(session_id)
+        session.status = SessionStatus.STOPPED
+        rig.db.update_session_status(session_id, "stopped", time.time())
+
+    monkeypatch.setattr(rig.manager, "stop_session", AsyncMock(side_effect=stop))
+    failures = [failed]
+
+    def step(name):
+        def run(*args, **kwargs):
+            if failures == [name]:
+                failures.clear()
+                raise AcquisitionRefused("owner_refused", "post-spawn lineage failure")
+            if name == "link":
+                rig.head["id"] = args[2]
+            return None
+        return run
+
+    for name, method in (
+        ("link", "link_succession"), ("note", "note_handoff"),
+        ("role", "session_role"), ("digest", "history_digest"),
+    ):
+        monkeypatch.setattr(worktree_lineage, method, step(name))
+    with pytest.raises(AcquisitionRefused, match="post-spawn"):
+        await rig.manager.handoff_session(
+            predecessor.session_id, reason="fixture", seed_text="Original continuation",
+        )
+    assert len(rig.manager.list_sessions()) == 2 and start.await_count == 1
+    successor_id = rig.db.get_session(predecessor.session_id)["successor_id"]
+    assert successor_id
+    assert not seed.await_count
+    writer_rig.selected.side_effect = AssertionError("original writer cannot be recaptured")
+    successor = await rig.manager.handoff_session(
+        predecessor.session_id, reason="fixture", seed_text="Original continuation",
+    )
+    assert successor.session_id == successor_id
+    assert successor.acp_session_id == "native-successor"
+    assert start.await_count == 1 and len(rig.manager.list_sessions()) == 2
+    assert seed.await_count == 1
+    assert "Original continuation" in seed.await_args.args[1]
+    assert predecessor.status == SessionStatus.STOPPED
+    repeated = await rig.manager.handoff_session(
+        predecessor.session_id, reason="fixture", seed_text="Original continuation",
+    )
+    assert repeated is successor and seed.await_count == 1 and start.await_count == 1
+    data = json.loads(rig.db.execute_read(
+        "SELECT data_json FROM acquisition_effects WHERE delivery_id=?", (request.delivery_id,),
+    )[0]["data_json"])
+    retained = data["_writer_handoffs"][predecessor.session_id]
+    assert retained["stage"] == "completed"
+    assert retained["successor_id"] == successor_id
+    assert data[writer.JOURNAL_KEY]["prefix"] == ["retained-owner", "original-build"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", ["start-response", "seed-response"])
+async def test_required_handoff_retains_unknown_effect_without_replacement(
+    writer_rig, monkeypatch, failed,
+):
+    from agent_bridge import worktree_lineage
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    predecessor = rig.manager.get_session(first.session_id)
+    predecessor.status = SessionStatus.IDLE
+    rig.client.acp_session_id = "native-successor"
+    original_start = rig.manager.start_session
+    failures = [failed]
+
+    async def start(*args, **kwargs):
+        successor = await original_start(*args, **kwargs)
+        if failures == ["start-response"]:
+            failures.clear()
+            raise AcquisitionRefused("owner_pending", "successor response lost")
+        return successor
+
+    async def seed(*args, **kwargs):
+        if failures == ["seed-response"]:
+            failures.clear()
+            raise AcquisitionRefused("owner_pending", "seed response lost")
+        return 0
+
+    async def stop(session_id, **_kwargs):
+        rig.manager.get_session(session_id).status = SessionStatus.STOPPED
+
+    start = AsyncMock(side_effect=start)
+    seed = AsyncMock(side_effect=seed)
+    monkeypatch.setattr(rig.manager, "start_session", start)
+    monkeypatch.setattr(rig.manager, "submit_prompt", seed)
+    monkeypatch.setattr(rig.manager, "stop_session", AsyncMock(side_effect=stop))
+    for name in ("link_succession", "note_handoff", "session_role", "history_digest"):
+        monkeypatch.setattr(worktree_lineage, name, lambda *a, **k: None)
+    options = {"reason": "fixture", "seed_text": "Original continuation"}
+    with pytest.raises(AcquisitionRefused, match="response lost"):
+        await rig.manager.handoff_session(predecessor.session_id, **options)
+    assert start.await_count == 1 and len(rig.manager.list_sessions()) == 2
+    with pytest.raises(AcquisitionRefused, match="inputs cannot be replaced"):
+        await rig.manager.handoff_session(
+            predecessor.session_id, reason="fixture", seed_text="Replacement continuation",
+        )
+    if failed == "start-response":
+        successor = await rig.manager.handoff_session(predecessor.session_id, **options)
+        assert successor.acp_session_id == "native-successor"
+    else:
+        with pytest.raises(AcquisitionRefused, match="seed outcome is unconfirmed"):
+            await rig.manager.handoff_session(predecessor.session_id, **options)
+    assert start.await_count == 1 and seed.await_count == 1
+    assert len(rig.manager.list_sessions()) == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("bad", ["identity", "preservation", "old", "unavailable", "nonce"])
 async def test_required_writer_refuses_before_native_effects(writer_rig, monkeypatch, bad):
     rig, request = writer_rig.rig, writer_rig.request
@@ -424,7 +586,9 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     session = rig.manager.get_session(result.session_id)
     session.status = SessionStatus.IDLE
     rig.client.acp_session_id = "native-successor"
-    monkeypatch.setattr(rig.manager, "stop_session", AsyncMock())
+    async def stop(session_id, **_kwargs):
+        rig.manager.get_session(session_id).status = SessionStatus.STOPPED
+    monkeypatch.setattr(rig.manager, "stop_session", AsyncMock(side_effect=stop))
     successor = await rig.manager.handoff_session(
         result.session_id, reason="bounded test", seed=False, seed_text="Continue",
     )

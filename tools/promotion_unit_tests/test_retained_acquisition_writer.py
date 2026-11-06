@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -198,3 +199,48 @@ def test_required_cli_refuses_without_writer_or_native_effect(boundary):
     assert raised.value.code == "worktree_writer_mode_unsupported"
     assert raised.value.effect == "not_started"
     assert b.calls == []
+
+
+def test_handoff_journal_keeps_original_successor_and_native_binding(boundary):
+    b = boundary
+    stored = {
+        "request_digest": b.request.delivery_id,
+        "data_json": json.dumps({"_worktree_writer": {"version": 1, "prefix": list(b.prefix)}}),
+    }
+    writes = []
+
+    def execute(sql, params):
+        if sql.startswith("UPDATE"):
+            stored["data_json"] = params[0]
+            writes.append(params)
+        return SimpleNamespace(fetchone=lambda: stored)
+
+    def transaction(*, write, full_sync):
+        assert full_sync is True
+        return nullcontext(SimpleNamespace(execute=execute))
+
+    b.db._runtime_transaction = transaction
+
+    async def acquire():
+        async with b.writer.acquisition_writer(b.db, b.request):
+            created = b.writer.handoff_state(b.db, "predecessor", create={
+                "successor_id": "original-successor", "seed_prompt": "original seed",
+            })
+            assert created["stage"] == "prepared"
+            started = b.writer.handoff_state(
+                b.db, "predecessor", stage="started", native_session_id="original-native",
+            )
+            assert started["successor_id"] == "original-successor"
+            with pytest.raises(Refused, match="original successor must be reconciled"):
+                b.writer.handoff_state(b.db, "predecessor", create={"successor_id": "replacement"})
+            with pytest.raises(Refused, match="native identity changed"):
+                b.writer.handoff_state(
+                    b.db, "predecessor", stage="started", native_session_id="replacement",
+                )
+            recovered = b.writer.handoff_state(b.db, "predecessor")
+            assert recovered["native_session_id"] == "original-native"
+            assert recovered["seed_prompt"] == "original seed"
+
+    finish(acquire())
+    assert len(writes) == 2
+    assert json.loads(stored["data_json"])["_worktree_writer"]["prefix"] == list(b.prefix)

@@ -4880,6 +4880,10 @@ the real retained writer owner with synthetic journal rows and substituted
 writer selection/process responses. It checks original-prefix recovery,
 incompatible serializer refusal, missing-binding non-recapture, exact workspace
 scope, required lineage error propagation and pre-effect CLI refusal.
+The additional journal control retains the original successor, native identity
+and seed through synthetic database responses, with full-sync intent and
+replacement refusal. Real stopped-session refresh and post-spawn handoff
+recovery are covered by the separate acquisition/runtime packet.
 The exact nodes, source and coverage target are positively admitted in the
 unit-only packet. The separate Bridge acquisition/runtime and lineage controls
 retain actual SQLite and finite source-process effects; their patched build

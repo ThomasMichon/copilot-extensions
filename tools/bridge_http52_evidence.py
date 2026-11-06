@@ -40,7 +40,7 @@ AFFECTED = (
         "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
         "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
         "routes/acquisitions.py", "session_handoff.py", "session_resume.py",
-        "session_start.py", "worktree_head.py", "worktree_lineage.py",
+        "session_start.py", "session_core.py", "worktree_head.py", "worktree_lineage.py",
         "_peer_launch.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
@@ -114,6 +114,9 @@ PROBES = {
     "test_unknown_or_changed_slot_never_certifies_a_build": 10,
     "test_same_cell_health_rechecks_peer_selection_without_launch": 11,
     "test_required_writer_round_trips_through_the_existing_http_owner": 1,
+    "test_required_writer_survives_stopped_resume_and_later_acquisition": 2,
+    "test_required_handoff_retry_reuses_original_successor_after_lineage_failure": 4,
+    "test_required_handoff_retains_unknown_effect_without_replacement": 2,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
