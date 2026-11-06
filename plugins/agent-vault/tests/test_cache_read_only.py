@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import json
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,67 @@ def test_existing_cache_without_key_is_not_rekeyed(monkeypatch, tmp_path):
         PersistentCache().get("Identity/shared")
     assert path.read_bytes() == b"old-cache"
     assert not (tmp_path / "credential-cache.key").exists()
+
+
+@pytest.mark.parametrize("failure", ["missing-key", "protection-error", "wrapped-key"])
+def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
+    monkeypatch, tmp_path, capsys, failure,
+):
+    from agent_vault import cache as cache_module, cli, kek
+
+    monkeypatch.delenv("AGENT_VAULT_PINNED_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_VAULT_CACHE", "1")
+    monkeypatch.setenv("AGENT_VAULT_CACHE_DIR", str(tmp_path))
+    cache_file = tmp_path / "credential-cache.enc"
+    key_file = tmp_path / "credential-cache.key"
+    cache_file.write_bytes(b"fixture-ciphertext")
+    cache = PersistentCache()
+    key = kek.WRAP_MAGIC + b"Xfixture-key" if failure == "wrapped-key" else b"fixture-key"
+    if failure != "missing-key":
+        key_file.write_bytes(key)
+    if failure == "wrapped-key":
+        module = ModuleType("cryptography.fernet")
+        module.Fernet = lambda _key: pytest.fail("invalid wrapping reached encryption")
+        monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
+    if failure == "protection-error":
+
+        class UnavailableCipher:
+            def decrypt(self, _value):
+                raise CacheProtectionError("private-protection-diagnostic")
+
+        cache._fernet = UnavailableCipher()
+    monkeypatch.setattr(cache_module, "get_cache", lambda: cache)
+    monkeypatch.setattr(
+        cli, "ensure_service",
+        lambda: pytest.fail("protected-cache failure fell back to the service"),
+    )
+    requests = [
+        {"entry": "Example/one", "field": "password"},
+        {"entry": "Example/two", "field": "username"},
+        {"entry": "Example/one", "field": "password"},
+    ]
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(requests)))
+
+    assert cli.main(["batch-get"]) == 1
+    captured = capsys.readouterr()
+    results = json.loads(captured.out)["results"]
+    assert [(row["entry"], row["field"]) for row in results] == [
+        (row["entry"], row["field"]) for row in requests
+    ]
+    assert all(row["ok"] is False and row["value"] is None for row in results)
+    assert all(row["source"] == "cache" for row in results)
+    assert all(row["error"].startswith("cache_protection_failed;") for row in results)
+    assert "private-protection-diagnostic" not in captured.out
+    assert "unknown wrap scheme" not in captured.out
+    assert captured.err == ""
+    assert cache_file.read_bytes() == b"fixture-ciphertext"
+    if failure == "missing-key":
+        assert not key_file.exists()
+    else:
+        assert key_file.read_bytes() == key
+    expected_error = kek.KekError if failure == "wrapped-key" else CacheProtectionError
+    with pytest.raises(expected_error):
+        cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
 
 
 def test_readonly_legacy_key_is_never_rewrapped(monkeypatch, tmp_path):

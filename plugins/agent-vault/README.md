@@ -247,6 +247,9 @@ Successful records have exactly `entry`, `field`, `value`, `ok: true` and
 escaping does not change them. `source` is `cache` or `service`. Failed records
 have `ok: false`, `value: null`, an error string and the attempted source
 (`cache`, `service` or `none`).
+Protected-cache failures are sanitized per item without service fallback,
+cache replacement or key regeneration. Later requests are still represented;
+the legacy single `get` protection behavior is unchanged.
 
 Exit status is `0` when every request succeeds (also for an empty array), `2`
 for a mixture of successes and failures, and `1` when every request fails.

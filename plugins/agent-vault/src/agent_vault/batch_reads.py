@@ -41,6 +41,9 @@ def _requests(stream):
 
 
 def cmd_batch_get(args):
+    from .cache_dpapi import CacheProtectionError
+    from .kek import KekError
+
     try:
         requests = _requests(sys.stdin)
     except (ValueError, OSError, UnicodeError) as exc:
@@ -48,9 +51,16 @@ def cmd_batch_get(args):
         return 1
     results = []
     for entry, field in requests:
-        result = read_credential(SimpleNamespace(
-            entry=entry, field=field, refresh=args.refresh, prompt=False,
-        ))
+        try:
+            result = read_credential(SimpleNamespace(
+                entry=entry, field=field, refresh=args.refresh, prompt=False,
+            ))
+        except (CacheProtectionError, KekError):
+            results.append({
+                "entry": entry, "field": field, "value": None, "ok": False, "source": "cache",
+                "error": "cache_protection_failed; protected cache requires repair before retrying",
+            })
+            continue
         ok = result.code == 0 and isinstance(result.value, str)
         record = {
             "entry": entry, "field": field, "value": result.value if ok else None,
