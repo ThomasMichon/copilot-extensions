@@ -61,7 +61,9 @@ def test_reference_refuses_relative_and_missing_paths_without_echoing_values(tmp
     assert str(error.value) == "credential-reference-unavailable"
 
 
-@pytest.mark.parametrize("value", ["", "x" * 8193, "token\nembedded"])
+@pytest.mark.parametrize("value", [
+    "", "x" * 8193, "token\nembedded", "synthetic invalid", "token\u00e9", "token\x7f",
+])
 def test_service_token_refuses_empty_oversized_and_control_values(tmp_path, value):
     proof, access = tmp_path / "proof.pem", tmp_path / "access"
     _key(proof, ec.generate_private_key(ec.SECP256R1()))

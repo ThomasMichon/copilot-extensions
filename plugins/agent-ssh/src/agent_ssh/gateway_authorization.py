@@ -193,7 +193,7 @@ def _private(path: Path, *, directory: bool) -> None:
         raise PermissionError("Authorization location must be owner-private")
 
 
-def _root(path: Path) -> Path:
+def _root(path: Path, *, create: bool = True) -> Path:
     path = path.expanduser()
     if not path.is_absolute():
         raise ValueError("Select an absolute dedicated authorization state directory")
@@ -203,6 +203,8 @@ def _root(path: Path) -> Path:
         if ancestor.is_symlink():
             raise PermissionError("Authorization ancestors must not be links")
     if not path.exists():
+        if not create:
+            return path
         if os.name == "nt":
             _windows_create_directory(path)
         else:
@@ -222,6 +224,44 @@ def _read(path: Path) -> str:
     return gateway_profile._read_owned_file(path)
 
 
+def _authorization_text(root: Path, owner: dict) -> str | None:
+    target = root / "authorized_keys.gateway"
+    previous = _read(target) if os.path.lexists(target) else None
+    if previous is not None:
+        line, separator, body = previous.partition("\n")
+        if not separator or not line.startswith(_MARKER):
+            raise ValueError("Authorization file is not managed by this owner")
+        receipt = json.loads(line[len(_MARKER):])
+        if (
+            not isinstance(receipt, dict) or set(receipt) != {*_BINDING, "body_sha256"}
+            or {name: receipt[name] for name in _BINDING} != owner
+            or receipt["body_sha256"] != hashlib.sha256(body.encode()).hexdigest()
+        ):
+            raise ValueError("Authorization file changed outside its owner; preserve it")
+    return previous
+
+
+def validate_state(path: Path, *, target: dict, controller: str) -> None:
+    """Validate existing namespace and key-file receipts without creating state."""
+    root = _root(path, create=False)
+    if not root.exists():
+        return
+    gateway_provider._directory_state(target, controller, root)
+    binding = root / "owner.json"
+    if not binding.exists():
+        if any(entry.name != "authorization.lock" for entry in root.iterdir()):
+            raise ValueError("Existing authorization has no owner binding; preserve it")
+        return
+    owner = json.loads(_read(binding))
+    if (
+        not isinstance(owner, dict) or set(owner) != _BINDING
+        or owner["target"] != target or owner["controller"] != controller
+        or not isinstance(owner["user"], str) or not gateway_profile._USER.fullmatch(owner["user"])
+    ):
+        raise ValueError("Authorization state belongs to another target/controller or is invalid")
+    _authorization_text(root, owner)
+
+
 def apply_projection(value: dict, state_dir: Path) -> tuple[Path, bool]:
     """Replace only this target's dedicated file; never the user's key file."""
     root = _root(state_dir)
@@ -239,18 +279,7 @@ def apply_projection(value: dict, state_dir: Path) -> tuple[Path, bool]:
             raise ValueError("Existing authorization has no owner binding; preserve it")
         else:
             atomic_write_text(binding, gateway_profile._json(owner))
-        previous = _read(target) if os.path.lexists(target) else None
-        if previous is not None:
-            line, separator, body = previous.partition("\n")
-            if not separator or not line.startswith(_MARKER):
-                raise ValueError("Authorization file is not managed by this owner")
-            receipt = json.loads(line[len(_MARKER):])
-            if (
-                not isinstance(receipt, dict) or set(receipt) != {*_BINDING, "body_sha256"}
-                or {name: receipt[name] for name in _BINDING} != owner
-                or receipt["body_sha256"] != hashlib.sha256(body.encode()).hexdigest()
-            ):
-                raise ValueError("Authorization file changed outside its owner; preserve it")
+        previous = _authorization_text(root, owner)
         body = "".join("restrict,pty " + row["public_key"] + "\n" for row in value["peers"])
         data = _MARKER + json.dumps({
             **owner, "body_sha256": hashlib.sha256(body.encode()).hexdigest(),

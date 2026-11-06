@@ -204,6 +204,11 @@ def private_directory(path: Path) -> None:
             _windows_create(path, directory=True)
         else:
             path.mkdir(mode=0o700)
+    validate_private_directory(path)
+
+
+def validate_private_directory(path: Path) -> None:
+    """Validate an existing directory without creating or repairing it."""
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise PlanError("state root is not an ordinary private directory")

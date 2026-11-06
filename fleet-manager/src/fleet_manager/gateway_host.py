@@ -122,12 +122,16 @@ def optional_selection(root: Path) -> dict | None:
             raise PlanError("Previously selected Gateway hosting configuration is missing")
         return None
     value = decode(read_private_file(path, MAX_BYTES))
-    record(value, "fleet-manager.gateway-host", {
-        "role", "policy", "tls", "journal", "authority", "installation",
+    version = value.get("version") if isinstance(value, dict) else None
+    if type(version) is not int or version not in (1, 2):
+        raise PlanError("Unsupported Gateway hosting configuration version")
+    references = ("policy", "tls", "journal") if version == 1 else ("configuration",)
+    record(value | {"version": 1}, "fleet-manager.gateway-host", {
+        "role", *references, "authority", "installation",
     })
-    if value["role"] != "gateway":
+    if value["role"] != ("gateway" if version == 1 else "ssh-client"):
         raise PlanError("Unsupported explicitly selected hosted role")
-    for key in ("policy", "tls", "journal"):
+    for key in references:
         if not isinstance(value[key], str):
             raise PlanError("Gateway host references require absolute ordinary paths")
         path = Path(value[key])
@@ -171,6 +175,34 @@ def _listener(selection: dict):
 
 
 def prepare(root: Path, selection: dict) -> tuple[object, object]:
+    if selection["role"] == "ssh-client":
+        config = ssh_configuration(selection)
+        from .ssh_machine import prepare as prepare_ssh
+
+        state = Path(config.to_dict()["state_dir"]).resolve()
+        installation = root.resolve()
+        if state.is_relative_to(installation) or installation.is_relative_to(state):
+            raise PlanError("SSH client lease must be separate from host lifecycle state and installation root")
+        from agent_ssh.gateway_directory import validate_consumer_state
+
+        value = config.to_dict()
+        protected = [root, Path(selection["configuration"])]
+        protected.extend(
+            Path(value[name])
+            for name in ("policy_path", "identity_file", "public_key_file", "proof_key_file",
+                         "gateway_ca", "access_token_file")
+            if value.get(name) is not None
+        )
+        for path in protected:
+            if path.resolve().is_relative_to(state):
+                raise PlanError("SSH client lease state must exclude protected host inputs")
+            validate_consumer_state(
+                path, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
+                authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,
+            )
+        prepare_ssh(config)
+        startup_digest(selection, configuration=config)
+        return config, None
     from .gateway_enrollment import EnrollmentPolicy
     from .ledger import OperationLedger
 
@@ -230,6 +262,8 @@ def main(action: str) -> int:
             "schema": "fleet-manager.gateway-host-contract", "version": 1,
             "capabilities": ["selected-application-host-v1", "native-owner-stop-v1"],
             "required_extra": "gateway-host",
+            "configuration_versions": [1, 2],
+            "roles": {"gateway": ["gateway-host"], "ssh-client": ["gateway-host", "ssh-client"]},
         }))
         return 0
     root = installation_root()
@@ -257,9 +291,25 @@ def selection_digest(selection: dict) -> str:
     return digest(selection)
 
 
-def startup_digest(selection: dict, *, listener=None) -> str:
+def startup_digest(selection: dict, *, listener=None, configuration=None) -> str:
     from .gateway_service_listener import read_bounded
 
+    if selection["role"] == "ssh-client":
+        from .credential_references import read_credential_reference
+
+        config = (configuration if configuration is not None else ssh_configuration(selection)).to_dict()
+        return digest({
+            "configuration": config,
+            "references": {
+                key: hashlib.sha256(
+                    read_credential_reference(Path(config[key])) if key == "proof_key_file"
+                    else read_bounded(Path(config[key]))
+                ).hexdigest()
+                for key in ("policy_path", "identity_file", "public_key_file",
+                            "proof_key_file", "gateway_ca")
+                if config[key] is not None
+            },
+        })
     if listener is None:
         listener = _listener(selection)
     return digest({
@@ -267,3 +317,10 @@ def startup_digest(selection: dict, *, listener=None) -> str:
         "certificate": hashlib.sha256(read_bounded(Path(listener.certificate))).hexdigest(),
         "key": hashlib.sha256(read_private_file(Path(listener.key), MAX_BYTES)).hexdigest(),
     })
+
+
+def ssh_configuration(selection: dict):
+    from .ssh_machine_config import SSHMachineConfig
+
+    path = Path(selection["configuration"])
+    return SSHMachineConfig.from_dict(decode(read_private_file(path, MAX_BYTES)))

@@ -168,6 +168,11 @@ restart. Each writer retains its existing monotonic revision and conflict
 checks; a partial write fails visibly and does not acknowledge convergence.
 No new operator command, listener, private-key transfer or background owner is
 introduced. Profile-only emission is not a complete native authorization update.
+The read-only `validate_writer_destinations` adapter checks existing direct
+and derived source/lock destination kinds before Fleet admits a hosted consumer;
+it creates no directory, file, lease or authorization.
+It also rejects conflicting writer scopes and reuses the authorization owner's
+root checks without creation, permission repair or new access grants.
 
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates
