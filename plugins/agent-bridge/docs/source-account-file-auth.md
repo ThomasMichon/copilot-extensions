@@ -23,7 +23,9 @@ inferred from a shared origin. The POST uses only that capability and the fixed
 falls back to token-only acquisition, follows a redirect, uses environment
 proxies, or retries a possibly accepted POST. Every HTTP request obtains fresh
 headers through the approved injector. Custom CA contexts must retain certificate
-and hostname verification; omitting one uses ordinary system trust.
+and hostname verification; omitting one uses ordinary system trust. The caller's
+whole-acquisition deadline governs both requests; no shorter implicit HTTPX read
+timeout cuts off an otherwise valid source acquisition.
 
 Response account, host, token shape, exact lease fields, numeric bounds and
 generation are checked before returning an in-memory lease. The conservative
@@ -52,7 +54,9 @@ those approvals from an endpoint or a source label.
 The parent directory must be canonical, owner-only and owned by the current
 UID. Config and lock files must be private, current-UID, single-link regular
 files; symlinks, malformed/duplicate-key JSON, absent account slots and unsafe
-permissions refuse without rewriting config. Native `authTokens` uses the
+permissions refuse without rewriting config. Leading native `//` comment headers,
+blank lines and an optional UTF-8 BOM are preserved; the JSON body retains strict
+duplicate-key rejection. Native `authTokens` uses the
 `https://github.com:<account>` key. Renewal changes only that slot's token and
 preserves other account and configuration values. The client account and host
 must match the selected native account and `github.com`.

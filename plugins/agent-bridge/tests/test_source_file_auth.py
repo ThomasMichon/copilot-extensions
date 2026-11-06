@@ -188,9 +188,24 @@ async def test_post_transport_failure_is_not_replayed_or_exposed(tmp_path, monke
     assert methods == ["GET", "POST"]
 
 
+@pytest.mark.asyncio
+async def test_caller_deadline_cancels_an_unfinished_exchange_without_retry(tmp_path, monkeypatch):
+    methods = []
+    async def handler(request):
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, json=discovery())
+        await asyncio.Event().wait()
+    client, _, _, _ = fixture_client(tmp_path, monkeypatch, handler)
+    with pytest.raises(wire.SourceLeaseError, match="unavailable"):
+        await client.acquire(timeout=0.05)
+    assert methods == ["GET", "POST"]
+
+
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
 @pytest.mark.asyncio
-async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(tmp_path, monkeypatch):
+@pytest.mark.parametrize("header", ["", "// Native config header\r\n\n", "\ufeff// Native header\n"])
+async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(tmp_path, monkeypatch, header):
     def handler(request):
         return httpx.Response(200, json=discovery() if request.method == "GET" else response())
     client, clock, _, _ = fixture_client(tmp_path, monkeypatch, handler)
@@ -203,25 +218,29 @@ async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(t
             "https://github.com:other": {"token": "other-synthetic-token"},
         },
     }
-    config.write_text(json.dumps(original), encoding="utf-8")
+    config.write_bytes(header.encode("utf-8") + json.dumps(original).encode("utf-8"))
     config.chmod(0o600)
+    def document():
+        raw = config.read_bytes()
+        assert raw.startswith(header.encode("utf-8"))
+        return json.loads(raw[len(header.encode("utf-8")):])
     store = CopilotAccountFile(config, account="synthetic")
     lease = await store.renew(client)
     expected = json.loads(json.dumps(original))
     expected["authTokens"]["https://github.com:synthetic"]["token"] = lease.token
-    assert json.loads(config.read_text()) == expected
+    assert document() == expected
     assert config.stat().st_mode & 0o777 == 0o600
     clock.monotonic += 60
     with pytest.raises(CopilotFileAuthError, match="expired"):
         store.install(lease)
-    assert json.loads(config.read_text()) == expected
+    assert document() == expected
     store.withdraw()
     del expected["authTokens"]["https://github.com:synthetic"]["token"]
-    assert json.loads(config.read_text()) == expected
+    assert document() == expected
     clock.wall, clock.monotonic = 1000.0, 200.0
     await store.renew(client)
     expected["authTokens"]["https://github.com:synthetic"]["token"] = lease.token
-    assert json.loads(config.read_text()) == expected
+    assert document() == expected
     assert not list(root.glob(".bridge-account-auth-*"))
 
 
@@ -335,7 +354,8 @@ def test_native_renewal_refuses_changed_custody_and_last_moment_expiry(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tmp_path):
+@pytest.mark.parametrize("provider_delay", [0, 5.2])
+async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tmp_path, provider_delay):
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -371,6 +391,8 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
             assert 0 <= length <= 4096
             body = await asyncio.wait_for(reader.readexactly(length), 3)
             requests.append((method, path, headers, body))
+            if method == "POST":
+                await asyncio.sleep(provider_delay)
             issued = time.time()
             assert headers[wire.INSTALLATION_HEADER] == "synthetic-index"
             assert (method, path) in {("GET", "/health"), ("POST", "/api/v1/source-credentials")}
@@ -409,7 +431,7 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
             await wire.HttpSourceLeaseClient(endpoint, **kwargs).acquire(timeout=5)
         assert requests == []
         trust = ssl.create_default_context(cafile=str(cert))
-        lease = await wire.HttpSourceLeaseClient(endpoint, tls_context=trust, **kwargs).acquire(timeout=5)
+        lease = await wire.HttpSourceLeaseClient(endpoint, tls_context=trust, **kwargs).acquire(timeout=8)
         assert 0 < lease.remaining_seconds() < 60
         assert [item[0] for item in requests] == ["GET", "POST"]
         assert [item[1] for item in requests] == ["/health", "/api/v1/source-credentials"]

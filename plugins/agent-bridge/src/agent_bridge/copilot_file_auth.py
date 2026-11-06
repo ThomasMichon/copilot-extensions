@@ -82,7 +82,16 @@ class CopilotAccountFile:
                 raw = stream.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise ValueError
-            value = json.loads(raw, object_pairs_hook=_pairs)
+            text = raw.decode("utf-8-sig")
+            header = "\ufeff" if raw.startswith(b"\xef\xbb\xbf") else ""
+            body_start = 0
+            for line in text.splitlines(keepends=True):
+                if not line.strip() or line.lstrip().startswith("//"):
+                    header += line
+                    body_start += len(line)
+                else:
+                    break
+            value = json.loads(text[body_start:], object_pairs_hook=_pairs)
             if not isinstance(value, dict) or not isinstance(value.get("authTokens"), dict):
                 raise ValueError
             slot = value["authTokens"].get(self._key)
@@ -105,6 +114,7 @@ class CopilotAccountFile:
                 0o600, dir_fd=directory,
             )
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(header)
                 json.dump(value, stream, ensure_ascii=True)
                 stream.write("\n")
                 stream.flush()

@@ -157,6 +157,7 @@ class HttpSourceLeaseClient:
         async with httpx.AsyncClient(
             trust_env=False, follow_redirects=False, transport=self._transport,
             verify=self._tls_context if self._tls_context is not None else True,
+            timeout=None,
         ) as client:
             support = await self._request(client, "GET", discovery=True)
             if (
