@@ -53,4 +53,13 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$CANDIDATE_REF"
           git show --no-patch --format=fuller HEAD
-          .test-venvs/linux/services/chat/bin/python tools/qualify_chat_container.py --python-base "$PYTHON_BASE"
+          python - <<'PY'
+          import os
+          import runpy
+          import sys
+          sys.path.insert(0, "tools")
+          runner = runpy.run_path("tools/run-standalone-tests.py")
+          python = str(runner["default_python"]("services/chat"))
+          os.execv(python, [python, "tools/qualify_chat_container.py",
+                           "--python-base", os.environ["PYTHON_BASE"]])
+          PY

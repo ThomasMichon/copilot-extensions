@@ -493,6 +493,12 @@ shared-multiplex contracts above.
 
 ### 2026-11-06 - Recover image qualification and repair unit admission
 
+- Fresh image run42166902613 reached the image step after acceptance but
+  refused its obsolete repository-local tooling path. Resolve the prepared
+  interpreter through the standalone runner's existing `default_python`
+  function, preserving its external-scratch ownership rather than introducing
+  another cache location. All26 image/template contracts pass in3.47s;
+  actual image execution remains required after this correction.
 - Corrected candidate `10b7379e0bc5779437e02a604badb2e262e64648`
   passed native Windows acceptance422+2 declared POSIX skips in115.52s
   under180s, and full498+the same skips in367.58s under600s.

@@ -27,6 +27,15 @@ def test_recipe_has_only_offline_wheel_inputs_and_foreground_nonroot_host():
     assert config["data_dir"] == "/data" and config["token_file"] == "/run/secrets/chat-domain"
 
 
+def test_image_lane_resolves_the_existing_runner_managed_interpreter():
+    workflow = (image.ROOT / ".github/workflows/chat-container-qualification.yml").read_text(
+        encoding="utf-8",
+    )
+    assert 'runpy.run_path("tools/run-standalone-tests.py")' in workflow
+    assert 'runner["default_python"]("services/chat")' in workflow
+    assert ".test-venvs/linux/services/chat/bin/python" not in workflow
+
+
 def test_dedicated_context_contains_only_service_closure_wheels_and_recipe(tmp_path, monkeypatch):
     built = []
 
