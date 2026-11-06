@@ -350,6 +350,16 @@ All 103 native Repositories Configuration controls passed on Windows, including
 the existing malformed/unsupported cases, and the affected complete native UI
 flow passed again. F/E9 passed; broader receiving gates remain separate.
 
+The next overview identified a second name-rule mismatch: generic Configuration
+resources permit initial punctuation that binding's identifier contract does
+not. One native binding-name check now drives both catalog eligibility and early
+invocation refusal; cards explain unsupported identifiers. Four additional
+catalog/actual-CLI cases cover initial underscore, dot, hyphen and an unsupported
+project name, while generic preference editing and a valid secret-shaped
+resource name remain available. All 107 native controls and the affected
+complete native UI flow passed on Windows. F/E9 and module-size checks passed;
+the shared generic validator and preview schema were not widened.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no

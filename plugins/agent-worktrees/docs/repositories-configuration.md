@@ -100,8 +100,10 @@ Payload activation uses the native selected home, including `AGENT_HOME`, and
 prefers the current project's selected root before the global fallback.
 An ambiguous native default-repository selection remains a recoverable
 configuration finding; binding refuses it without choosing a default.
-Rows outside the shared Configuration resource-name constraints remain
-inspectable but do not offer a binding action.
+Binding identifiers use exact canonical Configuration names beginning with an
+ASCII letter or digit. The same native check drives action eligibility and
+invocation; unsupported identifiers remain inspectable without a binding action.
+Generic Copilot-preference editing retains its own broader name rules.
 When binding is required but its payload is unavailable, the section's visible
 banner directs the user to enable and prepare its qualified owner.
 

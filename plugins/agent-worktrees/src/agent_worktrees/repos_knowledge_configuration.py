@@ -14,7 +14,19 @@ from dropin_registry import ScanAuthority
 from plugin_activation import resolve_active_plugins
 
 from . import config as cfg
-from .repos_configuration_sources import ConfigurationError
+from .repos_configuration_sources import ConfigurationError, resource_name
+
+
+def binding_names_supported(project: str, name: str) -> bool:
+    """Binding v2 identifiers narrow the generic Configuration name grammar."""
+    for value in (project, name):
+        try:
+            canonical = resource_name(value)
+        except ConfigurationError:
+            return False
+        if canonical != value or not canonical[0].isalnum():
+            return False
+    return True
 
 
 def owner_script(project: str) -> Path:
@@ -84,6 +96,11 @@ def _apply_worker(project: str, name: str, token: str, expected_script: str) -> 
 
 
 def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
+    if not binding_names_supported(project, name):
+        raise ConfigurationError(
+            "binding-name-unsupported",
+            "Binding requires exact Configuration names beginning with an ASCII letter or digit.",
+        )
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 

@@ -144,7 +144,7 @@ def inspect_project(project: str, workspace: str) -> Inspection:
 
 
 def catalog(project: str, *, workspace: str = "") -> dict:
-    from .repos_knowledge_configuration import owner_status
+    from .repos_knowledge_configuration import binding_names_supported, owner_status
 
     registry = repos.read_registry(strict=True)
     inspection = inspect_project(project, workspace)
@@ -169,6 +169,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             # unsupported row like any other composition failure instead.
             name_error = exc
         entry = registry.repos.get(name)
+        binding_names = binding_names_supported(project, name)
         local_path = entry.local_path() if entry else None
         registration = (
             "absent" if entry is None else "unsupported" if not local_path else
@@ -231,6 +232,8 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             f"Route: {route}; editing unsupported",
             f"Bound state identity: {inspection.binding}",
             f"Actual tracked pair: {inspection.pair}",
+            "Binding identifiers: " + ("supported" if binding_names else
+                "unsupported; exact Configuration names starting with an ASCII letter or digit are required."),
             "Sources (higher precedence last): " + str(state["sources"]),
             "Findings: " + str(findings),
             FUTURE_ONLY,
@@ -248,7 +251,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             }] if editable else [],
             "reset_fields": [],
             "knowledge_bindable": str(
-                name_error is None and not inspection.findings
+                binding_names and not inspection.findings
                 and inspection.readiness.get("ready") is False
                 and inspection.binding.get("identity") in ("", name)
                 and entry is not None and entry.repo_class in {"knowledge", "worktree"}

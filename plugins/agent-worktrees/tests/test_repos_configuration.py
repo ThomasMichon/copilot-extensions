@@ -492,6 +492,36 @@ def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(nati
     assert tree(native) == before
 
 
+@pytest.mark.parametrize("project,name", [
+    ("sample", "_knowledge"), ("sample", ".knowledge"),
+    ("sample", "-knowledge"), ("_project", "knowledge"),
+])
+def test_binding_name_rules_match_catalog_and_preview_without_blocking_preferences(native, monkeypatch, project, name):
+    from agent_worktrees import repos_configuration_catalog as catalog, repos_knowledge_configuration as binding
+
+    registry = repos._repos_yaml_path()
+    raw = yaml.safe_load(registry.read_text("utf-8"))
+    raw["repos"][project] = {"class": "worktree", repos._current_platform(): str(native / "repository")}
+    for repository in (name, "sk-knowledge"):
+        raw["repos"][repository] = {"class": "knowledge", repos._current_platform(): str(native / "knowledge")}
+    registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    before = tree(native)
+    monkeypatch.setattr(catalog, "inspect_project", lambda *_args: catalog.Inspection(
+        binding={"identity": ""}, readiness={"ready": False},
+    ))
+    monkeypatch.setattr(binding, "owner_status", lambda _project: "available")
+    rows = {row["id"]: row for row in catalog.catalog(project)["entries"]}
+    assert rows[name]["editable"] == "true"
+    assert rows[name]["knowledge_bindable"] == "false"
+    assert "Binding identifiers: unsupported" in rows[name]["card"]["body"]
+    assert rows["sk-knowledge"]["knowledge_bindable"] == ("true" if project == "sample" else "false")
+    result = cli("knowledge-preview", f"--context-project={project}", f"--repository={name}")
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "binding-name-unsupported"
+    assert SECRET not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
 @pytest.mark.parametrize("change", ["registry", "global", "machine", "drop-in", "target", "login"])
 def test_stale_previews_and_old_host_refuse_writes(native, change):
     proposed = preview("sample", "sample", "set", "chosen")
