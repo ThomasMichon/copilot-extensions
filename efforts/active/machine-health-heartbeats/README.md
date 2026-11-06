@@ -9,7 +9,8 @@
   [user-state carriers](../../../visions/user-state-carriers/README.md)
 - **Umbrella issue:** #10873
 - **Sub-issues:** #10881 (local report/chart consumer), #10928 (preference preview),
-  #11081 (guarded native telemetry adoption), #11119 (local hourly health store)
+  #11081 (guarded native telemetry adoption), #11119 (local hourly health store),
+  #11157 (passive owner observations)
 
 ## Guiding Intent
 
@@ -135,8 +136,11 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   operation and safe withdrawal before any adopted application.
 
 ### Phase 5 - Hourly health engine and carrier qualification
-- [ ] Prove explicit typed observation -> local hourly slot -> age-qualified
+- [x] Prove explicit typed observation -> local hourly slot -> age-qualified
   reader through the normal CLI (#11119), without claiming probe execution.
+- [ ] Prove the first passive local owner-listener observation through the
+  normal CLI and existing local record/reader flow (#11157), keeping all other
+  domains unknown and installed-provider qualification separate.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
@@ -675,3 +679,62 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   required/optional file races and the independent empty-domain CLI roundtrip.
   Ruff and whitespace passed. Fresh review and exact-head CI still gate this
   correction. No probe, schedule, carrier or running-service effect occurred.
+
+### 2026-11-06 - Local store merged; passive observations remain
+- #11139 merged as `bf30dc517d89befcebeff6b85741a4a1342e1c2c`
+  after actual current-head Copilot approval, resolved findings and required
+  green CI. This closes only the explicit local-storage consumer checkpoint;
+  supplied observations are not proof that native probes ran.
+- Pull-forward again aborted on squash-history conflicts. Every owned file
+  matched the confirmed merge, with no unmerged source delta. A retained
+  backup and non-destructive reconciliation preserved the landed result.
+- Next is bounded passive collection through the existing native observation
+  owners: inventory their supported read-only surfaces and caller restrictions,
+  then prove an owner observation -> local record -> age-qualified reader flow.
+  Do not invent a second agent inventory or infer authentication from a port.
+- Carrier exchange, native scheduling/lifetime, installed qualification,
+  enrollment and activation remain open. No runtime was updated or activated;
+  the parent remains Active and its worktree must not be finalized.
+
+### 2026-11-06 - Passive listener source consumer
+- Claimed #11157 after deduplication. The first passive adapter reads only an
+  explicitly selected loopback Bridge `/health` endpoint; its advertised
+  baseline contract and service/status fields qualify local listener response,
+  not authentication, credentials, Gateway access or logical agents.
+- One request has a two-second absolute transport deadline and 64 KiB aggregate
+  wire bound. No proxy, redirect, credential lookup, retry, discovery,
+  provisioning, service start, remediation or storage effect is performed.
+  Additive owner timings and large timestamps are discarded, not interpreted.
+- The normal observation CLI emits the existing typed input for separately
+  confirmed local recording. Other domains remain unknown. The store still
+  labels supplied data unverified and independently ages known proof to stale.
+- The initial combined observation/store/report packet passed 64 cases. The
+  final observer packet passed 23 cases with no skips, including the original
+  Bridge health handler's response from a separately prepared source test
+  interpreter, real loopback transport, normal module subprocesses, fresh local
+  store and stale readback. Diagnostics were isolated; no installed endpoint
+  or full daemon ASGI/lifespan was exercised. Trickle deadline, wire overflow,
+  redirect refusal and closed stdout retained bounded outcomes.
+- Ruff, documentation consistency, install contracts, module ceilings, effort
+  structure and whitespace passed. The first default Python had no Ruff;
+  the already available Ruff executable supplied the successful lint check.
+  Review, exact-source CI and source merge remain required.
+- This advances the machine-heartbeat domain-observation vision without
+  changing its intent or existing producer/owner contracts. Linux, installed
+  qualification, other domain owners, native scheduling, carrier delivery,
+  enrollment and activation remain open; the parent is not complete.
+
+### 2026-11-06 - Passive listener review corrections
+- The #11163 review identified a real framing gap: a bounded HTTP read can
+  return a valid JSON prefix despite missing declared Content-Length bytes.
+  Listener proof now additionally requires no declared body remainder. Reads
+  stay bounded; a huge advertised length cannot request a huge allocation.
+- Replaced the whitespace-only overflow fixture with an otherwise qualifying
+  JSON body padded to the body limit, so only aggregate header/body wire
+  enforcement prevents success. Removed a numeric substring assertion that
+  could accidentally match an unfrozen observation timestamp.
+- The final 26-case observer packet passed without skips, including actual
+  owner-response compatibility, real truncated length/chunk and huge-length
+  controls, overflow/trickle limits, source CLI/store readback and output
+  failure. Fresh current-head review and CI remain required. No operational
+  activation or carrier effect occurred.

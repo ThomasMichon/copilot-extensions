@@ -29,6 +29,38 @@ def add_parser(subparsers) -> None:
     inspect.add_argument("--store-dir", type=Path, required=True)
     inspect.add_argument("--now", help="aware ISO evaluation time (default: current UTC time)")
     inspect.set_defaults(func=run_slots)
+    observe = commands.add_parser("observe", help="read one explicitly selected local Bridge listener", allow_abbrev=False)
+    observe.add_argument("--bridge-port", type=int, required=True, help="numeric loopback port; no discovery or service start")
+    observe.add_argument("--publisher", required=True)
+    observe.add_argument("--continuity", required=True)
+    observe.set_defaults(func=run_observe)
+
+
+def run_observe(args) -> int:
+    from .health_observe import observe_bridge
+    from .health_slots import HealthError
+
+    result = None
+    try:
+        result = observe_bridge(args.bridge_port, args.publisher, args.continuity)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0
+    except (ValueError, OSError, OverflowError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        reason = str(error) if isinstance(error, HealthError) else "observation-unavailable"
+        print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
+
+
+def _silence_failed_stdout() -> None:
+    if sys.stdout is sys.__stdout__:
+        # A second buffered flush must not replace the command's exit status.
+        try:
+            with open(os.devnull, "wb") as sink:
+                os.dup2(sink.fileno(), sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
 
 
 def run_slots(args) -> int:
@@ -51,13 +83,8 @@ def run_slots(args) -> int:
             return 2
         return 0 if result.get("eligible", True) else 1
     except (ValueError, OSError, TimeoutError, OverflowError) as error:
-        if result is not None and isinstance(error, OSError) and sys.stdout is sys.__stdout__:
-            # A second buffered flush must not replace the command's exit status.
-            try:
-                with open(os.devnull, "wb") as sink:
-                    os.dup2(sink.fileno(), sys.stdout.fileno())
-            except (OSError, ValueError):
-                pass
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
         reason = (
             "response-output-unavailable" if result is not None
             else str(error) if isinstance(error, health_slots.HealthError) else "local-store-unavailable"
