@@ -47,3 +47,19 @@ acquisition. Agent Machines ownership and the dependency-ordered first source
 slice are agent recommendations submitted for review. The later endorsement
 selects Agent Machines for supported preference propagation and health/report
 aggregation without removing the configuration-only activation restriction.
+
+## Preferred harness-to-knowledge mapping
+
+The operator then selected a carrier application-data home and all four
+preference categories. The exact private account/folder is omitted here.
+The selection form explicitly authorized no OneDrive files or service activation.
+
+The subsequent requirement is preserved verbatim:
+
+> I definitely want to store the preferred mapping of each harness repo to knowledge repo. Note that this can be overridden per-machine, but the defaults go on OneDrive
+
+This requires a stored default relationship for each harness identity, with
+machine-specific overrides. It does not authorize automatically replacing a
+binding, registering/cloning a repository, selecting credentials or activating
+the carrier. The [Phase 4 amendment](preferences.md) separates the requested
+behavior from the proposed schema and implementation sequence.
