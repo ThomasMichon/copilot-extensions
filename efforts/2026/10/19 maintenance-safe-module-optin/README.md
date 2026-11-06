@@ -117,7 +117,7 @@ retain the operator-directed exception. No existing module gains an opt-in.
   documentation, setup/restore skills and plugin changefile.
 - The contained focused modules/reconcile-resources/authority/resources lane
   passed: 265 tests. Python `ruff check --select F,E9` passed; install-contract
-  passed for all 13 runtime plugins; the documentation-consistency guard passed.
+  passed for all 13 then-current runtime plugins; the documentation-consistency guard passed.
 - The contained full agent-machines suite timed out in the unchanged
   `tests/test_cell_lifecycle.py::test_adapters_repair_uninstall_preserve_isolate_replay`,
   while its adapter helper waited for a native subprocess at line 101, invoked
@@ -257,7 +257,7 @@ retain the operator-directed exception. No existing module gains an opt-in.
 - Implementation review/merge is the next gate. Automatic release promotion
   and separately authorized adopter rollout remain outside this coding slice.
 - Final publication gates passed: touched-code F/E9 lint, install-contract
-  (13 runtime plugins), version consistency and documentation consistency
+  (13 then-current runtime plugins), version consistency and documentation consistency
   (24 plugins). Reviewed the exact runtime diff against the shared review rubric;
   no additional mutation authority or automatic opt-in was introduced.
 

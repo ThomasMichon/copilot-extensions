@@ -622,8 +622,10 @@ logged. Windows uses the same strict owned Job. Omitting both retains the
 existing inherited-context behavior, stream budgets and caller-death cleanup.
 
 `run_installation_owned()` is the explicit boundary for a trusted canonical
-installer that must start durable product daemons. It retains the same output
-budgets, caller-owned cleanup and settlement callback, but its Windows Job
+installer or service transition that must start durable product daemons. It
+accepts the same optional `cwd` and `env` child context without mutating the
+caller. It retains the same output budgets, caller-owned cleanup and settlement
+callback, but its Windows Job
 permits explicit daemon breakaway. Ordinary descendants remain contained and
 are retired before settlement; deliberately detached daemons belong to their
 own service lifecycle, not that settlement proof. An external restrictive Job

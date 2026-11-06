@@ -415,7 +415,7 @@ during Phase 2; any material expansion returns through proposal review first.
   transport, TLS peer, HTTP isolation and CLI cases passed (218). The final
   conflict-owner extraction passed 77 session/CLI cases, Python lint and the
   strict module-size guard without widening a ceiling. Install contracts passed
-  for all 13 runtime plugins. These counts overlap, not additive coverage.
+  for all 13 then-current runtime plugins. These counts overlap, not additive coverage.
 - Independent historical route vectors exposed an unnecessary internal reuse
   keyword for anonymous requests. Omit that inert default without changing
   their wire expectations; the historical contract and session lane passed

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -65,7 +66,14 @@ async def test_creation_launch_actual_popen_is_once_and_finally_admitted(creatio
 
     rig = creation_launch
     popen = AsyncMock(side_effect=AssertionError("test stops before actual spawn"))
-    monkeypatch.setattr("agent_bridge.session_host.launcher.subprocess.Popen", popen)
+    original_popen = subprocess.Popen
+    monkeypatch.setattr(
+        "agent_bridge.session_host.launcher.subprocess.Popen",
+        lambda argv, *args, **kwargs: (
+            original_popen(argv, *args, **kwargs) if "--support-json" in argv
+            else popen(argv, *args, **kwargs)
+        ),
+    )
     if when == "scheduled":
         original = asyncio.to_thread
 
@@ -174,7 +182,7 @@ async def test_creation_launch_attested_exec_rechecks_after_attestation(creation
     raw = rig.owner.child_context(argv, rig.launch_target.cwd)
     rig.owner.begin_host()
     monkeypatch.setattr(os, "getppid", lambda: rig.producer.pid)
-    monkeypatch.setattr("agent_bridge.session_host.launcher.apply_host_survival", lambda: None)
+    monkeypatch.setattr("agent_remote_driver.session_host.launcher.apply_host_survival", lambda: None)
     called = []
 
     async def attested(_argv, _cwd, _env, _spawn, *, before_exec):
@@ -186,7 +194,8 @@ async def test_creation_launch_attested_exec_rechecks_after_attestation(creation
     monkeypatch.setattr("agent_bridge.session_host.preference_spawn.spawn_attested", attested)
     with pytest.raises(RuntimeCustodyError, match="open epoch"):
         await run_host(
-            argv, cwd=rig.launch_target.cwd, env={CONTEXT_ENV: raw},
+            argv, cwd=rig.launch_target.cwd,
+            env={CONTEXT_ENV: raw, "AGENT_BRIDGE_SESSION_ID": rig.session.session_id},
             session_id=rig.session.session_id,
         )
     assert called == ["attestation"]

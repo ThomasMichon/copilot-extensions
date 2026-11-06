@@ -744,7 +744,32 @@ function Write-SimpleBinstub {
     $moduleLiteral = $ModuleName.Replace("'", "''")
     $commandLiteral = $CommandName.Replace("'", "''")
     $coldDispatcher = ''
+    $earlyDispatcher = ''
     if ($CommandName -ceq 'agent-vault') {
+        $earlyDispatcher = @'
+$_scopeRequested = $false
+foreach ($_argument in $args) {
+    if ([string]$_argument -ceq '--') { break }
+    if ([string]$_argument -ceq '--configuration-root' -or
+        ([string]$_argument).StartsWith('--configuration-root=', [StringComparison]::Ordinal)) {
+        $_scopeRequested = $true
+    }
+}
+if ($_scopeRequested -or ($args.Count -gt 0 -and [string]$args[0] -ceq 'invocation-contract')) {
+    $_snap = ''
+    try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+    $_gate = if ($_snap) { Join-Path $_snap 'scripts\runtime-gate.ps1' } else { '' }
+    if ($_gate -and (Test-Path -LiteralPath $_gate -PathType Leaf) -and
+        (Select-String -LiteralPath $_gate -SimpleMatch '# Configuration root contract: vault-context-v1' -Quiet)) {
+        $env:AGENT_VAULT_HOME = $_root
+        $env:AGENT_VAULT_PAYLOAD_ROOT = $_snap
+        & $_gate @args
+        exit $LASTEXITCODE
+    }
+    [Console]::Error.WriteLine('[agent-vault] native repository context/contract support is unavailable; update the owning snapshot before retrying.')
+    exit 2
+}
+'@
         $coldDispatcher = @'
 $_gate = Join-Path $_snap 'scripts\runtime-gate.ps1'
 if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or
@@ -808,6 +833,7 @@ function _Resolve-Py([string]`$TraceMode = 'ready') {
 }
 `$_py = _Resolve-Py
 if (`$_py) { & `$_py -m $moduleLiteral @args; exit `$LASTEXITCODE }
+$earlyDispatcher
 if (`$env:$NoSelfProvisionEnv) { [Console]::Error.WriteLine('[$commandLiteral] runtime not provisioned ($NoSelfProvisionEnv set).'); exit 1 }
 `$_snap = ''
 try { `$_snap = ([IO.File]::ReadAllText((Join-Path `$_root 'payload-dir'))).Trim() } catch {}

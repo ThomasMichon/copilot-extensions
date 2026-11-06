@@ -901,8 +901,10 @@ def run_caller_owned(
 def run_installation_owned(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     on_settled: Callable[[], None] | None = None,
+    cwd: str | os.PathLike | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    """Own a trusted installer, allowing explicitly detached product daemons.
+    """Own a trusted installer or service transition, allowing detached product daemons.
 
     Ordinary descendants remain in the cleanup Job. Only a daemon's explicit
     breakaway can leave it; an external restrictive Job is never bypassed.
@@ -914,4 +916,6 @@ def run_installation_owned(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=None, capture=True,
         on_settled=on_settled, allow_daemon_breakaway=not contained_test_mode(),
+        **({"cwd": cwd} if cwd is not None else {}),
+        **({"env": env} if env is not None else {}),
     )

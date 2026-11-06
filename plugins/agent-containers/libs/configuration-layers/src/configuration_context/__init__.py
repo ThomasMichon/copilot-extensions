@@ -19,6 +19,16 @@ MAX_REPORT_BYTES = 64 * 1024
 CONTEXT_ENV = "AGENT_CONFIGURATION_CONTEXT"
 
 
+class RepositoryContextRequired(ConfigurationError):
+    """The qualified owner cannot select a repository from this directory."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Repository context is missing. Run from an adopted repository "
+            "or use its '<repo> <subject> ...' command from any directory."
+        )
+
+
 class _ProcessOptions(TypedDict, total=False):
     creationflags: int
 
@@ -140,6 +150,11 @@ def read_owner_context(
         )
         if unsupported and not required:
             return None
+        output = result.stdout[:MAX_REPORT_BYTES].decode("utf-8", errors="replace")
+        if "Could not resolve a project for 'state-root'." in output or (
+            "Could not resolve a project for 'state-root'." in diagnostic
+        ):
+            raise RepositoryContextRequired()
         raise ConfigurationError("configuration owner refused the selected context")
     if len(result.stdout) > MAX_REPORT_BYTES:
         raise ConfigurationError("configuration owner report exceeds the read bound")

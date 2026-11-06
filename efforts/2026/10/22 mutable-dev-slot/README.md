@@ -689,7 +689,7 @@ command-lifecycle admission and resident-roster reads with the candidate's
 source/authority separation and generation evidence. Both sides' behavior
 is retained; the tightened Worktrees runtime and dispatcher module ceilings
 remain unchanged. Release intent now includes the standalone worktree-manager
-consumer as well as the thirteen runtime plugins.
+consumer as well as the thirteen then-current runtime plugins.
 
 After reconciliation, the exact non-adopter selection passed 425 contracts
 with three skips, covering lifecycle, generation, reconciliation, monitor

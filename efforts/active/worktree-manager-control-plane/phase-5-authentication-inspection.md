@@ -1,7 +1,7 @@
 # Phase 5 - Provider-owned repository authentication inspection
 
-- **Status:** Native provider expansion implemented in source; Manager
-  composition and receiving acceptance remain open.
+- **Status:** Native provider and Manager Configuration composition implemented
+  in source; receiving acceptance remains open.
 - **Parent:** [Configuration Workbench](phase-5-configuration-workbench.md)
 - **Coordination:** #10844, claimed by `shiny-actuator`.
 - **Vision:** [Authentication and onboarding readiness](../../../visions/installer/configurator/README.md#authentication-and-onboarding-readiness).
@@ -103,6 +103,11 @@ knowledge or starts workers. Pending, stale, unavailable and unsupported
 observations remain visible; only a fresh applicable read can enable a
 corresponding executable action.
 
+Personal GitHub authentication is not an upfront public-foundation or first-run
+prerequisite. Defer that prompt until requested repository work requires that
+account. An installed tool, host name or unavailable optional observation does
+not establish the need; required target-specific credentials keep their owners.
+
 Inspection may display the correct owner's supported next step. An executable
 acquisition action is a later separately defined provider/account operation,
 not part of this first read-only slice. Until then, show its limitation rather
@@ -116,7 +121,7 @@ the current progress/cancellation and originating-scope refresh contracts.
   selected-runtime support declaration before implementing new caller syntax.
 - [x] Deliver the standalone provider inspection and focused controls without
   changing registration, preference, binding or credential-store behavior.
-- [ ] Connect the actual native provider to standing Configuration through the
+- [x] Connect the actual native provider to standing Configuration through the
   current contribution contract; prove navigation, errors and refresh without
   rebuilding the shared shell.
 - [ ] Record exact source/review/CI evidence, compatibility behavior and receiving
@@ -176,5 +181,46 @@ install-contract and documentation guards pass.
 These are contained source/package results, not a cold installation, selected
 installed runtime, live credential/backend, Git transport, Manager UI or
 complete authentication/onboarding pass. The Configuration consumer and its
-mixed-runtime/refresh evidence are the next source checkpoint. Broader
-receiving and acquisition acceptance remain with the existing owners.
+mixed-runtime/refresh evidence are recorded below. Broader receiving and
+acquisition acceptance remain with the existing owners.
+
+## Configuration source evidence
+
+The optional native adapter uses the existing version-1 list/card shell.
+The executing provider advertises its additive Configuration projection in
+the wheel-owned descriptor and supplies rows, cards, target/revision/time and
+limitations. Manager verifies selected interpreter/module and slot-local support
+before a single native read. No new payload pivot, CLI operation, universal
+authentication schema or executable acquisition action is added.
+
+Thirty-nine native provider controls and twenty-four Manager compatibility controls
+pass. Twenty-nine Configuration controls pass, including the actual production
+UI and process boundary to private-venv legacy and Windows namespaced fixtures
+running the real native parser, registry reader and projection with only their
+credential/API adapter substituted.
+The journey proves hidden-section non-probing, loading/navigation, native detail
+cards, stale refresh, unavailable observations, malformed-result errors,
+originating-scope settlement, changed project and pre-invocation rollback refusal.
+Registry and credential-sentinel bytes are unchanged. One unrelated existing
+opt-in native-owner test is skipped; it supplies no evidence here.
+
+Single-scope Configuration summaries include pending/stale metadata.
+The shared shell retains cached rows and their
+identity while displaying that metadata. Compatibility controls separately cover
+missing/malformed/unsupported descriptors, inspect-only older runtimes, newer
+payloads, foreign explicit commands, provider rollback and retained cleanup errors.
+Old callers keep the original standalone observation/exit semantics, and older
+Managers do not discover the new optional read.
+
+The generic list transport strips parent-plugin identity. The adapter forwards and
+validates context through the existing Manager restoration owner and preserves
+the native engine-selection precedence, including explicit environment commands
+over inherited handoffs. The real namespaced list process retains
+its selected context/interpreter; malformed context refuses before selection.
+Supplied malformed commands, including JSON null, refuse before selection, while an
+omitted argument retains ordinary engine resolution.
+
+These are contained source/fixture results, not a cold product installation,
+selected installed-runtime qualification, native performance budget, live
+credential/backend, Git transport or complete onboarding pass. Required PR review
+and CI remain independent publication gates. Receiving and acquisition stay open.

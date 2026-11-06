@@ -3,7 +3,9 @@ function Get-VaultRuntimeActivation {
         [string]$Project = (Get-Location).ProviderPath,
         [string]$RuntimeRoot,
         [string]$Context,
-        [string]$Python
+        [string]$Python,
+        [string]$InvocationDirectory,
+        [switch]$RetainNativeSelector
     )
     $reader = Join-Path $PSScriptRoot 'runtime-activation.py'
     $pythonPath = $Python
@@ -27,6 +29,8 @@ function Get-VaultRuntimeActivation {
     }
     $previousPreference = $ErrorActionPreference
     $readerArgs = @('--cwd', $Project)
+    if ($InvocationDirectory) { $readerArgs += "--invocation-cwd=$InvocationDirectory" }
+    if ($RetainNativeSelector) { $readerArgs += '--retain-native-selector' }
     if ($RuntimeRoot) { $readerArgs += "--runtime-root=$RuntimeRoot" }
     if ($PSBoundParameters.ContainsKey('Context')) { $readerArgs += "--context=$Context" }
     $ErrorActionPreference = 'Continue'
@@ -35,6 +39,15 @@ function Get-VaultRuntimeActivation {
         $code = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
     $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    $reasonProperty = $result.PSObject.Properties['reason']
+    if ($code -eq 3 -and $result.state -ceq 'failed' -and
+        $reasonProperty -and $reasonProperty.Value -ceq 'repository-context-missing') {
+        $contextError = [InvalidOperationException]::new(
+            "Agent Vault repository context is missing. Run from an adopted repository or use '<repo> vault unlock' from any directory."
+        )
+        $contextError.Data['VaultRepositoryContextMissing'] = $true
+        throw $contextError
+    }
     if ($code -notin @(0, 2) -or $result.state -notin @('configured', 'configuration-empty')) {
         throw "Agent Vault activation configuration could not be resolved; correct its configuration, binding or payload. Reader exit: $code; state: $($result.state). $($result.detail)"
     }

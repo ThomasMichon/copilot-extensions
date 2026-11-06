@@ -1,0 +1,793 @@
+"""Tests for the active/passive cutover orchestrator (deploy.py)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from zdd import breadcrumb, routing
+from zdd.cutover import CutoverOrchestrator
+
+
+class FakeHandle:
+    def __init__(self, pid: int = 4321) -> None:
+        self.pid = pid
+        self.terminated = False
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def poll(self) -> int | None:
+        return None
+
+
+class FakeClient:
+    """Records calls; configurable drain outcome."""
+
+    def __init__(self, base_url: str, registry: dict) -> None:
+        self.base_url = base_url
+        self.registry = registry
+        registry[base_url] = self
+        self.calls: list[str] = []
+        self.drain_result = {"drained": True, "clean": True, "forced": False,
+                             "busy_sessions": []}
+
+    def health(self):
+        self.calls.append("health")
+        return {"status": "ok"}
+
+    def drain(self, *, timeout, poll, force):
+        self.calls.append(f"drain(force={force})")
+        return self.drain_result
+
+    def undrain(self):
+        self.calls.append("undrain")
+        return {"draining": False}
+
+    def shutdown(self):
+        self.calls.append("shutdown")
+        return {"shutting_down": True}
+
+    def adopt_relay(self):
+        self.calls.append("adopt_relay")
+        return {"adopted": True}
+
+
+def _make(cfg_dir: Path, *, healthy_ports, registry, spawned=None, port=9290,
+          drain_result=None, **options):
+    """Build an orchestrator with controllable collaborators."""
+    handle = FakeHandle()
+    if spawned is None:
+        spawned = []
+
+    def spawn_passive(p):
+        spawned.append(p)
+        # the new daemon "becomes healthy" only if its port is in healthy_ports
+        return handle
+
+    def health_check(host, p):
+        return p in healthy_ports
+
+    def make_client(base_url):
+        c = registry.get(base_url) or FakeClient(base_url, registry)
+        if drain_result is not None and base_url.endswith(":9281"):
+            c.drain_result = drain_result
+        return c
+
+    orch = CutoverOrchestrator(
+        cfg_dir, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=spawn_passive,
+        health_check=health_check,
+        make_client=make_client,
+        pick_free_port=lambda: port,
+        sleep=lambda _s: None,
+        clock=_fake_clock(),
+        **options,
+    )
+    return orch, handle
+
+
+def _fake_clock():
+    t = {"v": 0.0}
+
+    def clock():
+        t["v"] += 0.01
+        return t["v"]
+
+    return clock
+
+
+# -- happy path: old daemon present, clean drain -----------------------------
+
+
+@pytest.mark.parametrize("self_retirement", [False, True])
+def test_committed_cleanup_failure_retains_witness_and_requires_retry(
+    tmp_path, monkeypatch, native_birth, self_retirement,
+):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    unlink = Path.unlink
+    path = breadcrumb.breadcrumb_path(tmp_path)
+
+    def deny_cleanup(target, *args, **kwargs):
+        if target == path:
+            raise PermissionError("fixture retained witness")
+        return unlink(target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_cleanup)
+    registry = {}
+    options = (
+        {"self_retirement": True, "activate_successor": lambda endpoint: None}
+        if self_retirement else {}
+    )
+    orch, handle = _make(tmp_path, healthy_ports={9290, 9281}, registry=registry, **options)
+    result = orch.run(health_timeout=1, drain_timeout=1)
+
+    assert result.committed and not result.ok and not result.rolled_back
+    assert "retained; retry cleanup" in result.error
+    assert not handle.terminated
+    if not self_retirement:
+        assert "shutdown" in registry["http://127.0.0.1:9281"].calls
+    assert routing.read_table(tmp_path)["active"]["pid"] == handle.pid
+    assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert breadcrumb.clear_breadcrumb(tmp_path)
+
+
+def test_cutover_happy_path(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    # An old active daemon exists on 9281.
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111,
+                           version="0.9")
+    registry: dict = {}
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290, 9281}, registry=registry,
+        port=9290,
+    )
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is True
+    assert res.committed is True
+    assert res.rolled_back is False
+    assert res.new_port == 9290
+    assert res.old_endpoint.port == 9281
+    # Old daemon was drained then shut down; new adopted the relay.
+    old_client = registry["http://127.0.0.1:9281"]
+    assert "drain(force=False)" in old_client.calls
+    assert "shutdown" in old_client.calls
+    new_client = registry["http://127.0.0.1:9290"]
+    assert "adopt_relay" in new_client.calls
+    # Routing table now points at the new port.
+    assert routing.read_table(tmp_path)["active"]["port"] == 9290
+    assert routing.read_table(tmp_path)["previous"]["port"] == 9281
+
+
+# -- new daemon never becomes healthy -> rollback ----------------------------
+
+@pytest.fixture
+def native_birth(monkeypatch):
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
+
+
+def test_self_retirement_commits_without_calling_the_predecessor(tmp_path, monkeypatch, native_birth):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry = {}
+    promoted = []
+
+    def activate(endpoint):
+        assert routing.read_table(tmp_path)["active"]["port"] == endpoint.port
+        promoted.append(endpoint.port)
+
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry=registry,
+        self_retirement=True, activate_successor=activate,
+    )
+    result = orch.run(health_timeout=1, drain_timeout=0)
+    assert result.ok and result.committed and not result.rolled_back
+    assert result.retirement_pending and not result.retirement_confirmed
+    assert result.to_dict()["retirement_pending"] is True
+    assert promoted == [9290] and registry == {}
+    assert not handle.terminated
+    assert breadcrumb.read_breadcrumb(tmp_path) is None
+
+    following, next_handle = _make(
+        tmp_path, healthy_ports={9291}, registry=registry, port=9291,
+        self_retirement=True, activate_successor=activate,
+    )
+    next_handle.pid = 4322
+    replaced = following.run(health_timeout=1, drain_timeout=0)
+    assert replaced.ok and replaced.committed and replaced.retirement_pending
+    assert promoted == [9290, 9291] and registry == {}
+    assert routing.read_table(tmp_path)["active"]["pid"] == next_handle.pid
+    assert not handle.terminated and not next_handle.terminated
+
+
+def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(tmp_path, monkeypatch, native_birth):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry = {}
+
+    def activate(_endpoint):
+        raise RuntimeError("successor refused promotion")
+
+    orch, handle = _make(
+        tmp_path, healthy_ports={9281, 9290}, registry=registry,
+        self_retirement=True, activate_successor=activate,
+    )
+    result = orch.run(health_timeout=1)
+    assert not result.ok and result.committed
+    assert not result.rolled_back and not handle.terminated
+    assert routing.read_table(tmp_path)["active"]["port"] == 9290
+    assert registry.get("http://127.0.0.1:9281") is None
+    assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
+    assert breadcrumb.read_breadcrumb(tmp_path)["old"]["pid"] == 111
+
+
+def test_post_promotion_requires_serving_not_merely_passive_health(tmp_path, monkeypatch, native_birth):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=lambda endpoint: None,
+        serving_health_check=lambda host, port: False,
+    )
+    result = orch.run(health_timeout=0.1)
+    assert result.committed and not result.ok and not handle.terminated
+    assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "committed"
+
+
+def test_self_retirement_captures_native_birth_after_passive_health(tmp_path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    phase = "before-health"
+    observations = []
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=promoted.append,
+    )
+
+    def birth(pid):
+        if pid != handle.pid:
+            return str(pid * 10)
+        token = None if phase == "before-health" else "43210"
+        observations.append((phase, token))
+        return token
+
+    def health(host, port):
+        nonlocal phase
+        phase = "after-health"
+        return True
+
+    publish = routing.publish_active
+
+    def publish_with_baseline(*args, **kwargs):
+        nonlocal phase
+        assert breadcrumb.read_breadcrumb(tmp_path)["new_process_start_time"] == "43210"
+        assert kwargs["process_start_time"] == "43210"
+        phase = "publication"
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", birth)
+    monkeypatch.setattr(routing, "publish_active", publish_with_baseline)
+    orch.health_check = health
+    result = orch.run(health_timeout=1, drain_timeout=0)
+
+    assert result.ok and result.committed
+    assert observations[:3] == [
+        ("before-health", None), ("after-health", "43210"), ("publication", "43210"),
+    ]
+    active = routing.Endpoint.from_dict(routing.read_table(tmp_path)["active"])
+    assert promoted == [active]
+    assert active.pid == handle.pid and active.process_start_time == "43210"
+
+
+def test_self_retirement_refuses_birth_changed_at_publication(tmp_path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    before = routing.routing_table_path(tmp_path).read_bytes()
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=promoted.append,
+    )
+    publish = routing.publish_active
+    rechecked = []
+
+    def changed_birth(pid):
+        rechecked.append(pid)
+        return "99999" if pid == handle.pid else str(pid * 10)
+
+    def publish_after_birth_change(*args, **kwargs):
+        assert kwargs["process_start_time"] == "43210"
+        monkeypatch.setattr("zdd.diagnostics.process_start_time", changed_birth)
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr(routing, "publish_active", publish_after_birth_change)
+    result = orch.run(health_timeout=1, drain_timeout=0)
+
+    assert not result.ok and not result.committed
+    assert "process identity changed before publication" in result.error
+    assert handle.pid in rechecked and promoted == []
+    assert routing.routing_table_path(tmp_path).read_bytes() == before
+
+
+@pytest.mark.parametrize("self_retirement", [False, True])
+@pytest.mark.parametrize(
+    "state, marker",
+    [
+        ("started", True), ("flipped", True), ("committed", True),
+        ("publication-uncertain", True), ("rolled_back", "true"),
+    ],
+)
+def test_next_install_preserves_pending_self_retirement_witness(
+    tmp_path, monkeypatch, native_birth, state, marker, self_retirement,
+):
+    import json
+
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    record = breadcrumb.write_breadcrumb(
+        tmp_path, state=state, old={"bind": "127.0.0.1", "port": 9281, "pid": 111},
+        new_port=9290, new_pid=4321, new_process_start_time="43210",
+        self_retirement=True,
+    )
+    record["self_retirement"] = marker
+    path = breadcrumb.breadcrumb_path(tmp_path)
+    path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+    route_before = routing.routing_table_path(tmp_path).read_bytes()
+    spawned = []
+    registry = {}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("pending resident completion must not trigger recovery or overwrite")
+
+    monkeypatch.setattr(breadcrumb, "recover_stale_cutover", forbidden)
+    monkeypatch.setattr(breadcrumb, "reap_abandoned_passive", forbidden)
+    monkeypatch.setattr(breadcrumb, "write_breadcrumb", forbidden)
+    monkeypatch.setattr(routing, "reap_stale_active", forbidden)
+    monkeypatch.setattr(routing, "publish_active", forbidden)
+    options = (
+        {"self_retirement": True, "activate_successor": forbidden}
+        if self_retirement else {}
+    )
+    orch, handle = _make(
+        tmp_path, healthy_ports={9291}, registry=registry, spawned=spawned,
+        port=9291, **options,
+    )
+    result = orch.run(health_timeout=1, drain_timeout=0)
+
+    assert not result.ok and not result.committed and not result.rolled_back
+    assert "resident completion" in result.error
+    assert spawned == [] and registry == {} and not handle.terminated
+    assert path.read_bytes() == before
+    assert routing.routing_table_path(tmp_path).read_bytes() == route_before
+
+
+@pytest.mark.parametrize("recovery_write_fails", [False, True])
+def test_self_retirement_publication_is_irreversible_before_flipped_record(
+    tmp_path, monkeypatch, recovery_write_fails, native_birth,
+):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    write = breadcrumb.write_breadcrumb
+
+    def fail_after_publication(*args, **kwargs):
+        if kwargs["state"] == "flipped" or recovery_write_fails and kwargs["state"] == "committed":
+            raise OSError("post-publication record failure")
+        return write(*args, **kwargs)
+
+    monkeypatch.setattr(breadcrumb, "write_breadcrumb", fail_after_publication)
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        self_retirement=True, activate_successor=lambda endpoint: None,
+    )
+    result = orch.run(health_timeout=1)
+    assert result.committed and not result.ok and not result.rolled_back
+    assert result.retirement_pending and not result.retirement_confirmed
+    assert result.to_dict()["retirement_pending"] is True
+    assert not handle.terminated
+    assert routing.read_table(tmp_path)["active"]["pid"] == handle.pid
+    assert "record failure" in result.error
+
+
+@pytest.mark.parametrize("visible", [False, True])
+def test_self_retirement_uncertain_storage_reports_only_proven_commit(
+    tmp_path, monkeypatch, native_birth, visible,
+):
+    from zdd import routing_persistence
+
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    old = routing.read_active_endpoint(tmp_path)
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        expected_old=old, refuse_old=lambda raw: None,
+        self_retirement=True, activate_successor=promoted.append,
+    )
+    write = routing_persistence.write
+
+    def uncertain(path, data):
+        if path == routing.routing_table_path(tmp_path) and (
+            data.get("active", {}).get("pid") == handle.pid
+            if visible else any(
+                entry["pid"] == handle.pid
+                for entry in data.get("publication_history", {}).get("entries", [])
+            )
+        ):
+            write(path, data)
+            raise routing_persistence.PublicationCommitUncertain("durability unconfirmed")
+        return write(path, data)
+
+    monkeypatch.setattr(routing_persistence, "write", uncertain)
+    result = orch.run(health_timeout=1)
+
+    assert result.publication_uncertain and not result.ok and not result.rolled_back
+    assert result.committed is visible
+    assert result.retirement_pending is visible
+    assert not result.retirement_confirmed and not handle.terminated and promoted == []
+    active = routing.read_table(tmp_path)["active"]
+    assert active["pid"] == (handle.pid if visible else old.pid)
+    record = breadcrumb.read_breadcrumb(tmp_path)
+    assert record["state"] == "publication-uncertain"
+    assert record["old"] == old.to_dict() and record["new_pid"] == handle.pid
+
+
+def test_expected_native_predecessor_exit_before_selection_preserves_caller_custody(
+    tmp_path, monkeypatch, native_birth,
+):
+    from zdd.cutover_lock import CutoverLock
+    import time
+
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    expected = routing.Endpoint.from_dict(routing.read_table(tmp_path)["active"])
+    witness = routing.publication_witness(tmp_path, deadline=time.monotonic() + 5)
+    before = routing.routing_table_path(tmp_path).read_bytes()
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: False)
+    monkeypatch.setattr(routing, "_pid_alive", lambda pid: False)
+    pending = {"reservation": "caller-owned"}
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        expected_old=expected, refuse_old=lambda raw: None,
+        self_retirement=True, activate_successor=promoted.append,
+    )
+
+    def spawn(port):
+        pending.pop("reservation")
+        return handle
+
+    orch.spawn_passive = spawn
+    lock = CutoverLock(tmp_path)
+    with lock:
+        result = orch.run(health_timeout=1, held_lock=lock)
+        assert lock.held
+    assert not result.ok and not result.committed and not result.retirement_pending
+    assert not result.rolled_back and not handle.terminated and promoted == []
+    assert "selected predecessor differs" in result.error
+    assert pending == {"reservation": "caller-owned"}
+    assert routing.routing_table_path(tmp_path).read_bytes() == before
+    assert routing.publication_witness(tmp_path, deadline=time.monotonic() + 5) == witness
+    assert breadcrumb.read_breadcrumb(tmp_path) is None
+
+
+def test_rollback_when_new_unhealthy(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry: dict = {}
+    # 9290 is NOT in healthy_ports -> health probe never passes.
+    orch, handle = _make(
+        tmp_path, healthy_ports={9281}, registry=registry,
+        port=9290,
+    )
+    res = orch.run(health_timeout=0.1, drain_timeout=1, poll=0.01)
+    assert res.ok is False
+    assert res.rolled_back is True
+    assert handle.terminated is True
+    # Route never moved off the old daemon.
+    assert routing.read_table(tmp_path)["active"]["port"] == 9281
+    # We never drained the old daemon (only health/undrain during rollback).
+    old_client = registry.get("http://127.0.0.1:9281")
+    if old_client is not None:
+        assert not any(c.startswith("drain(") for c in old_client.calls)
+    # #5195: the rolled-back breadcrumb still names the passive's own pid, so
+    # a caller that also wants reap_abandoned_passive's backstop can find it
+    # even though _rollback already terminated it in-process here.
+    record = breadcrumb.read_breadcrumb(tmp_path)
+    assert record is not None
+    assert record["new_pid"] == handle.pid
+
+
+def test_breadcrumb_records_new_pid_immediately_after_spawn(
+    tmp_path: Path, monkeypatch,
+):
+    """#5195: if the orchestrator process dies right after spawn_passive
+    returns (before the health gate even starts), the breadcrumb must already
+    carry the passive's pid -- not just the port -- so a later
+    reap_abandoned_passive pass can find and retire it."""
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    registry: dict = {}
+    seen_mid_flight: dict = {}
+
+    handle = FakeHandle(pid=9999)
+
+    def spawn_passive(port):
+        return handle
+
+    def health_check(host, port):
+        # Capture the breadcrumb the instant the health gate is consulted --
+        # simulates a crash immediately after spawn, before health passes.
+        seen_mid_flight["record"] = breadcrumb.read_breadcrumb(tmp_path)
+        return False
+
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=spawn_passive,
+        health_check=health_check,
+        make_client=lambda base_url: registry.setdefault(
+            base_url, FakeClient(base_url, registry)
+        ),
+        pick_free_port=lambda: 9290,
+        sleep=lambda _s: None,
+        clock=_fake_clock(),
+    )
+    orch.run(health_timeout=0.05, drain_timeout=1, poll=0.01)
+    record = seen_mid_flight["record"]
+    assert record is not None
+    assert record["new_pid"] == 9999
+    assert record["state"] == "started"
+
+
+# -- drain times out, no force -> rollback (route restored) ------------------
+
+
+def test_rollback_when_drain_incomplete(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry: dict = {}
+    incomplete = {"drained": False, "clean": False, "forced": False,
+                  "busy_sessions": ["s1"]}
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290, 9281}, registry=registry,
+        port=9290, drain_result=incomplete,
+    )
+    res = orch.run(health_timeout=1, drain_timeout=0.1)
+    assert res.ok is False
+    assert res.committed is False
+    assert res.rolled_back is True
+    assert handle.terminated is True
+    old_client = registry["http://127.0.0.1:9281"]
+    assert "shutdown" not in old_client.calls  # never retired the old daemon
+    assert "undrain" in old_client.calls        # drain gate released on rollback
+    # Route restored to the old daemon.
+    assert routing.read_table(tmp_path)["active"]["port"] == 9281
+
+
+# -- drain times out WITH force -> proceeds ----------------------------------
+
+
+def test_force_proceeds_through_incomplete_drain(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry: dict = {}
+    forced = {"drained": True, "clean": False, "forced": True,
+              "busy_sessions": ["s1"]}
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290, 9281}, registry=registry,
+        port=9290, drain_result=forced,
+    )
+    res = orch.run(health_timeout=1, drain_timeout=0.1, force=True)
+    assert res.ok is True
+    assert res.committed is True
+    assert "shutdown" in registry["http://127.0.0.1:9281"].calls
+    assert routing.read_table(tmp_path)["active"]["port"] == 9290
+
+
+# -- cold start: no prior active daemon --------------------------------------
+
+
+def test_cold_start_no_old_daemon(tmp_path: Path):
+    registry: dict = {}
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry=registry,
+        port=9290,
+    )
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is True
+    assert res.committed is True
+    assert res.old_endpoint is None
+    assert routing.read_table(tmp_path)["active"]["port"] == 9290
+
+
+def test_base_url_brackets_ipv6_bind(tmp_path: Path):
+    """Regression test: an orchestrator bound to a wildcard IPv6 address
+    (client_host "::1") must bracket it when forming the client base URL --
+    unbracketed ("http://::1:1234") is not a valid URL and breaks
+    make_client()/urlparse on the host's own colons."""
+    orch = CutoverOrchestrator(
+        tmp_path, bind="::", version="1.0.0",
+        spawn_passive=lambda p: FakeHandle(),
+        health_check=lambda host, p: True,
+        make_client=lambda base_url: base_url,
+        pick_free_port=lambda: 9290,
+        sleep=lambda _s: None,
+        clock=_fake_clock(),
+    )
+    assert orch._base_url(9290) == "http://[::1]:9290"
+
+
+# -- drain RAISES after the flip, old daemon now dead -> commit forward -------
+
+
+def test_commit_forward_when_old_dies_during_drain(tmp_path: Path, monkeypatch):
+    """If the old daemon becomes unreachable after the route flips, rollback must
+    NOT kill the healthy new daemon (that would strand all clients). It commits
+    forward to the new daemon instead."""
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry: dict = {}
+
+    # old (9281) is healthy at spawn/flip time but DEAD by rollback time.
+    state = {"old_alive": True}
+
+    def health_check(host, p):
+        if p == 9281:
+            return state["old_alive"]
+        return p == 9290
+
+    class RaisingClient(FakeClient):
+        def drain(self, *, timeout, poll, force):
+            self.calls.append("drain")
+            state["old_alive"] = False  # old crashes mid-drain
+            raise ConnectionError("old daemon gone")
+
+    def make_client(base_url):
+        if base_url.endswith(":9281"):
+            return registry.get(base_url) or RaisingClient(base_url, registry)
+        return registry.get(base_url) or FakeClient(base_url, registry)
+
+    handle = FakeHandle()
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=lambda p: handle,
+        health_check=health_check, make_client=make_client,
+        pick_free_port=lambda: 9290, sleep=lambda _s: None, clock=_fake_clock(),
+    )
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is True
+    assert res.committed is True
+    assert res.rolled_back is False
+    assert handle.terminated is False  # the healthy new daemon was NOT killed
+    # Route stays on the new daemon.
+    assert routing.read_table(tmp_path)["active"]["port"] == 9290
+
+
+# -- drain RAISES but old still alive -> rollback restores old ---------------
+
+
+def test_rollback_to_old_when_old_alive_and_drain_raises(tmp_path: Path,
+                                                         monkeypatch):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    registry: dict = {}
+
+    class RaisingClient(FakeClient):
+        def drain(self, *, timeout, poll, force):
+            self.calls.append("drain")
+            raise ConnectionError("transient blip")
+
+    def health_check(host, p):
+        return p in (9281, 9290)  # old stays alive
+
+    def make_client(base_url):
+        if base_url.endswith(":9281"):
+            return registry.get(base_url) or RaisingClient(base_url, registry)
+        return registry.get(base_url) or FakeClient(base_url, registry)
+
+    handle = FakeHandle()
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=lambda p: handle,
+        health_check=health_check, make_client=make_client,
+        pick_free_port=lambda: 9290, sleep=lambda _s: None, clock=_fake_clock(),
+    )
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is False
+    assert res.rolled_back is True
+    assert handle.terminated is True  # new daemon torn down
+    # Route restored to the old (still-alive) daemon.
+    assert routing.read_table(tmp_path)["active"]["port"] == 9281
+
+
+# -- cutover-wide serialization (effort agent-bridge-unified-zdd-cutover,
+# Phase 2: two concurrent invocations must never race the same breadcrumb/
+# routing state) -------------------------------------------------------------
+
+
+def test_run_refuses_once_the_wait_budget_is_exhausted(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+
+    held = CutoverLock(tmp_path)
+    held.acquire()
+    try:
+        # A small explicit lock_timeout keeps this test fast; run() still
+        # *waits* (does not refuse instantly) -- see
+        # test_run_waits_for_a_contended_lock_then_succeeds for the case
+        # where the holder releases before the budget is exhausted.
+        res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=0.3)
+    finally:
+        held.release()
+
+    assert res.ok is False
+    assert res.rolled_back is False
+    assert res.committed is False
+    assert "already in progress" in (res.error or "")
+    # Refused before ever touching the routing table.
+    assert routing.read_active_endpoint(tmp_path) is None
+
+
+def test_run_waits_for_a_contended_lock_then_succeeds(tmp_path: Path, monkeypatch):
+    """A legitimate back-to-back trigger (a fast second update superseding a
+    first still in flight) must succeed once the first releases the lock --
+    not be flatly refused. This is the exact shape of
+    worktree-manager's mux-daemon-cutover convergence flow."""
+    import threading
+    from zdd.cutover_lock import CutoverLock, CutoverLockedError
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+
+    held = CutoverLock(tmp_path)
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def hold_until_contention() -> None:
+        with held:
+            acquired.set()
+            assert release.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_until_contention)
+    holder.start()
+    acquire = CutoverLock._try_acquire
+
+    def observe_contention(lease) -> None:
+        try:
+            acquire(lease)
+        except CutoverLockedError:
+            release.set()
+            raise
+
+    monkeypatch.setattr(CutoverLock, "_try_acquire", observe_contention)
+    try:
+        assert acquired.wait(timeout=2)
+        res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=5.0)
+        assert res.ok is True
+    finally:
+        release.set()
+        holder.join(timeout=2)
+    assert not holder.is_alive()
+
+
+def test_run_releases_lock_after_completion(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock, lock_path
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is True
+
+    # The lock is free again -- a second cutover attempt can proceed.
+    contender = CutoverLock(tmp_path)
+    contender.acquire()
+    try:
+        assert contender.held
+        assert lock_path(tmp_path).exists()
+    finally:
+        contender.release()

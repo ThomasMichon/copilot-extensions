@@ -238,7 +238,7 @@ implementation of every recommendation or takeover of another participant's work
 - [x] Diff `New-SignedVenv` / `Ensure-Uv` / `Invoke-UvVenvResilient` /
       `Invoke-UvPipInstallResilient` / `Invoke-NativeCapture` /
       `Test-IsSreModuleMismatch` / `Test-IsVenvCorruption` / binstub-writing /
-      deploy-manifest-writing / scheduled-task functions across all ~13
+      deploy-manifest-writing / scheduled-task functions across all ~13 then-current
       runtime plugins' canonical installer entrypoint — `install.ps1` where it
       exists, else `init.ps1` (`agent-containers`, `agent-mcp`,
       `agent-machines`) — PowerShell first; `.sh` mirrors (`install.sh`/

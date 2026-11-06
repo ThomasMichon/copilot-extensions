@@ -39,6 +39,50 @@ def write(root, values):
     (root / ".agent-vault.json").write_text(json.dumps(values), encoding="utf-8")
 
 
+def test_cli_missing_repository_is_actionable_without_traceback(monkeypatch, capsys):
+    from configuration_context import RepositoryContextRequired
+
+    from agent_vault import cli
+
+    def missing():
+        raise RepositoryContextRequired()
+
+    monkeypatch.setattr(cli, "ensure_service", missing)
+    assert cli.main(["unlock"]) == 3
+    error = capsys.readouterr().err
+    assert "repository context is missing" in error
+    assert "<repo> vault unlock" in error
+    assert "Traceback" not in error
+
+
+def test_payload_reader_reports_missing_repository_without_private_error_text(
+    tmp_path, monkeypatch, capsys,
+):
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from configuration_context import RepositoryContextRequired
+
+    script = Path(__file__).parents[1] / "scripts" / "runtime-activation.py"
+    spec = importlib.util.spec_from_file_location("vault_activation_context_test", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(sys, "argv", [str(script), "--cwd", str(tmp_path)])
+
+    def missing(cwd):
+        raise RepositoryContextRequired()
+
+    monkeypatch.setattr(configuration, "runtime_enabled", missing)
+    assert module.main() == 3
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "failed"
+    assert result["reason"] == "repository-context-missing"
+    assert "<repo> vault unlock" in result["detail"]
+    assert "Traceback" not in result["detail"]
+
+
 def test_runtime_activation_uses_existing_qualified_layers(tmp_path, monkeypatch):
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     assert configuration.runtime_enabled(str(base)) is False
@@ -124,6 +168,215 @@ def test_native_repository_database_path_retains_declaring_owner(tmp_path, monke
     result = config.resolve_context(str(base), strict=True)
     assert result.kpdb == str(base / "native.kdbx")
     assert result.sources["kpdb"] == "repo"
+
+
+def test_native_project_scope_preserves_database_expansion(tmp_path, monkeypatch):
+    from agent_vault.invocation import use_configuration_root
+
+    base, _knowledge, _local, _global_path, _report = setup(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    expected = str(tmp_path / "${VAULT_TEST_LITERAL}" / "chosen.kdbx")
+    monkeypatch.setenv("VAULT_TEST_DATABASE", "${VAULT_TEST_LITERAL}/chosen.kdbx")
+    monkeypatch.setenv("VAULT_TEST_LITERAL", "must-not-expand-recursively")
+    monkeypatch.setenv("KPDB", "${VAULT_TEST_DATABASE}")
+    with use_configuration_root(str(base)):
+        result = config.resolve_context(strict=True)
+    assert result.kpdb == expected
+    assert result.sources["kpdb"] == "env"
+
+
+def test_native_project_scope_selects_repo_without_changing_cwd_or_native_paths(
+    tmp_path, monkeypatch, capsys,
+):
+    from agent_vault import cli
+
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    write(home, {"group": "caller", "kpdb": "caller.kdbx"})
+    write(project, {"group": "selected", "enabled": True})
+    (home / "native.json").write_text(json.dumps({"kpdb": "machine.kdbx"}), encoding="utf-8")
+    monkeypatch.chdir(home)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", "native.json")
+    monkeypatch.delenv("KPDB", raising=False)
+    monkeypatch.delenv("VAULT_GROUP", raising=False)
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    monkeypatch.setattr(config, "_ext_config", lambda cwd: {})
+
+    assert cli.main(["--configuration-root", str(project), "which", "--json"]) == 0
+    selected = json.loads(capsys.readouterr().out)
+    assert selected["group"] == "selected"
+    assert selected["kpdb"] == str(home / "machine.kdbx")
+    assert config.os.getcwd() == str(home)
+    assert config.os.environ["AGENT_VAULT_CONFIG"] == "native.json"
+    assert cli.main(["which", "--json"]) == 0
+    previous = json.loads(capsys.readouterr().out)
+    assert previous["group"] == "caller"
+    assert previous["kpdb"] == str(home / "caller.kdbx")
+
+
+@pytest.mark.parametrize("already_unlocked", [False, True])
+def test_native_project_unlock_tags_real_requests_with_selected_database(
+    tmp_path, monkeypatch, capsys, already_unlocked,
+):
+    from agent_vault import cli, extensions
+
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    write(home, {"enabled": False, "kpdb": "wrong.kdbx"})
+    write(project, {"enabled": True, "kpdb": "selected.kdbx"})
+    monkeypatch.chdir(home)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent-native.json"))
+    monkeypatch.setenv("AGENT_VAULT_HOST", "127.0.0.1")
+    for name in ("KPDB", "AGENT_VAULT", "VAULT_GROUP", "AGENT_VAULT_PINNED_CONTEXT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    monkeypatch.setattr(config, "_ext_config", lambda cwd: {})
+    monkeypatch.setattr(extensions, "get_registry", lambda: extensions.ExtensionRegistry())
+    monkeypatch.setattr(cli, "_discover_endpoint", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        cli, "gui_prompt_password", lambda *args: pytest.fail("unexpected password prompt"),
+    )
+    expected = str(project / "selected.kdbx")
+    requests = []
+    unlocked = already_unlocked
+
+    def transport(request, *args, **kwargs):
+        nonlocal unlocked
+        requests.append(dict(request))
+        if request["action"] == "unlock":
+            unlocked = True
+        return {
+            "ok": True, "cli": "unlocked" if unlocked else "locked",
+            "unlocked_vaults": [expected] if unlocked else [],
+        }
+
+    monkeypatch.setattr(cli, "_send_socket", transport)
+    monkeypatch.setattr(cli, "_send_tcp", transport)
+    assert cli.main(["--configuration-root", str(project), "unlock"]) == 0
+    assert "Vault available" in capsys.readouterr().out
+    assert all(request["kpdb"] == expected for request in requests)
+    assert any(request["action"] == "unlock" for request in requests) is not already_unlocked
+    assert config.os.getcwd() == str(home)
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--configuration-root"],
+    ["--configuration-root", "relative", "unlock"],
+    ["--configuration-root", "one", "--configuration-root", "two", "unlock"],
+])
+def test_native_project_scope_rejects_invalid_requests_before_dispatch(
+    monkeypatch, arguments,
+):
+    from agent_vault import cli
+
+    monkeypatch.setattr(cli, "_main", lambda argv: pytest.fail("invalid scope reached dispatch"))
+    with pytest.raises(SystemExit) as error:
+        cli.main(arguments)
+    assert error.value.code == 2
+
+
+def test_native_invocation_contract_is_read_only(monkeypatch, capsys):
+    from agent_vault import cli
+
+    monkeypatch.setattr(cli, "_main", lambda argv: pytest.fail("metadata reached dispatch"))
+    assert cli.main(["invocation-contract", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "schema": "agent-vault.invocation", "version": 1,
+        "capabilities": ["configuration-root-v1"],
+    }
+
+
+@pytest.mark.parametrize("router_owned", [False, True])
+def test_native_project_scope_consumes_only_router_owned_provisioning_guard(
+    tmp_path, monkeypatch, capsys, router_owned,
+):
+    from agent_vault import cli
+
+    monkeypatch.setenv("AGENT_VAULT_NO_SELFPROVISION", "1")
+    monkeypatch.delenv("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", raising=False)
+    if router_owned:
+        monkeypatch.setenv("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", "1")
+    assert cli.main(
+        ["--configuration-root", str(tmp_path), "invocation-contract", "--json"],
+    ) == 0
+    capsys.readouterr()
+    assert ("AGENT_VAULT_NO_SELFPROVISION" in config.os.environ) is not router_owned
+    assert "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD" not in config.os.environ
+
+
+def test_native_project_scope_preserves_literal_argument_after_separator(tmp_path):
+    from agent_vault.invocation import parse_invocation
+
+    root, remaining = parse_invocation(
+        ["--configuration-root", str(tmp_path), "search", "--", "--configuration-root"],
+    )
+    assert root == str(tmp_path)
+    assert remaining == ["search", "--", "--configuration-root"]
+
+
+def test_native_project_scope_composes_with_resident_source(tmp_path, monkeypatch):
+    from agent_vault import configuration_scope
+    from agent_vault.invocation import use_configuration_root
+
+    resident = tmp_path / "resident"
+    resident.mkdir()
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    config.bind_service_configuration(str(resident))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", "native.json")
+    assert config.configuration_root() == str(tmp_path / "resident")
+    with use_configuration_root(str(tmp_path / "project")):
+        assert config.configuration_root() == str(tmp_path / "project")
+        assert config.configuration_root(str(tmp_path / "explicit")) == str(tmp_path / "explicit")
+        assert config._global_config_path() == tmp_path / "native.json"
+    assert config.configuration_root() == str(tmp_path / "resident")
+
+
+@pytest.mark.parametrize("resident", [False, True])
+def test_native_project_scope_preserves_extension_default_and_resident_selection(
+    tmp_path, monkeypatch, resident,
+):
+    from pathlib import Path
+
+    from agent_vault import configuration_scope, extensions
+    from agent_vault.invocation import use_configuration_root
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent.json"))
+    for name in ("AGENT_VAULT", "KPDB", "VAULT_GROUP", "AGENT_VAULT_PORT", "AGENT_VAULT_PINNED_CONTEXT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    expected_hint = None
+    if resident:
+        selected = tmp_path / "resident"
+        selected.mkdir()
+        config.bind_service_configuration(str(selected))
+        expected_hint = str(selected)
+    seen = []
+
+    def contribute(cwd):
+        seen.append(cwd)
+        name = Path(cwd).name if cwd is not None else "default"
+        return {"kpdb": str(tmp_path / f"{name}.kdbx"), "group": name}
+
+    registry = extensions.ExtensionRegistry()
+    registry.register_config_source(contribute)
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
+    expected_name = "resident" if resident else "default"
+    before = config.resolve_context(strict=True)
+    with use_configuration_root(str(project)):
+        scoped = config.resolve_context(strict=True)
+    after = config.resolve_context(strict=True)
+    assert before.kpdb == after.kpdb == str(tmp_path / f"{expected_name}.kdbx")
+    assert before.group == after.group == expected_name
+    assert scoped.kpdb == str(tmp_path / "project.kdbx")
+    assert scoped.group == "project"
+    assert seen == [expected_hint, str(project), expected_hint]
 
 
 def test_actual_absent_owner_keeps_unbound_vault_defaults_without_open_or_bootstrap(tmp_path, monkeypatch):

@@ -13,6 +13,7 @@ import time
 from unittest.mock import AsyncMock
 
 import pytest
+from agent_procutil._interpreter import physical_executable
 from zdd.diagnostics import process_start_time
 
 from agent_bridge import session_manager as core
@@ -72,7 +73,8 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     audit = tmp_path / "received.jsonl"
     peer = Path(__file__).parent / "fixtures" / "acquisition_launch_peer.py"
     handles, captures = [], []
-    from agent_bridge.session_host import launcher, spawner
+    from agent_bridge.session_host import spawner
+    from agent_remote_driver.session_host import launcher
 
     original_launch = spawner.launch_session_host
     original_tail_capture = launcher._CrashTailCapture
@@ -88,8 +90,10 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
         return handle
 
     async def resolve(target, **_kwargs):
+        interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+        assert interpreter is not None
         return (
-            [sys.executable, "-u", str(peer), str(rig.db.db_path), str(audit), "delivery-a", mode],
+            [interpreter, "-u", str(peer), str(rig.db.db_path), str(audit), "delivery-a", mode],
             target.cwd, dict(target.env),
         )
 
@@ -246,6 +250,11 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
             else [f"session/{kind}", "session/prompt"]
         )
         assert len(handles) == 1
+        host_argv = handles[0].proc.args
+        assert host_argv[1:3] == ["-I", "-S"]
+        assert any(Path(arg).suffix == ".pyz" for arg in host_argv)
+        assert "agent_bridge.session_host" not in host_argv
+        assert json.loads(Path(handles[0].state_file).read_text())["lifetime_policy"] == "acp"
         assert {item["pid"] for item in received} == {handles[0].child_pid}
         row = rig.db.execute_read("SELECT * FROM acquisition_attempts")[0]
         assert {item["handoff"] for item in received} == {json.loads(row["launch_handoff_json"])["id"]}

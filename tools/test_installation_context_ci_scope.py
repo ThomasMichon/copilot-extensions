@@ -805,6 +805,23 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
 
 
+def test_chat_floor_matrix_keeps_python310_tests_with_python311_runner_bootstrap():
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for key in ("chat-construction-linux", "chat-construction-windows"):
+        job = workflow["jobs"][key]
+        assert job["strategy"]["matrix"]["python"] == ["3.10", "3.11"]
+        steps = job["steps"]
+        selected = next(step for step in steps if step.get("id") == "chat-python")
+        bootstrap = next(step for step in steps if step.get("name") == "Python 3.11 runner bootstrap")
+        acceptance = next(step for step in steps if step.get("name") == "Independent artifacts and native Chat acceptance")
+        assert selected["with"]["python-version"] == "${{ matrix.python }}"
+        assert bootstrap["with"]["python-version"] == "3.11"
+        assert steps.index(selected) < steps.index(bootstrap) < steps.index(acceptance)
+        assert acceptance["env"]["UV_PYTHON"] == "${{ steps.chat-python.outputs.python-path }}"
+
+
 def test_constructor_groups_and_mutations_move_to_existing_lanes_without_dropping_cache_scope():
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

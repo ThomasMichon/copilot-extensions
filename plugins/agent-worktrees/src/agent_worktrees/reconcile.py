@@ -1163,11 +1163,11 @@ def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
             _, root = runtime_installer_environment(name, pdir)
             record = _runtime_running_record(name, root)
             running = str(record["version"]) if record else None
-            drift = runtime_identity.generation_drift(
-                _read_json(root / "deploy-manifest.json"), record,
+            drift = runtime_identity.lag_evidence(
+                pdir, root, running, payload, _read_json(root / "deploy-manifest.json"),
+                record, _versions_equal,
             )
-            if (running is not None and payload is not None
-                    and (not _versions_equal(running, payload) or drift)):
+            if drift is not None:
                 lags.append({
                     "service": name,
                     "running": running,

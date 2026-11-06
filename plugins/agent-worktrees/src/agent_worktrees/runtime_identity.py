@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 from pathlib import Path
 
 from ._build_info import BUILD_INFO
@@ -17,6 +18,8 @@ def drift_description(entry: dict) -> str:
     if entry.get("running_generation"):
         running = f"build {entry['running_generation']} ({entry.get('running_slot') or 'unknown slot'})"
         installed = f"{entry['installed_generation']} ({entry.get('installed_slot') or 'unknown slot'})"
+    elif entry.get("installed_slot"):
+        running, installed = entry.get("running_slot") or entry["running"], entry["installed_slot"]
     else:
         running, installed = entry["running"], entry["payload"]
     return (
@@ -53,6 +56,36 @@ def generation_drift(deployed: dict | None, running: dict | None) -> dict:
         "running_slot": running.get("runtime_slot"),
         "installed_slot": deployed.get("runtime_slot"),
     }
+
+
+def lag_evidence(payload_dir: Path, root: Path, running: str | None, payload: str | None,
+                 deployed: dict | None, record: dict | None, versions_equal) -> dict | None:
+    """Keep known package/build drift even if optional slot resolution fails."""
+    if running is None or payload is None:
+        return None
+    from .reconcile_freshness import _resolved_selection, runtime_package_version
+
+    package = runtime_package_version(running)
+    drift = generation_drift(deployed, record)
+    if not versions_equal(package, payload) or drift:
+        return drift
+    recorded_slot = record.get("runtime_slot") if isinstance(record, dict) else None
+    if isinstance(recorded_slot, str) and versions_equal(runtime_package_version(recorded_slot), package):
+        observed = recorded_slot
+    elif package != running:
+        observed = running
+    else:
+        return None
+    try:
+        selected = _resolved_selection(payload_dir, root)
+    except (OSError, TypeError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return None
+    if (
+        selected and not versions_equal(observed, selected)
+        and versions_equal(package, runtime_package_version(selected))
+    ):
+        return {"running_slot": observed, "installed_slot": selected}
+    return None
 
 
 def slot_generation(slot: Path) -> str | None:

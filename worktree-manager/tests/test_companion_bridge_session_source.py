@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import cProfile
 from dataclasses import replace
 import importlib
-import io
 import json
 import os
 from pathlib import Path
-import pstats
 import select
 import socket
 import sys
 from threading import Event, Lock, Thread
-import time
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlsplit
 
@@ -27,6 +23,7 @@ from worktree_manager import mux_companion as companion
 from worktree_manager.companion_bridge_session_source import BridgeSessionSource
 from worktree_manager.companion_timeline_contract import Availability
 from worktree_manager.companion_worktree_source import WorktreeTimelineSource
+from _companion_membership_diagnostics import membership_seed
 from test_agenda_end_to_end import ROOT, SOURCE_PATHS
 from test_companion_agenda_live import current_data, until
 from test_companion_bridge_codec import OWNER, member
@@ -38,28 +35,6 @@ pytestmark = [
 ]
 
 
-def membership_seed(manager, owner, source_for, report=None):
-    """Optionally profile one unchanged seed; never retry or replace its result."""
-    if report is None:
-        return source_for(manager, owner)
-    profile, output = cProfile.Profile(), io.StringIO()
-    wall, cpu = time.perf_counter(), time.thread_time()
-    outcome = "error"
-    try:
-        result = profile.runcall(source_for, manager, owner)
-        outcome = "seeded"
-        return result
-    finally:
-        wall_ms = (time.perf_counter() - wall) * 1000
-        cpu_ms = (time.thread_time() - cpu) * 1000
-        stats = pstats.Stats(profile, stream=output).strip_dirs().sort_stats("cumulative")
-        stats.print_stats(25)
-        report(
-            f"membership-seed-profile outcome={outcome} "
-            f"wall_ms={wall_ms:.3f} thread_ms={cpu_ms:.3f}\n{output.getvalue()}"
-        )
-
-
 @pytest.fixture
 def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
     paths = [ROOT / "plugins/agent-bridge/src", *SOURCE_PATHS]
@@ -68,6 +43,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytes
     db_module = importlib.import_module("agent_bridge.db")
     events = importlib.import_module("agent_bridge.events")
     membership = importlib.import_module("agent_bridge.owner_membership")
+    membership_reader = importlib.import_module("agent_bridge.owner_membership_read")
     wire = importlib.import_module("agent_bridge.session_observation_contract")
     routes = importlib.import_module("agent_bridge.routes.session_observations")
     membership_routes = importlib.import_module("agent_bridge.routes.owner_membership")
@@ -94,6 +70,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytes
     owner = membership_seed(
         manager, OWNER, membership.source_for,
         report if os.environ.get("COMPANION_MEMBERSHIP_PROFILE") == "1" else None,
+        budget_module=membership_reader,
     )
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))

@@ -2,6 +2,58 @@
 
 [Configuration and generated-state reference](docs/configuration.md)
 
+## Independent Session Host application
+
+The Python application is separate from plugin activation. The canonical
+implementation is the [shared core distribution](../../libs/copilot-driver-core/README.md),
+consumed by both this application connector and Bridge. Its explicit
+headless entrypoint owns one child and exposes the reattachable, sequence/ack
+ACP byte-stream broker:
+
+```powershell
+agent-remote-driver --support-json
+agent-remote-driver --cwd <execution-workspace> --state-file <private-state-file> -- copilot --acp --stdio
+```
+
+The executing entrypoint advertises its support; package versions are not
+capability evidence. This headless entrypoint supports TCP frames and optional
+[`acp.v1`](docs/session-host-websocket.md) WebSocket access to that same broker
+with `--ws-port 0`. Its compact dependency-free receiving archive supports TCP
+only; the ordinary locked application includes the WS distribution.
+Ordinary ACP launches always require the private state record's `nonce` for
+TCP attachment; it is generated when omitted and shared with the WS adapter.
+The Python launch helper returns it on `HostHandle` without including it in
+the handle's diagnostic representation. Only explicit legacy execution retains
+optional authentication.
+It does not advertise headed execution. Child process readiness
+is not native session binding or prompt acceptance.
+
+Local launches export the core into their retained runtime directory
+and execute it with a physical base interpreter, independently of the caller's
+venv. The same core can export a compact receiving zipapp without Bridge,
+Worktrees or Manager. The application uses the existing wheel/application-project
+build owner; it does not introduce a global service or start on plugin enablement.
+
+Original keyed Bridge launches use a private, launch-scoped live admission
+channel. The retained Host asks its original caller to recheck the same operation
+journal and exact execution context before child creation; no receipt replaces
+that check, and neither Bridge nor its venv enters the Host's executing closure.
+The bounded channel can finish original late readiness after a frontend timeout.
+Caller loss, changed custody or refusal prevents child creation and does not
+permit another launch.
+
+New ACP Hosts survive detach and caller loss. They exit with their child or
+an explicit caller stop. Automatic idle retirement is unavailable until complete
+structured pending-work evidence is qualified; a legacy boolean status does
+not establish an empty task, agent or schedule set. Explicit legacy receiving
+adapters preserve the old disconnect contract and refuse unsupported original
+local startup custody. No installed or retained session is migrated.
+The legacy receiving entrypoint advertises only legacy lifetime and TCP.
+An explicit ACP lifetime or WebSocket request refuses before launch rather
+than being silently reinterpreted as legacy execution.
+
+## SDK extension
+
 > A user-global Copilot CLI SDK extension that gives any `copilot` session
 > baseline drivability -- attach to its live event stream, send/steer it, and
 > abort its current turn -- from the moment it launches, with no dependency on

@@ -1593,6 +1593,11 @@ def cmd_vault_remove(args):
 
 
 def main(argv: list[str] | None = None):
+    from .invocation import invoke_cli
+    return invoke_cli(_main, sys.argv[1:] if argv is None else argv)
+
+
+def _main(argv: list[str] | None = None):
     import argparse
 
     class _LazyVersionAction(argparse.Action):
@@ -1621,6 +1626,8 @@ def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
         prog="agent-vault",
         description="Local KeePassXC-backed credential CLI",
+        epilog="Global context option: --configuration-root DIRECTORY selects repository "
+               "configuration without changing the caller directory.",
     )
     parser.add_argument(
         "--version",
@@ -1861,7 +1868,17 @@ def main(argv: list[str] | None = None):
         p.print_help()
         return 1
 
-    return args.func(args)
+    from configuration_context import RepositoryContextRequired
+
+    try:
+        return args.func(args)
+    except RepositoryContextRequired:
+        print(
+            "Error: Agent Vault repository context is missing. Run from an adopted "
+            "repository or use '<repo> vault unlock' from any directory.",
+            file=sys.stderr,
+        )
+        return 3
 
 
 if __name__ == "__main__":
