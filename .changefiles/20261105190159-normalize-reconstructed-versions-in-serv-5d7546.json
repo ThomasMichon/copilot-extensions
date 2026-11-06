@@ -1,0 +1,9 @@
+{
+  "comment": "Normalize reconstructed versions in serving diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

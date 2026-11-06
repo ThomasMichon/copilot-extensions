@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,6 +17,15 @@ pytestmark = pytest.mark.guard
 PACKAGE = "0.4.1-dev3"
 FIRST = f"{PACKAGE}+source.{'f' * 40}.{'a' * 16}"
 SECOND = f"{PACKAGE}+source.{'a' * 40}.{'b' * 16}"
+REPAIR_A = f"{PACKAGE}+repair.{'a' * 32}"
+REPAIR_B = f"{PACKAGE}+repair.{'b' * 32}"
+
+
+def _native(path: Path) -> Path:
+    value = str(path)
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return path
+    return Path("\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value)
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -23,6 +33,7 @@ SECOND = f"{PACKAGE}+source.{'a' * 40}.{'b' * 16}"
 def test_source_slot_advertises_build_without_changing_distribution_version(
     tmp_path: Path, nested: bool, suffix: str,
 ) -> None:
+    tmp_path = _native(tmp_path)
     generation = FIRST + suffix
     slot = tmp_path / "versions" / generation
     prefix = slot / ".venv" if nested else slot
@@ -42,6 +53,32 @@ def test_source_tree_or_mismatched_package_cannot_claim_slot_build(tmp_path: Pat
     assert source_build.effective_runtime_version(
         "9.0.0", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
     ) == "9.0.0"
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_reconstructed_slot_advertises_its_distinct_generation(tmp_path: Path, nested: bool) -> None:
+    slot = tmp_path / "versions" / REPAIR_A
+    prefix = slot / ".venv" if nested else slot
+    module = prefix / "lib" / "agent_bridge" / "source_build.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("# installed\n", encoding="utf-8")
+    assert source_build.effective_runtime_version(PACKAGE, prefix=prefix, module_path=module) == REPAIR_A
+    assert source_build.effective_runtime_version(
+        PACKAGE, prefix=prefix, module_path=tmp_path / "foreign.py",
+    ) == PACKAGE
+    assert source_build.effective_runtime_version("9.0.0", prefix=prefix, module_path=module) == "9.0.0"
+
+
+def test_reconstructed_slot_preserves_a_package_local_version(tmp_path: Path) -> None:
+    package = "0.4.1.dev3+vendor.007"
+    generation = package + ".repair." + "a" * 32
+    prefix = tmp_path / "versions" / generation
+    module = prefix / "lib" / "agent_bridge" / "source_build.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("# installed\n", encoding="utf-8")
+    assert source_build.effective_runtime_version(
+        package, prefix=prefix, module_path=module,
+    ) == generation
 
 
 def test_numeric_hash_components_keep_their_opaque_leading_zeroes(tmp_path: Path) -> None:
@@ -70,6 +107,13 @@ def test_ordinary_environment_keeps_package_version(tmp_path: Path, prefix: str)
         ("0.3.0", FIRST, "older"),
         (FIRST, "0.5.0", "older"),
         (FIRST, PACKAGE, "different-source"),
+        (PACKAGE, REPAIR_A, "different-source"),
+        (REPAIR_A, PACKAGE, "different-source"),
+        (REPAIR_A, REPAIR_B, "different-source"),
+        (REPAIR_B, REPAIR_A, "different-source"),
+        (REPAIR_A, REPAIR_A, "current"),
+        (REPAIR_A, "0.5.0", "older"),
+        ("9.0.0", REPAIR_A, "newer"),
         ("1.0.0", "2.0.0", "older"),
         ("2.0.0", "1.0.0", "newer"),
         (FIRST, "0.4.0", "newer"),
@@ -81,14 +125,15 @@ def test_source_hashes_are_not_ordered_as_release_versions(
     assert serving_reconcile.compare_serving_version(running, target) == expected
 
 
+@pytest.mark.parametrize(("running", "target"), [(FIRST, SECOND), (REPAIR_A, REPAIR_B)])
 def test_different_source_probe_requests_cutover_instead_of_false_current(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, running: str, target: str,
 ) -> None:
     @contextmanager
     def observed(_root: Path) -> Iterator[SimpleNamespace]:
-        yield SimpleNamespace(version=FIRST)
+        yield SimpleNamespace(version=running)
 
-    monkeypatch.setattr(agent_bridge, "__version__", SECOND)
+    monkeypatch.setattr(agent_bridge, "__version__", target)
     monkeypatch.setattr(serving_reconcile, "observe_serving", observed)
     with pytest.raises(SystemExit) as stopped:
         serving_reconcile.reconcile_serving(argparse.Namespace(
@@ -97,17 +142,18 @@ def test_different_source_probe_requests_cutover_instead_of_false_current(
     assert stopped.value.code == 10
 
 
+@pytest.mark.parametrize(("old_version", "target"), [(FIRST, SECOND), (REPAIR_A, REPAIR_B)])
 def test_different_source_reconcile_uses_existing_guarded_cutover(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, old_version: str, target: str,
 ) -> None:
-    running = SimpleNamespace(version=FIRST)
+    running = SimpleNamespace(version=old_version)
 
     @contextmanager
     def observed(_root: Path) -> Iterator[SimpleNamespace]:
         yield running
 
     calls = []
-    monkeypatch.setattr(agent_bridge, "__version__", SECOND)
+    monkeypatch.setattr(agent_bridge, "__version__", target)
     monkeypatch.setattr(serving_reconcile, "observe_serving", observed)
     monkeypatch.setattr(venue_cli, "_cmd_deploy", lambda args, *, serving: calls.append(serving))
     serving_reconcile.reconcile_serving(argparse.Namespace(

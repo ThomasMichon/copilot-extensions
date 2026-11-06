@@ -28,7 +28,7 @@ class ServingReconcileError(RuntimeError):
 
 
 def compare_serving_version(running: str, target: str) -> str:
-    from .source_build import is_source_build_version
+    from .source_build import is_repair_build_version, is_source_build_version
 
     try:
         left, right = Version(running), Version(target)
@@ -38,6 +38,7 @@ def compare_serving_version(running: str, target: str) -> str:
         return "current"
     if left.public == right.public and (
         is_source_build_version(target) or is_source_build_version(running)
+        or is_repair_build_version(target) or is_repair_build_version(running)
     ):
         return "different-source"
     return "older" if left < right else "newer"

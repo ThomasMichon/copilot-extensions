@@ -2326,6 +2326,14 @@ def test_running_version_lag_no_false_drift_on_pep440(env, monkeypatch):
     assert reconcile.running_version_lag(env.repo) == []
 
 
+def test_running_version_lag_accepts_current_reconstructed_package(env, monkeypatch):
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9+repair." + "a" * 32)
+    assert reconcile.running_version_lag(env.repo) == []
+
+
 def test_running_version_lag_empty_without_settings(env):
     """No enabled plugins -> empty, never raises."""
     assert reconcile.running_version_lag(env.repo) == []
