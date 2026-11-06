@@ -26,12 +26,12 @@ def reader(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 @pytest.mark.parametrize(
     "elapsed,monotonic,failed",
     [
-        (0.047, 0.062, True),
+        (0.047, 0.062, False),
         (0.075, 0.062, True),
         (0.012, 0.015, False),
     ],
 )
-def test_paired_budget_separates_early_quantized_refusal_from_true_elapsed_work(
+def test_paired_budget_reports_elapsed_and_coarse_ticks_independently(
     reader: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     elapsed: float,
@@ -40,7 +40,7 @@ def test_paired_budget_separates_early_quantized_refusal_from_true_elapsed_work(
 ) -> None:
     clock, samples = [100.0, 10.0], []
     original = reader.ReadBudget
-    monkeypatch.setattr(reader, "time", SimpleNamespace(monotonic=lambda: clock[1]))
+    monkeypatch.setattr(reader, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
     monkeypatch.setattr(
         diagnostic,
         "time",
@@ -51,7 +51,7 @@ def test_paired_budget_separates_early_quantized_refusal_from_true_elapsed_work(
     )
     with diagnostic.paired_budgets(reader, samples):
         budget = reader.ReadBudget()
-        budget.started = 10.0
+        budget.started = 100.0
         clock[:] = [100.0 + elapsed, 10.0 + monotonic]
         if failed:
             with pytest.raises(reader.ObservationError) as caught:

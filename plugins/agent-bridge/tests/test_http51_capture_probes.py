@@ -98,6 +98,8 @@ from test_owner_membership_budget import (
     as test_only_writable_bootstrap_prepares_lookup_indexes,
     test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep
     as test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep,
+    test_private_deadline_uses_precise_elapsed_time_not_coarse_ticks
+    as test_private_deadline_uses_precise_elapsed_time_not_coarse_ticks,
     test_unknown_owner_large_history_has_actual_private_vm_cutoff
     as test_unknown_owner_large_history_has_actual_private_vm_cutoff,
 )
@@ -146,7 +148,9 @@ def _membership_transcript_clock(monkeypatch):
     # Transcript assertions use a virtual reader clock, not a host scheduling guarantee.
     # Separate probes exercise deadline expiry and actual SQLite VM exhaustion.
     budget_type = reader.ReadBudget
-    monkeypatch.setattr(reader, "time", SimpleNamespace(monotonic=lambda: 0.0))
+    monkeypatch.setattr(reader, "time", SimpleNamespace(
+        monotonic=lambda: 0.0, perf_counter=lambda: 0.0,
+    ))
     monkeypatch.setattr(reader, "ReadBudget", lambda: budget_type(started=0.0))
 
 

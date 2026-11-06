@@ -107,17 +107,45 @@ three ways only when no explicit pair or prior selection supplies it:
 Do **not** hardcode or guess a name -- the whole point is that a fork/other
 operator chooses their own.
 
+Before choosing authentication, inspect canonical registration and any supplied
+remote/path. A short name or fallback-discovered checkout does not establish
+the provider. If unresolved, ask once for the existing clone URL or checkout
+path instead of guessing an owner, creating a replacement repo or starting
+another login. Use the resolved Git provider's existing noninteractive access
+check and scoped identity; reuse working credentials without switching the
+machine-global account. Personal issue routing does not select the Git provider.
+
 ### Creating a new knowledge repo (option 3)
 
-Prefer a **private** repo (personal state is sensitive). With `gh`:
+Prefer a **private** repo (personal state is sensitive). For an explicitly
+selected GitHub destination, use `gh`; another provider uses its own supported
+creation flow, not a replacement GitHub repository:
 
 ```
 gh repo create <owner>/<name> --private --clone --description "Personal knowledge repo for <harness>"
 ```
 
 Seed it minimally (a README plus the state trees the harness routes to):
-`efforts/`, `logs/`, and `visions/` (with `.gitkeep`s). Commit + push.
-Knowledge repos are **direct-commit, low-ceremony** -- no PR gate.
+`efforts/`, `logs/`, and `visions/` (with `.gitkeep`s). Before publishing, follow
+the repository and provider policy below; private visibility does not imply
+direct-push permission or an exemption from review.
+
+### Publication policy (new and adopted repositories)
+
+Before any flow updates the local default branch or pushes, resolve the
+repository's contribution policy and effective publication profile, and use the
+owning provider's supported read-only policy inspection where available.
+A default `direct` profile or writable account is not proof of server permission.
+Honor required PRs, reviews and merge authority; do not lower or bypass them
+to finish binding. Missing, unsupported or permission-denied policy evidence
+stays explicitly unknown: preserve local work and resolve that publication
+gate rather than trial-pushing the default branch. This does not block
+independently permitted machine-local binding.
+
+Registration/state-root readiness below does not inspect or prove server
+landing policy. Do not invent a successful preflight result from those fields.
+If a push has already been rejected, retain the commits and use the provider's
+supported PR/recovery flow; do not reset, force-push or switch global accounts.
 
 For an existing/adopted knowledge repo, also inspect its repository-owned
 `.agent-worktrees/config.yaml`. If personal issues should go anywhere other than

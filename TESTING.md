@@ -2718,10 +2718,13 @@ The same optional boundary brackets each original private budget's creation and
 checks with `perf_counter`, reports both elapsed-clock implementations/resolutions,
 and retains at most eight budgets with their last check, unchanged limits and VM
 steps. `elapsed_min_ms`/`elapsed_max_ms` bracket the check's elapsed instant;
-`monotonic_after_ms` is a separately sampled post-check deadline-clock delta.
+`monotonic_after_ms` uses its own monotonic creation sample, independent of the
+clock chosen by the production deadline.
 Instrumentation still counts toward the original deadline. A native Windows
 control compares both clocks around sixteen bounded delayed checks, distinguishing
 an observed early refusal from true elapsed exhaustion or a non-reproduction.
+It also checks the actual production budget's creation against its high-resolution
+elapsed brackets and rejects any refusal proven earlier than the unchanged limit.
 This is a clock hypothesis control, not proof of a historical failure's cause,
 a CPU-clock substitution, a retry, or a production budget change.
 The fixture's state reader also opens its Windows handle with read/write/delete

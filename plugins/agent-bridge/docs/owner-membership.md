@@ -84,7 +84,11 @@ The private capture bounds physical query execution, not just returned rows:
 100,000 SQLite VM steps shared across the capture, a 100-step progress interval
 and a 50 ms cooperative elapsed read deadline, including connection, filesystem,
 query and materialization work. Private connections have zero SQLite
-busy timeout, and native value-length limits where supported. Python
+busy timeout. The deadline uses `time.perf_counter` at creation and every check:
+its high-resolution monotonic elapsed clock includes blocking and scheduling,
+without `time.monotonic`'s coarse CPython 3.12 Windows tick quantization. This is not
+a CPU-time budget and does not exclude time spent waiting. Native
+value-length limits apply where supported. Python
 materialization checks the same budget between bounded records. No schema/index
 preparation occurs, and no canonical progress handler or validator is replaced.
 Source file identity, database authority, serving generation and mutation
@@ -187,7 +191,7 @@ session-qualified owners, malformed JSON and an absent owner under one VM budget
 An old-store control retains bounded failure without read-side preparation and
 verifies ordinary writable reopening preserves records while preparing lookups.
 
-The HTTP-51 capture portfolio expands under its existing owner, family and
-generation; historical captures are not rewritten. Source tests and prepared
+The current HTTP-52 capture portfolio retains its existing owner, family and
+generation; historical HTTP-51 captures are not rewritten. Source tests and prepared
 declarations are not source-bound published evidence, installed capability or
 native-platform qualification.

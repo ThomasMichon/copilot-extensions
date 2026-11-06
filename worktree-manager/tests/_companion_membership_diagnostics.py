@@ -23,6 +23,7 @@ class BudgetSample:
     original_check: Callable[[], None]
     created_before: float
     created_after: float
+    monotonic_started: float
     elapsed_min_ms: float = 0
     elapsed_max_ms: float = 0
     monotonic_after_ms: float = 0
@@ -36,7 +37,7 @@ class BudgetSample:
             after = time.perf_counter()
             self.elapsed_min_ms = (before - self.created_after) * 1000
             self.elapsed_max_ms = (after - self.created_before) * 1000
-            self.monotonic_after_ms = (time.monotonic() - self.budget.started) * 1000
+            self.monotonic_after_ms = (time.monotonic() - self.monotonic_started) * 1000
             self.checks += 1
 
     def evidence(self) -> dict[str, Any]:
@@ -64,10 +65,11 @@ def paired_budgets(
 
     def factory() -> Any:
         before = time.perf_counter()
+        monotonic = time.monotonic()
         budget = budget_type()
         after = time.perf_counter()
         if len(samples) < 8:
-            sample = BudgetSample(budget, budget.check, before, after)
+            sample = BudgetSample(budget, budget.check, before, after, monotonic)
             samples.append(sample)
             budget.check = sample.check
         return budget
