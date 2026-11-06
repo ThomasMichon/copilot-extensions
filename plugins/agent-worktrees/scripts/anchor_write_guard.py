@@ -395,6 +395,7 @@ def shell_may_mutate(command: str, tool: str) -> bool:
     """Classify post-tool invalidation, not permission to write an anchor."""
     pending = [(command, 0)]
     remaining = 128
+    scan_budget = [131072]
     while pending:
         text, depth = pending.pop()
         if depth > 8:
@@ -404,10 +405,19 @@ def shell_may_mutate(command: str, tool: str) -> bool:
             if remaining < 0:
                 return True
             effective = _effective_seg(segment)
-            pending.extend(
-                (child, depth + 1)
-                for child in _shell_command_substitutions(effective, tool)
-            )
+            try:
+                pending.extend(
+                    (child, depth + 1)
+                    for child in _shell_command_substitutions(effective, tool, scan_budget=scan_budget)
+                )
+            except ValueError:
+                return True
+            if tool.lower() in {"powershell", "pwsh"}:
+                assignment = re.match(r"^\s*\$[\w:]+\s*(?:\+?=)\s*(.*)$", effective, re.DOTALL)
+                if assignment and not assignment[1].startswith(("'", '"')):
+                    effective = _effective_seg(assignment[1])
+                    if effective.lstrip().startswith("$"):
+                        return True
             if _WRITE_CMD_START.match(effective) or _literal_write_targets(effective, tool):
                 return True
             if not _GIT_START.match(effective):

@@ -444,7 +444,7 @@ function Invoke-PreparedPostToolRead {
         )
         $nativeBatch = $event.ContainsKey('toolCalls')
         $nativeWrite = $tool -is [string] -and $tool.ToLowerInvariant() -in $writeTools
-        $shellTool = $tool -is [string] -and $tool.ToLowerInvariant() -in @(
+        $shellTool = -not $nativeBatch -and $tool -is [string] -and $tool.ToLowerInvariant() -in @(
             'bash', 'sh', 'shell', 'powershell', 'pwsh', 'cmd', 'run', 'run_command',
             'execute', 'exec', 'terminal'
         )

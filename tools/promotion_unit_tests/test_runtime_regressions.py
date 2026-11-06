@@ -79,6 +79,14 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     pytest.param(";".join(["git status"] * 128), False, id="segment-limit"),
     pytest.param(";".join(["git status"] * 129), True, id="segment-overflow"),
     pytest.param("Write-Output $(" * 9 + "git status" + ")" * 9, True, id="depth-overflow"),
+    pytest.param("sed -n '1,100p' file.py", False, id="read-sed"),
+    pytest.param("sed -n '1,100p' file.py > report.txt", True, id="read-sed-redirect"),
+    pytest.param("sed -i.bak 's/old/new/' file.py", True, id="inplace-sed"),
+    pytest.param("$result = git commit -m test", True, id="assignment"),
+    pytest.param("$null = Set-Content file value", True, id="assignment-write"),
+    pytest.param("$result = 'git commit -m test'", False, id="literal-assignment"),
+    pytest.param('Write-Output "' + "(" * 20000 + '"', False, id="quoted-parentheses"),
+    pytest.param("$(" * 1000, True, id="scan-overflow"),
 ])
 def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
     assert guard.shell_may_mutate(command, "powershell") is mutates

@@ -615,6 +615,8 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "shell-fallback-args", "shell-unknown-args", "shell-pull",
     "shell-old-provider", "shell-wrong-generation", "shell-closed",
     "shell-missing-discovery", "shell-oversized", "shell-no-reply",
+    "shell-assignment", "shell-literal-assignment", "shell-read-sed",
+    "shell-quoted-parentheses", "batch-shell-metadata",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -629,7 +631,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
     fixture = prepared_read_event
     batch = case.startswith("batch-")
     shell_event = case.startswith("shell-")
-    case = case.removeprefix("batch-").removeprefix("shell-")
+    case = case.removeprefix("batch-") if batch else case.removeprefix("shell-")
     paths = [str(fixture["home"] / name) for name in ("one", "two")]
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
     invalidated = []
@@ -710,6 +712,8 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             ]
             if case == "reads":
                 payload["toolCalls"] = payload["toolCalls"][:1]
+            elif case == "shell-metadata":
+                payload["toolName"] = "powershell"
         elif case == "structured":
             payload["workingDirectory"] = payload["cwd"]
             payload["toolArgs"] = {}
@@ -724,6 +728,14 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
                 args = {"command": ["not-a-command"]}
             elif case == "oversized":
                 args["padding"] = "x" * 65536
+            elif case == "assignment":
+                args = {"command": "$result = git -c core.quotepath=false commit -m test"}
+            elif case == "literal-assignment":
+                args = {"command": "$result = 'git commit -m test'"}
+            elif case == "read-sed":
+                args = {"command": "sed -n '1,100p' file.py"}
+            elif case == "quoted-parentheses":
+                args = {"command": 'Write-Output "' + "(" * 20000 + '"'}
             payload.update(toolName="powershell", toolArgs=args)
             if case == "json-args":
                 payload["toolArgs"] = json.dumps(args)
@@ -750,14 +762,20 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         else:
             assert received.wait(2)
             assert len(notices) == 1
-            expected = {key: value for key, value in payload.items() if key != "toolResult"}
+            expected = {
+                key: value for key, value in payload.items()
+                if key != "toolResult" and not (batch and key == "toolName")
+            }
             assert notices[0]["payload"] == expected
             assert notices[0]["kind"] == (
                 "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
             )
-        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull"}
-        assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch"} else [])
-        assert server.has_recent_hook_demand() is (writes or case in {"structured", "patch", "reads", "read"})
+        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment"}
+        assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch", "shell-metadata"} else [])
+        assert server.has_recent_hook_demand() is (writes or case in {
+            "structured", "patch", "reads", "read", "literal-assignment", "read-sed",
+            "quoted-parentheses", "shell-metadata",
+        })
     finally:
         release.set()
         if stalled is not None:

@@ -352,7 +352,13 @@ Known Git reads and read-only branch flags do not invalidate or wake a sweep;
 other Git subcommands are conservative mutations. Supported literal writes and
 redirections invalidate globally, retaining the original shell target scope.
 Missing commands/parser support and traversal overflow are conservative too,
-with at most 128 segments and eight nested substitution levels. Classification
+with at most 128 segments, eight nested substitution levels and a shared
+131,072-iteration substitution-scan budget per event. Quoted literal parentheses
+are not executable PowerShell grouping; assignment right-hand commands retain
+mutation detection without treating quoted data as a command. Read-only `sed`
+does not invalidate unless it independently redirects output, while in-place
+forms remain mutations. Batch presence takes precedence over outer shell
+metadata, preserving the original native-batch request kind. Classification
 remains a heuristic, not execution of an arbitrary shell program or proof that
 external programs cannot write.
 

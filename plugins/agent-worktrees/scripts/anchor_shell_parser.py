@@ -137,6 +137,13 @@ def literal_write_targets(seg: str, tool: str) -> list[str]:
     if not arguments:
         return targets
     verb, args = arguments[0].lower(), arguments[1:]
+    options = args[:args.index("--")] if "--" in args else args
+    if verb == "sed" and not any(
+        re.match(r"^-[nErzu]*i", arg)
+        or arg == "--in-place" or arg.startswith("--in-place=")
+        for arg in options
+    ):
+        return targets
     if verb == "dd":
         return targets + [arg[3:] for arg in args if arg.lower().startswith("of=")]
     positional, named = [], {}
@@ -345,7 +352,10 @@ def shell_segments(cmd: str, tool: str) -> list[str]:
     return segments
 
 
-def shell_command_substitutions(seg: str, tool: str) -> list[str]:
+def shell_command_substitutions(
+    seg: str, tool: str, *, scan_budget: list[int] | None = None,
+) -> list[str]:
+    """Extract executable substitutions, optionally sharing a finite scan budget."""
     lower_tool = tool.lower()
     if lower_tool not in {"bash", "sh", "powershell", "pwsh"}:
         return []
@@ -354,6 +364,10 @@ def shell_command_substitutions(seg: str, tool: str) -> list[str]:
     quote = None
     index = 0
     while index < len(seg):
+        if scan_budget is not None:
+            scan_budget[0] -= 1
+            if scan_budget[0] < 0:
+                raise ValueError("shell substitution scan budget exhausted")
         char = seg[index]
         if char == escape and quote != "'" and index + 1 < len(seg):
             index += 2
@@ -381,10 +395,11 @@ def shell_command_substitutions(seg: str, tool: str) -> list[str]:
                 substitution_prefix = "$("
             elif (
                 lower_tool in {"powershell", "pwsh"}
+                and quote is None
                 and seg.startswith("@(", index)
             ):
                 substitution_prefix = "@("
-            elif lower_tool in {"powershell", "pwsh"} and char == "(":
+            elif lower_tool in {"powershell", "pwsh"} and quote is None and char == "(":
                 substitution_prefix = "("
             elif (
                 lower_tool in {"bash", "sh"}
@@ -400,6 +415,10 @@ def shell_command_substitutions(seg: str, tool: str) -> list[str]:
             depth = 1
             inner_quote = None
             while cursor < len(seg):
+                if scan_budget is not None:
+                    scan_budget[0] -= 1
+                    if scan_budget[0] < 0:
+                        raise ValueError("shell substitution scan budget exhausted")
                 current = seg[cursor]
                 if (
                     current == escape
@@ -441,6 +460,10 @@ def shell_command_substitutions(seg: str, tool: str) -> list[str]:
             start = index + 1
             cursor = start
             while cursor < len(seg):
+                if scan_budget is not None:
+                    scan_budget[0] -= 1
+                    if scan_budget[0] < 0:
+                        raise ValueError("shell substitution scan budget exhausted")
                 if seg[cursor] == "\\" and cursor + 1 < len(seg):
                     cursor += 2
                     continue
