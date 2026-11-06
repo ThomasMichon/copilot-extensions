@@ -181,6 +181,18 @@ retaining changed-input refusal. See the
 
 ### First additive producer contract
 
+The next finite consumer is the Windows read-event path (`view`, `rg`, `glob`).
+These events need no mutation invalidation. It consumes original prepared
+membership, the binding owner's guarded project/incarnation/workspace locator
+and a version-2 advisory row; the canonical recorded head is separate from
+the listing/resume target. The original reminder window/reset and bind cooldown
+remain in their existing sidecars. Missing observations are a shell-safe
+advisory no-op, not a blocking interpreter or resident recovery dependency.
+Late-guidance watches, mutations, installation cells and POSIX retain their
+previous paths pending their complete consumer checkpoints. This does not close
+the whole-hook, cold admission, notification or throughput gates.
+See the [consumer contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#windows-read-event-consumer).
+
 The existing `WorktreesRuntime` publishes a small advisory view only after its
 current-roster store accepts a publication. The original project-state owner
 resolves the home: `project_dir(project)/worktrees/<id>/hook-facts/`.

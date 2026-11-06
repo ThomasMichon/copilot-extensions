@@ -9,6 +9,7 @@
 - **Umbrella issue:** #10486
 - **Related issues:** #9716, #10377
 - **Realization defects:** #10652 (incoming completion gate), #6389 (fresh serving convergence), #10653 (unsafe forced cutover)
+- **Native observation prerequisite:** #10925 (fixture-scoped desktop evidence)
 
 ## Guiding Intent
 
@@ -34,6 +35,11 @@ compatibility/migration and transfer or exclusion of conflicting work admission
 remain readiness requirements; real incoming authenticity, build,
 authentication, permission, I/O and health failures remain failures.
 
+Consumer qualification must observe the fixture's own native effects, not demand
+that unrelated desktop activity stop. The generated-CMD witness therefore needs
+fixture-scoped observation with verified console-host attribution. This is a
+source-qualification prerequisite, not a new runtime incoming-readiness gate.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -41,6 +47,7 @@ authentication, permission, I/O and health failures remain failures.
 | battered-sprocket | Coordinator, implementation integration and PR owner | Managed source worktree |
 | lopsided-gasket | Existing handover implementation and focused qualification | Managed implementation worktree |
 | patient-spanner | Incoming/retirement architecture and acceptance amendment | Managed documentation worktree |
+| soldered-ratchet | Fixture-scoped observer contract and SDK qualification prerequisite | Managed source worktree |
 | Session-path evidence | Read-only client, host and upstream-state analysis | Coordinator delegation |
 | Activation evidence | Read-only installer, selection and retirement analysis | Coordinator delegation |
 | Keeper evidence | Read-only existing lifecycle/transport primitive analysis | Coordinator delegation |
@@ -59,6 +66,10 @@ authentication, permission, I/O and health failures remain failures.
   receives explicit file ownership and preserves this effort's completion gate.
 - Preserve the existing installer, source-construction and census owners.
   This effort does not replace the installer or waive native ownership checks.
+- soldered-ratchet owns the prospective #10925 SDK observation slice, separately
+  from lopsided-gasket's MCP implementation. Review this contract before SDK
+  implementation; preserve both branches' journals and existing resource owners
+  when integrating. No duplicate observer framework or implementation writer.
 
 ## Context
 
@@ -83,6 +94,8 @@ The settled requirement is fresh-call generation selection **and** preserved
 session reattachment, not merely an old-host drain. The operator's exact request
 and reattachment selection are retained in
 [inception-transcript.md](inception-transcript.md).
+The later observer-scope request is captured there separately; it does not
+replace the fresh-execution and session-reattachment objective.
 
 ## Scope Approvals
 
@@ -93,6 +106,12 @@ and reattachment selection are retained in
 - This reviewed plan does not itself grant rollout, elevation, service-restart,
   configuration-policy changes or destructive cleanup authority. Apply any
   separately established target-specific authorization at its existing boundary.
+- The operator requested that the observer not watch the whole desktop.
+  The scoped consumer contract below is agent-recommended implementation of that
+  request, not permission to weaken source admission or discard unknown events.
+- Observer planning and source review grant no native effects. Any existing
+  bounded visible-control authorization retains its original target, count,
+  activation/restoration/retirement limits and unused-or-consumed state.
 
 ## Plan
 
@@ -159,6 +178,10 @@ named tracked objective before the whole effort is Done.
 
 ### Phase 4 - Qualification, release and acceptance
 
+- [ ] Land the reviewed fixture-scoped observer contract below before its SDK
+  implementation; retain #10925 as its discrete coordination issue.
+- [ ] Implement and qualify that SDK-owned observation scope, then enroll the
+  exact generated-CMD consumer through source-bound native admission.
 - [ ] Run focused protocol and real-process regression controls on supported
   Windows and POSIX boundaries, plus practical clean-room install qualification.
 - [ ] Update owning reality docs, contract declarations and per-plugin
@@ -167,6 +190,47 @@ named tracked objective before the whole effort is Done.
   acceptance. Record old-client preservation separately from actual reattachment.
 - [ ] Resolve every plan and validation gate, or transfer an explicitly blocked
   legacy adoption item to its named tracked owner, before closing this effort.
+
+### Fixture-scoped native observation contract
+
+The following design is **agent-recommended and prospective**. It closes the
+observation gap in the existing native launch-validation pattern; it does not
+change the installer vision, make prepared-application qualification an incoming
+gate, or claim that a scoped observer already exists.
+
+- Use the existing native process-ownership, lifecycle and desktop-observer
+  owners. Add a distinct, versioned consumer scope rather than repurposing the
+  SDK self-probe's literal case roster. Preserve the existing self-test profile;
+  its whole-desktop evidence is not scoped-consumer evidence.
+- Acquire window/focus evidence through fixture-bound native subscriptions and
+  queries. The consumer mode must not install a desktop-wide event hook, enumerate
+  unrelated desktop windows, or collect a global stream and filter it into a
+  passing result. Do not collect unrelated titles, screenshots or focus history.
+- Bind fixture roots and descendants by native identity and birth, not process
+  names, titles, age or caller-asserted membership. Establish observation coverage
+  before relevant launch effects. Resolve descendant discovery/startup ordering,
+  early exit and identity-reuse races through the existing launch/lifecycle owner;
+  unproven startup coverage cannot qualify a zero-window result.
+- Include console and Default Terminal hosts only through a verified relationship
+  to the fixture. A shared host does not make all its windows fixture-owned:
+  constrain observations to the verified process/thread/window boundary.
+  Unsupported or ambiguous host attribution remains unqualified.
+- Record only fixture-owned visibility and foreground transitions. A minimal
+  pinned original-foreground endpoint may be retained solely for an authorized
+  calibration restoration; that is not permission to monitor unrelated activity.
+- Preserve raw scoped evidence, source bindings, epoch/identity checks, bounded
+  event delivery, gaps, overflow, callbacks and cleanup outcomes. Missing identity,
+  incomplete coverage or observer failure must not become an ignored event or a
+  manufactured zero. Source-bound expected cases and rosters remain enforced.
+- Keep calibration, workload observation and restoration/retirement evidence
+  distinct. A scoped profile needs its own validated evidence contract, not relaxed
+  checks on the existing whole-desktop packet. Native controls remain opt-in and
+  outside the required pure-unit inventory. If qualification needs an effect beyond
+  current authorization, stop for that exact additional approval.
+- Qualify the actual generated completed-slot CMD from a windowless parent across
+  two cycles. Observe the PowerShell resolver and configured descendants/hosts;
+  flags, a helper-only proxy or a quiet interval after startup do not substitute
+  for the changed launch chain.
 
 ## Validation Plan
 
@@ -207,6 +271,19 @@ named tracked objective before the whole effort is Done.
   automatic inhibition and never authorizes state-holder termination.
 - [ ] Actual consumer evidence distinguishes source qualification, released
   payload, selected runtime and the generation that handles a tool call.
+- [ ] Scoped acquisition refuses desktop-wide subscriptions/enumeration in the
+  consumer mode. Unrelated activity cannot change its verdict or enter its
+  recorded window/focus evidence; retain the old SDK self-profile's contract.
+- [ ] Positive owned-window and owned-focus evidence is detected, while forged,
+  stale, reused, exited or missing bindings and extra cases cannot produce a pass.
+  Cover dynamic descendants and shared/ambiguous Default Terminal host boundaries.
+- [ ] Coverage begins before relevant effects and remains complete through exit;
+  startup races, lost callbacks, delayed delivery, overflow and unconfirmed cleanup
+  remain unqualified. Process flags or sampled post-start quietness are not proof.
+- [ ] The actual MCP generated-CMD two-cycle case passes with scoped evidence and
+  verified owned cleanup under its existing consent/deadline. Calibration count,
+  foreground restoration and control retirement are reported independently;
+  no additional native effect is inferred from this plan.
 
 ## Proposal
 
@@ -239,3 +316,16 @@ migration already works.
   handover or whole-effort validation. Historical evidence remains unchanged.
 - #10600's reviewed plan is merged and implementation is in progress. This
   documentation amendment claims no runtime correction, release or rollout.
+
+### 2026-11-05 - Fixture-scoped observation request
+
+- Captured the operator's request to stop observing the whole desktop. Source
+  inspection found unfiltered WinEvent hooks and whole-desktop enumeration in
+  the SDK self-probe, not an existing scoped application-consumer API.
+- Claimed #10925 and proposed a separate SDK-owned qualification slice before
+  implementation. It preserves the literal self-test roster and makes identity,
+  acquisition scope, startup coverage and console-host ownership explicit.
+- This amendment is prospective only. No observer code or native effect is
+  claimed; review, source qualification and actual generated-CMD acceptance
+  remain open. Incoming publication, full handover and installed acceptance
+  retain their original completion gates.

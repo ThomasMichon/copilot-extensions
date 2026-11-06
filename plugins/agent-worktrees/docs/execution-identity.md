@@ -263,6 +263,16 @@ revision, not just its ID. Conflict refuses without replacing the allocation or
 consuming/restoring a prompt. This bounded repair does not change generic
 record mutation, fresh tuple admission or ordinary producer defaults.
 
+For `--fix`, JSON retains pre-attempt `initial_checks` separately from `checks`.
+If setup fails after writes may have begun, the repair revalidates its retained
+identity and observes permission/pair checks again before releasing its locks.
+If that observation fails, `checks` is omitted and `checks_error` explains the
+uncertainty; the original operation error remains primary. A returned guidance
+result also retains its actual `projection_status`, including failure.
+`repaired: false` means the complete repair did not succeed, not that no writes
+occurred. These observations neither roll back partial effects nor consume the
+retained prompt, and do not authorize a replacement allocation or blind retry.
+
 `load_or_create_anchor_record` and `_adopt_linked_worktree` expose the same
 internal opt-in for genuinely new records. The existing if-absent record lock
 selects the winner before deriving a tuple. Derivation checks the receiving

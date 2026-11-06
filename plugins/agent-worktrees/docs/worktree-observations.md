@@ -74,13 +74,14 @@ not reconstructed.
 
 ## Advisory hook files
 
-The current-roster owner also has an optional small file projection for future
-shell consumers. It is separate from the selected observation journal and does
+The current-roster owner also has an optional small file projection for shell
+consumers. It is separate from the selected observation journal and does
 not replace managed-session admission, canonical write receipts or hook policy.
-Ordinary pre/post hook entry points retain their existing execution path.
+The Windows read-event consumer below uses it; other ordinary events retain
+their existing execution path.
 
 The monitor's original passive discovery record advertises
-`hook_facts_version: 1` and `hook_facts_generation`, a process-local publisher
+`hook_facts_version: 2` and `hook_facts_generation`, a process-local publisher
 identity. Do not substitute `runtime_generation`: that existing field identifies
 a build and can be shared by replacement processes. The original project-state
 owner resolves `project_dir(project)/worktrees/<id>/hook-facts/`; read only the
@@ -95,6 +96,13 @@ Each UTF-8 envelope has exactly `version`, `quality`, `completeness`, `scope`,
 workspace. Producer metadata retains selected runtime root, build/publisher/
 projection generations and the existing installation-context fields. Facts
 contain only `status`, `status_note_at`, `last_session_id` and `head_yielded`.
+Version 2 additionally carries `record_head_session`, the canonical record's
+resolved head, independently of the listing/resume target. A yielded session or
+an execution-leg resume target is not a recorded head. The producer passes this
+observation separately from its original in-memory records, matching worktree,
+incarnation and workspace against the accepted row. It never extends the legacy
+roster wire or durable row schema. Missing or mismatched observations retain
+version 1; absence is unknown, not an asserted empty head.
 The listing session is an observation, **not head custody or permission to
 bind, resume or retire anything**. Missing facts stay null. The whole envelope
 is always advisory and partial, even when its source record was current.
@@ -120,7 +128,7 @@ A crash can leave an old advisory file. Presence is never daemon-liveness or
 current-authority proof.
 
 `Read-PostToolHookFacts` in the separately shipped `scripts/hook-facts.ps1` library is a
-read-only point reader, not an active hook implementation. Its caller must
+read-only point reader. Its caller must
 already supply original-owner discovery, selected runtime/project roots and
 exact expected project/worktree/incarnation/workspace after applicable live
 admission/input checks. It validates the full envelope and scope, reads at most
@@ -140,8 +148,56 @@ unavailable rather than guessing support. A complete shell-only event transition
 still needs managed-admission publication, reminder/reset and late-guidance
 consumers, nonblocking invalidation and a qualified POSIX decoder. Those
 requirements are not supplied by these files.
-The ordinary hook does not load this library yet, so the provider expansion
-does not add its parsing/definition cost to the current hot path.
+### Windows read-event consumer
+
+The ordinary PowerShell entry loads the library in the same shell.
+For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
+prepared-event bound and without an outstanding late-guidance watch, evaluation
+has no synchronous resident request, command
+discovery or Python fallback. Read events do not need mutation invalidation.
+Other tools, installation cells, oversized events and late-guidance watches
+keep their original entry and behavior; the prepared-event bound must not
+consume mutation or watched events. This is not the complete shell-only transition.
+
+The reader checks the original prepared membership and all its input witnesses.
+It then reads the binding owner's `worktree-binding.json`. Only the owner's
+guarded exact-record recheck adds the `hookFacts` version-1 locator with resolved
+`projectRoot` and actual record `workspace`; the caller-supplied display path is
+not that locator. Expected project/worktree/incarnation come from this binding,
+not the advisory file being checked. Identity/path comparisons are ordinal.
+The current event must still be within the exact workspace. No home or
+incarnation is inferred from a directory name.
+
+The original discovery selects one publisher file under `AGENT_HOME` when
+configured, otherwise `USERPROFILE`, matching prepared membership and the
+publisher. This does not relocate reminder accounting: the counter and shared
+lock remain under `USERPROFILE/.agent-worktrees/nudge-state` in both shell and
+Python. Version-2 facts drive the
+existing disposition window/call counter and bind-reminder cooldown at their
+original sidecar paths. Shell and Python counter updates and terminal clears
+share a byte-range transaction on `nudge-state/<worktree>.lock`, waiting at most
+100 ms for contention (or the remaining Python event deadline). A contended
+event skips this advisory counter without changing it or replaying the event;
+the independent bind reminder remains eligible. The stable lock file is not
+deleted on release. Timestamp note identities normalize to UTC microseconds in
+both paths, including existing sidecar values, so YAML's equivalent space/T or
+offset representations do not reset mixed read/edit accounting.
+Note changes reset the window, terminal observations
+clear its counter, live environment controls remain live, and a listing target
+does not suppress the no-recorded-head reminder. Neither a reminder nor its
+absence changes head custody or permission. No current event is sent or replayed.
+
+Missing, changed, malformed, old-contract or unsupported prepared observations
+produce no advisory result for these read events, without blocking on cold
+reconstruction or a resident. They are unavailable data, not complete-empty
+state. The bounds are 1 MiB for event/admission, 16 KiB each for binding,
+discovery and facts, and 4 KiB for the existing advisory counter. Binding and
+discovery decoding has depth 8; the fact envelope retains depth 4.
+Derived paths reject reparse components. Registered-entry tests use the real
+membership, binding and current-row publishers, with interpreter/resident
+traps, and distinguish hook-entry time from shell-process startup.
+These isolated source controls do not establish installed, ACP/model,
+POSIX, complete mutation/late-guidance or whole-hook throughput acceptance.
 
 ### Prepared Windows membership reuse
 

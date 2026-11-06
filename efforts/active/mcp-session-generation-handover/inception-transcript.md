@@ -37,3 +37,27 @@ replacement contract: independently qualify and land incoming publication first;
 outgoing recovery/cleanup and full adopted-client reattachment are separate
 outcomes, not incoming prerequisites. Reattachment remains required work; this
 does not substitute old-host draining or close whole-effort validation.
+
+## 2026-11-05 - Observer scope
+
+The operator asked:
+
+> Why do we need a quiet moment?
+
+After the coordinator explained that the existing SDK predicate observes the
+whole desktop, rather than only the fixture, the operator requested:
+
+> Can we make the observer *not* watch the whole desktop?
+
+### Capture validation
+
+The request is to change observation scope, not to ask for a quiet desktop or
+filter unrelated global observations into a passing consumer result. The
+fixture-owned acquisition, native identity, console-host attribution and
+fail-closed coverage design in the effort is agent-recommended implementation.
+Keeping the existing SDK self-test profile separate is a compatibility
+recommendation, not an assertion that the scoped consumer path already exists.
+
+This direction does not replace the fresh-execution and session-reattachment
+request or grant additional native effects. Any separately granted bounded
+calibration approval retains its original scope and consumption state.

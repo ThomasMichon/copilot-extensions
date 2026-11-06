@@ -111,6 +111,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   outcomes separately. Do not reload or restart a running service.
 
 ### Phase 4 - Core preference propagation
+- [ ] Review the [four-domain preference amendment](preferences.md), including
+  first-class harness-to-knowledge defaults and machine-local override/adoption.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -210,3 +212,15 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   existing configuration engine. Phase 5 retains probe/carrier/native
   qualification and its explicit activation gate. The effort remains Active;
   source release availability and installed report adoption are not inferred.
+
+### 2026-11-06 - Portable preference scope refined
+- The operator selected a carrier home and all four preference categories:
+  telemetry/reporting, model/reasoning, knowledge/venue and maintenance/update.
+  Selection creates no carrier files and does not authorize service activation.
+- The operator explicitly requires stored harness-to-knowledge default mappings
+  on the carrier, with per-machine overrides. The amendment distinguishes those
+  defaults from effective local bindings and reuses native identity, registration
+  and binding transactions. Existing ordinary-default eligibility remains narrow.
+- The linked proposal and its conflict/withdrawal/native-consumer controls await
+  review before implementation. Exact adopter folder/account choices remain
+  private; the parent effort stays Active.
