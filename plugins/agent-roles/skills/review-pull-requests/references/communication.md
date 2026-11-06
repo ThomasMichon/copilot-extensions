@@ -100,10 +100,12 @@ Reserve one slot before concurrent senders can act. This is a setup requirement
 for the chosen existing storage adapter, not a new lock/service implementation.
 Use bounded actionable requests to the original author, never a stream of
 impatience messages. Silence neither clears a hold nor authorizes escalation.
-Immediately before each send, re-check live state: a merged or closed PR,
-consent already present, a new head or a recent reply cancels the nudge; record
-the cancellation with its reservation. Do not repeat an identical request on
-unchanged state.
+Immediately before each send, re-check live state: a merged or closed PR, a
+new head or an author reply that already answers the request cancels the
+nudge, and consent already present cancels only a consent request; record the
+cancellation with its reservation. Do not repeat an identical request on
+unchanged state within its cooldown; later repeats follow the policy's maximum
+sends and stop conditions.
 
 ## Accepted transfer, not conversational inference
 

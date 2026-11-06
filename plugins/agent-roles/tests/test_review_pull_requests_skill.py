@@ -412,6 +412,7 @@ def test_loop_discipline_stops_repetition_and_hands_back_explicitly() -> None:
         assert requirement in skill, requirement
     for requirement in (
         "is not new input",
+        "Any qualifying trigger prompts reassessment of a standing change request",
         "Review only an overlapping delta",
         "report it once to the scope owner",
         "diagnose the cause once, retry once",
@@ -434,6 +435,8 @@ def test_loop_discipline_stops_repetition_and_hands_back_explicitly() -> None:
         assert requirement in charter, requirement
     for requirement in (
         "Immediately before each send, re-check live state",
+        "consent already present cancels only a consent request",
+        "unchanged state within its cooldown",
         "the predecessor stands down there",
         "Never leave two reviewers serving one scope",
     ):

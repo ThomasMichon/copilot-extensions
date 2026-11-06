@@ -37,8 +37,9 @@ Without a trigger the standing verdict stands. **Never republish an identical
 verdict on an unchanged head without new input.** Before publishing, compare
 the intended verdict and findings with the reviewer's latest official verdict
 on the same head; when they match and nothing new arrived, record the round as
-unchanged and post nothing. A standing change request remains until the head
-changes or the author responds.
+unchanged and post nothing. Any qualifying trigger prompts reassessment of a
+standing change request; clear it only when its blocking findings are resolved
+under repository policy, such as a required check that now passes.
 
 When only the base moves, check for conflicts and whether the base delta
 touches the PR's changed files, their direct dependencies or its required
