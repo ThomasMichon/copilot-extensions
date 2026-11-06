@@ -300,3 +300,15 @@ adopter pilot feedback gates subsequent widening.
 - Review convergence and source merge are still required. No runtime
   activation, real retained-checkout move or allocation-default change follows
   from this source qualification.
+
+### 2026-11-06 — Source-location admission closure
+- The current-head review returned Comment with no concrete open findings.
+  Final recovery-invariant reconciliation identified one narrow admission gap:
+  reject a redirected/noncanonical recorded source before writing a journal,
+  rather than creating custody that the recovery reader must reject.
+- The affected refusal, archive-fence and complete native/CLI consumers passed
+  **15 controls**. The resulting exact source also passed **1 real bounded
+  cross-filesystem roundtrip, no skips**, with exact owned cleanup confirmed.
+- Publish this final admission correction through a fresh review and required
+  CI. Keep source merge, release, selected-runtime activation and adopter
+  feedback distinct; the umbrella and broader effort remain Active.
