@@ -176,6 +176,9 @@ SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,
     (*retained.SPEC.capability_floors, ("OWNER_MEMBERSHIP_PROTOCOL_VERSION", 52)),
     scope=SCOPE,
+    closure_prefixes=(
+        "plugins/agent-codespaces/src/", "plugins/agent-worktrees/src/",
+    ),
 )
 encode = common.encode
 digest = common.digest

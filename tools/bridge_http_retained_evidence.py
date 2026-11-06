@@ -33,10 +33,26 @@ class EvidenceSpec:
     probes: dict[str, int]
     capability_floors: tuple[tuple[str, int], ...]
     scope: str = "actual local ASGI/SQLite adapter and ordinary producer; not SDK or native qualification"
+    closure_prefixes: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
         return f"HTTP-{self.generation}"
+
+
+def captured_inventory(spec: EvidenceSpec, required: set[str], tree: dict) -> set[str]:
+    def runtime_python(path: str) -> bool:
+        return (
+            historical.closure_python(path) or installation.closure_python(path)
+            or (
+                path.startswith(spec.closure_prefixes) and path.endswith(".py")
+                and "__pycache__" not in Path(path).parts
+            )
+        )
+
+    return {path for path in required if not runtime_python(path)} | {
+        path for path in tree if runtime_python(path)
+    }
 
 
 def contract(registry: dict) -> dict:
@@ -302,9 +318,7 @@ def validate(
                 metadata_paths=set(original.inputs) - {REGISTRY},
             ) | set(spec.extra_paths)
             # Completeness belongs to the captured tree, not a future checkout.
-            runtime_python = lambda p: historical.closure_python(p) or installation.closure_python(p)
-            required = {p for p in required if not runtime_python(p)}
-            required.update(p for p in tree if runtime_python(p))
+            required = captured_inventory(spec, required, tree)
             if set(proof) != required:
                 raise ValueError(f"{spec.label} closure inventory differs from captured tree")
         elif require_tree:

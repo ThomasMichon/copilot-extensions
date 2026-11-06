@@ -117,6 +117,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   through the normal CLI, without native adoption or carrier effects.
 - [x] Prove policy-governed explicit local acceptance/publication, offline
   watermarks, withdrawal and changed-preview refusal without carrier enrollment.
+- [x] Prove native canonical mapping resolution and explicitly confirmed
+  existing-repository binding through the selected owner, without automatic adoption.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -270,3 +272,69 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - This proves explicit local files, not a synchronized provider. No installed
   runtime, Linux native lane, real carrier, native owner adoption, enrollment
   or activation was exercised. Those validation and Phase 4/5 gates stay open.
+
+### 2026-11-06 - Local exchange reviewed and merged
+- #10949 merged as `827acd1855b2728d2a5d48dbf8b04e1f61160230` after current-head
+  Copilot approval, resolved feedback and green required CI.
+- Review corrections reject parent traversal before normalization, consume
+  validated lock/write paths and sync POSIX watermark directories before
+  publication or success, including retries. The path/native packet passed
+  38 tests; the final exchange packet passed 39 after durability controls.
+- Confirmed every changed file matched the squash merge before reconciling
+  local history. Native canonical-ID mapping resolution and explicit adoption
+  are next; the parent effort remains Active. Source release, installed
+  adoption, platform/carrier qualification and activation remain separate gates.
+
+### 2026-11-06 - Native mapping owner implemented and qualified locally
+- Centralized the existing canonical repository-ID codec for legacy/namespaced
+  readers, added exact registered-ID mapping resolution and extended the native
+  existing-binding preview/apply transaction. Existing local bindings remain
+  authoritative; unresolved/ambiguous/stale registrations never use a basename.
+- The focused native/configuration packet passed 37 cases. The final adapter
+  and real selected-payload packet passed 30 after stream-capture qualification.
+  The real first-touch flow used fresh Git roots and a credential-free example
+  provider, committed the pointer through the existing owner and read back
+  registration/state-root readiness. It passed in 41.497 seconds end to end
+  with the original 18/26-second operation budgets unchanged.
+- Diagnosed the actual apply deadline before changing it: repeated cold CLI
+  reads inside the already-locked worker consumed its budget. An optional
+  private read-only adapter now runs the same native handlers/rechecks in
+  process, using the existing real-stdout JSON capture seam. Payload baseline
+  and optional-adapter controls passed with all 73 binding-owner tests.
+- An existing six-call catalog test hit the per-item deadline; its six
+  independent real states now have named cases, identical assertions/process
+  count and unchanged deadlines. Each passed in 3.6-4.9 seconds. Linux native,
+  release/installed adoption, remaining domain adapters and carrier activation
+  are still open; this is source/isolated validation, not a live rollout.
+
+### 2026-11-06 - Native mapping review corrections
+- Refuse malformed/unreadable global, project-local and drop-in binding
+  sources using the native acquisition observations, while retaining missing
+  and explicitly unset source behavior. Supplied empty portable-ID options
+  cannot downgrade to the legacy name-based flow or bypass mixed selectors.
+- The focused Windows binding/parser packet passed 61 cases; 17 knowledge
+  acquisition controls passed after updating their original-owner fixture
+  and typed-error expectations. The actual fresh-root selected-payload
+  preview/apply/readback passed again in 25.16 seconds with unchanged budgets.
+- Corrected a source-guard inventory bug: HTTP-52 completeness now selects
+  its dynamic owner modules from the captured tree rather than future source
+  additions. Its regression and the real 1,044-fixture contract check pass;
+  no historical evidence was rewritten. Ruff and install contracts pass.
+- Required exact-source Linux CI and current-head review remain open.
+  No installed update, binding change, carrier effect or activation occurred.
+
+### 2026-11-06 - Portable scope guarded at pointer commit
+- Carry the confirmed portable resolution into the registry-locked worker and
+  recheck it through the existing pointer-write precondition. Portable apply
+  requires the selected payload's additive precondition capability; older
+  name-based callers retain their version-2 behavior.
+- Normalize effective binding names using the native resolver's whitespace
+  rule before resolution and identity comparison. Existing bindings still win.
+- The focused Windows owner packet passed 79 tests and the binding-payload
+  packet passed 78. Two old-capability refusal controls and the real fresh-root
+  success case passed. The new late-global-machine control exposed a missing
+  structured error receipt; after correction its residual run passed in
+  27.87 seconds, preserving pointer/registry bytes and the original budgets.
+- This is isolated source/first-touch proof, not installed-runtime or Linux
+  native qualification. Review and exact-source CI remain required; other
+  domain adapters, carrier qualification and activation remain open.

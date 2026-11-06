@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -79,23 +81,103 @@ def _owner_arguments(script: Path, project: str, name: str, operation: str, toke
     return args
 
 
-def _apply_worker(project: str, name: str, token: str, expected_script: str) -> None:
+def _native_read_runner(project: str):
+    """Keep fresh owner reads in the native worker; never dispatch write/auth verbs."""
+    entry = Path(sysconfig.get_path("scripts")) / (
+        "agent-worktrees.exe" if sys.platform == "win32" else "agent-worktrees"
+    )
+
+    def run(command: str, args: list[str], *, cwd="", noninteractive=False):
+        if Path(command).resolve() != entry.resolve():
+            return None
+        if args == ["repos", "list", "--json"]:
+            from .repos_cli import cmd_repos_dispatch
+
+            dispatch, arguments = cmd_repos_dispatch, ["list", "--json"]
+        elif args in (
+            ["-p", project, "config-root", "--json"],
+            ["-p", project, "state-root", "--json"],
+        ):
+            from . import context_cli
+
+            dispatch = (
+                context_cli.cmd_config_root_dispatch if args[2] == "config-root"
+                else context_cli.cmd_state_root_dispatch
+            )
+            arguments = ["--json"]
+        else:
+            return None
+        from .output import capture_json_output
+
+        previous, directory = cfg.active_project(), Path.cwd()
+        stdout, stderr = io.StringIO(), io.StringIO()
+        try:
+            cfg.set_active_project(project)
+            if cwd:
+                os.chdir(cwd)
+            with capture_json_output() as native_json, redirect_stdout(stdout), redirect_stderr(stderr):
+                result = dispatch(arguments)
+        finally:
+            os.chdir(directory)
+            cfg.set_active_project(previous)
+        return subprocess.CompletedProcess(
+            [command, *args], result, native_json.getvalue() or stdout.getvalue(),
+            stderr.getvalue() + (stdout.getvalue() if native_json.getvalue() else ""),
+        )
+
+    return run
+
+
+def _run_selected_payload(
+    project: str, name: str, operation: str, token: str, expected_script: str,
+    portable_resolution: dict | None = None,
+) -> None:
+    script = owner_script(project)
+    if str(script) != expected_script:
+        raise ConfigurationError("binding-owner-changed", "The binding owner changed; preview again.")
+
+    def revalidate() -> None:
+        if portable_resolution is not None:
+            from .repos_knowledge_preferences import resolve
+
+            current = resolve(
+                project, portable_resolution["harness"]["repository_id"],
+                portable_resolution["knowledge"]["repository_id"],
+            )
+            if current != portable_resolution:
+                raise ConfigurationError("preview-conflict", "Portable binding scope changed; preview again.")
+
+    previous = sys.argv
+    try:
+        sys.argv = _owner_arguments(script, project, name, operation, token)
+        runpy.run_path(
+            str(script), run_name="__main__",
+            init_globals={
+                "_NATIVE_BINDING_READ_RUNNER": _native_read_runner(project),
+                "_NATIVE_BINDING_PRECONDITION": revalidate,
+            },
+        )
+    finally:
+        sys.argv = previous
+
+
+def _apply_worker(
+    project: str, name: str, token: str, expected_script: str, portable_resolution: dict | None = None,
+) -> None:
     from . import repos
     from .repos_registry_transaction import registry_lock
 
     with registry_lock(repos._repos_yaml_path()):
-        script = owner_script(project)
-        if str(script) != expected_script:
-            raise ConfigurationError("binding-owner-changed", "The binding owner changed; preview again.")
-        previous = sys.argv
-        try:
-            sys.argv = _owner_arguments(script, project, name, "apply-locked", token)
-            runpy.run_path(str(script), run_name="__main__")
-        finally:
-            sys.argv = previous
+        _run_selected_payload(project, name, "apply-locked", token, expected_script, portable_resolution)
 
 
-def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
+def _preview_worker(project: str, name: str, expected_script: str) -> None:
+    _run_selected_payload(project, name, "preview", "", expected_script)
+
+
+def invoke(
+    project: str, name: str, operation: str, token: str = "", *, portable_resolution: dict | None = None,
+) -> dict:
     if not binding_names_supported(project, name):
         raise ConfigurationError(
             "binding-name-unsupported",
@@ -105,13 +187,13 @@ def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
     from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
     script = owner_script(project)
-    owner_args = _owner_arguments(script, project, name, "apply-locked" if operation == "apply" else operation, token)
-    args = (
-        [sys.executable, "-B", "-m", "agent_worktrees.repos_knowledge_configuration",
-         project, name, token, str(script)]
-        if operation == "apply" else
-        [sys.executable, "-B", *owner_args]
-    )
+    _owner_arguments(script, project, name, "apply-locked" if operation == "apply" else operation, token)
+    args = [
+        sys.executable, "-B", "-m", "agent_worktrees.repos_knowledge_configuration",
+        project, name, operation, token, str(script),
+    ]
+    if portable_resolution is not None:
+        args.append(json.dumps(portable_resolution, sort_keys=True))
     environment = dict(os.environ)
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "COPILOT_PLUGIN_ROOT"):
         environment.pop(key, None)
@@ -130,6 +212,10 @@ def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
             or type(capabilities.get("version")) is not int or capabilities["version"] != 1
             or type(capabilities.get("existing_binding_configuration")) is not int
             or capabilities["existing_binding_configuration"] != 2
+            or portable_resolution is not None and (
+                type(capabilities.get("portable_binding_precondition")) is not int
+                or capabilities["portable_binding_precondition"] != 1
+            )
         ):
             raise ConfigurationError(
                 "binding-owner-unsupported", "The selected binding owner needs its Configuration capability update.",
@@ -168,7 +254,22 @@ def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
     return value
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 5:
+def _worker_main() -> None:
+    if len(sys.argv) == 5:
+        _apply_worker(*sys.argv[1:])
+    elif len(sys.argv) == 6 and sys.argv[3] == "apply":
+        _apply_worker(sys.argv[1], sys.argv[2], sys.argv[4], sys.argv[5])
+    elif len(sys.argv) == 7 and sys.argv[3] == "apply":
+        _apply_worker(sys.argv[1], sys.argv[2], sys.argv[4], sys.argv[5], json.loads(sys.argv[6]))
+    elif len(sys.argv) == 6 and sys.argv[3] == "preview" and not sys.argv[4]:
+        _preview_worker(sys.argv[1], sys.argv[2], sys.argv[5])
+    else:
         raise SystemExit("The binding worker requires its native transaction arguments.")
-    _apply_worker(*sys.argv[1:])
+
+
+if __name__ == "__main__":
+    try:
+        _worker_main()
+    except ConfigurationError as error:
+        print(json.dumps({"status": "refused", "code": error.code, "pointer_committed": False}))
+        raise SystemExit(1)
