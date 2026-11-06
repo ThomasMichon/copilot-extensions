@@ -4724,7 +4724,7 @@
         "tools/native_test_paths.py": "655925954c152703ac8a5cc2d959cd22e798dc9a0f0f92325b4b755384105fb0",
         "tools/nested_uv_editable_ref.py": "47051c113945e3b0c7eda0f95b681df53fb1bc36b98e338b9a7d352c34751a26",
         "tools/plugin_runtime_resources.py": "b2bd74e55727acc2ed14189e804eca3e11781ed0a35abc96bcbfb61015d35ed6",
-        "tools/plugin_test_containment.py": "af3a6ff9e4c4b51115f6379cf77f686610947e364e18e3100e9e0698dc0580fe",
+        "tools/plugin_test_containment.py": "b6816b659e061c3c295fe7b41203f60248a9ed71469253d9dbe0691daa91394d",
         "tools/plugin_test_containment_darwin.py": "451267248707ebf9479b7c8ebd31226dcb2c053fb820bd65b913179db188d5ba",
         "tools/plugin_test_containment_observation.py": "3a216c9051cccc4c1d4448638166651895621fe2fbeba350ff27c6ad86de78a0",
         "tools/plugin_test_containment_posix.py": "0d5fca39319742d34f858f1db3829172bd4541cbb6be6b39772f938f35ebeb19",
