@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -11,6 +13,220 @@ import pytest
 import typecheck as checker
 from tools import _admission_protocol as admission
 from tools import typecheck_source_views as views
+
+
+@pytest.fixture
+def guard_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[checker.Project, tuple[str, ...], Path, list[str]]:
+    source = tmp_path / views.GUARD_ENTRY
+    source.parent.mkdir(parents=True)
+    source.write_bytes(
+        b"def accept(value: int) -> int:\r\n    return value\r\n"
+        b"raise RuntimeError('unit source must never execute')\r\n"
+    )
+    extra = source.with_name("new_owned_member.py")
+    extra.write_bytes(b"value: int = 1\n")
+    (tmp_path / "libs/installer-engine").mkdir(parents=True)
+    project = checker.Project(
+        "copilot-extensions-harness", ("plugins/copilot-extensions-harness",), (),
+        "pending", "3.10", ("linux",), "requirements.txt",
+        import_roots=("plugins/copilot-extensions-harness/scripts",),
+    )
+    (tmp_path / "requirements.txt").write_bytes(b"mypy==1.18.2\n")
+    environment, digest = checker.environment_path(tmp_path, project)
+    python = checker.environment_python(environment)
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"inert unit interpreter; never executed")
+    (environment / ".typecheck-prepared").write_bytes(digest.encode() + b"\n")
+    events: list[str] = []
+
+    class Lease:
+        def __init__(self, path: Path, *, service: str) -> None:
+            assert service == admission.ADMISSION_SERVICE and path.name
+
+        def acquire(self) -> None:
+            events.append("acquired")
+
+        def release(self) -> None:
+            events.append("released")
+
+    monkeypatch.setattr(admission, "SingleInstance", Lease)
+    return project, (views.GUARD_ENTRY, extra.relative_to(tmp_path).as_posix()), environment, events
+
+
+def _installation_inputs(root: Path) -> tuple[str, ...]:
+    directory = Path(views.INSTALLATION_ENTRY).parent
+    canonical = Path(__file__).resolve().parents[2] / directory
+    sources = [
+        path for path in canonical.glob("*.py")
+        if path.name == "installation_context.py" or path.name.startswith("_installation_context_")
+    ]
+    for source in sources:
+        destination = root / directory / source.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
+    return tuple((directory / source.name).as_posix() for source in sources)
+
+
+@pytest.mark.parametrize("scope", ["owned", "other-project", "incomplete"])
+def test_candidate_guard_alias_exact_owned_scope_and_N_to_N(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    guard_scope: tuple[checker.Project, tuple[str, ...], Path, list[str]], scope: str,
+) -> None:
+    project, files, environment, events = guard_scope
+    all_paths = files
+    original = (tmp_path / views.GUARD_ENTRY).read_bytes()
+    if scope == "other-project":
+        (tmp_path / "sample.py").write_bytes(b"value: int = 1\n")
+        project = replace(project, name="other", include=("sample.py",), import_roots=())
+        files = ("sample.py",)
+        all_paths = (*all_paths, *files)
+    elif scope == "incomplete":
+        files = files[:1]
+    calls: list[tuple[str, ...]] = []
+    mkdir = Path.mkdir
+    stage = environment.parent / ("source-views-" + environment.name) / project.name
+    creation_races: list[str] = []
+
+    def owned_mkdir(
+        path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False,
+    ) -> None:
+        assert path.resolve().is_relative_to(tmp_path), "mkdir outside synthetic unit storage"
+        if scope == "owned" and path == stage and not creation_races:
+            mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+            creation_races.append("ordinary directory won creation race")
+            raise FileExistsError(path)
+        mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", owned_mkdir)
+
+    def run(
+        argv: list[str], root: Path, *, env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        targets = tuple(Path(argv[-1][1:]).read_text().splitlines())
+        calls.append(targets)
+        assert root == tmp_path and len(targets) == len(files)
+        if scope == "other-project":
+            assert targets == files and "source-views-" not in env["MYPYPATH"]
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        alias = Path(targets[0])
+        assert alias.name == "copilot_mention_guard.py" and alias.read_bytes() == original
+        assert targets[1:] == files[1:] and views.GUARD_ENTRY not in targets
+        assert env["MYPYPATH"].split(os.pathsep).count(str(alias.parent)) == 1
+        return subprocess.CompletedProcess(argv, 0, f"{alias}:2:7: error: unit correspondence\n", "")
+
+    monkeypatch.setattr(checker, "_run", run)
+    if scope == "incomplete":
+        with pytest.raises(checker.TypecheckError, match="complete owned physical binding"):
+            checker.check_project(tmp_path, project, files, all_paths=all_paths)
+        assert not calls
+    else:
+        assert checker.check_project(tmp_path, project, files, all_paths=all_paths) == 0
+        assert len(calls) == 1
+        if scope == "owned":
+            assert creation_races == ["ordinary directory won creation race"]
+            assert f"{views.GUARD_ENTRY}:2:7: error: unit correspondence" in capsys.readouterr().out
+    assert events == ["acquired", "released"]
+    assert (tmp_path / views.GUARD_ENTRY).read_bytes() == original
+    assert not list(environment.glob("typecheck-*"))
+    assert not list(environment.parent.glob(f"source-views-{environment.name}/{project.name}/*.py"))
+
+
+@pytest.mark.parametrize("change", ["provider", "stub", "source", "source-identity", "view", "replaced-view"])
+def test_candidate_guard_alias_refuses_provider_and_identity_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    guard_scope: tuple[checker.Project, tuple[str, ...], Path, list[str]], change: str,
+) -> None:
+    project, files, environment, events = guard_scope
+    all_paths = files
+    source = tmp_path / views.GUARD_ENTRY
+    alias = environment.parent / ("source-views-" + environment.name) / project.name / "copilot_mention_guard.py"
+    calls: list[str] = []
+    if change in {"provider", "stub"}:
+        suffix = ".py" if change == "provider" else ".pyi"
+        provider = tmp_path / ("copilot_mention_guard" + suffix)
+        provider.write_bytes(b"foreign: int = 1\n")
+        if change == "provider":
+            all_paths = (*all_paths, provider.name)
+
+    def run(
+        argv: list[str], root: Path, *, env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append("called")
+        assert alias.read_bytes() == source.read_bytes()
+        if change == "source":
+            source.write_bytes(source.read_bytes() + b"# changed\n")
+        elif change == "source-identity":
+            content = source.read_bytes()
+            source.rename(source.with_suffix(".saved"))
+            source.write_bytes(content)
+        elif change == "view":
+            alias.write_bytes(b"changed: int = 1\n")
+        elif change == "replaced-view":
+            alias.rename(alias.with_suffix(".saved"))
+            alias.write_bytes(b"foreign: int = 1\n")
+        else:
+            pytest.fail("A competing provider cannot reach the inert analyzer")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(checker, "_run", run)
+    with pytest.raises((checker.TypecheckError, views.SourceViewError)):
+        checker.check_project(tmp_path, project, files, all_paths=all_paths)
+    assert bool(calls) == (change not in {"provider", "stub"})
+    assert events == ["acquired", "released"]
+    assert not list(environment.glob("typecheck-*"))
+    if change == "replaced-view":
+        assert alias.read_bytes() == b"foreign: int = 1\n"
+        assert alias.with_suffix(".saved").exists()
+    else:
+        assert not alias.exists()
+
+
+@pytest.mark.parametrize("change", ["unchanged", "guard-drift", "fragment-drift"])
+def test_candidate_guard_and_installation_views_keep_independent_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    guard_scope: tuple[checker.Project, tuple[str, ...], Path, list[str]], change: str,
+) -> None:
+    project, files, environment, events = guard_scope
+    installation = _installation_inputs(tmp_path)
+    worker = "libs/installation-context/_installation_context_worker.py"
+    project = replace(project, include=(*project.include, worker))
+    files = (*files, worker)
+    all_paths = (*files[:2], *installation)
+    worker_bytes = (tmp_path / worker).read_bytes()
+    stage = environment.parent / ("source-views-" + environment.name) / project.name
+    calls: list[str] = []
+
+    def run(
+        argv: list[str], root: Path, *, env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append("called")
+        alias, composed = stage / "copilot_mention_guard.py", stage / "installation_context.py"
+        assert alias.is_file() and composed.is_file()
+        assert env["MYPYPATH"].split(os.pathsep).count(str(stage)) == 1
+        targets = Path(argv[-1][1:]).read_text().splitlines()
+        assert targets == [str(alias), files[1], worker]
+        assert (tmp_path / worker).read_bytes() == worker_bytes
+        if change == "guard-drift":
+            source = tmp_path / views.GUARD_ENTRY
+            source.write_bytes(source.read_bytes() + b"# changed\n")
+        elif change == "fragment-drift":
+            fragment = next(name for name in installation if "_installation_context_" in name and name != worker)
+            source = tmp_path / fragment
+            source.write_bytes(source.read_bytes() + b"\n")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(checker, "_run", run)
+    if change == "unchanged":
+        assert checker.check_project(tmp_path, project, files, all_paths=all_paths) == 0
+    else:
+        with pytest.raises(views.SourceViewError, match="source changed"):
+            checker.check_project(tmp_path, project, files, all_paths=all_paths)
+    assert calls == ["called"] and events == ["acquired", "released"]
+    assert not list(stage.iterdir())
+    assert not list(environment.glob("typecheck-*"))
+    assert (tmp_path / worker).read_bytes() == worker_bytes
 
 
 def test_candidate_checker_refuses_unclassified_pending_and_failed_scopes(
