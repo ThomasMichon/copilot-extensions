@@ -17,6 +17,14 @@ Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
 
+Materialized library copies under the strict services' `libs/` directories are
+inventoried separately as pending consumers. They do not inherit service
+admission merely because promotion places them below that service's path.
+Service-owned source and tests remain strict, and each canonical library keeps
+its own declared admission; this does not qualify every shipped copy.
+An `--all` probe reports absent pending scopes without trying to check them;
+explicit scope checks and admitted empty scopes still refuse qualification.
+
 ## Local commands
 
 From the source repository root, with Python and UV available:

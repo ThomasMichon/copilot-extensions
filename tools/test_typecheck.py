@@ -49,6 +49,21 @@ def test_directory_prefixes_do_not_claim_neighboring_components() -> None:
     assert not item.owns("plugins/sample/tests/test_module.py")
 
 
+@pytest.mark.parametrize("service", ["dispatch", "index", "pr", "ssh"])
+def test_materialized_service_libraries_keep_independent_admission(service: str) -> None:
+    projects = typecheck.load_projects()
+    root = f"services/{service}"
+    owned = (f"{root}/src/service.py", f"{root}/tests/test_service.py", f"{root}/libs-other/helper.py")
+    copied = f"{root}/libs/repository-policy/repository_policy.py"
+    canonical = "libs/repository-policy/repository_policy.py"
+    owners = typecheck.inventory((*owned, copied, canonical), projects)
+    assert all(owners[path].name == f"service-{service}" and owners[path].level == "strict" for path in owned)
+    assert owners[copied].name == "service-vendored-libraries"
+    assert owners[copied].level == "pending"
+    assert owners[canonical].name == "lib-repository-policy"
+    assert owners[canonical].level == "strict"
+
+
 def test_paths_cannot_inject_response_file_arguments() -> None:
     """Git filename line separators cannot become MyPy options."""
     for separator in ("\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
