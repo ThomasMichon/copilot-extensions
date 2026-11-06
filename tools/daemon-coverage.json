@@ -142,6 +142,7 @@
     "r:fleet-manager/containers/gateway/Dockerfile": ["fm:gateway_service_server.py::serve"],
     "r:services/dispatch/Dockerfile": ["d:coordinator_cli.py::_cmd_serve"],
     "r:services/pr/container/Dockerfile": ["sp:hosting.py::_run_service"],
+    "r:services/chat/container/Dockerfile": ["sc:hosting.py::_run"],
     "r:services/ssh/container/Dockerfile": ["ss:__main__.py::_foreground"]
   },
   "native_entrypoints": {
@@ -248,7 +249,9 @@
       "r:fleet-manager/containers/gateway/Dockerfile::<script>::CMD": 1,
       "r:services/dispatch/Dockerfile::<script>::ENTRYPOINT": 1,
       "r:services/pr/container/Dockerfile::<script>::ENTRYPOINT": 1,
-      "r:services/pr/container/Dockerfile::<script>::CMD": 1
+      "r:services/pr/container/Dockerfile::<script>::CMD": 1,
+      "r:services/chat/container/Dockerfile::<script>::ENTRYPOINT": 1,
+      "r:services/chat/container/Dockerfile::<script>::CMD": 1
     },
     "supervised-service-child": {
       "ss:relay.py::NativeRelay.run::Popen": 1,
@@ -341,6 +344,7 @@
       "r:worktree-manager/bin/manager-runtime.ps1::<script>::Process.Start": 1,
       "r:worktree-manager/bin/pane-wrapper.ps1::<script>::Start-Process": 1,
       "r:services/pr/container/Dockerfile::<script>::HEALTHCHECK": 1,
+      "r:services/chat/container/Dockerfile::<script>::HEALTHCHECK": 1,
       "r:plugins/agent-conduct-guidance/skills/requesting-windows-elevation/scripts/elevation-worker.ps1::<script>::Start-Process": 1,
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },

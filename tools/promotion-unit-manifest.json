@@ -4490,7 +4490,7 @@
         "services/chat/src/agent_chat_service/__init__.py": "45cf6ef37ebbfa21a716e56cdf483a93cc3f173f5536baeba29cbfc70d1b4d4b",
         "services/chat/src/agent_chat_service/client.py": "218c66f571cfa5b6fa67b58a880d6ac435f4ef2e72b1d374354606da501e7935",
         "services/chat/src/agent_chat_service/collaboration.py": "5996687f5309db15edf5fe129c8339b6f5067591872a2617bf1da37efb5142eb",
-        "services/chat/src/agent_chat_service/store.py": "df3b352718213f0d606c5d96658993268266009398dcc0f7bff7db5df0c559d0",
+        "services/chat/src/agent_chat_service/store.py": "59b7977bd429801796f58d5468fe3d4a6c90a158dde5325d1d511242603e8f29",
         "tools/_admission_protocol.py": "baa0c1a2af44616eedf02bf678c128fd3c07045bd8e5542d4fe8ece3df54dc21",
         "tools/cache_directory_paths.py": "2a991cb0ec7d3bcf7f658922821271295a87083132238867873eb5393711a87c",
         "tools/typecheck.py": "c9cc6cf14e1a6d4d638633af51f287d214d1528e2c7a1431a6f65e3a8b3da563",
