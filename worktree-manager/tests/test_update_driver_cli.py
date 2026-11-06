@@ -569,11 +569,15 @@ def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp
     assert "--no-project-controller" in calls[0]
 
 
-@pytest.mark.parametrize(("parent_flags", "expected"), [
-    ((), 8), (("--no-project-controller",), 1), (("--target", "agent-bridge"), 1),
+@pytest.mark.parametrize(("parent_flags", "child_flags", "expected"), [
+    ((), ("--no-project-controller",), 8),
+    ((), ("--target", "agent-bridge"), 8),
+    ((), ("--target=agent-bridge",), 8),
+    (("--no-project-controller",), ("--target", "agent-bridge"), 1),
+    (("--target", "agent-bridge"), ("--target", "agent-bridge"), 1),
 ])
 def test_borrowed_project_authority_allows_controller_delegation(
-    queued, monkeypatch, tmp_path, parent_flags, expected,
+    queued, monkeypatch, tmp_path, parent_flags, child_flags, expected,
 ):
     import update_driver
     from update_driver.authority import selection
@@ -609,9 +613,9 @@ def test_borrowed_project_authority_allows_controller_delegation(
         lambda *_args: pytest.fail("delegated bypass re-entered the controller"),
     )
     monkeypatch.setattr(manager, "_cmd_update", lambda flags: calls.append(flags) or 8)
-    assert driver.cmd_update_request(["--project", "example", "--no-project-controller"]) == expected
+    assert driver.cmd_update_request(["--project", "example", *child_flags]) == expected
     if expected == 8:
-        assert "--no-project-controller" in calls[0]
+        assert all(flag in calls[0] for flag in child_flags)
     else:
         assert not calls
 

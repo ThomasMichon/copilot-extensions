@@ -19,7 +19,12 @@ def handoff(
         for value in arguments
     )
     if bypass:
-        if managed and not (delegated and "--no-project-controller" in arguments):
+        delegated_target = any(
+            value == "--target" or value.startswith("--target=") for value in arguments
+        )
+        if managed and not (delegated and (
+            "--no-project-controller" in arguments or delegated_target
+        )):
             raise ValueError("standalone or partial update is disabled by project authority")
         return None
     project, forwarded = extract_project(arguments)

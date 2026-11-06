@@ -432,6 +432,10 @@ def test_manager_authority_routes_only_to_selected_owner() -> None:
     with pytest.raises(ValueError, match="disabled"):
         handoff(["--no-project-controller"], authority=project)
     assert handoff(["--no-project-controller"], authority=project, delegated=True) is None
+    for flags in (["--target", "agent-bridge"], ["--target=agent-bridge"]):
+        with pytest.raises(ValueError, match="disabled"):
+            handoff(flags, authority=project)
+        assert handoff(flags, authority=project, delegated=True) is None
     assert len(calls) == 2
     engine.get_value = lambda *_args: ""
     with pytest.raises(ValueError, match="unavailable"):

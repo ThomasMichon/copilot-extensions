@@ -206,13 +206,14 @@ def test_project_authority_fails_closed_if_controller_disappears(project, monkey
 @pytest.mark.parametrize("parent_flags", [
     ("--phase", "runtimes"), ("--target", "agent-bridge"), ("--no-project-controller",),
 ])
-def test_partial_parent_request_cannot_claim_controller_delegation(project, parent_flags):
+@pytest.mark.parametrize("child", [{"phase": "runtimes"}, {"target": "agent-bridge"}])
+def test_partial_parent_request_cannot_claim_controller_delegation(project, parent_flags, child):
     from update_driver import RequestSpec
     from update_driver.authority import selection
 
     request = RequestSpec("engine", parent_flags, project="example", authority="project")
     assert project_update_controller.dispatch_update(
-        args(phase="runtimes", _controller_request=request,
+        args(**child, _controller_request=request,
              _controller_authority=selection("project", "example")),
         lambda _args: 0,
         lambda _args: pytest.fail("partial parent reached Manager"),
@@ -270,7 +271,7 @@ def test_project_authority_reaches_controller_under_real_driver_custody(project,
 
 
 @pytest.mark.parametrize(("delegation", "expected"), [
-    ("phase", "runtimes"), ("standalone", "standalone"),
+    ("phase", "runtimes"), ("standalone", "standalone"), ("target", "agent-bridge"),
 ])
 def test_project_controller_can_delegate_under_real_custody(
     project, monkeypatch, tmp_path, delegation, expected,
@@ -292,10 +293,11 @@ def test_project_controller_can_delegate_under_real_custody(
         "from agent_worktrees import config,update_cli,update_driver_cli\n"
         "config.set_active_project('example')\n"
         f"config.install_dir = lambda: Path({str(engine)!r})\n"
-        f"def phase(args): Path({str(result)!r}).write_text(getattr(args,'phase',None) or 'standalone', encoding='utf-8'); return 0\n"
+        f"def phase(args): Path({str(result)!r}).write_text(getattr(args,'phase',None) or getattr(args,'target',None) or 'standalone', encoding='utf-8'); return 0\n"
         "update_cli._core_helper = lambda name, local: phase if name == '_cmd_update_in_plugin' else local\n"
         "raise SystemExit(update_driver_cli.cmd_update_request(argparse.Namespace("
         + ("phase='runtimes', no_manager=True" if delegation == "phase"
+           else "target='agent-bridge', no_manager=True" if delegation == "target"
            else "no_project_controller=True, no_manager=True")
         + ")))\n"
     )
