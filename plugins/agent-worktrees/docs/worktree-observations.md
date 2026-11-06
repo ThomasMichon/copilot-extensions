@@ -224,6 +224,36 @@ store; interruption after consumption can still lose a notice. A notice skips
 disposition accounting, even when enabled; reminder opt-out never suppresses
 late guidance, and independent bind advice still runs when its own facts exist.
 
+#### Optional read demand
+
+After prepared admission, the shell can send a separate `readHookDemand`
+notification through the existing hook TCP endpoint. The running receiver
+advertises `read-hook-demand-v1` in `hook_capabilities` and its process-local
+`hook_generation` through the same bounded discovery record. This support is
+independent of advisory-row availability, reminder opt-out and late guidance.
+It is currently selected only for legacy native Windows prepared read events.
+
+The version-1 notification contains only `version`, `kind`, `token`,
+`hook_generation` and `deadline`; it carries no tool arguments, session content
+or mutation targets. It is at most 2 KiB, newline terminated, and uses one
+loopback connection with a combined 50 ms connect/write wait. The shell
+disposes that connection without reading any response. Missing, malformed,
+wrong-installation or old discovery skips the optional send. A connection or
+write failure has unknown acceptance and is not retried, replayed through
+another endpoint or replaced by Python. Provider rollback therefore retains
+the shell-safe advisory baseline, not a blocking compatibility call.
+
+Only the advertised process generation can accept the notice. The receiver
+rechecks its own admission and the monitor's live published/non-draining state,
+requires a finite unexpired deadline at most one second ahead, and records the
+original 120-second recent-tool idle grace. It does not invoke policy,
+advisory accounting, mutation invalidation, a sweep wake or lifecycle startup.
+The existing active-handler drain accounting and all other idle predicates
+remain in force. A sent notice is not an acknowledgement, durable delivery,
+fresh-status observation, permission or readiness proof. A missed notice may
+allow ordinary idle expiry; this operation does not recover an absent resident.
+Old callers retain their original request/response semantics with new receivers.
+
 ### Prepared Windows membership reuse
 
 The existing `managed-session.ps1` admission entry first checks the original

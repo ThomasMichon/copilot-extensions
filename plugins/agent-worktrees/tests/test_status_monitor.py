@@ -4543,7 +4543,7 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
     assert list(checks)[-1] == blocker and checks[blocker] is False
 
 
-@pytest.mark.parametrize("kind", ["preToolUse", "postToolUse"])
+@pytest.mark.parametrize("kind", ["preToolUse", "postToolUse", "readHookDemand"])
 def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind):
     from zdd import lifecycle
 
@@ -4590,18 +4590,29 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     endpoint = tmp_path / "hook-endpoint.json"
 
     def dial(server):
-        replies.append(hook_ipc.send_best_effort(
-            kind, {"toolName": "edit" if kind == "preToolUse" else "view"},
-            lock_path=endpoint,
-        ))
+        if kind == "readHookDemand":
+            import socket
+
+            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+                conn.sendall(json.dumps({
+                    "version": 1, "token": server.token, "kind": kind,
+                    "hook_generation": server.generation, "deadline": time.time() + 1,
+                }).encode() + b"\n")
+                assert conn.recv(1) == b""
+            replies.append(server.has_recent_hook_demand())
+        else:
+            replies.append(hook_ipc.send_best_effort(
+                kind, {"toolName": "edit" if kind == "preToolUse" else "view"},
+                lock_path=endpoint,
+            ))
         deadline = time.monotonic() + 2
         while server.active_handler_count():
             assert time.monotonic() < deadline, "hook response did not settle"
             time.sleep(.005)
 
     class Server(hook_ipc.HookIpcServer):
-        def __init__(self, decide):
-            super().__init__(decide)
+        def __init__(self, decide, **kwargs):
+            super().__init__(decide, **kwargs)
             self._clock = lambda: clock["now"]
             servers.append(self)
 

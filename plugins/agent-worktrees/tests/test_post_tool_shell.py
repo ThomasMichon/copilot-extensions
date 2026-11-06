@@ -491,6 +491,100 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows shell demand consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "current", "old-provider", "wrong-generation", "closed", "revoked",
+    "missing-discovery", "missing-row", "unadmitted", "no-reply",
+])
+def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    fixture = prepared_read_event
+    calls, notices = [], []
+    received, release = threading.Event(), threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request):
+            notices.append(request)
+            super()._on_read_demand(request)
+            received.set()
+
+    class NoReply(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(2)
+            raw = b""
+            while not raw.endswith(b"\n") and len(raw) < 2048:
+                chunk = self.request.recv(2048 - len(raw))
+                if not chunk:
+                    break
+                raw += chunk
+            notices.append(json.loads(raw))
+            received.set()
+            assert release.wait(10), "test did not release its non-replying peer"
+
+    server = Server(lambda *args: calls.append(args) or {}, read_demand_admitted=lambda: case != "revoked")
+    server.start()
+    stalled = None
+    stalled_thread = None
+    try:
+        path = fixture["registry"] / "status-monitor.lock"
+        discovery = {**json.loads(path.read_text()), **server.rendezvous()}
+        if case == "old-provider":
+            discovery.pop("hook_capabilities")
+        elif case == "wrong-generation":
+            discovery["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.close_admission()
+        elif case == "missing-row":
+            fixture["facts"].unlink()
+        elif case == "unadmitted":
+            (fixture["session"] / "agent-worktrees" / "managed-session.json").unlink()
+        elif case == "no-reply":
+            stalled = socketserver.ThreadingTCPServer(("127.0.0.1", 0), NoReply)
+            stalled_thread = threading.Thread(target=stalled.serve_forever)
+            stalled_thread.start()
+            discovery["hook_endpoint"] = f"127.0.0.1:{stalled.server_address[1]}"
+        path.write_text(json.dumps(discovery), encoding="utf-8")
+        if case == "missing-discovery":
+            path.unlink()
+        payload = {**fixture["payload"], "toolArgs": {"path": "must-not-be-sent"}}
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+            input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+            env=fixture["env"], **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert not result.stdout
+        assert result.stderr.startswith("entry_seconds="), result.stderr
+        print(f"{shell}/{case}: {result.stderr.strip()}")
+        if case in {"old-provider", "missing-discovery", "unadmitted"}:
+            assert not notices and not server.has_recent_hook_demand()
+        else:
+            assert received.wait(2), "send-only notification did not reach its receiver"
+            assert len(notices) == 1
+            assert set(notices[0]) == {"version", "kind", "token", "hook_generation", "deadline"}
+            assert notices[0]["kind"] == "readHookDemand"
+            assert server.has_recent_hook_demand() is (case in {"current", "missing-row"})
+        assert calls == [], "a read-demand notice must not run policy, advice or invalidation"
+    finally:
+        release.set()
+        if stalled is not None:
+            stalled.shutdown()
+            stalled.server_close()
+            stalled_thread.join(timeout=2)
+            assert not stalled_thread.is_alive()
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows shell read consumer")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", [

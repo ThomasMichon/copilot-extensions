@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve prepared Windows read-hook demand without waiting for a resident reply",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

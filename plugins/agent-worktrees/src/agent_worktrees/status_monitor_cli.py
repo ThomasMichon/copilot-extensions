@@ -424,7 +424,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         allocation_linker.activate()
         if hook_server is None and hook_policy.ready():
             try:
-                hook_server = HookIpcServer(_decide)
+                hook_server = HookIpcServer(
+                    _decide,
+                    read_demand_admitted=lambda: (
+                        published_lock and not admission_closed and not shutdown_requested.is_set()
+                    ),
+                )
                 hook_server.start()
             except Exception:
                 hook_server = None
