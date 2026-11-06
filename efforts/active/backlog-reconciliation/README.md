@@ -331,6 +331,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11024 delivery, whole #5799/#4053 receiving readback
+and #3941/#4046 `NOT_PLANNED` tracking retirements. All-plugin advice wording
+and generic direct-command lifetimes remain independent unchecked work under
+unchanged custodians. Complete07:33 PST scans measure815 whole OPEN,
+1007 effective audited dispositions and86 above729. Two bounded source
+studies retain actual registry/provenance gaps; whole startup-home fit is
+under independent research, not an accepted transfer or campaign completion.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records proposed direct #3941 all-plugin runtime-advice acceptance under the
 existing materials inventory and a separate #4046 generic-command lane under
 the remote-lifetime parent. Neither is actual receiving delivery or retirement
