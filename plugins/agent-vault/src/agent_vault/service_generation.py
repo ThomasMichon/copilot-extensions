@@ -23,6 +23,7 @@ from .config import home_dir, installation_id
 from .rendezvous import Endpoint, read_endpoint
 from .service_connections import settle_owned
 from .service_handoff import AuthReceiver, send_auth_state
+from .service_selection import SelectionCustodyUnavailable, selection_custody
 from .service_unix_alias import UnixAlias, socket_identity
 
 log = logging.getLogger(__name__)
@@ -547,7 +548,11 @@ class ServiceGeneration:
                 self.writer.release()
                 return False
 
-            result = predecessor.retire(current)
+            try:
+                with selection_custody(home_dir(), PROCESS_SLOT):
+                    result = predecessor.retire(current)
+            except SelectionCustodyUnavailable:
+                return "refused-selection-custody"
             log.info("Vault predecessor retirement: %s", result)
             return result
         finally:

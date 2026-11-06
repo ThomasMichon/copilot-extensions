@@ -95,7 +95,12 @@ After grace, each captured target gets one bounded cold-retirement attempt,
 never a descendant kill. There is no new watchdog,
 recurring reaper or per-request registry scan. The publication lease serializes
 the attempt with endpoint replacement; current selection and discovery are
-rechecked before native mutation.
+rechecked before native mutation. Cold retirement also holds the immutable
+slot's retained SDK selector lease through native termination and confirmed
+exit, serializing activation and rollback with that decision. Missing, invalid
+or busy retained selector custody reports `refused-selection-custody` without
+terminating a process; source/development invocations retain cooperative
+replacement but cannot perform that cold fallback.
 
 Retirement independently validates the admitted instance's central-service
 role, installation slot/home, runtime directory identity, unprotected resident
@@ -196,6 +201,9 @@ reconnection. Three generations exercise a discovered passive predecessor
 ahead of the actual older writer. A real subprocess behind the production
 KeePassXC edit constructor proves refusal while backend mutation remains live,
 followed by cooperative settlement. Unit controls separately cover
+missing or invalid retained SDK custody. A real SDK rollback attempted after
+the final owner check remains blocked until pinned predecessor exit is confirmed.
+Other unit controls cover
 owner/selection/birth refusal, changed lease holders, unconfirmed retirement,
 PID reuse, literal receipt admission, stale/live/replaced Unix aliases and
 expiration preservation. Endpoint-derived fixture requests use the advertised

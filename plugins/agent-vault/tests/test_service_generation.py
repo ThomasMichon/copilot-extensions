@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import asyncio
 import errno
+from contextlib import nullcontext
 from collections.abc import Callable
 import os
 from pathlib import Path
@@ -78,6 +79,7 @@ def test_current_controller_cannot_retire_after_selection_or_discovery_changes(
     monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
     monkeypatch.setattr(generation, "installation_id", lambda: "fixture-installation")
     monkeypatch.setattr(generation, "selected", lambda: change != "selection")
+    monkeypatch.setattr(generation, "selection_custody", lambda *_: nullcontext())
     monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(
         pid=123 if change == "endpoint" else os.getpid(),
         installation_id="foreign" if change == "installation" else "fixture-installation",
@@ -102,6 +104,7 @@ def test_older_writer_target_requires_current_contention_from_that_same_owner(
     monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
     monkeypatch.setattr(generation, "installation_id", lambda: "fixture-installation")
     monkeypatch.setattr(generation, "selected", lambda: True)
+    monkeypatch.setattr(generation, "selection_custody", lambda *_: nullcontext())
     monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(
         pid=os.getpid(), installation_id="fixture-installation",
     ))
@@ -631,7 +634,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 root, identity, port, mode = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
-if mode in {"hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "passive-legacy", "backend-work"}:
+if mode in {"hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "rollback-successor", "passive-legacy", "backend-work"}:
     sys.path.insert(0, str(root / "versions" / identity))
 os.environ.update(
     AGENT_VAULT_HOME=str(root), AGENT_VAULT_RUN_DIR=str(root / "run"),
@@ -643,8 +646,20 @@ os.environ.pop("AGENT_VAULT_INSTALLATION_ID", None)
 from agent_vault import service, service_generation as generation
 from agent_vault import service_handoff
 from agent_vault import service_predecessor
-if mode in {"bounded-successor", "prepared-successor"}:
+if mode in {"bounded-successor", "prepared-successor", "rollback-successor"}:
     service_predecessor.GRACE_SECONDS = 3
+if mode == "rollback-successor":
+    from agent_procutil.process_retirement import PinnedProcess
+    terminate = PinnedProcess.terminate
+    def held_terminate(self, *args, **kwargs):
+        (root / "retire.ready").touch()
+        deadline = time.monotonic() + 10
+        while not (root / "retire.continue").exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Owned retirement fixture was not released")
+            time.sleep(.01)
+        return terminate(self, *args, **kwargs)
+    PinnedProcess.terminate = held_terminate
 if mode == "legacy-receiver":
     read = service_handoff.read_frame
     def legacy_read(*args):
@@ -670,8 +685,7 @@ if mode == "legacy-health":
     service._dial_tcp = legacy_dial(service._dial_tcp)
     service._dial_unix = legacy_dial(service._dial_unix)
 generation.PROCESS_GENERATION = service.PROCESS_GENERATION = identity
-generation.selected_generation = lambda: (root / "selection").read_text().strip()
-generation.selected = lambda: generation.selected_generation() == identity
+generation.PROCESS_SLOT = root / "versions" / identity
 service.get_registry = lambda: SimpleNamespace(run_startup=lambda *args: None)
 vault = service.VaultService()
 vault.ttl_override = 0
@@ -854,7 +868,7 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
     source = (
         root / "versions" / identity / "agent_vault" / "service.py"
         if mode in {
-            "hung-cleanup", "hung-work", "bounded-successor", "prepared-successor",
+            "hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "rollback-successor",
             "passive-legacy", "backend-work",
         }
         else Path(generation.__file__).with_name("service.py")
@@ -869,6 +883,7 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
 
 def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
     (root / "backend.release").touch()
+    (root / "retire.continue").touch()
     for identity in ("newer", "middle", "older"):
         (root / (identity + ".start")).touch()
         (root / (identity + ".release")).touch()
@@ -881,6 +896,20 @@ def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
         print(path.name, path.read_text(encoding="utf-8", errors="replace")[-8192:])
     print("Owned backend fixture expired:", (root / "backend.expired").exists())
     return outputs
+
+
+def _stage_generation(root: Path, identity: str) -> None:
+    slot = root / "versions" / identity
+    shutil.copytree(
+        Path(generation.__file__).parent, slot / "agent_vault",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    shutil.copyfile(
+        Path(__file__).parent.parent / "scripts" / "versioned_runtime_leases.py",
+        bootstrap / "versioned_runtime_leases.py",
+    )
 
 
 def _capture_process(pid: int) -> PeerProcess:
@@ -911,7 +940,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
     from zdd.private_protocol import Deadline
     from zdd.diagnostics import process_start_time
 
-    (tmp_path / "selection").write_text("newer")
+    (tmp_path / "current-version").write_text("newer")
     durable = tmp_path / "fixture.kdbx"
     durable.write_bytes(b"fixture durable bytes")
     with socket.socket() as reservation:
@@ -934,7 +963,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
                 _send, fixed_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
-            (tmp_path / "selection").write_text("older")
+            (tmp_path / "current-version").write_text("older")
             new = _start(tmp_path, "older", fixed_port, incoming_mode)
             children.append(new)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, children)
@@ -985,6 +1014,110 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned retirement")
+def test_native_rollback_waits_for_pinned_retirement_to_confirm_exit(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_procutil._daemon_instance_identity import birth_identity
+
+    for identity in ("newer", "older"):
+        _stage_generation(tmp_path, identity)
+    (tmp_path / "current-version").write_text("newer")
+    old = _start(tmp_path, "newer", 0, "hung-work")
+    children = [old]
+    rollback = r"""
+import importlib.util, sys
+from contextlib import contextmanager
+from pathlib import Path
+from agent_procutil._daemon_instance_identity import identity_state
+root, sdk = Path(sys.argv[1]), Path(sys.argv[2])
+pid, birth = int(sys.argv[3]), sys.argv[4]
+spec = importlib.util.spec_from_file_location("rollback_sdk", sdk)
+runtime = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = runtime
+exec(compile(sdk.read_bytes(), str(sdk), "exec"), runtime.__dict__)
+original = runtime._publication_lease
+@contextmanager
+def observed(root):
+    try:
+        with original(root, timeout=0):
+            raise AssertionError("Retirement did not hold SDK selector custody")
+    except runtime.RetentionTimeout:
+        (root / "rollback.blocked").touch()
+    with original(root, timeout=8):
+        assert identity_state(pid, birth) in {"dead", "reused"}
+        (root / "rollback.acquired").touch()
+        yield
+runtime._publication_lease = observed
+runtime.activate(root, "newer", link_free=True)
+assert (root / "current-version").read_text().strip() == "newer"
+"""
+    with ThreadPoolExecutor(max_workers=2) as worker:
+        try:
+            _until(lambda: _endpoint(tmp_path) is not None, children)
+            endpoint = _endpoint(tmp_path)
+            pid = endpoint["pid"]
+            birth = birth_identity(pid)
+            pending = worker.submit(
+                _send, _target(endpoint),
+                {"action": "has", "kpdb": str(tmp_path / "fixture.kdbx"), "entry": "fixture"},
+            )
+            _until(lambda: (tmp_path / "newer.entered").exists(), children)
+            (tmp_path / "current-version").write_text("older")
+            new = _start(tmp_path, "older", 0, "rollback-successor")
+            children.append(new)
+            _until(lambda: (tmp_path / "retire.ready").exists(), children)
+            competing = worker.submit(
+                subprocess.run,
+                [sys.executable, "-c", rollback, str(tmp_path),
+                 str(Path(__file__).parent.parent / "scripts" / "versioned_runtime.py"),
+                 str(pid), birth],
+                capture_output=True, text=True, timeout=12, **no_window_kwargs(),
+            )
+            _until(lambda: (tmp_path / "rollback.blocked").exists(), [new])
+            assert old.poll() is None
+            assert not (tmp_path / "rollback.acquired").exists()
+            (tmp_path / "retire.continue").touch()
+            result = competing.result(timeout=12)
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert (tmp_path / "rollback.acquired").exists()
+            old.communicate(timeout=2)
+            assert old.returncode != 0
+            with pytest.raises((ValueError, OSError)):
+                pending.result(timeout=2)
+        finally:
+            _settle(tmp_path, children)
+
+
+@pytest.mark.parametrize("layout", ("missing", "foreign-slot", "directory-helper", "corrupt", "busy"))
+def test_missing_or_unattributable_sdk_cannot_retire_a_predecessor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str,
+) -> None:
+    from agent_vault import service
+
+    slot = tmp_path / "versions" / "incoming"
+    bootstrap = slot / ".runtime-bootstrap"
+    if layout == "busy":
+        _stage_generation(tmp_path, "incoming")
+    else:
+        bootstrap.mkdir(parents=True)
+    if layout == "directory-helper":
+        (bootstrap / "versioned_runtime_leases.py").mkdir()
+    if layout == "corrupt":
+        (bootstrap / "versioned_runtime_leases.py").write_text("def _publication_lease(:")
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "PROCESS_SLOT", tmp_path if layout == "foreign-slot" else slot)
+    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller.predecessor = SimpleNamespace(
+        retire=lambda *_: pytest.fail("No selector custody permits native retirement"),
+    )
+    guard = generation.selection_custody(tmp_path, slot) if layout == "busy" else nullcontext()
+    with guard:
+        assert controller._retire_previous() == "refused-selection-custody"
+    controller.publication.acquire()
+    controller.publication.release()
+
+
+@pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned retirement")
 def test_native_repeated_replacement_excludes_the_actual_older_writer(
     tmp_path: Path,
 ) -> None:
@@ -992,11 +1125,8 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
     from zdd.private_protocol import Deadline
 
     for identity in ("newer", "middle", "older"):
-        shutil.copytree(
-            Path(generation.__file__).parent, tmp_path / "versions" / identity / "agent_vault",
-            ignore=shutil.ignore_patterns("__pycache__"),
-        )
-    (tmp_path / "selection").write_text("newer")
+        _stage_generation(tmp_path, identity)
+    (tmp_path / "current-version").write_text("newer")
     durable = tmp_path / "fixture.kdbx"
     durable.write_bytes(b"fixture durable bytes")
     old = _start(tmp_path, "newer", 0, "hung-work")
@@ -1011,13 +1141,13 @@ def test_native_repeated_replacement_excludes_the_actual_older_writer(
                 _send, _target(first), {"action": "has", "kpdb": str(durable), "entry": "fixture"},
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
-            (tmp_path / "selection").write_text("middle")
+            (tmp_path / "current-version").write_text("middle")
             middle = _start(tmp_path, "middle", 0, "passive-legacy")
             children.append(middle)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
             second = _endpoint(tmp_path)
             assert not _send(_target(second), {"action": "ping"})["accepting_work"]
-            (tmp_path / "selection").write_text("older")
+            (tmp_path / "current-version").write_text("older")
             new = _start(tmp_path, "older", 0, "bounded-successor")
             children.append(new)
             _until(
@@ -1052,11 +1182,8 @@ def test_successive_cold_replacements_recover_the_fixed_unix_alias(tmp_path: Pat
 
     identities = ("newer", "middle", "older")
     for identity in identities:
-        shutil.copytree(
-            Path(generation.__file__).parent, tmp_path / "versions" / identity / "agent_vault",
-            ignore=shutil.ignore_patterns("__pycache__"),
-        )
-    (tmp_path / "selection").write_text("newer")
+        _stage_generation(tmp_path, identity)
+    (tmp_path / "current-version").write_text("newer")
     durable = tmp_path / "fixture.kdbx"
     durable.write_bytes(b"fixture durable bytes")
     children = [_start(tmp_path, "newer", 0, "bounded-successor")]
@@ -1071,7 +1198,7 @@ def test_successive_cold_replacements_recover_the_fixed_unix_alias(tmp_path: Pat
                     _send, fixed, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
                 )
                 _until(lambda: (tmp_path / (outgoing + ".entered")).exists(), [children[-1]])
-                (tmp_path / "selection").write_text(incoming)
+                (tmp_path / "current-version").write_text(incoming)
                 previous = children[-1]
                 new = _start(tmp_path, incoming, 0, "bounded-successor")
                 children.append(new)
@@ -1099,14 +1226,11 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
     from agent_vault.winpipe import pipe_send
 
     for identity in ("newer", "middle", "older"):
-        shutil.copytree(
-            Path(generation.__file__).parent, tmp_path / "versions" / identity / "agent_vault",
-            ignore=shutil.ignore_patterns("__pycache__"),
-        )
+        _stage_generation(tmp_path, identity)
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         fixed_port = reservation.getsockname()[1]
-    (tmp_path / "selection").write_text("newer")
+    (tmp_path / "current-version").write_text("newer")
     durable = tmp_path / "fixture.kdbx"
     durable.write_bytes(b"fixture durable bytes")
     old = _start(tmp_path, "newer", fixed_port, "hung-cleanup")
@@ -1120,7 +1244,7 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
                 _send, fixed_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
-            (tmp_path / "selection").write_text("middle")
+            (tmp_path / "current-version").write_text("middle")
             middle = _start(tmp_path, "middle", fixed_port, "passive-legacy")
             children.append(middle)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
@@ -1129,7 +1253,7 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
             assert pending.result(timeout=10)["ok"]
             _until(lambda: (tmp_path / "cleanup.entered").exists(), children)
             _until(lambda: _send(_target(second), {"action": "ping"})["accepting_work"], children)
-        (tmp_path / "selection").write_text("older")
+        (tmp_path / "current-version").write_text("older")
         new = _start(tmp_path, "older", fixed_port, "bounded-successor")
         children.append(new)
         _until(
@@ -1159,14 +1283,14 @@ def test_windows_alias_retries_after_discovery_exit_while_older_transport_surviv
 
 
 def test_failed_successor_does_not_remove_or_stop_the_incumbent(tmp_path: Path) -> None:
-    (tmp_path / "selection").write_text("newer")
+    (tmp_path / "current-version").write_text("newer")
     old = _start(tmp_path, "newer", 0)
     children = [old]
     try:
         _until(lambda: _endpoint(tmp_path) is not None, children)
         endpoint = _endpoint(tmp_path)
         old_port = _target(endpoint)
-        (tmp_path / "selection").write_text("older")
+        (tmp_path / "current-version").write_text("older")
         failed = _start(tmp_path, "older", 0, "fail")
         children.append(failed)
         stdout, stderr = failed.communicate(timeout=10)
@@ -1190,12 +1314,8 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
     from zdd.private_protocol import Deadline
 
     for identity in ("newer", "older"):
-        shutil.copytree(
-            Path(generation.__file__).parent,
-            tmp_path / "versions" / identity / "agent_vault",
-            ignore=shutil.ignore_patterns("__pycache__"),
-        )
-    (tmp_path / "selection").write_text("newer")
+        _stage_generation(tmp_path, identity)
+    (tmp_path / "current-version").write_text("newer")
     durable = tmp_path / "fixture.kdbx"
     durable.write_bytes(b"fixture durable bytes")
     old = _start(tmp_path, "newer", 0, old_mode)
@@ -1217,7 +1337,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
             if old_mode == "backend-work":
                 _until(lambda: (tmp_path / "backend.entered").exists(), children)
-            (tmp_path / "selection").write_text("older")
+            (tmp_path / "current-version").write_text("older")
             if old_mode == "backend-work":
                 (tmp_path / "older.start").touch()
             else:

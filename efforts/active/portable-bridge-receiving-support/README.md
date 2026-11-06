@@ -1061,3 +1061,25 @@ implementation. The exact support closure follows the consumer trace and tests.
   changed-birth cases pass; all 36 selected alias/cleanup consumers pass with
   one Linux skip. This is a focused final correction, not a repeated full
   265-case packet or additional unrelated coverage.
+
+### 2026-11-06 - Serialize rollback with pinned retirement
+
+- The next #11072 review had no inline findings, but its summary identified
+  a real selector race. The daemon-publication lease protects discovery;
+  SDK activation and rollback use a different kernel selector lease. Two
+  selection checks cannot close the interval before native termination.
+- Cold retirement now borrows that existing SDK lease from its own immutable
+  slot's retained bootstrap helper, holding it through pinned termination and
+  confirmed exit. No second selector protocol or generic SDK change is added.
+  Missing, nonordinary, corrupt or busy custody refuses the cold attempt;
+  cooperative replacement remains available.
+- The native regression pauses immediately after final owner revalidation
+  and before real termination. A concurrent real SDK `activate` first proves
+  that the selector lease is busy, then acquires it only after the original
+  process is positively dead. The generation packet passes 63 cases with
+  one Linux-only skip. The subsequent corrupt/busy refusal controls pass all
+  five cases; unchanged native cases retain that earlier packet's evidence.
+  This does not claim another monolithic run or Linux-native qualification.
+- The replacement reference now documents selector custody and its refusal
+  outcome. Review, exact-head CI, release and installed/external acceptance
+  remain open. No live service was changed by these source tests.
