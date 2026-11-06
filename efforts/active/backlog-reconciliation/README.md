@@ -331,6 +331,24 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records three further audited finite completions: #8410 through #8763,
+#9414 through #9419 and #9481 through #9483. Real merged source/regressions,
+current behavior, exact-head approvals and complete successful checks support
+the original bounded requests. Seven other originals retain their actual
+historical, source-owner, native or expanded-parent acceptance conditions.
+Two complete matching22:02 PST scans measure827 whole OPEN:548 creator-eligible,
+279 excluded,561 original-cohort and266 inflow. Verified dispositions are978,
+still98 above fixed729; the campaign remains Active without custody effects.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed merge #10898 publishing the three actual source/test
+completions and retained residuals. Both reviewed/merged/current file identities
+match, with genuine exact-head approval, nine complete good checks and the
+bounded133-test/23-plugin documentation validation. The campaign remains
+Active at the dated832-open census; fifteen further finite acceptance audits
+are assigned without implementation, native or custody effects.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records two further finite source/test completions: #8862 through merged
 #8867 and #9095 through merged #9098. Inspected original clauses, retained
 current source/test bindings, exact-head approval and complete successful
