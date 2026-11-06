@@ -37,9 +37,10 @@ import logging
 import os
 import secrets
 import time
+from functools import partial
 from pathlib import Path
 
-from . import source_serving
+from . import execution_context, incoming, source_serving
 from .client import (
     OneShotSession,
     UpstreamError,
@@ -423,15 +424,15 @@ class Server:
                 self._connections.discard(owner)
 
     async def _dispatch(self, req: dict) -> dict:
-        # Loopback-TCP transport: authorize every request against the daemon's
-        # token (a no-op on AF_UNIX, where ``_token`` is None).
+        # TCP requires the per-daemon token; AF_UNIX uses filesystem permissions.
         if self._token is not None and req.get("token") != self._token:
             return {"ok": False, "error": "unauthorized"}
         op = req.get("op")
+        if not incoming.accepts(self, req):
+            return {"ok": False, "error": "serving generation changed; request not accepted"}
         self._touch()  # any op is host activity; reset the idle self-evict clock
         if op == "ping":
-            return {"ok": True, "pong": True, "sessions": self.pool.size,
-                    "attached": self._attached, "configuration_context": CONTEXT_VERSION}
+            return {**incoming.ping_reply(self), "configuration_context": CONTEXT_VERSION}
         if op == "shutdown":
             return {"ok": True}
         if op in ("call", "list"):
@@ -440,9 +441,11 @@ class Server:
                 return {"ok": False, "error": "missing 'bridge'"}
             try:
                 root = request_root(req)
-                cfg = load_config(bridge, repository_root=root)
+                cfg = execution_context.load_config(
+                    bridge, req, partial(load_config, repository_root=root),
+                )
             except Exception as exc:
-                return {"ok": False, "error": f"config: {exc}"}
+                return execution_context.config_failure(exc)
             key = json.dumps([str(root), str(cfg.source_path)])
             try:
                 if op == "list":
@@ -487,14 +490,19 @@ class Server:
         if self._token is not None and req.get("token") != self._token:
             await self._send(writer, {"ok": False, "error": "unauthorized"})
             return
+        if not incoming.accepts(self, req):
+            await self._send(writer, {"ok": False, "error": "serving generation changed; attach not accepted"})
+            return
         bridge = req.get("bridge")
         if not bridge:
             await self._send(writer, {"ok": False, "error": "missing 'bridge'"})
             return
         try:
-            cfg = load_config(bridge, repository_root=request_root(req))
+            cfg = execution_context.load_config(
+                bridge, req, partial(load_config, repository_root=request_root(req)),
+            )
         except Exception as exc:
-            await self._send(writer, {"ok": False, "error": f"config: {exc}"})
+            await self._send(writer, execution_context.config_failure(exc))
             return
 
         # Client-bound sink: write one complete JSON-RPC line per message and
@@ -821,12 +829,9 @@ class Server:
             return {"ok": False, "error": "unauthorized"}
         op = req.get("op")
         if op in ("ping", "health"):
-            return {"ok": True, "pong": True, "draining": self._draining,
-                    "attached": self._attached, "sessions": self.pool.size,
-                    "pid": os.getpid(), "version": self._version,
-                    "data_socket": str(self.socket_path),
-                    "ready": self._server is not None and self._server.is_serving()
-                    and not self._closing and not self._draining}
+            from .source_serving import control_ping_reply
+
+            return control_ping_reply(self)
         if op == "drain":
             self._draining = True
             # Only attached (long-lived multiplexer) sessions are "in-flight,

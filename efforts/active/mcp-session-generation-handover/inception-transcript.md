@@ -81,3 +81,11 @@ renewed MCP prerequisite. Existing source work and journals are preserved.
 No prior application-bound calibration approval transfers to the SDK; no native
 effect, debugger implementation/execution or new process graph is authorized by
 this correction or by the source-only decoupling slice.
+## 2026-11-05 - Bounded ordinary-installer publication
+
+> Publish boundedordinary-installerfix, track prepared-applicationqualification separately.
+
+This separates the ordinary-installer publication decision from prepared
+application qualification, tracked separately in #10742 under #7028. Full
+adopted-session reattachment and whole-effort completion remain required; no
+build-feed trust or rollout approval is implied.

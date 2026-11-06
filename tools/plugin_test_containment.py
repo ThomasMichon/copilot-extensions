@@ -54,7 +54,7 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src")
 )
 try:
-    from agent_procutil import no_window_kwargs
+    from agent_procutil import JobHandle, no_window_kwargs
     from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle as daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
@@ -91,6 +91,10 @@ class ContainmentError(RuntimeError):
 
 class UnreapedProcessError(ContainmentError):
     """Owned processes may still hold the sandbox; cleanup is unsafe."""
+
+    def __init__(self, message: str, *, job: JobHandle | None = None):
+        super().__init__(message)
+        self.job = job
 
 
 class TestSandbox(NativeTemporaryDirectory):
@@ -360,10 +364,10 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         raise UnreapedProcessError("POSIX process group remains live after SIGKILL")
 
 
-def _windows_last_error() -> int:
-    import ctypes
+def _retire_windows_job(owner: JobHandle, timeout: float) -> None:
+    from agent_procutil._windows_caller_owned import _retire_job
 
-    return ctypes.get_last_error()
+    _retire_job(owner, timeout)
 
 
 class _WindowsJob:
@@ -505,42 +509,41 @@ class _WindowsJob:
             self._kernel32.CloseHandle(process)
 
     def close(self, *, qualification: Qualification | None = None) -> None:
-        if self._handle:
-            try:
-                if self.active_processes():
-                    if qualification is not None:
-                        qualification.forced_termination = True
-                    if not self._kernel32.TerminateJobObject(self._handle, 124):
-                        raise UnreapedProcessError(
-                            "TerminateJobObject failed with error "
-                            f"{_windows_last_error()}"
-                        )
-                    deadline = (
-                        min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
-                        if qualification is not None else time.monotonic() + 5.0
-                    )
-                    while self.active_processes():
-                        if time.monotonic() >= deadline:
-                            raise UnreapedProcessError(
-                                "Windows Job Object still has active processes after termination"
-                            )
-                        time.sleep(0.01)
+        owner = getattr(self, "_retirement_owner", None)
+        if owner is None:
+            if not self._handle:
+                return
+            owner = self._retirement_owner = JobHandle(self._handle)
+        elif not owner.handle and not getattr(owner, "_native_retirement", None):
+            return
+        deadline = (
+            min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
+            if qualification is not None else time.monotonic() + 5.0
+        )
+        try:
+            if qualification is not None and self._handle and self.active_processes():
+                qualification.forced_termination = True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 if qualification is not None:
-                    qualification.boundary.require(time.monotonic)
-                    qualification.job_zero_observed = True
-            except (ContainmentError, KeyboardInterrupt, OSError) as exc:
-                if isinstance(exc, UnreapedProcessError):
-                    raise
-                raise UnreapedProcessError(
-                    f"Windows Job Object termination could not be verified: {exc}"
-                ) from exc
-            finally:
-                closed = self._kernel32.CloseHandle(self._handle)
-                self._handle = None
-                if qualification is not None:
-                    qualification.job_handle_closed = bool(closed)
-                    if not closed:
-                        raise UnreapedProcessError("Original Windows Job handle could not be closed")
+                    qualification.forced_termination = True
+                handle = owner.handle or getattr(getattr(owner, "_native_retirement", None), "duplicate", None)
+                if not handle or not self._kernel32.TerminateJobObject(handle, 124):
+                    raise OSError("Owned Windows Job termination request could not be issued")
+                raise TimeoutError("Windows Job native retirement budget expired")
+            _retire_windows_job(owner, remaining)
+            if owner.handle or getattr(owner, "_native_retirement", None):
+                raise OSError("Windows Job native retirement retained unconfirmed witnesses")
+        except (Exception, KeyboardInterrupt) as exc:
+            raise UnreapedProcessError(
+                f"Windows Job native member exit could not be verified: {exc}", job=owner,
+            ) from exc
+        finally:
+            self._handle = owner.handle
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic)
+            qualification.job_zero_observed = True
+            qualification.job_handle_closed = True
 
     def active_processes(self) -> int:
         import ctypes

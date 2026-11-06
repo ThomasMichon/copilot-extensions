@@ -295,6 +295,23 @@ def _dep_fingerprint(name: str) -> str:
 
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
+    """Detach build children before preparation, not only before pytest."""
+    retained = _venv_root()
+    with _TestSandbox(prefix="ce-prep-", dir=runs_root(REPO)) as private:
+        record_owner(Path(private), REPO, retention="disposable after verified preparation cleanup")
+        from plugin_test_environment import preparation_environment
+
+        environment = preparation_environment(os.environ, Path(private), _plugin_dir(name))
+        cache = retained / ".uv-cache"
+        cache.mkdir(parents=True, exist_ok=True)
+        environment["UV_CACHE_DIR"] = str(cache.resolve())
+        interpreters = retained / ".python"
+        interpreters.mkdir(parents=True, exist_ok=True)
+        environment["UV_PYTHON_INSTALL_DIR"] = str(interpreters.resolve())
+        return _prepare_venv(name, uv, reinstall=reinstall, environment=environment)
+
+
+def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str, str]) -> Path:
     """Prepare the cached venv and return its Python interpreter.
 
     The caller must establish the environment directory and hold its
@@ -325,7 +342,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         before = venv.stat()
         subprocess.run(
             [uv, "venv", "--allow-existing", str(venv)], check=True,
-            env={key: value for key, value in os.environ.items() if key != "UV_VENV_CLEAR"},
+            env={key: value for key, value in environment.items() if key != "UV_VENV_CLEAR"},
         )
         after = venv.stat()
         if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
@@ -358,7 +375,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 # dependencies after the container loses network access.
                 cmd.extend(["--cache-dir", str(venv / ".bootstrap-uv-cache")])
             run_uv_install(
-                uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                uv, cmd[3:], env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 **({"non_editable": True} if name == "worktree-manager" else {}),
                 retained_resource_roots=(
                     standalone_build_resources("fleet-manager", source_root=REPO)
@@ -381,7 +398,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             run_uv_install(
                 uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
                      *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
-                cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py

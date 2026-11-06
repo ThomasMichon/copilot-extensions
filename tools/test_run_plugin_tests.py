@@ -623,6 +623,12 @@ def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
         return subprocess.CompletedProcess(command, 0)
 
     def install(uv, arguments, **kwargs):
+        environment = kwargs.pop("env")
+        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME"):
+            assert Path(environment[key]).is_relative_to(private)
+        assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
         assert kwargs == {
             "cwd": plugin, "trusted_source_roots": (runner.REPO,), "check": True,
             "retained_resource_roots": (),
@@ -937,6 +943,12 @@ def test_manager_explicit_native_selection_remains_available():
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
+    files = tuple(sorted(
+        path.relative_to(root).as_posix() for path in (root / "tests" / "native").glob("test_*.py")
+    ))
+    groups = runner._test_file_groups("worktree-manager", 25, test_files=files)
+    assert all(0 < len(group) <= 25 for group in groups)
+    assert [path for group in groups for path in group] == [root / value for value in files]
 
 
 @pytest.fixture

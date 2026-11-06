@@ -1,4 +1,10 @@
-"""Environment isolation and pure registry comparison for test runners."""
+"""Private suite/preparation state and pure registry comparison.
+
+Inherited service roots and installation participants are detached in ordinary
+runs; supervisor custody stays with its existing owner. Native fixtures must
+also pass explicit private installation/data paths: environment redirection
+does not redefine Windows special-folder APIs.
+"""
 
 from __future__ import annotations
 
@@ -38,6 +44,8 @@ _ROOT_ENV = {
     "AGENT_INDEX_ENGINE_HOME": "agent-index/engine",
     "AGENT_LOGGER_HOME": "agent-logger",
     "AGENT_MCP_HOME": "agent-mcp",
+    "AGENT_MCP_INSTALL_DIR": "agent-mcp-runtime",
+    "WORKTREE_MANAGER_ROOT": "worktree-manager",
     "AGENT_VAULT_CORE_RUN_DIR": "agent-vault/run",
     "AGENT_VAULT_KEK_DIR": "agent-vault/kek",
     "TEMP": "tmp",
@@ -69,9 +77,65 @@ ALWAYS_SCRUB_NAMES = {
     "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
     "COPILOT_PLUGIN_ROOT",
     "COPILOT_EXTENSIONS_TEST_VENV_ROOT",
+    "COPILOT_EXTENSIONS_CONTEXT",
+    "COPILOT_EXTENSIONS_NATIVE_INSTALLER",
+    "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+    "COPILOT_PLUGIN_INSTALL_STAGED",
+    "COPILOT_PLUGIN_STAGED_FROM",
+    "COPILOT_PROJECT_DIR",
+    "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
+    "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN",
+    "UPDATE_DRIVER_WITNESS",
 }
 _ALWAYS_SCRUB_NAMES = ALWAYS_SCRUB_NAMES
 _CREDENTIAL_NAMES = {"GH_TOKEN", "GITHUB_TOKEN"}
+
+
+def preparation_environment(
+    base: Mapping[str, str], sandbox: Path, project: Path,
+) -> dict[str, str]:
+    """Retain the dependency owner's resolver inputs before detaching host state."""
+    import installer_dependency_policy as dependencies
+
+    inputs = dependencies._config_inputs([], base, project)
+    configuration = {}
+    for path, is_project in reversed(inputs):
+        data = dependencies._toml(path)
+        if is_project:
+            data = {
+                key: value for key, value in data["tool"]["uv"].items()
+                if key not in ("sources", "workspace")
+            }
+        configuration = dependencies._merge_config(data, configuration)
+    environment = isolated_environment(base, sandbox)
+    if inputs:
+        retained = sandbox.resolve() / "uv.toml"
+        dependencies._write_toml(retained, configuration)
+        environment["UV_CONFIG_FILE"] = str(retained)
+    return environment
+
+
+def _detach_suite_overrides(env: dict[str, str], root: Path) -> None:
+    """Route inherited service state privately, without moving supervisor custody."""
+    for name in tuple(env):
+        key = name.upper()
+        if "TEST_SUPERVISOR" in key:
+            continue
+        if not key.startswith(("AGENT_", "WORKTREE_MANAGER_", "COPILOT_PLUGIN_")):
+            continue
+        if not env[name].strip():
+            env.pop(name)
+            continue
+        if key.endswith(("_CONTEXT", "_INSTALLATION_ID")):
+            env.pop(name)
+        elif key.endswith(("_ROOT", "_ROOTS", "_HOME", "_DIR")):
+            target = root / "overrides" / key.lower()
+            target.mkdir(parents=True, exist_ok=True)
+            env[name] = str(target)
+        elif key.endswith(("_CONFIG", "_CONFIG_PATH", "_DB", "_ENDPOINT", "_SOCKET", "_FILE")):
+            target = root / "overrides" / key.lower() / "state"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            env[name] = str(target)
 
 
 def isolated_environment(
@@ -86,8 +150,9 @@ def isolated_environment(
         raise ValueError("allow_host_state requires allow_explicit_tiers")
     root = sandbox.resolve()
     env = dict(base)
-    for name in _ALWAYS_SCRUB_NAMES:
-        env.pop(name, None)
+    for name in tuple(env):
+        if name.upper() in _ALWAYS_SCRUB_NAMES:
+            env.pop(name)
     if allow_host_state:
         env[ALLOW_HOST_STATE_ENV] = "1"
         for name in ALWAYS_SANDBOX_ENV_NAMES:
@@ -95,6 +160,7 @@ def isolated_environment(
             value.mkdir(parents=True, exist_ok=True)
             env[name] = str(value)
     else:
+        _detach_suite_overrides(env, root)
         env.pop(ALLOW_HOST_STATE_ENV, None)
         for name in _CREDENTIAL_NAMES:
             env.pop(name, None)

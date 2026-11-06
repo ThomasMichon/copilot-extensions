@@ -10,6 +10,7 @@
 - **Related issues:** #9716, #10377
 - **Realization defects:** #10652 (incoming completion gate), #6389 (fresh serving convergence), #10653 (unsafe forced cutover)
 - **Resident configuration correction:** #10951 (qualified caller context)
+- **Separate prepared qualification:** #10742 under campaign #7028; not the ordinary-installer slice's publication gate
 
 ## Guiding Intent
 
@@ -59,10 +60,11 @@ acceptance.
   full handover; documentation and implementation PRs have non-overlapping file
   ownership. No duplicate implementation writers.
 - **Host (owns PRs):** battered-sprocket coordinates implementation;
-  patient-spanner owns this documentation amendment.
+  patient-spanner owns the merged documentation amendment.
 - **Delegates:** Evidence roles are read-only. Lopsided-gasket retains
-  implementation ownership; its effort-file edits wait for this amendment's
-  merge and are then reconciled without discarding its journal.
+  exclusive implementation ownership; its effort-file edits are reconciled
+  with the merged amendment without discarding its journal. The coordinator
+  retains independent review, publication, release and acceptance.
 - **Handoff:** Findings return to the coordinator. Any implementation delegation
   receives explicit file ownership and preserves this effort's completion gate.
 - Preserve the existing installer, source-construction and census owners.
@@ -103,6 +105,10 @@ session-reattachment objective.
 
 ## Scope Approvals
 
+- The operator explicitly approved publishing the bounded ordinary-installer
+  correction while tracking prepared-application qualification separately.
+  That approval does not close the prepared matrix, full reattachment, release
+  or legacy-adoption gates, nor authorize a public-feed fallback or trust changes.
 - The operator requested a source-backed MCP retirement/update fix and selected
   reattachment when explicitly offered reattachment versus old-host draining.
 - Existing live clients and state-preservation processes must not be force-killed.
@@ -137,13 +143,13 @@ named tracked objective before the whole effort is Done.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Resolve concrete client/upstream state ownership and reuse existing
+- [x] Resolve concrete client/upstream state ownership and reuse existing
   lifecycle/transport primitives rather than inventing a parallel supervisor.
-- [ ] Reconcile client-bound stdio conduits and shared custody against the
+- [x] Reconcile client-bound stdio conduits and shared custody against the
   [service process-count contract](../../../visions/plugin-services/README.md#process-count-scales-with-services-not-sessions).
   Heavy backends and custody services must be bounded by installation and
   identity-compatible pooling, not new per-client daemons or supervisor trees.
-- [ ] Specify the versioned handover, admission and outcome contract, including
+- [x] Specify the versioned handover, admission and outcome contract, including
   the legacy-client adoption boundary and unsupported/rollback behavior.
 - [x] Land this prospective effort through normal automated review before code
   (#10600). Handover-specific design obligations gate that implementation, not
@@ -197,6 +203,7 @@ rejection and need an updated client or `--no-serve`.
   routed targets and protocol-era compatibility.
 - [ ] Self-retire client preservers on disconnect/EOF or verified owning-session
   termination; do not mistake a wrapper parent's exit for session completion.
+
 - [ ] Close superseded admission through the existing owner and retire old
   central generations only after their protected state is transferred or
   drained. Exclude client preservers and independently owned resources.
@@ -288,6 +295,88 @@ migration already works.
 - Source evidence found no existing generic MCP-session migration broker.
   Added a prospective quiescent-handover contract and explicit multi-client
   process-count validation in response to review.
+
+### 2026-11-04 - Implementation admission
+
+- Plan PR #10600 merged to `dev` with current-head automated approval and required
+  checks. Phase 1 records the reviewed ownership and protocol design, not an
+  implementation witness.
+- lopsided-gasket takes the exclusive implementation role. Stable connection
+  custody will own transport state; incoming backend objects must own subsequent
+  pipeline execution. Live coroutines cannot be serialized, so accepted calls
+  finish under their existing epoch before a data-only checkpoint.
+- Publication, promotion, authorized installed acceptance and the pre-feature
+  legacy adoption hold remain coordinator-owned completion gates.
+
+### 2026-11-04 - Source implementation milestone
+
+- Implemented the MCP-owned shared raw-connection keeper and independently
+  replaceable execution attachments. Incoming code constructs new session,
+  decorator and routing objects from versioned JSON data; no old pipeline is
+  retained behind a new relay. Local CLI responders remain current-backend
+  execution rather than keeper-owned policy.
+- Preserved explicit portable interpreter-binding provenance across runtime
+  slots, without treating literal interpreter-path changes as equivalent.
+  Routed target credentials and negotiated state remain separately bound.
+- Integrated guarded incoming publication on both native installers through
+  actual nested construction slots. Publication and command/deployment state do
+  not depend on old-process census or reset-control. The current IPC namespace
+  is distinct from pre-feature listeners, including configured socket bases.
+- Protected MCP conduits, keepers, foreground calls, central session hosts and
+  descendants from generic version retirement. Installer census is diagnostic
+  check-only; central generations retire through their own drained owner.
+  Automatic slot collection is
+  held: generic best-effort PID discovery cannot establish that launch-owned
+  code is no longer needed for lazy imports. This deliberately retains old code
+  on disk; qualified idle collection remains an explicit maintenance gate.
+- Real Windows source-process cases cover a pending mutation, simultaneous
+  fresh admission, startup and transition notifications, a server request,
+  cancellation, unchanged upstream PID/one initialization, new pipeline code,
+  old central exit, compatible provider rollback, backend-loss uncertainty
+  without replay and verified conduit-death cleanup. One-client and multi-client
+  heavy-process counts remain installation/generation bounded.
+- The final execution/configuration/transport packet passed **317 tests** with
+  **11 platform skips**. The native construction/retirement/home packet passed
+  **250 tests**, with **24 skips** and **one explicitly deselected qualification
+  case** after its direct failure. Every bounded runner reported verified owned
+  process cleanup. No production operation or publication was performed.
+- The final slot-retention adjustment was separately checked through the native
+  PowerShell warning/encoding boundary: both supported host cases pass while a
+  fixture collection tripwire remains untouched.
+- That unresolved case is
+  `test_reap_versions.py::test_real_tree_exit_spares_original_parent`: native
+  ownership census reports **Cannot attribute candidate process ownership**.
+  Its proof was not weakened or marked xfail. This is a coordinator-owned
+  qualification blocker under #10486, not an accepted clean native-retirement
+  result.
+- Independent source review, Linux/macOS qualification, complete native
+  HTTP/routed-target witnesses, hardened clean-room installation, installed
+  literal-command/Copilot acceptance, launch/performance qualification, release,
+  rollout and legacy adoption remain open. The process witnesses use distinct
+  source generations through the normal module entry, not a released installed
+  global command. The source milestone does not close this effort.
+
+### 2026-11-04 - Bounded supervision checkpoint
+
+- lopsided-gasket pauses at the coordinator's review boundary. The source
+  candidate is preserved locally, uncommitted and unpublished. No owned test
+  command remains running; completed bounded runs reported verified cleanup.
+- The latest installer policy is diagnostic-only census and retained predecessor
+  slots. Its final deltas require metadata refresh and bounded revalidation
+  before a commit can be treated as qualified.
+- One source gap remains explicit: fresh attachment still needs physical
+  generation admission when optional global configuration discovery skips
+  activation, or an activation opt-out leaves a capable old backend advertised.
+  Capability support alone must not select that old execution graph for a fresh
+  current caller. No generation-stamp-only test may substitute for execution proof.
+- Native fixture isolation needs owner review before further helper/test runs:
+  the runner redirects standard profile/state variables, but does not scrub every
+  manager-root override. Intended redirection and process cleanup are not proof
+  that every independently resolved resource stayed private. No causal ownership
+  conclusion follows from timing alone.
+- Resume with the same implementation actor after coordinator review. Preserve
+  the full reattachment contract, source exclusivity, native-census qualification
+  blocker, retained-slot hold and all release/consumer/legacy adoption gates.
 
 ### 2026-11-05 - Reconcile the existing incoming-completion architecture
 
@@ -441,3 +530,489 @@ migration already works.
   primary-consumer acceptance, with distinct unchecked Plan items. It is not
   live deployment or whole-effort completion and does not wait for SDK
   observer/focus/host qualification.
+- #10660 merged with automated approval and required checks at
+  `0fecf29e819de94c3adea8c731be6d9ce762b383`. Reconciled that canonical amendment
+  with the implementation journal without discarding prior progress.
+
+### 2026-11-05 - Private incoming-publication qualification
+
+- Committed the coupled canonical test-environment isolation prerequisite:
+  preparation children and native helpers receive private explicit state roots,
+  including inherited manager-root overrides, without relocating supervisor
+  custody. Three poisoned-parent-root controls passed.
+- Preserved the larger handover candidate separately while assembling the first
+  incoming-only slice. Its historical packets above are not qualification of
+  this slice or evidence that the independent-review findings are resolved.
+- The ordinary Windows native installer witness passed with two genuine
+  installations of different Pipeline code but unchanged package versions.
+  A fresh literal PATH command executes incoming code in a different physical
+  slot; the held old client retains its upstream PID and one initialization.
+  No manually published endpoint or fabricated installed-slot layout is used.
+  Retirement tripwires remain untouched and the old slot remains available.
+- This proves incoming publication and existing-client preservation only.
+  Adopted-wrapper reattachment, caller-identity and flow-control review fixes,
+  complete platform/native qualification, release, rollout and legacy adoption
+  remain open. No production operation or publication was performed.
+- The incoming integration/native-construction packet passed **299 tests**
+  with **30 platform skips**, including both retained-slot controls. Final
+  server/admission/isolation controls passed **49 tests** with **one skip**.
+  The ordinary installer witness passed again against the final production
+  source; one warm-pool fixture still using the legacy namespace was corrected
+  and its complete server packet rerun. Every runner verified owned cleanup.
+- The Windows fresh literal bridge observation was approximately **0.35 seconds**
+  with the incoming shared backend already ready. This is one native observation,
+  not a cross-platform performance qualification. No new per-client daemon or
+  synchronous helper is added to an already-current attachment.
+- Refreshed declarations through their canonical owners, passed the install
+  contract and touched-Python `F`/`E9` checks, and extracted incoming ping
+  metadata to keep the resident server within its source-module cap.
+  Coordinator review/publication remains the next gate. The managed-application
+  owner in #10054 must reconcile the current-handle namespace interface before
+  publication; its construction, rollback and reuse ownership is not superseded.
+
+### 2026-11-05 - Incoming caller-authority and cold-admission corrections
+
+- Independent incoming-slice inspection found that ready backend generation
+  did not bind caller authority, and optional acceleration failure could fall
+  through to a physically unselected cold interpreter.
+- Added private caller-derived configuration/environment/working-directory
+  equivalence before installed shared execution. Unsupported or different
+  contexts use current direct execution without rewriting backend environment.
+  Added typed physical-selection refusal across cold bridge/call/stub/catalog
+  execution and explicit unknown-outcome handling that forbids mutation replay.
+- The focused caller-context, selection, no-replay, server and isolation packet
+  passed **78 tests**, with **one platform skip** and verified owned cleanup.
+  The final complete incoming native packet passed **82 tests**, with **one
+  platform skip**. Both ordinary-installer variants prove actual caller-B
+  bridge/tool output against installer/backend-A context, and paused old
+  interpreters refuse warm, unavailable-accelerator fallback and no-serve calls
+  without stale upstream mutations. The source materialized-stub guard and
+  no-credential-transfer controls are included in that same green packet.
+- The companion constructor/application/retention packet passed **264 tests**
+  with **30 platform skips**, including both retained-slot controls. Every
+  runner verified owned cleanup. A larger combined selection exceeded the
+  existing 300-second group budget; the two complete packets were separated
+  without raising limits. A new stub fixture's missing explicit JSON input was
+  corrected before the final complete native packet was rerun successfully.
+- Production source did not change between the two final green packets.
+  Independent review, namespace coordination and publication remain
+  coordinator-owned gates; full handover, native census and other-platform
+  qualification remain open.
+- No managed-application adapter or namespace revision is part of these fixes.
+  The existing startup transaction and guards remain owned by #10054; its
+  inactive first touch, explicit incumbent, reuse, independent roots/handles,
+  failed-publication retry, reverse replacement, missing-route and occupied
+  endpoint matrix is not relabeled qualified for this namespace.
+
+### 2026-11-05 - Installed namespace contract reconciliation
+
+- Reproduced a concrete configured-handle regression: prepared `source_setup`
+  observed a sibling namespace rather than the explicitly configured incumbent
+  and incorrectly recorded `wanted=false`. The focused source test failed
+  before correction.
+- A real private ordinary-install fixture separately reproduced an inactive
+  configured catalog auto-starting a resident before first touch. This violated
+  the application's retained on-demand contract; the native case failed before
+  the publisher correction.
+- Committed `12c3ec7cc705206d7036cad468672035e8f08a8b`: configured handles remain
+  exact, separate default legacy state supplies intent without adoption, and
+  catalog readiness alone does not start an inactive resident.
+- Against that exact production source, both ordinary native variants passed
+  (**2 tests**) and the final callback/handle/authority packet passed
+  **143 tests**, with **14 platform skips**. All owned cleanup was verified;
+  source lint, install contract and module caps passed.
+- Authentic prepared-application qualification is blocked before MCP execution:
+  the existing governed builder refused because the private fixture has no
+  affirmatively trusted governed package feed. No trust entry was added and no
+  public-toolchain exception or installed global runtime was substituted.
+  The opt-in preparation prerequisite requires an explicitly pinned approved
+  commit and retains this real refusal rather than manufacturing wheel inputs,
+  completion receipts or an application layout.
+- The complete installed legacy/prepared application matrix remains open.
+  Resume with owner-supplied admitted prepared inputs or an approved governed
+  build context, then exercise the actual adapters, both replacement directions,
+  reuse, failed-publication recovery and mixed consumers. The prior 15-phase
+  report is not relabeled as qualification of this namespace.
+
+### 2026-11-05 - Ordinary installer scope and exact-handle intent
+
+- The operator separated the publishable ordinary-installer correction from
+  the still-open prepared application matrix, now tracked by #10742 under
+  #7028. The missing governed build context is a test-environment input refusal
+  for that separate qualification, not an ordinary-installer release veto.
+  Actual ordinary incoming authentication, build, health and admission failures
+  remain completion gates. Neither #10742 nor #10486 is closed by this slice.
+- Reproduced the exact configured-sidecar regression before correction:
+  shared serving intent was false, but the publisher's duplicate file scan
+  treated the same current endpoint as legacy intent and attempted startup.
+- Removed that duplicate scan. The publisher now uses the existing shared
+  serving-intent owner, including its exclusion of the current handle from
+  separate legacy hints. Exact configured handles, explicit socket semantics,
+  the default current namespace and the caller/physical-admission guards remain.
+- The focused intent/callback/authority packet passed **78 tests**, with
+  **one platform skip** and verified cleanup.
+- Final ordinary native qualification passed both complete variants in two
+  disjoint bounded selections (**one pass each**); the complete callback,
+  exact-handle, authority and isolation packet passed **185 tests** with
+  **15 platform skips**. All runners verified owned cleanup. A combined
+  selection exceeded the unchanged 300-second group limit and is not credited
+  as a pass; no timing or custody limit was raised.
+- The configured native variant verifies that the dead exact sidecar remains
+  untouched and no resident activates, then continues its existing default-
+  namespace generation witness. This is not configured-handle migration or
+  prepared-matrix qualification. Production source was unchanged between all
+  final green selections; only this journal result followed them.
+- Coordinator review/reconciliation/publication remain the next ordinary-slice
+  gates. Prepared qualification stays unqualified under #10742/#7028, and full
+  adopted-session reattachment and whole-effort completion stay open.
+
+### 2026-11-05 - Reconcile the tested ordinary slice onto current Dev
+
+- Replayed the owned commits onto Dev
+  `5320b55f0dc6a10d8eab7eeab99cf2903a45cb60`, preserving the merged #10660
+  architecture, every implementation journal entry, the ordinary-slice approval
+  and separate unqualified #10742 scope. No source prototype stash was applied.
+- Resolved the isolation scrub-list conflict by retaining both upstream test-
+  venv isolation and the installation/context scrubbing. Regenerated only
+  derived footprint hashes from the combined source through their canonical
+  owner; no contract recipe, upstream bootstrap code or release version changed.
+- The combined runner exposed a real API integration failure before pytest:
+  upstream makes the cache-root override optional, while the preparation wrapper
+  still assumed it was a path. The bounded job failed before correction.
+  Preparation now uses the owning root resolver and scratch owner, and native
+  fixtures use the runner's explicit retained-cache input instead of a checkout-
+  local cache. The focused isolation/admission packet passed **19 tests** with
+  verified cleanup.
+- A single guarded managed checkpoint sync succeeded on the same Dev pin;
+  no additional base chasing or source-host adoption occurred. Both complete
+  ordinary native variants then passed (**one test each**), and the full
+  callback/authority packet passed **185 tests**, with **15 platform skips**.
+- The companion constructor packet exposed two test assertions still expecting
+  a sibling namespace for an explicit configured handle. Corrected only that
+  expectation to the approved exact-handle contract; both shell adapters passed
+  the focused four-case control and the entire constructor/retention packet
+  passed **266 tests**, with **30 platform skips**. All owned cleanup was verified.
+- All final packets used the same reconciled production source. The final
+  constructor expectation and this journal are test/documentation-only changes;
+  they do not change the qualified runtime. Prepared qualification under #10742,
+  full handover under #10486, release and installed acceptance remain open.
+
+### 2026-11-05 - PR source admission and runtime review corrections
+
+- PR #10754 exposed stale unit source admission for the changed isolation
+  helper and a dependency-audit integration gap after preparation moved into
+  its invoked helper. Extended only the bounded actual preparation route;
+  missing, repointed, uninvoked and changed source evidence still revokes
+  attribution. The original parser reported **548 declarations/5 violations**;
+  the corrected complete live guard reports **548/0**, retaining the seven-day
+  policy. The full source-attribution suite passed **159 tests**, with **4 skips**.
+- Rebound only the two changed admitted source entries through the existing
+  protected source reader and admission contract. Membership remains **4146
+  nodes**, **595 sources**, unchanged coverage targets and the **300-second**
+  production packet budget. Existing environment, collector and PR-reuse
+  contract controls passed **243 tests**; no actor/process suites were admitted.
+- Corrected non-object/invalid warm-call replies to unknown outcomes without
+  cold replay; preserved data-home resolution independently of installation
+  roots; threaded exact requested handles through the installed startup owner;
+  and retained configuration home in manual cutover. Owner-declared process
+  bookkeeping is separated from caller authority, explicit references remain
+  significant, and private control tokens are not accidentally inherited.
+- The final Windows native variants each passed, proving exact override startup
+  without a default resident, independent default data-home failure, compatible
+  installed forwarding/pool reuse, distinct caller credentials and no stale
+  mutation replay. The complete callback/transport packet passed **211 tests**
+  with **15 skips**; constructor controls passed **267 tests** with **30 skips**.
+  Owned cleanup was verified. Temporary private diagnostic instrumentation was
+  removed before final qualification.
+- Complete unit qualification is not claimed on Windows: the unchanged packet
+  reached an existing symlink control requiring unavailable native privilege
+  and had platform skips. No elevation, skipped-node waiver or admission
+  weakening was used. The parent must run the entire unchanged packet in its
+  supported Linux venue or CI. The corrected real POSIX cutover/configuration
+  fixture likewise remains pending that venue; Windows skips are not proof.
+- #10742 prepared qualification and #10486 full handover remain open. No public
+  push, review-thread mutation, production rollout or source-host adoption was
+  performed by this implementation slice.
+
+### 2026-11-05 - Complete Linux source qualification
+
+- The coordinator ran the unchanged complete unit packet on Linux: **4146
+  admitted nodes** passed, with **595 source bindings**, original coverage
+  targets and the **300-second** whole-packet budget retained. Execution,
+  coverage and packet verification completed in **181.575 seconds**; the
+  bounded supervisor verified owned cleanup. The failed Windows attempt is not
+  credited as a pass.
+- The corrected real POSIX cutover fixture passed, verifying fixed-handle
+  routing, actual predecessor exit and lookup of the original configuration
+  home. Its initial fixture address exceeded the native Unix-socket length
+  limit before startup; an exact bind probe confirmed that cause. The existing
+  canonical short scratch root resolved the venue failure without a source
+  change, timeout increase or custody waiver. Both reports were retained.
+- Independent correction review found no additional High/Medium issues.
+  Source qualification does not satisfy the still-pending current-head review,
+  required CI, promotion or authorized installed-consumer acceptance gates.
+  Prepared application qualification under #10742 and full adopted-session
+  handover under #10486 remain open.
+
+### 2026-11-05 - Post-publication Dev reconciliation
+
+- Reconciled the actual PR conflict with current Dev. Both conflicts concerned
+  producer digests only; the non-derived footprint contracts were identical.
+  The canonical footprint owner regenerated digests over the combined source,
+  retaining the updated upstream daemon asset and contract revision.
+- Preserved all earlier journals, six review corrections and current upstream
+  unit membership, coverage targets and budget. The combined manifest admits
+  **4145 nodes**, **595 sources** and **300 seconds**; only the two previously
+  corrected source bindings differ from Dev. Protected source verification
+  passed. The earlier complete Linux packet describes its original source pin,
+  not qualification of this new integrated pin.
+- Both ordinary native installation variants passed. The callback/client packet
+  passed **211 tests** with **15 skips**, and focused unit-admission/dependency
+  controls passed **402 tests** with **4 skips**. Owned cleanup was verified.
+  A missing coverage collector caused an initial collection failure; restoring
+  it through the existing CI tooling owner resolved that test-environment issue.
+- Install-contract, F/E9 lint, module-cap and whitespace checks passed. The
+  complete dependency guard admitted **549 declarations/0 violations**, with
+  the seven-day policy unchanged. No new MCP production behavior was authored.
+  Current-head publication, review, CI and complete Linux qualification remain
+  coordinator-owned; #10742 and full handover #10486 remain open.
+
+### 2026-11-05 - Reconciled Linux packet qualification
+
+- The coordinator qualified the complete reconciled Linux packet: all **4145
+  admitted nodes** passed, retaining **595 sources**, coverage targets and the
+  **300-second** budget. Execution, coverage and source/packet verification
+  completed in **181.116 seconds**, with verified owned cleanup.
+- MCP code/tests are unchanged from the previously qualified correction;
+  the native installer and real POSIX cutover witnesses remain applicable.
+  Publication uses the owning private PR's documented exact-head-leased
+  intentional-rebase flow. Current-head review, required CI, promotion and
+  authorized installed-consumer acceptance still remain open, alongside
+  #10742 and full handover #10486.
+
+### 2026-11-05 - Further review corrections and containment qualification hold
+
+- Contradictory warm-call success/refusal and result-bearing refusal replies now
+  retain unknown outcomes without cold mutation replay. Actual-wire controls
+  preserve one warm write and zero cold executions; ordinary pre-effect context
+  refusal still permits direct execution.
+- Native readiness, reuse and guarded publication qualify the authenticated
+  process's installation root as well as native birth, physical generation and
+  exact data ownership. Both ordinary native variants passed. The discovered
+  variant constructed the same physical version in a second installation,
+  refused publication and preserved the first route and held upstream.
+  The complete callback/client packet passed **225 tests**, with **15 skips**.
+- Dependency-source attribution rejects local helper shadowing and module-level
+  callee replacement while retaining legacy direct preparation. Preparation
+  retains UV configuration through the existing dependency owner's reader,
+  precedence merge and private writer before detaching user/service roots.
+  Explicit reinstall controls validate the private environment and original
+  install arguments. Native discovery controls now follow the owning inventory
+  while retaining exact selection and the unchanged 25-file grouping cap.
+- Final dependency controls passed **170 tests/4 skips**, runner controls
+  **196 tests/3 skips**, and unit-admission/collector controls **243 tests**.
+  The combined packet is **not green**: containment had **88 passes/2 skips/1
+  failure**, with immediate file deletion reporting WinError 32 after contained
+  return. The exact single retry reproduced that failure. Both supervisors
+  verified final cleanup; this does not prove the inner return boundary.
+  No containment policy change, ad hoc process kill, assertion waiver or flake
+  classification was substituted. That owner-boundary diagnosis remains open.
+- Only the two changed unit source bindings were refreshed through the protected
+  reader and admission contract; **4145 nodes**, **595 sources**, coverage targets
+  and the **300-second** budget remain intact. Install contract, F/E9 lint,
+  module caps and whitespace passed; the dependency guard remains **549/0**.
+  The manual cutover function is unchanged, including its configuration-home
+  argument. Earlier Linux qualification describes earlier pins; current complete
+  qualification and review remain coordinator-owned. #10742 and #10486 stay open.
+
+### 2026-11-05 - Native Job exit qualification hold resolved
+
+- Targeted native evidence identified an owned file-holding descendant in the
+  inner Job. Immediately after Job termination, accounting reported zero while
+  its native process handle remained unsignalled and delete-access-open still
+  reported WinError 32. Assigned exit status was not actual native exit.
+  No external holder was attributed and no flake waiver was used.
+- Windows containment now reuses procutil's existing stable-member pin/native
+  wait barrier within the original teardown budget. Unconfirmed native exit,
+  unclosed handles or retained witnesses preserve the same Job owner on the
+  error; successful settlement flags require completed retirement. No new
+  controller, timing allowance, file-deletion retry or production remedy was
+  introduced.
+- Both original failed reports and fixture files were preserved. The unchanged
+  file-holder and cancellation cases passed after the source correction.
+  Final validation passed **841 tests/9 skips**, including **92 containment
+  tests/2 skips**, **170 dependency tests/4 skips**, **196 runner tests/3 skips**,
+  **243 admission controls** and **140 native qualification/SDK controls**.
+  Owned cleanup was verified; the former combined-packet hold is resolved.
+- Only the containment source binding changed in the admitted unit manifest.
+  **4145 nodes**, **595 sources**, coverage targets and the **300-second** budget
+  remain unchanged. Module caps, F/E9 lint, install contract, whitespace and
+  dependency guard **549/0** passed. The prior five corrections are preserved;
+  current full Linux qualification, review and publication remain coordinator
+  gates. Prepared qualification #10742 and full handover #10486 remain open.
+
+### 2026-11-05 - Pure-unit native-retirement fixture integration
+
+- Complete Linux qualification exposed a borrowed owner fixture still mocking
+  the retired kernel/count boundary. Its real retirement import attempted an
+  ineligible dynamic-library effect inside the pure-unit packet.
+- Updated only that fixture to fake the current native-retirement boundary,
+  asserting native witness closure, the unchanged five-second budget and forced
+  nonpositive qualification. Production teardown and unit effect policy remain
+  unchanged. Focused admitted-owner, contract and PR-source controls passed
+  **149 tests**, with verified cleanup.
+- Refreshed only the borrowed fixture's admitted source binding; **4145 nodes**,
+  **595 sources**, coverage targets and the **300-second** budget remain intact.
+  Current complete Linux qualification and publication remain coordinator gates;
+  #10742 and #10486 remain open.
+
+### 2026-11-05 - Canonical generated Windows runtime resolution
+
+- CI's strict runtime-resolution guard exposed a generated CMD interpreter
+  shortcut. Removed both hand-built slot paths; every launch now uses the
+  co-deployed canonical marker resolver noninteractively in read-only mode.
+  Environment-based path handling preserves quoted profile paths without
+  weakening completion/reparse checks or adding guard annotations.
+- A mismatched completion marker executed before the correction and now refuses
+  before module execution. Two focused generated-launch controls passed,
+  preserving selected nested environment, literal arguments and stdin.
+  Both required ordinary native installer variants passed on final regenerated
+  source, preserving the original held-client PID/single initialization and
+  fresh physical-code witnesses.
+- Regenerated only MCP's human-output declaration and producer footprint through
+  their existing owners. Strict runtime-resolution, install-contract, F/E9,
+  module-cap and whitespace checks passed. Protected verification found no
+  changed unit source bindings; **4145 nodes**, **595 sources**, coverage targets
+  and the **300-second** budget remain unchanged.
+- No complete Linux packet was rerun or relabeled; the coordinator's result
+  remains bound to its original source pin. Review, publication and rollout
+  remain coordinator gates. Prepared qualification #10742 and full handover
+  #10486 remain open.
+
+### 2026-11-05 - Final source qualification and reaper documentation correction
+
+- The coordinator qualified the complete Linux packet after the canonical CMD
+  correction: **4145 admitted nodes** passed, with **595 source bindings**,
+  unchanged coverage targets and the **300-second** budget. Execution,
+  coverage and packet verification completed in **259.815 seconds**, with
+  verified owned cleanup. Both final ordinary Windows installer variants and
+  the two marker/stdin controls passed; the previously failing strict
+  runtime-resolution guard was independently rerun successfully.
+- Corrected the remaining review finding in the README and incoming-publication
+  documentation: the environment variable is a legacy installer opt-out.
+  It does not inhibit the explicit reaper; non-terminating inspection requires
+  `--check-only`. This correction changes no executable or test inputs.
+- Current-head review, required CI, promotion and authorized installed-consumer
+  acceptance remain open. Prepared qualification #10742 and full adopted-session
+  handover #10486 remain separate required work, not completed by this packet.
+
+### 2026-11-05 - Current Dev reconciliation and bounded branch reachability
+
+- Reconciled the published change with current Dev through the owned PR flow.
+  Four conflicts concerned producer digests only; non-derived footprint
+  contracts were identical and the canonical owner regenerated combined-source
+  digests. Upstream attached-session drain protection, executing-writer changes,
+  primitive caching, documentation and all prior journals were retained.
+- The review overview had a concrete source-attribution defect: traversal could
+  continue after a selected terminating branch and credit an uncalled helper.
+  Six controls failed before the correction. The bounded existing traversal now
+  propagates return/raise termination through recognized `if`/`with` blocks,
+  while retaining continuation for a nonmatching or partially terminating
+  branch. No general control-flow rewrite or dependency exemption was added.
+- Dependency controls passed **178 tests/4 skips** and the complete dependency
+  audit remains **549/0**. Integrated MCP callback, configuration and payload
+  controls passed **276 tests/22 skips**. Existing private-environment/reinstall
+  and PR-source controls passed **83 tests**; all supervisors verified cleanup.
+  Strict runtime-resolution, install contract, F/E9, module caps and whitespace
+  passed.
+- The two carried findings remain corrected: private preparation validates its
+  environment without discarding install arguments, and same-version foreign
+  installation ownership refuses before reuse or publication. Those
+  implementations were not changed to address stale comments.
+- Current Dev's **4152 nodes**, **595 sources**, coverage targets and original
+  **300-second** unit budget are preserved, including newly admitted upstream
+  controls. Only the changed dependency-audit binding was refreshed after this
+  correction. Complete Linux qualification, provider review and publication
+  remain coordinator gates; #10742 and full handover #10486 remain open.
+
+### 2026-11-05 - Exact Dev metadata reconciliation and CI qualification gate
+
+- Reconciled the published branch onto the approved current Dev pin. Replay
+  conflicts concerned only producer digests; non-derived footprint contracts
+  remained identical and canonical regeneration retained all upstream and
+  authored source. Upstream nested-peer environment validation was preserved.
+  Minimal existing frontdoor/configuration controls passed **39 tests/7 skips**,
+  with verified cleanup. Strict runtime-resolution, install contract, module
+  caps and whitespace passed.
+- At published source `bc9b65d90991cd4342e3dcb7541e215c284cd934`, both local Linux
+  attempts **failed whole-packet qualification**, despite all **4152 assertions**
+  passing in **182.92** and **192.09 seconds**. The first reached final
+  verification at **272.330 seconds**; final verification exceeded the original
+  **300-second** whole bound. Both supervisors verified cleanup, not successful
+  packet qualification.
+- The **29.906-second** profile, including **20.269 seconds** of source-path/hash
+  checks on the mounted filesystem, is diagnostic only. It is not a full pass.
+  No path checks, coverage, nodes, profile or deadlines were weakened; no
+  600-second native profile was substituted.
+- Both alternative native-venue requests refused before allocation; no resource
+  was created, blanket fallback enabled or adoption policy changed. Public
+  #10827 tracks the routed allocation's project-binstub assumption.
+- Required native Linux CI must qualify the complete current **4152-node**,
+  **595-source**, **300-second** packet before merge. Earlier qualified source
+  pins remain distinct. Current review, publication, CI, merge and rollout
+  remain coordinator gates; #10742 and full handover #10486 remain open.
+
+### 2026-11-05 - Windows reference casing and matched-branch reachability
+
+- Current review exposed two concrete defects. On Windows, a mixed-case explicit
+  environment reference could resolve a real credential while omitting it from
+  the sharing digest. Reference matching now follows case-insensitive Windows
+  lookup only; POSIX matching remains case-sensitive. Explicit references remain
+  significant and unreferenced control bookkeeping remains excluded.
+- The matched dependency branch still scanned its body directly after outer
+  reachability analysis. It now uses the same bounded traversal inside that
+  branch. Early return/raise cannot credit a later local source; a partially
+  terminating branch can retain a genuinely reachable source.
+- Before-fix controls reproduced two casing failures and three unreachable-source
+  failures. Final context/no-replay controls passed **29 tests**; dependency
+  controls passed **182 tests/4 skips**, with the complete dependency guard at
+  **549/0**. Both ordinary native Windows variants passed, retaining positive
+  installed pooling, credential isolation, held clients and fresh physical-code
+  execution. All supervisors verified cleanup.
+- Canonical footprint regeneration and the single changed dependency-audit unit
+  binding preserve **4152 nodes**, **595 sources**, coverage targets and the
+  **300-second** budget. F/E9, strict runtime-resolution, install contract,
+  module caps and whitespace passed. No rebase, local complete-packet rerun,
+  publication, production effect or qualification waiver was introduced.
+- Required native Linux CI still gates merge; local whole-budget failures and
+  diagnostic-only profiling remain disclosed separately. Review, release and
+  installed-consumer acceptance remain coordinator-owned. #10742 and full
+  handover #10486 remain open.
+
+### 2026-11-05 - Expired Job termination and caller-unset default home
+
+- Current review exposed a termination omission after whole-bound expiry.
+  Expired close now requests termination through the exact owned original or
+  retained Job handle before reporting unconfirmed retirement. It does not
+  begin another verification interval, wait beyond the deadline, discard
+  witnesses or publish positive settlement flags. Normal native teardown
+  retains its existing five-second bound.
+- An unset or empty unreferenced home now compares as the canonical resolved
+  default added during daemon startup. Nonempty overrides and explicit
+  configuration references remain significant; no credential key or custom
+  configuration home is blindly removed.
+- Four controls failed before these fixes. Final context/no-replay controls
+  passed **31 tests**; expired-owner, native file-holder and cancellation
+  controls passed **13 tests**, with **149 pure owner/PR-source controls**
+  passing. Both ordinary native variants now run with caller `AGENT_MCP_HOME`
+  unset under private default profile roots, including the configured catalog.
+  Both passed actual pool reuse, credential isolation, held-client continuity
+  and fresh physical-code witnesses. All supervisors verified cleanup.
+- Canonical footprint regeneration and the single changed containment unit
+  binding retain **4152 nodes**, **595 sources**, coverage targets and the
+  **300-second** budget. F/E9, strict runtime-resolution, install contract,
+  module caps, whitespace and dependency guard **549/0** passed.
+- No local whole-packet rerun, rebase, publication, production effect or budget
+  waiver was used. Mandatory native Linux CI, current review, release and
+  installed-consumer acceptance remain coordinator gates. #10742 and full
+  handover #10486 remain open.

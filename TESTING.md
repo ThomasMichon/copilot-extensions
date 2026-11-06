@@ -1844,6 +1844,16 @@ Ordinary callers retain their existing relative-limit API.
 pure registry-value comparison. The containment module re-exports its public
 environment API in both package and standalone import modes; the registry
 reader, refusal errors and native Job lifecycle remain in the original owner.
+Preparation resolves UV configuration before redirecting user directories,
+using the dependency owner's configuration reader, precedence merge and private
+snapshot writer. Existing UV credential inputs remain available without
+restoring host service roots or changing feed admission policy.
+Windows Job teardown reuses procutil's pinned-member native-exit barrier.
+Zero active-process accounting alone does not prove that native exit or pending
+I/O has completed. Unconfirmed retirement retains the same Job witnesses on
+`UnreapedProcessError.job`; it cannot publish successful settlement flags.
+An expired whole bound still requests termination of that exact owned Job,
+without starting another verification interval or claiming settlement.
 
 The qualified stage publishes source/scope/origin-bound work-completion evidence
 only after actual candidate and worker exits within the original work cutoff.
