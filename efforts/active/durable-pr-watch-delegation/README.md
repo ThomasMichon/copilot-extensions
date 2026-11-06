@@ -1085,12 +1085,18 @@ callback an implicit credential store.
   plus five read-only failure-evidence controls. Touched Python lint and the
   thirteen-plugin installation contract passed. No native OS-account, installed
   or fleet test was run locally.
-- Windows shipped-cell startup followed by native-identity refusal remains
-  unresolved. A narrowed disposable direct-start experiment failed before
-  publishing child custody, not at that hosted boundary, and is not shipped or
-  counted as acceptance. The actual shipped-cell failure now records bounded,
-  read-only native-birth comparison and original-exit observations separately,
-  retaining unknown/refused evidence without control, retry or cleanup bypass.
+- The Windows `serve` controller was also admitted as a resident, unlike the
+  passing `restart` path. Its disposable Windows admission creates an inherited
+  kill-on-close Job. Admission now belongs only to the actual passive and legacy
+  foreground owners. Five focused routing/native controls pass: the corrected
+  child survives caller exit, while restoring old controller admission kills
+  that exact child. Test containment, leases and native checks are unchanged.
+- Actual shipped-account acceptance remains open. An earlier narrowed
+  disposable direct-start experiment failed before publishing child custody,
+  not at the hosted boundary, and is not shipped or counted as acceptance.
+  The shipped-cell failure now records bounded read-only native-birth comparison
+  and original-exit observations separately, retaining unknown/refused evidence
+  without control, retry or cleanup bypass.
 - Fresh hosted qualification needs a new exact-source approval; both earlier
   one-run grants are consumed. Keep #10927, #9277 and every original installed,
   operational, resource and parent completion obligation open.

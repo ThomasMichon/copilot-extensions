@@ -1,5 +1,5 @@
 {
-  "comment": "Refuse unsupported governed-owner birth tokens before publication and repair concurrency qualification forwarding.",
+  "comment": "Keep daemon admission on actual watch owners, refuse unsupported birth tokens before publication and preserve concurrency revision fencing.",
   "changes": [
     {
       "plugin": "agent-pull-requests",
