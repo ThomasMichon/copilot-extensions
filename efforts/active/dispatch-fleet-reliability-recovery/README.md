@@ -212,6 +212,13 @@ startup path first; it does not claim every suite entry point already conforms.
 
 ### Phase 3 - Bound supervision and preserve recoverable operations
 
+- [ ] Complete #2798's exact provider-ground-truth claim/goal reconciliation,
+  #3179's distinct releasing/trailing-cleanup recovery, #8780's optional
+  optimistic CLI guards and #8781's scoped current-reservation CLI selection
+  through the direct [owner-fenced Plan](owner-fenced-recovery-intake.md#plan).
+  Preserve original owners, all alternatives and unchecked product acceptance;
+  actual reviewed merge/current full readback precede tracker supersession.
+
 - [ ] Establish the budget before declaration/companion resolution and isolate
   expensive receipt integrity work from the master reconcile thread.
 - [ ] Keep one tracked operation per receipt and revalidate exact selection and
@@ -622,6 +629,12 @@ _(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
   no startup, retry, reservation, reviewer or container operation.
 
 ## Validation Plan
+
+- [ ] Resolve every original/refined #2798/#3179/#8780/#8781 clause through the
+  direct [owner-fenced Validation Plan](owner-fenced-recovery-intake.md#validation-plan).
+  Preserve R2816, R2877, P5493 and every incumbent global validation/owner gate;
+  tracker intake is not implementation, native acceptance or resource release.
+
 - [ ] Complete every directly retained #2395 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Complete every directly retained #2207 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
@@ -733,6 +746,17 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-11-05 - Proposed owner-fenced recovery and CLI tracking intake
+
+Added direct Plan/global Validation for the complete provider-ground-truth,
+releasing/trailing-cleanup and two finite CLI contracts. Fresh whole-source
+qualification distinguished actual ownership from issue status and retained
+#8781's preferred versus optional filter choices. Existing R2816/R2877/P5493
+lanes remain intact. #7836 is now merged source rather than an open candidate;
+exact source acceptance and any operational duty remain separate evidence.
+This proposes only reviewed tracking receipt, not implementation, owner
+reassignment, reservation recovery, tests, native operation or rollout.
 
 ### 2026-10-30 - Proposed four-signature ordinary-startup characterization
 
