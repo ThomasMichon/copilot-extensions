@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 
 SANDBOX_ENV = "COPILOT_EXTENSIONS_TEST_SANDBOX"
-_MUX = {"tmux", "psmux"}
+_MUX = {"tmux", "psmux", "pmux"}
 _SHELLS = {"sh", "bash", "dash", "zsh", "cmd", "powershell", "pwsh"}
 _EXEC_VECTOR = {"execv", "execve", "execvp", "execvpe", "posix_spawn", "posix_spawnp"}
 _EXEC_LIST = {"execl", "execle", "execlp", "execlpe"}
@@ -170,7 +170,7 @@ def _launcher_problem(
     nested = parts[1:]
     if name == "ssh":
         text = " ".join(nested)
-        if check_mux_scope and re.search(r"\b(?:psmux|tmux)(?:\.exe)?\b", text, re.IGNORECASE):
+        if check_mux_scope and re.search(r"\b(?:psmux|pmux|tmux)(?:\.exe)?\b", text, re.IGNORECASE):
             return "remote mux commands require independently verified remote fixture scope"
         return _shell_problem(text, check_mux_scope=False)
     if name in {"sudo", "doas"}:
@@ -273,7 +273,7 @@ def _shell_problem(
         except ValueError:
             pass
     patterns = (
-        (r"\b(?:psmux|tmux)(?:\.exe)?\b[^\r\n;|]*\bkill-server\b", "server-wide mux cleanup"),
+        (r"\b(?:psmux|pmux|tmux)(?:\.exe)?\b[^\r\n;|]*\bkill-server\b", "server-wide mux cleanup"),
         (r"\b(?:pkill|killall)\b", "name/pattern-based process termination"),
         (r"\btaskkill(?:\.exe)?\b[^\r\n;|]*/(?:im|fi)\b", "bulk/image-name process termination"),
         (r"\bstop-process\b[^\r\n;|]*-(?:n|na|nam|name)\b", "name-based process termination"),

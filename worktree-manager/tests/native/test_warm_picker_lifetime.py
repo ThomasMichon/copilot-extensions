@@ -212,10 +212,28 @@ def _owner(root, namespace):
     publish(root / "owner.json", {"pid": os.getpid(), "start": process_start_time(os.getpid())})
     pool = WarmPickerPool(root / "manager")
     pool.mux_args = namespace
+    payload = {
+        "manager_runtime": runtime_identity(), "engine": pool.engine,
+        "context": pool.context, "cwd": str(root),
+        "handoff": {
+            "ok": True, "contract_version": 1,
+            "runtime_root": str(root / "home" / ".agent-worktrees"),
+            "bootstrap": {
+                "version": 1, "project": demo.DEMO_PROJECT,
+                "headless": False, "should_switch_cwd": False,
+                "default_live": False,
+                "project_config": {
+                    "config_dir": str(root / "home"),
+                    "repo_dir": str(root), "machine": "fixture",
+                },
+            },
+        },
+    }
     claimed = False
     history = []
     last_state = None
     try:
+        assert pool.acquire(payload) == {"available": False, "reason": "warming"}
         while True:
             snapshots = []
             for slot in pool._slots:
@@ -250,23 +268,7 @@ def _owner(root, namespace):
                         "incarnation": slot.incarnation, "worker": ready,
                     })
                 if not claimed and (root / "activate").exists():
-                    result = pool.acquire({
-                        "manager_runtime": runtime_identity(), "engine": pool.engine,
-                        "context": ready["context"], "cwd": str(root),
-                        "handoff": {
-                            "ok": True, "contract_version": 1,
-                            "runtime_root": str(root / "home" / ".agent-worktrees"),
-                            "bootstrap": {
-                                "version": 1, "project": demo.DEMO_PROJECT,
-                                "headless": False, "should_switch_cwd": False,
-                                "default_live": False,
-                                "project_config": {
-                                    "config_dir": str(root / "home"),
-                                    "repo_dir": str(root), "machine": "fixture",
-                                },
-                            },
-                        },
-                    })
+                    result = pool.acquire({**payload, "context": ready["context"]})
                     publish(root / "claim.json", result)
                     if result.get("available"):
                         (slot.directory / "attached").touch()

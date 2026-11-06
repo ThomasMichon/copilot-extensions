@@ -16,6 +16,7 @@ import plugin_test_command_safety as safety
 
 _GLOBAL_COMMANDS = [
     ["psmux", "kill-server"],
+    ["pmux.exe", "kill-server"],
     ["tmux", "-S", "/private/mux.sock", "kill-server"],
     ["C:\\Program Files\\PSMux\\PSMUX.EXE", "kill-server"],
     ["pkill", "-f", "copilot"],
@@ -78,6 +79,7 @@ def test_windows_audit_command_line_roundtrips_nested_python_quotes_and_newlines
 
 @pytest.mark.parametrize("command", [
     ["psmux", "kill-session", "-t", "wt-live"],
+    ["pmux.exe", "kill-session", "-t", "wt-live"],
     ["psmux", "new-session", "-d", "-s", "fixture"],
     ["psmux", "-L", "default", "kill-session", "-t", "fixture"],
     ["tmux", "-S", "/outside/mux.sock", "kill-session", "-t", "fixture"],
@@ -173,6 +175,7 @@ def test_child_arguments_cannot_qualify_the_parent_mux_namespace(monkeypatch, tm
     ["bash", "-o", "pipefail", "-lc", "pkill -f fixture"],
     ["pwsh", "-ExecutionPolicy", "Bypass", "-co", "Stop-Process -Name fixture"],
     ["cmd.exe", "/c", "taskkill /IM python.exe /F"],
+    ["cmd.exe", "/c", "pmux.exe kill-server"],
     ["pwsh", "-Command", "psmux kill-session -t wt-live"],
     ["sh", "-c", "docker system prune -af"],
     ["pwsh", "-Command", "& 'C:\\Program Files\\PSMux\\psmux.exe' kill-session -t wt-live"],
@@ -462,13 +465,14 @@ def test_benign_source_does_not_pay_for_ast_analysis(tmp_path, monkeypatch):
     assert safety.source_problems(source) == []
 
 
-def test_real_popen_is_refused_before_even_a_harmless_standin_can_execute(tmp_path):
+@pytest.mark.parametrize("mux", ["psmux", "pmux.exe", "tmux.exe"])
+def test_real_popen_is_refused_before_even_a_harmless_standin_can_execute(tmp_path, mux):
     sentinel = tmp_path / "executed"
     (tmp_path / "kill-server").write_text(
         f"from pathlib import Path\nPath({str(sentinel)!r}).touch()\n"
     )
     # Even if refusal regresses, executable is pinned to Python, never psmux.
-    command = ["psmux", "kill-server"]
+    command = [mux, "kill-server"]
     with pytest.raises(safety.UnsafeTestCommand):
         subprocess.run(
             command, executable=sys.executable, cwd=tmp_path,

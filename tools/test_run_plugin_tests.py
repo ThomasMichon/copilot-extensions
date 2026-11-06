@@ -913,9 +913,10 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
 
 def test_manager_explicit_native_selection_remains_available():
     root = runner._plugin_dir("worktree-manager")
-    files = tuple(sorted(
-        path.relative_to(root).as_posix() for path in (root / "tests" / "native").glob("test_*.py")
-    ))
+    files = (
+        "tests/native/test_psmux_home_directory.py",
+        "tests/native/test_warm_picker_lifetime.py",
+    )
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
