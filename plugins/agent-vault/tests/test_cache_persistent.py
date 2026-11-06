@@ -426,7 +426,10 @@ def test_batch_get_refresh_returns_ordered_partial_or_total_failure(
 
 
 @pytest.mark.parametrize("refresh", [False, True])
-@pytest.mark.parametrize("failure", ["ciphertext", "schema", "key", "entry", "field", "rotation"])
+@pytest.mark.parametrize("failure", [
+    "ciphertext", "schema", "key", "entry", "field", "rotation",
+    "journal-empty", "journal-candidate", "journal-operation", "journal-previous",
+])
 def test_batch_refuses_corrupt_fernet_cache_without_replacement(
     enabled_cache, monkeypatch, capsys, failure, refresh,
 ):
@@ -450,11 +453,20 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
     elif failure == "key":
         persistent._key_file.write_bytes(kek.WRAP_MAGIC + b"Rmalformed-fernet-key")
     else:
-        fields = {
+        malformed = {
             "entry": [],
             "field": {"password": None},
             "rotation": {"password": {"rotation": "invalid"}},
-        }[failure]
+        }
+        journals = {
+            "journal-empty": {},
+            "journal-candidate": {"candidate": 42, "operation": 1, "previous": None},
+            "journal-operation": {"candidate": "new", "operation": True, "previous": None},
+            "journal-previous": {"candidate": "new", "operation": 1, "previous": {"value": 42}},
+        }
+        fields = malformed[failure] if failure in malformed else {
+            "password": {"rotation": journals[failure]},
+        }
         persistent._cache_file.write_bytes(cipher.encrypt(json.dumps({
             "v": 1, "entries": {"Example/one": fields, "Example/two": fields},
         }).encode()))
@@ -484,6 +496,31 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
         with pytest.raises(ValueError):
             cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
     else:
+        assert persistent.get("Example/one") is None
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+def test_batch_preserves_valid_pending_journal_semantics(
+    enabled_cache, monkeypatch, capsys, refresh,
+):
+    persistent = get_cache()
+    assert persistent.put("Example/one", "password", "previous")
+    assert persistent.begin_replace("Example/one", "password", "candidate", 1)
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", lambda *_args, **_kwargs: {
+        "ok": True, "value": "authoritative",
+    })
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"Example/one"}]'))
+
+    assert cli.main(["batch-get", *(["--refresh"] if refresh else [])]) == 0
+    result, = json.loads(capsys.readouterr().out)["results"]
+    assert result["value"] == "authoritative"
+    if refresh:
+        assert persistent.pending_replace("Example/one", "password") is None
+        assert persistent.get("Example/one") == "authoritative"
+    else:
+        assert persistent.pending_replace("Example/one", "password")["candidate"] == "candidate"
         assert persistent.get("Example/one") is None
 
 

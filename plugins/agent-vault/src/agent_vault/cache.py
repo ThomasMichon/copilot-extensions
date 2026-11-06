@@ -298,14 +298,28 @@ class PersistentCache:
         if not isinstance(fields, dict):
             return None
         record = fields.get(field)
-        if strict and field in fields and (
-            not isinstance(record, dict)
-            or (
-                not isinstance(record.get("rotation"), dict) if "rotation" in record
-                else not isinstance(record.get("value"), str)
-            )
-        ):
-            raise CacheProtectionError("Selected protected cache record is invalid")
+        if strict and field in fields:
+            valid = isinstance(record, dict)
+            if valid and "rotation" in record:
+                rotation = record["rotation"]
+                previous = rotation.get("previous") if isinstance(rotation, dict) else None
+                valid = (
+                    isinstance(rotation, dict)
+                    and {"candidate", "operation", "previous"} <= rotation.keys()
+                    and isinstance(rotation["candidate"], str)
+                    and type(rotation["operation"]) is int
+                    and (
+                        previous is None
+                        or (
+                            isinstance(previous, dict) and "rotation" not in previous
+                            and isinstance(previous.get("value"), str)
+                        )
+                    )
+                )
+            else:
+                valid = valid and isinstance(record.get("value"), str)
+            if not valid:
+                raise CacheProtectionError("Selected protected cache record is invalid")
         return record
 
     @staticmethod
