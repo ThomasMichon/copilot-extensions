@@ -1261,3 +1261,19 @@ not overlap the captured HTTP source closure. Install-contract, library sync,
 docs, headless launch, effort structure, all generated consumers and all 615
 admitted source hashes then pass. New-head review and required CI still gate
 merge; the parent effort remains Active.
+
+### 2026-11-06 - Narrow native symlink prerequisite handling
+
+Exact-head CI passes at the integrated 245-case head. Copilot's next review
+identifies a portability gap in the linked-slot controls: an unprovisioned
+Windows account can receive privilege error 1314 before the refusal assertion.
+Use the existing test-capability pattern to skip only that actual Windows
+error. All other link errors still fail; the three linked cases still create
+real links and exercise their original refusal assertions on provisioned hosts.
+The canonical capture continues to reject any skipped portfolio item.
+
+All twelve focused controls pass, including the ten slot cases and explicit
+1314-versus-other-error regressions, in 6.97 seconds with a successful
+88.91-second contained runner. Changed Python passes F/E9, and all 615 admitted
+sources still verify. Reproduce the complete capture on this changed fixture
+source before updating the PR; a passing prior head is not its qualification.
