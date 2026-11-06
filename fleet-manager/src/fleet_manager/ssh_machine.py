@@ -22,9 +22,15 @@ _LOG = logging.getLogger(__name__)
 
 
 def _consumer(config):
-    from agent_ssh.gateway_directory import apply_update, validate_consumer_state
+    from agent_ssh.gateway_directory import (
+        apply_update, validate_consumer_state, validate_writer_destinations,
+    )
 
     value = config.to_dict()
+    validate_writer_destinations(
+        config_d=absolute(value["config_d"]), ssh_config=absolute(value["ssh_config"]),
+        authorization_dir=absolute(value["authorization_dir"]) if value["authorization_dir"] else None,
+    )
     validate_consumer_state(
         absolute(value["state_dir"]), config_d=absolute(value["config_d"]),
         ssh_config=absolute(value["ssh_config"]),

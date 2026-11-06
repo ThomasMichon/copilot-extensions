@@ -2,27 +2,48 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import stat
 
 from . import gateway_authorization, gateway_provider
+
+
+def _writer_directories(config_d: Path, ssh_config: Path, authorization_dir: Path | None) -> set[Path]:
+    from . import gateway_profile, ssh_profile
+
+    directories = {
+        config_d,
+        config_d.parent / gateway_profile._SOURCE_DIR,
+        config_d.parent / ssh_profile._LOCK_DIR_NAME,
+        ssh_config.parent / ssh_profile._LOCK_DIR_NAME,
+    }
+    if authorization_dir is not None:
+        directories.add(authorization_dir)
+    return directories
+
+
+def validate_writer_destinations(
+    *, config_d: Path, ssh_config: Path, authorization_dir: Path | None,
+) -> None:
+    """Validate existing direct and derived writer kinds without creating anything."""
+    for path in _writer_directories(config_d, ssh_config, authorization_dir):
+        if os.path.lexists(path):
+            info = path.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise ValueError("SSH writer directory must be an ordinary directory")
+    if os.path.lexists(ssh_config):
+        info = ssh_config.lstat()
+        if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("SSH writer configuration must be an ordinary file")
 
 
 def validate_consumer_state(
     state_dir: Path, *, config_d: Path, ssh_config: Path, authorization_dir: Path | None,
 ) -> None:
     """Keep a consumer's private state outside every directory owned by these writers."""
-    from . import gateway_profile, ssh_profile
-
     state = state_dir.resolve()
-    destinations = {
-        config_d, ssh_config,
-        config_d.parent / gateway_profile._SOURCE_DIR,
-        config_d.parent / ssh_profile._LOCK_DIR_NAME,
-        ssh_config.parent / ssh_profile._LOCK_DIR_NAME,
-    }
-    if authorization_dir is not None:
-        destinations.add(authorization_dir)
-    for destination in destinations:
+    for destination in _writer_directories(config_d, ssh_config, authorization_dir) | {ssh_config}:
         selected = destination.resolve()
         if selected.is_relative_to(state) or state.is_relative_to(selected):
             raise ValueError("SSH consumer requires a dedicated state directory outside local writer scopes")

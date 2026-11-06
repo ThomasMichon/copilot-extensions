@@ -32,6 +32,31 @@ def arguments(root):
     }
 
 
+@pytest.mark.parametrize("scope", ["fragments", "sources", "profile-locks", "root-locks", "authorization"])
+def test_writer_preflight_refuses_invalid_derived_directories_without_effects(tmp_path, scope):
+    from agent_ssh import gateway_profile, ssh_profile
+
+    config = arguments(tmp_path)
+    config["ssh_config"] = tmp_path / "root-config" / "config"
+    destination = {
+        "fragments": config["config_d"],
+        "sources": config["config_d"].parent / gateway_profile._SOURCE_DIR,
+        "profile-locks": config["config_d"].parent / ssh_profile._LOCK_DIR_NAME,
+        "root-locks": config["ssh_config"].parent / ssh_profile._LOCK_DIR_NAME,
+        "authorization": config["authorization_dir"],
+    }[scope]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"retained owner content")
+    state = tmp_path / "consumer-state"
+    with pytest.raises(ValueError, match="ordinary directory"):
+        gateway_directory.validate_writer_destinations(
+            config_d=config["config_d"], ssh_config=config["ssh_config"],
+            authorization_dir=config["authorization_dir"],
+        )
+    assert destination.read_bytes() == b"retained owner content"
+    assert not state.exists()
+
+
 def test_later_directory_rebuilds_real_profiles_and_native_login_keys_without_restart(tmp_path):
     _, directory = fixture_files(tmp_path)
     later = json.loads(json.dumps(directory))

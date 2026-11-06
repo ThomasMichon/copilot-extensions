@@ -499,6 +499,16 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             host.write_private(Path(selection["configuration"]), value)
             await preserved_owner(initial["pid"])
             host.write_private(Path(selection["configuration"]), value | {
+                "config_d": str(state_file),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            assert state_file.read_bytes() == b"retained owner state"
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
+            host.write_private(Path(selection["configuration"]), value | {
                 "proof_key_file": str(root / "absent-proof.pem"),
             })
             failed = await invoke(updated_slot, "install")

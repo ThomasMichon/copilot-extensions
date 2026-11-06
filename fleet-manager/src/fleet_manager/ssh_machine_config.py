@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import stat
 
 from .gateway_ssh_policy import ENVIRONMENTS, GatewaySSHPolicy
 from .planning import PlanError, canonical, decode, identifier, record
@@ -30,6 +31,8 @@ def absolute(value: object) -> Path:
             info = candidate.lstat()
             if candidate.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
                 raise PlanError("SSH client refuses linked path references")
+            if candidate != path and not stat.S_ISDIR(info.st_mode):
+                raise PlanError("SSH client path parent must be an ordinary directory")
     return path
 
 
@@ -73,6 +76,14 @@ class SSHMachineConfig:
         for name in ("gateway_ca", "authorization_dir"):
             if value[name] is not None:
                 absolute(value[name])
+        for name in ("config_d", "authorization_dir", "ssh_config"):
+            if value[name] is None:
+                continue
+            path = absolute(value[name])
+            if os.path.lexists(path) and not (
+                path.is_file() if name == "ssh_config" else path.is_dir()
+            ):
+                raise PlanError("SSH client output path has an incompatible file type")
         root = absolute(value["state_dir"]).resolve()
         if root == root.parent or any(
             absolute(value[name]).resolve().is_relative_to(root)

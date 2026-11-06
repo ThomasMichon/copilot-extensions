@@ -63,6 +63,12 @@ state directory requires an existing ordinary parent; regular files and invalid
 lease state refuse before the watch or an installed selection can change.
 No policy, credential, identity, CA or host configuration reference may occupy
 that lease-only tree, including its canonical lock filename.
+Existing output kinds and path ancestors are checked too: configuration and
+authorization roots must be directories, the SSH configuration must be a file,
+and no selected path may traverse an existing regular-file parent. Runtime
+writers retain their own permission, lock and content checks.
+The selected adapter must expose `validate_writer_destinations`; an older
+partial adapter refuses before credential reads rather than skipping this check.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an

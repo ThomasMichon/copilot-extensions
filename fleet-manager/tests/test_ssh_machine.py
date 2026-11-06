@@ -430,14 +430,18 @@ def test_writer_derived_scope_is_checked_before_credentials_or_lease(tmp_path, s
     assert not Path(value["state_dir"]).exists()
 
 
-def test_older_local_adapter_refuses_before_credentials_or_state(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("legacy_state", [False, True])
+def test_older_local_adapter_refuses_before_credentials_or_state(tmp_path, monkeypatch, capsys, legacy_state):
     value, _, _ = configured(tmp_path)
+    value["proof_key_file"] = str(tmp_path / "missing-proof")
     path = tmp_path / "client.json"
     path.write_bytes(canonical(value))
-    monkeypatch.setitem(
-        sys.modules, "agent_ssh.gateway_directory",
-        SimpleNamespace(apply_update=lambda *_a, **_kw: pytest.fail("old adapter was invoked")),
+    adapter = SimpleNamespace(
+        apply_update=lambda *_a, **_kw: pytest.fail("old adapter was invoked"),
     )
+    if legacy_state:
+        adapter.validate_consumer_state = lambda *_a, **_kw: pytest.fail("partial adapter was invoked")
+    monkeypatch.setitem(sys.modules, "agent_ssh.gateway_directory", adapter)
     assert ssh_machine.serve(path) == 1
     assert "requires the ssh-client extra" in capsys.readouterr().err
     assert not (tmp_path / "state").exists()

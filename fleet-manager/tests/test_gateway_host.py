@@ -350,6 +350,49 @@ def test_host_configuration_cannot_be_a_consumer_lease(tmp_path):
     assert not (root / host.STATE).exists()
 
 
+@pytest.mark.parametrize("field,kind", [
+    ("config_d", "file"), ("authorization_dir", "file"), ("ssh_config", "directory"),
+    ("config_d", "file-parent"),
+])
+def test_invalid_local_writer_destination_refuses_before_host_selection(tmp_path, field, kind):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    destination = tmp_path / "retained-destination"
+    if kind == "directory":
+        destination.mkdir()
+    else:
+        destination.write_bytes(b"retained owner content")
+    value[field] = str(destination / "child" if kind == "file-parent" else destination)
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(PlanError, match="output path|parent"):
+        host.prepare(root, selection)
+    assert destination.is_dir() if kind == "directory" else destination.read_bytes() == b"retained owner content"
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+@pytest.mark.parametrize("scope", ["sources", "fragment-locks", "root-locks"])
+def test_invalid_derived_writer_directory_refuses_before_host_state(tmp_path, scope):
+    from agent_ssh import gateway_profile, ssh_profile
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    value["ssh_config"] = str(tmp_path / "root-ssh" / "config")
+    destination = {
+        "sources": Path(value["config_d"]).parent / gateway_profile._SOURCE_DIR,
+        "fragment-locks": Path(value["config_d"]).parent / ssh_profile._LOCK_DIR_NAME,
+        "root-locks": Path(value["ssh_config"]).parent / ssh_profile._LOCK_DIR_NAME,
+    }[scope]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"retained owner content")
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(ValueError, match="ordinary directory"):
+        host.prepare(root, selection)
+    assert destination.read_bytes() == b"retained owner content"
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
 @pytest.mark.parametrize("failure", ["missing", "empty", "invalid-utf8", "overlong"])
 def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_path, failure):
     from fleet_manager.gateway_contract import GatewayError
