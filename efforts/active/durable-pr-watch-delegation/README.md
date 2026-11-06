@@ -299,8 +299,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   and interest-specific echo integration. Its finite B1 storage expansion
   merged in #10665. The optional protected B2 source seam merged in #10677 captures original
   positions and reconciles confirmed comment/reply/edit readback without
-  resends or consuming newer input. Exact vote attribution, B3 echo coverage,
-  A2's full exit and negotiated serving remain open.
+  resends or consuming newer input. The first conservative B3 comment-echo
+  leaf merged in #10743; exact original versions and one contiguous semantic
+  position are required. Unsupported attribution and longer chains remain
+  unavailable. Complete B3/A2 acceptance and negotiated serving remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -1089,6 +1091,25 @@ callback an implicit credential store.
   Remaining installed, provider, service/client, image and fleet acceptance
   stays open; neither this prerequisite nor source-workspace finalization
   completes the effort or grants rollout.
+
+### 2026-11-05 - Land conservative original-version comment echo coverage
+
+- #10743 actually merged as `eb6d7492c79664eb71b50b8a53618d28d2bd818f`
+  after exact-head Copilot approval with all four review findings resolved
+  and both current-head CI runs green, including their required PR gates.
+  Managed completion reconciled the existing source worktree.
+- The final coupled packet passes 317 cases; the unchanged native
+  response/exporter packet passes 42. A final 41-case feedback rerun verifies
+  the deterministic deadline fixture. Source lint, documentation/install
+  contracts, module limits and admitted strict service Linux/Windows targets
+  pass. These are source/synthetic results, not native Windows, live provider
+  or installed proof.
+- Re-read the complete parent Plan and Validation Plan. Preserve the Active
+  parent and remaining B3/A2 acceptance: unsupported response versions and
+  longer event chains stay unavailable rather than becoming queue progress.
+  The next consumer boundary must retain this distinction when qualifying
+  optional attention serving; A3, full provider/CLI/Dispatch/retention and
+  installed/shadow acceptance remain open. No operational authority changed.
 
 ### 2026-11-05 - Qualify the first conservative comment-echo leaf
 

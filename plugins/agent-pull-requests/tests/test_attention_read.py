@@ -1,0 +1,356 @@
+"""Actual retained feedback, CLI/client and authenticated handler; no live effects."""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+from dataclasses import replace
+import io
+import json
+import sys
+
+import pytest
+from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest
+from single_instance_lease import OperationLock
+
+from test_review_executor import environment as environment
+from test_review_feedback import feedback_environment as feedback_environment, observe, run
+from test_workspace_integration import integration as integration
+
+from agent_pull_requests import __main__ as cli
+from agent_pull_requests.attention_acquisition import AttentionInputs
+from agent_pull_requests.attention_client import AttentionClient
+from agent_pull_requests.attention_read import AttentionReader, AttentionUnavailable
+from agent_pull_requests.conversation_store import ConversationStore
+from agent_pull_requests.review_feedback import FeedbackInputs
+from agent_pull_requests.watch_gateway import WatchGateway, WatchScopeBinding
+from agent_pull_requests.watch_replay import ConsumerScope
+from agent_pull_requests.watch_replay_client import ReplayClient, ReplayClientError
+from agent_pull_requests.watch_replay_store import ReplayStore, ReplayStoreInvalid
+from agent_pull_requests.workspace_conversation import conversation_key
+
+pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
+
+
+@pytest.fixture
+def reading(feedback_environment: tuple, integration: tuple) -> tuple:
+    store, _, _, _, backend, _, expires, interests = feedback_environment
+    _, _, native, _, _, binding = integration
+    workspace = native.operations
+    workspace.conversations = True
+    workspace.attention_owner = lambda generation: AttentionInputs(
+        generation["id"], interests, True, False, False, False, False,
+    )
+    workspace.feedback_owner = lambda generation: FeedbackInputs(generation["id"], interests, 60)
+    reader = AttentionReader(workspace, consumer=binding.consumer, max_age_seconds=60, aging_seconds=30)
+    scope = ConsumerScope(binding.consumer, binding.account, binding.repo)
+    gateway = WatchGateway(
+        store, fleet=binding.fleet, gateway=binding.gateway, slot=binding.slot,
+        bindings=(WatchScopeBinding(binding.principal, binding.target, scope),),
+        workspaces={(binding.principal, binding.target): workspace},
+        attention={(binding.principal, binding.target): reader},
+    )
+
+    class Caller:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.change = None
+
+        async def request(self, method, target, *, request_headers, body, response_limit):
+            self.calls.append(target)
+            response = await gateway.handle(ServiceRequest(
+                CallerContext(binding.fleet, binding.gateway, binding.slot,
+                              binding.principal, expires),
+                method, target, tuple((name.lower(), value) for name, value in request_headers), body,
+            ))
+            if self.change is not None:
+                value = json.loads(response.body)
+                self.change(value)
+                response = replace(response, body=json.dumps(value).encode())
+            return response
+
+    caller = Caller()
+    client = AttentionClient(caller, route_prefix="", binding=binding,
+                             key=conversation_key({**workspace.scope, "number": 1}, store.namespace))
+    return reader, gateway, client, caller, binding
+
+
+def read(reader: AttentionReader, expires: int, **changes) -> dict:
+    return reader.execute("read", {"limit": 16, "after": None, **changes},
+                          expires_at=expires, checkpoint=lambda: None)
+
+
+def test_cli_client_gateway_restart_preserves_bytes_and_independent_legacy_watch(
+    feedback_environment: tuple, reading: tuple, monkeypatch, capsys,
+) -> None:
+    store, _, _, _, backend, _, expires, _ = feedback_environment
+    reader, gateway, client, caller, binding = reading
+    before = store.path.read_bytes()
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"limit":16,"after":null}')))
+    assert cli.main(["attention", "read", "--request", "-"], attention_host=client) == 0
+    value = json.loads(capsys.readouterr().out)
+    assert len(value["items"]) == 1 and value["items"][0]["reasons"] == ["initial-review"]
+    assert caller.calls == ["/v1/attention/project/capabilities", "/v1/attention/project/read"]
+    assert backend.calls == [] and store.path.read_bytes() == before
+    reader.store = ReplayStore(store.root, store.namespace, clock=store.clock,
+                               service_identity=store.service_identity)
+    reader.workspace.store = reader.store
+    assert read(reader, expires)["snapshot"] == value["snapshot"]
+
+    async def scenario() -> None:
+        legacy = ReplayClient(caller, route_prefix="", target=binding.target,
+                              repo=binding.repo, binding=binding)
+        assert (await legacy.capabilities()).binding == binding
+        await gateway.drain(timeout=1)
+
+    asyncio.run(scenario())
+    with pytest.raises(ReplayStoreInvalid, match="serving contract unavailable"):
+        ConversationStore(store).capabilities(expires_at=expires)
+    assert store.path.read_bytes() == before
+
+
+def test_unclassified_self_echo_is_unavailable_only_for_captured_consumer(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    value = feedback_environment
+    reader, _, _, _, _ = reading
+    assert run(value)["feedback"]["status"] == "handled"
+    assert read(reader, value[6])["items"][0]["reasons"] == ("handled-through-cursor",)
+    observe(value, change="echo")
+    before = value[0].path.read_bytes()
+    item = read(reader, value[6])["items"][0]
+    assert item["status"] == "unavailable" and item["reasons"] == ("feedback-change-unclassified",)
+    other = AttentionReader(reader.workspace, consumer="consumer-b", max_age_seconds=60, aging_seconds=30)
+    assert read(other, value[6])["items"][0]["status"] == "actionable"
+    assert value[0].path.read_bytes() == before
+
+
+def test_proven_original_version_echo_reads_waiting_without_rewriting_capture(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    value = feedback_environment
+    reader = reading[0]
+    backend = value[4]
+    backend.versioned_reply = True
+    backend.pr["reviewers"] = copy.deepcopy(value[2]["sections"]["reviewers"]["data"])
+    assert run(value)["feedback"]["status"] == "handled"
+    newer = observe(value, change="echo")
+    result = run(value, current=lambda: (newer, backend.positions[newer["id"]]))
+    assert result["feedback"]["echo"]["status"] == "covered"
+    before = value[0].path.read_bytes()
+    assert read(reader, value[6])["items"][0]["status"] == "waiting"
+    assert value[0].path.read_bytes() == before
+
+
+def test_stale_observation_and_unknown_selection_are_not_actionable(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    value = feedback_environment
+    reader = reading[0]
+    value[5][0] += 60
+    assert read(reader, value[6])["items"][0]["status"] == "unavailable"
+
+    def change(document: dict) -> None:
+        document["attention"]["records"][0]["interest"]["matches"] = None
+
+    value[0]._review_transaction(change, expires_at=value[6])
+    assert read(reader, value[6])["items"][0]["reasons"] == ("selection-unknown",)
+
+
+def test_page_snapshot_refuses_changed_input_instead_of_skipping(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    value = feedback_environment
+    reader = reading[0]
+
+    def add(document: dict) -> None:
+        second = copy.deepcopy(document["attention"]["records"][0])
+        second["facts"]["key"]["number"] += 1
+        document["attention"]["records"].append(second)
+
+    value[0]._review_transaction(add, expires_at=value[6])
+    first = read(reader, value[6], limit=1)
+    assert first["next"] is not None
+    second = read(reader, value[6], limit=1, after=first["next"])
+    assert second["items"][0]["key"]["number"] != first["items"][0]["key"]["number"]
+    observe(value, change="reply")
+    before = value[0].path.read_bytes()
+    with pytest.raises(AttentionUnavailable, match="page changed"):
+        read(reader, value[6], limit=1, after=first["next"])
+    assert value[0].path.read_bytes() == before
+
+
+@pytest.mark.parametrize("change,status", [
+    ({"consumer": "other"}, 400), ({"limit": True}, 400), ({"limit": 17}, 400),
+    ({"after": {"snapshot": "x", "offset": 1}}, 400),
+])
+def test_request_cannot_override_scope_or_progress(
+    feedback_environment: tuple, reading: tuple, change: dict, status: int,
+) -> None:
+    reader, gateway, _, _, binding = reading
+    before = reader.store.path.read_bytes()
+
+    async def scenario() -> None:
+        response = await gateway.handle(ServiceRequest(
+            CallerContext(binding.fleet, binding.gateway, binding.slot, binding.principal,
+                          feedback_environment[6]),
+            "POST", "/v1/attention/project/read", (("content-type", "application/json"),),
+            json.dumps({"binding": binding.document(), "request": {
+                "limit": 16, "after": None, **change,
+            }}).encode(),
+        ))
+        assert response.status == status
+        await gateway.drain(timeout=1)
+
+    asyncio.run(scenario())
+    assert reader.store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("cause", ["missing", "old", "contract", "scope"])
+def test_new_client_refuses_absent_or_incompatible_attention_without_retry(
+    feedback_environment: tuple, reading: tuple, cause: str,
+) -> None:
+    reader, gateway, client, caller, _ = reading
+    before = reader.store.path.read_bytes()
+    if cause == "missing":
+        gateway.attention = {}
+    elif cause == "old":
+        reader.store = ReplayStore(reader.store.root, "other", clock=reader.store.clock,
+                                   service_identity=reader.store.service_identity)
+    elif cause == "contract":
+        caller.change = lambda value: value.update(owner_store_versions=[3])
+    else:
+        caller.change = lambda value: value["binding"].update(consumer="other")
+
+    async def scenario() -> None:
+        with pytest.raises(ReplayClientError):
+            await client.capabilities()
+        with pytest.raises(ReplayClientError, match="capability_required"):
+            await client.read(limit=16, after=None)
+        await gateway.drain(timeout=1)
+
+    asyncio.run(scenario())
+    assert len(caller.calls) == 1 and reader.store.path.read_bytes() == before
+
+
+def test_real_owner_lock_and_revocation_cannot_be_bypassed(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    reader, gateway, client, _, _ = reading
+    before = reader.store.path.read_bytes()
+
+    async def scenario() -> None:
+        await client.capabilities()
+        with OperationLock(reader.store.root / "watch-replay.lock"):
+            with pytest.raises(ReplayClientError, match="unavailable"):
+                await client.read(limit=16, after=None)
+        reader.workspace.feedback_owner = None
+        with pytest.raises(ReplayClientError, match="unavailable"):
+            await client.read(limit=16, after=None)
+        await gateway.drain(timeout=1)
+
+    asyncio.run(scenario())
+    assert reader.store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("cause", ["unknown", "unbound", "readback"])
+def test_uncertain_tracking_retains_native_outcomes_without_an_initial_review(
+    feedback_environment: tuple, reading: tuple, cause: str,
+) -> None:
+    value = feedback_environment
+    reader = reading[0]
+    if cause == "unknown":
+        value[4].lose_reply = True
+    elif cause == "readback":
+        value[1]["actions"].append({"id": "verdict", "kind": "verdict", "verdict": "APPROVED"})
+        value[4].emit_vote_thread = True
+    result = run(value)
+    if cause == "unbound":
+        def remove_capture(document: dict) -> None:
+            document["feedback_captures"]["records"] = []
+            row = document["attention"]["records"][0]
+            row["handled"] = row["provenance"] = None
+        value[0]._review_transaction(remove_capture, expires_at=value[6])
+    before = value[0].path.read_bytes()
+    item = read(reader, value[6])["items"][0]
+    assert item["status"] == "unavailable" and "initial-review" not in item["reasons"]
+    assert value[0].path.read_bytes() == before
+    assert value[0].inspect_review(value[1]["operation_id"], value[1]["scope"],
+                                  expires_at=value[6])["actions"] == result["actions"]
+
+
+@pytest.mark.parametrize("field", ["consumer", "account", "namespace", "candidate"])
+def test_client_rejects_foreign_or_malformed_read_evidence(
+    feedback_environment: tuple, reading: tuple, field: str,
+) -> None:
+    _, gateway, client, caller, _ = reading
+    async def scenario() -> None:
+        await client.capabilities()
+        def change(value: dict) -> None:
+            item = value["items"][0]
+            if field == "consumer":
+                item[field] = "other"
+            elif field == "candidate":
+                item[field]["head"] = "short"
+            else:
+                item["key"][field] = "other"
+        caller.change = change
+        with pytest.raises(ReplayClientError, match="invalid_attention_response"):
+            await client.read(limit=16, after=None)
+        await gateway.drain(timeout=1)
+    asyncio.run(scenario())
+
+
+def test_default_cli_is_explicitly_unavailable_and_unknown_flags_refuse(environment, capsys) -> None:
+    assert cli.main(["attention", "capabilities"]) == 0
+    assert json.loads(capsys.readouterr().out)["owner_binding"] == "unavailable"
+    with pytest.raises(SystemExit) as error:
+        cli.main(["attention", "read", "--request", "-", "--consumer", "other"])
+    assert error.value.code == 2
+
+
+def test_service_writer_qualifies_v5_reader_without_claiming_v3_conversation_support(
+    feedback_environment: tuple, reading: tuple, monkeypatch,
+) -> None:
+    from test_watch_service import Connector
+    from agent_pull_requests import watch_service
+    from agent_pull_requests.watch_observer import NativeObservationBinding
+    from agent_pull_requests.watch_service import WatchService
+
+    reader, _, _, _, binding = reading
+    monkeypatch.setattr(watch_service, "ServiceConnector", Connector)
+    async def access() -> str:
+        return "synthetic"
+    service = WatchService(
+        reader.store, fleet=binding.fleet, gateway=binding.gateway, slot=binding.slot,
+        bindings=(WatchScopeBinding(binding.principal, binding.target, ConsumerScope(
+            binding.consumer, binding.account, binding.repo,
+        )),),
+        observations=(NativeObservationBinding(binding.account, binding.repo, sys.executable),),
+        gateway_origin="https://gateway.invalid", access_token_callback=access,
+        proof_key=object(), authority=lambda: feedback_environment[6], checkpoint=lambda: None,
+        workspaces={(binding.principal, binding.target): reader.workspace},
+        attention={(binding.principal, binding.target): reader},
+    )
+    monkeypatch.setattr(service.observer, "cycle", lambda **_kwargs: {
+        "status": "observed", "unavailable": 0, "unbound": 0,
+    })
+    before = reader.store.path.read_bytes()
+    async def scenario() -> None:
+        await service.start()
+        try:
+            assert service._lease.held
+            response = await service.gateway.handle(ServiceRequest(
+                CallerContext(binding.fleet, binding.gateway, binding.slot, binding.principal,
+                              feedback_environment[6]),
+                "POST", "/v1/attention/project/capabilities", (("content-type", "application/json"),),
+                json.dumps({"binding": binding.document(), "request": {}}).encode(),
+            ))
+            assert response.status == 200 and json.loads(response.body)["owner_store_versions"] == [5]
+            with pytest.raises(ReplayStoreInvalid):
+                ConversationStore(reader.store).capabilities(expires_at=feedback_environment[6])
+        finally:
+            await service.close(timeout=3)
+        assert not service._lease.held and service.status()["closed"]
+    asyncio.run(scenario())
+    assert reader.store.path.read_bytes() == before

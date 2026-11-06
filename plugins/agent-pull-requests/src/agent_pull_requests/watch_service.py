@@ -35,6 +35,7 @@ class WatchService:
         proof_key: Any, authority: Callable[[], int], checkpoint: Callable[[], None],
         gateway_ca: str | None = None, interval: float = 5,
         workspaces=None,
+        attention=None,
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -56,6 +57,7 @@ class WatchService:
             store, fleet=fleet, gateway=gateway, slot=slot, bindings=bindings,
             checkpoint=self._check,
             workspaces=workspaces,
+            attention=attention,
         )
         self.observer = ReplayObserver(store, bindings=observations)
         if any(
@@ -126,9 +128,20 @@ class WatchService:
                     expires_at=self._authority(), checkpoint=self._check,
                 )
                 for workspace in self.gateway.workspaces.values():
-                    workspace.validate_storage(
-                        expires_at=self._authority(), checkpoint=self._check,
-                    )
+                    # Attention has its own explicit v5 contract; never relabel
+                    # those bytes as the older conversation-serving layout.
+                    readers = [reader for reader in self.gateway.attention.values()
+                               if reader.workspace is workspace]
+                    if readers:
+                        for reader in readers:
+                            reader.execute("capabilities", {}, expires_at=self._authority(),
+                                           checkpoint=self._check)
+                        with workspace.cache._transaction() as lock:
+                            workspace.cache._check(lock)
+                    else:
+                        workspace.validate_storage(
+                            expires_at=self._authority(), checkpoint=self._check,
+                        )
             self._disk = asyncio.create_task(asyncio.to_thread(
                 validate_storage,
             ))

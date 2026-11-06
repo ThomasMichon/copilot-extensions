@@ -1,0 +1,9 @@
+{
+  "comment": "Add an optional negotiated retained attention reader with conservative feedback availability and strict CLI/client/Gateway scope isolation",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
