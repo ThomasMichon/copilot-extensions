@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+import json
+import os
 from pathlib import Path
 
 _ROOT: ContextVar[str | None] = ContextVar("vault_configuration_root", default=None)
@@ -59,3 +61,14 @@ def invocation_contract() -> dict:
         "version": 1,
         "capabilities": ["configuration-root-v1"],
     }
+
+
+def invoke_cli(command: Callable[[list[str]], int | None], argv: list[str]) -> int | None:
+    root, remaining = parse_invocation(list(argv))
+    if root is not None and os.environ.pop("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", None) == "1":
+        os.environ.pop("AGENT_VAULT_NO_SELFPROVISION", None)
+    with use_configuration_root(root):
+        if remaining == ["invocation-contract", "--json"]:
+            print(json.dumps(invocation_contract()))
+            return 0
+        return command(remaining)
