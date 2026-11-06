@@ -112,15 +112,21 @@ def assigned(tmp_path, monkeypatch, request):
                     "agent-bridge.status": {
                         "version": 1, "capabilities": ["health-json", "exact-session-worktree-writer"],
                     },
+                    "agent-bridge.resume": {"version": 1, "capabilities": ["keyed-worktree-writer"]},
                 },
             }), "")
         if command == "resume":
             saved = queue.get_reservation(snapshot["spawn_reservation_key"])
             target = saved.agent_info["session_id"] if saved.agent_info else "worktree-a"
-            assert argv == [
+            expected = [
                 "bridge", "--json", "resume", target, "--require-agent-hosting", "--strict",
             ]
-            assert kwargs.get("input") is None
+            if requirement is not None:
+                expected += ["--worktree-writer-file", "-"]
+                assert json.loads(kwargs["input"]) == requirement
+            else:
+                assert kwargs.get("input") is None
+            assert argv == expected
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": response["session_id"], "status": "idle", "verb": "loaded",
             }), "")
@@ -216,6 +222,30 @@ def _qualified_start(assigned, *, explicit=True):
         task, client=client, agent="local", project="execution-project", prompt="assigned work",
         **({"worktree_writer": task["_writer_requirement"]} if explicit else {}),
     )
+
+
+@pytest.mark.parametrize("support", [None, []])
+def test_qualified_create_requires_executing_cli_resume_support(assigned, monkeypatch, support):
+    queue, task, _, _, _, calls = assigned
+    _required_writer(assigned)
+    original = ordinary_bridge.subprocess.run
+
+    def unsupported(argv, **kwargs):
+        result = original(argv, **kwargs)
+        if argv[0] == "bridge" and argv[2] == "version":
+            value = json.loads(result.stdout)
+            if support is None:
+                value["contracts"].pop("agent-bridge.resume")
+            else:
+                value["contracts"]["agent-bridge.resume"]["capabilities"] = support
+            return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+        return result
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", unsupported)
+    with pytest.raises(ordinary_bridge.BridgeCarriedSessionBusy, match="CLI writer support"):
+        _qualified_start(assigned)
+    assert "create" not in calls and "resume" not in calls
+    assert queue.get_reservation(task["spawn_reservation_key"]).agent_info is None
 
 
 def _required_writer(assigned):

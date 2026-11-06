@@ -484,9 +484,14 @@ def start(
                 raise BridgeCarriedSessionBusy(f"retained ordinary agent is not idle: {status}")
             store_info()
             if status == "stopped":
-                resumed = run([
-                    "--json", "resume", session_id, "--require-agent-hosting", "--strict",
-                ])
+                resume_args = ["--json", "resume", session_id, "--require-agent-hosting", "--strict"]
+                if writer_admission is not None:
+                    resume_args += ["--worktree-writer-file", "-"]
+                resumed = run(
+                    resume_args,
+                    **({"prompt_input": json.dumps(writer_admission.requirement)}
+                       if writer_admission is not None else {}),
+                )
                 response = _json_result(resumed)
                 if resumed.returncode or response.get("session_id") != session_id:
                     raise BridgeCarriedSessionBusy("strict ordinary resume did not preserve the retained bridge identity")

@@ -6,11 +6,11 @@
   },
   "advertisement_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
-    "sha256": "e5e795ff31e7bb3066fc2720727c583e7d91fe4f41f8430a2e3c8241ec9e29f4"
+    "sha256": "c9192975d206506ec11656dd17de224f814cdb6a736dcf8b7ce0991d77f2d458"
   },
   "scope": "unchanged source and immutable prior operation; no new runtime observation",
   "captured_from": {
-    "commit": "8c79b42decdd1d75c65cfd4254703edf1a894bee",
+    "commit": "0d373429108a3bf3177c297e2db7bbc8dad0b39c",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/client_drain.py",

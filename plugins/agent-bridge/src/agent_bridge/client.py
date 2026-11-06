@@ -319,6 +319,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         params: dict[str, Any] | list[tuple[str, Any]] | None = None,
         request_timeout: float | None = None,
         allow_retry: bool = True,
+        _endpoint: str | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
         from .startup_observation import current
@@ -328,6 +329,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
             observation.check()
             return observation.preflight(lambda: self._request(
                 method, path, body, params=params, allow_retry=allow_retry,
+                _endpoint=_endpoint,
                 request_timeout=min(
                     self._timeout if request_timeout is None else request_timeout,
                     observation.clock.remaining() or .001,
@@ -336,7 +338,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         data = json.dumps(body).encode() if body else None
 
         def _build_request() -> urllib.request.Request:
-            url = f"{self._base}{path}"
+            url = f"{self._base if _endpoint is None else _endpoint}{path}"
             if params:
                 pairs = (
                     list(params.items())
@@ -358,7 +360,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         def _follow_active_endpoint() -> bool:
             """Rebuild the request if endpoint discovery reports a new daemon."""
             nonlocal req
-            if self._reresolve is None:
+            if _endpoint is not None or self._reresolve is None:
                 return False
             self._daemon_proto = None
             new_base = self._reresolve()
@@ -989,24 +991,12 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         session_id: str,
         *,
         request_timeout: float | None = None,
+        worktree_writer: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/resume"""
-        from .startup_observation import current
-        observation = current()
-        if observation is not None and not observation.clock.ready:
-            return observation.request(
-                self, session_id,
-                lambda: self._request(
-                    "POST", f"/api/v1/sessions/{session_id}/resume",
-                    request_timeout=observation.clock.process_remaining(),
-                    allow_retry=False,
-                ) or {},
-            )
-        return self._request(
-            "POST",
-            f"/api/v1/sessions/{session_id}/resume",
-            request_timeout=request_timeout,
-        ) or {}
+        return super().resume_session(
+            session_id, request_timeout=request_timeout, worktree_writer=worktree_writer,
+        )
 
     def resume_worktree(
         self,

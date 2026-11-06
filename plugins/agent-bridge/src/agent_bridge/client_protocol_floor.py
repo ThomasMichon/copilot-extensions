@@ -73,6 +73,7 @@ def _request_with_floor(
     def attempt(*a: Any, **k: Any) -> dict[str, Any] | None:
         # Native retries cannot bypass the fresh protocol check between attempts.
         k["allow_retry"] = False
+        k["_endpoint"] = endpoint
         return request(*a, **k)
 
     retrying = False
@@ -84,13 +85,15 @@ def _request_with_floor(
             base = resolve() if resolve else None
             if base:
                 client._base = base.rstrip("/")
+        # An event watcher may refresh the shared client's endpoint mid-check.
+        endpoint = client._base
         try:
             health = attempt("GET", "/health") or {}
             version = int(health.get("protocol_version") or 0)
             peer_minimum = int(health.get("min_protocol_version") or 0)
         except (BridgeConnectionError, OSError, TypeError, ValueError):
             unanswered = BridgeConnectionError(
-                f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
+                f"the bridge daemon at {endpoint} didn't answer a protocol check in time; "
                 "the request was not sent",
             )
             if time.monotonic() >= deadline:
@@ -99,7 +102,7 @@ def _request_with_floor(
             continue
         if version < floor:
             raise BridgeClientError(
-                426, f"the bridge daemon now at {client._base} predates protocol "
+                426, f"the bridge daemon now at {endpoint} predates protocol "
                 f"{floor}; not sending the request there",
             )
         if negotiate_http_protocol(version, peer_minimum, required=floor) is None:
@@ -114,7 +117,7 @@ def _request_with_floor(
             actual = advertised.get(name) if isinstance(advertised, dict) else None
             if type(actual) is not int or actual < minimum:
                 raise BridgeClientError(
-                    426, f"the bridge daemon now at {client._base} does not support "
+                    426, f"the bridge daemon now at {endpoint} does not support "
                     f"required capability {name} version {minimum}; "
                     "the request was not sent",
                 )

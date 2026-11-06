@@ -19,6 +19,10 @@ Scope
 
 Mode: read-only sweep | recurring observation | steering
   Cadence and wake source: <existing scheduler/event; required for recurring>
+  Active and parked cadences: <e.g. 30 minutes active, 2 hours parked>
+  Early-check triggers: <question at half its revisit time, two observations
+    without delta, validation over budget, unanswered change request past its
+    limit, recorded deadline passed>
   End condition: <finite stop criterion or explicit indefinite service + owner>
 
 Steering scope (only if explicitly granted; else "none")
@@ -27,6 +31,18 @@ Steering scope (only if explicitly granted; else "none")
   Excluded purposes: <e.g. scope change, merge, deploy, stop/start, approvals>
   Validity: <expiry, revision or revocation condition>
   Limits: <one outstanding steer per target+issue; other caps>
+
+Watchdog thresholds (see references/watchdog-checks.md)
+  Question revisit time and required default: <e.g. 30 minutes; every
+    question carries a recommended default>
+  Prerequisite depth limit: <e.g. one level without a named failed boundary>
+  Validation proportionality budget: <e.g. minutes per small, low-risk change>
+  Open-obligation limits: <unanswered change request, approved without
+    consent, unconsumed handoff>
+  Delivery bar: <merged | released | deployed and live-verified, per root>
+  Escalation: <one report to owner when a delivered steer stalls past its
+    revisit time or a second steer goes unheeded>
+  Unknown-state limit: <consecutive unknown observations before one report>
 
 Holds and later narrowing: <references, newest first>
 Acceptance: <what a completed sweep or a healthy service period must show>
@@ -41,5 +57,9 @@ Acceptance: <what a completed sweep or a healthy service period must show>
   has a persisted pending record before send and a recorded result after.
 - Holds, review bars, approvals, resource limits and ownership are unchanged
   by the monitor.
+- The monitor asked no blocking question; every wait it reports is classified
+  required, productive or waste with evidence.
+- Each escalation was reported once with evidence, a recommended decision and
+  its default, after the steer ladder or for a decision only the operator owns.
 - Static documentation tests do not qualify runtime behavior, delivery or
   rollout of this role.
