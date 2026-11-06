@@ -347,12 +347,13 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
             )
             assert result.returncode == 0, result.stderr
             assert not result.stderr
-            if event_case == "late-watch":
+            if event_case in {"mutation", "late-watch"}:
                 assert result.stdout == ""
-                assert (session / "local-guidance-watch.json").read_text() == "{}"
+                if event_case == "late-watch":
+                    assert (session / "local-guidance-watch.json").read_text() == "{}"
             else:
                 assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
-        expected = [] if event_case == "late-watch" else [("postToolUse", payload)] * 2
+        expected = [] if event_case in {"mutation", "late-watch"} else [("postToolUse", payload)] * 2
         assert seen == expected
     finally:
         server.close()
@@ -565,6 +566,9 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
         print(f"{shell}/{case}: {result.stderr.strip()}")
         if case in {"old-provider", "missing-discovery", "unadmitted"}:
             assert not notices and not server.has_recent_hook_demand()
+        elif case in {"wrong-generation", "closed", "revoked"} and not received.wait(2):
+            # Delivery is optional; the direct wire controls prove receiver rejection.
+            assert not notices and not server.has_recent_hook_demand()
         else:
             assert received.wait(2), "send-only notification did not reach its receiver"
             assert len(notices) == 1
@@ -572,6 +576,123 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
             assert notices[0]["kind"] == "readHookDemand"
             assert server.has_recent_hook_demand() is (case in {"current", "missing-row"})
         assert calls == [], "a read-demand notice must not run policy, advice or invalidation"
+    finally:
+        release.set()
+        if stalled is not None:
+            stalled.shutdown()
+            stalled.server_close()
+            stalled_thread.join(timeout=2)
+            assert not stalled_thread.is_alive()
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows shell mutation consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "structured", "patch", "old-provider", "wrong-generation", "closed",
+    "missing-discovery", "oversized", "no-reply",
+])
+def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
+    from types import SimpleNamespace
+
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import __main__ as main
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    fixture = prepared_read_event
+    paths = [str(fixture["home"] / name) for name in ("one", "two")]
+    policy = main._ResidentHookPolicy(main._load_hook_client_module())
+    invalidated = []
+    cache = SimpleNamespace(
+        invalidate=lambda path: invalidated.append(path),
+        invalidate_all=lambda: pytest.fail("known paths must retain target scope"),
+    )
+    received, release = threading.Event(), threading.Event()
+    notices = []
+
+    class Server(HookIpcServer):
+        def _on_native_mutation(self, request):
+            notices.append(request)
+            super()._on_native_mutation(request)
+            received.set()
+
+    class NoReply(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(2)
+            raw = b""
+            while not raw.endswith(b"\n") and len(raw) < 65536:
+                chunk = self.request.recv(65536 - len(raw))
+                if not chunk:
+                    break
+                raw += chunk
+            notices.append(json.loads(raw))
+            received.set()
+            assert release.wait(10)
+
+    server = Server(
+        lambda *args: pytest.fail("synchronous request or policy replay"),
+        native_mutation_decide=lambda kind, payload, deadline: main._resident_hook_decision(
+            kind, payload, deadline=deadline, policy=policy, segment_cache=cache,
+        ),
+    )
+    server.start()
+    stalled = None
+    stalled_thread = None
+    try:
+        path = fixture["registry"] / "status-monitor.lock"
+        discovery = {**json.loads(path.read_text()), **server.rendezvous()}
+        if case == "old-provider":
+            discovery.pop("hook_capabilities")
+        elif case == "wrong-generation":
+            discovery["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.close_admission()
+        elif case == "no-reply":
+            stalled = socketserver.ThreadingTCPServer(("127.0.0.1", 0), NoReply)
+            stalled_thread = threading.Thread(target=stalled.serve_forever)
+            stalled_thread.start()
+            discovery["hook_endpoint"] = f"127.0.0.1:{stalled.server_address[1]}"
+        path.write_text(json.dumps(discovery), encoding="utf-8")
+        if case == "missing-discovery":
+            path.unlink()
+        args = {"edits": [{"path": item} for item in paths]}
+        tool = "multi_edit"
+        if case == "patch":
+            tool = "apply_patch"
+            args = {"input": f"*** Update File: {paths[0]}\n*** Move to: {paths[1]}\n"}
+        elif case == "oversized":
+            args["content"] = "x" * 65536
+        payload = {**fixture["payload"], "toolName": tool, "toolArgs": args, "toolResult": "not transmitted"}
+        if case == "structured":
+            payload["workingDirectory"] = payload["cwd"]
+            payload["toolArgs"] = {}
+            payload["tool_input"] = args
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+            input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+            env=fixture["env"], **no_window_kwargs(),
+        )
+        assert result.returncode == 0 and not result.stdout, result.stderr
+        assert result.stderr.startswith("entry_seconds="), result.stderr
+        print(f"{shell}/{case}: {result.stderr.strip()}")
+        if case in {"old-provider", "missing-discovery", "oversized"}:
+            assert not notices and not server.has_recent_hook_demand()
+        elif case in {"wrong-generation", "closed"} and not received.wait(2):
+            assert not notices
+        else:
+            assert received.wait(2)
+            assert len(notices) == 1
+            expected = {key: value for key, value in payload.items() if key != "toolResult"}
+            assert notices[0]["payload"] == expected
+        assert invalidated == (paths if case in {"structured", "patch"} else [])
+        assert server.has_recent_hook_demand() is (case in {"structured", "patch"})
     finally:
         release.set()
         if stalled is not None:

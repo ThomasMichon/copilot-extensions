@@ -77,8 +77,8 @@ not reconstructed.
 The current-roster owner also has an optional small file projection for shell
 consumers. It is separate from the selected observation journal and does
 not replace managed-session admission, canonical write receipts or hook policy.
-The Windows read-event consumer below uses it; other ordinary events retain
-their existing execution path.
+The prepared Windows read and native-write consumers below use it; other
+ordinary events retain their existing execution path.
 
 The monitor's original passive discovery record advertises
 `hook_facts_version: 2` and `hook_facts_generation`, a process-local publisher
@@ -155,9 +155,9 @@ For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
 prepared-event bound, including outstanding late-guidance watches, evaluation
 has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
-Other tools, installation cells and oversized events
-keep their original entry and behavior; the prepared-event bound must not
-consume mutation events. This is not the complete shell-only transition.
+The native-write subset below shares this shell-safe evaluation. Other tools,
+installation cells and oversized events keep their original entry and
+behavior. This is not the complete shell-only transition.
 
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's
@@ -256,6 +256,44 @@ remain in force. A sent notice is not an acknowledgement, durable delivery,
 fresh-status observation, permission or readiness proof. A missed notice may
 allow ordinary idle expiry; this operation does not recover an absent resident.
 Old callers retain their original request/response semantics with new receivers.
+
+### Windows native-write consumer
+
+Prepared single native writes (`create`, `edit`, the supported `str_replace`
+variants, `write`, `write_file`, `insert`, `apply_patch`, `new_file` and
+`multi_edit`) share the same shell reminders and late-guidance evaluation.
+They do not request advisory computation from the resident or fall back to
+Python. Shell tools and any payload containing `toolCalls` retain their
+original path; this does not qualify batch or shell-command classification.
+
+The existing hook IPC owner optionally advertises `native-hook-mutation-v1`.
+The shell sends one `nativeToolMutation` notification with the same version,
+token, process generation and one-second deadline envelope as read demand,
+plus `payload`. That payload contains only the event's tool name, arguments,
+current admitted workspace and session; tool results are not transmitted.
+The newline-terminated wire is bounded to 64 KiB, with the same combined
+50 ms connect/write wait and no response, retry or uncertain-event replay.
+Absent, old or invalid discovery and an oversized notification skip the
+optional send, not shell advisory evaluation.
+
+The receiver rechecks managed-session membership, current published admission,
+governance and shutdown under the original monitor state lock, with at most
+50 ms lock contention. It rejects batches and non-native tools. Native targets
+come from the guard-owned `tool_call_forms.write_targets`, including every
+structured edit and both patch-move endpoints. Relative paths use the event
+workspace. Unknown targets retain the original workspace invalidation;
+extractor overflow/unavailability conservatively invalidates all segments.
+No new target parser, permission cache or durable mutation store is introduced.
+The same native extraction also corrects the retained request/response path's
+first-target-only invalidation.
+
+Only cache invalidation, the original mutation-triggered sweep wake and recent
+tool idle grace follow acceptance. There is no project discovery, policy,
+advisory reply, recomputation or lifecycle boot in this notification branch.
+Transport completion is not acceptance or fresh-status proof. Lost/rejected
+notices leave the existing periodic/TTL refresh backstop in charge; they are
+not durably queued. These isolated source controls do not establish installed
+composition, cold/cell/POSIX entry or whole-hook throughput acceptance.
 
 ### Prepared Windows membership reuse
 

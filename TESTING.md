@@ -83,6 +83,19 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+Worktrees' opt-in `--test-file tests/test_post_tool_shell.py --test-file
+tests/test_hook_ipc.py --test-file tests/test_status_monitor.py
+--allow-explicit-tiers -k "native_mutation or
+registered_post_hook_reuses_original_prepared_membership or
+registered_read_demand_is_send_only or handoff_wake_kind_actually_wakes"`
+packet exercises real registered Windows PowerShell 5.1/7 entries with original
+prepared membership, interpreter/resident traps, structured-edit and patch-move
+invalidation, missing/old/stale/closed discovery and a non-replying peer.
+Original IPC controls cover exact generation/schema/deadline/wire bounds and
+the running monitor's real invalidation wake and unadmitted refusal. These are
+isolated source consumers, not installed, complete shell/batch or throughput
+acceptance; required exact-source unit CI remains separate.
+
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
 --allow-explicit-tiers` packet checks optional expected-head declaration/codec
