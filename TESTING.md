@@ -541,10 +541,6 @@ product-cohort, provider, fresh-adopter or rollout proof. These jobs are
 sequenced after the retained explicit continuity cases, not parallel replacement
 coverage. Local helper/ordering controls and a packaged-API refusal probe do
 not substitute for their actual native outcomes.
-The explicit `ssh_setup_only=true` selector runs just those two normal-setup
-jobs when diagnosing that consumer, without requiring the unchanged artifact
-groups to run first. It retains their preparation and180-second/six-minute
-bounds. Such a partial run never substitutes for the full selected packet.
 
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py

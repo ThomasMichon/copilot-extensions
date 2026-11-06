@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -95,6 +94,8 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     workflow = yaml.safe_load(
         (root / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
     )
+    events = workflow.get("on", workflow.get(True))
+    assert len(events["workflow_dispatch"]["inputs"]) <= 25
     job = workflow["jobs"]["gateway-host-application-" + platform]
     steps = [step for step in job["steps"] if "run" in step]
     assert job["timeout-minutes"] == 6 and len(steps) == 2
@@ -114,21 +115,6 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     normal = workflow["jobs"]["gateway-normal-setup-" + platform]
     assert normal["timeout-minutes"] == 6
     assert normal["needs"] == "gateway-continuity-application-" + platform
-    condition = normal["if"].removeprefix("${{").removesuffix("}}").strip()
-    condition = condition.replace(
-        "needs.gateway-continuity-application-" + platform + ".result", "dependency",
-    ).replace("!cancelled()", "not_cancelled").replace("&&", " and ").replace("||", " or ")
-    for cancelled in (False, True):
-        for diagnostic in (False, True):
-            for full in (False, True):
-                for dependency in ("success", "failure", "skipped", "cancelled"):
-                    selected_mode = eval(condition, {"__builtins__": {}}, {
-                        "not_cancelled": not cancelled, "dependency": dependency,
-                        "inputs": SimpleNamespace(ssh_setup_only=diagnostic, pr_artifacts=full),
-                    })
-                    assert selected_mode == (
-                        not cancelled and (diagnostic or full and dependency == "success")
-                    )
     normal_steps = [step for step in normal["steps"] if "run" in step]
     assert [shlex.split(step["run"]) for step in normal_steps] == [
         ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
