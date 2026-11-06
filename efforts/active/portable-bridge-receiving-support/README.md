@@ -914,3 +914,40 @@ implementation. The exact support closure follows the consumer trace and tests.
 - Review this plan before implementation. Live process recovery is not
   authorized by the source direction; installed rollout and the original
   first-venue acceptance remain separate gates.
+- #11059 received exact-head approval with no active findings and green
+  required CI, then merged as `10e3ec8c9e28f899d2086f8a3a67420f3a84773c`.
+  Re-read the remaining Plan and Validation Plan. Implement #11057 through
+  the existing lifecycle and shared native process/owner primitives next;
+  no installed or receiving-consumer gate closes from this planning merge.
+
+### 2026-11-06 - Bounded Vault writer transition implemented
+
+- The focused failing control reproduced writer custody surviving settled
+  credential work until transport cleanup. The outgoing lifecycle now releases
+  that lease before cleanup and privately acknowledges the release. The
+  incoming service still acquires the actual shared lease; a public health
+  response cannot supply this acknowledgement.
+- The existing incoming tick grants thirty seconds after discovery publication,
+  then makes one central-only retirement attempt through shared native process
+  custody. Selection, discovery, admitted owner, installation slot, runtime
+  identity, principal and native birth are checked before mutation. Unknown
+  ownership or exit stays an explicit refusal, not a fabricated healthy update.
+- Actual Windows fixtures preserve an admitted old connection during grace,
+  transfer ready writer custody before hung cleanup, and cold-exclude hung
+  credential work before incoming admission. The retained admission supplies
+  the exact registry after launch-only environment fields have been cleared.
+  Fixed-address aliases are retried after old-process exit.
+- The focused lifecycle/discovery/readiness packet passes 212 cases with one
+  platform-specific skip and a CPython closed-pipe destructor warning. It
+  includes old/new receipt directions, malformed receipt and independent
+  owner/selection/birth/exit refusal controls. Linux/macOS, installer clean-room,
+  installed rollout and external receiving acceptance remain unqualified.
+  These isolated source controls do not close the parent effort.
+- Python lint, install contract, documentation and headless checks pass.
+  Final committed-source checks, review/CI, release and separately authorized
+  installed acceptance remain open. No live predecessor was terminated.
+- The final generation/ownership packet passes all 62 cases after latching
+  positive predecessor exit, avoiding repeated native probes in steady state.
+  The unchanged settlement, lifetime, auth-state, readiness and discovery
+  controls retain their earlier result. All 40 admitted strict projects pass
+  both declared type targets; pending scopes are not implicitly qualified.

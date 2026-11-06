@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import daemon_entrypoint
+from agent_procutil.daemon_instances import admit_daemon_instance, daemon_entrypoint
 
 import asyncio
 import contextlib
@@ -563,6 +563,10 @@ class VaultService:
                 self._generation.handoff_result
                 if getattr(self, "_generation", None) is not None else "not-requested"
             ),
+            "predecessor_retirement": (
+                self._generation.predecessor_retirement
+                if getattr(self, "_generation", None) is not None else "not-requested"
+            ),
         }
 
     def _handle_admitted_request(self, request: dict, peer: str = "?",
@@ -1005,6 +1009,9 @@ async def handle_client(
 
 @daemon_entrypoint("agent-vault", source=__file__, purpose="production")
 async def run_server(service: VaultService, tcp_port: int | None = None) -> None:
+    # The outer entrypoint retains this same admission through shutdown.
+    with admit_daemon_instance("agent-vault") as custody:
+        service._instance_registry_root = custody.receipt.registry_root
     servers = []
     pipe_servers: list = []
     connections = VaultConnections(service, handle_client)

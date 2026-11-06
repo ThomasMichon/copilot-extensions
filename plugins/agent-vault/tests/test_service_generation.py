@@ -8,9 +8,11 @@ from collections.abc import Callable
 import os
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import sys
 import time
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +21,125 @@ from agent_procutil import no_window_kwargs
 from agent_vault import service_generation as generation
 from zdd.private_peer import PeerProcess
 from single_instance_lease import AlreadyRunningError
+
+
+def test_retirement_releases_writer_before_nonsettling_transport_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import cutover, service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    controller = generation.ServiceGeneration(
+        SimpleNamespace(_runtime_can_work=True, _shutdown=False),
+        SimpleNamespace(work=set()), [], [],
+    )
+    controller.writer.acquire()
+    controller.has_writer = True
+    controller.retiring = {"runtime_generation": "successor"}
+    monkeypatch.setattr(generation, "selected_generation", lambda: "successor")
+    monkeypatch.setattr(cutover, "build_auth_state", lambda _: {"fixture": True})
+    sent = []
+
+    def transfer(status: dict, payload: dict, *, writer_released: bool = False) -> bool:
+        assert not controller.has_writer
+        assert not controller.service._runtime_can_work
+        assert not controller.connections.work
+        sent.append(writer_released)
+        return True
+
+    monkeypatch.setattr(generation, "send_auth_state", transfer)
+    try:
+        asyncio.run(controller.tick())
+        assert sent == [True]
+        assert not controller.has_writer
+        assert controller.service._shutdown
+        assert not controller.service._runtime_can_work
+        # The predecessor remains alive and its transport cleanup has not run.
+        incoming = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+        incoming.previous = SimpleNamespace(pid=os.getpid())
+        incoming.legacy_predecessor = True
+        incoming.receiver = SimpleNamespace(writer_released=lambda: True)
+        assert incoming._take_writer()
+        incoming.writer.release()
+    finally:
+        if controller.has_writer:
+            controller.writer.release()
+
+
+@pytest.mark.parametrize("change", ("selection", "endpoint", "installation"))
+def test_current_controller_cannot_retire_after_selection_or_discovery_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    from agent_vault import service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "installation_id", lambda: "fixture-installation")
+    monkeypatch.setattr(generation, "selected", lambda: change != "selection")
+    monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(
+        pid=123 if change == "endpoint" else os.getpid(),
+        installation_id="foreign" if change == "installation" else "fixture-installation",
+    ))
+    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+
+    def retire(current: Callable[[], bool]) -> str:
+        assert not current()
+        return "refused-owner-or-selection"
+
+    controller.predecessor = SimpleNamespace(retire=retire)
+    assert controller._retire_previous() == "refused-owner-or-selection"
+
+
+def test_confirmed_predecessor_exit_does_not_repeat_native_process_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "selected", lambda: True)
+    monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(pid=os.getpid()))
+    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller.previous = SimpleNamespace(pid=123)
+    controller.predecessor_retirement = "exited"
+    controller.has_writer = controller.hooks_started = controller.aliases_after_exit = True
+
+    def unexpected(_: int) -> bool:
+        pytest.fail("A positively settled predecessor was probed again")
+
+    monkeypatch.setattr(generation, "pid_alive", unexpected)
+    for _ in range(2):
+        asyncio.run(controller.tick())
+
+
+@pytest.mark.parametrize("receipt,version", (
+    (True, 1), (None, 1), ("true", 1), (1, 1), (True, True), (True, 99),
+))
+def test_only_valid_native_handoff_records_writer_release(
+    monkeypatch: pytest.MonkeyPatch, receipt: object, version: object,
+) -> None:
+    from agent_vault import service_handoff as handoff
+    from agent_vault.cutover import AUTH_STATE_CONTRACT
+
+    receiver = object.__new__(handoff.AuthReceiver)
+    receiver.peer = object()
+    receiver.generation = "fixture-generation"
+    receiver.cancelled = threading.Event()
+    receiver._lock = threading.Lock()
+    receiver._payload = None
+    receiver._writer_released = False
+    receiver.listener = SimpleNamespace(accept=lambda *args, **kwargs: SimpleNamespace(close=lambda: None))
+    frame = dict(
+        contract=AUTH_STATE_CONTRACT, version=version, target_generation="fixture-generation",
+        auth={"contract": AUTH_STATE_CONTRACT, "version": version},
+    )
+    if receipt is not None:
+        frame["credential_writer_released"] = receipt
+    monkeypatch.setattr(handoff, "read_frame", lambda *args: frame)
+    monkeypatch.setattr(handoff, "write_frame", lambda *args: None)
+    receiver._receive()
+    assert receiver.writer_released() is (receipt is True and type(version) is int and version == 1)
 
 
 def test_generation_identity_follows_the_selected_build_not_version_order(
@@ -397,6 +518,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 root, identity, port, mode = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
+if mode in {"hung-cleanup", "hung-work", "bounded-successor"}:
+    sys.path.insert(0, str(root / "versions" / identity))
 os.environ.update(
     AGENT_VAULT_HOME=str(root), AGENT_VAULT_RUN_DIR=str(root / "run"),
     AGENT_VAULT_PID=str(root / "vault.pid"), AGENT_VAULT_SOCKET=str(root / "vault.sock"),
@@ -406,6 +529,21 @@ os.environ.update(
 os.environ.pop("AGENT_VAULT_INSTALLATION_ID", None)
 from agent_vault import service, service_generation as generation
 from agent_vault import service_handoff
+from agent_vault import service_predecessor
+if mode == "bounded-successor":
+    service_predecessor.GRACE_SECONDS = 3
+if mode == "legacy-receiver":
+    read = service_handoff.read_frame
+    def legacy_read(*args):
+        frame = read(*args)
+        frame.pop("credential_writer_released", None)
+        return frame
+    service_handoff.read_frame = legacy_read
+if mode == "legacy-sender":
+    send = generation.send_auth_state
+    def legacy_send(status, payload, **kwargs):
+        return send(status, payload)
+    generation.send_auth_state = legacy_send
 if mode == "legacy-health":
     def legacy_dial(dial):
         def send(request, *args, **kwargs):
@@ -447,6 +585,15 @@ def native(kpdb, entry, group=None):
     return True
 
 vault.has = native
+if mode == "hung-cleanup":
+    from agent_vault.service_connections import VaultConnections
+    close = VaultConnections.close
+    async def held_close(self, *args):
+        (root / "cleanup.entered").touch()
+        while not (root / (identity + ".stop")).exists():
+            await asyncio.sleep(.02)
+        return await close(self, *args)
+    VaultConnections.close = held_close
 if mode == "fail":
     async def fail(*args, **kwargs):
         raise OSError("fixture listener construction failed")
@@ -491,6 +638,13 @@ def _send(port: int, request: dict) -> dict:
             return json.loads(stream.readline())
 
 
+def _serving(port: int, pid: int) -> bool:
+    try:
+        return _send(port, {"action": "ping"}).get("pid") == pid
+    except (OSError, ValueError):
+        return False
+
+
 def _until(predicate: Callable[[], bool], processes: list[subprocess.Popen], timeout: float = 10) -> None:
     deadline = time.monotonic() + timeout
     while not predicate():
@@ -504,12 +658,20 @@ def _until(predicate: Callable[[], bool], processes: list[subprocess.Popen], tim
 
 
 def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subprocess.Popen:
+    from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
+
     env = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("AGENT_VAULT_", "VAULT_")) and key not in {"KPDB", "KEE_PASS_DB"}
     }
-    return subprocess.Popen(
+    source = (
+        root / "versions" / identity / "agent_vault" / "service.py"
+        if mode in {"hung-cleanup", "hung-work", "bounded-successor"}
+        else Path(generation.__file__).with_name("service.py")
+    )
+    return spawn_instance(
         [sys.executable, "-c", CHILD, str(root), identity, str(port), mode],
+        instance=DaemonInstanceSpec("agent-vault", root, source, purpose="unattended-test"),
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, env=env, **no_window_kwargs(),
     )
@@ -539,9 +701,12 @@ def _capture_process(pid: int) -> PeerProcess:
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native process references")
-@pytest.mark.parametrize("incoming_mode,warm", (("normal", True), ("no-overlap", False)))
+@pytest.mark.parametrize("old_mode,incoming_mode,warm", (
+    ("legacy-health", "normal", True), ("normal", "no-overlap", False),
+    ("legacy-sender", "normal", True), ("normal", "legacy-receiver", True),
+))
 def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_writers(
-    tmp_path: Path, incoming_mode: str, warm: bool,
+    tmp_path: Path, old_mode: str, incoming_mode: str, warm: bool,
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor
     from zdd.private_protocol import Deadline
@@ -553,7 +718,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         fixed_port = reservation.getsockname()[1]
-    old = _start(tmp_path, "newer", fixed_port, "legacy-health" if warm else "normal")
+    old = _start(tmp_path, "newer", fixed_port, old_mode)
     children = [old]
     old_lifetime = None
     try:
@@ -590,7 +755,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
         stdout, stderr = old.communicate(timeout=10)
         assert old.returncode == 0, stdout + stderr
         old_lifetime.wait_exit(Deadline(1))
-        if warm:
+        if old_mode == "legacy-health":
             assert json.loads((tmp_path / "legacy-health.json").read_text()) == {
                 "transport": "_dial_tcp" if os.name == "nt" else "_dial_unix",
                 "request": {"action": "ping"},
@@ -603,6 +768,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
         assert int((tmp_path / "vault.pid").read_text()) == new_pid
         (tmp_path / "older.release").touch()
         assert _send(new_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"})["ok"]
+        _until(lambda: _serving(fixed_port, new_pid), [new])
         assert _send(fixed_port, {"action": "ping"})["pid"] == new_pid
         assert [json.loads(row) for row in (tmp_path / "work.jsonl").read_text().splitlines()] == [
             ["newer", "entered"], ["newer", "settled"], ["older", "entered"], ["older", "settled"],
@@ -641,3 +807,87 @@ def test_failed_successor_does_not_remove_or_stop_the_incumbent(tmp_path: Path) 
     finally:
         _settle(tmp_path, children)
     assert old.returncode == 0
+
+
+@pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned retirement")
+@pytest.mark.parametrize("old_mode", ("hung-cleanup", "hung-work"))
+def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
+    tmp_path: Path, old_mode: str,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from zdd.private_protocol import Deadline
+
+    for identity in ("newer", "older"):
+        shutil.copytree(
+            Path(generation.__file__).parent,
+            tmp_path / "versions" / identity / "agent_vault",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    (tmp_path / "selection").write_text("newer")
+    durable = tmp_path / "fixture.kdbx"
+    durable.write_bytes(b"fixture durable bytes")
+    old = _start(tmp_path, "newer", 0, old_mode)
+    children = [old]
+    lifetime = None
+    try:
+        _until(lambda: _endpoint(tmp_path) is not None, children)
+        initial = _endpoint(tmp_path)
+        old_pid, old_port = initial["pid"], _port(initial)
+        lifetime = _capture_process(old_pid)
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            pending = worker.submit(
+                _send, old_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+            )
+            _until(lambda: (tmp_path / "newer.entered").exists(), children)
+            (tmp_path / "selection").write_text("older")
+            new = _start(tmp_path, "older", 0, "bounded-successor")
+            children.append(new)
+            _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, children)
+            incoming = _endpoint(tmp_path)
+            port, pid = _port(incoming), incoming["pid"]
+            assert old.poll() is None
+            assert not _send(port, {"action": "ping"})["accepting_work"]
+            assert _send(port, {"action": "has", "kpdb": str(durable), "entry": "fixture"}) == {
+                "ok": False, "error": "service_transition", "retryable": True,
+            }
+            assert _send(old_port, {"action": "ping"})["pid"] == old_pid
+            if old_mode == "hung-cleanup":
+                (tmp_path / "newer.release").touch()
+                assert pending.result(timeout=10)["ok"]
+                _until(lambda: (tmp_path / "cleanup.entered").exists(), children)
+                _until(lambda: _send(port, {"action": "ping"})["accepting_work"], children)
+                assert old.poll() is None
+                assert _send(port, {"action": "ping"})["auth_handoff"] == "warmed"
+            _until(
+                lambda: _send(port, {"action": "ping"})["predecessor_retirement"] != "grace",
+                [new],
+            )
+            assert _send(port, {"action": "ping"})["predecessor_retirement"] == "cold-retired"
+            lifetime.wait_exit(Deadline(1))
+            old.communicate(timeout=2)
+            assert old.returncode != 0
+            if old_mode == "hung-work":
+                with pytest.raises((ValueError, OSError)):
+                    pending.result(timeout=2)
+                assert not (tmp_path / "newer.release").exists()
+            _until(lambda: _send(port, {"action": "ping"})["accepting_work"], [new])
+            health = _send(port, {"action": "ping"})
+            assert health["predecessor_retirement"] == "cold-retired"
+            assert health["unlocked_vaults"] == ([str(durable)] if old_mode == "hung-cleanup" else [])
+            assert _endpoint(tmp_path)["pid"] == pid
+            (tmp_path / "older.release").touch()
+            assert _send(port, {"action": "has", "kpdb": str(durable), "entry": "fixture"})["ok"]
+            work = [json.loads(row) for row in (tmp_path / "work.jsonl").read_text().splitlines()]
+            assert work == [
+                ["newer", "entered"],
+                *([["newer", "settled"]] if old_mode == "hung-cleanup" else []),
+                ["older", "entered"], ["older", "settled"],
+            ]
+            assert durable.read_bytes() == b"fixture durable bytes"
+    finally:
+        outputs = _settle(tmp_path, children)
+        if lifetime is not None:
+            lifetime.close()
+    assert children[-1].returncode == 0
+    assert all("fixture-master" not in output for output in outputs)
+    assert _endpoint(tmp_path) is None

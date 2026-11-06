@@ -164,11 +164,19 @@ class ServiceGeneration:
         self.hooks_started = False
         self.receiver: AuthReceiver | None = None
         self.handoff_result = "not-requested"
+        self.predecessor = None
+        self.predecessor_deadline = 0.0
+        self.predecessor_retirement = "not-requested"
+        self.aliases_after_exit = False
 
     def _take_writer(self) -> bool:
         if self.has_writer:
             return True
-        if self.legacy_predecessor and self.previous and pid_alive(self.previous.pid):
+        if (
+            self.legacy_predecessor and self.previous and pid_alive(self.previous.pid)
+            and not (self.receiver and self.receiver.writer_released())
+            and not (self.predecessor and self.predecessor.exited())
+        ):
             return False
         try:
             self.writer.acquire()
@@ -213,6 +221,12 @@ class ServiceGeneration:
                 self.previous and pid_alive(self.previous.pid)
             )
             if self.legacy_predecessor:
+                from .service_predecessor import Predecessor
+
+                self.predecessor = await asyncio.to_thread(
+                    Predecessor.capture, self.previous, home_dir(),
+                    getattr(self.service, "_instance_registry_root", None),
+                )
                 try:
                     self.receiver = AuthReceiver(self.root, self.previous.pid, PROCESS_GENERATION)
                     self.receiver.start()
@@ -260,6 +274,11 @@ class ServiceGeneration:
                 installation_id=installation_id(), alt=advertised[2] or None,
             )
             self._write_pid()
+            if self.legacy_predecessor:
+                from .service_predecessor import GRACE_SECONDS
+
+                self.predecessor_deadline = time.monotonic() + GRACE_SECONDS
+                self.predecessor_retirement = "grace"
         finally:
             self.publication.release()
 
@@ -318,6 +337,27 @@ class ServiceGeneration:
             return
         if not selected() or endpoint is None:
             return
+        previous_exited = self.predecessor_retirement in {"exited", "cold-retired"}
+        if self.previous and not previous_exited:
+            previous_exited = bool(
+                (self.predecessor and self.predecessor.exited())
+                or not pid_alive(self.previous.pid)
+            )
+            if previous_exited:
+                self.predecessor_retirement = "exited"
+        if self.predecessor_retirement == "grace":
+            if previous_exited:
+                self.predecessor_retirement = "exited"
+            elif time.monotonic() >= self.predecessor_deadline:
+                self.predecessor_retirement = await settle_owned(asyncio.to_thread(
+                    self._retire_previous,
+                ))
+                previous_exited = bool(
+                    self.predecessor and self.predecessor.exited()
+                )
+        if previous_exited and self.hooks_started and not self.aliases_after_exit:
+            await self._legacy_aliases()
+            self.aliases_after_exit = True
         if not self._take_writer():
             return
         if not self.hooks_started:
@@ -325,6 +365,7 @@ class ServiceGeneration:
             self.service._runtime_can_work = True
             self._write_pid()
             await self._legacy_aliases()
+            self.aliases_after_exit = previous_exited or self.previous is None
             context = self.api.resolve_context()
             self.api.get_registry().run_startup(
                 self.service,
@@ -345,10 +386,42 @@ class ServiceGeneration:
         if expected is None or self.retiring.get("runtime_generation") == expected:
             from .cutover import build_auth_state
 
+            payload = build_auth_state(self.service)
+            released = self._release_writer()
             await settle_owned(asyncio.to_thread(
-                send_auth_state, self.retiring, build_auth_state(self.service),
+                send_auth_state, self.retiring, payload, writer_released=released,
             ))
+        else:
+            self._release_writer()
         self.service._shutdown = True
+
+    def _release_writer(self) -> bool:
+        if not getattr(self, "has_writer", False):
+            return False
+        self.writer.release()
+        self.has_writer = False
+        return True
+
+    def _retire_previous(self) -> str:
+        if self.predecessor is None:
+            return "refused-owner"
+        try:
+            self.publication.acquire()
+        except AlreadyRunningError:
+            return "refused-publication"
+        try:
+            def current() -> bool:
+                endpoint = read_endpoint(self.root)
+                return bool(
+                    selected() and endpoint and endpoint.pid == os.getpid()
+                    and endpoint.installation_id == installation_id()
+                )
+
+            result = self.predecessor.retire(current)
+            log.info("Vault predecessor retirement: %s", result)
+            return result
+        finally:
+            self.publication.release()
 
     def handoff_advertisement(self) -> dict | None:
         return self.receiver.advertisement() if self.receiver is not None else None
@@ -377,9 +450,7 @@ class ServiceGeneration:
         with contextlib.suppress(FileNotFoundError, ValueError):
             if int(pid.read_text(encoding="utf-8").strip()) == os.getpid():
                 pid.unlink()
-        if self.has_writer:
-            self.writer.release()
-            self.has_writer = False
+        self._release_writer()
         if self.has_generation:
             self.generation_lease.release()
             self.has_generation = False

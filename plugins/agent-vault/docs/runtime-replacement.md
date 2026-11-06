@@ -7,7 +7,8 @@ Parent: [Architecture](architecture.md). User-facing setup and commands:
 
 `service_generation.py` owns endpoint and work custody;
 `service_handoff.py` owns private transfer; `cutover.py` owns the auth-state
-contract and expiration rules.
+contract and expiration rules. `service_predecessor.py` applies the existing
+shared native process/custody primitives to one displaced central Vault owner.
 
 The Windows updater constructs and selects the incoming runtime, then invokes
 its selected-generation ensure operation. It does not stop the predecessor or
@@ -34,7 +35,8 @@ The newcomer binds a fresh endpoint beside a live predecessor and atomically
 publishes it through the existing native-transport rendezvous. TCP can use an
 ephemeral port while the predecessor owns the legacy port. After acquiring work
 custody, the new daemon restores available legacy aliases without deleting a
-foreign listener.
+foreign listener. If work custody transfers before the old process exits, it
+retries those aliases once the predecessor's exit is observed.
 
 One shared OS lease, keyed by the durable Vault home, excludes concurrent
 credential work across generations. A published endpoint can answer health
@@ -63,20 +65,54 @@ password-expiration checks.
 
 The old build observes a different, live, selected build and closes its work
 admission. It settles already-admitted native requests, optionally transfers
-compatible auth state, and retires itself. Its cleanup preserves the successor's
+compatible auth state, and releases the credential-work lease before transport
+cleanup. A native-authenticated release receipt allows the newcomer to take
+that shared lease without waiting for final process exit. No late credential
+request can reactivate the donor. Its cleanup preserves the successor's
 endpoint and PID publication. Confirmed retirement commits forward even if the
 successor subsequently disappears; it does not reactivate a displaced writer.
 A candidate failure before publication leaves the incumbent's route intact.
-An older predecessor without this supersession protocol is not automatically
-terminated. Its survival can leave credential readiness unresolved after code
-publication; a successful code install is not falsely reported as a healthy
-replacement.
+
+The selected incoming service's existing lifecycle tick grants the captured
+predecessor thirty seconds from discovery publication for cooperative work,
+handoff and exit. After grace, one bounded cold-retirement attempt may interrupt
+that exact central service, not its descendants. There is no new watchdog,
+recurring reaper or per-request registry scan. The publication lease serializes
+the attempt with endpoint replacement; current selection and discovery are
+rechecked before native mutation.
+
+Retirement independently validates the admitted instance's central-service
+role, installation slot/home, runtime directory identity, unprotected resident
+status, OS principal and native birth. It uses the retained admission's registry,
+not a launch-only environment variable. Test owners can replace only their own
+test run. Shared `PinnedProcess` termination confirms original-process exit;
+identity-only termination is not sufficient owner authority. Reused PIDs,
+changed records, reselected successors, clients and unrelated installations
+cannot become targets.
+
+Health's additive `predecessor_retirement` reports `grace`, `exited`,
+`cold-retired` or a specific `refused-*` outcome independently of
+`accepting_work`. A healthy incoming service is not rolled back for refused
+cleanup. Without a valid release receipt, credential admission still needs
+original-predecessor exit and acquisition of the shared writer lease.
+Unavailable owner/exit proof can therefore leave credential readiness unresolved;
+neither code publication nor a requested termination is reported as full
+replacement success. Interrupted requests have unknown outcomes, not permission
+for blind mutation replay.
 
 ## Versioned, private auth handoff
 
 The negotiated contract is `agent-vault.auth-state`, currently version `1`.
 Health advertises supported versions and, during replacement, a bounded
 one-use receiver. The donor transfers state only when the versions overlap.
+
+The version-1 private frame accepts an optional boolean
+`credential_writer_released`. Only literal `true` from the exact authenticated
+donor establishes settled writer custody; missing or malformed values do not.
+The sender includes it only after closing admission, settling credential work
+and releasing its lease. Prior readers tolerate and ignore the additive field;
+prior senders omit it. Both mixed directions retain auth transfer and the
+original process-exit gate. No CLI syntax or auth-payload version is retired.
 
 The payload contains unlocked KeePass master passwords, their original set
 times, and absolute expiration deadlines. It does not copy credential-value
@@ -100,11 +136,20 @@ opt-in encrypted cache or an explicit unlock if no unexpired state transferred.
 
 ## Qualification and remaining platform work
 
-Isolated child-process tests cover Windows private transfer, no-overlap
-retirement, original native-process exit, writer exclusion, retained durable
-bytes, successor-safe cleanup and legacy TCP reconnection. Unit controls cover
-expiration preservation and malformed/unsupported contracts. These are not
-installed whole-suite adoption evidence.
+The focused packet is `python tools/run-plugin-tests.py agent-vault --test-file
+tests/test_service_generation.py --test-file tests/test_service_predecessor.py
+--allow-explicit-tiers`. Isolated child-process tests cover private transfer,
+both mixed receipt directions, no-overlap retirement, held connections during
+grace, hung credential work and transport cleanup, original native-process exit,
+writer exclusion, retained durable bytes, successor-safe cleanup and legacy TCP
+reconnection. Unit controls separately cover owner/selection/birth refusal,
+unconfirmed retirement, literal receipt admission and expiration preservation.
+These are not installed whole-suite adoption evidence.
+
+Native pinned cold retirement is implemented for Windows and Linux. macOS
+retains cooperative self-exit but refuses this unavailable native cold-retirement
+primitive; private auth transfer is also unavailable there. Windows source
+controls are executed locally; Linux and macOS qualification are separate.
 
 The POSIX/systemd installer still has its legacy restart and unversioned
 handoff-carrier path. Its migration and native service-manager custody remain
