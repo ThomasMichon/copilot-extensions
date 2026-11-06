@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse direct SSH preparation and command delivery after explicit relay admission failure.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
