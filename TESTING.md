@@ -5962,11 +5962,14 @@ checks is not proof of host isolation.
 The existing optional `installation-context-acceptance.yml` dispatch with
 `interactive_completion=true` qualifies the real mux lifetime fixture on
 disposable Linux and Windows workers, plus the private POSIX pane fixture.
-Windows uses portable PSMux 3.3.5 in runner temp, pinned by archive SHA-256;
+Windows uses portable PSMux 3.4.0 in runner temp, pinned by archive SHA-256;
 it does not install or register a host service. This lane remains manual and
 outside required unit CI. Do not substitute a shared developer desktop for it.
+The older 3.3.5 fixture can lose a cursor-response wakeup when control requests
+overlap pane creation, blocking even direct Python before its first instruction.
+The fixture pin does not change installed muxes or production compatibility.
 Windows startup controls overlap private mux requests with four detached
-launches, using direct Python and the noninteractive PowerShell wrapper.
+launches, using direct Python and the PowerShell wrapper.
 The original worker-startup deadline, real TTY, owner-death and sentinel
 assertions remain unchanged. A cursor-position response is sent only after a
 startup failure, to diagnose a blocked shell; it never converts that failure

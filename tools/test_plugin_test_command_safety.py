@@ -707,6 +707,6 @@ def test_native_startup_probes_preserve_the_exact_python_command_without_running
     wrapped = namespace["_probe_argv"](marker, "pwsh")
     assert direct[:6] == [sys.executable, "-I", "-B", "-X", "utf8", "-c"]
     assert direct[-1] == str(marker)
-    assert wrapped[:5] == ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand"]
+    assert wrapped[:4] == ["pwsh", "-NoLogo", "-NoProfile", "-EncodedCommand"]
     decoded = base64.b64decode(wrapped[-1]).decode("utf-16-le")
     assert decoded == "& " + " ".join("'" + part.replace("'", "''") + "'" for part in direct) + "; exit $LASTEXITCODE"

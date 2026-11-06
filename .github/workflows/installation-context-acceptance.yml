@@ -1143,10 +1143,10 @@ jobs:
         if: ${{ runner.os == 'Windows' }}
         shell: pwsh
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'psmux-3.3.5.zip'
-          $destination = Join-Path $env:RUNNER_TEMP 'psmux-fixture-3.3.5'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.5/psmux-v3.3.5-windows-x64.zip' -OutFile $archive
-          $expected = '7e3059f082df01eaa233bc50dbf62650d993150029b1d12327d3fcae2f6db808'
+          $archive = Join-Path $env:RUNNER_TEMP 'psmux-3.4.0.zip'
+          $destination = Join-Path $env:RUNNER_TEMP 'psmux-fixture-3.4.0'
+          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.4.0/psmux-v3.4.0-windows-x64.zip' -OutFile $archive
+          $expected = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
             throw 'PSMux fixture archive digest mismatch'
           }

@@ -355,7 +355,7 @@ def _probe_argv(marker, powershell):
         return argv
     command = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
     encoded = base64.b64encode((command + "; exit $LASTEXITCODE").encode("utf-16-le")).decode("ascii")
-    return [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
+    return [powershell, "-NoLogo", "-NoProfile", "-EncodedCommand", encoded]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="diagnoses Windows native launch boundaries")

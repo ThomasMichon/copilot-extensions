@@ -376,8 +376,8 @@ def test_optional_mux_safety_qualification_uses_disposable_pinned_windows_toolin
         tooling = next(step for step in steps if step.get("name", "").startswith("Prepare pinned PSMux"))
         assert tooling["if"] == "${{ runner.os == 'Windows' }}"
         assert "RUNNER_TEMP" in tooling["run"] and "GITHUB_PATH" in tooling["run"]
-        assert "v3.3.5/psmux-v3.3.5-windows-x64.zip" in tooling["run"]
-        assert "7e3059f082df01eaa233bc50dbf62650d993150029b1d12327d3fcae2f6db808" in tooling["run"]
+        assert "v3.4.0/psmux-v3.4.0-windows-x64.zip" in tooling["run"]
+        assert "a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721" in tooling["run"]
         assert "Get-FileHash" in tooling["run"]
         native = next(step for step in steps if step.get("name") == "Qualify warm UI lifetime in a private native mux")
         assert native["if"] == "${{ runner.os == 'Linux' || runner.os == 'Windows' }}"
@@ -904,6 +904,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "gateway-role-tunnels", "gateway-host-application-linux", "gateway-host-application-windows",
+        "gateway-continuity-application-linux", "gateway-continuity-application-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",

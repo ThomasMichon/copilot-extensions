@@ -138,7 +138,7 @@ class WarmPickerPool:
                 return
             script = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
             encoded = base64.b64encode((script + "; exit $LASTEXITCODE").encode("utf-16-le")).decode("ascii")
-            command = [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
+            command = [powershell, "-NoLogo", "-NoProfile", "-EncodedCommand", encoded]
         else:
             command = [shlex.join(argv)]
         environment = dict(self.environment)
