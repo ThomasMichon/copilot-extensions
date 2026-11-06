@@ -95,6 +95,18 @@ above in the receiver. Its separate tracker may then retire `NOT_PLANNED`,
 not `COMPLETED`; #5452 remains OPEN. Delivery and a fresh whole-parent readback
 are separate from this proposal, not inferred from a documentation merge.
 
+## Actual receiving delivery and disposition
+
+#11166 merged as `09c0911819efe54230360328fc186cce9faac14e` after
+current-head approval, nine complete good checks and zero review threads.
+All three reviewed, merged and current document blobs match. The actual
+13,086-character OPEN #5452 body then received the full direct Plan/global
+Validation, coordination, original #5410 description and both corrections.
+Complete current body/discussion readback preceded #5410's separate
+NOT_PLANNED retirement, audit 251. Original title, body, discussion and
+assignment remain; #5452 stays OPEN and all technical rows stay unchecked.
+This is actual tracking intake, not authentication or transport implementation.
+
 ## See also
 
 - [Backlog Reconciliation](README.md)

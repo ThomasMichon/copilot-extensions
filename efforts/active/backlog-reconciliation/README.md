@@ -234,11 +234,16 @@ implementation authority, resource custody or the fixed checkpoint.
 ## Plan
 
 The [authenticated board-waiter cohort](board-waiter-receiving-cohort.md)
-proposes complete direct #5410 intake under existing OPEN #5452, preserving
-actual-header regressions and both delegated/relay consumers as independent
-unchecked lanes. Reviewed planning, actual parent delivery and whole current
-readback precede any separate tracking retirement; no implementation or
-source/resource custody transfer follows.
+records reviewed #11166, complete actual #5452 receiving/readback and #5410's
+separate NOT_PLANNED tracking retirement. Actual-header regressions and both
+delegated/relay consumers remain independent unchecked lanes; no implementation
+or source/resource custody transfer follows.
+
+The [managed validation cohorts](managed-validation-evidence-cohorts.md)
+propose #4835's finite contained-Windows exit-state lane under existing OPEN
+#6917, retaining fixture and shared-primitive owners separately from the
+accepted shared-runner writer. Review, actual complete delivery/readback and
+a separate judgment still precede any tracking retirement.
 
 The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
 independently verifies eighteen PR records and twenty-four source identities.
