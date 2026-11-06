@@ -160,20 +160,43 @@ def command(argv: list[str]) -> int:
             )
 
     parser = SafeParser(prog="repos configuration")
-    parser.add_argument("command", choices=("catalog", "preview", "apply", "knowledge-preview", "knowledge-apply"))
+    parser.add_argument("command", choices=(
+        "catalog", "identities", "preview", "apply", "knowledge-resolve", "knowledge-preview", "knowledge-apply",
+    ))
     parser.add_argument("--context-project", required=True)
     parser.add_argument("--repository")
     parser.add_argument("--workspace", default="")
     parser.add_argument("--operation", choices=("set", "reset"), default="set")
     parser.add_argument("--login", default="")
     parser.add_argument("--preview-token", default="")
+    parser.add_argument("--harness-id", default="")
+    parser.add_argument("--knowledge-id", default="")
     try:
         args = parser.parse_args(argv)
         # Native loaders may warn about source content. Return sanitized findings,
         # never those raw diagnostics through provider rows, stderr or receipts.
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             project = resource_name(args.context_project)
-            if args.command == "catalog":
+            portable = bool(args.harness_id or args.knowledge_id)
+            if portable and (
+                not args.command.startswith("knowledge-")
+                or not args.harness_id or not args.knowledge_id or args.repository
+            ):
+                raise ConfigurationError("invalid-request", "Supply both portable IDs instead of a repository name.")
+            if args.command == "identities":
+                from .repos_knowledge_preferences import identities
+
+                result = identities()
+            elif args.command == "knowledge-resolve" or portable:
+                from . import repos_knowledge_preferences
+
+                operation = args.command.removeprefix("knowledge-")
+                function = getattr(repos_knowledge_preferences, operation)
+                arguments = [project, args.harness_id, args.knowledge_id]
+                if operation == "apply":
+                    arguments.append(args.preview_token)
+                result = function(*arguments)
+            elif args.command == "catalog":
                 from .repos_configuration_catalog import catalog
 
                 result = catalog(project, workspace=args.workspace)

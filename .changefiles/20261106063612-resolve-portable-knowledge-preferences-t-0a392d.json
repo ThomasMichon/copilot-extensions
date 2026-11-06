@@ -1,0 +1,13 @@
+{
+  "comment": "Resolve portable knowledge preferences through native identities and confirmed binding with bounded fresh owner reads",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}

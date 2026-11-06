@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -79,6 +81,53 @@ def _owner_arguments(script: Path, project: str, name: str, operation: str, toke
     return args
 
 
+def _native_read_runner(project: str):
+    """Keep fresh owner reads in the locked worker; never dispatch write/auth verbs."""
+    entry = Path(sysconfig.get_path("scripts")) / (
+        "agent-worktrees.exe" if sys.platform == "win32" else "agent-worktrees"
+    )
+
+    def run(command: str, args: list[str], *, cwd="", noninteractive=False):
+        if Path(command).resolve() != entry.resolve():
+            return None
+        if args == ["repos", "list", "--json"]:
+            from .repos_cli import cmd_repos_dispatch
+
+            dispatch, arguments = cmd_repos_dispatch, ["list", "--json"]
+        elif args in (
+            ["-p", project, "config-root", "--json"],
+            ["-p", project, "state-root", "--json"],
+        ):
+            from . import context_cli
+
+            dispatch = (
+                context_cli.cmd_config_root_dispatch if args[2] == "config-root"
+                else context_cli.cmd_state_root_dispatch
+            )
+            arguments = ["--json"]
+        else:
+            return None
+        from .output import capture_json_output
+
+        previous, directory = cfg.active_project(), Path.cwd()
+        stdout, stderr = io.StringIO(), io.StringIO()
+        try:
+            cfg.set_active_project(project)
+            if cwd:
+                os.chdir(cwd)
+            with capture_json_output() as native_json, redirect_stdout(stdout), redirect_stderr(stderr):
+                result = dispatch(arguments)
+        finally:
+            os.chdir(directory)
+            cfg.set_active_project(previous)
+        return subprocess.CompletedProcess(
+            [command, *args], result, native_json.getvalue() or stdout.getvalue(),
+            stderr.getvalue() + (stdout.getvalue() if native_json.getvalue() else ""),
+        )
+
+    return run
+
+
 def _apply_worker(project: str, name: str, token: str, expected_script: str) -> None:
     from . import repos
     from .repos_registry_transaction import registry_lock
@@ -90,7 +139,10 @@ def _apply_worker(project: str, name: str, token: str, expected_script: str) -> 
         previous = sys.argv
         try:
             sys.argv = _owner_arguments(script, project, name, "apply-locked", token)
-            runpy.run_path(str(script), run_name="__main__")
+            runpy.run_path(
+                str(script), run_name="__main__",
+                init_globals={"_NATIVE_BINDING_READ_RUNNER": _native_read_runner(project)},
+            )
         finally:
             sys.argv = previous
 

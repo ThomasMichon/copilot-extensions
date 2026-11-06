@@ -76,6 +76,14 @@ including failures during legacy cleanup after the write. Plugin composition
 keeps its native delegate windowless on Windows.
 See [Repositories Configuration](../agent-worktrees/docs/repositories-configuration.md#confirmed-existing-knowledge-binding).
 
+The native worker may provide a private, read-only in-process adapter while
+holding that registration lock. It runs the existing fresh inventory and
+selected-project config/state handlers without repeated interpreter startup;
+all validation and pointer rechecks remain. Writes, authentication, composition
+and unsupported reads retain their ordinary subprocess path. Without the
+optional adapter the payload behaves as before; no new CLI, execution grant,
+cached-read authority or changed native deadline is introduced.
+
 `bind_knowledge.py` writes or refreshes these local artifacts:
 
 | Artifact | What it contains |

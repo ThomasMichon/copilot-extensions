@@ -138,6 +138,76 @@ probes. Pointer completion is captured at the preserving writer boundary, so
 a later cleanup or observation failure still returns a nonzero incomplete
 receipt with `pointer_committed: true`.
 
+The locked worker can supply its selected payload with a private read-only
+in-process adapter for native repository inventory and this project's
+configuration/state-root handlers. Reads remain fresh and all original
+preflights/rechecks still execute; only repeated cold interpreter startup is
+removed. Native JSON uses the existing real-stdout capture seam. The adapter
+restores project/cwd/streams and does not intercept write, authentication,
+composition or another project's commands. Unrecognized calls use the existing
+subprocess path. Older payloads ignore the optional callback; a newer payload
+under an older worker retains the unchanged subprocess baseline. Neither the
+18/26-second native budgets nor binding Configuration capability 2 changes.
+
+## Portable harness-to-knowledge preferences
+
+The native identity owner exposes a read-only catalog without enrolling
+installation-cell state:
+
+```text
+agent-worktrees repos configuration identities --context-project sample
+agent-worktrees repos configuration knowledge-resolve --context-project sample --harness-id <native-repo-id> --knowledge-id <native-repo-id>
+```
+
+`identities` emits `agent-worktrees.repository-identities`, version `1`, with
+`capabilities.knowledge_preference: 1`. IDs use the same normalized-remote
+identity as native project state and configuration context, in legacy and
+namespaced installations. A local-only remote has no portable ID. Display names
+and checkout basenames never select a portable identity. Duplicate canonical
+IDs are ambiguous, not aliases that can silently pick a registration.
+Local account, class and default-branch selection stay with the native registry;
+portable documents carry IDs, not account choices or absolute checkout paths.
+Do not export this whole local catalog into a synchronized preference document.
+
+Resolution requires exactly one available worktree-capable registration for
+each ID, a distinct knowledge repository, and a harness ID matching the explicit
+context project. Missing, stale, ambiguous, unsupported-class or local-only
+registrations refuse without discovery, cloning, registration repair or
+account selection. The result uses `agent-worktrees.knowledge-preference`,
+version `1`, with the native logical execution-machine identity.
+
+An effective local binding remains authoritative. Resolution/preview reports
+`already-bound` when it matches, or `binding-preserved` when it differs, with
+no adoption token and no binder invocation. An explicitly unresolved local
+binding is an error to repair through its owner, never absence permitting a
+shared fallback. A suppressed/absent portable suggestion needs no native
+binding call. Related venue choices retain their existing owner; this API
+does not provision or replace a local route.
+
+Where no binding exists, adoption remains an explicit separate operation:
+
+```text
+agent-worktrees repos configuration knowledge-preview --context-project sample --harness-id <native-harness-id> --knowledge-id <native-knowledge-id>
+agent-worktrees repos configuration knowledge-apply --context-project sample --harness-id <native-harness-id> --knowledge-id <native-knowledge-id> --preview-token <returned-token>
+```
+
+Preview returns the selected binding owner's `native_preview` and a combined
+confirmation token binding canonical registration, execution machine, existing
+binding and the native transaction token. Apply re-resolves and previews before
+passing that native token to the existing version-2 binding transaction. Changed
+IDs, registry data, scope or bindings refuse rather than adopting a new target.
+The existing locked registration/pointer rechecks, selected payload, preserving
+writer and personal-plugin composer still own all effects and partial receipts.
+Pair creation and running-session delivery remain separate readiness gates.
+
+This is additive provider support. The original by-name `--repository` form is
+unchanged; do not combine it with portable IDs. Confirm the selected runtime's
+`repos configuration --help` exposes `identities`, `knowledge-resolve` and the
+two ID options before using them, then read the catalog's capability. Older
+runtimes remain usable by name but cannot promise identity-bound adoption;
+do not downgrade an ID request or replay an effectful operation by basename.
+No automatic caller migration or retirement is implied by a source release.
+
 ## Validation
 
 Native coverage runs through `tools/run-plugin-tests.py agent-worktrees -k
@@ -156,3 +226,11 @@ These checks use redirected roots and sentinel secrets, compare complete source
 bytes/directory trees, and exercise cancel, set, no-field reset, changed
 inheritance, ordinary concurrent registry writes and stale/invalid requests.
 They do not establish promoted/installed GUI acceptance or authorize rollout.
+
+Portable-ID controls live in `tests/test_knowledge_preferences.py`. The opt-in
+`tests/native/test_portable_knowledge_binding.py` uses actual fresh Git roots,
+canonical registrations and the real selected `harness-knowledge` payload to
+prove preview -> confirmed pointer -> registration/state-root readback, within
+the native operation budgets. Its example non-GitHub origins require no account
+credentials or network. This is isolated source execution, not installed-runtime,
+cloud-carrier or cross-platform deployment qualification.

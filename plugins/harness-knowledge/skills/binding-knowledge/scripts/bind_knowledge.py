@@ -189,6 +189,14 @@ def _run_agent_worktrees(
 ) -> subprocess.CompletedProcess[str] | None:
     if not agent_worktrees_path:
         return None
+    reader = globals().get("_NATIVE_BINDING_READ_RUNNER")
+    if callable(reader):
+        native_read = cast(Callable[..., subprocess.CompletedProcess[str] | None], reader)
+        result = native_read(
+            agent_worktrees_path, args, cwd=cwd, noninteractive=noninteractive,
+        )
+        if result is not None:
+            return result
     command = _agent_worktrees_command(agent_worktrees_path, args)
     if not command:
         return None

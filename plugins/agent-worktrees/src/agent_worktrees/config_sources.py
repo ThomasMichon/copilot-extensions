@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -108,8 +107,7 @@ def configuration_context(
     else:
         resolved = None
     name = config.repo_name
-    normalized = project_state._normalized_repository_remote(name)
-    repository_id = "repo-" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+    repository_id = project_state.canonical_repository_id(name)
     installation = registry_paths.installation_context()
     cell = str(installation["cellRoot"]) if installation else str(registry_paths.registry_root())
     base = base_anchor or config.default_repo.anchor
