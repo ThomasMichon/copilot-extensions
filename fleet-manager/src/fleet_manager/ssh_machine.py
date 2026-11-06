@@ -32,6 +32,7 @@ def _consumer(config):
         authorization_dir=absolute(value["authorization_dir"]) if value["authorization_dir"] else None,
         authorization_target={"machine": value["machine"], "environment": value["environment"]},
         authorization_controller=value["controller"],
+        gateway=value["gateway"], identity_file=absolute(value["identity_file"]),
     )
     validate_consumer_state(
         absolute(value["state_dir"]), config_d=absolute(value["config_d"]),

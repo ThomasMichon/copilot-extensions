@@ -246,6 +246,7 @@ def validate_state(path: Path, *, target: dict, controller: str) -> None:
     root = _root(path, create=False)
     if not root.exists():
         return
+    gateway_provider._directory_state(target, controller, root)
     binding = root / "owner.json"
     if not binding.exists():
         if any(entry.name != "authorization.lock" for entry in root.iterdir()):

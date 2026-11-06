@@ -59,6 +59,7 @@ def test_writer_preflight_refuses_invalid_derived_directories_without_effects(tm
             authorization_dir=config["authorization_dir"],
             authorization_target={"machine": config["machine"], "environment": config["environment"]},
             authorization_controller=config["controller"],
+            gateway=config["gateway"], identity_file=config["identity_file"],
         )
     assert destination.read_bytes() == b"retained owner content"
     assert not state.exists()
@@ -88,6 +89,7 @@ def test_writer_preflight_rejects_conflicting_output_scopes_without_creating_the
             authorization_dir=config["authorization_dir"],
             authorization_target={"machine": config["machine"], "environment": config["environment"]},
             authorization_controller=config["controller"],
+            gateway=config["gateway"], identity_file=config["identity_file"],
         )
     assert not list(tmp_path.iterdir())
 
@@ -100,6 +102,7 @@ def test_writer_preflight_allows_the_profile_writer_to_create_a_shared_parent(tm
         authorization_dir=config["authorization_dir"],
         authorization_target={"machine": config["machine"], "environment": config["environment"]},
         authorization_controller=config["controller"],
+        gateway=config["gateway"], identity_file=config["identity_file"],
     )
     assert not list(tmp_path.iterdir())
 
@@ -127,10 +130,61 @@ def test_writer_preflight_validates_authorization_owner_without_creation_or_repa
             authorization_dir=config["authorization_dir"],
             authorization_target={"machine": config["machine"], "environment": config["environment"]},
             authorization_controller=config["controller"],
+            gateway=config["gateway"], identity_file=config["identity_file"],
         )
     assert all(entry.read_bytes() == value for entry, value in before.items())
     if failure == "missing-parent":
         assert not path.exists()
+
+
+@pytest.mark.parametrize("scope", ["sources", "authorization"])
+def test_writer_preflight_preserves_invalid_retained_revision_state(tmp_path, scope):
+    from agent_ssh import gateway_authorization, gateway_profile, gateway_provider
+
+    config = arguments(tmp_path)
+    if scope == "authorization":
+        root = gateway_authorization._root(config["authorization_dir"])
+    else:
+        root = config["config_d"].parent / gateway_profile._SOURCE_DIR
+        root.mkdir(parents=True)
+    target, controller = {"machine": config["machine"], "environment": config["environment"]}, config["controller"]
+    path, _ = gateway_provider._directory_state(target, controller, root)
+    gateway_authorization.atomic_write_text(path, json.dumps({
+        "version": 1, "target": target, "controller": controller,
+        "directory_revision": 0, "directory_digest": "a" * 64,
+    }))
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="revision state is invalid"):
+        gateway_directory.validate_writer_destinations(
+            config_d=config["config_d"], ssh_config=config["ssh_config"],
+            authorization_dir=config["authorization_dir"],
+            authorization_target=target, authorization_controller=controller,
+            gateway=config["gateway"], identity_file=config["identity_file"],
+        )
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["gateway-alias", "identity-syntax", "root-encoding"])
+def test_writer_preflight_uses_the_same_static_input_checks_as_the_writers(tmp_path, failure):
+    config = arguments(tmp_path)
+    if failure == "gateway-alias":
+        config["gateway"] = "invalid:alias"
+    elif failure == "identity-syntax":
+        config["identity_file"] = tmp_path / "key%token"
+    else:
+        config["ssh_config"].parent.mkdir(parents=True)
+        config["ssh_config"].write_bytes(b"\xff")
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError):
+        gateway_directory.validate_writer_destinations(
+            config_d=config["config_d"], ssh_config=config["ssh_config"],
+            authorization_dir=config["authorization_dir"],
+            authorization_target={"machine": config["machine"], "environment": config["environment"]},
+            authorization_controller=config["controller"],
+            gateway=config["gateway"], identity_file=config["identity_file"],
+        )
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert not config["config_d"].exists() and not config["authorization_dir"].exists()
 
 
 def test_later_directory_rebuilds_real_profiles_and_native_login_keys_without_restart(tmp_path):

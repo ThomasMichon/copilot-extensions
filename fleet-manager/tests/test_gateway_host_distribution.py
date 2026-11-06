@@ -331,7 +331,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
     from test_gateway_ssh_provider import key
     from test_runtime_identity import AUDIENCE
     from test_ssh_machine import update
-    from agent_ssh import gateway_authorization
+    from agent_ssh import gateway_authorization, gateway_provider
 
     tmp_path = tmp_path_factory.mktemp("s")
     snapshot, application, updated_application = prepared_application(
@@ -527,6 +527,42 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             assert (root / "current-version").read_text().strip() == first.name
             assert (root / "last-known-good").read_text().strip() == first.name
             assert binding.read_bytes() == before_binding
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
+            invalid_revision = gateway_authorization._root(tmp_path / "invalid-revision")
+            target = {"machine": value["machine"], "environment": value["environment"]}
+            local = next(row for row in directory["machines"] if {
+                "machine": row["machine"], "environment": row["environment"],
+            } == target)
+            gateway_authorization.atomic_write_text(invalid_revision / "owner.json", json.dumps({
+                "target": target, "controller": value["controller"], "user": local["user"],
+            }))
+            floor, _ = gateway_provider._directory_state(target, value["controller"], invalid_revision)
+            gateway_authorization.atomic_write_text(floor, json.dumps({
+                "version": 1, "target": target, "controller": value["controller"],
+                "directory_revision": 0, "directory_digest": "a" * 64,
+            }))
+            before_floor = floor.read_bytes()
+            host.write_private(Path(selection["configuration"]), value | {
+                "authorization_dir": str(invalid_revision),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            assert floor.read_bytes() == before_floor
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
+            invalid_root = tmp_path / "invalid-root-config"
+            invalid_root.write_bytes(b"\xff")
+            host.write_private(Path(selection["configuration"]), value | {
+                "ssh_config": str(invalid_root),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            assert invalid_root.read_bytes() == b"\xff"
             host.write_private(Path(selection["configuration"]), value)
             await preserved_owner(initial["pid"])
             host.write_private(Path(selection["configuration"]), value | {

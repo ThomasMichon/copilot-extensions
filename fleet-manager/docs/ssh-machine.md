@@ -78,6 +78,9 @@ Existing authorization bindings must match the configured target/controller,
 and retained key-file receipts must remain internally consistent. Fresh
 directory admission, remote login identity and monotonic revision checks remain
 with the authenticated update and its original writers.
+Preflight also reuses their static alias/path renderers and existing root-config
+decoder, and validates the retained revision record's shape without advancing
+its floor. It does not manufacture a fresh directory or an admission receipt.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an
