@@ -1377,3 +1377,11 @@ paths with spaces/backslashes, named-output selection, the shared deadline,
 and rejection of missing, duplicate or foreign portfolio entries. Changed
 Python passes F/E9. The next complete capture must qualify this fixture and
 reporting source; the earlier disjoint diagnostic is not substituted.
+
+The changed-module guard catches the reader at 1,005 lines, above its existing
+1,000-line cap. Stop the in-flight capture before changing its source. Compact
+only the newly factored import and simple parser flag without altering import
+order or behavior; all 24 changed modules now satisfy their existing ceilings.
+The nine focused reader/parser controls pass in 4.65 seconds (122.25 including
+preparation/cleanup), and F/E9 passes. The stopped capture is not qualification;
+the final source still requires complete writer and independent reproduction.

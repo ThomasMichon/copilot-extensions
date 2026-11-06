@@ -8,10 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import config as cfg
-from . import output
-from . import sessions, tracking, worktree_identity
-from . import retained_record_writer
+from . import config as cfg, output, sessions, tracking, worktree_identity, retained_record_writer
 
 
 def _core():
@@ -40,11 +37,7 @@ def add_head_parser(sub) -> None:
         required=True,
         help="Worktree ID (full or 4-char suffix)",
     )
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
+    sp.add_argument("--json", action="store_true", help="Emit JSON (default; accepted for caller compatibility)")
 
 
 def add_parsers(sub) -> None:
