@@ -330,6 +330,23 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [managed validation cohorts](managed-validation-evidence-cohorts.md)
+retain #7136/#8521 directly in OPEN #6917 and #8511 directly in OPEN
+#4217. Complete actual parent bodies preserve independent preparation,
+diagnostics, grouped results, deterministic CI and default-artifact ownership
+acceptance. All technical rows and existing source/resource custodians remain;
+the three subordinate trackers await reviewed delivery and fresh disposition.
+Newer runner source and path metadata are not assumed semantic repairs.
+
+The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
+reviewed #11060 and #6186's separately audited NOT_PLANNED retirement
+under independently OPEN #6185, without technical completion or release.
+Two identical complete scans measure 803 whole OPEN and 1,022 audited
+outcomes: the one campaign departure is outweighed by two eligible arrivals.
+The [quality study](launch-pipe-and-logger-quality-cohorts.md) retains
+#6407's actual consumer gate and #6917's ordinary-group residual. Fixed
+729 stays 74 away; new source research and actual ownership holds continue.
+
 The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
 the complete OPEN #6185 parent receiving #6186 as an independent emitter
 convergence/recovery lane. Current source credits actual-start writing,
