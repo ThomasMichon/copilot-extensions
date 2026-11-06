@@ -591,6 +591,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       [diagnostic readback](journal/2026/11.05-sidecar-membership-diagnostics.md)
       retains every failed run and the unexplained 50 ms cold-read gap;
       production budgets and retries are unchanged.
+      #10848 closes the separately reproduced unrelated-history scan gap
+      with writable-bootstrap owner indexes and current native lookup/client
+      qualification. The same readback retains passive old-store behavior,
+      the original budgets and the unexplained one-row cold timeout.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -605,6 +609,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       whole S2-S5 and original root gates remain open.
 
 ## Validation Plan
+
+- [x] Step 7 finite exact-owner read scaling: avoid unrelated-registry scans
+      through ordinary writable-bootstrap indexes; preserve read-only and
+      existing-only non-preparation, exact owner normalization, malformed
+      legacy JSON and old-store VM cutoffs. #10848 qualifies isolated source
+      controls and two native Windows lookup/bootstrap controls alongside
+      the unchanged 120-case actual-client packet. This does not establish
+      the cause of the separate cold timeout or complete S2-S5.
 
 - [ ] Step 7: verify the complete source, real consumer, qualified pre-context,
       history/viewport, native and bounded-performance acceptance in
@@ -693,6 +705,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Strict codec and retained membership replay boundaries](journal/2026/11.05-sidecar-codec-boundaries.md)
 - [2026-11-05 - Cold membership diagnostics and native fixture corrections](journal/2026/11.05-sidecar-membership-diagnostics.md)
 - [2026-11-05 - Windows actual-owner client qualification and retained read-budget gap](journal/2026/11.05-sidecar-windows-owner-composition.md)
 - [2026-11-05 - Native Windows allocation/export qualification and remaining owner composition](journal/2026/11.05-sidecar-windows-durability.md)

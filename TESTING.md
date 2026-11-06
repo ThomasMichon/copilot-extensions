@@ -843,7 +843,11 @@ starting an SDK actor. `test_companion_bridge_codec.py` and
 The discovery packet invokes the real passive payload gate with an inherited
 foreign-plugin receipt and root and checks no provisioning. Replacement controls replay
 64 old members to 64 new members across bounded pages without transient current
-facts. The joined fixture exhausts Bridge evidence, refreshes the baseline, and
+facts. Retained-range controls reject stale bootstrap positions, expired replay
+bases and contradictory pagination without imposing contiguous owner-local event
+numbers. An actual canonical two-owner source verifies global sequence gaps and
+empty caught-up reads without manufacturing local events.
+The joined fixture exhausts Bridge evidence, refreshes the baseline, and
 checks the other providers' rows, proofs, purpose, browsing anchor and next
 Worktrees delta. Tokenless head invalidation and a blocked Bridge preparation
 separately check retirement and independent rich Agenda admission, including a
