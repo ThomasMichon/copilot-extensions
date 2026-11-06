@@ -479,6 +479,9 @@ async def test_cold_pending_first_prompt_strictly_resumes_original_native(creati
         await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
     session = rig.manager.list_sessions()[0]
     native = session.acp_session_id
+    caller = session.caller_id
+    assert caller.startswith("acquisition:creation:")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_attempts")
     session.status = SessionStatus.STOPPED
     session.client = None
     monkeypatch.setattr(rig.manager, "_submit_prompt_locked", original)
@@ -494,6 +497,7 @@ async def test_cold_pending_first_prompt_strictly_resumes_original_native(creati
         rig.manager, rig.target, key="logical-work", prompt="Do the work",
     )
     assert recovered is session and result["native_session_id"] == native
+    assert recovered.caller_id == caller
     assert calls == [{"drain": False, "allow_recreate": False}]
     assert len(rig.manager.list_sessions()) == len(rig.db.execute_read("SELECT * FROM turns")) == 1
     await asyncio.sleep(0)
@@ -503,6 +507,9 @@ async def test_cold_unprompted_creation_replay_restores_same_ready_native(creati
     rig = creation_rig
     session, first = await workspace_creation.start(rig.manager, rig.target, key="logical-work")
     native = session.acp_session_id
+    caller = session.caller_id
+    assert caller.startswith("acquisition:creation:")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_attempts")
     session.status = SessionStatus.STOPPED
     session.client = None
     calls = []
@@ -516,6 +523,7 @@ async def test_cold_unprompted_creation_replay_restores_same_ready_native(creati
     recovered, replay = await workspace_creation.start(rig.manager, rig.target, key="logical-work")
     assert recovered is session and recovered.status == SessionStatus.IDLE
     assert replay["replayed"] and replay["native_session_id"] == first["native_session_id"] == native
+    assert recovered.caller_id == caller
     assert calls == [{"drain": False, "allow_recreate": False}]
     assert not rig.db.execute_read("SELECT * FROM turns")
     assert sum(args[0] == "create" for args, _ in rig.calls) == 1

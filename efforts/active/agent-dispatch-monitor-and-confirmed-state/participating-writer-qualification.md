@@ -150,6 +150,9 @@ mandatory. Unknown responses retain the same assignment and claim.
       bracketed by its active instance and unchanged journal. This observation
       neither selects a writer nor admits the resident or an unaccounted
       producer; conditional Dispatch assembly remains a separate next step.
+      That optional observation merged in #11001 with current-source HTTP,
+      process and actor-free controls. The original workspace and complete
+      installed cohort remain required before ordinary assembly.
 - [ ] Integrate ordinary preparation/advancement consumers only after their
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers
