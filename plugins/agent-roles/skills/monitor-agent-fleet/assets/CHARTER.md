@@ -17,7 +17,7 @@ Scope
   Exclusions: <owners, repositories or work never observed or steered>
   Observation period: <time range or "from now">
 
-Mode: read-only sweep | recurring observation | steering
+Mode: read-only sweep | recurring observation | steering | dormant correction
   Cadence and wake source: <existing scheduler/event; required for recurring>
   Active and parked cadences: <e.g. 30 minutes active, 2 hours parked>
   Early-check triggers: <question at half its revisit time, two observations
@@ -31,6 +31,17 @@ Steering scope (only if explicitly granted; else "none")
   Excluded purposes: <e.g. scope change, merge, deploy, stop/start, approvals>
   Validity: <expiry, revision or revocation condition>
   Limits: <one outstanding steer per target+issue; other caps>
+
+Dormant correction scope (only if explicitly granted; else "none")
+  Record kinds: <effort plan, workspace title/summary, agenda cursor,
+    pending handoff baton>
+  Candidates: <inactive owners active in the observation period; finalized
+    workspaces with open efforts included or not>
+  Apply mode: <clear corrections direct, ambiguous batched | recommend only>
+  Excluded effects: <messages, checkout/branch/claim writes, finalize,
+    abandon, reset, approvals, deployment>
+  Record publication: <monitor's own writable workspace and review gate>
+  Validity: <expiry, revision or revocation condition>
 
 Watchdog thresholds (see references/watchdog-checks.md)
   Question revisit time and required default: <e.g. 30 minutes; every
@@ -55,6 +66,9 @@ Acceptance: <what a completed sweep or a healthy service period must show>
   marked with confidence.
 - **Messages sent** is `none` in read-only mode, and each steer in steering mode
   has a persisted pending record before send and a recorded result after.
+- Each dormant correction had a liveness recheck and revision re-read
+  immediately before the write and an owner readback after; live-idle, newly
+  active and unknown targets were left unchanged.
 - Holds, review bars, approvals, resource limits and ownership are unchanged
   by the monitor.
 - The monitor asked no blocking question; every wait it reports is classified

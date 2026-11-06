@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: add a separately granted dormant charter correction mode for inactive owners and an over-narrow self-proposed grant misdirection pattern",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
