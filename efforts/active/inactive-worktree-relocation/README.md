@@ -501,3 +501,30 @@ adopter pilot feedback gates subsequent widening.
   its previously recorded isolated and 44-case continuation evidence. The
   source effort/umbrella stay Active; current-head review/CI/merge, the retained
   external-fixture disposition and corrected real-volume retry remain open.
+
+### 2026-11-06 — Literal metadata durability and permission assessment
+- Did not treat the latest “No open issues” overview as clearance: it also
+  alleged a critical crash-recovery gap and a permission-check bypass without
+  publishing locations. Requested concrete details and inspected its completed
+  reviewer diagnostics, which identified the checkpoint advance and permission
+  writer sites.
+- Persist Git administrative/checkout pointers before advancing to
+  `git-repaired`, and persist the ledger and affected permission files before
+  advancing to `rebound`. Failed barriers retain the preceding retryable
+  checkpoint and the same original stage/identity; recovery does not strand
+  the operation behind a phase that outran durable effects.
+- Recheck actual metadata mutation access under the existing permission-owner
+  locks immediately before writing. Withdrawal after capture now refuses
+  without silently replacing the protected permission file.
+- Current-source native CLI, both new durability cuts, both permission-access
+  withdrawals, all five post-effect interruption cuts, exited-caller recovery
+  and the previously timed-out copy-recovery case passed **13 controls**, with
+  one explicit POSIX skip. A bounded Git-probe expiry also now produces a
+  structured refusal rather than a traceback; production Git budgets remain
+  unchanged. The earlier expanded run's single Windows pipe timeout is not
+  relabeled as an understood or fixed global Git defect.
+- Reconciled upstream through the backed, one-to-one replay, retaining every
+  owned commit and current upstream admission inventory. Source publication
+  still awaits the exact current-head required CI and real review assessment.
+  The umbrella/effort and retained-fixture disposition remain open; no activation
+  or adopter data effects are implied.
