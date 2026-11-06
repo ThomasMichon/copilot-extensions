@@ -70,9 +70,12 @@ one owned hidden line after the configured visible signature:
 
 Required signature text is kept off opening/closing root fence lines by adding
 paragraph separation when needed; already separated boundaries remain unchanged.
+The same separation preserves a leading explicit blockquote, including a quoted
+metadata example, across initial preparation and retries.
 Backtick and tilde blocks survive repeated preparation, including a configured
 footer without its own leading newline. Overlapping header/footer boundaries
-are ambiguous and refuse rather than preparing a signature-only comment.
+are ambiguous and refuse before decoration, including owned old variants;
+current signatures take precedence over variants at their own boundary.
 
 An allowed internal source additionally carries `wt=<worktree-stamp>`.
 This is not `agent-worktrees:source`: it cannot refresh PR ownership.

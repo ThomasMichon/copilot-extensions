@@ -167,6 +167,40 @@ def test_overlapping_signature_boundaries_cannot_hide_a_filler_comment(
         prepare(draft, profile=settings)
 
 
+@pytest.mark.parametrize("header,footer,draft", [
+    ("[New AI] ", "New footer.", "[Old AI]"),
+    ("[Old AI]", "New footer.", "[Old AI]"),
+    ("[New AI] ", "[Old AI]", "[Old AI]"),
+])
+def test_owned_variant_overlap_refuses_before_decoration(
+    header: str, footer: str, draft: str,
+) -> None:
+    settings = profile.validate({"version": 1, "rules": [{
+        "header": header, "footer": footer,
+        "header_variants": ["[Old AI]"], "footer_variants": ["[Old AI]"],
+    }]})
+    with pytest.raises(profile.ProfileError, match="overlapping"):
+        prepare(draft, profile=settings)
+
+
+def test_current_signature_wins_over_a_longer_owned_variant() -> None:
+    settings = profile.validate({"version": 1, "rules": [{
+        "header": "[AI] ", "footer": " Footer.",
+        "header_variants": ["[AI] Substantive reply. Footer."],
+    }]})
+    first = prepare("[AI] Substantive reply. Footer.", profile=settings)
+    assert first["body"].startswith("[AI] Substantive reply. Footer.")
+    assert prepare(first["body"], profile=settings, previous=first) == first
+
+
+@pytest.mark.parametrize("indent", ["", "   "])
+def test_signature_preserves_leading_quoted_metadata_example_and_retry(indent: str) -> None:
+    draft = indent + "> <!-- agent-comment:v1 c=example w=example -->\n\nSubstantive reply."
+    first = prepare(draft)
+    assert first["body"].startswith("[AI-assisted] \n\n" + draft)
+    assert prepare(first["body"], previous=first) == first
+
+
 @pytest.mark.parametrize("draft", [
     "Review.\n\n<!-- agent-comment:v2 unknown -->",
     "Review.\n\n<!-- agent-comment:v1 c=foreign w=foreign -->",

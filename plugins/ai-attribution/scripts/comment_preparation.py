@@ -163,6 +163,19 @@ def _outer_markers(draft: str) -> list[str]:
 
 
 def _visible_body(draft: str, signature: Signature) -> str:
+    if signature["required"]:
+        boundaries: list[int] = []
+        for current, variants, at_boundary in (
+            (signature["header"], signature["header_variants"], draft.startswith),
+            (signature["footer"], signature["footer_variants"], draft.endswith),
+        ):
+            owned = next(
+                (text for text in sorted(set(variants), key=len, reverse=True) if text and at_boundary(text)),
+                "",
+            ) if current and not at_boundary(current) else current
+            boundaries.append(len(owned) if owned and at_boundary(owned) else 0)
+        if sum(boundaries) > len(draft):
+            raise ProfileError("ambiguous overlapping signature boundaries")
     visible = decorate(draft, signature)
     header = len(signature["header"]) if signature["header"] and visible.startswith(signature["header"]) else 0
     footer = len(signature["footer"]) if signature["footer"] and visible.endswith(signature["footer"]) else 0
@@ -174,7 +187,7 @@ def _visible_body(draft: str, signature: Signature) -> str:
     if not signature["required"]:
         return visible
     prefix, suffix = visible[:header], visible[len(visible) - footer:]
-    if prefix and _FENCE_START.match(core) and not prefix.endswith(("\n", "\r")):
+    if prefix and (_FENCE_START.match(core) or re.match(r" {0,3}>", core)) and not prefix.endswith(("\n", "\r")):
         prefix += "\n\n"
     if (
         suffix and not core.endswith(("\n", "\r")) and not suffix.startswith(("\n", "\r"))
