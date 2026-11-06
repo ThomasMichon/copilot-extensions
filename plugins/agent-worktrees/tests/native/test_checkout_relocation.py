@@ -192,7 +192,13 @@ def test_old_published_writer_refuses_move_without_activation_or_data_effects(ch
     assert not move_state.journal_path(checkout.record.yaml_path).exists()
 
 
-@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule"])
+def test_access_normalization_keeps_inherit_only_semantics():
+    normalize = relocation.transfer.normalized_ace_flags
+    assert normalize(0x08 | 0x10) != normalize(0x10)
+    assert normalize(0x10) == normalize(0)
+
+
+@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "seed"])
 def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
     record = checkout.record
     if blocker == "dirty":
@@ -209,10 +215,95 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
         tracking.save_record(record)
     elif blocker == "submodule":
         (checkout.source / ".gitmodules").write_text("opaque", encoding="utf-8")
-    with pytest.raises(ValueError):
+    elif blocker == "git-lock":
+        git_ops.git("worktree", "lock", str(checkout.source), cwd=checkout.anchor)
+    elif blocker == "foreign-machine":
+        record.machine = "another-host"
+        tracking.save_record(record)
+    elif blocker == "source-alias":
+        config_path = checkout.copilot / "config.json"
+        config_path.write_text(json.dumps({"trustedFolders": [str(checkout.source).replace("\\", "/").lower()]}))
+    elif blocker == "seed":
+        from agent_worktrees import launch_seed_state
+
+        launch_seed_state.stage(record.yaml_path, kind="new", text="fixture-only intent")
+        record.yaml_path.with_suffix(".lock").unlink(missing_ok=True)
+    with pytest.raises((ValueError, RuntimeError)):
         _plan(checkout)
     assert checkout.source.exists() and not checkout.destination.exists()
     assert not move_state.journal_path(record.yaml_path).exists()
+    if blocker == "seed":
+        assert not record.yaml_path.with_suffix(".lock").exists()
+
+
+@pytest.mark.parametrize("phase", ["git-repair", "permissions", "ledger", "retirement", "durability"])
+def test_effect_interruption_retries_without_losing_source_or_identity(checkout, monkeypatch, phase):
+    fixture = checkout
+    with monkeypatch.context() as injection:
+        if phase == "git-repair":
+            original = relocation._git
+            def failing(path, *args):
+                result = original(path, *args)
+                if args[:2] == ("worktree", "repair"):
+                    raise OSError("injected repair checkpoint loss")
+                return result
+            injection.setattr(relocation, "_git", failing)
+        elif phase == "permissions":
+            original = relocation.permission_paths.apply
+            def failing(*args):
+                original(*args)
+                raise OSError("injected permission checkpoint loss")
+            injection.setattr(relocation.permission_paths, "apply", failing)
+        elif phase == "ledger":
+            original = tracking.save_record
+            def failing(*args, **kwargs):
+                original(*args, **kwargs)
+                raise OSError("injected ledger checkpoint loss")
+            injection.setattr(tracking, "save_record", failing)
+        elif phase == "retirement":
+            original = relocation.shutil.rmtree
+            def failing(path, *args, **kwargs):
+                if Path(path) == fixture.source:
+                    (fixture.source / "ignored.bin").unlink()
+                    raise OSError("injected partial source retirement")
+                return original(path, *args, **kwargs)
+            injection.setattr(relocation.shutil, "rmtree", failing)
+        else:
+            original = relocation.durability.files
+            def failing(paths):
+                selected = list(paths)
+                if fixture.record.yaml_path in selected:
+                    raise OSError("injected durability barrier failure")
+                return original(selected)
+            injection.setattr(relocation.durability, "files", failing)
+        with pytest.raises(OSError, match="injected"):
+            _move(fixture)
+    assert fixture.source.exists()
+    assert fixture.destination.exists()
+    assert (fixture.destination / "ignored.bin").read_bytes() == bytes(range(256))
+    assert _move(fixture)["phase"] == "complete"
+    assert not fixture.source.exists()
+    assert tracking.load_record(fixture.record.yaml_path).creation_nonce == fixture.record.creation_nonce
+
+
+def test_fresh_process_recovery_accepts_the_exited_original_caller(checkout):
+    env = dict(os.environ, AGENT_HOME=str(checkout.home), USERPROFILE=str(checkout.home), HOME=str(checkout.home))
+    script = (
+        "import sys; from agent_worktrees import config as cfg,checkout_relocation as move; "
+        "cfg.set_active_project('sample'); real=move.transfer.copy\n"
+        "def fail(source,stage):\n"
+        " real(source,stage)\n"
+        " raise OSError('injected child exit')\n"
+        "move.transfer.copy=fail\n"
+        "try: move.move(sys.argv[1],sys.argv[2],cfg.load_config())\n"
+        "except OSError: sys.exit(7)\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script, checkout.record.worktree_id, str(checkout.destination)],
+        env=env, cwd=checkout.home, text=True, capture_output=True, timeout=60, **no_window_kwargs(),
+    )
+    assert child.returncode == 7, (child.stdout, child.stderr)
+    assert _move(checkout)["phase"] == "complete"
 
 
 def test_changed_allocation_root_retains_real_git_and_ledger_authority(checkout):

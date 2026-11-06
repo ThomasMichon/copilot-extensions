@@ -21,7 +21,7 @@ def _owner(machine: str, platform: str, identity) -> dict:
 
 
 def reserve(config, worktree_id: str, nonce: str, *, kind="session", no_pair=False, machine_identity=None, platform_name=None) -> None:
-    if kind != "session" or no_pair:
+    if kind != "session" or no_pair or os.environ.get("AGENT_WORKTREES_NO_PAIR"):
         return
     root = state_root.resolve_state_root(config)
     if not root.requires_external or not root.bound:

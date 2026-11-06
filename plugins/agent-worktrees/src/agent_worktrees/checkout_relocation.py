@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 import shutil
 import sqlite3
@@ -13,6 +12,7 @@ from pathlib import Path
 
 from . import checkout_permission_relocation as permission_paths
 from . import checkout_relocation_state as state, checkout_transfer as transfer
+from . import checkout_durability as durability, permissions
 from . import config as cfg, execution_spaces, git_ops, launch_admission, launch_seed_state
 from . import procs, retained_checkout, sessions, tracking, worktree_lifecycle
 from .finalize_lock import FinalizeLock
@@ -83,7 +83,7 @@ def _ordinary_shape(record, ledger: Path) -> None:
         raise ValueError("relocation v1 refuses unsettled resource obligations")
     if any(pr.state != "merged" for pr in record.prs):
         raise ValueError("relocation v1 refuses open, unknown or unmerged PR associations")
-    if launch_seed_state.peek(ledger) is not None:
+    if launch_seed_state.peek(ledger, read_only=True) is not None:
         raise ValueError("relocation refuses pending launch intent")
     _launchless(ledger)
 
@@ -124,6 +124,13 @@ def _check_data(checkout: Path, config, branch: str) -> str:
     if preservation_reason(checkout) is not None or (Path(config.default_repo.anchor) / ".agent-index" / "config.yaml").exists():
         raise ValueError("relocation v1 requires qualification from the checkout-data or index owner")
     retained_checkout.require_git_checkout(checkout, Path(config.default_repo.anchor), branch)
+    administrative = Path(_git(checkout, "rev-parse", "--absolute-git-dir"))
+    try:
+        (administrative / "locked").lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise ValueError("relocation refuses a Git-locked worktree")
     if _git(checkout, "status", "--porcelain=v1", "--untracked-files=normal"):
         raise ValueError("relocation v1 requires a clean checkout")
     upstream = f"refs/remotes/{config.default_repo.remote}/{config.default_repo.default_branch}"
@@ -219,6 +226,8 @@ def plan(worktree_id: str, destination: str, config) -> dict:
     if ledger.is_symlink():
         raise ValueError("relocation ledger is redirected")
     record = tracking.load_record(ledger)
+    if record.worktree_id != worktree_id or record.repo != config.repo_name:
+        raise ValueError("relocation record does not match the receiving ledger identity/project")
     previous = state.read(ledger)
     if previous is not None:
         target = Path(destination).expanduser()
@@ -264,6 +273,7 @@ def plan(worktree_id: str, destination: str, config) -> dict:
     }
     if previous is not None:
         report["previous_journal"] = hashlib.sha256(state.journal_path(ledger).read_bytes()).hexdigest()
+    _require_receiver(record, report, config)
     if len(json.dumps(report).encode("utf-8")) > 60 * 1024:
         raise ValueError("relocation pointer inventory exceeds its journal budget")
     return report
@@ -339,11 +349,12 @@ def move(worktree_id: str, destination: str, config) -> dict:
             transfer.preserve_security(source, stage)
             if _digest(stage) != report["fingerprint"]:
                 raise ValueError("checkout copy verification failed; original retained")
+            durability.tree(stage)
             report["phase"] = "copied"
             state.write(ledger, report)
         if report["phase"] == "copied":
             if stage.exists() and not target.exists():
-                os.rename(stage, target)
+                durability.replace(stage, target, existing=False)
             if stage.exists() or not target.is_dir() or _digest(target) != report["fingerprint"]:
                 raise ValueError("destination publication is ambiguous; retain original move custody")
             report["phase"] = "published"
@@ -373,6 +384,13 @@ def move(worktree_id: str, destination: str, config) -> dict:
                 raise ValueError("post-move consumer verification failed; source retained")
             _stopped(record, target)
             _sessionless(target)
+            administrative = Path(_git(target, "rev-parse", "--absolute-git-dir"))
+            durability.tree(target)
+            durability.files([
+                ledger, administrative / "gitdir", target / ".git",
+                *(path for path in (permissions._config_path(), permissions._permissions_path()) if path.exists()),
+            ])
+            state.write(ledger, report)
             if source.exists():
                 _stopped(record, source)
                 _sessionless(source)

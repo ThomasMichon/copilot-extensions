@@ -15,6 +15,10 @@ MAX_ENTRIES = 10_000
 MAX_BYTES = 1024 * 1024 * 1024
 
 
+def normalized_ace_flags(flags: int, *, inheritance: bool = False) -> int:
+    return flags & (~0x10 if inheritance else ~0x17)
+
+
 def manifest(root: Path) -> dict[str, tuple]:
     result = {}
     total = 0
@@ -156,7 +160,7 @@ def _access(path: Path, *, inheritance: bool = False) -> tuple:
         prefix = ctypes.string_at(acl.value + offset, 4)
         size = int.from_bytes(prefix[2:4], "little")
         entry = bytearray(ctypes.string_at(acl.value + offset, size))
-        entry[1] &= ~0x10 if inheritance else ~0x1F
+        entry[1] = normalized_ace_flags(entry[1], inheritance=inheritance)
         entries.append(bytes(entry))
         offset += size
     protected = bool(int.from_bytes(data.raw[2:4], "little") & 0x1000)

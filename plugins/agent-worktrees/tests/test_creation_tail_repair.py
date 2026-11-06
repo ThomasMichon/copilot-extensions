@@ -375,6 +375,17 @@ def test_original_configured_companion_root_survives_default_change_and_repair(
     assert launch_seed_state.state_path(creation.record.yaml_path).read_bytes() == seed_before
 
 
+def test_environment_no_pair_never_resolves_or_reserves_companion(creation, monkeypatch):
+    from agent_worktrees import paired_allocation_location
+
+    monkeypatch.setenv("AGENT_WORKTREES_NO_PAIR", "1")
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: pytest.fail("disabled pairing resolved state"))
+    paired_allocation_location.reserve(
+        creation.configs["harness"], creation.record.worktree_id, creation.record.creation_nonce,
+    )
+    assert not creation.record.yaml_path.with_suffix(".paired-allocation.json").exists()
+
+
 def test_creation_reuses_companion_after_parent_stamp_failure(native_creation, monkeypatch, capsys):
     creation = native_creation
     original = worktree_creation._stamp_and_compose_paired_knowledge

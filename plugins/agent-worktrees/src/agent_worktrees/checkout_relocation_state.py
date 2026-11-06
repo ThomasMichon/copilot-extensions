@@ -80,7 +80,9 @@ def write(ledger: Path, data: dict) -> None:
             json.dump(data, stream, sort_keys=True)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(staging, path)
+        from .checkout_durability import replace
+
+        replace(staging, path)
     finally:
         staging.unlink(missing_ok=True)
 
@@ -118,7 +120,7 @@ def require_previous_owner(data: dict) -> None:
     caller = data.get("caller")
     if not isinstance(caller, dict) or type(caller.get("pid")) is not int or not isinstance(caller.get("birth"), str):
         raise ValueError("relocation caller custody is unavailable")
-    if caller["pid"] != os.getpid() and identity_state(caller["pid"], caller["birth"]) != "gone":
+    if caller["pid"] != os.getpid() and identity_state(caller["pid"], caller["birth"]) not in {"dead", "reused"}:
         raise ValueError("the original relocation caller is still active or unobservable")
 
 
@@ -149,4 +151,7 @@ def archive_terminal(ledger: Path, expected: str) -> None:
             stream.write(raw)
             stream.flush()
             os.fsync(stream.fileno())
+    from .checkout_durability import files
+
+    files([history])
     path.unlink()

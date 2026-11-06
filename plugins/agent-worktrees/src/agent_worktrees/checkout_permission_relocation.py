@@ -25,11 +25,21 @@ def capture(source: str, destination: str) -> dict:
             "", json.loads(path.read_text(encoding="utf-8")),
         )
         entries = data.get("trustedFolders", []) if kind == "trust" else data.get("locations", {})
+        if isinstance(entries, (dict, list)) and any(
+            isinstance(value, str) and (
+                Path(value) == Path(source) and value != source
+                or Path(value) == Path(destination) and value != destination
+            )
+            for value in entries
+        ):
+            raise ValueError("permission aliases changed during relocation")
         if not isinstance(entries, list if kind == "trust" else dict):
             raise ValueError("unsupported Copilot permission schema")
         for value in entries:
             if not isinstance(value, str):
                 raise ValueError("unsupported Copilot permission path")
+            if Path(value) == Path(source) and value != source:
+                raise ValueError("relocation v1 refuses non-exact source permission aliases")
             if _under(value, destination) or _under(value, source) and Path(value) != Path(source):
                 raise ValueError("relocation v1 refuses existing destination or nested permission entries")
         value = source in entries if kind == "trust" else entries.get(source)
