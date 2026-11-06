@@ -224,6 +224,12 @@ records 242 passing source controls, real global-sequence skips and preserved
 unknown custody. Complete source coverage, history/append-failure acceptance
 and every remaining native/installed/original parent gate stay open.
 
+#10858 merged as `03272eb713c7f9bbfaa441e777f8f30ccfde298d`, reconciling
+274 supported-source history/live splice and gap controls. Its
+[readback](journal/2026/11.05-sidecar-history-gaps.md) distinguishes
+owner append failure, Agenda atomic rollback, partial Bridge observations
+and actual three-owner recovery without extending installed/native acceptance.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -742,7 +748,7 @@ is inferred from these presentation checks.
   #10855 qualifies 242 controls across the supported Worktrees, Agenda,
   membership and selected-session codecs plus the actual membership/source
   join. This is source/private-process/Textual qualification, not universal
-  source coverage, native/installed behavior or the remaining splice/gap row.
+  source coverage or native/installed behavior.
 - [x] History/live splice and gap tests: coalescing is current state, not lost
   canonical history; retention/replacement/append failure cannot look empty/complete.
   The [supported-source qualification](journal/2026/11.05-sidecar-history-gaps.md)
