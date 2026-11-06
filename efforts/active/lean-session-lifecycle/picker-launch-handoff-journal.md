@@ -1042,3 +1042,34 @@ its saved installed-update, launch and handoff obligations.
   checking code; the project is explicitly pending, not an admitted strict
   scope. Preserve that migration limitation rather than claim type acceptance
   or alter unrelated test discovery in this reader fix.
+- The first hosted native portfolio passes Linux and 137 Windows cases, but
+  fails the Companion fixture when immediately recreating its session after
+  confirmed CLI-session disappearance. The reader controls pass; the whole
+  portfolio is not credited. No timeout or failed assertion is removed.
+- The local default backend is PSMux `3.3.8`, not that portfolio's pinned
+  `3.4.0`; its preparation timeout and later command timeout are separate
+  observations, not reproduction of the hosted recreation failure. The exact
+  pinned archive verifies against the workflow digest, and the original
+  native fixture passes locally with that backend in 25.73 seconds.
+- Make this fixture's cold-server profile explicit with `PSMUX_NO_WARM=1`,
+  matching the sibling actual-Companion fixture. PSMux documents its default
+  warm-session pool as standby-server registry renaming and claim messaging;
+  this lifecycle fixture must not depend on that independent reuse path.
+  Real pane, CLI identity, observer exit, same-name recreation and incarnation
+  assertions remain, with the original subprocess and hosted test deadlines.
+  The historical failure's exact warm-pool condition is not proven, and no
+  production warm-pool correction or host update is claimed. Fresh hosted
+  qualification of this changed fixture remains required.
+- The changed local packet passes all 41 assertions, then its canonical group
+  cleanup refuses deletion of the copied x64 fixture interpreter with Windows
+  access denied. That invocation remains failed, not green. #7643 tracks this
+  Windows ARM64 executable-retention boundary; this observation does not
+  identify the retaining process. No protected process, lock or artifact is
+  forcibly cleared. Qualify the same packet with the existing native ARM64
+  interpreter in a separate runner-owned cache, preserving the refused scope
+  and every containment, test and cleanup limit.
+- The native ARM64 variant reaches the real pane/navigation flow but hits the
+  unchanged 120-second item bound while spawning a later mux query. It is not
+  a passed native packet or a reason to widen the limit. Keep both local
+  environmental failures and the hosted failure in the evidence; complete
+  fresh hosted Windows qualification before merging the fixture correction.

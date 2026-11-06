@@ -47,6 +47,7 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         key: value for key, value in os.environ.items()
         if key not in {"TMUX", "TMUX_PANE", "WT_SESSION", "PSMUX_SESSION"}
     }
+    environment["PSMUX_NO_WARM"] = "1"
 
     def mux(*args):
         args = list(args)
