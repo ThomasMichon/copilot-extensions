@@ -40,6 +40,7 @@ def test_native_membership_deadline_reports_paired_clock_quantization(
         samples = []
         with paired_budgets(reader, samples):
             budget = reader.ReadBudget()
+            assert samples[0].created_before <= budget.started <= samples[0].created_after
             target = samples[0].created_after + 0.049
             time.sleep(0.045)
             while time.perf_counter() < target:
@@ -63,6 +64,7 @@ def test_native_membership_deadline_reports_paired_clock_quantization(
             "trials": evidence, "early_refusals": len(early),
             "interpretation": "early refusal reproduced" if early else "not reproduced",
         }), flush=True)
+    assert not early, "precise elapsed deadline rejected before its unchanged 50 ms limit"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows delete-sharing semantics")

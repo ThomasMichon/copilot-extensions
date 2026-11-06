@@ -1,0 +1,13 @@
+{
+  "comment": "Use precise monotonic elapsed time for membership deadlines and retain independent paired-clock qualification with unchanged time and VM limits.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
