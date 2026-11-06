@@ -1,0 +1,9 @@
+{
+  "comment": "Observe a birth-matched routed mux daemon without an explicit port argument",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
