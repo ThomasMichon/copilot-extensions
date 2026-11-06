@@ -358,7 +358,7 @@ def _probe_argv(marker, powershell):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="diagnoses Windows native launch boundaries")
-@pytest.mark.parametrize("launcher", ["direct-python", "powershell"])
+@pytest.mark.parametrize("launcher", ["direct-python", "powershell", "powershell-noninteractive"])
 def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mux):
     from plugin_test_command_safety import private_mux_args
 
@@ -367,10 +367,12 @@ def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mu
         pytest.skip("native mux and its shell are required")
     env = _environment(tmp_path)
     namespace = private_mux_args(tmp_path)
-    session = "picker-" + secrets.token_hex(12)
-    marker = tmp_path / "probe.json"
+    probes = [
+        ("picker-" + secrets.token_hex(12), tmp_path / f"probe-{index}.json")
+        for index in range(4)
+    ]
     (tmp_path / "owner-debug.json").write_text(json.dumps({
-        "states": [{"launcher": launcher, "slots": [{"session": session}]}],
+        "states": [{"launcher": launcher, "slots": [{"session": session} for session, _ in probes]}],
     }))
 
     def command(*args, timeout=5):
@@ -380,23 +382,40 @@ def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mu
             encoding="utf-8", errors="replace", timeout=timeout, **no_window_kwargs(),
         )
 
-    worker = None
     try:
-        created = command(
-            "new-session", "-d", "-s", session, "--",
-            *_probe_argv(marker, powershell if launcher == "powershell" else None),
+        for session, marker in probes:
+            argv = _probe_argv(marker, None if launcher == "direct-python" else powershell)
+            if launcher == "powershell-noninteractive":
+                argv.insert(3, "-NonInteractive")
+            created = command("new-session", "-d", "-s", session, "--", *argv)
+            assert created.returncode == 0, created.stderr
+
+        def ready():
+            # Match the owner's immediate control request during shell startup,
+            # rather than qualifying only an otherwise-idle detached server.
+            for session, _ in probes:
+                command("display-message", "-p", "-t", session, "#{pane_pid}", timeout=0.5)
+            workers = [_read(marker) for _, marker in probes]
+            return workers if all(workers) else None
+
+        def failure():
+            (tmp_path / "owner-debug.json").write_text(json.dumps({
+                "states": [{"launcher": launcher, "slots": [
+                    {"session": session} for session, marker in probes if _read(marker) is None
+                ]}],
+            }))
+            return launcher + " did not run:\n" + _startup_diagnostics(tmp_path, command)
+
+        workers = _wait(
+            ready, failure,
         )
-        assert created.returncode == 0, created.stderr
-        worker = _wait(
-            lambda: _read(marker),
-            lambda: launcher + " did not run:\n" + _startup_diagnostics(tmp_path, command),
-        )
-        assert _live(worker)
-        assert worker["stdin_tty"] and worker["stdout_tty"], worker
+        assert all(_live(worker) for worker in workers)
+        assert all(worker["stdin_tty"] and worker["stdout_tty"] for worker in workers), workers
         sentinel_mux()
     finally:
-        _kill(worker)
-        command("kill-session", "-t", session)
+        for session, marker in probes:
+            _kill(_read(marker))
+            command("kill-session", "-t", session)
 
 
 @pytest.mark.parametrize("phase", ["pending", "bound"])
