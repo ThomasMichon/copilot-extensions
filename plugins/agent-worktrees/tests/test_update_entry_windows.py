@@ -24,7 +24,7 @@ def _use_real_probe_python(monkeypatch):
 
 
 @pytest.mark.parametrize("project_position", ["before", "after"])
-@pytest.mark.parametrize("front", ["global", "git-sh", "git-bash"])
+@pytest.mark.parametrize("front", ["global", "installed-global", "git-sh", "git-bash"])
 @pytest.mark.parametrize("runtime_source", ["marketplace", "git"])
 def test_configured_project_update_routes_before_manager_bootstrap(
     update_entry_case, native_powershell, monkeypatch, project_position, front, runtime_source,
@@ -66,8 +66,17 @@ def test_configured_project_update_routes_before_manager_bootstrap(
         if project_position == "before"
         else ["update", "--force", "--project", "sample", "--skip-modules", "a b"]
     )
-    if front == "global":
-        entry = str(PLUGIN / "bin" / "agent-worktrees.ps1").replace("'", "''")
+    if front in ("global", "installed-global"):
+        if front == "installed-global":
+            user_bin = home / ".local" / "bin"
+            user_bin.mkdir(parents=True)
+            for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
+                shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
+            (runtime / "payload-dir").write_text(str(PLUGIN), encoding="utf-8")
+            entry_path = user_bin / "agent-worktrees.ps1"
+        else:
+            entry_path = PLUGIN / "bin" / "agent-worktrees.ps1"
+        entry = str(entry_path).replace("'", "''")
         harness = tmp / "project-controller-entry.ps1"
         quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments)
         harness.write_text(

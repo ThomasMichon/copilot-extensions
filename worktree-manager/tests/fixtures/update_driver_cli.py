@@ -18,6 +18,14 @@ def main() -> int:
     boundary.source_identity = lambda: {"repo": "fixture-source", "ref": "fixed"}
     engine_client.installed_engine_command = lambda: ["synthetic-marker-provider"]
     engine_client.accept_inherited_engine_command()
+    get_value = engine_client.get_value
+
+    def selected_value(project, key):
+        if key == "update-controller":
+            return ""
+        return get_value(project, key)
+
+    engine_client.get_value = selected_value
     if sys.argv[1] in {"submit", "submit-only"}:
         original = update_driver.runtime_command
 

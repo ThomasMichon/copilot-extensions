@@ -203,7 +203,7 @@ def cmd_update_request(args: argparse.Namespace) -> int:
                         raise driver.StateError("engine installation changed after submission")
                     custody.assert_owned()
                     return update_cli.cmd_update(args)
-        if not controller and getattr(args, "no_manager", False):
+        if not controller:
             from .project_update_controller import configured_for_update
 
             try:

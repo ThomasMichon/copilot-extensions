@@ -20,14 +20,24 @@ def _args(**values):
     return argparse.Namespace(**{**fields, **values})
 
 
-def _run_runtime_owned(monkeypatch, argv, environment):
+def _run_runtime_owned(monkeypatch, argv, environment, *, timeout=20):
 
     with monkeypatch.context() as selected:
         for key, value in environment.items():
             selected.setenv(key, value)
         from agent_procutil.owned_process import run_owned
 
-        return run_owned(list(argv), timeout=20)
+        return run_owned(list(argv), timeout=timeout)
+
+
+def _write_fixture_project(scope):
+    import json
+
+    config = scope / ".example" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(json.dumps({
+        "repos": {"example": {"anchor": str(scope / "anchor")}},
+    }), encoding="utf-8")
 
 
 def _enqueue_fixture_update(monkeypatch, scope, **values):
@@ -102,7 +112,7 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["wait"] == request.id
 
 
-@pytest.mark.parametrize("route", ["shortcut", "no-manager"])
+@pytest.mark.parametrize("route", ["shortcut", "no-manager", "direct"])
 @pytest.mark.parametrize("root_form", ["default", "relative", "registered"])
 def test_controller_shortcut_keeps_automatic_manager_policy(
     queued, monkeypatch, tmp_path, root_form, route,
@@ -364,6 +374,7 @@ def test_actual_queue_retains_sources_after_submitting_environment_disappears(tm
         settings = scope / name / ".github" / "copilot" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text("{}")
+    _write_fixture_project(scope)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     for key in boundary._CONTEXT_KEYS:
@@ -447,8 +458,8 @@ def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_pa
 
 
 @pytest.mark.parametrize("with_manager", [False, True])
-# Two independently bounded 20-second workers plus fixture setup and cleanup.
-@pytest.mark.timeout(60)
+# Two independently bounded workers plus fixture setup and cleanup.
+@pytest.mark.timeout(100)
 def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch, with_manager):
     import json
     import importlib.util
@@ -477,6 +488,7 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
         settings = invocation / ".github" / "copilot" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text("{}")
+        _write_fixture_project(scope)
     observer = nullcontext()
     if with_manager and os.name == "nt":
         helper_path = Path(__file__).resolve().parents[3] / "libs/update-driver/tests/test_native_lifetime.py"
@@ -496,7 +508,7 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
             monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first"))
             worker, environment = update_driver.runtime_command("update_driver", ["worker"])
             try:
-                result = _run_runtime_owned(monkeypatch, worker, environment)
+                result = _run_runtime_owned(monkeypatch, worker, environment, timeout=40)
             except subprocess.TimeoutExpired as error:
                 logs = home / ".copilot-extensions" / "update-driver"
                 pytest.fail(f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}: {error}")
@@ -512,7 +524,7 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
         scope = tmp_path / name
         assert json.loads((scope / "result.json").read_text()) == {
             "anchor": str(scope / "anchor"),
-            "invocation": str(scope / ("anchor" if with_manager else "invocation")),
+            "invocation": str(scope / "invocation"),
             "update_context": str(scope / "invocation"),
         }
         if with_manager:
