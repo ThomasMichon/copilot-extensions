@@ -145,6 +145,25 @@ def test_synthesized_projection_cannot_be_written_back_to_topology(bound_source)
     assert related.related_path(harness).read_bytes() == before
 
 
+@pytest.mark.parametrize("authored", [False, True])
+def test_synthesized_entry_cannot_be_upserted_into_authored_topology(bound_source, authored):
+    harness, _knowledge, _registry, _cfg, anchors = bound_source
+    topology = related.RelatedConfig(related={
+        "tool": related.RelatedEntry(name="tool", role="tooling"),
+    })
+    if authored:
+        topology.related["notes"] = related.RelatedEntry(
+            name="notes", role="product", summary="Retained narrative",
+            delegate="agent-bridge", locus=related.Locus(preferred="codespace"),
+        )
+    related.write_related(harness, topology)
+    before = related.related_path(harness).read_bytes()
+    entry = related.get_related_grafted(anchors(), "notes")
+    with pytest.raises(ConfigurationError, match="Cannot persist a synthesized"):
+        related.upsert_related(harness, entry)
+    assert related.related_path(harness).read_bytes() == before
+
+
 def test_current_checkout_briefing_retains_aligned_state_policy(bound_source):
     from agent_worktrees import related_briefing
 

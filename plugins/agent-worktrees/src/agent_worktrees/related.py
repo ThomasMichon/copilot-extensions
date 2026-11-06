@@ -930,6 +930,13 @@ def upsert_related(anchor: str | Path, entry: RelatedEntry) -> RelatedConfig:
     preserving existing values otherwise -- so callers can update one field
     without clobbering the rest.
     """
+    if entry.bound_state_root:
+        from configuration_layers import ConfigurationError
+
+        raise ConfigurationError(
+            "Cannot persist a synthesized bound knowledge relationship; "
+            "edit the authored related sources instead."
+        )
     cfg = read_related(anchor)
     existing = cfg.related.get(entry.name)
     if existing is None:

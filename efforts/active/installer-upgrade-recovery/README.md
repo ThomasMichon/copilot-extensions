@@ -1921,3 +1921,22 @@ The 4,180-node set, coverage targets, effect guards and 300-second unit budget
 are unchanged. Revised-head required CI, passing review
 and native qualification remain due before merge; containing release and all
 parent acceptance boundaries remain separate.
+
+### 2026-11-06 - Refuse synthesized entries before authored upsert
+
+Review `5798620519` on `1a247aa8e6` confirms the two source-marker findings
+resolved, then identifies a write-back bypass in an existing-key upsert.
+Merging a synthesized entry into an authored object loses the projection
+marker before the writer checks it, allowing projected role/routing to persist.
+The new two-case regression passes insertion refusal but fails existing-key
+refusal against that source.
+
+`upsert_related` now rejects the synthesized input before reading or merging
+authored topology. Both cases preserve the exact authored bytes after refusal.
+All 197 discovery and existing related writer/merge/CLI controls pass in
+35.16 seconds, 132.45 including isolated preparation and cleanup. Ordinary
+authored partial updates retain their existing merge behavior. Source admission
+is unchanged, and the existing module ceiling passes without widening.
+The prior head's CI and resolved findings do not satisfy the new-head review,
+required CI or still-unperformed hosted qualification. No merge or rollout
+is claimed; this parent remains Active.
