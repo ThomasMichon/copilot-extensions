@@ -96,15 +96,22 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     )
     job = workflow["jobs"]["gateway-host-application-" + platform]
     steps = [step for step in job["steps"] if "run" in step]
-    assert job["timeout-minutes"] == 6 and len(steps) == 3
+    assert job["timeout-minutes"] == 6 and len(steps) == 2
     assert [shlex.split(step["run"]) for step in steps] == [
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
-        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
     ]
     assert not any(step.get("continue-on-error") for step in steps)
+    continuity = workflow["jobs"]["gateway-continuity-application-" + platform]
+    assert continuity["timeout-minutes"] == 6
+    assert continuity["needs"] == "gateway-host-application-" + platform
+    followthrough = [step for step in continuity["steps"] if "run" in step]
+    assert len(followthrough) == 1 and not followthrough[0].get("continue-on-error")
+    assert shlex.split(followthrough[0]["run"]) == [
+        "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
+    ]
     expressions = []
-    for step in steps:
+    for step in steps + followthrough:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(

@@ -98,9 +98,11 @@ Neither configuration version is retired or automatically migrated.
 
 ## Lifetime and operations
 
-Native qualification runs the independent installed Gateway sequence, the
-legacy SSH/host controls and the continuity-selected installed SSH sequence in
-three disjoint groups within the same six-minute job. Each
+Native qualification retains the installed Gateway sequence and legacy SSH/host
+controls in two disjoint groups within each six-minute platform job. The new
+continuity-selected whole installed sequence has a separate six-minute job per
+platform, sequenced after its matching legacy job rather than increasing peak
+concurrency. Each
 group retains the 180-second runner bound, and neither stateful installation
 sequence is split. Their union preserves the full selected case set; this is
 not a claim that the combined portfolio finishes within one 180-second process.
