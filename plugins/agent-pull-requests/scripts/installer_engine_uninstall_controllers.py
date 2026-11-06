@@ -71,6 +71,14 @@ def lifecycle_controllers(rows, payload, root, plugin, *, load, authority_payloa
                arguments=row.get("argv"))
         for origin in origins
     ))
+    for _ in range(4):
+        admitted.update({
+            row["pid"] for row in rows if row["ppid"] in admitted and any(
+                parent(row["pid"], row["image"], row["command"], origin, root, plugin,
+                       row["pid"], arguments=row.get("argv"))
+                for origin in origins
+            )
+        })
     if payload.parent.parent == Path.home() / ("." + plugin) / ".install-stage":
         commands = load(dependency(payload, "installer_engine_commands.py"))
         body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")

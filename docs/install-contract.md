@@ -2479,6 +2479,10 @@ caller. Each interpreter must be absolute and outside the selected removal
 root. Changed arguments, unrelated ancestry, non-Python images and deeper
 chains remain unrecognized; this is not stop authority or a general parent
 exemption.
+The same live teardown proof admits at most four native installer-child
+levels matching its original or staged installer and removal root before
+classifying the exact staging watchdog. Another script, root or parent chain
+does not qualify; an exhausted depth cannot admit the watchdog.
 On Windows, the same existing MSYS/Cygdrive drive-path normalization applies
 to parsed shell command lines and captured Bash argument vectors before
 matching the exact installer and root. It does not expand shell syntax,

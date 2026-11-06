@@ -1219,6 +1219,7 @@ def test_controller_argv_preserves_native_quoted_program_and_arguments(tmp_path:
 @pytest.mark.parametrize("mutation", (
     "literal", "bash32-continuations", "modified", "comment", "leading-space",
     "wrong-flag", "wrong-zero", "foreign-parent",
+    "native-child", "child-script", "child-root", "child-parent", "child-overflow",
 ))
 def test_staging_watchdog_accepts_only_exact_native_heredoc_renderings(
     installation: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, mutation: str,
@@ -1271,10 +1272,31 @@ def test_staging_watchdog_accepts_only_exact_native_heredoc_renderings(
         {"pid": watchdog_pid, "ppid": 9999 if mutation == "foreign-parent" else owner_pid,
          "image": "/bin/bash", "command": "", "argv": watchdog_args},
     ]
+    children = []
+    if mutation == "native-child" or mutation.startswith("child-"):
+        count = 5 if mutation == "child-overflow" else 2
+        for index in range(count):
+            child_args = list(native)
+            if index == 0 and mutation == "child-script":
+                child_args[1] = str(original / "scripts/other.sh")
+            elif index == 0 and mutation == "child-root":
+                child_args[-1] = str(root.parent / "other")
+            children.append({
+                "pid": 9100 + index,
+                "ppid": 9999 if index == 0 and mutation == "child-parent" else
+                    owner_pid if index == 0 else 9100 + index - 1,
+                "image": "/bin/bash", "command": "", "argv": child_args,
+            })
+        rows[-1]["ppid"] = children[-1]["pid"]
+        rows.extend(children)
     _, admitted = MODULE._lifecycle_controllers(rows, payload, root, plugin)
     expected = {owner_pid, native_pid}
-    if mutation in {"literal", "bash32-continuations"}:
+    if mutation in {"literal", "bash32-continuations", "native-child"}:
         expected.add(watchdog_pid)
+    if mutation == "native-child":
+        expected.update(child["pid"] for child in children)
+    elif mutation == "child-overflow":
+        expected.update(child["pid"] for child in children[:4])
     assert admitted == expected
 
 
