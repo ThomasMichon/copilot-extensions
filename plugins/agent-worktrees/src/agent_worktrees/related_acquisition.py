@@ -293,7 +293,7 @@ def grafted(anchors, observations=None):
 def _synthesize_bound_state(anchors, merged, observations):
     from configuration_layers import ConfigurationError
 
-    from . import related as r, repos
+    from . import related as r
 
     selected = {
         (anchor.state_repo, str(anchor))
@@ -303,6 +303,8 @@ def _synthesize_bound_state(anchors, merged, observations):
     }
     if not selected:
         return
+    from . import repos
+
     try:
         normalized = {(name, Path(path).resolve()) for name, path in selected}
         if len(normalized) != 1:

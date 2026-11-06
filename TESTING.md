@@ -4749,6 +4749,14 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+Five binding-projection controls in `test_related_acquisition.py` exercise the
+actual synthesis body with logical paths and substituted canonical-registry
+acquisition. They preserve metadata provenance, knowledge/legacy-worktree
+classes and explicit uncertainty without importing the native registry owner
+on unconfigured paths. These actor-free models do not qualify real filesystem,
+registration, pairing or lifecycle effects; the opt-in native reader portfolio
+retains those separate boundaries.
+
 The runner explicitly preserves full parameter IDs, including on pytest 9.2,
 so collection continues to match the exact admitted node inventory.
 

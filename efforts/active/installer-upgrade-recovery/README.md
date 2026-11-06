@@ -1858,3 +1858,17 @@ Actual admission from `42183304105`, attempt 1, names containing Dev
 defining binding-guidance blobs match merge/admitted/Main, and the released
 payload is `harness-knowledge` `0.1.6-dev1`. This release does not install
 anything locally or include the still-unpublished knowledge-related slice.
+
+PR #10956 publishes the slice as head `3207ce155b` after an automatic rebase
+onto `827acd1855`; its new feature/test/workflow bodies remain unchanged.
+Initial required CI `42189687470` rejects the changed admitted
+`related_acquisition.py` fingerprint before unit execution. This is a genuine
+admission omission, not a flake or permission to rerun unchanged input.
+The correction retains the closed source cohort, coverage targets, effect
+guards and 300-second manifest budget, updating only three production bindings
+and their existing pure-unit file while adding five exact actor-free nodes.
+Canonical registry acquisition remains substituted in those models, and its
+real import is lazy when no bound-state metadata exists. Existing fixtures
+now include the actual StateRoot repository-name field. All 157 related
+admission controls pass functionally in 4.46 seconds; full guarded packet and
+revised-head CI/review remain required.
