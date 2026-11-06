@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed plan, implementation and completion PRs
 - **Created:** 2026-11-05
-- **Status:** Active
-- **Vision:** [Cooperative write guards](../../../visions/plugins/agent-worktrees/README.md#write-guards-are-hygiene-nudges-named-for-their-plain-mundane-reason)
+- **Status:** Done
+- **Vision:** [Cooperative write guards](../../../../visions/plugins/agent-worktrees/README.md#write-guards-are-hygiene-nudges-named-for-their-plain-mundane-reason)
 - **Umbrella issue:** #10778
 - **Sub-issues:** none
 
@@ -41,9 +41,9 @@ entry and write-target classifiers miss these common forms. A real managed
 denial control therefore failed despite positive admission and a complete
 native-produced guarded-root map. An older path-shaped event still denied.
 
-The [circumstantial hook contract](../../../docs/patterns/circumstantial-hook-contracts.md)
+The [circumstantial hook contract](../../../../docs/patterns/circumstantial-hook-contracts.md)
 separates reusable facts from event-time decisions. The
-[prepared guard map](../../../plugins/agent-worktrees/docs/guarded-anchor-map.md)
+[prepared guard map](../../../../plugins/agent-worktrees/docs/guarded-anchor-map.md)
 already owns caller-scoped topology acquisition outside the hot path.
 The native session sidecar represents binding and control separately; its
 mere existence is not necessarily current-workspace membership.
@@ -63,6 +63,12 @@ disablement. Any installed rollout uses its deployment owner's independently
 applicable authorization. Disposable tests retain exact ownership and cleanup.
 The previous failed live control remains failed; no replay or normalized input
 will be relabeled as native acceptance.
+
+The operator separately authorized: "Authorize the canonical user-scoped suite
+update on this machine, then run and clean up the live A/B test". This covers
+the current-user installation, disposable local repositories and owned test
+agents, not fleet changes, new access, elevation or unrelated changes. Real
+repository registrations remain intact; fixture adoption uses a private registry.
 
 ## Plan
 
@@ -96,9 +102,9 @@ will be relabeled as native acceptance.
 ### Phase 4 - Merge and resolution
 - [x] Complete documentation, contract and performance-impact assessments;
   land the implementation after review and required CI.
-- [ ] Observe release and any authorized installed adoption needed for the
+- [x] Observe release and any authorized installed adoption needed for the
   acceptance claim; retain uncompleted deployment gates explicitly.
-- [ ] Resolve the coordination issue only after its complete acceptance gate,
+- [x] Deferred to `#10778`: Resolve the coordination issue only after its complete acceptance gate,
   journal outcomes, mark Done, land the archive, and finalize owned worktrees.
 
 ## Validation Plan
@@ -330,3 +336,45 @@ gap, with no new sandbox, process interception, service, or security guarantee.
   261-file scope. With complete first-party import inputs, all 35 service-owned
   files pass unchanged strict Python 3.10 checking for Linux and Windows.
   Exact-candidate promotion remains required before closing #10842.
+- Typing prerequisite #10856 merged as
+  `b53f38db3e72362fc3343837dc743c46fee32746` after current-head Copilot approval
+  with no open findings and successful required CI. The worktree was pulled
+  forward and the complete effort reread. The next gate is a new promotion
+  containing this repair; installed acceptance and final resolution remain
+  open.
+- Promotion `42154035810` froze development input
+  `b53f38db3e72362fc3343837dc743c46fee32746` into candidate
+  `f26ae6fb9a57d68410fdb3d69f1dd3e54c9d9728`. All 4,162 candidate units passed;
+  strict SSH checking passed all 35 service-owned files on Linux and Windows.
+  Both real Windows Resume cases passed in 44.25 seconds, and artifact
+  attestation and exact-candidate qualification succeeded.
+- Generated release #10862 merged to Main. The independently authorized
+  current-user canonical update is running for Worktrees only; fresh installed
+  five-control native acceptance and owned cleanup remain open. No fleet,
+  additional access or unrelated deployment is authorized by this result.
+- The canonical targeted update completed successfully for Worktrees
+  `1.24.493-dev1`, publishing the runtime selection and settling the healthy
+  monitor transition. The imported runtime and shipped payload agree on that
+  version; the native controls load installed payloads, not source overrides.
+- Fresh installed controls passed all five actual native outcomes: unmanaged
+  allowance without a managed marker, managed delegation denial, a permitted
+  scoped retry, independent read-only denial while that grant was active, and
+  restored delegation denial after revocation. Each recorded exactly one real
+  `apply_patch`, successful pre-tool hook execution, a matching tool outcome,
+  expected target bytes, a healthy Remote Driver and loaded Bridge evidence.
+- The scoped grant is revoked, both targets are restored, and all five exact
+  native processes completed and are absent. Framework-owned session histories
+  remain intact. Disposable scratch cleanup and the reviewed archive are the
+  remaining mechanical closeout; the broader two-second latency qualification
+  remains explicitly unproved and separately owned by #7935.
+- Owned fixture scratch is now removed. Cleanup found a retained host from an
+  earlier failed launch after its child had exited and its Bridge record had
+  disappeared. The exact host accepted the canonical termination message but
+  remained alive; identity-pinned retirement of that owned process released
+  the directory. No shared daemon or unrelated process was restarted or ended.
+- Functional delivery is complete, including source review/CI, Main release,
+  authorized installed adoption, five-control acceptance and owned fixture
+  cleanup. The immediate archive-PR, native binding/worktree/claim and issue
+  settlement is explicitly retained by the same Driver under open #10778.
+  This transfer avoids claiming those future mechanical actions have already
+  happened; it does not shorten the parent completion gate.
