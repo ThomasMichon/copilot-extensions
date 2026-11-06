@@ -785,6 +785,7 @@ async def test_required_cli_writer_is_explicitly_unsupported_before_any_owner_ca
 @pytest.mark.asyncio
 @pytest.mark.timeout(90)
 async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes(rig, tmp_path, monkeypatch):
+    import os
     import sys
     from agent_bridge import acquisition_worktree_writer as writer, session_lifecycle_cli as lifecycle
     from agent_bridge import worktree_lineage
@@ -801,6 +802,16 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         sys.executable, str(Path(__file__).parent / "fixtures/worktree_record_owner.py"),
         str(root), str(state), "test-project", "worktree-a",
     ]
+    from bridge_http47_runtime import REQUEST
+
+    environment = lifecycle._agent_worktrees_environment()
+    if REQUEST in environment:
+        # Reinstall only the capture guard after the real owner environment scrub.
+        environment["PYTHONPATH"] = os.pathsep.join((
+            str(root / "tools/http47_capture_bootstrap"), str(root / "tools"),
+        ))
+    for owner in (acquisition_authority, worktree_lineage):
+        monkeypatch.setattr(owner, "_agent_worktrees_environment", lambda: environment.copy())
     protected = snapshot(prefix, "protect")
     before = snapshot(prefix)
     checkout = state / "trees" / "worktree-a"
