@@ -1,0 +1,9 @@
+{
+  "comment": "Publish Maintainer vision-adherence review and paired repository lens",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
