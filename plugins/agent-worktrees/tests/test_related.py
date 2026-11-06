@@ -2695,6 +2695,7 @@ def test_related_acquisition_report_source_selection_uses_one_config_and_activat
 ], ids=["numeric-role", "numeric-delegate-via", "list-role", "list-delegate-via"])
 def test_related_report_isolates_entry_conversion_failure_without_changing_legacy(tmp_path, monkeypatch, malformed):
     from dropin_registry import ScanAuthority
+    from agent_worktrees.config_acquisition import capture_config_observations
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     path = related.related_path(tmp_path)
@@ -2702,9 +2703,12 @@ def test_related_report_isolates_entry_conversion_failure_without_changing_legac
     path.write_text(yaml.safe_dump({"related": {
         "first": {"role": "docs"}, "broken": malformed, "last": {"role": "tooling"},
     }}, sort_keys=False), encoding="utf-8")
-    with pytest.raises(AttributeError):
-        related.read_related(tmp_path)
-    report = related.read_related_report(tmp_path)
+    with capture_config_observations():
+        with pytest.raises(AttributeError):
+            related.read_related(tmp_path)
+    with capture_config_observations() as active:
+        report = related.read_related_report(tmp_path)
+    assert active == []
     assert set(report.value.related) == {"first", "last"}
     assert report.value.related["first"].role == "docs"
     assert report.value.related["last"].role == "tooling"

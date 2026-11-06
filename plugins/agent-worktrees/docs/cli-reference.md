@@ -67,8 +67,11 @@ Discovery projects at most 24 associations, with explicit omissions, within
 the existing 1 MiB body budget, measured using the actual versioned, indented
 stdout envelope and newline. One invocation shares one fresh configuration
 acquisition scope and one strict registry snapshot across association targets.
-Concrete failed configuration acquisitions, including suppressed related-overlay
-failures and malformed/lossy committed inputs, cannot qualify fallback bindings.
+Concrete failed configuration acquisitions, including malformed related files,
+suppressed related-overlay failures and failed/malformed/lossy committed inputs,
+cannot qualify fallback bindings. Related-file diagnostics join the active
+configuration acquisition without changing the loader's fallback values or
+legacy exception behavior.
 Opaque owner-provenance diagnostics alone are not configuration value failures.
 It performs no credential/forge read, Git remote discovery,
 Git fetch, service startup or canonical write of its own; the status command's

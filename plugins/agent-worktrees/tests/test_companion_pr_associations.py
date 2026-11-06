@@ -1021,3 +1021,110 @@ def test_suppressed_related_config_failure_cannot_qualify_active_defaults(source
     )
     entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
     assert all(entry["binding"]["available"] is False for entry in entries)
+
+
+@pytest.mark.parametrize(
+    ("raw", "available"),
+    [
+        ("related: [\n", False),
+        ("[]\n", False),
+        ("related: []\n", False),
+        ("related:\n  sample: invalid\n", False),
+        ("related:\n  sample:\n    pr: invalid\n", False),
+        ("related:\n  sample:\n    pr: []\n", False),
+        ("related:\n  sample:\n    pr: {}\n", True),
+        ("related:\n  sample:\n    pr: null\n", True),
+        ("related:\n  sample:\n", True),
+        ("", True),
+        (None, True),
+    ],
+)
+def test_native_related_file_failure_cannot_qualify_active_defaults(
+    source, monkeypatch, raw, available
+):
+    from agent_worktrees import related
+
+    anchor = source.path.parent / "plugin"
+    directory = anchor / ".agent-worktrees"
+    directory.mkdir(parents=True)
+    (anchor / "plugin.json").write_text('{"name": "fixture"}')
+    path = directory / "related.yaml"
+    if raw is not None:
+        path.write_text(raw)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(config, "_control_plane_related_pr_map", config._CONTROL_PLANE_PR_OWNER)
+    monkeypatch.setattr(related, "find_control_plane_anchor", lambda: None)
+    monkeypatch.setattr(
+        related,
+        "installed_plugin_related_anchors",
+        lambda: [related._PluginContributionAnchor(str(anchor), "fixture")],
+    )
+    monkeypatch.setattr(
+        repos,
+        "list_repos",
+        lambda **kwargs: [
+            SimpleNamespace(name="sample", remote="https://github.com/example/repository.git")
+        ],
+    )
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is available for entry in entries)
+    assert path.read_text() == raw if raw is not None else not path.exists()
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+@pytest.mark.parametrize("failure", ["head", "batch", "absent"])
+def test_committed_transport_failure_cannot_qualify_disk_fallback(
+    source, monkeypatch, foreign, failure
+):
+    from agent_worktrees import config_cache
+
+    anchor = source.path.parent / "anchor"
+    anchor.mkdir()
+    disk = anchor / config.INREPO_CONFIG_FILENAME
+    disk.write_text("marker: disk\n")
+    values = []
+    calls = []
+
+    def git(*args, **kwargs):
+        calls.append(args[0])
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(
+                returncode=1 if failure == "absent" else 128 if failure == "head" else 0,
+                stdout="refs/remotes/origin/main\n",
+            )
+        if args == ("cat-file", "--batch"):
+            return SimpleNamespace(returncode=128, stdout=b"")
+        assert args[0] == "--literal-pathspecs"
+        # A successful compatibility fallback does not repair the failed batch.
+        return SimpleNamespace(returncode=0, stdout="")
+
+    def load(name):
+        values.append(config._load_inrepo_config(str(anchor)))
+        repo = config.RepoConfig(
+            anchor="", worktree_root="", pr=config.PRConfig(provider="github")
+        )
+        return SimpleNamespace(repo_name=name, default_repo=repo, repos={name: repo})
+
+    monkeypatch.setattr(git_ops, "git", git)
+    if foreign:
+        monkeypatch.setattr(config, "_control_plane_related_pr_map", lambda: {})
+        monkeypatch.setattr(
+            repos,
+            "list_repos",
+            lambda **kwargs: [
+                SimpleNamespace(name="foreign", remote="https://github.com/example/repository.git")
+            ],
+        )
+        monkeypatch.setattr(
+            config, "load_project_config", lambda name: config_cache.memoize_in_scope(load, name)
+        )
+    else:
+        monkeypatch.setattr(config, "load_config", lambda **kwargs: load("sample"))
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is (failure == "absent") for entry in entries)
+    assert values == [{"marker": "disk"}] and disk.read_text() == "marker: disk\n"
+    assert calls == (
+        ["symbolic-ref", "cat-file", "--literal-pathspecs"]
+        if failure == "batch"
+        else ["symbolic-ref"]
+    )

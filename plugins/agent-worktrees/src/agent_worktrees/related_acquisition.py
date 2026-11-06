@@ -26,24 +26,27 @@ from .source_probes import probe_source
 
 def parse_file(path: Path, observations: list[SourceObservation] | None = None, *, selected=False):
     from . import related as r
+    from .config_acquisition import current_observations
+
+    diagnostics = observations if observations is not None else current_observations()
 
     try:
         data = r.yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         if selected:
-            failed(observations, str(path), "related-file", "source-disappeared", "selected file disappeared before reading")
+            failed(diagnostics, str(path), "related-file", "source-disappeared", "selected file disappeared before reading")
         else:
-            observe(observations, str(path), "related-file", ScanAuthority.ABSENT)
+            observe(diagnostics, str(path), "related-file", ScanAuthority.ABSENT)
         return r.RelatedConfig()
     except Exception as exc:
         detail = type(exc).__name__
-        failed(observations, str(path), "related-file", "unreadable-source", detail)
+        failed(diagnostics, str(path), "related-file", "unreadable-source", detail)
         return r.RelatedConfig()
-    observe(observations, str(path), "related-file", ScanAuthority.COMPLETE)
+    observe(diagnostics, str(path), "related-file", ScanAuthority.COMPLETE)
     if data is None:
         return r.RelatedConfig()
     if not isinstance(data, dict):
-        failed(observations, str(path), "related-file", "invalid-shape", "document must be a mapping")
+        failed(diagnostics, str(path), "related-file", "invalid-shape", "document must be a mapping")
         return r.RelatedConfig()
     primary = str(data.get("primary", "")).strip()
 
@@ -55,9 +58,12 @@ def parse_file(path: Path, observations: list[SourceObservation] | None = None, 
             if entry is None:
                 entry = {}
             if not isinstance(entry, dict):
-                failed(observations, str(path), "related-file", "invalid-entry",
+                failed(diagnostics, str(path), "related-file", "invalid-entry",
                        "related entry must be a mapping or null")
                 continue
+            if entry.get("pr") is not None and not isinstance(entry["pr"], dict):
+                failed(diagnostics, str(path), "related-file", "invalid-entry",
+                       "pr must be a mapping or null")
             try:
                 related[str(name)] = r.RelatedEntry(
                     name=str(name),
@@ -78,10 +84,10 @@ def parse_file(path: Path, observations: list[SourceObservation] | None = None, 
             except AttributeError as exc:
                 if observations is None:
                     raise
-                failed(observations, str(path), "related-file", "invalid-entry", type(exc).__name__)
+                failed(diagnostics, str(path), "related-file", "invalid-entry", type(exc).__name__)
 
     else:
-        failed(observations, str(path), "related-file", "invalid-shape",
+        failed(diagnostics, str(path), "related-file", "invalid-shape",
                "related must be a mapping")
     return r.RelatedConfig(primary=primary, related=related)
 

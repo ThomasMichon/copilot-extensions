@@ -123,6 +123,7 @@ def _config_failed(observations) -> bool:
             "config-dropin-entry",
             "inrepo-yaml",
             "committed-decoding",
+            "related-file",
         }
         and observation.authority is config_acquisition.ScanAuthority.INDETERMINATE
         or any(
@@ -135,6 +136,7 @@ def _config_failed(observations) -> bool:
                 "migration-failed",
                 "control-plane-related-pr-failed",
                 "source-selection-failed",
+                "committed-source-unavailable",
             }
             for finding in observation.findings
         )
