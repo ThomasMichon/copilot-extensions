@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh HTTP-52 controlled source evidence for the worktree status bundle change",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
