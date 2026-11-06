@@ -112,12 +112,22 @@ workspace and nonce. Replays preserve it when omitted, reject replacement,
 and cannot retrofit it after an unpinned relationship or native exists.
 A lost relationship reply retains the same expectation and original request.
 
-This provider-first expansion stores an expectation, not successful admission.
+The ordinary new-workspace consumer negotiates preparation storage support
+before workspace creation, then observes the executing Bridge CLI contracts
+and passive active-instance selection. The existing preparation owner combines
+that selected expectation with the authoritative creation nonce and retains it
+through this endpoint before the first relationship. An explicit caller
+expectation must agree with the selection and prepared nonce. A pending
+relationship reply is reconciled through the same prepared-workspace owner on
+retry, preserving its original requirement and creation key; a changed current
+selection cannot replace them. Already prepared historical workspaces without
+an original requirement are not retrofitted.
+
+This conditional composition stores an expectation, not successful admission.
 Independent queue/request, ground-owner and complete participating-writer
-checks still govern the first relationship. Ordinary startup does not yet
-derive a requirement for a new workspace: that consumer must use the actual
-negotiated Bridge selection and authoritative prepared nonce, not a future
-acquisition journal or caller-ready boolean. No admission policy is installed.
+checks still govern the first relationship. A future acquisition journal or
+caller-ready boolean cannot establish those checks. No admission policy is
+installed and no complete participating cohort is qualified by this consumer.
 
 The internal ordinary Bridge caller accepts an explicit `worktree_writer`
 expectation for an already prepared workspace. It is the existing version-1

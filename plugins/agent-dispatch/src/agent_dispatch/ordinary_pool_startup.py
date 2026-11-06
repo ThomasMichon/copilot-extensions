@@ -63,20 +63,45 @@ def initial_machine(task: dict, reservation: dict) -> str | None:
 def prepare_owned_workspace(
     task: dict, reservation: dict, *, client, project: str | None,
     machine: str, no_pair: bool, timeout: float,
+    writer_identity: dict | None = None, worktree_writer: dict | None = None,
 ) -> dict:
     """Create through the existing Dispatch-aware owner before Bridge embodiment."""
-    if reservation.get("worktree") or reservation.get("agent_info"):
+    from .workspace_binding import hold, record_prepared
+    from .ordinary_writer_admission import REQUIREMENT, writer_requirement
+
+    if reservation.get("agent_info"):
+        return reservation
+    if reservation.get("worktree"):
+        if reservation.get("task_relationship_required") is True and reservation.get(REQUIREMENT) is not None:
+            record_prepared(
+                client, reservation, {
+                    "worktree": reservation["worktree"], "path": reservation.get("worktree_path"),
+                    "project": reservation.get("allocation_project"),
+                    "ownership": reservation.get("worktree_ownership"),
+                    "creation_nonce": reservation.get("creation_nonce"),
+                }, driver="ordinary-bridge", creating_host=machine,
+                worktree_writer_requirement=writer_requirement(reservation[REQUIREMENT]),
+            )
+            return client.get_reservation(reservation["key"])
         return reservation
     from . import embody
-    from .workspace_binding import record_prepared
 
     prepared = embody.prepare_reusable_worktree(
         task, reservation, project=project, interface="acp", driver="ordinary-bridge",
         supervisor=reservation["reserved_by"], timeout=timeout, no_pair=no_pair,
         allocation_client=client,
     )
+    requirement = None
+    if writer_identity is not None:
+        requirement = writer_requirement({
+            "version": 1, "identity": writer_identity,
+            "creation_nonce": prepared.get("creation_nonce"),
+        })
+        if worktree_writer is not None and writer_requirement(worktree_writer) != requirement:
+            hold("ordinary prepared workspace differs from its expected writer requirement")
     record_prepared(
         client, reservation, prepared, driver="ordinary-bridge", creating_host=machine,
+        **({"worktree_writer_requirement": requirement} if requirement is not None else {}),
     )
     current = client.get_reservation(reservation["key"])
     if (
@@ -87,7 +112,6 @@ def prepare_owned_workspace(
         or current.get("worktree_path") != prepared["path"]
         or current.get("creation_key") != reservation["creation_key"]
     ):
-        from .workspace_binding import hold
         hold("ordinary owned-workspace readback is unconfirmed; retain the original creation")
     return current
 

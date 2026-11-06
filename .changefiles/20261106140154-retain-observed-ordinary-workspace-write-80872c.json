@@ -1,0 +1,9 @@
+{
+  "comment": "Retain observed ordinary workspace writer expectations before relationship attachment and reconcile pending preparation on retry.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

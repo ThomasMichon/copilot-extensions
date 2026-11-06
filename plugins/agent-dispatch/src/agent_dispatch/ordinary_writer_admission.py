@@ -13,17 +13,22 @@ from .queue_task_relationships import valid_record_writer
 REQUIREMENT = "worktree_writer_requirement"
 
 
+def _writer_identity(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"installation_root", "runtime_generation"}
+        and isinstance(value["installation_root"], str) and bool(value["installation_root"].strip())
+        and isinstance(value["runtime_generation"], str)
+        and re.fullmatch(r"[0-9a-f]{32}", value["runtime_generation"]) is not None
+    )
+
+
 def writer_requirement(value: object) -> dict:
     if not (
         isinstance(value, dict) and set(value) == {"version", "identity", "creation_nonce"}
         and type(value["version"]) is int and value["version"] == 1
         and isinstance(value["creation_nonce"], str) and value["creation_nonce"].strip()
-        and isinstance(value["identity"], dict)
-        and set(value["identity"]) == {"installation_root", "runtime_generation"}
-        and isinstance(value["identity"]["installation_root"], str)
-        and value["identity"]["installation_root"].strip()
-        and isinstance(value["identity"]["runtime_generation"], str)
-        and re.fullmatch(r"[0-9a-f]{32}", value["identity"]["runtime_generation"])
+        and _writer_identity(value["identity"])
     ):
         raise TaskError("ordinary Bridge writer requirement is unconfirmed")
     return copy.deepcopy(value)
@@ -103,8 +108,9 @@ class OrdinaryWriterAdmission:
             raise TaskError("ordinary Bridge writer observation is unavailable")
         return value
 
-    def _health(self, run) -> dict:
-        health = self._read(run, ["status"])
+    @classmethod
+    def _health(cls, run) -> dict:
+        health = cls._read(run, ["status"])
         capabilities = health.get("capabilities")
         slot = health.get("slot")
         active = slot.get("active") if isinstance(slot, dict) else None
@@ -135,9 +141,9 @@ class OrdinaryWriterAdmission:
         ):
             raise TaskError("ordinary Bridge writer workspace incarnation changed")
 
-    def admit_create(self, run, *, retained: bool = False) -> None:
-        """A future journal cannot admit the earlier first relationship."""
-        support = self._read(run, ["version", "--contracts-json"])
+    @classmethod
+    def _create_health(cls, run) -> dict:
+        support = cls._read(run, ["version", "--contracts-json"])
         contracts = support.get("contracts")
         required = {
             "agent-bridge.create": {"keyed-worktree-writer"},
@@ -157,7 +163,19 @@ class OrdinaryWriterAdmission:
             )
         ):
             raise TaskError("executing ordinary Bridge CLI writer support is unconfirmed")
-        health = self._health(run)
+        return cls._health(run)
+
+    @classmethod
+    def selected_writer(cls, run) -> dict:
+        """Observe an expectation before preparation, not a closed-cohort permit."""
+        selected = cls._create_health(run).get("worktree_record_writer")
+        if not _writer_identity(selected):
+            raise TaskError("ordinary Bridge selected writer identity is unconfirmed")
+        return copy.deepcopy(selected)
+
+    def admit_create(self, run, *, retained: bool = False) -> None:
+        """A future journal cannot admit the earlier first relationship."""
+        health = self._create_health(run)
         if not retained and health.get("worktree_record_writer") != self.requirement["identity"]:
             raise TaskError("ordinary Bridge selected writer differs from the admitted writer")
 

@@ -34,10 +34,18 @@ api = controls.api
 @pytest.fixture
 def ordinary(
     q: TaskQueue, api: TestClient, monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
-    tmp_path: Path,
+    tmp_path: Path, request: pytest.FixtureRequest,
 ) -> Iterator[SimpleNamespace]:
+    relationship_owner = None
+    governed = getattr(request, "param", False)
+    if governed:
+        from tests.test_assignment_relationships import GroundOwner
+        relationship_owner = GroundOwner()
+        relationship_owner.queue = q
+        q._relationship_writer = relationship_owner
+        q._relationship_authority = "local"
     revision = publish(q, pool())
-    requested = task(q)
+    requested = task(q, **({"require_verification": True} if governed else {}))
     requests, calls = [], []
     client = controls.connected(api, requests)
     placed = client.place_pool_task(
@@ -64,7 +72,8 @@ def ordinary(
     }
 
     def create_workspace(**kwargs: Any) -> dict:
-        assert q.get(requested.id).status == Status.CLAIMED and not calls
+        assert q.get(requested.id).status == Status.CLAIMED
+        assert not any(argv[2] in {"create", "send"} for argv, _ in calls)
         allocations.append(kwargs)
         ground["dispatch_attempt"] = {
             "task_id": kwargs["task_id"], "reservation_key": kwargs["reservation_key"],
@@ -73,15 +82,66 @@ def ordinary(
         }
         return {
             "worktree": ground["id"], "project": ground["repo"], "path": ground["path"],
+            **({"creation_nonce": ground["creation_nonce"]} if governed else {}),
         }
 
     monkeypatch.setattr(embody, "create_worktree", create_workspace)
     monkeypatch.setattr(ordinary_assignment, "read_owner", lambda *a, **k: dict(ground))
 
+    writer = {"installation_root": "/worktrees", "runtime_generation": "a" * 32}
+
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
+        if argv[2] == "version":
+            return subprocess.CompletedProcess(argv, 0, json.dumps({
+                "schema": "agent-bridge.cli-contracts", "version": 1,
+                "contracts": {
+                    "agent-bridge.create": {"version": 1, "capabilities": ["keyed-worktree-writer"]},
+                    "agent-bridge.status": {
+                        "version": 1, "capabilities": ["health-json", "exact-session-worktree-writer"],
+                    },
+                    "agent-bridge.resume": {"version": 1, "capabilities": ["keyed-worktree-writer"]},
+                },
+            }), "")
+        if argv[2] == "status":
+            assert governed
+            value = {
+                "service": "agent-bridge", "status": "ok", "ready": True, "draining": False,
+                "slot": {"role": "active", "pid": 42, "active": {"pid": 42, "generation": 7}},
+                "capabilities": {
+                    "worktree_record_delegation": 1, "retained_workspace_creation_writer": 1,
+                    "retained_workspace_creation_writer_inspection": 1,
+                },
+                "worktree_record_writer": writer,
+            }
+            if "--full" in argv:
+                from agent_dispatch.queue_task_relationships import WRITER
+                stored = q.get_reservation(placed["reservation"]["key"])
+                value = {
+                    "session_id": "bridge-a", "acp_session_id": "native-a",
+                    "durable_session_id": "native-a", "worktree_id": ground["id"],
+                    "project": ground["repo"], "target_dir": ground["path"],
+                    "worktree_writer_observation": {
+                        "schema": "copilot-extensions.creation-worktree-writer", "version": 1,
+                        "session_id": "bridge-a", "native_session_id": "native-a",
+                        "bridge_instance": {"installation_root": "/bridge", "pid": 42, "generation": 7},
+                        "project": ground["repo"], "worktree_id": ground["id"],
+                        "worktree_path": ground["path"],
+                        "worktree_writer": stored.worktree_writer_requirement,
+                        "writer_scope": "executing-process", "writer_contract": WRITER,
+                        "retained_session_writes": 1,
+                    },
+                }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
         if argv[2] == "create":
-            assert not kwargs.get("input") and "--prompt-file" not in argv
+            assert "--prompt-file" not in argv
+            if governed:
+                retained = q.get_reservation(placed["reservation"]["key"])
+                assert json.loads(kwargs["input"]) == retained.worktree_writer_requirement
+                assert argv[-2:] == ["--worktree-writer-file", "-"]
+                assert q.task_relationship(requested.id)["state"] == "bound"
+            else:
+                assert not kwargs.get("input")
             assert q.get(requested.id).status == Status.CLAIMED
             if not creation_records:
                 creation_records.append(dict(ground))
@@ -123,6 +183,7 @@ def ordinary(
         install_root=install_root,
         allocations=allocations, ground=ground,
         creation_records=creation_records,
+        writer=writer, relationship_owner=relationship_owner,
     )
     client.close()
 
@@ -132,6 +193,167 @@ def launch(ordinary: SimpleNamespace) -> dict:
     return ordinary_bridge.start(
         ordinary.task, client=ordinary.client, agent="local", project="example", prompt=seed,
     )
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_governed_start_retains_selected_writer_before_first_relationship(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    o = ordinary
+    observed = []
+    owner = o.q._relationship_writer
+
+    def admit(workspace: Any, operation: str, payload: dict) -> dict:
+        retained = o.q.get_reservation(o.placed["reservation"]["key"])
+        assert retained.worktree_writer_requirement == {
+            "version": 1, "identity": o.writer, "creation_nonce": o.ground["creation_nonce"],
+        }
+        assert retained.task_relationship_event_id is not None
+        assert not any(argv[2] == "create" for argv, _ in o.calls)
+        observed.append(operation)
+        return owner(workspace, operation, payload)
+
+    monkeypatch.setattr(o.q, "_relationship_writer", admit)
+    assert launch(o)["native_session_id"] == "native-a"
+    assert observed == ["reserve", "bind"]
+    assert [argv[2] for argv, _ in o.calls][:2] == ["version", "status"]
+    assert len(o.allocations) == 1
+    retained = o.q.get_reservation(o.placed["reservation"]["key"])
+    assert retained.agent_info["worktree_writer_requirement"] == retained.worktree_writer_requirement
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+@pytest.mark.parametrize("versions", [None, [], [True], ["1"]])
+def test_governed_start_refuses_old_preparation_owner_before_workspace_effect(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, versions: object,
+) -> None:
+    o = ordinary
+    monkeypatch.setattr(o.client, "pool_placement_contract", lambda: {
+        **pool_placement_contract(), "prepared_writer_requirement_versions": versions,
+    })
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="prepared ordinary writer"):
+        launch(o)
+    assert not o.allocations and not o.calls and not o.relationship_owner.calls
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+@pytest.mark.parametrize("change", ["cli", "identity"])
+def test_governed_start_refuses_unqualified_selected_bridge_before_workspace_effect(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    o = ordinary
+    run = ordinary_bridge.subprocess.run
+
+    def unsupported(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        result = run(argv, **kwargs)
+        value = json.loads(result.stdout)
+        if change == "cli" and argv[2] == "version":
+            value["contracts"]["agent-bridge.resume"]["capabilities"] = []
+        elif change == "identity" and argv[2] == "status":
+            value["worktree_record_writer"]["runtime_generation"] = True
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", unsupported)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="unconfirmed"):
+        launch(o)
+    assert not o.allocations and not o.relationship_owner.calls
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_governed_lost_relationship_reply_reuses_original_requirement_after_selection_moves(
+    ordinary: SimpleNamespace,
+) -> None:
+    o = ordinary
+    o.relationship_owner.lose_reply = "reserve"
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="unresolved"):
+        launch(o)
+    original = o.q.get_reservation(o.placed["reservation"]["key"])
+    requirement = original.worktree_writer_requirement
+    o.writer.update(installation_root="/new", runtime_generation="b" * 32)
+    assert launch(o)["native_session_id"] == "native-a"
+    retained = o.q.get_reservation(original.key)
+    assert retained.creation_key == original.creation_key
+    assert retained.worktree_writer_requirement == requirement
+    assert len(o.allocations) == 1 and len(o.relationship_owner.claims) == 1
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+@pytest.mark.parametrize("field", ["identity", "creation_nonce"])
+def test_governed_explicit_requirement_cannot_replace_observed_preparation(
+    ordinary: SimpleNamespace, field: str,
+) -> None:
+    o = ordinary
+    requirement = {
+        "version": 1, "identity": dict(o.writer), "creation_nonce": o.ground["creation_nonce"],
+    }
+    if field == "identity":
+        requirement[field]["runtime_generation"] = "b" * 32
+    else:
+        requirement[field] = "different"
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="differs"):
+        ordinary_bridge.start(
+            o.task, client=o.client, agent="local", project="example",
+            prompt=startup_seed(o.task, o.client), worktree_writer=requirement,
+        )
+    assert len(o.allocations) == (0 if field == "identity" else 1)
+    assert not o.relationship_owner.calls
+    assert o.q.get_reservation(o.placed["reservation"]["key"]).agent_info is None
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_governed_preparation_still_requires_independent_relationship_admission(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    o = ordinary
+
+    def unqualified(*args: Any) -> dict:
+        raise TaskError("participating cohort is unconfirmed")
+
+    monkeypatch.setattr(o.q, "_relationship_writer", unqualified)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="unresolved"):
+        launch(o)
+    retained = o.q.get_reservation(o.placed["reservation"]["key"])
+    assert retained.worktree_writer_requirement["identity"] == o.writer
+    assert retained.task_relationship_event_id is not None
+    assert not o.relationship_owner.calls
+    assert not any(argv[2] in {"create", "send"} for argv, _ in o.calls)
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_governed_selection_movement_during_preparation_refuses_first_native_create(
+    ordinary: SimpleNamespace,
+) -> None:
+    o = ordinary
+
+    def moved(operation: str, result: dict) -> None:
+        if operation == "bind":
+            o.writer.update(runtime_generation="b" * 32)
+
+    o.relationship_owner.before_reply = moved
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="differs from the admitted writer"):
+        launch(o)
+    retained = o.q.get_reservation(o.placed["reservation"]["key"])
+    assert retained.worktree_writer_requirement["identity"]["runtime_generation"] == "a" * 32
+    assert retained.agent_info is None and len(o.allocations) == 1
+    assert not any(argv[2] in {"create", "send"} for argv, _ in o.calls)
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_governed_historical_workspace_is_not_retrospectively_pinned(ordinary: SimpleNamespace) -> None:
+    from agent_dispatch.ordinary_pool_startup import prepare_owned_workspace
+
+    o = ordinary
+    reservation = o.client.get_reservation(o.placed["reservation"]["key"])
+    prepare_owned_workspace(
+        o.task, reservation, client=o.client, project="example",
+        machine="host-a", no_pair=False, timeout=180,
+    )
+    before = o.q.get_reservation(reservation["key"])
+    assert before.worktree_writer_requirement is None
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="lacks its qualified writer"):
+        launch(o)
+    assert o.q.get_reservation(reservation["key"]) == before
+    assert not o.calls and len(o.allocations) == 1
 
 
 def released_pool_seed(task_id: str, *, generation: int, route: str = "",
