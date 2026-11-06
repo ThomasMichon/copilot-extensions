@@ -154,9 +154,9 @@ the digest of the entire original capture and ordered references to each
 selected confirmed action, original attempt and immutable native receipt
 digest. Original receipts remain in the review section; no bodies or response
 payloads are copied. Verdict-containing operations cannot carry proof while
-exact vote readback remains unsupported. Structural validation is not proof
-that protected readback occurred: this data-only slice has no proof-ingest or
-protected proof-commit API.
+exact vote readback remains unsupported. Structural validation is not proof that protected readback occurred. There is
+no public proof-ingest API; only the existing trusted protected reconciliation
+can establish and commit actual readback.
 
 Capture metadata retains its existing 64 KiB bound and reservation. Each
 readback has a separate 64 KiB maximum; its full slot plus 32 bytes of per-record
@@ -171,12 +171,32 @@ Interrupted adoption reconciles the same reservation; changing it refuses.
 Replay/review/conversation/attention writes and repeated earlier adoptions
 preserve v6. Prior strict capture-v1 readers refuse capture-v2, and existing
 v3 conversation capabilities and v5 attention serving do not advertise v6.
-The current protected feedback path likewise returns
-`capture_layout_unavailable` for v6 rather than starting new selected effects.
-Ordinary native operations retain their existing behavior without claiming
-historical tracking. Protected proof commits and negotiated v6 attention reads
-remain separate B4 leaves; null proof cannot be replaced by current handled
-provenance, a later cursor or an automatic migration.
+The optional protected feedback path supports both v5's original behavior and
+v6's historical proof. It admits the v2 capture and its reserved proof slot
+before the first native attempt. All selected actions must be confirmed and
+that operation's fresh pinned readback must succeed before the complete-envelope
+transaction records its own body-free proof. Capture, native operation and
+receipt identities are rechecked at commit; network IO never holds the lock.
+Confirmed effects are not resent after readback/storage failure or response
+loss. An existing v5 capture adopted with null proof still needs this actual
+readback, never inference from current handled provenance.
+
+The proof is independent of the current handled frontier. An older operation
+can acquire its own successful readback proof without regressing a newer
+baseline, changing its provenance or resetting pending age. Missing current
+interests or a later reopen cannot acquire an old epoch's handled baseline;
+v6 may retain only the original proof when no frontier update is admissible.
+V5 keeps its original refusal semantics. A historical certificate does not
+assert that today's input is fresh or that an effect remains unchanged.
+Later input, unknown/partial native outcomes and unsupported vote attribution
+keep their existing meanings.
+
+Original proof and B3 echo coverage remain separate. Only successful proof
+replacement updates the in-process tracking snapshot used by the existing
+echo commit guard; failed or uncertain replacement cannot pretend it committed.
+The capture's original position and readback references never change when
+its interest covers a later proven echo. Negotiated v6 attention reads remain
+a separate B4 leaf; old serving does not gain support from protected integration.
 
 B1 capture adoption adds an 8 MiB default reservation to the existing total owner-byte
 limit and preserves every replay, conversation, attention and review record.

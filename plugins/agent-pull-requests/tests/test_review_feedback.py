@@ -622,3 +622,173 @@ def test_missing_capture_allows_receipt_recovery_but_not_remaining_effects(feedb
     assert result["actions"][1]["state"] == "unattempted" and backend.vote is None
     assert result["feedback"]["reason"] == "capture_missing_after_attempt"
     assert result["entered_writes"] == 0 and len(writes(backend)) == 1
+
+
+@pytest.mark.parametrize("older_first", [False, True])
+def test_historical_readback_is_independent_of_newer_handled_frontier(
+    feedback_environment: tuple, older_first: bool,
+) -> None:
+    value = feedback_environment
+    store, selected, _, attachment, backend, _, expires, _ = value
+    FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    original_selection = copy.deepcopy(selected)
+    if not older_first:
+        backend.after_write = lambda current: setattr(current, "read_late", True)
+    first = run(value)
+    assert first["actions"][0]["state"] == "confirmed"
+    assert (document(value)["feedback_captures"]["records"][0]["readback"] is not None) is older_first
+    backend.read_late = False
+    backend.after_write = None
+    newer = observe(value, change="echo")
+    selected.update(operation_id="newer-operation", generation_id=newer["id"])
+    selected["actions"] = [{"id": "second", "kind": "comment", "body": "Second selected comment"}]
+    attached = {**attachment, "generation_id": newer["id"]}
+    second_value = store, selected, newer, attached, *value[4:]
+    assert run(second_value)["feedback"]["status"] == "handled"
+    before = document(value)
+    assert before["feedback_captures"]["records"][1]["readback"] is not None
+    assert before["attention"]["records"][0]["provenance"]["operation_id"] == "newer-operation"
+    selected.clear()
+    selected.update(original_selection)
+    restarted = ReplayStore(store.root, store.namespace, clock=store.clock)
+    retry = run((restarted, *value[1:]))
+    assert retry["entered_writes"] == 0 and retry["feedback"]["updated"] == 0
+    after = document(value)
+    assert after["attention"] == before["attention"] and after["reviews"] == before["reviews"]
+    first_capture = after["feedback_captures"]["records"][0]
+    assert first_capture["readback"]["capture_id"]
+    assert first_capture["cursor"] == {"epoch": 1, "sequence": 1}
+    assert first_capture["readback"] != after["feedback_captures"]["records"][1]["readback"]
+    assert len(writes(backend)) == 2
+    stable = document(value)
+    assert run((restarted, *value[1:]))["entered_writes"] == 0
+    assert document(value) == stable
+
+
+@pytest.mark.parametrize("failure", ["lost", "readback", "storage_before", "storage_after", "verdict"])
+def test_historical_proof_needs_its_own_confirmed_readback_and_atomic_commit(
+    feedback_environment: tuple, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    import agent_pull_requests.watch_replay_store as module
+    from agent_pull_requests.watch_storage import StateCommitUncertain
+
+    value = feedback_environment
+    store, selected, _, _, backend, _, expires, _ = value
+    FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    write = module._atomic_write_json
+    if failure == "lost":
+        backend.lose_reply = True
+    elif failure == "readback":
+        backend.after_write = lambda current: setattr(current, "read_late", True)
+    elif failure == "verdict":
+        selected["actions"].append({"id": "verdict", "kind": "verdict", "verdict": "APPROVED"})
+    else:
+        def fail(path: object, data: dict) -> None:
+            if any(row["readback"] is not None for row in data["feedback_captures"]["records"]):
+                if failure == "storage_after":
+                    write(path, data)
+                    raise StateCommitUncertain("synthetic original-proof reply loss")
+                raise OSError("synthetic original-proof commit unavailable")
+            write(path, data)
+        monkeypatch.setattr(module, "_atomic_write_json", fail)
+    first = run(value)
+    assert first["feedback"]["status"] in ("pending", "unavailable")
+    assert (document(value)["feedback_captures"]["records"][0]["readback"] is not None) is (
+        failure == "storage_after"
+    )
+    reviews = document(value)["reviews"]
+    sent = len(writes(backend))
+    backend.lose_reply = False
+    backend.read_late = False
+    backend.after_write = None
+    monkeypatch.setattr(module, "_atomic_write_json", write)
+    retry = run(value)
+    assert retry["entered_writes"] == 0 and len(writes(backend)) == sent
+    if failure == "verdict":
+        assert retry["feedback"]["reason"] == "exact_vote_readback_unavailable"
+        assert document(value)["feedback_captures"]["records"][0]["readback"] is None
+    else:
+        assert retry["feedback"]["status"] == "handled"
+        assert document(value)["feedback_captures"]["records"][0]["readback"] is not None
+    if failure != "lost":
+        assert document(value)["reviews"] == reviews
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+def test_adopted_original_readback_never_backfills_from_old_handled_state(
+    feedback_environment: tuple, reopen: bool,
+) -> None:
+    value = feedback_environment
+    store, _, _, _, backend, _, expires, _ = value
+    assert run(value)["feedback"]["status"] == "handled"
+    FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    assert document(value)["feedback_captures"]["records"][0]["readback"] is None
+    if reopen:
+        observe(value, change="completed", second=10)
+        observe(value, change="active", second=12)
+    before = document(value)
+    calls = len(backend.calls)
+    retry = run(value)
+    assert retry["feedback"]["status"] == "handled" and retry["feedback"]["updated"] == 0
+    assert retry["entered_writes"] == 0 and len(writes(backend)) == 1 and len(backend.calls) > calls
+    after = document(value)
+    assert after["feedback_captures"]["records"][0]["readback"] is not None
+    assert after["attention"] == before["attention"] and after["reviews"] == before["reviews"]
+    if reopen:
+        assert after["attention"]["records"][0]["facts"]["cursor"]["epoch"] == 2
+        assert after["attention"]["records"][0]["handled"] is None
+
+
+def test_historical_capture_capacity_refuses_before_native_attempt(feedback_environment: tuple) -> None:
+    value = feedback_environment
+    store, _, _, _, backend, _, expires, _ = value
+    FeedbackCaptureStore(store).adopt_readback(
+        lifecycle_checkpoint=lambda: None, expires_at=expires, readback_bytes=1024,
+    )
+    result = run(value)
+    assert result["feedback"]["status"] == "unavailable" and not writes(backend)
+    assert document(value)["feedback_captures"]["records"] == []
+    assert all(row["state"] == "unattempted" for row in result["actions"])
+
+
+def test_historical_proof_and_original_b3_echo_keep_distinct_positions(feedback_environment: tuple) -> None:
+    value = feedback_environment
+    store, _, _, _, backend, _, expires, _ = value
+    FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    backend.versioned_reply = True
+    backend.pr["reviewers"] = copy.deepcopy(value[2]["sections"]["reviewers"]["data"])
+    assert run(value)["feedback"]["status"] == "handled"
+    original = document(value)["feedback_captures"]
+    newer = observe(value, change="echo")
+    result = run(value, current=lambda: (newer, backend.positions[newer["id"]]))
+    assert result["feedback"]["echo"]["status"] == "covered"
+    assert result["entered_writes"] == 0 and len(writes(backend)) == 1
+    data = document(value)
+    assert data["feedback_captures"] == original
+    assert data["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 2
+    assert data["feedback_captures"]["records"][0]["cursor"]["sequence"] == 1
+    assert data["attention"]["records"][1]["handled"] is None
+
+
+def test_same_frontier_operation_still_records_its_own_original_readback(feedback_environment: tuple) -> None:
+    value = feedback_environment
+    store, selected, _, attachment, backend, _, expires, _ = value
+    FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    backend.versioned_reply = True
+    backend.pr["reviewers"] = copy.deepcopy(value[2]["sections"]["reviewers"]["data"])
+    assert run(value)["feedback"]["status"] == "handled"
+    newer = observe(value, change="echo")
+    assert run(value, current=lambda: (newer, backend.positions[newer["id"]]))[
+        "feedback"
+    ]["echo"]["status"] == "covered"
+    before = document(value)
+    selected.update(operation_id="same-frontier-operation", generation_id=newer["id"])
+    selected["actions"] = [{"id": "second", "kind": "comment", "body": "Second selected comment"}]
+    attached = {**attachment, "generation_id": newer["id"]}
+    result = run((store, selected, newer, attached, *value[4:]))
+    assert result["feedback"]["status"] == "handled" and result["feedback"]["updated"] == 0
+    after = document(value)
+    assert after["attention"] == before["attention"] and len(writes(backend)) == 2
+    assert after["feedback_captures"]["records"][0] == before["feedback_captures"]["records"][0]
+    assert after["feedback_captures"]["records"][1]["cursor"] == {"epoch": 1, "sequence": 2}
+    assert after["feedback_captures"]["records"][1]["readback"] is not None

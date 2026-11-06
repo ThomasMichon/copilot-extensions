@@ -313,6 +313,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   read-consumer leaves; qualify overlapping operations, original identity,
   capacity, restart, unavailable evidence and old/new compatibility without
   weakening B2/B3 or closing broader attention/provider/installed acceptance.
+  The finite explicit v6/capture-v2 storage prerequisite merged in #10972.
+  Protected proof commits and negotiated v6 reads remain separate exits.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -950,6 +952,24 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Land historical readback storage without activating consumers
+
+- #10972 actually merged as `8971538874535035c9dafd5a1616760415772ede`
+  after exact-head Copilot approval, no open findings and all required CI green.
+  The source worktree reconciled through the normal completion path.
+- Explicit v5-to-v6 adoption retains original captures with null readback and
+  separately reserved bounded proof capacity. Complete-envelope writers and
+  repeated earlier adoptions preserve the expanded layout; prior disk/wire
+  contracts remain unchanged without implicit migration or downgrade.
+- The final bounded coupled packet passes 207 cases with cleanup verified;
+  fatal lint, touched-module, documentation and install-contract gates pass.
+  The admitted strict service consumer passes Linux/win32 targets, not native
+  Windows execution or installed/provider qualification.
+- Re-read the full current Plan and Validation Plan; the parent remains Active.
+  Continue actual protected proof commits, then negotiated v6 reads. The
+  storage prerequisite does not close B4, B3/A2, broader service acceptance or
+  production shadow/pane qualification. No deployment or live effects occurred.
 
 ### 2026-11-06 - Review historical original-position readback before implementation
 
