@@ -4,7 +4,10 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -17,8 +20,9 @@ update_entry_case = shared_update_entry_case
 
 
 @pytest.mark.parametrize("project_position", ["before", "after"])
+@pytest.mark.parametrize("selection", ["configured", "old-engine", "unconfigured", "broken-helper"])
 def test_posix_project_controller_precedes_manager_bootstrap(
-    tmp_path, native_bash, project_position,
+    tmp_path, native_bash, project_position, selection,
 ) -> None:
     home = tmp_path / "home"
     tools = tmp_path / "tools"
@@ -30,7 +34,10 @@ def test_posix_project_controller_precedes_manager_bootstrap(
     engine.write_text(
         '#!/bin/sh\n'
         'case " $* " in\n'
+        '  *" -c "*) case "$*" in *"json.loads"*) printf "/tmp/probe-cache" ;; '
+        '*) printf \'"%s"\\n\' "/tmp/probe-cache" ;; esac; exit 0 ;;\n'
         '  *" get update-controller "*) printf "%s\\0" "$@" > "$PROBE_ARGS"; '
+        'case "$PROBE_MODE" in old-engine) exit 2 ;; unconfigured) exit 0 ;; esac; '
         'printf "tools/update.py\\n"; exit 0 ;;\n'
         'esac\n'
         'printf "%s\\0" "$@" > "$UPDATE_ARGS"\nexit 47\n'
@@ -44,6 +51,12 @@ def test_posix_project_controller_precedes_manager_bootstrap(
     uname.chmod(0o755)
     startup = tmp_path / "bash-env"
     startup.write_text('uname() { printf "Linux\\n"; }\n')
+    python = tools / "python3"
+    python.write_text(
+        "#!/bin/sh\nexit 1\n" if selection == "broken-helper" else
+        "#!/bin/sh\nexec " + shlex.quote(bash_path(native_bash, sys.executable)) + ' "$@"\n',
+    )
+    python.chmod(0o755)
     for name in ("curl", "git", "pwsh", "powershell.exe"):
         unavailable = tools / name
         unavailable.write_text('#!/bin/sh\nexit 96\n')
@@ -61,7 +74,9 @@ def test_posix_project_controller_precedes_manager_bootstrap(
         "BASH_ENV": bash_path(native_bash, startup),
         "PROBE_ARGS": bash_path(native_bash, tmp_path / "probe.args"),
         "UPDATE_ARGS": bash_path(native_bash, tmp_path / "update.args"),
+        "PROBE_MODE": selection,
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
+        "WORKTREE_MANAGER_BOOTSTRAP_REPO": "-disabled-for-test",
         "WORKTREE_MANAGER_ROOT": bash_path(native_bash, home / ".worktree-manager"),
         "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR": bash_path(
             native_bash, home / "providers",
@@ -69,13 +84,123 @@ def test_posix_project_controller_precedes_manager_bootstrap(
     })
     result = owned_process.run_owned(
         [native_bash, bash_path(native_bash, PLUGIN / "bin" / "agent-worktrees"), *arguments],
-        timeout=20, env=env,
+        timeout=40, env=env,
     )
-    assert result.returncode == 47, result.stderr
-    assert _arguments(tmp_path / "probe.args")[-4:] == [
-        "--project", "sample", "get", "update-controller",
-    ]
-    assert _arguments(tmp_path / "update.args")[-len(arguments):] == arguments
+    expected = {"configured": 47, "old-engine": 126, "unconfigured": 126, "broken-helper": 125}
+    assert result.returncode == expected[selection], result.stderr
+    if selection != "broken-helper":
+        assert _arguments(tmp_path / "probe.args")[-4:] == [
+            "--project", "sample", "get", "update-controller",
+        ]
+    if selection == "configured":
+        assert _arguments(tmp_path / "update.args")[-len(arguments):] == arguments
+    else:
+        assert not (tmp_path / "update.args").exists()
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="native identity pin fixture requires pidfd or Windows")
+def test_posix_controller_probe_timeout_retires_its_descendants(tmp_path, native_bash, monkeypatch):
+    from agent_procutil import no_window_kwargs
+
+    helpers = PLUGIN.parents[1] / "libs" / "agent-procutil" / "tests"
+    monkeypatch.syspath_prepend(str(helpers))
+    from caller_owned_fixture import identity
+    from test_caller_owned_native import PinnedProcess
+
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    (payload / "bin").mkdir(parents=True)
+    (scripts / "installation-context").mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees"}', encoding="utf-8")
+    shutil.copy2(PLUGIN / "bin" / "agent-worktrees", payload / "bin")
+    entry = (PLUGIN / "bin" / "agent-worktrees-update-entry.sh").read_text(encoding="utf-8")
+    assert entry.count("--timeout 30") == 2
+    (payload / "bin" / "agent-worktrees-update-entry.sh").write_text(
+        entry.replace("--timeout 30", "--timeout 5"), encoding="utf-8",
+    )
+    shutil.copy2(PLUGIN / "scripts" / "update_controller_probe.py", scripts)
+    shutil.copy2(
+        PLUGIN / "scripts" / "installation-context" / "daemon_instance_runtime.pyz",
+        scripts / "installation-context",
+    )
+    home, tools = tmp_path / "home", tmp_path / "tools"
+    runtime = home / ".agent-worktrees"
+    (runtime / "bin").mkdir(parents=True)
+    tools.mkdir()
+    (runtime / "current-version").write_text("selected\n", encoding="utf-8")
+    slow = tmp_path / "slow-engine.py"
+    slow.write_text(
+        "import json, os, subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, os.environ['PROBE_HELPERS'])\n"
+        "from caller_owned_fixture import identity\n"
+        "options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}\n"
+        "child = subprocess.Popen([sys.executable, '-I', '-S', '-c', "
+        "'import time; time.sleep(30)'], **options)\n"
+        "root = Path(os.environ['PROBE_ROOT'])\n"
+        "pending = root / 'pending.json'\n"
+        "pending.write_text(json.dumps([identity(), identity(child.pid)]), encoding='utf-8')\n"
+        "pending.replace(root / 'ready.json')\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    engine = tools / "engine"
+    engine.write_text(
+        '#!/bin/sh\ncase " $* " in\n'
+        '  *" -c "*) case "$*" in *"json.loads"*) printf "/tmp/probe-cache" ;; '
+        '*) printf \'"%s"\\n\' "/tmp/probe-cache" ;; esac; exit 0 ;;\n'
+        'esac\nexec ' + shlex.quote(bash_path(native_bash, sys.executable))
+        + ' -I -S -B ' + shlex.quote(bash_path(native_bash, slow)) + '\n',
+        encoding="utf-8",
+    )
+    engine.chmod(0o755)
+    (runtime / "bin" / "resolve-runtime.sh").write_text(
+        "AW_PY=" + shlex.quote(bash_path(native_bash, engine)) + "\n", encoding="utf-8",
+    )
+    python = tools / "python3"
+    python.write_text("#!/bin/sh\nexec " + shlex.quote(bash_path(native_bash, sys.executable)) + ' "$@"\n')
+    python.chmod(0o755)
+    startup = tmp_path / "bash-env"
+    startup.write_text('uname() { printf "Linux\\n"; }\n')
+    env = {
+        **os.environ,
+        "HOME": bash_path(native_bash, home), "USERPROFILE": str(home),
+        "PATH": os.pathsep.join([str(tools), str(Path(native_bash).parent), os.environ["PATH"]]),
+        "BASH_ENV": bash_path(native_bash, startup),
+        "PROBE_HELPERS": str(helpers), "PROBE_ROOT": str(tmp_path),
+        "WORKTREE_MANAGER_BOOTSTRAP_REPO": "-disabled-for-test",
+    }
+    process = subprocess.Popen(
+        [native_bash, bash_path(native_bash, payload / "bin" / "agent-worktrees"),
+         "--project", "sample", "update"],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+    )
+    pins = []
+    try:
+        deadline = time.monotonic() + 10
+        ready = tmp_path / "ready.json"
+        while not ready.is_file() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.is_file(), "the controller probe did not start its descendants"
+        pins = [PinnedProcess(row) for row in json.loads(ready.read_text(encoding="utf-8"))]
+        stdout, stderr = process.communicate(timeout=15)
+        assert process.returncode == 124, stdout + stderr
+        assert all(pin.gone() for pin in pins), "controller probe descendants survived timeout"
+    finally:
+        if process.poll() is None:
+            parent = PinnedProcess(identity(process.pid))
+            try:
+                parent.kill()
+            finally:
+                parent.close()
+            process.wait(timeout=5)
+        for pin in pins:
+            try:
+                pin.kill()
+            finally:
+                pin.close()
+        process.stdout.close()
+        process.stderr.close()
 
 
 def _windows_shell_double(tmp, monkeypatch) -> None:

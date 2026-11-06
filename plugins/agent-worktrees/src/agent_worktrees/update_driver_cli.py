@@ -202,18 +202,23 @@ def cmd_update_request(args: argparse.Namespace) -> int:
                     ):
                         raise driver.StateError("engine installation changed after submission")
                     custody.assert_owned()
-                    return update_cli.cmd_update(args)
-        if not controller:
-            from .project_update_controller import configured_for_update
+                    previous = getattr(args, "_controller_request", None)
+                    args._controller_request = request.spec
+                    try:
+                        return update_cli.cmd_update(args)
+                    finally:
+                        if previous is None:
+                            del args._controller_request
+                        else:
+                            args._controller_request = previous
+        from .project_update_controller import probe_for_submission
 
-            try:
-                controller = configured_for_update(args) is not None
-            except (OSError, KeyError, RuntimeError, ValueError) as error:
-                raise ValueError(f"Cannot resolve the project update controller: {error}") from error
+        cwd = _invocation_cwd()
+        selection = True if controller else probe_for_submission(args, cwd=cwd)
+        controller = selection is True
         project = cfg.active_project()
         flags = _flags(args)
         bypass = ["--no-manager"] if getattr(args, "no_manager", False) else []
-        cwd = _invocation_cwd()
         spec = driver.RequestSpec(
             backend="engine", argv=tuple([*bypass, *flags]), project=project or "", cwd=str(cwd),
             source=str(cfg.install_dir().resolve()), context=_request_context(controller=controller, cwd=cwd),

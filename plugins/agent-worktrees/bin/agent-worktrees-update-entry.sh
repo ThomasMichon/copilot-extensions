@@ -31,15 +31,40 @@ _aw_project_controller_selected() (
         esac
         shift
     done
-    unset PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV UV_INTERNAL__PYTHONHOME \
-        __PYVENV_LAUNCHER__ AGENT_RT_ROOT AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP
-    export AGENT_WORKTREES_NO_SELFPROVISION=1
-    export AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME=1
-    if [ "$_probe_has_project" = 1 ]; then
-        _controller="$(bash "$_aw_update_caller" --project "$_probe_project" get update-controller 2>/dev/null)" || return 1
-    else
-        _controller="$(bash "$_aw_update_caller" get update-controller 2>/dev/null)" || return 1
+    _probe_payload="$(CDPATH= cd -- "$_aw_update_entry_dir/.." && pwd -P)" || return 125
+    if [ ! -f "$_probe_payload/plugin.json" ]; then
+        _probe_payload="$(cat "$_runtime_root/payload-dir" 2>/dev/null)" || _probe_payload=""
     fi
+    _probe_worker="$_probe_payload/scripts/update_controller_probe.py"
+    [ -n "$_probe_payload" ] && [ -f "$_probe_worker" ] || return 1
+    _probe_python=""
+    for _candidate in python3 python; do
+        _candidate="$(command -v "$_candidate" 2>/dev/null)" || continue
+        case "$_candidate" in *WindowsApps*|*windowsapps*) continue ;; esac
+        _probe_python="$_candidate"
+        break
+    done
+    if [ -z "$_probe_python" ] && [ -f "$_runtime_root/bin/resolve-runtime.sh" ]; then
+        . "$_runtime_root/bin/resolve-runtime.sh"
+        _probe_python="${AW_PY:-}"
+    fi
+    if [ -z "$_probe_python" ]; then
+        printf '%s\n' '[agent-worktrees] controller probe requires Python 3; no update ran.' >&2
+        return 125
+    fi
+    if [ "$_probe_has_project" = 1 ]; then
+        _controller="$("$_probe_python" -I -S -B "$_probe_worker" --timeout 30 \
+            --caller "$_aw_update_caller" --project "$_probe_project")" && _probe_result=0 || _probe_result=$?
+    else
+        _controller="$("$_probe_python" -I -S -B "$_probe_worker" --timeout 30 \
+            --caller "$_aw_update_caller")" && _probe_result=0 || _probe_result=$?
+    fi
+    case "$_probe_result" in
+        0) ;;
+        10) return 1 ;;
+        124|125) return "$_probe_result" ;;
+        *) printf '%s\n' '[agent-worktrees] controller probe failed; no update ran.' >&2; return 125 ;;
+    esac
     [ -n "$_controller" ]
 )
 _aw_update_entry() (
@@ -77,6 +102,14 @@ _aw_update_entry() (
             ;;
     esac
     if _aw_project_controller_selected "$@"; then
+        _probe_rc=0
+    else
+        _probe_rc=$?
+    fi
+    case "$_probe_rc" in
+        124|125) exit "$_probe_rc" ;;
+    esac
+    if [ "$_probe_rc" = 0 ]; then
         AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP=1 \
             AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER=1 \
             exec bash "$_aw_update_caller" "$@"

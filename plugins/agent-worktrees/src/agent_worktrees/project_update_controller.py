@@ -12,6 +12,8 @@ from agent_procutil import no_window_kwargs
 from . import config as cfg
 from . import output, update_options
 
+PROBE_TIMEOUT = 30
+
 
 def dispatch_update(args, auth, manager, standalone) -> int:
     if getattr(args, "auth_report", False):
@@ -29,17 +31,53 @@ def configured_script(repo) -> str:
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
-def configured_for_update(args):
+def _selected_project(args):
     if (
         getattr(args, "no_project_controller", False)
         or getattr(args, "phase", None)
         or getattr(args, "target", None) is not None
-        or not cfg.active_project()
     ):
+        return None
+    return cfg.active_project()
+
+
+def configured_for_update(args):
+    if not _selected_project(args):
         return None
     repo = cfg.load_config().default_repo
     script = configured_script(repo)
     return (repo, script) if script else None
+
+
+def _probe_command(project: str) -> list[str]:
+    return [
+        sys.executable, "-I", "-B", "-m", "agent_worktrees",
+        "--project", project, "get", "update-controller",
+    ]
+
+
+def probe_for_submission(args, *, cwd: Path, timeout: float = PROBE_TIMEOUT) -> bool | None:
+    project = _selected_project(args)
+    if not project:
+        return None
+    from agent_procutil.owned_process import OutputLimitExceeded, run_caller_owned
+
+    environment = dict(os.environ)
+    for key in ("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "UPDATE_DRIVER_WITNESS"):
+        environment.pop(key, None)
+    command = _probe_command(project)
+    try:
+        result = run_caller_owned(
+            command, cwd=str(cwd), env=environment, timeout=timeout,
+            max_stdout_bytes=65536, max_stderr_bytes=65536,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("project update controller probe timed out; no update ran") from error
+    except OutputLimitExceeded as error:
+        raise ValueError("project update controller probe exceeded its output limit") from error
+    if result.returncode:
+        raise ValueError("project update controller probe failed; no update ran")
+    return bool(result.stdout.strip())
 
 
 def run_project_update(args) -> int | None:
@@ -52,6 +90,21 @@ def run_project_update(args) -> int | None:
     if selected is None:
         return None
     repo, script = selected
+    request = getattr(args, "_controller_request", None)
+    if getattr(args, "auto", False) and request is not None:
+        from dataclasses import replace
+        from update_driver.core import automatic_update_refusal
+        from .update_driver_cli import _request_context
+
+        try:
+            context = _request_context(controller=True, cwd=Path(request.cwd))
+            refusal = automatic_update_refusal(replace(request, context=context))
+        except (OSError, ValueError) as error:
+            output.err(f"Cannot resolve automatic update policy: {error}")
+            return 1
+        if refusal:
+            output.err(refusal)
+            return 3
     try:
         root = Path(repo.anchor).resolve(strict=True)
         relative = Path(script)

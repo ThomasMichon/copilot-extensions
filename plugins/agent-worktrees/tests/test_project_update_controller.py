@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -186,6 +187,74 @@ def test_no_controller_preserves_existing_updater(project, monkeypatch):
         )),
     )
     assert project_update_controller.run_project_update(args()) is None
+
+
+def test_automatic_controller_rechecks_policy_when_enabled_after_submission(
+    project, monkeypatch, tmp_path, capsys,
+):
+    import update_driver
+    from agent_worktrees import control_plane_providers
+
+    manager = tmp_path / ".worktree-manager"
+    manager.mkdir()
+    (manager / "config.toml").write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json"))
+    monkeypatch.setattr(
+        control_plane_providers, "_machine_control_plane_providers_dir",
+        lambda: tmp_path / "providers",
+    )
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "test"},
+    )
+    monkeypatch.setattr(
+        project_update_controller.subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("disabled automatic controller was launched"),
+    )
+    request = update_driver.RequestSpec(
+        "engine", ("--auto",), cwd=str(tmp_path),
+        context=(("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json")),),
+    )
+    assert project_update_controller.run_project_update(
+        args(auto=True, _controller_request=request),
+    ) == 3
+    captured = capsys.readouterr()
+    assert "maintenance.automatic is false" in captured.out + captured.err
+
+
+def test_submission_probe_has_a_deadline_and_fails_closed(project, monkeypatch, tmp_path):
+    from agent_procutil import owned_process
+
+    calls = []
+
+    def timeout(command, **options):
+        calls.append((command, options))
+        raise subprocess.TimeoutExpired(command, options["timeout"])
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", timeout)
+    with pytest.raises(ValueError, match="probe timed out"):
+        project_update_controller.probe_for_submission(args(), cwd=tmp_path, timeout=0.5)
+    command, options = calls[0]
+    assert command[-4:] == ["--project", "example", "get", "update-controller"]
+    assert options["timeout"] == 0.5
+    assert options["cwd"] == str(tmp_path)
+
+
+@pytest.mark.parametrize(("value", "selected"), [("tools/update.py\n", True), ("", False)])
+def test_submission_probe_returns_the_owned_engine_selection(project, monkeypatch, tmp_path, value, selected):
+    from agent_procutil import owned_process
+
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options))
+        return SimpleNamespace(returncode=0, stdout=value)
+
+    monkeypatch.setenv("UPDATE_DRIVER_WITNESS", "do-not-inherit")
+    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    assert project_update_controller.probe_for_submission(args(), cwd=tmp_path) is selected
+    assert "UPDATE_DRIVER_WITNESS" not in calls[0][1]["env"]
 
 
 def test_config_and_standalone_option_round_trip(tmp_path):

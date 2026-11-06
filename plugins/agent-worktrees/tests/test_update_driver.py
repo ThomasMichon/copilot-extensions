@@ -59,7 +59,7 @@ def _enqueue_fixture_update(monkeypatch, scope, **values):
         selected.setattr(update_driver, "ensure_worker", lambda *a, **kw: None)
         selected.setattr(boundary.cfg, "active_project", lambda: "example")
         selected.setattr(boundary.cfg, "install_dir", lambda: scope / ".agent-worktrees")
-        selected.setattr(project_update_controller, "configured_for_update", lambda _args: None)
+        selected.setattr(project_update_controller, "probe_for_submission", lambda _args, **_kwargs: False)
         selected.setattr(engine, "_INVOCATION_CWD", scope / "invocation")
         return boundary.cmd_update_request(_args(detach=True, **values))
 
@@ -96,7 +96,7 @@ def queued(monkeypatch, tmp_path):
     monkeypatch.setattr(update_driver, "wait", wait)
     monkeypatch.setattr(boundary.cfg, "active_project", lambda: "example")
     monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
-    monkeypatch.setattr(project_update_controller, "configured_for_update", lambda _args: None, raising=False)
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda _args, **_kwargs: False)
     from agent_worktrees import __main__ as core
     monkeypatch.setattr(core, "_INVOCATION_CWD", None)
     monkeypatch.setattr(update_cli, "cmd_update", forbidden)
@@ -143,8 +143,8 @@ def test_controller_shortcut_keeps_automatic_manager_policy(
     else:
         monkeypatch.delenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", raising=False)
         monkeypatch.setattr(
-            project_update_controller, "configured_for_update",
-            lambda _args: (object(), "tools/update.py"), raising=False,
+            project_update_controller, "probe_for_submission",
+            lambda _args, **_kwargs: True,
         )
     if root_form == "relative":
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")

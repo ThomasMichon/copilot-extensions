@@ -257,8 +257,9 @@ def test_namespaced_payload_controller_routes_before_manager_bootstrap(
     assert routed[1][-4:] == ["--project", "sample", "update", "--force"]
 
 
+@pytest.mark.parametrize("front", ["shell", "driver"])
 def test_controller_probe_timeout_retires_its_descendants(
-    update_entry_case, native_powershell, monkeypatch,
+    update_entry_case, native_powershell, monkeypatch, front,
 ):
     tmp, home, _resolver = update_entry_case
     _use_real_probe_python(monkeypatch)
@@ -310,14 +311,35 @@ def test_controller_probe_timeout_retires_its_descendants(
     monkeypatch.setenv("PROBE_TEST_HELPERS", str(helpers))
     monkeypatch.setenv("PROBE_TEST_ROOT", str(tmp))
     monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
+    if front == "shell":
+        argv = [
+            native_powershell, "-NoProfile", "-File", str(payload / "bin" / "agent-worktrees.ps1"),
+            "--project", "sample", "update",
+        ]
+    else:
+        harness = tmp / "driver-probe.py"
+        paths = [str(Path(entry).resolve()) for entry in sys.path if entry]
+        harness.write_text(
+            "import argparse, sys\n"
+            f"sys.path[:0] = {paths!r}\n"
+            "from agent_worktrees import config, project_update_controller as controller\n"
+            "config.set_active_project('sample')\n"
+            f"controller._probe_command = lambda _project: [sys.executable, '-I', '-S', '-B', {str(slow)!r}]\n"
+            "try:\n"
+            f"    controller.probe_for_submission(argparse.Namespace(), cwd={str(tmp)!r}, timeout=5)\n"
+            "except ValueError as error:\n"
+            "    print(error, file=sys.stderr)\n"
+            "    raise SystemExit(124 if 'probe timed out' in str(error) else 1)\n"
+            "raise SystemExit(1)\n",
+            encoding="utf-8",
+        )
+        argv = [sys.executable, "-I", "-B", str(harness)]
     process = subprocess.Popen(
-        [native_powershell, "-NoProfile", "-File", str(payload / "bin" / "agent-worktrees.ps1"),
-         "--project", "sample", "update"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
     )
     pins = []
     try:
-        deadline = time.monotonic() + 4
+        deadline = time.monotonic() + 10
         ready = tmp / "ready.json"
         while not ready.is_file() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
