@@ -197,8 +197,9 @@ def test_readonly_source_directories_refuse_before_custody(checkout, location):
         path.chmod(0o700)
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows effective delete-access proof")
-def test_source_delete_access_refuses_before_custody(checkout):
+@pytest.mark.skipif(os.name != "nt", reason="Windows effective mutation-access proof")
+@pytest.mark.parametrize("location", ["source-file", "destination-directory"])
+def test_required_mutation_access_refuses_before_custody(checkout, location):
     import ctypes
     from ctypes import wintypes
     from agent_procutil import _daemon_instance_owner as owner
@@ -212,11 +213,13 @@ def test_source_delete_access_refuses_before_custody(checkout):
     api.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
     api.SetFileSecurityW.restype = wintypes.BOOL
     descriptor = ctypes.c_void_p()
+    path = checkout.source / "tracked.txt" if location == "source-file" else checkout.destination.parent
+    denied = "0x10002" if location == "source-file" else "0x2"
     assert api.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        f"D:P(D;;SD;;;{user})(A;;FA;;;{user})", 1, ctypes.byref(descriptor), None,
+        f"D:P(D;;{denied};;;{user})(A;;FA;;;{user})", 1, ctypes.byref(descriptor), None,
     )
     try:
-        assert api.SetFileSecurityW(str(checkout.source / "tracked.txt"), 4 | 0x80000000, descriptor)
+        assert api.SetFileSecurityW(str(path), 4 | 0x80000000, descriptor)
     finally:
         kernel.LocalFree(descriptor)
     with pytest.raises(ValueError, match="delete/write"):
