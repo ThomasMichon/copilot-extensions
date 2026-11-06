@@ -1731,7 +1731,8 @@ jobs:
             -k "(test_gateway_host and not distribution) or test_gateway_enrollment
             or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
             or selected_gateway_application_first_touch_repeat_update_and_stop
-            or test_ssh_machine or test_machine_identity"
+            or selected_ssh_application_first_touch_repeat_update_and_stop
+            or test_gateway_host or test_ssh_machine or test_machine_identity"
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
 
   gateway-host-application-windows:

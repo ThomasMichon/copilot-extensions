@@ -233,7 +233,12 @@ def test_machine_consumer_real_tls_proofs_and_local_writer(
         credential_references, "load_service_credentials",
         lambda **_options: pytest.fail("machine mode acquired a token source"),
     )
-    callers, verified, received = [], [], []
+    callers, verified, received, applied = [], [], [], []
+
+    def complete(revision):
+        assert verified and received
+        assert key(2) in (tmp_path / "authorization" / "authorized_keys.gateway").read_text()
+        applied.append(revision)
 
     def compose(**options):
         caller = bounded_caller(**options)
@@ -276,8 +281,8 @@ def test_machine_consumer_real_tls_proofs_and_local_writer(
             rig.tasks.append(task)
             await asyncio.wait_for(connector.connected.wait(), 3)
             config = SSHMachineConfig.from_dict(value)
-            owner = asyncio.create_task(ssh_machine.run(config, stop=stop))
-            await reached((tmp_path / "authorization" / "authorized_keys.gateway").exists, owner)
+            owner = asyncio.create_task(ssh_machine.run(config, stop=stop, on_applied=complete))
+            await reached(lambda: applied == [directory["revision"]], owner)
             assert key(2) in (tmp_path / "authorization" / "authorized_keys.gateway").read_text()
             identity, context = verified[0]
             assert identity.subject == "caller-a" and identity.audience == AUDIENCE
@@ -399,6 +404,15 @@ def test_real_local_owners_apply_later_join_and_restart_catch_up(tmp_path, monke
 
     async def exercise():
         incoming, positions = asyncio.Queue(), []
+        applied = []
+
+        def complete(revision):
+            assert authorized.exists()
+            if revision == 2:
+                assert key(2) in authorized.read_text()
+                assert any("Host worker-b" in path.read_text()
+                           for path in (tmp_path / "ssh" / "config.d").glob("*.conf"))
+            applied.append(revision)
 
         async def wait(_client, after, *, seconds=25):
             positions.append(after)
@@ -406,14 +420,19 @@ def test_real_local_owners_apply_later_join_and_restart_catch_up(tmp_path, monke
 
         monkeypatch.setattr(SSHDirectoryClient, "wait", wait)
         stop = asyncio.Event()
-        owner = asyncio.create_task(ssh_machine.run(SSHMachineConfig.from_dict(value), stop=stop))
+        owner = asyncio.create_task(ssh_machine.run(
+            SSHMachineConfig.from_dict(value), stop=stop, on_applied=complete,
+        ))
         try:
+            await reached(lambda: positions == [0], owner)
+            assert not applied
             await incoming.put(update(policy, first))
             await reached(authorized.exists, owner)
             assert key(2) not in authorized.read_text()
             await incoming.put(update(policy, full))
             await reached(lambda: key(2) in authorized.read_text(), owner)
             assert positions[:2] == [0, 1]
+            assert applied == [1, 2]
             assert any("Host worker-b" in path.read_text()
                        for path in (tmp_path / "ssh" / "config.d").glob("*.conf"))
         finally:
@@ -422,11 +441,14 @@ def test_real_local_owners_apply_later_join_and_restart_catch_up(tmp_path, monke
         before = authorized.read_bytes(), authorized.stat().st_mtime_ns
         stop = asyncio.Event()
         positions.clear()
-        owner = asyncio.create_task(ssh_machine.run(SSHMachineConfig.from_dict(value), stop=stop))
+        owner = asyncio.create_task(ssh_machine.run(
+            SSHMachineConfig.from_dict(value), stop=stop, on_applied=complete,
+        ))
         try:
             await incoming.put(update(policy, full))
             await reached(lambda: positions == [0, 2], owner)
             assert (authorized.read_bytes(), authorized.stat().st_mtime_ns) == before
+            assert applied == [1, 2, 2]
         finally:
             stop.set()
             await asyncio.wait_for(owner, 5)
@@ -447,11 +469,36 @@ def test_local_owner_failure_is_not_hidden_or_advanced(tmp_path, monkeypatch):
         monkeypatch.setattr(SSHDirectoryClient, "wait", wait)
         monkeypatch.setattr(ssh_machine, "_consumer", lambda _config: denied)
         with pytest.raises(PermissionError, match="selected-local-owner-denied"):
-            await ssh_machine.run(SSHMachineConfig.from_dict(value))
+            await ssh_machine.run(
+                SSHMachineConfig.from_dict(value),
+                on_applied=lambda _revision: pytest.fail("failed local write reported readiness"),
+            )
         lease = ssh_machine._lease(tmp_path / "state")
         lease.acquire()
         lease.release()
     asyncio.run(exercise())
+
+
+def test_failed_completion_observer_settles_watch_without_advancing_notification(tmp_path, monkeypatch):
+    value, policy, directory = configured(tmp_path)
+    positions = []
+
+    async def wait(_client, after, *, seconds=25):
+        positions.append(after)
+        return update(policy, directory)
+
+    def failed(revision):
+        assert revision == directory["revision"]
+        assert (tmp_path / "authorization" / "authorized_keys.gateway").exists()
+        raise RuntimeError("selected-host-publication-failed")
+
+    monkeypatch.setattr(SSHDirectoryClient, "wait", wait)
+    with pytest.raises(RuntimeError, match="selected-host-publication-failed"):
+        asyncio.run(ssh_machine.run(SSHMachineConfig.from_dict(value), on_applied=failed))
+    assert positions == [0]
+    lease = ssh_machine._lease(tmp_path / "state")
+    lease.acquire()
+    lease.release()
 
 
 def test_repeated_cancel_retains_lease_and_signal_handlers_until_watch_settles(

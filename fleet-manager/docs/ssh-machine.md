@@ -14,6 +14,11 @@ installation, planning and diagnostics remain inert. General-purpose node
 hosting, automatic setup selection and managed install/update/uninstall are not
 implemented by this role.
 
+An explicitly selected [installed host](gateway-host.md#selected-ssh-participant)
+can embed this same consumer through the existing Source application lifecycle.
+It requires both `gateway-host` and `ssh-client`; this does not change the
+foreground command or make ordinary thin-client installation active.
+
 ## Configuration and authority
 
 Supply strict bounded `fleet-manager.ssh-client` JSON in one explicitly selected
@@ -125,6 +130,14 @@ be orphaned as a background thread. Embeddings can call
 `ssh_machine.run(config, stop=event)` inside their existing lifetime; signal
 ownership stays with the embedding unless it explicitly selects
 `install_signals=True`.
+
+An embedding may pass `on_applied=callback` to observe the completed directory
+revision. This synchronous notification runs only after the existing local
+transaction succeeds, including a successful unchanged snapshot on restart.
+Starting the watch or a failed writer never emits it. An observer failure stops
+the watch without advancing its notification position; the existing lease and
+cancellation cleanup still settle. The callback observes convergence, not
+enrollment, current connection health or SSH route readiness.
 
 Replacement is explicitly stop-before-start, not a side-by-side/ZDD claim.
 The existing lifecycle owner stops the old foreground role; the OS lease

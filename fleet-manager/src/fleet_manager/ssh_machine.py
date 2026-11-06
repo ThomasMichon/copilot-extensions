@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from functools import partial
 import logging
 import os
@@ -62,14 +63,8 @@ async def _settle(task):
             interrupted = True
 
 
-async def run(
-    config: SSHMachineConfig, *, stop: asyncio.Event | None = None,
-    install_signals: bool = False,
-) -> None:
-    """No enrollment or service action; the embedding owns this foreground task."""
-    stop = stop if stop is not None else asyncio.Event()
-    if stop.is_set():
-        return
+def prepare(config: SSHMachineConfig):
+    """Validate the selected local writer and credentials without network or writes."""
     config = SSHMachineConfig.from_dict(config.to_dict())
     accept = _consumer(config)
     from .credential_references import load_service_credentials, read_credential_reference
@@ -117,6 +112,19 @@ async def run(
         timeout=35, **authentication,
     )
     client = SSHDirectoryClient(caller, namespace=value["namespace"])
+    return accept, client
+
+
+async def run(
+    config: SSHMachineConfig, *, stop: asyncio.Event | None = None,
+    install_signals: bool = False, on_applied: Callable[[int], None] | None = None,
+) -> None:
+    """No enrollment or service action; the embedding owns this foreground task."""
+    stop = stop if stop is not None else asyncio.Event()
+    if stop.is_set():
+        return
+    accept, client = prepare(config)
+    value = config.to_dict()
     lease = _lease(absolute(value["state_dir"]))
     lease.acquire()
     previous, task = {}, None
@@ -129,6 +137,8 @@ async def run(
         # The existing writers are synchronous: cancellation cannot orphan a write.
         result = accept(update)
         _LOG.info("ssh-client-directory-applied revision=%s", result["directory_revision"])
+        if on_applied is not None:
+            on_applied(result["directory_revision"])
 
     try:
         if install_signals:

@@ -29,11 +29,12 @@ async def run(root: Path, nonce: str) -> None:
 
 
 async def _run(root: Path, nonce: str, slot: Path, selection: dict) -> None:
-    from aiohttp import web
+    if selection["role"] == "ssh-client":
+        await _run_ssh(root, nonce, slot, selection)
+        return
     from zdd.diagnostics import process_start_time
     from .gateway_service_server import STATE, start
     from .gateway_host_start import require_launch
-    from .gateway_local_handler import settled
 
     require_launch(root, slot.name, nonce)
     listener, ledger = host.prepare(root, selection)
@@ -74,35 +75,7 @@ async def _run(root: Path, nonce: str, slot: Path, selection: dict) -> None:
                 "revision": state.status().revision,
             }
 
-        async def handler(request):
-            token = request.headers.get("X-Fleet-Host", "")
-            if (
-                "Origin" in request.headers or not token.isascii()
-                or not hmac.compare_digest(token, nonce)
-            ):
-                raise web.HTTPForbidden()
-            if request.path == "/stop":
-                value = await request.json()
-                selected = host.selected_version(root)
-                if (
-                    type(value) is not dict or set(value) != {"generation", "replacement"}
-                    or value["generation"] != slot.name
-                    or selected != (value["replacement"] or slot.name)
-                    or value["replacement"] == slot.name
-                ):
-                    raise web.HTTPConflict()
-                stopping.set()
-            elif request.path != "/status":
-                raise web.HTTPNotFound()
-            return web.json_response(status())
-
-        app = web.Application(client_max_size=1024)
-        app.router.add_post("/{action}", handler)
-        control = web.AppRunner(app, access_log=None, shutdown_timeout=2)
-        await control.setup()
-        site = web.TCPSite(control, "127.0.0.1", 0)
-        await site.start()
-        await settled(lambda: _publish(root, slot, nonce, identity, control.addresses[0][1]))
+        control = await _control(root, slot, nonce, identity, stopping, status)
         while not stopping.is_set():
             try:
                 await asyncio.wait_for(stopping.wait(), timeout=.5)
@@ -131,6 +104,121 @@ async def _run(root: Path, nonce: str, slot: Path, selection: dict) -> None:
                 cancelled = True
         await cleanup
         if cancelled:
+            raise asyncio.CancelledError
+
+
+async def _control(root, slot, nonce, identity, stopping, status):
+    from aiohttp import web
+    from .gateway_local_handler import settled
+
+    async def handler(request):
+        token = request.headers.get("X-Fleet-Host", "")
+        if (
+            "Origin" in request.headers or not token.isascii()
+            or not hmac.compare_digest(token, nonce)
+        ):
+            raise web.HTTPForbidden()
+        if request.path == "/stop":
+            value = await request.json()
+            selected = host.selected_version(root)
+            if (
+                type(value) is not dict or set(value) != {"generation", "replacement"}
+                or value["generation"] != slot.name
+                or selected != (value["replacement"] or slot.name)
+                or value["replacement"] == slot.name
+            ):
+                raise web.HTTPConflict()
+            stopping.set()
+        elif request.path != "/status":
+            raise web.HTTPNotFound()
+        return web.json_response(status())
+
+    app = web.Application(client_max_size=1024)
+    app.router.add_post("/{action}", handler)
+    control = web.AppRunner(app, access_log=None, shutdown_timeout=2)
+    await control.setup()
+    try:
+        await web.TCPSite(control, "127.0.0.1", 0).start()
+        await settled(lambda: _publish(root, slot, nonce, identity, control.addresses[0][1]))
+        return control
+    except BaseException:
+        await control.cleanup()
+        raise
+
+
+async def _run_ssh(root, nonce, slot, selection):
+    from zdd.diagnostics import process_start_time
+    from .gateway_host_start import require_launch
+    from .ssh_machine import _settle, run
+
+    require_launch(root, slot.name, nonce)
+    config, _ = host.prepare(root, selection)
+    startup = host.startup_digest(selection)
+    birth = process_start_time(os.getpid())
+    if birth is None:
+        raise PlanError("SSH host native identity is unavailable")
+    identity = {
+        "pid": os.getpid(), "birth": birth, "generation": slot.name,
+        "selection": host.selection_digest(selection),
+    }
+    stopping, converged = asyncio.Event(), asyncio.Event()
+    revision = 0
+
+    def applied(value):
+        nonlocal revision
+        revision = value
+        converged.set()
+
+    consumer = asyncio.create_task(run(config, stop=stopping, on_applied=applied))
+    initial = asyncio.create_task(converged.wait())
+    control = None
+    try:
+        await asyncio.wait({consumer, initial}, return_when=asyncio.FIRST_COMPLETED)
+        if consumer.done():
+            await consumer
+            raise PlanError("SSH host ended before directory convergence")
+        if host.startup_digest(selection) != startup:
+            raise PlanError("SSH startup inputs changed before readiness")
+
+        def status():
+            return {
+                **identity, "schema": "fleet-manager.gateway-host-control", "version": 1,
+                "role": "ssh-client", "origin": config.to_dict()["gateway_origin"],
+                "startup": startup, "revision": revision,
+                "ready": converged.is_set() and not stopping.is_set() and not consumer.done(),
+            }
+
+        control = await _control(root, slot, nonce, identity, stopping, status)
+        while not stopping.is_set():
+            if consumer.done():
+                await consumer
+                raise PlanError("SSH host consumer ended without withdrawal")
+            try:
+                await asyncio.wait_for(stopping.wait(), timeout=.5)
+            except asyncio.TimeoutError:
+                if host.selected_version(root) != slot.name:
+                    stopping.set()
+    finally:
+        stopping.set()
+        initial.cancel()
+        consumer.cancel()
+
+        async def shutdown():
+            try:
+                results, _ = await _settle(consumer)
+                await asyncio.gather(initial, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                        raise result
+            finally:
+                if control is not None:
+                    await control.cleanup()
+
+        results, interrupted = await _settle(asyncio.create_task(shutdown()))
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise result
+        if interrupted:
             raise asyncio.CancelledError
 
 

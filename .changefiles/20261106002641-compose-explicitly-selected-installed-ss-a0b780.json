@@ -1,0 +1,9 @@
+{
+  "comment": "Compose explicitly selected installed SSH participants through the existing host lifecycle after authenticated directory convergence.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

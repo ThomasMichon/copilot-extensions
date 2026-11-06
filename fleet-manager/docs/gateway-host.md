@@ -7,6 +7,12 @@ installer, deployment manager, SSH writer or enrollment issuer. Ordinary
 Selecting `service-gateway` alone supplies the foreground SDK, not a resident
 role.
 
+The same installed lifetime can host one explicitly selected SSH participant
+when the application selects both `gateway-host` and `ssh-client`. This does
+not start a second Gateway server or install a second lifecycle owner.
+`ssh-client` alone remains foreground-only. The physical installation selects
+one hosted role, not simultaneous Gateway and participant lifetimes.
+
 The selected executable reports this additive contract with
 `fleet-manager gateway-host capabilities`: `fleet-manager.gateway-host-contract`,
 version 1, with `selected-application-host-v1` and `native-owner-stop-v1`.
@@ -52,6 +58,31 @@ unsupported, expired or changed required input is a failure, never client-only
 success. Hosting does not acquire a provider identity, issue a key or grant a
 new machine permission to join.
 
+### Selected SSH participant
+
+Use the same owner-private `gateway-host.json`, with configuration version 2:
+
+```json
+{
+  "schema": "fleet-manager.gateway-host",
+  "version": 2,
+  "role": "ssh-client",
+  "configuration": "<absolute private fleet-manager.ssh-client JSON path>",
+  "authority": "example-authority",
+  "installation": "example-installation"
+}
+```
+
+The referenced [SSH configuration](ssh-machine.md) keeps its existing v1
+token/proof or v2 machine-key meaning and provider-owned references. Preflight
+validates the existing local writer scopes and credentials without network,
+lease creation or profile writes. The SSH lease and lifecycle state must be
+separate. No enrollment, credential acquisition or materialization occurs.
+Capability output additively advertises both host configuration versions and
+each role's required extras. Older strict v1 host readers refuse v2; rollback
+must not translate it into Gateway serving or foreground-only success.
+Neither configuration version is retired or automatically migrated.
+
 ## Lifetime and operations
 
 `fleet-manager gateway-host status|start|stop` addresses the selected physical,
@@ -68,6 +99,19 @@ and requests exact stop. Its random capability is kept out of argv and public
 Gateway routes; browser-origin control requests are rejected. Stop retains a
 native process reference and reports success only after confirmed exit.
 Deleting configuration is not withdrawal or uninstall.
+
+For SSH, readiness publication follows the first authenticated snapshot and
+complete synchronous profile/authorization transaction. It is not process
+creation, watch startup, new enrollment or proof of an SSH route. Control
+reports the last applied directory revision; it does not assert a continuously
+connected remote channel. Authentication or local writer failure ends the
+consumer and closes control. Stop and repeated cancellation settle that original
+watch and its local lease before releasing the installed runtime retention.
+An unchanged install reuses the same ready owner. Key, local policy, target-login
+identity, CA or configuration changes invalidate reuse; token renewal stays with
+the existing per-admission reference reader and is not a host restart trigger.
+Selected-generation replacement still observes the existing exact stop and
+lease exclusion; this does not claim gap-free notification handoff.
 
 Prelaunch intent is written before process creation and settled by that exact
 child's readiness publication or confirmed launcher cleanup. If the launcher
@@ -132,3 +176,11 @@ source-independent execution, unchanged repeat, failed candidate
 preflight, a distinct updated profile generation and exact native stop. That fixture is
 not release-feed acquisition, provider authentication, deployment or fleet
 adoption evidence.
+
+The SSH variant uses the same actual offline application constructor and
+installer against a disposable authenticated TLS Gateway with synthetic machine
+keys. Its packet exercises first touch, source-independent repeat, failed
+candidate preservation, selected update, unchanged local writer state and exact
+native stop. Focused host controls additionally refuse readiness before directory
+completion and on writer failure. This is not native ARM64, provider enrollment,
+reboot startup or actual adopter rollout evidence.

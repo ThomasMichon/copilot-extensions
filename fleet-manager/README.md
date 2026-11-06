@@ -34,6 +34,9 @@ The separately selected [installed Gateway host](docs/gateway-host.md) composes
 that SDK with the existing Source/application installer and an app-owned
 lifetime. It requires explicit private host inputs and the `gateway-host`
 dependency profile; ordinary thin-client installation remains inert.
+With the additional `ssh-client` profile, that same lifetime can instead host
+one explicitly configured SSH participant. Readiness follows authenticated
+directory convergence through the existing local writers, not process creation.
 
 ```text
 fleet-manager plan --template recommended.json --config adopter.json --inventory live.json --fleet-id example --machine-limit 5
