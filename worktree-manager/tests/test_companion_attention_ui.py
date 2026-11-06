@@ -9,6 +9,7 @@ from textual.widgets import Button, Static, TabbedContent
 from worktree_manager import mux_companion as companion
 from worktree_manager import companion_lifecycle as lifecycle
 from test_companion_attention import envelope
+from test_companion_agenda_live import until
 
 
 def data(session_id="session-a"):
@@ -172,8 +173,8 @@ def test_refresh_clears_nudge_and_late_read_cannot_replace_new_head(monkeypatch)
             async with app.run_test() as pilot:
                 assert await asyncio.to_thread(entered.wait, 2)
                 app.action_refresh()
-                await pilot.pause()
-                await app.workers.wait_for_complete()
+                await until(pilot, lambda: app._data.attention is not None
+                            and app._data.attention["session_id"] == "successor")
                 assert app._data.attention["session_id"] == "successor"
                 release.set()
                 assert await asyncio.to_thread(finished.wait, 2)
@@ -242,7 +243,9 @@ def test_refresh_replacement_remains_singleflight_across_another_poll(monkeypatc
                 await pilot.pause()
                 assert len(calls) == 2
                 release.set()
-                await app.workers.wait_for_complete()
+                await until(pilot, lambda: app._data.attention is not None
+                            and app._data.attention["rest"] == "idle"
+                            and not app._attention_busy)
                 assert app._data.attention["rest"] == "idle"
                 assert not app._attention_busy
                 assert app._attention_next > companion.time.monotonic()

@@ -19,7 +19,7 @@ import psutil
 import pytest
 
 from worktree_manager import companion_pane, mux_mapping_registry
-from _companion_joined_fixtures import managed_join
+from _companion_joined_fixtures import managed_join, native_state_reader
 from test_companion_bridge_session_source import semantic_peer as semantic_peer
 from test_companion_current_requests import actual_waiters as actual_waiters
 from test_companion_joined_tmux import source_entrypoint
@@ -133,12 +133,17 @@ def test_native_windows_three_owner_history_live_and_same_cli(
 
             def app_state() -> dict[str, Any]:
                 path = peer["checkout"].parent / "native-state.json"
-                return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+                try:
+                    with native_state_reader(path) as stream:
+                        return json.load(stream)
+                except FileNotFoundError:
+                    return {}
 
             def wait_for(
                 condition: Callable[[], bool], describe: Callable[[], dict[str, Any]] | None = None,
+                *, deadline: float | None = None,
             ) -> None:
-                deadline = time.monotonic() + 15
+                deadline = time.monotonic() + 15 if deadline is None else deadline
                 while time.monotonic() < deadline:
                     assert not client.exited(client.process.process), client.output.decode("utf-8", "replace")
                     assert client.read_error is None, client.read_error
@@ -211,9 +216,18 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                 focus("Select")
                 wait_for(lambda: "Bridge feed" in screen()
                          and app_state().get("bridge_members", 0) > 0)
-                client.send(b"\r\x1b[B\r")
+                selection_deadline = time.monotonic() + 15
+                client.send(b"\r")
+                wait_for(lambda: app_state().get("bridge_select", {}).get("expanded") is True
+                         and app_state().get("focus") == "SelectOverlay",
+                         deadline=selection_deadline)
+                client.send(b"\x1b[B")
+                wait_for(lambda: app_state().get("bridge_select", {}).get("highlighted") == 1,
+                         deadline=selection_deadline)
+                client.send(b"\r")
                 wait_for(lambda: "140 starts (observed range)" in screen()
-                         and "Bridge: retained / observed" in screen())
+                         and "Bridge: retained / observed" in screen(),
+                         deadline=selection_deadline)
                 focus("CollapsibleTitle")
                 client.send(b"\r")
                 wait_for(lambda: "\u25b6 Evidence" in screen() and "Tool started" in screen())

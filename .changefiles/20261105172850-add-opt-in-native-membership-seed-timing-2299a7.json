@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in native membership-seed diagnostics and preserve atomic Windows fixture publication without changing capture budgets or retry semantics",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -2565,6 +2565,33 @@ and unknown birth stays unsettled. All source commands, readers and observer
 must still exit before further input is sent to the original CLI. The same
 run's separate 50 ms membership-seed setup failure is retained under #8811,
 not waived or hidden by this exit-check correction.
+The manual Windows Companion packet enables the fixture-only
+`COMPANION_MEMBERSHIP_PROFILE=1` diagnostic. It profiles the existing initial
+`source_for` call, reports total wall and current-thread CPU time plus the top
+25 cumulative call costs with directory paths stripped, and preserves the
+original result or exception. It does not retry, prewarm, replace an owner,
+change the 50 ms/VM budgets or make a failed read pass. Other runs remain
+unprofiled unless explicitly selected. Portable controls preserve one call
+and exact result/exception identity in both modes. Profiled timings include
+instrumentation and are diagnostic evidence, not native performance acceptance.
+The fixture's state reader also opens its Windows handle with read/write/delete
+sharing, matching atomic publication rather than temporarily denying its
+publisher's DELETE access. A native control holds the publisher's DELETE-access
+handle: the old ordinary reader refuses while the shared reader obtains complete
+JSON. After the publisher closes, replacement and a complete new read succeed.
+This does not claim that `MoveFileEx` can replace a still-open destination.
+Only a missing publication is deferred. Access, sharing and malformed-JSON
+errors remain failures; there is no permission-error retry or deadline reset.
+The blocked attention-refresh controls wait for the actual successor observation
+and single-flight completion, not `wait_for_complete()` over the intentionally
+cancelled predecessor worker. They still release and observe the late old read
+and assert it cannot replace the new head or its idle result. This avoids a
+test-only `WorkerCancelled` race without changing production cancellation.
+Actual keyboard selection waits for the fixture-observed menu expansion and
+highlight before committing the session choice, rather than batching keys across
+asynchronous widget transitions. Expansion, highlight and source admission share
+the original single 15-second deadline. These observations do not set widget
+state or replace real client input.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

@@ -14,11 +14,101 @@ from types import SimpleNamespace
 import pytest
 
 from agent_procutil import no_window_kwargs
+from _companion_joined_fixtures import native_state_reader
 from test_companion_bridge_codec import OWNER
-from test_companion_bridge_session_source import semantic_peer as semantic_peer
+from test_companion_bridge_session_source import membership_seed, semantic_peer as semantic_peer
 from test_companion_joined_tmux import source_entrypoint
 from test_companion_joined_psmux import live_reader_pids, owner_commands_settled
 from worktree_manager import agenda_transport, companion_bridge_source, mux_companion
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows delete-sharing semantics")
+def test_native_state_reader_shares_publisher_delete_access_and_complete_reads(
+    tmp_path: Path,
+) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    target, replacement = tmp_path / "state.json", tmp_path / "next.json"
+    target.write_text('{"revision":1}', encoding="utf-8")
+    replacement.write_text('{"revision":2}', encoding="utf-8")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    publisher = kernel.CreateFileW(str(target), 0x10000, 0x7, None, 3, 0x80, None)
+    assert publisher != wintypes.HANDLE(-1).value, ctypes.WinError(ctypes.get_last_error())
+    try:
+        with pytest.raises(PermissionError):
+            target.open("rb")
+        with native_state_reader(target) as stream:
+            assert json.load(stream) == {"revision": 1}
+    finally:
+        assert kernel.CloseHandle(publisher)
+    replacement.replace(target)
+    with native_state_reader(target) as stream:
+        assert json.load(stream) == {"revision": 2}
+
+
+@pytest.mark.parametrize("failure", [
+    FileNotFoundError("not published"), PermissionError("access denied"),
+    json.JSONDecodeError("invalid state", "", 0),
+])
+def test_native_state_observation_only_defers_a_missing_publication(
+    tmp_path: Path, failure: Exception,
+) -> None:
+    source = ast.parse(Path(__file__).with_name("test_companion_joined_psmux.py").read_text())
+    state = next(node for node in ast.walk(source)
+                 if isinstance(node, ast.FunctionDef) and node.name == "app_state")
+
+    def reader(_path):
+        raise failure
+
+    namespace = {
+        "Any": object, "json": json, "native_state_reader": reader,
+        "peer": {"checkout": tmp_path / "checkout"},
+    }
+    exec(compile(ast.Module(body=[state], type_ignores=[]), "<native state>", "exec"), namespace)
+    if isinstance(failure, FileNotFoundError):
+        assert namespace["app_state"]() == {}
+    else:
+        with pytest.raises(type(failure)) as caught:
+            namespace["app_state"]()
+        assert caught.value is failure
+
+
+@pytest.mark.parametrize("profile", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
+def test_membership_seed_diagnostics_preserve_one_call_and_original_result(
+    profile: bool, failed: bool,
+) -> None:
+    manager, result, failure = object(), object(), ValueError("capture-budget-exhausted")
+    calls, reports = [], []
+
+    def source_for(actual_manager, owner):
+        calls.append((actual_manager, owner))
+        if failed:
+            raise failure
+        return result
+
+    if failed:
+        with pytest.raises(ValueError) as caught:
+            membership_seed(manager, OWNER, source_for, reports.append if profile else None)
+        assert caught.value is failure
+    else:
+        assert membership_seed(
+            manager, OWNER, source_for, reports.append if profile else None,
+        ) is result
+    assert calls == [(manager, OWNER)]
+    assert bool(reports) is profile
+    if profile:
+        assert len(reports) == 1
+        assert ("outcome=error" if failed else "outcome=seeded") in reports[0]
+        assert "wall_ms=" in reports[0] and "thread_ms=" in reports[0]
 
 
 @pytest.mark.parametrize(
@@ -41,6 +131,7 @@ def test_observer_retries_only_native_sharing_without_advancing(
     callbacks = []
     timeline = SimpleNamespace(
         size=(80, 20), window=SimpleNamespace(follow_live=True, events=[], sources={}),
+        expanded=False, value="membership", query_one=lambda _kind: SimpleNamespace(highlighted=0),
     )
     app = SimpleNamespace(
         size=(80, 24), focused=None, query_one=lambda _kind: timeline,
@@ -159,7 +250,7 @@ def test_native_client_deadline_is_checked_after_the_blocking_poll(
     source = ast.parse(Path(__file__).with_name(filename).read_text(encoding="utf-8"))
     wait = next(node for node in ast.walk(source)
                 if isinstance(node, ast.FunctionDef) and node.name == "wait_for")
-    clock = [0.0]
+    clock = [5.0 if filename == "test_companion_joined_psmux.py" else 0.0]
     client = SimpleNamespace(
         process=SimpleNamespace(process=1), output=b"", read_error=None, exited=lambda _handle: False,
     )
@@ -177,10 +268,14 @@ def test_native_client_deadline_is_checked_after_the_blocking_poll(
         return True
 
     if observed_at < 15:
-        namespace["wait_for"](observe)
+        namespace["wait_for"](
+            observe, **({"deadline": 15} if filename == "test_companion_joined_psmux.py" else {}),
+        )
     else:
         with pytest.raises(pytest.fail.Exception):
-            namespace["wait_for"](observe)
+            namespace["wait_for"](
+                observe, **({"deadline": 15} if filename == "test_companion_joined_psmux.py" else {}),
+            )
 
 
 def test_native_cleanup_timeout_does_not_query_the_departed_observer(tmp_path: Path) -> None:

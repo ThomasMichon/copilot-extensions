@@ -68,10 +68,13 @@ def observed_mount(app):
     previous=[None]
     def observe():
         timeline=app.query_one(SubwayTimeline)
+        bridge=app.query_one('#bridge-feed')
         value=json.dumps({{
             'app_cells':list(app.size),'timeline_cells':list(timeline.size),
             'focus':type(app.focused).__name__,'follow_live':timeline.window.follow_live,
             'bridge_members':len(app._bridge_attachment._members),
+            'bridge_select':{{'expanded':bridge.expanded,'value':str(bridge.value),
+                             'highlighted':bridge.query_one('SelectOverlay').highlighted}},
             'event_count':len(timeline.window.events),
             'sources':[{{'provider':state.token.identity.provider.value,
                         'before':state.before is not None,
