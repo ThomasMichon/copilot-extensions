@@ -109,7 +109,9 @@ decorator afterward.
 
 The helper is deliberately conservative, not a complete provider Markdown
 renderer. Unterminated root fences, unbalanced/nested literal HTML comments
-and ambiguous outer boundaries refuse. Final native rendering/body preservation
+and ambiguous outer boundaries refuse. Backtick fence info strings containing
+backticks also refuse; tilde fence info strings retain their literal backticks.
+Final native rendering/body preservation
 still needs the publisher/provider's own qualification.
 
 The final body has a 64 KiB maximum, optionally lowered with integer

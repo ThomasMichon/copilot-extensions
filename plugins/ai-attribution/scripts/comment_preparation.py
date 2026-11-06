@@ -134,6 +134,8 @@ def _outer_markers(draft: str) -> list[str]:
                 continue
             opening = _FENCE_START.match(line)
             if opening:
+                if opening[1][0] == "`" and "`" in line[opening.end():]:
+                    raise ProfileError("invalid backtick fence info string")
                 fence = opening[1][0], len(opening[1])
                 continue
             literal = _mask_inline_code(line)

@@ -201,6 +201,20 @@ def test_signature_preserves_leading_quoted_metadata_example_and_retry(indent: s
     assert prepare(first["body"], previous=first) == first
 
 
+@pytest.mark.parametrize("info", ["text`invalid", "text\\`invalid"])
+def test_invalid_backtick_fence_cannot_hide_a_foreign_marker(info: str) -> None:
+    draft = f"Substantive reply.\n\n```{info}\n<!-- agent-comment:v1 c=foreign w=foreign -->\n```"
+    with pytest.raises(profile.ProfileError, match="backtick fence"):
+        prepare(draft)
+
+
+def test_tilde_fence_info_may_contain_backticks() -> None:
+    draft = "~~~text`example\n<!-- agent-comment:v1 c=example w=example -->\n~~~"
+    first = prepare(draft)
+    assert first["body"].startswith("[AI-assisted] \n\n" + draft)
+    assert prepare(first["body"], previous=first) == first
+
+
 @pytest.mark.parametrize("draft", [
     "Review.\n\n<!-- agent-comment:v2 unknown -->",
     "Review.\n\n<!-- agent-comment:v1 c=foreign w=foreign -->",
