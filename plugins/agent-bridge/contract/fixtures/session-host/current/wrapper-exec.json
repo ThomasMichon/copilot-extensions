@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "158f2036a62ce48aca7f0f0638c3760e0d84fef5",
+    "commit": "59f44149a92a601cb6b5148cc810bfc1ebc01add",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "libs/copilot-driver-core/src/agent_remote_driver/preference_exec.py",
@@ -18,6 +18,6 @@
   "consent_base64": "AQ==",
   "refused_exit_code": 78,
   "exec_preserves_pid": true,
-  "component_digest": "4b4828768ec40e7d03552a298355e33f768b4a69c32562ecb086619a2c52ba0d",
+  "component_digest": "8e482285e3a454ae331068bff6cdd04007eec9a79ae64ff074c7a2cf7daf614e",
   "capability_scope": "Linux target-local final context; actual ACP readback remains mandatory"
 }

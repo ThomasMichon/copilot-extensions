@@ -557,3 +557,9 @@ fixture cleanup. F/E9 lint passes. The current authority vectors need an
 exact-commit refresh for these staged-source changes, followed by updated
 publication, exact-head review and required CI. Desktop visibility, headed
 convergence and the rest of the parent validation remain open.
+
+The exact-source current capture and readback now pass for this correction.
+Full contract validation passes both contracts and 1,022 fixtures; all 26
+capture/frozen-corpus controls pass in 8.58 seconds. No historical capture
+was rewritten. Updated publication and the new exact-head review/CI remain
+the immediate Phase 2 merge gates.
