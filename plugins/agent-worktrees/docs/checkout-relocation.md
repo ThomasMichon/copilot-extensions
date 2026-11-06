@@ -55,6 +55,11 @@ checkout-local agendas and configured index participation are not qualified in
 v1. Missing/malformed operational metadata and immutable creation receipts also
 refuse. These restrictions do not finalize, abandon, clean or rewrite anything.
 They are staged support boundaries, not a permanent exclusion of inactive WIP.
+POSIX admission and retirement require a bounded native mount-table inventory;
+mounted checkout roots/subtrees (including same-device bind mounts) refuse.
+The current inventory reader uses Linux `/proc/self/mountinfo`; a platform
+without that readable native table refuses rather than assuming no mounts.
+Cancellation inventories the owned stage before deleting it as well.
 Ignored nested Git checkouts/worktrees also refuse before custody; only the
 outer linked checkout's Git registration is qualified. Legacy and itemized
 open/pending-transfer follow-ups both count as outstanding responsibility.

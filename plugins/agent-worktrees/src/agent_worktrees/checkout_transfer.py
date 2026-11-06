@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import os
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -13,6 +14,25 @@ from agent_procutil.owned_process import run_caller_owned
 
 MAX_ENTRIES = 10_000
 MAX_BYTES = 1024 * 1024 * 1024
+
+
+def _require_no_mounts(root: Path) -> None:
+    with Path("/proc/self/mountinfo").open("rb") as stream:
+        raw = stream.read(MAX_BYTES // 1024 + 1)
+    if not raw or len(raw) > MAX_BYTES // 1024:
+        raise ValueError("native mount inventory is unavailable or exceeds its budget")
+    entries = raw.decode("utf-8", errors="surrogateescape").splitlines()
+    if len(entries) > MAX_ENTRIES:
+        raise ValueError("native mount inventory exceeds its entry budget")
+    for line in entries:
+        fields = line.split()
+        if len(fields) < 10 or "-" not in fields[6:]:
+            raise ValueError("native mount inventory is malformed")
+        mount = Path(re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), fields[4]))
+        if not mount.is_absolute():
+            raise ValueError("native mount inventory is malformed")
+        if mount == root or root in mount.parents:
+            raise ValueError("relocation v1 refuses mounted checkout roots and subtrees")
 
 
 def _windows_access(path: Path, access: int) -> None:
@@ -75,6 +95,8 @@ def require_file_mutation(path: Path) -> None:
 
 
 def manifest(root: Path) -> dict[str, tuple]:
+    if os.name != "nt":
+        _require_no_mounts(root)
     result = {}
     total = 0
     for index, path in enumerate(itertools.chain((root,), root.rglob("*"))):

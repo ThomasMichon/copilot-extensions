@@ -266,6 +266,7 @@ def _slugify(text: str) -> str:
 
 def cmd_move(args: argparse.Namespace) -> int:
     from . import checkout_relocation
+    from yaml import YAMLError
 
     if args.capabilities:
         if args.worktree_id or args.destination or args.apply or args.abort:
@@ -285,7 +286,7 @@ def cmd_move(args: argparse.Namespace) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     except (
-        ValueError, OSError, RuntimeError, git_ops.GitError,
+        ValueError, OSError, RuntimeError, git_ops.GitError, YAMLError,
         checkout_relocation.execution_spaces.ExecutionSpaceError,
     ) as exc:
         print(json.dumps({"schema": checkout_relocation.SCHEMA, "error": str(exc), "complete": False}))

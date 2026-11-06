@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import shutil
 import sqlite3
@@ -516,6 +517,104 @@ def test_malformed_workspace_yaml_returns_structured_cli_refusal(checkout):
     assert "malformed YAML" in json.loads(result.stdout)["error"]
     assert "Traceback" not in result.stderr
     assert not move_state.journal_path(checkout.record.yaml_path).exists()
+
+
+@pytest.mark.parametrize("content", ["[]", "worktree_id: ["])
+@pytest.mark.parametrize("pending", [False, True])
+def test_malformed_ledger_returns_structured_cli_refusal(checkout, monkeypatch, content, pending):
+    journal = move_state.journal_path(checkout.record.yaml_path)
+    if pending:
+        def interrupted(*args):
+            raise OSError("injected copy interruption")
+        with monkeypatch.context() as injection:
+            injection.setattr(relocation.transfer, "copy", interrupted)
+            with pytest.raises(OSError, match="injected"):
+                _move(checkout)
+    before = journal.read_bytes() if journal.exists() else None
+    checkout.record.yaml_path.write_text(content)
+    env = dict(os.environ, AGENT_HOME=str(checkout.home), USERPROFILE=str(checkout.home), HOME=str(checkout.home))
+    result = run_caller_owned(
+        [sys.executable, "-m", "agent_worktrees", "--project", "sample", "move",
+         checkout.record.worktree_id, "--to", str(checkout.destination), "--json", *(["--apply"] if pending else [])],
+        env=env, cwd=checkout.home, timeout=60,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 1
+    report = json.loads(result.stdout)
+    assert report["error"] and report["complete"] is False
+    assert "Traceback" not in result.stderr
+    assert (journal.read_bytes() if journal.exists() else None) == before
+    assert checkout.record.yaml_path.read_text() == content
+    assert checkout.source.exists() and not checkout.destination.exists()
+
+
+@pytest.mark.parametrize("binding", ["root", "directory", "file"])
+def test_mount_inventory_refuses_same_device_bindings_with_escaped_paths(tmp_path, monkeypatch, binding):
+    root = tmp_path / "checkout with space"
+    root.mkdir()
+    nested = root if binding == "root" else root / binding
+    if binding == "directory":
+        nested.mkdir()
+    elif binding == "file":
+        nested.write_bytes(b"preserved")
+    assert nested.stat().st_dev == root.stat().st_dev
+    mount = nested.as_posix().replace(" ", r"\040")
+    raw = f"1 0 0:1 / {root.anchor} rw - rootfs rootfs rw\n2 1 0:1 /backing {mount} rw - rootfs rootfs rw\n".encode()
+    monkeypatch.setattr(Path, "open", lambda *args, **kwargs: io.BytesIO(raw))
+    with pytest.raises(ValueError, match="mounted checkout"):
+        relocation.transfer._require_no_mounts(root)
+
+
+def test_mount_inventory_failure_and_unrelated_mounts(tmp_path, monkeypatch):
+    root = tmp_path / "checkout"
+    raw = f"1 0 0:1 / {root.anchor} rw - rootfs rootfs rw\n".encode()
+    monkeypatch.setattr(Path, "open", lambda *args, **kwargs: io.BytesIO(raw))
+    relocation.transfer._require_no_mounts(root)
+    raw = b"malformed\n"
+    with pytest.raises(ValueError, match="malformed"):
+        relocation.transfer._require_no_mounts(root)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux private mount-namespace qualification")
+def test_native_bind_mount_refuses_without_touching_backing_data(tmp_path):
+    unshare, mount, umount = (shutil.which(name) for name in ("unshare", "mount", "umount"))
+    if not all((unshare, mount, umount)):
+        pytest.skip("native private mount-namespace tools are unavailable")
+    root, backing = tmp_path / "checkout", tmp_path / "backing"
+    root.mkdir()
+    backing.mkdir()
+    (root / "ignored").mkdir()
+    (backing / "keep").write_bytes(b"outside checkout")
+    script = """
+import subprocess, sys
+from pathlib import Path
+from agent_worktrees.checkout_transfer import manifest
+root, backing, mount, umount = sys.argv[1:]
+root, backing = Path(root), Path(backing)
+binding = root / "ignored"
+subprocess.run([mount, "--bind", str(backing), str(binding)], check=True)
+try:
+    assert binding.stat().st_dev == root.stat().st_dev
+    try:
+        manifest(root)
+    except ValueError as exc:
+        assert "mounted checkout" in str(exc)
+    else:
+        raise AssertionError("same-device bind mount was admitted")
+    assert (backing / "keep").read_bytes() == b"outside checkout"
+finally:
+    subprocess.run([umount, str(binding)], check=True)
+"""
+    result = run_caller_owned(
+        [unshare, "--user", "--map-root-user", "--mount", "--propagation", "private", "--fork",
+         sys.executable, "-c", script, str(root), str(backing), mount, umount],
+        cwd=tmp_path, timeout=20, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    if result.returncode and "unshare:" in result.stderr and "Operation not permitted" in result.stderr:
+        pytest.skip("kernel policy does not admit an unprivileged private mount namespace")
+    assert result.returncode == 0, result.stderr
+    assert (backing / "keep").read_bytes() == b"outside checkout"
+    assert not list((root / "ignored").iterdir())
 
 
 @pytest.mark.parametrize("phase", ["git-repair", "permissions", "ledger", "retirement", "durability"])

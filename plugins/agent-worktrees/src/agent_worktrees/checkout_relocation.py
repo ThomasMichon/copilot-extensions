@@ -456,6 +456,7 @@ def abort(worktree_id: str, destination: str, config) -> dict:
             blocker = procs.checkout_retirement_blocker(str(stage))
             if blocker:
                 raise ValueError(blocker)
+            transfer.manifest(stage)
         report["caller"] = state.caller()
         report["phase"] = "cancelling"
         state.write(ledger, report)
