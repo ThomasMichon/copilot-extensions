@@ -1068,6 +1068,21 @@ callback an implicit credential store.
   consumer qualification, retaining allocation, correlation and separately
   authorized adoption as unfinished work.
 
+### 2026-11-06 - Land the bounded projection repair and retain release proof
+
+- #11167 merged as `3f29614f05a93fdd979a9e71b2735aab297aa768` after
+  exact-head Copilot approval with no findings and required CI `42312927520`
+  passed. The source worktree reconciled its merged PR and pulled forward
+  through the normal managed path.
+- Current parent digest and touched-section readback confirm all eighty-three
+  open Plan/Validation items remain; no parent requirement changed or closed.
+  The native/Dispatch journal outcomes now landed with this meaningful source
+  contribution, rather than a journal-only PR.
+- Keep #11160 open until normal hosted candidate composition confirms its
+  blocker cleared. Post-merge CI `42313550089` is in progress; release and
+  any separately authorized installed proof remain pending. No retry, runtime
+  rollout, resource release or custody override follows from this merge.
+
 ### 2026-11-06 - Repair the actual release-candidate projection blocker
 
 - The repair in #10953 is still pending release. Promotion run `42309816584`
