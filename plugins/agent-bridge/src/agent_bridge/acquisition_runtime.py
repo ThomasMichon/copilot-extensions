@@ -733,10 +733,12 @@ class AcquisitionRuntime:
             "acquisition_pending", "prepared attempt requires owner reconciliation"
         )
 
-    async def inspect_pending(self, delivery_id: str) -> dict[str, Any]:
+    async def inspect_pending(
+        self, delivery_id: str, *, worktree_writer: bool = False,
+    ) -> dict[str, Any]:
         """Report recovery facts without consuming, launching or delivering."""
         rows = self.db.execute_read(
-            "SELECT a.worktree_id,a.state,e.stage,e.data_json FROM acquisition_attempts a "
+            "SELECT a.worktree_id,a.state,a.request_digest,e.stage,e.data_json FROM acquisition_attempts a "
             "LEFT JOIN acquisition_effects e USING(delivery_id) WHERE a.delivery_id=?",
             (delivery_id,),
         )
@@ -757,7 +759,7 @@ class AcquisitionRuntime:
             "SELECT id,status,acp_session_id FROM sessions WHERE caller_id=?",
             (f"acquisition:{delivery_id}",),
         )
-        return {
+        result = {
             "delivery_id": delivery_id, "state": row["state"],
             "caller_context": {
                 field: value for field, value in data.get("_request", {}).items()
@@ -769,6 +771,21 @@ class AcquisitionRuntime:
             "delivery_admitted": delivery_admitted,
             "recovery": "retry the same request, or allow a current same-task reservation to reconcile",
         }
+        if worktree_writer:
+            from .acquisition_writer_inspection import inspect_writer
+
+            if self.manager.is_draining or not getattr(self.state, "ready", True):
+                raise AcquisitionRefused(
+                    "worktree_writer_unconfirmed", "Bridge is not ready for writer observation",
+                )
+            result["worktree_writer_observation"] = await inspect_writer(
+                self.db, delivery_id, dict(row),
+            )
+            if self.manager.is_draining or not getattr(self.state, "ready", True):
+                raise AcquisitionRefused(
+                    "worktree_writer_unconfirmed", "Bridge readiness changed during writer observation",
+                )
+        return result
 
     async def _reconcile_prior(
         self,

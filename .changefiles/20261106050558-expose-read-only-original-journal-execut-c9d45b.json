@@ -1,0 +1,9 @@
+{
+  "comment": "Expose read-only original-journal executing writer observations through capability-gated acquisition inspection.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
