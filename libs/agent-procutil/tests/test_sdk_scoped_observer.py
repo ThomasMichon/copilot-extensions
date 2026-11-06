@@ -768,3 +768,56 @@ def test_callback_lock_cannot_delay_root_retirement_or_error_evidence_past_clean
         if observer.thread is not None:
             observer.thread.join(1)
             assert not observer.thread.is_alive()
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+@pytest.mark.parametrize("terminated", [False, True])
+def test_native_fixture_finally_requests_expired_root_termination_and_retains_custody(
+    monkeypatch, interrupted, terminated,
+):
+    from agent_procutil import _windows_caller_owned as native
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    module = load("sdk_scoped_fixture_retirement_controls", "test_caller_owned_native.py")
+    calls = []
+    primary = KeyboardInterrupt("fixture interrupted") if interrupted else None
+    native_error = OSError("native termination request refused")
+    process = SimpleNamespace(
+        args=["owned-fixture"], _handle=601,
+        retire_job=lambda *args: pytest.fail("positive retirement budget granted"),
+        wait=lambda *args, **kwargs: pytest.fail("root wait after expiry"),
+        close=lambda: pytest.fail("root handle closed without exit proof"),
+    )
+    job = SimpleNamespace(handle=501, close=lambda: pytest.fail("Job closed after expiry"))
+    kernel = SimpleNamespace(
+        TerminateJobObject=lambda handle, code: calls.append((handle, code)) or terminated,
+        QueryInformationJobObject=lambda *args: pytest.fail("accounting query after expiry"),
+    )
+    monkeypatch.setattr(native, "_api", lambda: kernel)
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: 111))
+    monkeypatch.setattr(module.ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(module.ctypes, "WinError", lambda code: native_error, raising=False)
+    with pytest.raises(OwnedCleanupError) as caught:
+        module._retire_scoped_fixture(process, job, 110, primary)
+    error = caught.value
+    assert calls == [(501, 1)]
+    assert error.process is process and error.job is job
+    assert error.operation_error is primary and error._job_empty_confirmed is False
+    assert error.__cause__ is (primary if primary is not None else error.cleanup_error)
+    assert process._handle == 601 and job.handle == 501
+    if not terminated:
+        assert error.cleanup_error is native_error
+
+
+def test_native_fixture_finally_preserves_nonexpired_retirement_sequence(monkeypatch):
+    module = load("sdk_scoped_fixture_retirement_normal", "test_caller_owned_native.py")
+    calls = []
+    process = SimpleNamespace(
+        args=["owned-fixture"], retire_job=lambda job, timeout: calls.append(("retire", job, timeout)),
+        wait=lambda **kwargs: calls.append(("wait", kwargs["timeout"])),
+        close=lambda: calls.append(("close",)),
+    )
+    job = object()
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: 100))
+    module._retire_scoped_fixture(process, job, 110, None)
+    assert calls == [("retire", job, 10), ("wait", 10), ("close",)]

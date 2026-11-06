@@ -232,3 +232,21 @@ proposal neither reintroduces an MCP gate nor authorizes the held extension.
 - Regenerated the admission payload and refreshed footprints through their
   canonical owners. Refreshed only the changed admitted native-owner source
   digest; required packet inventory and its 300-second budget are unchanged.
+
+### 2026-11-06 - Preserve native fixture finally custody after deadline expiry
+
+- Extracted the actual managed-root case's finally cleanup into a directly
+  exercised helper. Expired cleanup now requests termination of its exact retained
+  Job before reporting unconfirmed cleanup, without accounting, waiting, closing
+  handles or claiming exit. Original operation/native errors and process/Job
+  custody remain on `OwnedCleanupError`; nonexpired retirement is unchanged.
+- Four synthetic expiry/interruption controls failed before the correction.
+  The affected SDK selection then passed 68 tests, with bounded runner cleanup
+  verified. These controls execute the same fixture retirement helper, not the
+  already-corrected spawn error path. The native case itself was collected only.
+- Canonical installation-context sync rebuilt the missing/drifted caller-lifetime
+  source archives, followed by canonical payload regeneration and footprint
+  refresh. No archive or generated package was edited by hand. No admitted
+  source binding, inventory, coverage target or 300-second packet budget changed.
+- Native GUI, debugger, calibration, rollout and publication remain unauthorized
+  for this worker; no such effects were executed.

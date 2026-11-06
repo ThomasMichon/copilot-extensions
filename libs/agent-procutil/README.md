@@ -254,6 +254,11 @@ source-admitted `ScopedEnrollment` through pytest configuration
 `_agent_procutil_scoped_enrollment`. Missing enrollment skips the opt-in case;
 wrong-case or invalid source enrollment refuses before native binding.
 This typed input transports earlier admission, not effect consent.
+The case's own finally helper also handles late return/interruption: after its
+original cleanup deadline it requests exact retained-Job termination only, with
+no accounting query, wait, handle close or positive exit claim. Its
+`OwnedCleanupError` retains the original process/Job, operation cause and native
+termination error independently of observer teardown.
 The old self-profile's literal packets are unchanged and do not enroll this case.
 Native driver qualification and execution remain separately gated in
 [Fixture-Scoped Native Observation](../../efforts/active/fixture-scoped-native-observation/README.md).

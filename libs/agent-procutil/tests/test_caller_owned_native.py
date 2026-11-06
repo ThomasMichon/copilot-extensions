@@ -26,6 +26,35 @@ import caller_owned_fixture as fixture
 LIBRARY = Path(__file__).resolve().parents[1]
 
 
+def _retire_scoped_fixture(process, job, cleanup_deadline, primary):
+    """Keep the native case's original root/Job custody on cleanup failure."""
+    from agent_procutil import _windows_caller_owned as native
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    def remaining():
+        value = cleanup_deadline - time.monotonic()
+        if value <= 0:
+            raise subprocess.TimeoutExpired(process.args, 0)
+        return value
+
+    seconds = cleanup_deadline - time.monotonic()
+    expired = seconds <= 0
+    try:
+        if expired:
+            if not native._api().TerminateJobObject(job.handle, 1):
+                raise ctypes.WinError(ctypes.get_last_error())
+            raise TimeoutError("fixture Job termination requested after deadline; exit unconfirmed")
+        process.retire_job(job, seconds)
+        process.wait(timeout=remaining())
+        process.close()
+    except BaseException as cleanup:
+        failure = OwnedCleanupError(process, job)
+        failure.operation_error, failure.cleanup_error = primary, cleanup
+        if expired:
+            failure._job_empty_confirmed = False
+        raise failure from (primary if primary is not None else cleanup)
+
+
 @pytest.fixture
 def sdk_scoped_enrollment(request):
     """Borrow an SDK driver's already-admitted object, never infer effect consent."""
@@ -47,7 +76,6 @@ def sdk_scoped_enrollment(request):
 def test_scoped_observer_managed_root(sdk_scoped_enrollment):
     """Exercise one real SDK-owned root; this does not qualify opaque hosts."""
     from agent_procutil import _windows_caller_owned as native
-    from agent_procutil.owned_process import OwnedCleanupError
     from sdk_desktop_win32 import WinAPI
     from sdk_scoped_observer import ScopedObserver
 
@@ -80,14 +108,7 @@ def test_scoped_observer_managed_root(sdk_scoped_enrollment):
             primary = error
             raise
         finally:
-            try:
-                process.retire_job(job, remaining(cleanup_deadline))
-                process.wait(timeout=remaining(cleanup_deadline))
-                process.close()
-            except BaseException as cleanup:
-                failure = OwnedCleanupError(process, job)
-                failure.operation_error, failure.cleanup_error = primary, cleanup
-                raise failure from (primary if primary is not None else cleanup)
+            _retire_scoped_fixture(process, job, cleanup_deadline, primary)
     assert observer.hooks_closed and observer.pins_closed
 
 
