@@ -209,6 +209,10 @@ def test_ordinary_create_carries_selected_tuple_to_actual_knowledge_pair(
         lambda *_a, project=None, **_k: knowledge_config if project == "knowledge" else config,
     )
     monkeypatch.setattr(
+        cfg, "load_project_config",
+        lambda project, **_k: knowledge_config if project == "knowledge" else config,
+    )
+    monkeypatch.setattr(
         m.state_root_mod, "resolve_state_root",
         lambda _config: _state_root(path=str(knowledge_anchor), repo="knowledge"),
     )
