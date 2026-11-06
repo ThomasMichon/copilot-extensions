@@ -164,6 +164,11 @@ continuation, not the remaining parent gates. The separately queued Worktrees
 target completes successfully and verifies the same qualified reader in
 `1.24.477-dev1`. The broader update finishes unsuccessfully with five component
 failures; whole-set acceptance and the remaining parent gates stay open.
+The routed-port observation follow-up in #10916 subsequently lands with
+birth-qualified active-route discovery and an explicitly cold Companion
+fixture. Exact-head Linux/Windows native qualification and required CI pass;
+the installed reader and the remaining serving-generation/whole-update gate
+are still separate. No Phase 4 or Validation item closes from that source merge.
 
 ## Validation Plan
 
