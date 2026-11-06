@@ -66,6 +66,22 @@ def machine_config(root):
     return value, policy, directory
 
 
+@pytest.mark.parametrize("public", [
+    b"", b"\xff", b"ssh-rsa invalid", b"ssh-ed25519 invalid", b"x" * 257,
+])
+def test_malformed_local_public_key_refuses_before_lease_or_network(tmp_path, monkeypatch, public):
+    value, _, _ = machine_config(tmp_path)
+    Path(value["public_key_file"]).write_bytes(public)
+    monkeypatch.setattr(
+        SSHDirectoryClient, "watch",
+        lambda *_args: pytest.fail("malformed local public key opened the directory watch"),
+    )
+    with pytest.raises((ValueError, UnicodeError)):
+        asyncio.run(ssh_machine.run(SSHMachineConfig.from_dict(value)))
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
 def update(policy, directory):
     return DirectoryUpdate.parse(canonical({
         "schema": "agent-ssh.service-directory", "version": 1,

@@ -53,6 +53,10 @@ Before policy/credential reads or lease creation, the existing agent-ssh adapter
 also checks the writers' derived source and lock directories. The lease state
 cannot contain or sit inside any profile, authorization, source or lock scope;
 no second copy of those writer-owned path names is maintained by Fleet.
+Installed hosting additionally excludes the entire application installation
+root from those writer scopes. Local public-key bytes are bounded and parsed
+through the existing canonical ed25519 validator before watch or lease creation;
+they are still reread and matched to the authenticated directory at each write.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an

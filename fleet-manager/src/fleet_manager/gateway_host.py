@@ -187,7 +187,7 @@ def prepare(root: Path, selection: dict) -> tuple[object, object]:
 
         value = config.to_dict()
         validate_consumer_state(
-            host_state, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
+            root, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
             authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,
         )
         startup_digest(selection, configuration=config)

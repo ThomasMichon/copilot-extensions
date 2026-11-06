@@ -72,9 +72,15 @@ def prepare(config: SSHMachineConfig):
     )
     from .gateway_contract import GatewayError
     from .gateway_service_caller import ServiceCaller
+    from .gateway_ssh_provider import public_key
     from .ssh_directory import SSHDirectoryClient
 
     value = config.to_dict()
+    with absolute(value["public_key_file"]).open("rb") as stream:
+        public = stream.read(257)
+    if len(public) > 256:
+        raise PlanError("Gateway local public-key file exceeds its bound")
+    public_key(public.decode("ascii").strip())
     if value["version"] == 1:
         credentials = load_service_credentials(
             proof_key_file=absolute(value["proof_key_file"]),

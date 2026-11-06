@@ -445,6 +445,24 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
                 assert (root / "last-known-good").read_text().strip() == first.name
                 host.write_private(Path(selection["configuration"]), value)
                 await preserved_owner(initial["pid"])
+            public = Path(value["public_key_file"])
+            original_public = public.read_bytes()
+            public.write_bytes(b"ssh-ed25519 invalid")
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            public.write_bytes(original_public)
+            await preserved_owner(initial["pid"])
+            host.write_private(Path(selection["configuration"]), value | {
+                "ssh_config": str(root / "current-version"),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
             host.write_private(Path(selection["configuration"]), value | {
                 "proof_key_file": str(root / "absent-proof.pem"),
             })

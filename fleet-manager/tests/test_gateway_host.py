@@ -197,6 +197,12 @@ def ssh_selected(root):
 
     private_directory(root)
     value, policy, directory = machine_config(root)
+    local = root.parent / ("ssh-local-" + root.name)
+    local.mkdir()
+    value.update(
+        state_dir=str(local / "state"), authorization_dir=str(local / "authorization"),
+        config_d=str(local / "ssh" / "config.d"), ssh_config=str(local / "ssh" / "config"),
+    )
     host.write_private(root / "ssh-client.json", value)
     selection = {
         "schema": "fleet-manager.gateway-host", "version": 2, "role": "ssh-client",
@@ -227,7 +233,11 @@ def test_ssh_host_preflight_is_inert_and_keeps_provider_token_renewal(tmp_path):
     selection, _, _, _ = ssh_selected(root)
     config, _ = host.prepare(root, host.optional_selection(root))
     assert config.to_dict()["version"] == 2
-    value, _, _ = configured(root)
+    token_value, _, _ = configured(root)
+    value = config.to_dict() | {
+        "version": 1, "access_token_file": token_value["access_token_file"],
+    }
+    value.pop("authentication")
     host.write_private(Path(selection["configuration"]), value)
     host.prepare(root, selection)
     before = host.startup_digest(selection)
@@ -268,14 +278,36 @@ def test_ssh_host_state_is_outside_all_writer_and_derived_scopes(tmp_path, scope
     assert not Path(value["state_dir"]).exists()
 
 
+@pytest.mark.parametrize("destination", [
+    host.CONFIG, "ssh-client.json", "current-version", "last-known-good",
+    "versions/candidate/.venv/config",
+])
+def test_ssh_host_preflight_preserves_installation_metadata_from_writer_scope(tmp_path, destination):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    path = root / destination
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"retained installation metadata")
+    host.write_private(Path(selection["configuration"]), value | {"ssh_config": str(path)})
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="outside local writer scopes"):
+        host.prepare(root, selection)
+    assert path.read_bytes() == before
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
 @pytest.mark.parametrize("failure", ["missing", "empty", "invalid-utf8", "overlong"])
 def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_path, failure):
     from fleet_manager.gateway_contract import GatewayError
     from test_ssh_machine import configured
 
     root = tmp_path / "i"
-    selection, _, _, _ = ssh_selected(root)
-    value, _, _ = configured(root)
+    selection, value, _, _ = ssh_selected(root)
+    token_value, _, _ = configured(root)
+    value = value | {"version": 1, "access_token_file": token_value["access_token_file"]}
+    value.pop("authentication")
     token = Path(value["access_token_file"])
     if failure == "missing":
         token.unlink()

@@ -78,12 +78,16 @@ token/proof or v2 machine-key meaning and provider-owned references. Preflight
 validates the existing local writer scopes and credentials without network,
 lease creation or profile writes. The SSH lease and lifecycle state must be
 separate. No enrollment, credential acquisition or materialization occurs.
-Host lifecycle state is also excluded from all direct and derived writer
-destinations. Token-mode preflight reads and validates the current bounded UTF-8
-token without retaining it; later admissions still reread the provider reference.
+The entire installation root is excluded from all direct and derived writer
+destinations, protecting configuration, selectors and immutable runtime slots
+as well as lifecycle state. Token-mode preflight reads and validates the current
+bounded UTF-8 token without retaining it; later admissions still reread the
+provider reference.
 Every fingerprinted policy, identity, public-key, proof-key and CA reference is
 read during setup preflight, before the incoming selection can replace a healthy
-owner.
+owner. The local public-key reference must also parse as canonical bounded
+ed25519 during preflight; readable malformed bytes cannot defer failure until
+after selection changes.
 Capability output additively advertises both host configuration versions and
 each role's required extras. Older strict v1 host readers refuse v2; rollback
 must not translate it into Gateway serving or foreground-only success.
