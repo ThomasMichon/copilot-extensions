@@ -188,9 +188,12 @@ def test_prepared_writer_is_committed_before_first_relationship_and_survives_los
                 worktree_writer_requirement=requirement, **facts,
             )
         original = queue.task_relationship(task.id)
-        restarted = TaskQueue(queue.db_path, relationship_writer=admitted,
-                              relationship_authority="local")
-        assert restarted.get_reservation(reservation.key).worktree_writer_requirement == requirement
+    queue = TaskQueue(queue.db_path, relationship_writer=admitted, relationship_authority="local")
+    owner.queue = queue
+    assert queue.get_reservation(reservation.key).worktree_writer_requirement == requirement
+    api = TestClient(create_app(queue, token="data", control_token="control",
+                                enable_mcp=False, verification_interval=0))
+    with connected(api, requests) as client:
         result = client.record_spawn_worktree(reservation.key, workspace.worktree, **facts)
     assert result["worktree_writer_requirement"] == requirement and result["agent_info"] is None
     assert queue.task_relationship(task.id)["state"] == "bound"
