@@ -51,6 +51,8 @@ The same completion-gated owner lookup therefore applies to payload activation
 and provisioned readiness/client reads.
 Reader failures retain their exception class and up to four function/line
 locations, without exception text, configuration values or source paths.
+Same-cell configuration reads disable bytecode writes in both peer-launch
+interpreter hops; caller cache settings alone do not protect immutable slots.
 Windows activation errors also retain the reader's exit code and readiness
 state, so an installer refusal remains distinguishable from inactive readiness.
 Activation does not load extension configuration providers or treat invocation

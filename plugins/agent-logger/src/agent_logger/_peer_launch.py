@@ -67,7 +67,7 @@ def launch_prefix(owner: str, own_root: Path, raw_context: str, peer: str) -> li
     if bootstrap.name.lower() == "pythonw.exe":
         bootstrap = bootstrap.with_name("python.exe")
     return [
-        str(bootstrap), "-I", "-X", "utf8", str(Path(__file__).resolve()),
+        str(bootstrap), "-I", "-B", "-X", "utf8", str(Path(__file__).resolve()),
         owner, str(own_root), raw_context, peer,
     ]
 
@@ -344,7 +344,7 @@ def launch(
         or _governance(peer_primitive, peer, durable, environment) != before
     ):
         raise ValueError("Installation governance changed during peer resolution")
-    command = [str(python), "-I", "-X", "utf8", "-m", PEERS[plugin], *argv]
+    command = [str(python), "-I", "-B", "-X", "utf8", "-m", PEERS[plugin], *argv]
     if os.name != "nt":
         os.execve(python, command, environment)
     # Keep inherited stdio and process-tree ownership, not a detached child.

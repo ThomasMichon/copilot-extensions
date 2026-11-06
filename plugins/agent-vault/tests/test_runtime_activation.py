@@ -303,6 +303,112 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
     assert not (installed.parents[1] / "scripts").exists()
 
 
+def test_cold_namespaced_capture_preserves_both_runtime_slots(tmp_path):
+    import venv
+    import configuration_context
+    import configuration_layers
+    from .test_identity_payload_gate import load_module
+
+    home, payload, runtime, _identity, context = prepare_payload(tmp_path, "namespaced")
+    primitive = load_module(
+        payload / "scripts" / "installation-context" / "installation_context.py",
+        "cold_capture_installation",
+    )
+    own = json.loads(Path(context).read_text(encoding="utf-8"))
+    namespace = json.loads(Path(own["namespaceReceipt"]).read_text(encoding="utf-8"))
+    peer_payload = payload.parent / "agent-worktrees"
+    (peer_payload / "scripts").mkdir(parents=True)
+    source_peer = PLUGIN.parent / "agent-worktrees"
+    shutil.copytree(
+        source_peer / "scripts" / "installation-context",
+        peer_payload / "scripts" / "installation-context",
+    )
+    for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+        shutil.copyfile(source_peer / "scripts" / name, peer_payload / "scripts" / name)
+    shutil.copyfile(source_peer / "plugin.json", peer_payload / "plugin.json")
+    environment = {"HOME": str(home), "USERPROFILE": str(home)}
+    stamped = primitive.stamp_context(
+        payload_version="1.0.0", payload_origin="installed",
+        expected_namespace_generation=namespace["generation"], expected_install_generation=0,
+        payload_root=peer_payload, plugin_id="agent-worktrees", environment=environment,
+        copilot_home=home / ".copilot", durable_home=home / ".copilot-extensions",
+    )
+    primitive.compare_and_swap_activation(
+        context=stamped["installReceipt"], expected_marketplace_id=stamped["marketplaceId"],
+        expected_plugin_id="agent-worktrees",
+        expected_namespace_generation=stamped["namespaceGeneration"],
+        expected_install_generation=stamped["generation"], expected_activation_generation=0,
+        activation_mode="namespaced", activation_state="active", legacy_disposition="absent",
+        legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+        legacy_root=home / ".agent-worktrees", environment=environment,
+        durable_home=home / ".copilot-extensions",
+    )
+    peer = Path(stamped["pluginRoot"])
+    slots = {}
+    for name, owner in (("agent_vault", runtime), ("agent_worktrees", peer)):
+        slot = owner / "versions" / "1.0.0"
+        venv.EnvBuilder(with_pip=False).create(slot)
+        site = (
+            slot / "Lib" / "site-packages" if os.name == "nt"
+            else next((slot / "lib").glob("python*/site-packages"))
+        )
+        package = site / name
+        package.mkdir()
+        if name == "agent_vault":
+            for filename in ("__init__.py", "config.py", "configuration.py",
+                             "configuration_scope.py", "_peer_launch.py"):
+                shutil.copyfile(PLUGIN / "src" / name / filename, package / filename)
+            for source in (PLUGIN / "src" / name).glob("_installation_context*.py"):
+                shutil.copyfile(source, package / source.name)
+            for dependency in (configuration_context, configuration_layers):
+                shutil.copytree(
+                    Path(dependency.__file__).parent, site / dependency.__name__,
+                    ignore=shutil.ignore_patterns("__pycache__"),
+                )
+        else:
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            report = {
+                "schema": "agent-worktrees.configuration", "version": 1,
+                "context": {
+                    "repository_id": "cold-capture", "execution_machine": "fixture",
+                    "installation_cell": str(peer.parent.parent), "binding": "unbound",
+                    "base_root": str(tmp_path),
+                },
+            }
+            (package / "__main__.py").write_text(
+                "import json,sys\n"
+                "assert sys.argv[1:] == ['state-root','--configuration','--json']\n"
+                "print(" + repr(json.dumps(report)) + ")\n", encoding="utf-8",
+            )
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+        }), encoding="utf-8")
+        (owner / "current-version").write_text("1.0.0", encoding="utf-8")
+        slots[name] = slot
+    before = {
+        path: path.read_bytes()
+        for slot in slots.values() for path in slot.rglob("*") if path.is_file()
+    }
+    python = slots["agent_vault"] / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home), "AGENT_RT_ROOT": str(runtime),
+        "AGENT_VAULT_HOME": str(runtime), "COPILOT_EXTENSIONS_CONTEXT": context,
+    })
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c",
+         "import json;from agent_vault.configuration import service_configuration_snapshot;"
+         "print(json.dumps(service_configuration_snapshot()))"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["root"] == str(tmp_path)
+    assert {
+        path: path.read_bytes()
+        for slot in slots.values() for path in slot.rglob("*") if path.is_file()
+    } == before
+
+
 @pytest.mark.parametrize("shell", ["python", "powershell", "pwsh"])
 def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path, shell):
     if shell != "python" and (os.name != "nt" or shutil.which(shell) is None):
