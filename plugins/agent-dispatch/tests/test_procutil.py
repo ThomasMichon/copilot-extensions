@@ -1195,17 +1195,41 @@ def test_no_context_keeps_real_legacy_argv_and_environment(tmp_path, monkeypatch
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows windowless parent contract")
-def test_namespaced_peer_from_windowless_parent(tmp_path, monkeypatch):
+@pytest.mark.parametrize("launch_kind", ["namespaced", "retained-legacy"])
+def test_namespaced_peer_from_windowless_parent(tmp_path, monkeypatch, launch_kind):
     cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
     own = _make_namespaced_context(cell)
-    _make_live_peer(cell, "agent-bridge", "1.0.0-dev1")
-    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent))
-    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     assert pythonw.is_file()
+    if launch_kind == "retained-legacy":
+        from agent_dispatch import worktree_owner_launch
+
+        _make_live_peer(cell, "agent-worktrees", "1.0.0-dev1", nested=True)
+        root = cell / "plugins" / "agent-worktrees"
+        slot = root / "versions" / "1.0.0-dev1"
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        scripts = Path(__file__).resolve().parents[2] / "agent-worktrees" / "scripts"
+        for source in (scripts / "runtime_launcher.py", *scripts.glob("versioned_runtime*.py")):
+            shutil.copyfile(source, bootstrap / source.name)
+        (bootstrap / "runtime-generation").write_text("1" * 32, encoding="ascii")
+        _update_receipt(slot / ".install-complete.json", lambda data: data.update(payload_hash="a" * 64))
+        root.rename(tmp_path / ".agent-worktrees")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / ".agent-dispatch"))
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        _make_live_peer(cell, "agent-bridge", "1.0.0-dev1")
+        monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent))
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
     # Exercise the production prefix's conversion back to a console root.
     monkeypatch.setattr(procutil.sys, "executable", str(pythonw))
-    prefix = procutil.agent_bridge_launch_prefix()
+    prefix = (
+        worktree_owner_launch.retained_selection()
+        if launch_kind == "retained-legacy" else procutil.agent_bridge_launch_prefix()
+    )
     assert Path(prefix[0]).name == "python.exe"
     input_path = tmp_path / "launch.json"
     output_path = tmp_path / "result.json"
