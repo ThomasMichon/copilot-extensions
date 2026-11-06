@@ -477,6 +477,8 @@ def main(argv=None):
     mode.add_argument("--health", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.initialize_storage or args.health:
+            return _serve(args)
         return _run(args)
     except HostError as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr, flush=True)
@@ -484,8 +486,6 @@ def main(argv=None):
 
 
 def _run(args):
-    if args.initialize_storage or args.health:
-        return _serve(args)
     try:
         from agent_procutil.daemon_instances import admit_daemon_instance
     except ImportError:

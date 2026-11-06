@@ -493,6 +493,20 @@ shared-multiplex contracts above.
 
 ### 2026-11-06 - Recover image qualification and repair unit admission
 
+- Candidate `6e00cf558a27a93f99b774493251a08154143009` received
+  approval5796163288 with all three findings resolved. Its required4174-node
+  unit packet passed with coverage in91.479s. Native run42168646392 completed
+  all four504-node cells: Linux3.10/3.11 full504 passed in47.13/46.41s;
+  Windows3.10/3.11 full502+2 declared skips in89.80/134.68s. Both lanes
+  reported complete execution and membership
+  `d7c9a1d07d02e82c27590e01308946bf9769b7bc3fe7669e905a59752a98d823`.
+  The fresh image also passed against its recorded merge candidate.
+- Required source guards still refused unclassified Docker lifecycle directives
+  and finite dispatch before `_run`'s admission. Classify the image's resident
+  entrypoint/command and finite health probe through the existing census and
+  service owner, and dispatch finite modes before entering the daemon-only
+  function. The unchanged daemon guard and both finite-mode regressions pass;
+  current-head CI and review remain required.
 - Retained-only startup now validates all current tables and required columns
   before schema bootstrap can write. Missing event, membership or collaboration
   tables and a renamed stable-request column refuse without changing database
