@@ -1742,3 +1742,17 @@ whole-suite update, a consuming harness's clean-room scenario or affected-host
 rollout. Existing U8/U9 and #10448 results retain their original scope.
 Current-head review, required CI, merge and containing release of this
 test-only slice remain outstanding; the parent Plan/Validation Plan stays open.
+
+PR #10889's first head `79b3ca9789` receives a genuine approval, but CI
+`42163624170` fails its Bridge source-coverage guard: the historical HTTP-52
+closure blob for `tools/bridge_http52_artifact.py` is unavailable in the fresh
+checkout. Evidence preparation lists only HTTP-47 through HTTP-51. A focused
+regression first fails because HTTP-52's distinct checkpoint is never prepared.
+Adding that packet to the existing exact-commit preparation fixes this source
+prerequisite without changing the validator or recapturing evidence.
+All 58 preparation controls then pass in 48.70 seconds through the existing
+bounded containment owner, including native unreferenced-tree controls.
+An initial full local invocation instead hits four Git filename-length errors
+under its overly long ad hoc scratch prefix; switching to the runner's canonical
+compact roots fixes the invocation, not the tests or Git policy.
+The revised head still needs its own review and full required CI.
