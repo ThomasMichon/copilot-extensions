@@ -4335,7 +4335,24 @@
         "tools/promotion_unit_tests/test_typecheck_emitted.py::test_unsupported_non_name_rebindings_cannot_mask_producer[match-as]",
         "tools/promotion_unit_tests/test_typecheck_emitted.py::test_unsupported_non_name_rebindings_cannot_mask_producer[match-star]",
         "tools/promotion_unit_tests/test_typecheck_emitted.py::test_unsupported_non_name_rebindings_cannot_mask_producer[match-rest]",
-        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_unsupported_non_name_rebindings_cannot_mask_producer[delete]"
+        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_unsupported_non_name_rebindings_cannot_mask_producer[delete]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_snapshot_isolated_from_caller_and_admission_mutation",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_required_admission_rejects_before_any_owner_effect",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_conflicting_context_cannot_inherit_original_admission[authority]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_conflicting_context_cannot_inherit_original_admission[event]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_conflicting_context_cannot_inherit_original_admission[workspace]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_conflicting_context_cannot_inherit_original_admission[queue]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_conflicting_context_cannot_inherit_original_admission[request]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[workspace]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[request]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[payload]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[token]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[reserve]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[identity]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[nonce]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_bound_operation_facts_are_checked_before_admission[writer]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_interleaved_bound_requests_do_not_share_current_request_state",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_unbound_and_missing_request_owner_cannot_silently_downgrade"
     ],
     "sources": {
         "libs/repository-policy/src/repository_policy/receiving.py": "9edad82766c227e2f3e2ab0cc919f7d54fe9301e40de36a0414c4ed090140239",
@@ -4946,7 +4963,12 @@
         "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "0c2c0bb91dd954a290bb7477d7c30d62ad7fde622522a99d8ab06b4430c7aa0f",
         "tools/sweep_forbidden_labels.py": "cc848ce49e60253946d2180331ac13a66b417987014db1184973212b1a634818",
         "tools/promotion_unit_tests/test_label_cleanup.py": "5c60fa35649184a8c59ddd88ecb6a92a4963f04be808921fc68f0eeb07e1861c",
-        "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py": "08ac3b2329d3adb9a21638efc3a07c3a0acd4c4dd4fa38d35f642426101dece6"
+        "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py": "08ac3b2329d3adb9a21638efc3a07c3a0acd4c4dd4fa38d35f642426101dece6",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py": "9e720b55051ee63b34a6fe913ec208bd6d9250e8b16472b09cc3909a9886d3dd",
+        "plugins/agent-dispatch/src/agent_dispatch/assignment_relationship_owner.py": "8e4ec1c985cff25bfe0f18a0f5f9013b59e7cc2ec5f6d4b0ad074a01650132a0",
+        "plugins/agent-dispatch/src/agent_dispatch/assignment_workspace.py": "9e1f96ca9bfaa8a3bbcdfe4dfcad33e86dcbe0051eb24779ddb9650df125e524",
+        "plugins/agent-dispatch/src/agent_dispatch/queue_task_relationships.py": "32acafd46db960aead972f49ea4500bdd524ab567e4332af2e0e4e1a51c16aec",
+        "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py": "9915c6dbddbce56b27099b234a004c70ba548ae33f462d4718c4b11a180b4e13"
     },
     "coverage_targets": [
         "libs/repository-policy/src/repository_policy/receiving.py",
@@ -5205,7 +5227,11 @@
         "tools/artifact_attestation.py",
         "tools/artifact_release_discovery.py",
         "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py",
-        "tools/sweep_forbidden_labels.py"
+        "tools/sweep_forbidden_labels.py",
+        "plugins/agent-dispatch/src/agent_dispatch/assignment_relationship_owner.py",
+        "plugins/agent-dispatch/src/agent_dispatch/assignment_workspace.py",
+        "plugins/agent-dispatch/src/agent_dispatch/queue_task_relationships.py",
+        "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py"
     ],
     "max_seconds": 300
 }

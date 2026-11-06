@@ -177,6 +177,22 @@ See the canonical [Worktrees relationship contract](../../agent-worktrees/docs/r
 These conditional adapter controls still do not assemble the real writer
 cohort or activate ordinary coordinator construction.
 
+Queue reconciliation uses the selected adapter's `bind_request` path when
+available, passing an isolated copy of the original audited request before
+reserve or retirement inspection. This path requires the separately supplied
+`admit_request(workspace, writer_identity, request)` callback. It receives fresh
+copies before each relationship operation; callback mutation cannot change the
+retained request or the next operation. A request-aware adapter refuses unbound
+calls, and a bound path without that admission owner cannot silently downgrade.
+Legacy explicit three-argument writer callables remain compatible.
+Each bound callable keeps its own request and confirmed token, checks coherent
+workspace/assignment/authority/recovery facts, and refuses conflicting operation
+payloads before effects. Bind and close accept only the token confirmed by the
+same callable's original reserve or inspect. The original ground-owner receipt
+and post-I/O queue checks remain required. This is an in-process context seam,
+not proof that the assembling owner's original-queue/cohort observation has
+qualified the actual installed writers. It adds no Worktrees wire field or probe.
+
 The original direct-claim audit event stores one immutable relationship
 request in `task_events.task_relationship`. Allocator placement still claims
 capacity before a workspace exists. A newly governed reservation retains its

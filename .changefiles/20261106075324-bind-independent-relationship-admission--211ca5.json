@@ -1,0 +1,9 @@
+{
+  "comment": "Bind independent relationship admission to the original audited request before owner effects",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

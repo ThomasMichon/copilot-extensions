@@ -328,6 +328,8 @@ Installation, rollout, allocation and original native-resource holds remain.
 
 This is an **agent-proposed source refinement** of the existing independent
 admission and ordinary-integration items, not ordinary construction or activation.
+The documentation-only refinement was reviewed and merged in #11028;
+implementation and all five validation obligations remain open.
 The first protected workspace relationship precedes keyed Bridge creation.
 `task_events.task_relationship` already owns its original request: workspace,
 reservation, task/generation, audited assignment event, request ID, authority and
