@@ -2518,6 +2518,13 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
   deployment or satisfying both remedies is not the selected OR contract;
   broader Configurator, restart and runtime gates stay independent.
 
+- [ ] **P5898-7962:** Receive #7962's complete original and refinements in
+  the existing #5898 parent through [terminal/mux receiving](mux-receiving7962.md).
+  Retain terminal custody, connected/manual-reattach status, actual selected-child
+  CWD/history, all pending human/native/release/explicit-rollout gates and named
+  owners. Credit merged source only; planned intake is not acceptance or custody
+  release.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
@@ -2710,6 +2717,12 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   incumbent credit, actual custodians and original finite tiers. Intake is not
   implementation, installed/native acceptance or whole Manager completion.
 
+- [ ] **V5898-7962:** Verify every terminal/mux receiving Plan and Validation
+  clause against both complete originals/refinements and the FULL current OPEN
+  #5898 receiver before subordinate disposition. Preserve actual pending
+  human/native/release/explicit-rollout status, source credit, the Bash subprocess
+  coverage opportunity and all owner/resource boundaries.
+
 ## Coordination
 
 The proposed #5611 finite deployment/readiness case retains actual installer,
@@ -2865,7 +2878,25 @@ cannot survive. Keep this effort Active after any individual intake.
 No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
+The planned #7962 intake belongs to existing #5898 and the
+[terminal/mux receiving contract](mux-receiving7962.md), not a new implementation
+or global ACK process. Preserve its expressly completed source claim as history,
+not a renewed reservation. #4564/#5961/#4496/#7116/#2062 and #5892/#5878 retain
+their distinct scopes. The directly applicable #5898 MEV5 requires full current
+receiver readback; all other source-specific intake conditions remain in their
+own scopes. No source/resource/physical custody or updater authority transfers.
+
 ## Journal
+
+### 2026-11-05 - Planned #5898 terminal/mux receiving
+
+Added the complete pending #7962 Plan/local Validation and actual global
+Plan/Validation/Coordination map through the linked contract. Credit source
+merge #8031 and the Done archive reported in #8211 without marking human,
+native, release or installed acceptance complete. Actual #5898 receipt and
+full-current readback still precede subordinate tracking disposition.
+No source claim, owner, resource, physical operation or rollout was transferred.
+
 
 ### 2026-11-05 - Confirmed existing-knowledge binding continuation
 
