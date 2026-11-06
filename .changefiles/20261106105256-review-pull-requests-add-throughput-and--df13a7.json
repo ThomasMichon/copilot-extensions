@@ -1,0 +1,9 @@
+{
+  "comment": "review-pull-requests: add throughput and loop discipline (zero actionable queue metric, qualifying re-review triggers, no repeated identical verdicts, round cap and watch backoff, explicit hand-back, consent follow-up re-check, predecessor supersession)",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
