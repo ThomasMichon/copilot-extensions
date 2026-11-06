@@ -100,6 +100,10 @@ def read_credential(args) -> CredentialRead:
             not isinstance(resp, dict)
             or type(resp.get("ok")) is not bool
             or (resp["ok"] and not isinstance(resp.get("value"), str))
+            or (
+                resp.get("generation") is not None
+                and type(resp["generation"]) is not int
+            )
         ):
             return CredentialRead(1, error="service_response_invalid; vault service returned an invalid response")
         if resp and resp.get("ok"):

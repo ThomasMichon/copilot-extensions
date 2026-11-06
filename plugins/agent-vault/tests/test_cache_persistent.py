@@ -574,7 +574,7 @@ def test_batch_preserves_valid_pending_journal_semantics(
     monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
     monkeypatch.setattr(cli, "ensure_service", lambda: True)
     monkeypatch.setattr(cli, "send_command", lambda *_args, **_kwargs: {
-        "ok": True, "value": "authoritative",
+        "ok": True, "value": "authoritative", "generation": 1,
     })
     monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"Example/one"}]'))
 
@@ -589,12 +589,17 @@ def test_batch_preserves_valid_pending_journal_semantics(
         assert persistent.get("Example/one") is None
 
 
+@pytest.mark.parametrize("refresh", [False, True])
 @pytest.mark.parametrize("response", [
     {"ok": True}, {"ok": True, "value": 42}, [],
     {"ok": "yes", "value": "not-published"},
+    *[
+        {"ok": True, "value": "not-published", "generation": generation}
+        for generation in ([], float("inf"), "not-an-integer", True)
+    ],
 ])
 def test_batch_rejects_malformed_service_values_before_cache_write(
-    enabled_cache, monkeypatch, capsys, response,
+    enabled_cache, monkeypatch, capsys, response, refresh,
 ):
     persistent = get_cache()
     assert persistent.put("Example/retained", "password", "cached-value")
@@ -607,7 +612,7 @@ def test_batch_rejects_malformed_service_values_before_cache_write(
         '[{"entry":"Example/one"},{"entry":"Example/two"}]',
     ))
 
-    assert cli.main(["batch-get"]) == 1
+    assert cli.main(["batch-get", *(["--refresh"] if refresh else [])]) == 1
     captured = capsys.readouterr()
     results = json.loads(captured.out)["results"]
     assert [row["entry"] for row in results] == ["Example/one", "Example/two"]
