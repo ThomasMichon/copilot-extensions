@@ -89,31 +89,33 @@ class GuidanceSnapshot:
         if root.resolve() != root or not root.is_dir():
             return {"status": "unsafe_root", "files": files}
         examined = 0
+        directories = [root]
         try:
-            for directory, dirs, names in os.walk(root, followlinks=False):
-                examined += len(dirs) + len(names)
-                if examined > MAX_INVENTORY_ENTRIES:
-                    return {"status": "entry_limit", "files": files}
-                dirs[:] = sorted(
-                    name for name in dirs
-                    if (Path(directory) / name).resolve() == Path(directory) / name
-                )
-                for name in sorted(names):
-                    path = Path(directory) / name
-                    if path.suffix != ".md":
-                        continue
-                    if path.resolve() != path or not path.is_file():
-                        return {"status": "unsafe_file", "files": files}
-                    stat = path.stat()
-                    files.append({
-                        "path": str(path), "bytes": stat.st_size,
-                        "mtime_ns": stat.st_mtime_ns,
-                    })
-                    if len(files) > MAX_FILES:
-                        return {"status": "file_limit", "files": files}
+            while directories:
+                with os.scandir(directories.pop()) as entries:
+                    for entry in entries:
+                        examined += 1
+                        if examined > MAX_INVENTORY_ENTRIES:
+                            return {"status": "entry_limit", "files": files}
+                        path = Path(entry.path)
+                        if entry.is_dir(follow_symlinks=False):
+                            if path.resolve() == path:
+                                directories.append(path)
+                            continue
+                        if path.suffix != ".md":
+                            continue
+                        if path.resolve() != path or not path.is_file():
+                            return {"status": "unsafe_file", "files": files}
+                        stat = path.stat()
+                        files.append({
+                            "path": str(path), "bytes": stat.st_size,
+                            "mtime_ns": stat.st_mtime_ns,
+                        })
+                        if len(files) > MAX_FILES:
+                            return {"status": "file_limit", "files": files}
         except OSError:
             return {"status": "unavailable", "files": files}
-        return {"status": "present", "files": files}
+        return {"status": "present", "files": sorted(files, key=lambda item: item["path"])}
 
     def finish(self, reason: str | None = None) -> dict:
         self.state = "incomplete" if reason else "complete"
@@ -232,13 +234,16 @@ class GuidanceSnapshot:
                     raw = source.read(MAX_FILE_BYTES + 1)
                 if len(raw) > MAX_FILE_BYTES:
                     return self.finish("guidance_file_limit")
-                expected = raw.decode("utf-8-sig").replace("\r\n", "\n").strip()
+                expected = raw.decode("utf-8-sig").replace("\r\n", "\n").rstrip("\n")
             except (OSError, UnicodeError):
                 return self.finish("guidance_unavailable")
             observed = results[item["tool_call_id"]].replace("\r\n", "\n")
             # Native view may annotate each line rather than returning raw text.
             unnumbered = re.sub(r"(?m)^(?:L\d+:|\d+[.:]) ?", "", observed)
-            matched = bool(expected) and (expected in observed or expected in unnumbered)
+            body_pattern = r"(?m)^" + re.escape(expected) + r"(?=\n|\Z)"
+            matched = bool(expected) and any(
+                re.search(body_pattern, text) is not None for text in (observed, unnumbered)
+            )
             item["source_body_observed"] = matched
             if not matched:
                 return self.finish("read_denied_truncated_or_unmatched")

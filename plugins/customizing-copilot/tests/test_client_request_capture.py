@@ -154,7 +154,54 @@ def test_refused_initial_inventory_emits_no_tool_calls(tmp_path, monkeypatch, st
     assert snapshot.report()["rounds"][0]["generated_files"]["status"] == status
 
 
-def test_snapshot_correlates_full_bodies_and_wire_deltas(tmp_path):
+def test_inventory_stops_consuming_entries_at_limit(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    import snapshot_rounds
+
+    for index in range(5):
+        (tmp_path / f"{index}.txt").touch()
+    scandir = os.scandir
+    consumed = []
+    closed = []
+
+    @contextmanager
+    def counted_scandir(path):
+        with scandir(path) as entries:
+            def counted_entries():
+                for entry in entries:
+                    consumed.append(entry.name)
+                    yield entry
+            try:
+                yield counted_entries()
+            finally:
+                closed.append(path)
+
+    monkeypatch.setattr(snapshot_rounds.os, "scandir", counted_scandir)
+    monkeypatch.setattr(snapshot_rounds, "MAX_INVENTORY_ENTRIES", 2)
+    result = snapshot_rounds.GuidanceSnapshot(tmp_path).inventory()
+    assert result["status"] == "entry_limit"
+    assert len(consumed) == 3
+    assert closed == [tmp_path]
+
+
+def test_inventory_reports_unreadable_subdirectory(tmp_path, monkeypatch):
+    import snapshot_rounds
+
+    child = tmp_path / "unreadable"
+    child.mkdir()
+    scandir = os.scandir
+
+    def denied_scandir(path):
+        if Path(path) == child:
+            raise PermissionError("Synthetic denied directory")
+        return scandir(path)
+
+    monkeypatch.setattr(snapshot_rounds.os, "scandir", denied_scandir)
+    assert snapshot_rounds.GuidanceSnapshot(tmp_path).inventory()["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("line_format", ["{}", "1. {}", "1: {}", "L1: {}"])
+def test_snapshot_correlates_full_bodies_and_wire_deltas(tmp_path, line_format):
     from snapshot_rounds import GuidanceSnapshot
 
     root = tmp_path / "instructions"
@@ -172,7 +219,7 @@ def test_snapshot_correlates_full_bodies_and_wire_deltas(tmp_path):
     reply = snapshot.receive(payload, 200, tmp_path / "request.round-2.json")
     assert len(reply["tool_calls"]) == 2
     for index, path in enumerate(files):
-        annotated = "\n".join(f"{line_number}. {line}" for line_number, line in enumerate(
+        annotated = "\n".join(line_format.replace("1", str(line_number)).format(line) for line_number, line in enumerate(
             path.read_text().splitlines(), 1,
         ))
         payload["messages"].append(tool_result(f"capture-read-{index}", annotated))
@@ -206,6 +253,7 @@ def test_listing_does_not_authorize_unlisted_or_denied_reads(tmp_path, listing, 
     ("missing", "missing_or_duplicate_tool_result"),
     ("duplicate", "missing_or_duplicate_tool_result"),
     ("denied", "read_denied_truncated_or_unmatched"),
+    ("denied_filename", "read_denied_truncated_or_unmatched"),
     ("empty_denied", "read_denied_truncated_or_unmatched"),
     ("changed", "guidance_changed_during_read"),
     ("oversize", "guidance_file_limit"),
@@ -214,8 +262,9 @@ def test_listing_does_not_authorize_unlisted_or_denied_reads(tmp_path, listing, 
 def test_incomplete_guidance_never_reports_complete(tmp_path, failure, reason):
     from snapshot_rounds import GuidanceSnapshot, MAX_FILE_BYTES
 
-    path = tmp_path / "cue.md"
-    path.write_text("" if failure == "empty_denied" else "Synthetic full guidance body", encoding="utf-8")
+    path = tmp_path / ("Use uv.md" if failure == "denied_filename" else "cue.md")
+    body = "" if failure == "empty_denied" else "Synthetic full guidance body"
+    path.write_text("Use uv\n" if failure == "denied_filename" else body, encoding="utf-8")
     payload = guidance_payload()
     snapshot = GuidanceSnapshot(tmp_path)
     snapshot.receive(payload, 100, tmp_path / "request.json")
@@ -227,7 +276,7 @@ def test_incomplete_guidance_never_reports_complete(tmp_path, failure, reason):
     reply = snapshot.receive(payload, 200, tmp_path / "round2.json")
     if failure not in {"oversize", "schema"}:
         if failure != "missing":
-            payload["messages"].append(tool_result("capture-read-0", "Permission denied"))
+            payload["messages"].append(tool_result("capture-read-0", f"Permission denied: {path}"))
         if failure == "duplicate":
             payload["messages"].append(tool_result("capture-read-0", "duplicate"))
         if failure == "changed":
