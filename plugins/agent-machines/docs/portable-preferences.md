@@ -323,6 +323,12 @@ legacy/non-pinnable runtime, missing provider, unsupported discovery or a
 rolled-back provider without `input_fence: 1` blocks only this optional
 operation. Ordinary exchange and existing producer commands remain available.
 There is no PATH search, fallback configuration writer, bootstrap or update.
+Before selection and every producer call, Machines refuses a selected producer's
+nonempty `AGENT_BRIDGE_TELEMETRY_SINK` or `AGENT_DISPATCH_TELEMETRY_SINK`
+override. Dispatch adoption also refuses any `AGENT_DISPATCH_TASK_*` environment
+entry. The peer launcher's routing cleanup must not erase a custom sink or turn
+a restricted task into an unrestricted configuration caller; these checks repeat
+at capability discovery, preview and apply, including changes after preview.
 
 For `capture: retained-local`, the native configuration owner validates its
 target, preserves custom/legacy sinks and uses its own lock/atomic writer.

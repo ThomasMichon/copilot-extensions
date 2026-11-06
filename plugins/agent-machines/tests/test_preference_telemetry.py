@@ -1,12 +1,13 @@
 """Fixture-resolved peers retain actual producer parsers, locks and writers."""
 
 import json
+import os
 from pathlib import Path
 import sys
 
 import pytest
 
-from agent_machines import __main__ as cli, configuration, preference_telemetry as adapter
+from agent_machines import __main__ as cli, _peer_launch, configuration, preference_telemetry as adapter
 from agent_machines.preferences import PreferenceError
 
 
@@ -52,6 +53,118 @@ def configured(tmp_path, monkeypatch):
 
     monkeypatch.setattr(adapter, "_prefix", prefix)
     return state, native / "telemetry.json", directory
+
+
+@pytest.fixture
+def projected_peer(configured, monkeypatch):
+    state, target, directory = configured
+    plugins = Path(__file__).resolve().parents[2]
+
+    def context(producer):
+        return {
+            "pluginId": producer, "installReceipt": str(state / "receipt.json"),
+            "payloadRoot": str(plugins / producer), "pluginRoot": str(target.parent),
+            "marketplaceId": "example-marketplace", "logsRoot": str(target.parent / "logs"),
+        }
+
+    def prefix(producer):
+        return [
+            sys.executable, "-c",
+            "import json,os,runpy,sys; sys.path.insert(0,sys.argv.pop(1)); "
+            "from agent_machines._peer_launch import peer_environment; "
+            "environment=peer_environment(json.loads(sys.argv.pop(1)),dict(os.environ)); "
+            "os.environ.clear(); os.environ.update(environment); "
+            "sys.path.insert(0,sys.argv.pop(1)); "
+            "runpy.run_module(sys.argv.pop(1),run_name='__main__')",
+            str(plugins / "agent-machines" / "src"), json.dumps(context(producer)),
+            str(plugins / producer / "src"), producer.replace("-", "_"),
+        ]
+
+    monkeypatch.setattr(adapter, "_prefix", prefix)
+    return context
+
+
+def test_real_peer_projection_reaches_native_writer(configured, projected_peer):
+    state, target, directory = configured
+    arguments = dict(producer="agent-dispatch", directory=directory)
+    preview = adapter.adopt(state, **arguments)
+    result = adapter.adopt(state, apply=True, expected=preview["preview_token"], **arguments)
+    assert result["configuration_applied"] and result["changed"]
+    assert json.loads(target.read_bytes())["retained_spool"]["directory"] == str(directory)
+    assert list((directory / "retained").iterdir()) == []
+
+
+@pytest.mark.parametrize("producer,key,reason", [
+    ("agent-dispatch", f"AGENT_DISPATCH_TASK_{suffix}", "task-authority-preserved")
+    for suffix in ("TOKEN", "ID", "URL", "WORKER_ID")
+] + [
+    (producer, producer.upper().replace("-", "_") + "_TELEMETRY_SINK", "environment-sink-preserved")
+    for producer in adapter.PRODUCERS
+])
+def test_restrictions_are_refused_before_peer_selection(
+    configured, projected_peer, monkeypatch, producer, key, reason,
+):
+    state, target, directory = configured
+    monkeypatch.setenv(key, "example-restriction")
+    assert key not in _peer_launch.peer_environment(projected_peer(producer), dict(os.environ))
+    monkeypatch.setattr(adapter, "_prefix", lambda *_args: pytest.fail("restricted peer was selected"))
+    with pytest.raises(PreferenceError, match=reason):
+        adapter.adopt(state, producer=producer, directory=directory)
+    assert not target.exists() and not target.with_suffix(".json.lock").exists()
+
+
+@pytest.mark.parametrize("producer,key,reason", [
+    ("agent-dispatch", "AGENT_DISPATCH_TASK_TOKEN", "task-authority-preserved"),
+    ("agent-dispatch", "AGENT_DISPATCH_TELEMETRY_SINK", "environment-sink-preserved"),
+])
+@pytest.mark.parametrize("handoff", ["capabilities", "preview", "apply"])
+def test_changed_environment_is_refused_at_each_peer_handoff(
+    configured, projected_peer, monkeypatch, producer, key, reason, handoff,
+):
+    state, target, directory = configured
+    arguments = dict(producer=producer, directory=directory)
+    preview = adapter.adopt(state, **arguments)
+    original_call, original_run = adapter._call, adapter.run_caller_owned
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(args)
+        return original_run(*args, **kwargs)
+
+    def call(prefix, native_arguments, **fields):
+        phase = (
+            "capabilities" if native_arguments == ["capabilities"]
+            else "apply" if "--apply" in native_arguments else "preview"
+        )
+        if phase == handoff:
+            monkeypatch.setenv(key, "example-restriction")
+            assert key not in _peer_launch.peer_environment(projected_peer(producer), dict(os.environ))
+        return original_call(prefix, native_arguments, **fields)
+
+    monkeypatch.setattr(adapter, "run_caller_owned", run)
+    monkeypatch.setattr(adapter, "_call", call)
+    with pytest.raises(PreferenceError, match=reason):
+        adapter.adopt(state, apply=True, expected=preview["preview_token"], **arguments)
+    assert len(calls) == {"capabilities": 0, "preview": 1, "apply": 2}[handoff]
+    assert not target.exists() and not target.with_suffix(".json.lock").exists()
+
+
+@pytest.mark.parametrize("arguments", [
+    ["capabilities"], ["retained"], ["retained", "--apply"],
+])
+def test_bridge_sink_is_refused_before_projected_handoff(
+    configured, projected_peer, monkeypatch, arguments,
+):
+    _state, target, _directory = configured
+    key = "AGENT_BRIDGE_TELEMETRY_SINK"
+    monkeypatch.setenv(key, "custom.module:factory")
+    assert key not in _peer_launch.peer_environment(projected_peer("agent-bridge"), dict(os.environ))
+    monkeypatch.setattr(
+        adapter, "run_caller_owned", lambda *_args, **_kwargs: pytest.fail("restricted peer was launched"),
+    )
+    with pytest.raises(PreferenceError, match="environment-sink-preserved"):
+        adapter._call([], arguments, producer="agent-bridge")
+    assert not target.exists() and not target.with_suffix(".json.lock").exists()
 
 
 def test_normal_cli_reaches_actual_producer_without_activation(configured, capsys):

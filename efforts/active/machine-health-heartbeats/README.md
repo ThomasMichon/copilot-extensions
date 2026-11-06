@@ -573,3 +573,21 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   full installer clean-room or native Linux qualification. An installed/live
   lane is not exercised: runtime rollout and carrier/activation effects remain
   held, and the operation itself has no external backend. The parent stays Active.
+
+### 2026-11-06 - Preserve restrictions across telemetry peer handoff
+- The #11094 review found that native peer environment cleanup removes task
+  identity fields and custom telemetry sink overrides. Producer-side admission
+  alone therefore cannot preserve those caller restrictions.
+- Machines now refuses Dispatch task environment entries and a selected
+  producer's nonempty sink override before peer selection and before every
+  capability, preview and apply handoff. The shared launcher is unchanged.
+- The 26-case adapter packet passed. A source-resolved peer uses the real
+  environment projection and native Dispatch writer in a temporary profile.
+  Controls refuse restrictions before selection and after parent preview at
+  each handoff, without creating native configuration or its writer lock.
+  Bridge sink controls test the same pre-launch refusal without importing
+  Bridge into Machines' dependency environment.
+- Documentation consistency and whitespace passed. These remain fixture-resolved
+  source/process controls, not installed immutable-slot or carrier qualification.
+  Fresh exact-head CI and a passing review still gate this correction; no
+  rollout, capture, carrier publication or activation is authorized by it.

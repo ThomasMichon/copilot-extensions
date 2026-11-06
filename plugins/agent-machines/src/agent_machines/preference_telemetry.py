@@ -17,6 +17,15 @@ PRODUCERS = ("agent-bridge", "agent-dispatch")
 NATIVE_SCHEMA = "process-telemetry.retained-configuration/v1"
 
 
+def _admit(producer: str) -> None:
+    if producer == "agent-dispatch" and any(
+        name.startswith("AGENT_DISPATCH_TASK_") for name in os.environ
+    ):
+        raise codec.PreferenceError("task-authority-preserved")
+    if os.environ.get(producer.upper().replace("-", "_") + "_TELEMETRY_SINK"):
+        raise codec.PreferenceError("environment-sink-preserved")
+
+
 def _prefix(producer: str) -> list[str]:
     root = Path(os.environ.get("AGENT_RT_ROOT") or (Path.home() / ".agent-machines"))
     raw = os.environ.get(_peer_launch.CONTEXT_ENV, "")
@@ -29,7 +38,8 @@ def _prefix(producer: str) -> list[str]:
     return prefix
 
 
-def _call(prefix: list[str], arguments: list[str], *, capability=False) -> dict:
+def _call(prefix: list[str], arguments: list[str], *, producer: str, capability=False) -> dict:
+    _admit(producer)
     result = run_caller_owned(
         [*prefix, "telemetry", *arguments], timeout=25,
         max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
@@ -113,9 +123,10 @@ def _plan(state: Path, local: Path | None, producer: str, directory: Path) -> tu
     }
     prefix = []
     if choices.get("capture") == "retained-local":
+        _admit(producer)
         prefix = _prefix(producer)
-        _call(prefix, ["capabilities"], capability=True)
-        native = _call(prefix, arguments)
+        _call(prefix, ["capabilities"], producer=producer, capability=True)
+        native = _call(prefix, arguments, producer=producer)
         result.update(native=native, eligible=native["status"] == "preview", status=native["status"])
         if result["eligible"]:
             token = native.get("confirmation")
@@ -143,7 +154,7 @@ def adopt(
         return result
     native = _call(prefix, [
         *arguments, "--apply", "--confirm", result["native"]["confirmation"],
-    ])
+    ], producer=producer)
     if native["status"] != "configured":
         known_refusal = native["status"] == "refused" or native.get("write_outcome") == "not-applied"
         return {
