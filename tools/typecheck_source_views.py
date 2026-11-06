@@ -414,13 +414,25 @@ def _required_harness_programs(
         parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
 
         def context(node: ast.AST) -> ast.FunctionDef:
+            producer = node
             chain: list[ast.AST] = []
             while node in parents:
                 node = parents[node]
                 chain.append(node)
             functions = [n for n in chain if isinstance(n, ast.FunctionDef)]
-            if not functions or any(isinstance(n, (ast.ClassDef, ast.AsyncFunctionDef, ast.Lambda)) for n in chain):
-                raise SourceViewError("Unsupported module/class/async Python producer context")
+            container = parents.get(producer)
+            nested_body: ast.expr | None = None
+            if isinstance(producer, ast.Constant) and producer.value == "-c" and isinstance(container, (ast.List, ast.Tuple)):
+                offset = container.elts.index(producer)
+                if offset + 1 < len(container.elts):
+                    nested_body = container.elts[offset + 1]
+            literal_nested = (
+                isinstance(nested_body, ast.Constant) and isinstance(nested_body.value, str)
+            )
+            if not functions or (len(functions) != 1 and not literal_nested) or any(
+                isinstance(n, (ast.ClassDef, ast.AsyncFunctionDef, ast.Lambda)) for n in chain
+            ):
+                raise SourceViewError("Unsupported module/class/async/nested Python producer context")
             return functions[-1]
 
         def binding(fn: ast.FunctionDef, name: str) -> ast.expr:
@@ -511,6 +523,26 @@ def harness_emitted_inputs(
             raise SourceViewError("Unknown harness member fields")
         content = _read(root, row["path"])
         tree = _parse(content, row["path"])
+        for node in ast.walk(tree):
+            names: tuple[str, ...] = ()
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                names = (node.id,)
+            elif isinstance(node, ast.arg):
+                names = (node.arg,)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names = (node.name,)
+            elif isinstance(node, ast.alias):
+                names = (node.asname or node.name.split(".")[0],)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                names = tuple(node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+                names = (node.name,)
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name is not None:
+                names = (node.name,)
+            elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+                names = (node.rest,)
+            if {"str", "repr"}.intersection(names):
+                raise SourceViewError("Shadowed fixture conversion binding")
         if _digest(content) not in row["sha256"] or _shape(tree) != row["structure"]:
             raise SourceViewError(f"{row['path']}: producer bytes/structure changed; review all sinks")
         inputs.append((row["path"], content))

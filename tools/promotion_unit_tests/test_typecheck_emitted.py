@@ -150,3 +150,49 @@ def test_emitted_provider_uses_ordered_canonical_winner(tmp_path: Path, change: 
         (package / "__init__.pyi").write_bytes(b"")
         with pytest.raises(checker.TypecheckError, match="winning agent_procutil stub"):
             checker._harness_procutil_provider(tmp_path, [str(canonical), str(later)])
+
+
+@pytest.mark.parametrize("change", ["nested-sink", "nested-literal", "function", "parameter", "import", "module-store"])
+def test_reviewed_member_digests_cannot_hide_lexical_bindings(tmp_path: Path, change: str) -> None:
+    paths, declaration = emitted_source(tmp_path)
+    path = tmp_path / paths[0]
+    source = path.read_bytes()
+    if change == "nested-sink":
+        source = (
+            b"def emit():\n    script = 'value: int = 1'\n"
+            b"    def launch(script: str):\n        subprocess.run([sys.executable, '-c', script])\n"
+            b"    launch(\"value: int = 'wrong'\")\n"
+        )
+    elif change == "nested-literal":
+        source = b"def emit():\n    def launch():\n        subprocess.run([sys.executable, '-c', \"value: int = 1\"])\n"
+    elif change == "function":
+        source += b"\ndef str(value):\n    return 42\n"
+    elif change == "parameter":
+        source = source.replace(b"def emit():", b"def emit(repr):")
+    elif change == "import":
+        source += b"\nfrom builtins import int as str\n"
+    else:
+        source += b"\nrepr = lambda value: 42\n"
+    path.write_bytes(source)
+    tree = ast.parse(source)
+    declaration["members"][0].update(
+        sha256=[hashlib.sha256(source).hexdigest()], structure=views._shape(tree),
+    )
+    if change == "nested-sink":
+        expression = next(n.value for n in ast.walk(tree) if isinstance(n, ast.Assign))
+        container = next(n for n in ast.walk(tree) if isinstance(n, ast.List))
+        declaration["programs"][0].update(
+            selector="assignment:script", expression=views._shape(expression),
+            sites=[[container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]],
+        )
+    elif change == "nested-literal":
+        container = next(n for n in ast.walk(tree) if isinstance(n, ast.List))
+        declaration["programs"][0]["sites"] = [
+            [container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]
+        ]
+    (tmp_path / views.HARNESS_DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    if change == "nested-literal":
+        assert views.harness_emitted_inputs(tmp_path, paths)[1][0][1] == b"value: int = 1"
+        return
+    with pytest.raises(views.SourceViewError, match="nested|conversion binding"):
+        views.harness_emitted_inputs(tmp_path, paths)
