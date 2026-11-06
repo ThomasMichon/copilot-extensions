@@ -420,6 +420,7 @@ def shell_may_mutate(command: str, tool: str) -> bool:
                         return True
                 elif assignment is None and re.match(r"^\s*\$[^=]*=", effective):
                     return True
+                effective = re.sub(r"^\s*\.\s+", "", effective, count=1)
             if re.match(
                 r"^\s*(?:\.\s+)?(?:[({]|(?:if|elseif|else|foreach|for|while|until|switch|try|catch|finally|do|trap|function|filter|begin|process|end|then|case|select)\b)",
                 effective, re.IGNORECASE,
@@ -441,6 +442,7 @@ def shell_may_mutate(command: str, tool: str) -> bool:
                 continue
             if subcommand and (
                 subcommand not in _GIT_READ_BUILTINS or subcommand == "fetch"
+                or any(arg == "--output" or arg.startswith("--output=") for arg in (args[:args.index("--")] if "--" in args else args))
             ):
                 return True
     return False

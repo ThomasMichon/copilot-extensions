@@ -349,7 +349,10 @@ original shell segmentation, substitution, literal-target and Git-option
 parsers. It does not evaluate or cache permission: `pull --ff-only` and `fetch`
 can change observed repository state even though the anchor guard permits them.
 Known Git reads and read-only branch flags do not invalidate or wake a sweep;
-other Git subcommands are conservative mutations. Supported literal writes and
+an output-file option before the path delimiter makes an otherwise read-only
+Git command a mutation. PowerShell dot invocation is normalized for the same
+classification, including assignment right-hand commands.
+Other Git subcommands are conservative mutations. Supported literal writes and
 redirections invalidate globally, retaining the original shell target scope.
 Missing commands/parser support and traversal overflow are conservative too,
 with at most 128 segments, eight nested substitution levels and a shared

@@ -105,6 +105,15 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     pytest.param("Get-Content -LiteralPath file[ab]", False, id="read-bracket-path"),
     pytest.param("[IO.File]::ReadAllText('file')", False, id="read-type-call"),
     pytest.param("[string[]]$result = git commit -m test", True, id="typed-array-assignment"),
+    pytest.param("git diff --output=report.txt", True, id="git-output"),
+    pytest.param("git log --output report.txt", True, id="git-output-argument"),
+    pytest.param("git show --output=report.txt HEAD", True, id="git-show-output"),
+    pytest.param("git diff -- --output=literal-path", False, id="git-output-after-delimiter"),
+    pytest.param("git log --format=--output=literal", False, id="git-output-format-data"),
+    pytest.param(". git commit -m test", True, id="dot-git-write"),
+    pytest.param(". Set-Content file value", True, id="dot-file-write"),
+    pytest.param(". git status --short", False, id="dot-read"),
+    pytest.param("$result = . git commit -m test", True, id="assigned-dot-write"),
 ])
 def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
     assert guard.shell_may_mutate(command, "powershell") is mutates
