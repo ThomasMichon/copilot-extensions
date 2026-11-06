@@ -36,8 +36,12 @@ if args[:1] == ["-c"]:
     raise SystemExit(result.returncode)
 if args[:3] == ["-I", "-m", "agent_worktrees.session_shell"]:
     source = Path(os.environ["TEST_SOURCE_ROOT"])
+    runtime_lib = Path(os.environ["AGENT_RT_ROOT"]) / "lib"
     sys.path[:0] = [str(source / "plugins/agent-worktrees/src"),
-                    str(source / "libs/repository-policy/src")]
+                    str(source / "libs/repository-policy/src"), str(runtime_lib)]
+    import work_coalescing_singleton
+    if not Path(work_coalescing_singleton.__file__).resolve().is_relative_to(runtime_lib.resolve()):
+        raise SystemExit("Resume fixture dependency resolved outside its runtime")
     from agent_worktrees.session_shell import main
     sys.argv = ["session_shell", *args[3:]]
     raise SystemExit(main())
@@ -154,7 +158,8 @@ def _resume_fixture(root, shared_env, manager_bin, index):
     }
 
 
-def test_resume_fixture_supplies_the_session_shell_dependency(tmp_path):
+@pytest.mark.parametrize("use_fixture_dependency", [False, True])
+def test_resume_fixture_supplies_the_session_shell_dependency(tmp_path, use_fixture_dependency):
     env = _test_env(tmp_path)
     launch = _resume_fixture(tmp_path / "launch", env, tmp_path / "manager-bin", 0)
     runtime_lib = Path(launch["env"]["AGENT_RT_ROOT"]) / "lib"
@@ -162,6 +167,9 @@ def test_resume_fixture_supplies_the_session_shell_dependency(tmp_path):
         str(path) for path in (ROOT / "libs").glob("*/src")
         if path.parent.name != "work-coalescing-singleton"
     )
+    if not use_fixture_dependency:
+        (runtime_lib / "work_coalescing_singleton").rename(tmp_path / "detached-dependency")
+        source_dependencies.append(str(ROOT / "libs/work-coalescing-singleton/src"))
     bootstrap = """
 import importlib.util, runpy, sys
 from pathlib import Path
@@ -189,7 +197,11 @@ assert Path(work_coalescing_singleton.__file__).resolve().is_relative_to(Path(ru
         cwd=launch["target"], env=launch["env"], capture_output=True, text=True, timeout=20, check=False,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    if use_fixture_dependency:
+        assert result.returncode == 0, result.stdout + result.stderr
+    else:
+        assert result.returncode != 0
+        assert "Resume fixture dependency resolved outside its runtime" in result.stderr
 
 
 @pytest.mark.parametrize("prewarm", [False, True])
