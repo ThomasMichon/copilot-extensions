@@ -1422,7 +1422,11 @@ An absent Manager-root environment value uses the selected provider's canonical
 default when comparing contexts; an explicit different root remains incompatible.
 Spare and completion commands use isolated Python startup and the owning
 constructed slot's retention bootstrap, so inherited Python paths cannot select
-a different Manager. A consumed UI enters the caller's cwd before project binding;
+a different Manager. On Windows, the encoded PowerShell launcher is
+noninteractive: it only invokes Python and propagates its exit code, without
+requesting shell input. The Python UI retains
+its native terminal input and output.
+A consumed UI enters the caller's cwd before project binding;
 the engine's explicit switch-to-anchor policy still applies afterward.
 Warm admission revalidates the current mux incarnation as well as the worker's
 process birth identity. Prewarming is disabled when process-birth identity is

@@ -5881,6 +5881,12 @@ disposable Linux and Windows workers, plus the private POSIX pane fixture.
 Windows uses portable PSMux 3.3.5 in runner temp, pinned by archive SHA-256;
 it does not install or register a host service. This lane remains manual and
 outside required unit CI. Do not substitute a shared developer desktop for it.
+Windows startup controls overlap private mux requests with four detached
+launches, using direct Python and the noninteractive PowerShell wrapper.
+The original worker-startup deadline, real TTY, owner-death and sentinel
+assertions remain unchanged. A cursor-position response is sent only after a
+startup failure, to diagnose a blocked shell; it never converts that failure
+into a passing qualification.
 
 Manager's source-bound test environment installs its ordinary wheel, preserving
 the declared metadata of its embedded first-party libraries. Other plugin

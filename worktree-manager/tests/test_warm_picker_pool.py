@@ -712,6 +712,11 @@ def test_spare_launch_uses_isolation_before_importing_worker_module(pool, monkey
     assert value.acquire(request())["reason"] == "warming"
     value._spawn()
     command = commands[0]
+    if os.name == "nt":
+        shell = command.index("--") + 1
+        assert command[shell + 1:-1] == [
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+        ]
     script = (
         base64.b64decode(command[-1]).decode("utf-16-le") if os.name == "nt" else command[-1]
     )

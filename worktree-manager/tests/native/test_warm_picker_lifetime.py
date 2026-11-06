@@ -355,11 +355,11 @@ def _probe_argv(marker, powershell):
         return argv
     command = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
     encoded = base64.b64encode((command + "; exit $LASTEXITCODE").encode("utf-16-le")).decode("ascii")
-    return [powershell, "-NoLogo", "-NoProfile", "-EncodedCommand", encoded]
+    return [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="diagnoses Windows native launch boundaries")
-@pytest.mark.parametrize("launcher", ["direct-python", "powershell", "powershell-noninteractive"])
+@pytest.mark.parametrize("launcher", ["direct-python", "powershell"])
 def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mux):
     from plugin_test_command_safety import private_mux_args
 
@@ -398,8 +398,6 @@ def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mu
     try:
         for index, (session, marker) in enumerate(probes):
             argv = _probe_argv(marker, None if launcher == "direct-python" else powershell)
-            if launcher == "powershell-noninteractive":
-                argv.insert(3, "-NonInteractive")
             created = command("new-session", "-d", "-s", session, "--", *argv)
             assert created.returncode == 0, created.stderr
             if index == 0:
