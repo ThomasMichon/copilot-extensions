@@ -36,7 +36,7 @@ from installer_wheel_inputs import (
 )
 from installer_wheel_snapshot import _digest, _open, _unchanged, retain_wheel_bundle
 from runtime_profile_bundle import _write_archive
-from runtime_profile_wheels import verify_profile_wheels
+from runtime_profile_wheels import MANAGER_ISOLATED, derive_profile_environments, verify_profile_layout
 
 SCHEMA = "copilot-extensions.runtime-profile-delivery"
 _MANIFEST_BYTES = 16 << 20
@@ -109,11 +109,17 @@ def _materials(profile, materials, max_files, max_bytes, deadline):
 
 
 def _manifest(profile, manifest, max_files, max_bytes, deadline):
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    layout = manifest.get("layout") if version == 2 else None
     if (
         not isinstance(manifest, dict)
-        or manifest.keys() != {"schema", "version", "profile_sha256", "files", "materials"}
+        or manifest.keys() != (
+            {"schema", "version", "profile_sha256", "files", "materials", "layout"}
+            if version == 2 else {"schema", "version", "profile_sha256", "files", "materials"}
+        )
         or manifest["schema"] != SCHEMA or type(manifest["version"]) is not int
-        or manifest["version"] != 1 or manifest["profile_sha256"] != profile.lock_id
+        or version not in (1, 2) or (version == 2 and layout != MANAGER_ISOLATED)
+        or manifest["profile_sha256"] != profile.lock_id
     ):
         raise WheelError("delivery differs from selected profile or schema")
     materials = manifest["materials"]
@@ -129,7 +135,7 @@ def _manifest(profile, manifest, max_files, max_bytes, deadline):
     for name, item in materials.items():
         if files["materials/" + name] != {key: item[key] for key in ("sha256", "size")}:
             raise WheelError("delivery material/file identity mismatch")
-    return files
+    return files, layout
 
 
 @contextmanager
@@ -161,6 +167,8 @@ class DeliverySnapshot:
     wheels: object
     materials: object
     material_paths: object
+    layout: str | None
+    environments: object
 
 
 @contextmanager
@@ -198,7 +206,7 @@ def retain_profile_delivery(
                     stream, archive, archive.getinfo("delivery.json"),
                     limit=manifest_limit, deadline=deadline,
                 )), object_pairs_hook=_unique)
-                files = _manifest(profile, manifest, max_files, max_bytes, deadline)
+                files, layout = _manifest(profile, manifest, max_files, max_bytes, deadline)
                 if set(names) != {*files, "delivery.json"}:
                     raise WheelError("unexpected or omitted delivery members")
                 paths = {}
@@ -235,15 +243,17 @@ def retain_profile_delivery(
                 max_total_bytes=max_bytes, max_snapshot_bytes=max_snapshot_bytes - total,
                 deadline=deadline,
             ) as wheels:
-                verify_profile_wheels(
+                environments = verify_profile_layout(
                     profile, wheels.archives, max_archive_bytes=max_bytes,
                     max_unpacked_bytes=max_bytes, max_metadata_bytes=_MANIFEST_BYTES,
-                    limits=limits, deadline=deadline,
+                    limits=limits, deadline=deadline, layout=layout,
                 )
                 yield DeliverySnapshot(
                     wheels,
                     MappingProxyType({name: streams["materials/" + name] for name in manifest["materials"]}),
                     MappingProxyType({name: paths["materials/" + name] for name in manifest["materials"]}),
+                    layout,
+                    environments,
                 )
 
 
@@ -251,10 +261,13 @@ def build_profile_delivery(
     record, transport: Path, transport_sha256: str, materials: dict,
     material_paths: dict, destination: Path, *, max_bytes: int, max_files: int,
     max_snapshot_bytes: int, deadline: float,
+    layout: str | None = None,
 ) -> dict:
     """Package caller-qualified materials; never discover or approve them."""
     _limits(max_bytes, max_files, max_snapshot_bytes, deadline)
     profile = validate_profile(record, deadline=deadline)
+    if layout is not None:
+        derive_profile_environments(profile, layout=layout, deadline=deadline)
     materials = json.loads(_json(materials))
     material_paths = dict(material_paths)
     _materials(profile, materials, max_files, max_bytes, deadline)
@@ -294,6 +307,8 @@ def build_profile_delivery(
                 "schema": SCHEMA, "version": 1, "profile_sha256": profile.lock_id,
                 "files": files, "materials": materials,
             }
+            if layout is not None:
+                manifest.update(version=2, layout=layout)
             metadata = _json(manifest)
             if len(metadata) > _MANIFEST_BYTES:
                 raise WheelError("delivery manifest byte budget exceeded")
@@ -308,8 +323,9 @@ def build_profile_delivery(
                 profile.record(), candidate, delivery_sha256=sha256, max_bytes=max_bytes,
                 max_files=max_files, max_snapshot_bytes=max_snapshot_bytes - total - size,
                 deadline=deadline,
-            ):
-                pass
+            ) as retained:
+                if retained.layout != layout:
+                    raise WheelError("delivery environment layout differs from selection")
         # Input verification has finished before publication, including exit checks.
         before = _ordinary(candidate)
         with _open(candidate) as stream:
@@ -344,6 +360,7 @@ def main(argv=None):
     parser.add_argument("--materials", required=True, type=Path)
     parser.add_argument("--material-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--layout", choices=(MANAGER_ISOLATED,))
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
     parser.add_argument("--max-files", type=int, default=100_000)
@@ -357,7 +374,7 @@ def main(argv=None):
             record, args.transport, args.transport_sha256, materials,
             {name: args.material_dir / name for name in materials}, args.output,
             max_bytes=args.max_bytes, max_files=args.max_files,
-            max_snapshot_bytes=8 * args.max_bytes, deadline=deadline,
+            max_snapshot_bytes=8 * args.max_bytes, deadline=deadline, layout=args.layout,
         )
         print(json.dumps(result, sort_keys=True))
         return 0

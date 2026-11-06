@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 from runtime_profile import ProfileError, validate_profile
-from runtime_profile_wheels import verify_profile_wheels
+from runtime_profile_wheels import MANAGER_ISOLATED, verify_profile_layout
 
 # isort: split
 
@@ -68,6 +68,7 @@ def build_profile_bundle(
     record: dict, archives, destination: Path, *, limits: WheelLimits,
     max_wheels: int, max_total_bytes: int, max_snapshot_bytes: int,
     max_unpacked_bytes: int, max_bundle_bytes: int, deadline: float,
+    layout: str | None = None,
 ) -> dict:
     """Produce the existing transport format from a complete, byte-checked set.
 
@@ -95,10 +96,10 @@ def build_profile_bundle(
             max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_total_bytes,
             max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
         ) as snapshot:
-            verify_profile_wheels(
+            verify_profile_layout(
                 profile, snapshot.archives, max_archive_bytes=max_total_bytes,
                 max_unpacked_bytes=max_unpacked_bytes, max_metadata_bytes=limits.max_metadata_bytes,
-                limits=limits, deadline=deadline,
+                limits=limits, deadline=deadline, layout=layout,
             )
             snapshot_bytes = sum(os.fstat(stream.fileno()).st_size for stream in snapshot.archives.values())
             _write_bundle(
@@ -138,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", required=True, type=Path)
     parser.add_argument("--wheel-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--layout", choices=(MANAGER_ISOLATED,))
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
     parser.add_argument("--max-wheels", type=int, default=200)
@@ -163,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             max_wheels=args.max_wheels, max_total_bytes=args.max_bytes,
             max_snapshot_bytes=4 * args.max_bytes, max_bundle_bytes=args.max_bytes,
             max_unpacked_bytes=8 * args.max_bytes,
+            layout=args.layout,
             limits=WheelLimits(
                 args.max_bytes, 8 * args.max_bytes, args.max_bytes, 16 << 20,
                 100_000, 10_000, 4 << 20,

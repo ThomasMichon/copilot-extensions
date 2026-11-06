@@ -54,6 +54,28 @@ def inputs(tmp_path):
     }, paths
 
 
+@pytest.fixture
+def isolated_manager(tmp_path, inputs):
+    record, paths = inputs
+    name = "copilot_extensions_worktree_manager"
+    distribution = name.replace("_", "-")
+    path = tmp_path / f"{name}-1.0-py3-none-any.whl"
+    path.write_bytes(wheel_bytes(
+        name=name, prefix=f"{name}-1.0.dist-info/",
+        metadata=f"Metadata-Version: 2.4\nName: {distribution}\nVersion: 1.0\n\n".encode(),
+        extra={"helper/__init__.py": b"VALUE = 2\n"},
+    ))
+    paths[path.name] = path
+    record["roots"].append(distribution + "==1.0")
+    record["wheels"].append({
+        "name": distribution, "version": "1.0", "filename": path.name,
+        "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+        "requires_python": "", "provides_extras": [], "selected_extras": [],
+        "requires_dist": [],
+    })
+    return record, paths
+
+
 def build(record, paths, output, **changes):
     return producer.build_profile_bundle(record, paths, output, **({
         "limits": WheelLimits(100_000, 100_000, 100_000, 10_000, 100, 100, 10_000),
@@ -93,6 +115,150 @@ def test_deterministic_candidate_is_consumed_by_original_snapshot_owner(tmp_path
         assert archive.namelist() == sorted("wheels/" + name for name in expected)
         assert all(item.date_time == (1980, 1, 1, 0, 0, 0) for item in archive.infolist())
         assert all(item.compress_type == zipfile.ZIP_STORED for item in archive.infolist())
+
+
+def test_isolated_manager_preserves_the_full_profile_and_validates_each_environment(
+        tmp_path, isolated_manager,
+):
+        from runtime_profile_wheels import derive_profile_environments
+
+        record, paths = isolated_manager
+        full = validate_profile(record)
+        with pytest.raises(ProfileError, match="ownership collision"):
+            build(record, paths, tmp_path / "single.zip", max_wheels=3)
+        environments = derive_profile_environments(full, layout="manager-isolated")
+        assert set(environments) == {"shared", "manager"}
+        shared = environments["shared"].record()
+        manager = environments["manager"].record()
+        assert {row["name"] for row in shared["wheels"]} == {"demo-pkg", "helper"}
+        assert {row["name"] for row in manager["wheels"]} == {"copilot-extensions-worktree-manager"}
+        assert set(shared["roots"]) | set(manager["roots"]) == set(record["roots"])
+        assert {
+            row["filename"] for profile in (shared, manager) for row in profile["wheels"]
+        } == set(paths)
+        assert full.record() == record
+        result = build(record, paths, tmp_path / "split.zip", max_wheels=3, layout="manager-isolated")
+        expected = {wheel["filename"]: wheel["sha256"] for wheel in record["wheels"]}
+        with retain_wheel_bundle(
+            tmp_path / "split.zip", expected, bundle_sha256=result["sha256"], max_bundle_bytes=100_000,
+            max_wheels=3, max_archive_bytes=100_000, max_total_bytes=100_000,
+            max_snapshot_bytes=200_000, deadline=time.monotonic() + 30,
+        ) as snapshot:
+            for profile in environments.values():
+                archives = {
+                    row["filename"]: snapshot.archives[row["filename"]]
+                    for row in profile.record()["wheels"]
+                }
+                verify_profile_wheels(
+                    profile, archives, max_archive_bytes=100_000,
+                    max_unpacked_bytes=100_000, max_metadata_bytes=10_000,
+                )
+            with pytest.raises(ProfileError, match="ownership collision"):
+                verify_profile_wheels(
+                    full, snapshot.archives, max_archive_bytes=100_000,
+                    max_unpacked_bytes=100_000, max_metadata_bytes=10_000,
+                )
+
+
+def test_isolated_manager_still_refuses_collision_with_its_own_dependencies(
+        tmp_path, isolated_manager,
+):
+        record, paths = isolated_manager
+        manager = record["wheels"][-1]
+        path = paths[manager["filename"]]
+        path.write_bytes(wheel_bytes(
+            name="copilot_extensions_worktree_manager",
+            prefix="copilot_extensions_worktree_manager-1.0.dist-info/",
+            metadata=(
+                b"Metadata-Version: 2.4\nName: copilot-extensions-worktree-manager\n"
+                b"Version: 1.0\nRequires-Dist: helper==1.0\n\n"
+            ),
+            extra={"helper/__init__.py": b"VALUE = 2\n"},
+        ))
+        manager["sha256"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        manager["requires_dist"] = ["helper==1.0"]
+        with pytest.raises(ProfileError, match="ownership collision"):
+            build(record, paths, tmp_path / "split.zip", max_wheels=3, layout="manager-isolated")
+        assert not (tmp_path / "split.zip").exists()
+
+
+def test_isolated_layout_enforces_one_expanded_byte_budget_across_both_environments(
+        tmp_path, isolated_manager,
+):
+        record, paths = isolated_manager
+        sizes = {}
+        for filename, path in paths.items():
+            with zipfile.ZipFile(path) as wheel:
+                sizes[filename] = sum(member.file_size for member in wheel.infolist())
+        manager = record["wheels"][-1]["filename"]
+        limit = max(sizes[manager], sum(size for name, size in sizes.items() if name != manager))
+        assert limit < sum(sizes.values())
+        with pytest.raises(ProfileError):
+            build(
+                record, paths, tmp_path / "split.zip", max_wheels=3,
+                max_unpacked_bytes=limit, layout="manager-isolated",
+            )
+        assert not (tmp_path / "split.zip").exists()
+
+
+def test_isolated_layout_counts_a_shared_dependency_once(isolated_manager, tmp_path):
+        record, paths = isolated_manager
+        manager = record["wheels"][-1]
+        path = paths[manager["filename"]]
+        path.write_bytes(wheel_bytes(
+            name="copilot_extensions_worktree_manager",
+            prefix="copilot_extensions_worktree_manager-1.0.dist-info/",
+            metadata=(
+                b"Metadata-Version: 2.4\nName: copilot-extensions-worktree-manager\n"
+                b"Version: 1.0\nRequires-Dist: helper==1.0\n\n"
+            ),
+        ))
+        manager["sha256"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        manager["requires_dist"] = ["helper==1.0"]
+        total = 0
+        for path in paths.values():
+            with zipfile.ZipFile(path) as wheel:
+                total += sum(member.file_size for member in wheel.infolist())
+        assert build(
+            record, paths, tmp_path / "split.zip", max_wheels=3,
+            max_unpacked_bytes=total, layout="manager-isolated",
+        )["size"] > 0
+
+
+def test_manager_isolation_requires_an_explicit_manager_root(isolated_manager):
+        from runtime_profile_wheels import derive_profile_environments
+
+        record, _ = isolated_manager
+        record["roots"].pop()
+        record["wheels"][0]["requires_dist"].append("copilot-extensions-worktree-manager==1.0")
+        with pytest.raises(ProfileError, match="manager.*root"):
+            derive_profile_environments(validate_profile(record), layout="manager-isolated")
+        with pytest.raises(ProfileError, match="layout"):
+            derive_profile_environments(validate_profile(record), layout="unknown")
+
+
+def test_manager_isolation_refuses_a_shared_root_that_needs_manager(isolated_manager):
+        from runtime_profile_wheels import derive_profile_environments
+
+        record, _ = isolated_manager
+        record["wheels"][0]["requires_dist"].append("copilot-extensions-worktree-manager==1.0")
+        with pytest.raises(ProfileError, match="complete root closure"):
+            derive_profile_environments(validate_profile(record), layout="manager-isolated")
+
+
+def test_manager_isolation_recomputes_extras_for_each_environment(isolated_manager):
+        from runtime_profile_wheels import derive_profile_environments
+
+        record, _ = isolated_manager
+        app, dependency, manager = record["wheels"]
+        app["requires_dist"] = ["helper[shared]==1.0"]
+        manager["requires_dist"] = ["helper[manager]==1.0"]
+        dependency["provides_extras"] = ["shared", "manager"]
+        dependency["selected_extras"] = ["manager", "shared"]
+        environments = derive_profile_environments(validate_profile(record), layout="manager-isolated")
+        for name in ("shared", "manager"):
+            helper = next(row for row in environments[name].record()["wheels"] if row["name"] == "helper")
+            assert helper["selected_extras"] == [name]
 
 
 @pytest.mark.parametrize("change", ["missing", "extra", "bytes", "metadata", "closure"])
