@@ -331,6 +331,22 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records proposed direct #3941 all-plugin runtime-advice acceptance under the
+existing materials inventory and a separate #4046 generic-command lane under
+the remote-lifetime parent. Neither is actual receiving delivery or retirement
+yet. The old failed-ACP-start separation remains technical, not a claim that
+Copilot APIs implement generic jobs; complete independent Plan/Validation and
+all current owners remain. Canonical planning review precedes the next effects.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11021 merge, both delivered blobs and continuing
+Active Plan/Validation. Twenty-four following whole-contract reports retain
+source/native and owner boundaries; seven nominated historical subordinate
+trackers are already CLOSED and supply no new credit. Two bounded planned
+fit studies continue for public runtime-advice wording and separate remote
+work lifetimes, without accepting a receiver or changing any source/resource.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records complete actual #2830 receiving/readback and separate `NOT_PLANNED`
 retirement of #2974/#3369. Mux-exit and independent extension research,
 nonblocking dead-session/content advisories, the original blank-mux incident
