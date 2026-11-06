@@ -232,7 +232,9 @@ def installed(root=None, *, home=None, report=None, observations=None):
     except (OSError, ValueError) as exc:
         failed(diagnostics, "plugin-activation", "plugin-activation", "activation-unavailable", type(exc).__name__)
         return []
-    if observations is None and report.authority is ScanAuthority.INDETERMINATE:
+    if observations is None and (report.authority is ScanAuthority.INDETERMINATE or any(
+        decision.status is EntryStatus.INDETERMINATE for decision in report.decisions.values()
+    )):
         failed(diagnostics, "plugin-activation", "plugin-activation", "activation-indeterminate",
                "plugin activation could not be resolved")
     observe(observations, "plugin-activation", "plugin-activation", report.authority, findings=owner_findings(report.findings))

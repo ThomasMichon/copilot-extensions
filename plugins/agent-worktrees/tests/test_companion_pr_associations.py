@@ -1120,12 +1120,14 @@ def test_native_installation_context_failure_cannot_qualify_base_related(
 
 @pytest.mark.parametrize(
     ("activation", "available"),
-    [("empty", True), ("indeterminate", False), ("malformed", False)],
+    [("empty", True), ("indeterminate", False), ("entry", False), ("malformed", False)],
 )
 def test_native_activation_failure_cannot_qualify_base_related(
     source, monkeypatch, activation, available
 ):
     from agent_worktrees import related
+    from dropin_registry import EntryDecision, Finding
+    from plugin_activation import ActivationReport
 
     anchor = source.path.parent / "repository"
     directory = anchor / related.CANONICAL_RELATED_DIR
@@ -1135,6 +1137,15 @@ def test_native_activation_failure_cannot_qualify_base_related(
     def resolve_active_plugins(**kwargs):
         if activation == "malformed":
             raise ValueError("malformed activation settings")
+        if activation == "entry":
+            finding = Finding(
+                registry="plugin-activation", entry="uncertain@example-market",
+                status="indeterminate", reason="unreadable-source", detail="fixture",
+            )
+            return ActivationReport(
+                authority=ScanAuthority.COMPLETE,
+                decisions={finding.entry: EntryDecision.indeterminate(finding)},
+            )
         authority = (
             ScanAuthority.INDETERMINATE if activation == "indeterminate" else ScanAuthority.COMPLETE
         )
