@@ -67,6 +67,7 @@ def admission(monkeypatch):
             "agent-bridge.status": {
                 "version": 1, "capabilities": ["health-json", "exact-session-worktree-writer"],
             },
+            "agent-bridge.resume": {"version": 1, "capabilities": ["keyed-worktree-writer"]},
         },
     }
     info = {
@@ -145,7 +146,7 @@ def test_discovery_argv_executes_the_shipped_bridge_parser_and_contract(admissio
 
 
 @pytest.mark.parametrize("change", [
-    "cli-version", "create-support", "status-support", "old-daemon", "not-ready",
+    "cli-version", "create-support", "status-support", "resume-support", "old-daemon", "not-ready",
     "passive", "unknown-instance", "selected-writer", "selected-build", "draining",
 ])
 def test_future_admission_refuses_unknown_cli_daemon_or_selected_writer(admission, change):
@@ -156,6 +157,8 @@ def test_future_admission_refuses_unknown_cli_daemon_or_selected_writer(admissio
         support["contracts"]["agent-bridge.create"]["capabilities"] = []
     elif change == "status-support":
         support["contracts"]["agent-bridge.status"]["version"] = 0
+    elif change == "resume-support":
+        support["contracts"]["agent-bridge.resume"]["capabilities"] = []
     elif change == "old-daemon":
         health["capabilities"]["retained_workspace_creation_writer"] = True
     elif change == "not-ready":

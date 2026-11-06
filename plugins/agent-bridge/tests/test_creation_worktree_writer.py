@@ -138,11 +138,45 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
     assert replay is first and replay_receipt["native_session_id"] == receipt["native_session_id"]
     await rig.manager.stop_session(first.session_id, force=True)
     assert first.status == SessionStatus.STOPPED
-    resumed = await rig.manager.resume_session(first.session_id, drain=False, allow_recreate=True)
+    resumed = await rig.manager.resume_session(
+        first.session_id, drain=False, allow_recreate=True,
+        worktree_writer=fixture.requirement,
+    )
     assert resumed is first and resumed.acp_session_id == receipt["native_session_id"]
     assert fixture.selected.call_count == 1
     assert writers.current() is None
     assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == saved
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["requirement", "pointer", "native", "alias"])
+async def test_required_creation_resume_refuses_changed_custody_before_effect(
+    writer_creation, monkeypatch, changed,
+):
+    fixture = writer_creation
+    rig = fixture.rig
+    session, _receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
+    )
+    await rig.manager.stop_session(session.session_id, force=True)
+    requirement = fixture.requirement.model_dump()
+    target = session.session_id
+    if changed == "requirement":
+        requirement["creation_nonce"] = "replacement"
+    elif changed == "pointer":
+        session.target = replace(session.target, venue={})
+    elif changed == "native":
+        session.acp_session_id = "replacement"
+    else:
+        target = "alias"
+        monkeypatch.setattr(rig.manager, "_resolve_ref", lambda _target: session.session_id)
+    fixture.selected.side_effect = AssertionError("must not select a replacement writer")
+    connect = AsyncMock(side_effect=AssertionError("refused resume must not launch"))
+    monkeypatch.setattr(rig.manager, "_connect_via_session_host", connect)
+    with pytest.raises(AcquisitionRefused):
+        await rig.manager.resume_session(target, worktree_writer=requirement)
+    connect.assert_not_awaited()
+    assert session.status == SessionStatus.STOPPED
 
 
 @pytest.mark.asyncio
@@ -513,6 +547,26 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(
         )
         original = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
         fixture.selected.side_effect = AssertionError("inspection must not select a writer")
+        requirement = fixture.requirement.model_dump()
+        assert http.post(
+            f"/api/v1/sessions/{result['session_id']}/stop", params={"force": "true"},
+        ).status_code == 204
+        resumed = client.resume_session(result["session_id"], worktree_writer=requirement)
+        assert resumed["session_id"] == result["session_id"]
+        assert resumed["acp_session_id"] == result["creation"]["native_session_id"]
+        with pytest.raises(BridgeClientError) as changed:
+            client.resume_session(
+                result["session_id"],
+                worktree_writer={**requirement, "creation_nonce": "replacement"},
+            )
+        assert changed.value.status == 409
+        assert http.post(
+            f"/api/v1/sessions/{result['session_id']}/resume",
+            json={"worktree_writer": {"unknown": True}},
+        ).status_code == 422
+        assert http.post(
+            f"/api/v1/sessions/{result['session_id']}/resume", json={"unknown": True},
+        ).status_code == 422
         observed = client.get_session(result["session_id"], worktree_writer=True)
         assert observed["worktree_writer_observation"]["worktree_writer"] == fixture.requirement.model_dump()
         assert observed["worktree_writer_observation"]["bridge_instance"] == instance

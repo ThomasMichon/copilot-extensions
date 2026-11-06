@@ -426,7 +426,9 @@ def test_executing_cli_disclosure_matches_actual_parser(
             "agent-bridge.status": {
                 "version": 1, "capabilities": ["health-json", "exact-session-worktree-writer"],
             },
-            "agent-bridge.resume": {"version": 1, "capabilities": ["exact-worktree-target"]},
+            "agent-bridge.resume": {
+                "version": 1, "capabilities": ["exact-worktree-target", "keyed-worktree-writer"],
+            },
             "bridge-session-current-requests-v1": {
                 "version": 1, "capabilities": ["observe-session-current-requests"],
             },

@@ -9,10 +9,11 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
+from ..acquisition_contract import AcquisitionRefused
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -26,6 +27,7 @@ from ..models import (
     CursorInfo,
     DelegatedResultSnapshot,
     ResyncSessionResponse,
+    ResumeSessionRequest,
     SessionInfo,
     SessionListResponse,
     SessionStatus,
@@ -1469,11 +1471,18 @@ async def interrupt_turn(session_id: str, request: Request):
 
 
 @router.post("/{session_id}/resume", response_model=SessionInfo)
-async def resume_session(session_id: str, request: Request):
+async def resume_session(
+    session_id: str, request: Request, body: ResumeSessionRequest | None = Body(default=None),
+):
     """Resume a stopped session by spawning a new agent process."""
     mgr: SessionManager = request.app.state.session_manager
     try:
-        session = await mgr.resume_session(session_id)
+        session = await mgr.resume_session(
+            session_id,
+            **({"worktree_writer": body.worktree_writer} if body and body.worktree_writer else {}),
+        )
+    except AcquisitionRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:

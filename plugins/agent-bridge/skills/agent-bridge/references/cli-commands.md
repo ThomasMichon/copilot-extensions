@@ -409,6 +409,15 @@ be discarded (or the cancel signature *persists* across sends). See the
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --cli
 ```
 
+For an original keyed creation with a retained writer requirement,
+`resume <exact-session-id> --strict --worktree-writer-file <path>` carries the
+same strict JSON requirement (`-` reads stdin). This opt-in form refuses CLI,
+reclaim and worktree-selector combinations before discovery, and never falls
+back from a missing exact session. The executing `agent-bridge.resume/v1`
+descriptor advertises `keyed-worktree-writer`; each HTTP attempt separately
+requires `retained_workspace_creation_writer_resume: 1`. See the
+[retained writer contract](../../../docs/retained-acquisition-writer.md).
+
 `--worktree-id` and the positional target are mutually exclusive. The exact
 selector accepts one owner-record ID, not a path or `<repo>@anchor` key; invalid
 or empty input exits 2 before client discovery. It sends only the worktree

@@ -989,24 +989,12 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         session_id: str,
         *,
         request_timeout: float | None = None,
+        worktree_writer: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/resume"""
-        from .startup_observation import current
-        observation = current()
-        if observation is not None and not observation.clock.ready:
-            return observation.request(
-                self, session_id,
-                lambda: self._request(
-                    "POST", f"/api/v1/sessions/{session_id}/resume",
-                    request_timeout=observation.clock.process_remaining(),
-                    allow_retry=False,
-                ) or {},
-            )
-        return self._request(
-            "POST",
-            f"/api/v1/sessions/{session_id}/resume",
-            request_timeout=request_timeout,
-        ) or {}
+        return super().resume_session(
+            session_id, request_timeout=request_timeout, worktree_writer=worktree_writer,
+        )
 
     def resume_worktree(
         self,

@@ -181,6 +181,8 @@ from test_full_session_status_cli import (
     as test_writer_status_uses_negotiated_original_observation,
 )
 from test_creation_worktree_writer import (
+    test_required_creation_resume_refuses_changed_custody_before_effect
+    as test_required_creation_resume_refuses_changed_custody_before_effect,
     test_required_creation_writer_cli_carries_requirement_to_actual_client
     as test_required_creation_writer_cli_carries_requirement_to_actual_client,
     test_required_creation_writer_cli_invalid_input_refuses_before_connect
@@ -220,6 +222,17 @@ from test_creation_worktree_writer import (
     as test_keyed_creation_registration_failure_retains_native_and_dormancy,
     test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim
     as test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim,
+)
+
+from test_creation_writer_resume import (
+    test_required_resume_real_parser_client_rechecks_provider
+    as test_required_resume_real_parser_client_rechecks_provider,
+    test_required_resume_invalid_form_refuses_before_discovery
+    as test_required_resume_invalid_form_refuses_before_discovery,
+    test_required_resume_worktree_selector_refuses_before_discovery
+    as test_required_resume_worktree_selector_refuses_before_discovery,
+    test_required_resume_cannot_fallback_or_accept_replacement
+    as test_required_resume_cannot_fallback_or_accept_replacement,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
