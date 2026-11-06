@@ -858,8 +858,11 @@ def decide(
         return _pre_unavailable("event payload is not an object")
     if kind == "preToolUse" and require_policy:
         return _fallback_pre(payload, home, require_policy=True)
-    if kind == "preToolUse" and "toolCalls" in payload:
-        # Older healthy monitors cannot classify this native envelope.
+    if kind == "preToolUse" and (
+        "toolCalls" in payload
+        or (payload.get("toolName") or payload.get("tool_name")) in {"apply_patch", "multi_edit"}
+    ):
+        # Older healthy monitors cannot classify these native write forms.
         return _fallback_pre(payload, home)
     if (
         kind == "sessionStart"

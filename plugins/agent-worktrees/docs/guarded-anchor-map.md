@@ -134,6 +134,12 @@ cover linked targets by repository identity.
 Supplemental registrations must resolve to repository roots. A registration
 pointing at a subdirectory becomes a partial-posture error before publication,
 without poisoning independently confirmed delegated roots.
+An unreadable or invalid project registry withdraws the supplemental posture
+inventory and reports it as partial; it must not manufacture base-repo or
+elevation defaults. Confirmed delegated roots remain independently usable.
+Worktree-only shell reminders reuse the anchor owner's classification, including
+its `pull --ff-only` maintenance exemption and linked-checkout exclusion.
+Delegation, read-only and elevation postures retain their stricter classifiers.
 
 Git identity uses bounded filesystem metadata reads, including ordinary `.git`
 directories, relative/absolute gitdir pointers, linked worktree `commondir`,

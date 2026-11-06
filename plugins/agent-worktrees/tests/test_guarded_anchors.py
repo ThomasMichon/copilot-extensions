@@ -1007,6 +1007,25 @@ def test_supplemental_subdirectory_does_not_poison_confirmed_roots(producer, mon
     assert not any(row["name"] == "second" for row in result.postures)
 
 
+def test_failed_projects_read_keeps_only_confirmed_delegated_roots(producer, monkeypatch):
+    from agent_worktrees import installer
+
+    p = producer
+    p.registry.repos["first"].repo_class = "worktree"
+    p.registry.repos["second"].repo_class = "singleton"
+
+    def unavailable(*, strict=False):
+        assert strict
+        raise PermissionError("synthetic unreadable project registry")
+
+    monkeypatch.setattr(installer, "read_projects_registry", unavailable)
+    p.module.refresh(p.callers, registry_root=p.root)
+    result = p.reader.read_map(p.callers[0], p.root)
+    assert result.status == "ready" and result.roots[0]["name"] == "target"
+    assert result.postures == []
+    assert result.posture_errors == sorted(p.registry.repos)
+
+
 @pytest.mark.parametrize("consumer", ["hook", "withdraw", "refresh"])
 def test_nonregular_map_is_rejected_by_every_reader(producer, monkeypatch, consumer):
     p = producer

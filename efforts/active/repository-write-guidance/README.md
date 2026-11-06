@@ -223,3 +223,20 @@ gap, with no new sandbox, process interception, service, or security guarantee.
 - The earlier five native controls and unit packet retain their original
   source-generation qualification. Fresh published-head CI/review and
   impact-selected native revalidation remain required before completion.
+
+### 2026-11-05 - Mixed-version and supplemental-posture corrections
+- The next review found a single-call form gap in legacy-monitor routing,
+  shell false positives for nested linked worktrees and maintenance pulls,
+  and tolerant project acquisition that could publish incorrect postures.
+- Routed single-call native patches and multi-edits through the current local
+  evaluator, reused the anchor owner's shell classifier for worktree-only
+  postures, resolved literal shell destinations before anchor attribution,
+  and made failed project acquisition a partial supplemental inventory.
+- The focused composed-policy, guard and producer packet passed 388 tests
+  with one platform-specific skip. Existing delegation/read-only scope stays
+  stricter than worktree maintenance guidance.
+- Published-source native grant/revocation controls both passed against
+  `867c91f5ec`: the scoped retry changed the target, and revocation restored a
+  real pre-tool denial with unchanged target bytes and healthy Driver evidence.
+  This evidence predates the latest shell/mixed-version corrections; final
+  release inclusion and installed full-flow acceptance remain independent.

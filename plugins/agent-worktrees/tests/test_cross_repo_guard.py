@@ -201,3 +201,32 @@ def test_prepared_worktree_posture_preserves_anchor_controls(tmp_path, guarded, 
         "toolArgs": {"path": str(Path(roots[0]["path"]) / "new.py")},
     }, env=env, home=tmp_path, guarded_roots=roots)
     assert (decision["permissionDecision"] if decision else None) == expected
+
+
+@pytest.mark.parametrize("command", ['echo value > "{target}"', 'Set-Content "{target}" value'])
+@pytest.mark.parametrize("delegated", [False, True])
+@pytest.mark.parametrize("linked", [False, True])
+def test_nested_linked_shell_destination_preserves_posture_and_delegation(
+    tmp_path, command, delegated, linked,
+):
+    root = tmp_path / "anchor space"
+    (root / ".git").mkdir(parents=True)
+    target = root / ".worktrees" / "feature space"
+    target.mkdir(parents=True)
+    if linked:
+        gitdir = root / ".git" / "worktrees" / "feature"
+        gitdir.mkdir(parents=True)
+        (gitdir / "commondir").write_text("../..\n")
+        (target / ".git").write_text(f"gitdir: {gitdir}\n")
+    row = {
+        "name": "target", "path": str(root),
+        "delegate": "agent-bridge" if delegated else "none",
+        "identity": guard._guard_map.repository_identity(root),
+    }
+    if not delegated:
+        row["posture"] = "worktree"
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(tmp_path),
+        "toolArgs": {"command": command.format(target=target / "new.py")},
+    }, env={}, home=tmp_path, guarded_roots=[row])
+    assert bool(result) is (delegated or not linked)

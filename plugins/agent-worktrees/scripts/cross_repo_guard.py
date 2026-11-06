@@ -66,10 +66,13 @@ except (ImportError, OSError, SyntaxError):
     _guard_map = None
 
 try:
-    from anchor_write_guard import _git_invocation, _git_subcommand_writes_worktree
+    from anchor_write_guard import (
+        _git_invocation, _git_subcommand_writes_worktree, evaluate as _anchor_evaluate,
+    )
 except (ImportError, OSError, SyntaxError):
     _git_invocation = None
     _git_subcommand_writes_worktree = None
+    _anchor_evaluate = None
 
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
@@ -425,7 +428,15 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict],
         cmd = _pick(args, CMD_ARG_KEYS)
         if not cmd:
             return None
-        return _shell_hit(cmd, cwd, guarded, tool=tool, identity_cache=identity_cache)
+        worktree_rows = [row for row in guarded if row.get("posture") == "worktree"]
+        if worktree_rows and _anchor_evaluate is not None:
+            hit = _anchor_evaluate(tool, args, cwd, worktree_rows)
+            if hit is not None:
+                return {**hit, "reason": _deny_reason(hit, "(a shell command writes into it).")}
+        return _shell_hit(
+            cmd, cwd, [row for row in guarded if row.get("posture") != "worktree"],
+            tool=tool, identity_cache=identity_cache,
+        )
     return None
 
 

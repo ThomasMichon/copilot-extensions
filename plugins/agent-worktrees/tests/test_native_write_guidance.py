@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
@@ -81,7 +83,8 @@ def test_unknown_batch_shape_reports_unavailable_without_a_deny(tmp_path, monkey
     assert "native tool batch is invalid" in result["additionalContext"]
 
 
-def test_native_batch_does_not_accept_empty_legacy_monitor_decision(tmp_path, monkeypatch):
+@pytest.mark.parametrize("form", ["batch", "apply_patch", "multi_edit"])
+def test_native_write_does_not_accept_empty_legacy_monitor_decision(tmp_path, monkeypatch, form):
     client, forms, guard = (load(name) for name in ("hook_client", "tool_call_forms", "cross_repo_guard"))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     target = tmp_path / "target"
@@ -104,17 +107,58 @@ def test_native_batch_does_not_accept_empty_legacy_monitor_decision(tmp_path, mo
 
     monkeypatch.setattr(client, "_request", monitor)
     monkeypatch.setattr(client, "_load_sibling", sibling)
-    event = {"cwd": str(tmp_path), "toolCalls": [{
-        "name": "apply_patch", "args": (
-            f"*** Begin Patch\n*** Update File: {target / 'source.py'}\n*** End Patch\n"
-        ),
-    }]}
+    patch = f"*** Begin Patch\n*** Update File: {target / 'source.py'}\n*** End Patch\n"
+    event = {"cwd": str(tmp_path)}
+    if form == "batch":
+        event["toolCalls"] = [{"name": "apply_patch", "args": patch}]
+    else:
+        event.update(toolName=form, toolArgs=(
+            patch if form == "apply_patch" else {"edits": [{"path": str(target / "source.py")}]}
+        ))
     assert client.decide("preToolUse", event, home=tmp_path)["permissionDecision"] == "deny"
     assert calls == []
     assert client.decide("preToolUse", {
         "cwd": str(tmp_path), "toolName": "edit", "toolArgs": {"path": "source.py"},
     }, home=tmp_path) == {}
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("posture", ["worktree", "reference", "delegated"])
+def test_composed_maintenance_pull_retains_each_repository_policy(tmp_path, monkeypatch, posture):
+    client, cross, anchor = (load(name) for name in (
+        "hook_client", "cross_repo_guard", "anchor_write_guard",
+    ))
+    target = tmp_path / "target"
+    (target / ".git").mkdir(parents=True)
+    row = {
+        "name": "target", "path": str(target),
+        "delegate": "agent-bridge" if posture == "delegated" else "none",
+    }
+    if posture != "delegated":
+        row["posture"] = posture
+    original = client._load_sibling
+
+    def sibling(name):
+        if name == "cross_repo_guard.py":
+            return SimpleNamespace(decide=lambda event, *, home, deadline: cross.decide(
+                event, env={}, home=home, guarded_roots=[row],
+            ))
+        if name == "anchor_write_guard.py":
+            return SimpleNamespace(decide=lambda event, *, home: anchor.decide(
+                event, env={}, home=home, anchors=[row],
+            ))
+        if name == "tool_call_forms.py":
+            return original(name)
+        return SimpleNamespace(decide=lambda *a, **k: None, needs_observations=lambda *a: False)
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(client, "_load_sibling", sibling)
+    result = client.decide("preToolUse", {"cwd": str(tmp_path), "toolCalls": [{
+        "name": "powershell", "args": {
+            "command": f'git -C "{target}" pull --ff-only origin main',
+        },
+    }]}, home=tmp_path)
+    assert (result.get("permissionDecision") == "deny") is (posture != "worktree")
 
 
 def test_composed_guards_consume_selected_grant_and_revocation(tmp_path, monkeypatch):

@@ -81,7 +81,10 @@ def _require_configuration_observations(observations) -> None:
 def _posture_rows(registry, reader) -> tuple[list[dict], list[str]]:
     from . import installer
 
-    projects = installer.read_projects_registry()["projects"]
+    try:
+        projects = installer.read_projects_registry(strict=True)["projects"]
+    except Exception:
+        return [], sorted(registry.repos)
     rows = []
     unavailable = []
     for name, registered in sorted(registry.repos.items()):

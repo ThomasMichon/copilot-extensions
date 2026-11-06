@@ -831,6 +831,7 @@ def _shell_hit(
     # Effective cwd -- starts at the tool's cwd and follows in-command ``cd``s so
     # a repo-scoped git write (no ``-C``) is attributed to the right repo.
     eff_cwd = cwd
+    literal_roots = {}
 
     for seg in _shell_segments(cmd, tool):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
@@ -864,6 +865,7 @@ def _shell_hit(
             and _git_branch_invocation_is_readonly(git_args)
         ):
             git_write = False
+        literal_targets = None
         for a in anchors:
             gp = a.get("path")
             if not gp:
@@ -872,12 +874,25 @@ def _shell_hit(
             tok = _anchor_token(root_str)
             # 1. A file redirect whose target is the anchor. ``>>?(?!\s*&)``
             #    excludes fd-dup redirects (``2>&1``, ``1>&2``) -- not writes.
-            if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            redirect = re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay)
             # 2. A write cmdlet/verb at COMMAND POSITION with the anchor as an
             #    argument (e.g. ``Set-Content "<anchor>\x"``, ``rm <anchor>``).
-            if at_write_cmd and re.search(tok, seg_hay):
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            if redirect or at_write_cmd and re.search(tok, seg_hay):
+                if literal_targets is None:
+                    literal_targets = [
+                        re.sub(r"^\d*>>?", "", token).replace("\\", os.sep)
+                        for token in _git_tokens(eff, tool)
+                    ]
+                for target in literal_targets:
+                    resolved = _resolve(target, eff_cwd)
+                    canonical = _canon(resolved)
+                    if canonical != root_str and not canonical.startswith(root_str + os.sep):
+                        continue
+                    if resolved not in literal_roots:
+                        literal_roots[resolved] = find_repo_root(resolved)
+                    root = literal_roots[resolved]
+                    if root is not None and not is_linked_worktree(root) and _canon(str(root)) == root_str:
+                        return {**a, "reason": _deny_reason(a["name"], a["path"])}
         # 3a. A git mutation with an explicit ``-C`` / ``--git-dir`` /
         #     ``--work-tree`` target writes any anchor named by those options.
         if git_write:

@@ -3,8 +3,8 @@
   "version": 1,
   "guards": {
     "statelessness_guard.py": "b126e1ef0fc96d93476b8b25ae471b3e14034d0a31184f88ef958b0f1255f02b",
-    "cross_repo_guard.py": "7be8f494ff74c1abe92c3fc01a7830b12abd225eb6812715646fd884d5f6f83f",
-    "anchor_write_guard.py": "43b34807a331a3d1c944494f73b67692d6909aa89241878a2ac56edf9ae0195b",
+    "cross_repo_guard.py": "41bafe310cbadb80b57c3b87ed64c4f81d8e6076a2ed9d1eb3dff69d4daffce1",
+    "anchor_write_guard.py": "b1e8f2edc228ba80a23b80e9aafdba8f807097bc8610996af34c20813058f234",
     "pr_supersede_guard.py": "405514834a48658e8006ee226d838a4305a70eff0d539ab274670c21013bf140"
   }
 }
