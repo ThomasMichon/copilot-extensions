@@ -8,7 +8,8 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Prepare the pending checker-only prerequisite (#10638) without crediting its independent full-composed-consumer-qualification gate (#9807 / #10362); integrate the merged shared foundation (#10400 / #10553) with separately pending Versioned Runtime (#10331), Copilot Extensions Harness payload helpers/tests (#10362), and canonical Payload Invocation (#10371) admissions. Real consumer aliases, emitted copies and remaining interpreter/native gates stay open. Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Integrate the Copilot Extensions Harness consumer (#10362) with the delivered checker-only guard-alias prerequisite (#10638 / #10866), retaining full-composed-consumer-qualification under #9807 / #10362 as unmet. Versioned Runtime (#10331), canonical Payload Invocation (#10371), actual consumer aliases, emitted copies and remaining interpreter/native gates stay independently pending. Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Checker-only follow-up:** #10638 is delivered by merged #10866; this is a prerequisite, not Harness, Versioned Runtime or Payload Invocation admission.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -147,6 +148,7 @@ rewrite.
 - [ ] Resolve tooling module identities, independent package environments, dependency/stub versions and declared interpreter/platform targets.
 - [x] Persist additional interpreter qualification versions through the existing local/source/candidate checker, preserving the minimum target and default behavior (#10400 / merged #10553); Versioned Runtime's own qualification remains #10331.
 - [x] Deliver ordinary real-import-root resolution with source-frozen custody and native `MYPYPATH` separator guards (#10400 / merged #10553), without admitting its pending consumers.
+- [x] Deliver the faithful checker-only guard-module alias/source-view prerequisite (#10638 / merged #10866); preserve separate consumer, emitted/copy and native qualification.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
 
 ### Phase 3 - Shared-library ratchet
@@ -213,13 +215,14 @@ rewrite.
 - [ ] Reconcile tracker rows and file totals with the authoritative manifest
   and inventory; local proposals and canonical-library locks must not imply
   complete consumer/copy enforcement. The 2026-11-06 snapshot reconciles all
-  68 rows; this recurring and final portfolio gate remains open.
+  69 declared projects, including the zero-physical-file pending vendored-library
+  project; this recurring and final portfolio gate remains open.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
 - [ ] Composition and generated-copy controls reject omitted/reordered/changed fragments or stale source correspondence; no empty result can certify coverage.
 - [ ] **full-composed-consumer-qualification** (#9807 / #10362): preserve this
-  unmet consumer gate independently of opening the checker-only #10638 PR.
+  unmet consumer gate independently of the merged checker-only #10866 prerequisite.
   Prove the actual composed consumer, immutable 64-root boundary, copied/emitted
   helpers, native behavior and full frozen-candidate/promotion qualification.
   A passing development packet or focused source/frozen controls is not this
@@ -2819,3 +2822,47 @@ composition prerequisites, and review/validation rules.
   gates remain open, including #10331, #10362 and #10371. This effort and #9807
   remain Active. This documentation slice changes no source policy, runtime,
   installed payload or required CI and does not complete the campaign.
+
+### 2026-11-06 - Checker-only alias delivered; actual consumer integration next
+
+- #10866 merged into Dev as `07e4932be0d4c1f6d348be95b39dbd61deccc1df`
+  after Copilot approval `5795502451` on published head
+  `7e95af2542e529148ab7ab91b41cf1f16b68d940`, green required checks and
+  no open findings. #10638's checker-only prerequisite is delivered; no Harness,
+  Versioned Runtime or Payload Invocation project admission follows from it.
+- Hosted `--enforced` checking passes the checker on both `linux` and `win32`
+  Python 3.10 targets, with four physical files/four targets, and all admitted
+  scopes. Fresh producer run `42156951476` qualifies **4,174 units**; later
+  run `42157114998` reuses that verified same-head packet with fresh guards and
+  type checking, rather than providing a second fresh unit execution.
+- The retained original CI archive passes its provider digest and size binding.
+  Independent, data-only canonical verification against actual CI-bound Git
+  source `d5a9ae56e658fa0bb8af340948ff2d0ad355cb4e` verifies all **597 input
+  hashes**, **12,522 raw phase reports** (4,174 each setup/call/teardown),
+  **zero effects**, and **251 positive measured files/declared targets**.
+  Packet time is **94.682 seconds** under the unchanged 300-second limit.
+- That CI-bound source is distinct from both the published head and final Dev
+  merge. Two upstream inputs differ at the final merge:
+  `tools/promotion_unit_tests/test_related_acquisition.py` and
+  `plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py`.
+  The original failed whole-merge equivalence check is retained, not relabeled
+  as a pass; no complete merged-tree or frozen-candidate packet is claimed.
+- The nine immutable shipping records and selected earlier source/frozen
+  positive, negative and input-provenance records are retained with verified
+  byte lengths and hashes. The earlier six positives, four-module controls,
+  eight argument/return negatives and 17 custody guards qualify only their
+  historical bytes. The Windows full frozen-candidate timeouts remain failures,
+  not a known flake, CI waiver or consumer qualification.
+- The read-only inventory on reviewed Dev
+  `064444b6e6b41c4ea645033bcec061b191686418` reconciles **69 declared projects**:
+  **40 strict (58.0%)**, **29 pending**, **zero basic or unclassified paths**,
+  and **400 / 8,355 physical Python files (4.8%)** in strict scopes.
+  Sixty-eight projects own physical paths; newly declared
+  `service-vendored-libraries` remains pending with zero tracked physical files.
+  Nine additional physical files belong to pending owners; no strict admission
+  is added and the earlier 40/68, 400/8,346 snapshot remains historical.
+- Next is actual Harness consumer integration (#10362), preserving the
+  immutable 64-root, copied/emitted, native and candidate-promotion gates.
+  Versioned Runtime (#10331), Payload Invocation (#10371), the full composed
+  consumer objective and every original unfinished portfolio gate remain open.
+  This effort and #9807 stay Active; source delivery is not release or rollout.
