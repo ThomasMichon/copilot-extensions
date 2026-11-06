@@ -52,7 +52,11 @@ The front door is the **`binding-knowledge`** skill:
    paired knowledge worktree.
 
 See `skills/binding-knowledge/SKILL.md` for the exact commands, repo-creation
-flow, and re-pointing steps.
+flow, provider-before-authentication checks, publication policy and re-pointing
+steps. Registration/state-root readiness does not establish server landing
+policy or authorize a direct push. Repository/provider PR and review requirements
+still apply; unavailable policy evidence remains unknown, not permission to
+trial-push a default branch.
 
 ## Machine-local artifacts
 

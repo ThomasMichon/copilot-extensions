@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve the Git provider before authentication and honor repository/server publication policy during knowledge binding",
+  "changes": [
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}
