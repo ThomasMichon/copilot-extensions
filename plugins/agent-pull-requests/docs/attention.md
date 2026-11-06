@@ -44,6 +44,12 @@ journal/cursor semantics, bounded retention, provider normalization, authenticat
 service/CLI adoption, task-lineage integration and actual shadow comparison
 remain separate open work in the canonical effort.
 
+The separately negotiated [optional retained reader](attention-reader.md)
+composes the actual existing owners, conservative feedback availability and
+CLI/client/Gateway read path. It does not change the inert functions or enable
+default hosts; its distinct v5 contract never masquerades as v3 conversation
+serving.
+
 ## Explicit data-owner expansion
 
 The reviewed [durable attention contract](../../../efforts/active/durable-pr-watch-delegation/durable-attention-slice.md)

@@ -331,6 +331,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed merge #10904, the actual #9481 corrective reopening and
+#7942's finite observation completion through #8026. The original native
+acceptance remains OPEN; source parity for #8972 is credited without
+misrepresenting an author's inline reply as independent review approval.
+Two complete matching22:27 PST scans measure826 whole OPEN:547 creator-eligible,
+279 excluded,561 original-cohort and265 inflow. Verified dispositions are979,
+still97 above fixed729; the campaign continues without native or custody effects.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records finite completions of #8410 through #8763, #9414 through #9419 and
 #10239 through #10226. #9481's source repair is credited, but its premature
 whole-completion disposition is corrected by reopening the issue: the original

@@ -230,6 +230,13 @@ and every remaining native/installed/original parent gate stay open.
 owner append failure, Agenda atomic rollback, partial Bridge observations
 and actual three-owner recovery without extending installed/native acceptance.
 
+#10907 merged as `32b14dbc315c180bbd7c6d1f089ddb1a10f67d5b`, correcting
+the separate Windows deadline-quantization defect reproduced by #10901.
+The [diagnostic readback](journal/2026/11.05-sidecar-membership-diagnostics.md)
+records unchanged 50 ms/VM limits, source-bound capture and exact-source
+Windows creation/no-early-refusal qualification. Historical cold-read causality,
+startup stability, complete source coverage and original parent gates stay open.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -688,6 +695,13 @@ is inferred from these presentation checks.
   independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
+
+- [x] Use precise monotonic elapsed time for the bounded membership deadline
+  without increasing its time/VM limits or excluding scheduling and blocking.
+  #10907's current Windows packet verifies actual budget creation and sixteen
+  delayed checks with no early refusal, alongside 129 Companion and two lookup
+  controls with zero test skips. This closes only the reproduced precision
+  defect, not historical cold-read causality or the full native/source gate.
 
 - [x] Bound exact-owner membership work independently of unrelated retained
   registry size using owner-prepared lookups, while retaining passive

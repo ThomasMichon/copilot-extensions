@@ -67,3 +67,20 @@ def test_render_lists_daemon_health_findings(capfd):
     out = capfd.readouterr().out
     assert "Resident daemon health (report-only): 1 finding(s)" in out
     assert "pid 22068" in out
+
+
+def test_render_retirement_holds_remains_report_only_with_fix(capfd):
+    rep = _report(retirement_holds={
+        "checked": 1, "found": 1, "report_only": True,
+        "items": [{
+            "worktree_id": "retained-worktree",
+            "ownership": {"bucket": "held-claims", "reason": "1 held resource claim pending"},
+            "checkout": "live process(es) still use the checkout: psmux.exe(42)",
+        }],
+    })
+    m._render_doctor_report(rep, applied=True, gc_applied=False)
+    out = capfd.readouterr().out
+    assert "Retirement holds (report-only): 1" in out
+    assert "retained-worktree" in out and "psmux.exe(42)" in out
+    assert "1 held resource claim pending" in out
+    assert "--fix does not release claims or stop processes" in out
