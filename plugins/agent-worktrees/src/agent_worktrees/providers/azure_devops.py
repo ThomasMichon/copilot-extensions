@@ -412,7 +412,7 @@ class AzureDevOpsProvider:
                      or (data.get("createdBy") or {}).get("uniqueName", ""))
 
         return PRSnapshot(
-            pr_state=pr_state,
+            pr_state=pr_state, endpoint=self.authority_endpoint(api_base),
             merged=merged,
             head_sha=head_sha,
             base_ref=base_ref,

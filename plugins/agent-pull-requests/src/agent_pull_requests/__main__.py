@@ -349,7 +349,10 @@ def _github_create(
 def _cmd_create(args: argparse.Namespace) -> int:
     if args.worktrees_command is not None:
         return _cmd_native(args)
-    if any(getattr(args, field, None) for field in ("source_workspace", "expected_head", "body_file")):
+    if (
+        any(getattr(args, field, None) for field in ("source_workspace", "expected_head", "body_file"))
+        or getattr(args, "config", None) is not None
+    ):
         message = "Delegated creation requires an explicit --worktrees-command; no GitHub fallback was attempted."
         print(json.dumps({"error": message, "repo": args.repo})) if args.json else print(message, file=sys.stderr)
         return 2
@@ -605,11 +608,10 @@ def _cmd_watch_status(args: argparse.Namespace) -> int:
     return 0
 
 
-@daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
 def _cmd_serve(args: argparse.Namespace) -> int:
-    """Run the resident PR-watch daemon in the foreground.
+    """Ensure the governed owner or run the legacy foreground daemon.
 
-    A long-lived host (Scheduled Task / systemd-user unit) is deferred to a
+    For the legacy foreground daemon, a long-lived host is deferred to a
     follow-up per ``docs/patterns/service-lifecycle-supervision.md`` -- this
     first slice is manually invocable and auto-booted on demand by
     ``_watch_boot`` (``call_with_fallback``'s own boot path), matching
@@ -638,6 +640,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 0
     if getattr(args, "passive_instance", None) or getattr(args, "port", 0):
         raise PermissionError("watch passive entry requires an explicit installation context")
+    return _serve_legacy(args)
+
+
+@daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
+def _serve_legacy(args: argparse.Namespace) -> int:
+    """Admit only the actual legacy foreground owner, not its controller."""
     from single_instance_lease import AlreadyRunningError, SingleInstance
     from work_coalescing_singleton import CoalescingServer
 
@@ -815,6 +823,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--draft", action="store_true", help="open as a draft pull request")
     create.add_argument("--source-workspace", help="Exact reachable delegated Git root (native only)")
     create.add_argument("--expected-head", help="Full reviewed source commit (native only)")
+    create.add_argument("--config", help="Explicit delivered worker policy (native only)")
     create.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     create.set_defaults(handler=_cmd_create)
 

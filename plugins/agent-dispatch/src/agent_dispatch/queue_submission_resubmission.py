@@ -10,7 +10,7 @@ from .producers.evaluator import Reject
 from .queue_records import TaskError
 from .queue_submission_preparation import _encoded
 
-_PROPOSAL_FIELDS = {"request_id", "result", "result_ref", "resubmission"}
+_PROPOSAL_FIELDS = {"request_id", "result", "result_ref", "resubmission", "expected_status"}
 
 
 def rejected_preparation(

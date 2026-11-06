@@ -9,8 +9,8 @@ This is the shared implementation map, not a deployment approval or a second
 effort. Keep progress here and contracts in the linked guide. Update a row when
 claiming work, after qualification, after merge and after release; do not mark
 an app converted from wheel production or a callback declaration alone.
-This refresh records bounded Linux Bridge frontend, CodeSpaces, base-profile
-Containers/SSH CLI and separate Dispatch plugin/standalone controls, and
+This refresh records bounded Linux Bridge frontend and MCP startup, CodeSpaces,
+base-profile Containers/SSH CLI and separate Dispatch plugin/standalone controls, and
 credits the previously recorded Windows releases and CLI qualification.
 Evidence remains source-, profile- and platform-specific; it does not requalify later binaries
 or establish whole-app acceptance.
@@ -131,7 +131,7 @@ qualification from #10462, released in #10862, as scoped in their rows below.
 Bridge/MCP startup #10054 is merged; their remaining app/lifecycle acceptance
 stays with the existing owners. CodeSpaces #10311, Containers #10347 and
 Dispatch's plugin/standalone slice #10345 also have recorded bounded Windows
-releases. The additional Bridge, CodeSpaces, base-profile Containers/SSH CLI
+releases. The additional Bridge, MCP, CodeSpaces, base-profile Containers/SSH CLI
 and Dispatch Linux controls below use their own explicit Main snapshots, not an
 inferred qualification of current Dev.
 There is no new portfolio-wide conversion count here: release, installed
@@ -144,7 +144,7 @@ whole-toolset atomicity or the complete stage contract.
 | [worktree-manager](../../../worktree-manager/README.md) (`copilot-extensions-worktree-manager`) | Bounded app-project/UV path released in #9990/#10024; Windows cold/repeat/update, real command/readiness, retained state and caller-Job lifetime qualified. Full stage-readiness, native POSIX and rollout remain open. | Preserve released behavior; complete only an agreed remaining platform/integration gap under #7028. |
 | [agent-worktrees](../../../plugins/agent-worktrees/README.md) | Same bounded released pair; historical command-owner restoration and installed-wheel consumer admission included. Full adopted-system/status-monitor transition remains separate. | Verify actual worktree/registry operations and monitor continuity for the claimed integration/platform; do not rebuild the first pair to begin another app. |
 | [agent-bridge](../../../plugins/agent-bridge/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. Its historical Windows staging, first touch/reuse, pre-publication failure, Host/ACP upgrade/rollback, retained data, caller-Job closure and native exits remain credited. The separate Linux x86_64 frontend witness below uses explicit Main `7f48209d25c3b90499e20afcfa79ae60136ca4e0`: actual stage/cold/reuse, authenticated installed readiness, retained stopped work and source-concealed reads. Neither record qualifies subsequent binaries, an installed Copilot agent or the whole app. | Existing owners retain POSIX Host/ACP continuity, full credential-relay/provider, source-change/reverse/recovery, fresh-OS and broader legacy-adoption acceptance. Coordinate through #10054/#7028 and their follow-ups; do not repeat completed bounded witnesses or open competing repair PRs. |
-| [agent-mcp](../../../plugins/agent-mcp/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. All 15 bounded Windows phases passed, including three-shell first touch, same-generation reuse, denied publication with exact recovery/retry, forward/reverse replacement, caller-Job survival and native exits. These historical candidate checks do not qualify subsequent changes or complete authoritative-replacement/whole-app acceptance. | Existing owners retain native POSIX, fresh-OS and broader legacy-adoption acceptance. Keep SQLite fixture-upstream checks distinct from a product DB claim. The [parent Plan](README.md) tracks the unchecked authoritative-replacement adoption delta under existing #10054/#7028/#9716/#10377 owners: #10652 incoming completion, #6389 fresh serving convergence and #10653 protected retirement. Unknown outgoing cleanup is separately deferred; #10486 full reattachment remains required separate work, not an incoming gate. This refresh claims no additional runtime fix or qualification. |
+| [agent-mcp](../../../plugins/agent-mcp/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. All 15 bounded Windows phases passed, including three-shell first touch, same-generation reuse, denied publication with exact recovery/retry, forward/reverse replacement, caller-Job survival and native exits. The separate Linux x86_64 witness below uses explicit Main `9007b0ef321d2be24088cd42279564005d39289e`: stage, inactive cold installation, configured startup/readiness, same-native-owner reuse and source-concealed reads. Neither record qualifies subsequent binaries or completes authoritative-replacement/whole-app acceptance. | #10742 retains the prepared/mixed-source matrix; incoming publication #10754 excludes that matrix, with #10652 yielding to it. Existing owners retain #6389 fresh serving convergence, #10653 protected retirement and the affected-installation mutation hold, plus #10486 full reattachment as required separate work, not an incoming gate. #10810 POSIX helpers, #10797 metadata and #10764 Darwin remain separate owned work. Preserve #10054/#7028/#9716/#10377 coordination, broader platform/fresh-OS/legacy acceptance and the distinction between synthetic fixture upstreams and product DBs. This refresh adds bounded evidence, not a runtime fix or full namespace/handover qualification. |
 | [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Bounded modern user-mode application slice #10345 released on Main `a48e41419190fe43ef006a8ef6dfa08e134785b6`. Historical Windows cold/restart/handoff and held-state/native cleanup remain credited. The separate Linux x86_64 witness below uses explicit Main `0dbbdd374e1af0b6443c84cead45102333855da3`: actual stage/cold/reuse, authenticated coordinator readiness, logical work preservation and source-concealed reads. Neither record establishes whole-SDK, later-binary or whole-app qualification. | Existing owners retain configured-supervisor, flat/nonprofile and native-service-owned transitions, distinct-source/reverse/recovery and complete authoritative-replacement acceptance. Preserve candidate admission and unfinished-work custody; #9026 fixed first-use recipes and #9673 guarded conversation replacement remain separate work. |
 | [agent-codespaces](../../../plugins/agent-codespaces/README.md) | #10311 released bounded Windows application/provider work on Main `27aab5a3262cc331c0d73564a8a59dfd20fced01`, including historical A/B/A Owner/replacement and both provider-install orders. The separate Linux x86_64 CLI/provider controls below pass on explicit Main `1a83c1d250ae8093a47afab1107c3ebb9553a53e`, with Connection Owner disabled. Neither record qualifies every newer SDK or the whole app. | Existing owners retain Linux daemon lifecycle, source-change/reverse/failure integration, healthy foreign-provider collision coverage on Linux, other architectures, pristine OS, live backend/forwards and rollout. Keep stage-only environment preparation separate from full candidate readiness. |
 | [agent-containers](../../../plugins/agent-containers/README.md) | #10347 released bounded configuration/provider callbacks on Main `f85bd817958a3ead2ba69182ad01f76bb11e4076`, with historical Windows installed front doors, both discovery orders, repeat and original-manifest preservation. The separate Linux x86_64 base-profile CLI/provider controls below pass on explicit Main `1a83c1d250ae8093a47afab1107c3ebb9553a53e`; neither record qualifies later binaries or the whole app. | Existing owners retain provider-exec/Paramiko, other platforms/architectures, pristine OS, source-change/reverse/retry, broader legacy/replacement and live credentialed fleet/backend acceptance. Preserve profile and foreign-container custody; callbacks do not borrow containers, query fleets or start a resident. |
@@ -479,6 +479,71 @@ full relay/provider behavior, distinct-source/reverse/recovery, other
 architectures, fresh-OS behavior, broader legacy adoption and rollout remain
 with their existing owners. This is bounded install/readiness evidence, not
 whole-app acceptance or a new portfolio conversion count.
+
+### Bounded MCP Linux startup and reuse record
+
+The additional witness under #10742 uses explicit released Main
+`9007b0ef321d2be24088cd42279564005d39289e`, tree
+`cccd1638847dc59dfbf2f9ccff641b22cb6dcc4d`, on Linux x86_64 /
+CPython 3.12.11 in a fresh container from a pinned, preprovisioned image.
+This is not a pristine OS or current-Dev qualification. Canonical
+source/application/profile preparation takes 28.896 seconds separately.
+The BASE profile selects no extras, seven first-party distributions and one
+governed registry wheel. The generated declaration retains the real
+`__source-setup` and `__source-start` callbacks without legacy opt-outs.
+Acquisition-policy association and seven-day dependency seasoning are checked
+without changing feed or TLS policy.
+
+| Actual generated control | Elapsed | Boundary checked |
+|--------------------------|---------|------------------|
+| Separate fresh `install --stage` root | 0.139 s | Environment preparation, separate from normal cold installation |
+| Fresh **unstaged** normal `install` root | 1.097 s | Selected installed application; correctly inactive with no wanted incumbent |
+| Repeat normal `install` in that same root after explicit configured startup | 1.443 s | Same authenticated native owner, physical slot, fixed handle and data socket |
+
+The original 300-second install and 60-second readiness bounds are unchanged.
+The original phase remains **failed**, not retroactively passed: all four
+commands returned zero, but the fixture placed a valid explicit-path config
+outside MCP's `bridges` discovery directory. Readiness correctly reported
+`configuration-empty`, so no resident started. This is a fixture placement
+error, not a product bug.
+
+A separate configured follow-up copies that synthetic config into the
+discovery directory, retaining the original, then explicitly starts the selected
+installed application in 0.838 seconds. All sixteen follow-up commands return
+zero. This follow-up reuses the installed slot without replaying preparation,
+staging or cold installation. Authenticated readiness requires no upstream;
+no backend or held MCP client is exercised.
+
+Reuse and installed global/slot/module/baked-root reads preserve the same
+native PID/birth, physical interpreter and fixed/data socket ownership.
+Installed reads and authenticated readiness also pass while original source,
+input, profile, runner and cache paths are concealed; all paths are restored.
+Constructor execution after concealment is not tested. Independent archive
+comparison matches all 270 captured runtime wheel members to actual installed
+bytes and preserves 398 immutable entries, except for permitted success/intent
+record refresh. Original configuration, retained fixture state and foreign
+bytes remain exact.
+
+Execution is network-disconnected, non-root, capability-dropped, resource-bounded
+and read-only outside owned temporary storage, without host binds, a Docker
+socket or credentials. Reports, input and native-footprint archives pass full
+regular-member reads, safe-name and local/remote size/hash checks before fixture
+retirement. Archived environments are evidence only, not installation inputs.
+Containment is supported by the fixture request and process observations, not
+an independent exported raw-inspect audit; feed/TLS evidence is likewise bounded
+to the captured code/configuration, not an independent full transport audit.
+Installed authenticated shutdown observes the original owner's kernel pidfd
+exit before handle closure and exact container removal. Independent verification
+confirms container absence and venue-resource settlement.
+
+This is bounded cold/configured-reuse/readiness evidence, not a new runtime
+release or host/fleet deployment. #10742 retains mixed-source, reverse,
+failure/recovery and held-client acceptance. #10754 incoming namespace work,
+#6389 serving convergence, #10653 protected retirement and its affected-installation
+hold, #10486 full reattachment, #10810 POSIX helpers, #10797 metadata and #10764
+Darwin remain with their existing owners. Other architectures, pristine OS,
+broader legacy adoption and complete authoritative replacement remain open.
+Neither this witness nor historical #10054 completes MCP or the parent effort.
 
 ## Contributing from another agent or operator
 

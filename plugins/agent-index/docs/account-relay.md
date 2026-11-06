@@ -62,6 +62,16 @@ Older listeners close without this declaration. A consumer requiring a lease
 must report unsupported support, never fall back to the unrestricted listener
 or an ordinary token response.
 
+For a connection-bound lease exchange, send that same describe operation with
+the single field `exchange=connection-bound/v1`. A capable listener echoes
+`exchange=connection-bound/v1` alongside the contract and operation, then accepts
+one account operation on that same connection. Read and validate this
+declaration before sending the capability. No reconnect is permitted between
+those frames; replacement of a TCP endpoint or namespace descriptor cannot
+redirect the acquisition to an unnegotiated peer. An older listener closes this
+read-only query without issuing credentials. The original fieldless describe
+response and its EOF behavior are unchanged, as are single-operation clients.
+
 `get-account-source-lease` uses the same exact fields and capability as
 `get-account-token`. It acquires anew, rechecks policy/capability before delivery,
 and returns the existing token fields plus `lease_contract`, a fresh `lease_id`,
@@ -79,6 +89,52 @@ pause/resume a process, create a feeder or authorize transport enrollment.
 Provider-first expansion does not make an existing token-only consumer enforce
 a lease. Both the ordinary token operation and declaration-less legacy
 listener remain supported; no legacy operation is retired.
+
+The standard-library client offers `acquire_source_lease(path, source=...,
+account=..., host=...)`, and `exchange_source_lease(transport, fields,
+capability)` for an already-admitted embedding. Every acquisition first reads
+the fixed support declaration from the selected live endpoint, without sending
+or reading a stored capability. An undeclared or incompatible peer is refused;
+there is no ordinary-token fallback. Discovery and acquisition share one
+finite timeout. The same socket descriptor, owner and peer checks used by the
+ordinary token API apply to the connection carrying both frames. This SDK
+requires the connection-bound capability, not merely the original
+single-operation lease declaration.
+
+The returned `SourceLease` exposes `token`, `lease_id`, `lease_issued_at` and
+`lease_expires_at`. Its repr omits the token. `remaining_seconds()` uses the
+earlier of the source's wall deadline and a local monotonic budget, deducting
+the entire discovery/acquisition latency. Future-issued, non-finite, expired
+or over-one-hour source evidence is refused. An observed clock rollback or
+expiry permanently invalidates that object; fresh acquisition returns new
+evidence. Source and consumer clocks must be sufficiently synchronized for
+this conservative check. These objects are process-local evidence, not
+persistable resume permissions or token-expiry attestations.
+
+`exchange_source_lease_for(path, fields, capability, host=...)` additionally
+checks the configured binding for an embedding. Like `exchange_for`, it uses
+only the caller-supplied capability, never the worker's stored one.
+
+The existing HTTP `/source-credentials` facade also accepts an explicit
+`lease_contract=credential-relay.account-source-lease/v1` JSON field alongside
+the ordinary request. The running core's `/health` advertises
+`source_credentials_contract` with that `lease_contract` and `exchange=http/v1`.
+Select this declaration from the intended installation before sending a lease
+request; missing or incompatible support is not permission to fall back to a
+token-only operation. Older cores reject the added request field. Unknown
+lease contracts and a declaring-but-incompatible account listener return
+`source-lease-unsupported` (HTTP 409) without ordinary-token fallback.
+
+A lease response adds `lease_contract`, `lease_id`, `lease_issued_at`,
+`lease_expires_at` and `lease_remaining_seconds` to the existing token/account/
+host/installation fields. The remaining time is the native SDK's conservative
+budget at serialization. Each forwarding/receiving owner must deduct its whole
+exchange latency and apply the earlier wall deadline and local monotonic budget;
+never restart the full source interval at a later hop or persist it as a new
+authorization. Source unavailability, withdrawal or elapsed budget returns no
+credential. Requests without `lease_contract` retain the exact token-only
+response. No old form is retired. HTTP metadata declares provider support, not
+a signed-in source, file renewal or execution-owner enforcement.
 
 The Bridge publishes `account-relay-port.json` beside the policy, containing
 only the actual loopback port, process ID and generation. This dedicated listener accepts

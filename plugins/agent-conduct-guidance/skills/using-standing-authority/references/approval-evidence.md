@@ -17,7 +17,7 @@ do not invent missing authority or turn an absent limit into unlimited effects.
 | Resources and owners | Target selector, data/content scope, executing and resource owners, affected consumers and information destinations |
 | Effects and blast radius | Expected mutations/disruption/scale and the operator's accepted failure/recovery costs; not an agent-generated approval score |
 | Conditions and exclusions | Review/release/authentication prerequisites, protected data/services, forbidden operations and unresolved decisions |
-| Limits and repetition | Resource/time/disruption bounds, retry/revision policy and any explicit pin or single-attempt restriction |
+| Limits and repetition | Resource/time/disruption bounds, retry/revision policy and any explicit pin or single-attempt restriction, each pin or one-shot limit with its origin: operator-stated, operator-chosen over a broader option, or agent-proposed; accepted caps and budgets bind as granted scope |
 | Validity and changes | Expiry/stop conditions, actual limited uses, current holds, narrowing/revocation/supersession and their original source references |
 | Interpretation and unknowns | Clearly labeled agent interpretation and unresolved evidence, never promoted into the original grant |
 
@@ -59,6 +59,15 @@ approval is not content authority.
 | Operator pre-cleared the normal tooling deployment/fix loop across the owned target selector | Reuse that clearance while actual operations, owners, effects and limits still match. |
 | New source revision or corrected command remains within an unpinned repeating scope | Refresh execution evidence and continue; do not manufacture a new approval boundary. |
 | Original operator answer pins a revision or permits only one attempt | Preserve the pin/use limit; obtain a real amendment before exceeding it. |
+| Agent wrote a single attempt or revision pin into its own question and the operator chose the only approving option | Record it as an agent-proposed precaution, not an operator pin; reuse the granted class within its effects. |
+| Earlier grant covers an operation class "as needed" or says not to re-ask | Apply it to later invocations of that class within its targets, effects and limits; do not narrow it to the first invocation. |
+| A run under a cleared class fails and a reviewed fix lands | Treat the rerun as an ordinary bounded retry; refresh execution evidence instead of asking again. |
+| The same operation class would need approval a second time | Ask once for class-level pre-clearance with a bounded rerun policy, not per invocation. |
+| Operator accepts a class-level rerun policy with a run cap | The cap binds as granted scope; ask for an amendment before exceeding it. |
+| Author agent's own approved PR conflicts with its target branch | Rebase its own branch, resolve the understood conflict, regenerate derived artifacts and push without an approval prompt; required review and CI apply to the new head. |
+| A mechanical rebase or conflict-only push meets a review-round, revision or attempt cap | Do not count it against the cap; caps bind intent-changing revisions. |
+| Agent drafts a how-to-proceed question whose options are all narrow ("exact", "one", "only", "read-only", a revision pin) | Rewrite it: recommend the broadest option within the requested authority, add a standing option if it can recur and keep narrower options beside it with a named risk. |
+| Operator picks a narrower option offered beside a broader one | The narrowing binds; record it as operator-chosen and ask once at class level if the work later needs more. |
 | Prior invocation may already have produced effects | Reconcile through the existing owner with the original identity; do not blindly replay. |
 | Deployment expands beyond the approved selector, owner or accepted effects | Ask only for the expanded effect scope and continue unaffected authorized work. |
 | Low-risk tooling approval is reused for a prototype that mutates personal archives | Keep content mutation gated; deployment recoverability does not authorize data effects. |

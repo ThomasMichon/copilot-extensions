@@ -24,6 +24,7 @@ Do not maintain a second independently evolving registrar schema.
 | `URL`, `SHARED_URL` | URL; native local discovery / absent shared |
 | `SHARED_TOKEN`, `SHARED_CONTROL_TOKEN` | Secret string; absent; independent shared authority |
 | `TASK_AUTHORITY` | `central` / `local`; unset retains native routing; no cross-queue fallback for explicit authority |
+| `RELATIONSHIP_ADMISSION`, `RELATIONSHIP_AUTHORITY` | Trusted `module:factory` and explicit `local` / `central` queue authority; both absent by default |
 | `PRODUCER_CAPABILITY`, `PRODUCER_CAPABILITY_COMMAND` | Capability/fetch selector; invocation-owned, never portable authority |
 | `NO_AUTOSTART` | Any nonempty value disables lazy start |
 | `RUN_DIR`, `ROUTING_DIR`, `ENDPOINT`, `OVERRIDES` | Owner runtime/discovery paths/selectors; native defaults; not preference tiers |
@@ -33,6 +34,40 @@ Do not maintain a second independently evolving registrar schema.
 Explicit CLI/environment selection remains outside composition. No config read
 starts the coordinator, fetches a token, activates producer scope or grants
 network bind permission. Wildcard bind still requires token admission.
+
+### Conditional relationship admission
+
+The ordinary `serve` construction accepts an explicitly configured, trusted
+zero-argument admission factory. It must return
+`agent_dispatch.assignment_admission.RelationshipAdmission` with both
+`admit_workspace(workspace, writer_identity)` and
+`admit_request(workspace, writer_identity, original_request)`. The coordinator
+constructs the existing selected Worktrees adapter, retaining its command and
+reobserving the actual resident before each relationship call. The queue keeps
+its independent durable request/prepared-reservation checks and post-I/O CAS.
+The configured queue authority is separate from the client's `TASK_AUTHORITY`
+routing default; it must name the actual original queue.
+
+This is executable local service configuration, not portable registrar content,
+a task-supplied receipt or a public API that accepts factories. Configuration
+reads do not import the factory; only coordinator construction does. Incomplete
+selection, a bad factory, unavailable selected writer or construction failure
+refuses startup before socket/routing publication, without a legacy/no-writer
+fallback. The ordinary `serve` CLI forwards both selectors unchanged.
+With both selectors absent,
+ordinary construction remains unchanged and supplies no relationship writer.
+Source startup's configuration identity includes both selectors, so it cannot
+adopt a same-build incumbent with a different admission selection.
+
+No permissive built-in admission policy is provided. A consuming owner's actual
+callbacks must independently qualify the original workspace, Bridge's future
+keyed creation or original continuation journal, and every participating ledger
+writer. Missing, changed or unaccounted participants must refuse before effects.
+An installed CLI/resident observation alone does not close that cohort.
+The factory does not enable pool allocation, invent an ordinary writer
+requirement, retrofit a historical agent or replace the existing custody owners.
+Complete admission assembly and ordinary running acceptance remain separate
+gates; do not install a no-op callback to get past them.
 
 ## Human-authored registrar and identity sources
 

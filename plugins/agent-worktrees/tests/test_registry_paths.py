@@ -56,6 +56,7 @@ def _stamp(
     marketplace: str,
     repository: str,
     plugin: str = "agent-worktrees",
+    source: dict | None = None,
 ) -> tuple[Path, Path]:
     # Scrub ambient installation-context env this test process may have
     # inherited from a live Copilot CLI session it is itself running inside
@@ -71,7 +72,7 @@ def _stamp(
             str(payload / "scripts" / "installation-context" / "installation_context.py"),
             "stamp",
             "--source-json",
-            json.dumps({"source": "github", "repo": repository}),
+            json.dumps(source if source is not None else {"source": "github", "repo": repository}),
             "--marketplace-key",
             marketplace,
             "--plugin-id",

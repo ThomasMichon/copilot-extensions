@@ -11,7 +11,7 @@ agent-zdd = { path = "libs/zdd" }
 
 [project]
 name = "fleet-manager"
-version = "0.1.122-dev1"
+version = "0.1.123-dev1"
 description = "Standalone fleet planner and opt-in authenticated Gateway runtime and SDK."
 readme = "README.md"
 license = "MIT"

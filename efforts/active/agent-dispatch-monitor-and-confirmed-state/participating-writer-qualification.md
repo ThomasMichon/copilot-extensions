@@ -19,7 +19,11 @@ and [dated journal](journal/2026/11.05-submission-resubmission.md#resident-only-
 `WorktreeRelationshipWriter` negotiates the selected executing CLI and requires
 an independent `admit_workspace` callback. Its relationship calls use the
 registered direct owner; they do not establish another resident's support.
-Ordinary coordinator construction still supplies no writer.
+Default ordinary coordinator construction still supplies no writer.
+The conditional [configuration owner](../../../plugins/agent-dispatch/docs/configuration.md#conditional-relationship-admission)
+can select a trusted factory carrying both real independent callbacks through
+the existing `serve` path. It supplies no permissive policy and is not an
+admission receipt or installed-cohort observation.
 
 Worktrees already exposes the
 [incarnation-bound relationship contract](../../../plugins/agent-worktrees/docs/resource-relationship.md#workspace-incarnation-and-executing-writer-support).
@@ -167,6 +171,12 @@ mandatory. Unknown responses retain the same assignment and claim.
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers
       through submission, rejection and resubmission.
+      Conditional new-workspace startup merged in #11145 and combines observed Bridge
+      selection with the prepared nonce before the first relationship, using
+      the expanded preparation provider. It replays pending relationship
+      attachment with the retained original expectation. Actual independent
+      complete-cohort policy and installed-owner
+      qualification remain open; the expectation is not admission.
 - [ ] Run a fresh whole-stack case only after its first failed boundary changes.
       Verify repeated independent rejection and acceptance through ordinary
       callers, not internal-method fixtures or a previously failed container.
@@ -365,12 +375,15 @@ and independent original-request/complete-cohort assembly remains open.
       moved-selector recovery. #11063 passes 243 affected source controls,
       the actual CLI discovery parser and 4,525 admitted units. No ordinary
       writer is constructed by that bounded source slice.
-- [ ] Require retained-writer continuation support on every explicit-resume
-      effect attempt, including daemon cutover after observation. Current
-      hosting-only negotiation is insufficient. Preserve the exact original
+- [x] Require retained-writer continuation support on every explicit-resume
+      effect attempt, including daemon cutover after observation. Preserve the exact original
       journal/native and never fall back to another target or unpinned resume.
       Keyed send already uses receiver-side `no_resume=True`; do not infer
       an implicit-resume defect from its CLI option validation.
+      #11078 passes source parser/client/HTTP controls, including the production
+      observer moving the shared endpoint during health. Health and mutation
+      remain pinned to one destination; each safe retry qualifies its next
+      destination. Actual installed/cohort and running-lifecycle gates stay open.
 
 ## Continuing provider-first slice: original relationship request admission
 
@@ -437,3 +450,30 @@ before the first reserve.
       installed-writer and complete-cohort observations remain separate gates.
       #11031 passes 17 new admitted controls, the complete 4,352-unit packet
       and 106 distinct queue/owner controls. No ordinary writer is constructed.
+
+The original queue/preparation correlation was subsequently repaired in #11105.
+Before each external operation, the queue also rereads the exact prepared
+reservation named by the original request, retaining workspace, incarnation
+and original event/generation facts. Bounded SQLite and actor-free controls
+cover changed preparation and original-request recovery. This closes that
+source defect only; independent ground-record/allocation, actual selected
+participants and complete-cohort admission remain open.
+
+### Prepared-workspace expectation ordering
+
+The existing attachment operation is the provider owner for the expected
+future Bridge writer. It already stores the original workspace nonce and
+audited relationship request before reconciliation. Its optional requirement
+is now retained in that same transaction, with independently advertised
+placement support and client negotiation. It rejects changed expectations,
+nonce conflicts and retrofit after a historical unpinned relationship/native.
+An omitted retry preserves the original expectation; a lost relationship
+reply does not allocate another request.
+
+The provider prerequisite merged in #11130; conditional ordinary consumer
+assembly followed in #11145. That consumer derives an expectation from actual
+negotiated Bridge selection and authoritative preparation, then uses this
+existing owner before the first relationship. Independent first-request admission must not require
+an acquisition journal that can exist only after that relationship.
+Actual closed-cohort policy and installed-owner qualification remain open;
+no permissive callback or running configuration is supplied.

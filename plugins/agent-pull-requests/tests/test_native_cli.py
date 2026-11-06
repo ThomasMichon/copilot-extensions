@@ -70,6 +70,71 @@ def test_native_metadata_old_peer_refuses_without_effect_or_fallback(
     assert len(calls) == 1 and calls[0][1] == "pr-author-capabilities"
 
 
+@pytest.mark.parametrize("supported", [False, True])
+def test_native_worker_config_requires_selected_runtime_support(
+    command, tmp_path, monkeypatch, capsys, supported,
+):
+    path = tmp_path / "worker policy.json"
+    path.write_text("{}", "utf-8")
+    capabilities = author_capabilities()
+    if supported:
+        capabilities["operations"]["worker-policy-config"] = True
+    result = {"repo": "project/repo", "number": 7, "ok": True}
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0, json.dumps(capabilities if len(calls) == 1 else result), "",
+        )
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("update", command, "--config", str(path), "--title", "new")) == (
+        0 if supported else 1
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert len(calls) == (2 if supported else 1)
+    assert all(f"--config={path}" in call for call in calls)
+    if supported:
+        assert payload == result
+    else:
+        assert "does not advertise" in payload["error"]
+
+
+@pytest.mark.parametrize("path", ["", "missing.json"])
+def test_native_worker_config_never_falls_back_when_unavailable(
+    command, monkeypatch, capsys, path,
+):
+    monkeypatch.setattr(native_author, "run_command", lambda *a, **k: pytest.fail("spawn"))
+    assert cli.main(arguments("update", command, "--config", path)) == 1
+    assert "configuration file is unavailable" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("config", ["", "worker.json"])
+def test_author_config_without_native_selection_never_uses_github(
+    monkeypatch, capsys, config,
+):
+    monkeypatch.setattr(cli, "_github_create", lambda *a, **k: pytest.fail("forge fallback"))
+    assert cli.main([
+        "create", "--repo", "project/repo", "--head", "topic", "--title", "Fix",
+        "--config", config, "--json",
+    ]) == 2
+    assert "explicit --worktrees-command" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_native_frontend_declares_its_own_worker_config_support(command, monkeypatch, capsys):
+    monkeypatch.setattr(
+        native_author, "run_command",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, json.dumps(author_capabilities()), ""),
+    )
+    assert cli.main([
+        "author-capabilities", "--repo", "project/repo", "--worktrees-command", command, "--json",
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["frontend"]["worker-policy-config"] is True
+    assert "worker-policy-config" not in payload["operations"]
+
+
 def test_native_qualified_create_forwards_only_after_capability(command, monkeypatch, capsys):
     value = {"repo": "project/repo", "number": 7, "pr_opened": True, "url": "https://forge.invalid/7"}
     calls = stub(monkeypatch, value)
@@ -395,9 +460,11 @@ def test_native_rejects_old_powershell_before_target_execution(tmp_path, monkeyp
     assert not marker.exists()
 
 
-@pytest.mark.parametrize("verb", ["status", "wait", "create", "merge"])
+@pytest.mark.parametrize(("verb", "with_config"), [
+    ("status", False), ("wait", False), ("create", False), ("merge", False), ("create", True),
+])
 def test_native_front_door_crosses_real_worktrees_command_boundary(
-    verb, tmp_path, monkeypatch, capsys,
+    verb, with_config, tmp_path, monkeypatch, capsys,
 ):
     monkeypatch.setattr(cli, "_WATCH_INVOCATION", None)
     value = report(merged=True)
@@ -414,11 +481,26 @@ def test_native_front_door_crosses_real_worktrees_command_boundary(
     elif verb == "merge":
         expected = ["pr-merge", "project/repo", "7", "--now", "--json"]
         value = {"repo": "project/repo", "pr": 7, "applied": True, "merged": False}
+    extra = []
+    if with_config:
+        policy = tmp_path / "worker policy.json"
+        policy.write_text("{}", "utf-8")
+        expected.append(f"--config={policy}")
+        extra = ["--config", str(policy)]
     command = tmp_path / ("native command.ps1" if os.name == "nt" else "native-command")
     python_script = (
         f"import sys\nassert sys.argv[1:] == {expected!r}\n"
         f"print({json.dumps(value)!r})\n"
     )
+    if with_config:
+        capabilities = author_capabilities()
+        capabilities["operations"]["worker-policy-config"] = True
+        probe = ["pr-author-capabilities", "--repo=project/repo", "--json", f"--config={policy}"]
+        python_script = (
+            "import sys\n"
+            f"if sys.argv[1:] == {probe!r}:\n    print({json.dumps(capabilities)!r})\n"
+            f"else:\n    assert sys.argv[1:] == {expected!r}\n    print({json.dumps(value)!r})\n"
+        )
     if os.name == "nt":
         target = tmp_path / "native_command.py"
         target.write_text(python_script, encoding="utf-8")
@@ -429,7 +511,7 @@ def test_native_front_door_crosses_real_worktrees_command_boundary(
     command.write_text(script, encoding="utf-8")
     if os.name != "nt":
         command.chmod(0o700)
-    assert cli.main(arguments(verb, str(command))) == 0
+    assert cli.main(arguments(verb, str(command), *extra)) == 0
     assert json.loads(capsys.readouterr().out) == (
         {**value, "timedOut": False} if verb == "wait" else value
     )

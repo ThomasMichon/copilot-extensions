@@ -154,6 +154,14 @@ restarting the Owner or replacing its relay. Successful admission and explicit
 `--no-relay` operation retain their existing behavior. These signals do not prove
 end-to-end credential delivery; host credential checks remain a separate boundary.
 
+After positive Owner/forward admission, direct SSH also requires the exact
+exported remote listener to answer the shared relay ping/pong command before
+preparation or command delivery. The check uses the existing account-qualified
+SSH manager and selected operation budget, with a finite default when none is
+selected. Missing, wrong-service or inconclusive results refuse without replacing
+the Owner; cancellation retains normal owned cleanup. Explicit `--no-relay`
+skips the check. Ping never fetches credentials or proves real Git authentication.
+
 Fresh ACP and attached CLI launches prepare selected plugins before starting the
 actual Copilot child. Credential relay readiness precedes authenticated checkout
 provisioning and plugin installation; checkout-creating `on_connect` hooks run

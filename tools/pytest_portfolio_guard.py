@@ -11,6 +11,7 @@ import pytest
 # Static consumers share one identity; runtime imports retain both entry modes.
 if _typing.TYPE_CHECKING:
     from coverage_guided_selection.auditability import MARKER, declaration
+    from plugin_test_command_safety import install_command_guard
     from plugin_test_containment import (
         ALLOW_HOST_STATE_ENV,
         ALWAYS_SANDBOX_ENV_NAMES,
@@ -24,6 +25,11 @@ else:
         from coverage_guided_selection.auditability import MARKER, declaration
     except ModuleNotFoundError:
         from tools.coverage_guided_selection.auditability import MARKER, declaration
+
+    try:
+        from plugin_test_command_safety import install_command_guard
+    except ModuleNotFoundError:
+        from tools.plugin_test_command_safety import install_command_guard
 
     try:
         from plugin_test_containment import (
@@ -200,3 +206,12 @@ def pytest_collection_modifyitems(
             )
     if errors:
         raise pytest.UsageError("invalid test portfolio declarations:\n- " + "\n- ".join(errors))
+
+
+# Explicit -p plugins load before conftests; sessionstart is too late to guard
+# import-time code in a conftest or test helper.
+if os.environ.get(CONTAINED_ENV) == "1":
+    validate_contained_environment()
+    install_command_guard(Path(os.environ[SANDBOX_ENV]))
+else:
+    install_command_guard()

@@ -8,7 +8,9 @@
 - **Vision:** [machine heartbeats](../../../visions/telemetry/machine-heartbeats/README.md),
   [user-state carriers](../../../visions/user-state-carriers/README.md)
 - **Umbrella issue:** #10873
-- **Sub-issues:** #10881 (local report/chart consumer), #10928 (preference preview)
+- **Sub-issues:** #10881 (local report/chart consumer), #10928 (preference preview),
+  #11081 (guarded native telemetry adoption), #11119 (local hourly health store),
+  #11157 (passive owner observations)
 
 ## Guiding Intent
 
@@ -121,6 +123,10 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   existing-repository binding through the selected owner, without automatic adoption.
 - [x] Prove explicitly confirmed Copilot scalar-floor adoption through native
   configuration, alias scope, validation and the serialized settings owner.
+- [x] Expose producer-owned retained telemetry configuration preview/apply
+  without provisioning, activation or projected-task authority bypass.
+- [x] Prove capability-selected telemetry adoption with accepted-input
+  revalidation at the producer's write boundary, preserving custom sinks.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -130,6 +136,11 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   operation and safe withdrawal before any adopted application.
 
 ### Phase 5 - Hourly health engine and carrier qualification
+- [x] Prove explicit typed observation -> local hourly slot -> age-qualified
+  reader through the normal CLI (#11119), without claiming probe execution.
+- [ ] Prove the first passive local owner-listener observation through the
+  normal CLI and existing local record/reader flow (#11157), keeping all other
+  domains unknown and installed-provider qualification separate.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
@@ -520,3 +531,210 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   introduced by the configuration-only gate. Ruff and whitespace passed.
 - Fresh current-head review and CI remain required. This correction does not
   authorize runtime installation, active capture or carrier publication.
+
+### 2026-11-06 - Retained-configuration providers merged
+- #11058 merged as `48e4125655f03440a37d2f531f461a6c707f48c8`
+  after actual current-head Copilot approval with no findings, resolved
+  threads and green required CI. Source-attribution metadata passed.
+- All 20 PR-touched paths exactly matched the verified merge. The managed
+  pull-forward safely aborted on squash-history conflicts; a retained backup
+  and empty-range rebase reconciled only the proved merged history. No
+  unmerged source was discarded.
+- Completed only the producer prerequisite. Machines must select a capable
+  pinned native producer and revalidate the accepted snapshot, policy and
+  local overrides at the actual producer write boundary. A caller-only check
+  would leave a stale-authority gap.
+- The parent effort remains Active. Carrier exchange, native installed
+  qualification, health probes, scheduling and explicitly authorized
+  activation are still open. A source merge is not a release or rollout.
+
+### 2026-11-06 - Guarded telemetry adoption implemented
+- Claimed #11081 for explicitly confirmed Machines adoption through a pinned
+  same-cell producer. The producer's additive input-fence capability binds
+  exact validated policy, accepted-snapshot and optional local-override bytes
+  to its confirmation and rechecks them inside its native writer lock.
+- Custom sinks refuse without overwrite. Disabled/withdrawn contributions
+  contact no producer and do not erase adopted values. Unsupported providers
+  cannot trigger a fallback writer. Reporting remains visibly unsupported
+  for adoption; it has no native configuration field.
+- The Machines/codec packet passed 35 cases. The first fixture incorrectly
+  launched Bridge inside Machines' Python and exposed the missing Bridge-only
+  dependency; the cross-plugin packet now uses the real Dispatch parser and
+  transaction. Bridge's own prepared environment passed 29 native adoption
+  cases plus three malformed/oversize/duplicate input-fence controls.
+- Independent Machines CLI preview/apply processes reached the real Dispatch
+  configuration writer in fresh, preprovisioned roots. Only native context and
+  peer resolution were fixture-supplied; this is not immutable-slot, installed
+  selection or carrier qualification. No installer is needed for this path.
+- The shared library passed strict Python-3.10 Linux and Windows type targets
+  over 18 source files each. Install contracts, module ceilings, documentation
+  consistency, Ruff and whitespace passed.
+- Post-write acknowledgement failures preserve an unknown outcome instead of
+  claiming an untouched configuration. The final adapter/independent-process
+  packet passed ten cases without skips, including malformed native preview
+  refusal. A separate actual-write/unknown-acknowledgement control passed
+  without retrying the write. Review and required exact-source CI still gate
+  this slice.
+- These are unit/lightweight process and fresh-configuration controls, not a
+  full installer clean-room or native Linux qualification. An installed/live
+  lane is not exercised: runtime rollout and carrier/activation effects remain
+  held, and the operation itself has no external backend. The parent stays Active.
+
+### 2026-11-06 - Preserve restrictions across telemetry peer handoff
+- The #11094 review found that native peer environment cleanup removes task
+  identity fields and custom telemetry sink overrides. Producer-side admission
+  alone therefore cannot preserve those caller restrictions.
+- Machines now refuses Dispatch task environment entries and a selected
+  producer's nonempty sink override before peer selection and before every
+  capability, preview and apply handoff. The shared launcher is unchanged.
+- The 26-case adapter packet passed. A source-resolved peer uses the real
+  environment projection and native Dispatch writer in a temporary profile.
+  Controls refuse restrictions before selection and after parent preview at
+  each handoff, without creating native configuration or its writer lock.
+  Bridge sink controls test the same pre-launch refusal without importing
+  Bridge into Machines' dependency environment.
+- Documentation consistency and whitespace passed. These remain fixture-resolved
+  source/process controls, not installed immutable-slot or carrier qualification.
+  Fresh exact-head CI and a passing review still gate this correction; no
+  rollout, capture, carrier publication or activation is authorized by it.
+- The fresh review confirmed both handoff corrections and found an exit-contract
+  mismatch: a native invalid/unavailable request was classified as a preservation
+  refusal. The CLI now returns `2` for native errors or unknown write outcomes,
+  retaining `1` for known refusals. Three focused actual-producer CLI controls
+  passed for missing retained storage, custom-sink preservation and an unknown
+  post-write acknowledgement; the last still performs exactly one write.
+- The next review found that a fenced input could itself name the native
+  configuration output. Both producers now reject input paths or file
+  identities overlapping their target or writer lock before issuing
+  confirmation. A real Machines local-override/Dispatch-target collision
+  preserves every input byte without creating a lock. That case and three
+  existing changed-input controls passed; Bridge passed five native overlap
+  and locked-input controls. Strict Python-3.10 library typing passed both
+  Linux and Windows targets over 18 files each. These add no installed-runtime
+  or carrier qualification.
+
+### 2026-11-06 - Guarded adoption merged; local health follow-up
+- #11094 merged as `55bdbdbdd8c57064e7de296d60975b0e8d6e4ccb`
+  after actual current-head Copilot approval, resolved findings and required
+  green CI. This closes only the guarded source-adoption checkbox in Phase 4.
+  Release availability, installed operation, capture and carrier receipt remain
+  separate and unproved; no runtime update or activation occurred.
+- Pull-forward aborted on squash-history conflicts. The complete published
+  slice matched the merge commit, with no unmerged source delta; a retained
+  backup allowed non-destructive reconciliation to the confirmed upstream tree.
+- Claimed #11119 for the next complete source-only local flow: strict typed
+  observation input, atomic 168-hour slots and an age-qualified reader through
+  the normal Machines CLI. Probe collection, native scheduling and carrier
+  enrollment/publication remain outside that slice and open in the parent.
+
+### 2026-11-06 - Explicit local hourly store implemented
+- #11119 now has an explicit `health record` preview/confirmed apply and
+  `health inspect` consumer. A strict separate policy selects publisher
+  continuity; the health parser never consumes preferences or executes probes.
+- The bounded closed observation vocabulary separates listeners, SSH transport
+  and authenticated direction, Gateway, authorization, credential readiness and
+  logical agents. Unknown counts remain null; supplied evidence is visibly
+  unverified. No arbitrary errors, paths, process inventory or credentials enter
+  stored records.
+- Complete flushed records occupy 168 absolute-hour slots. Native local writer
+  exclusion and exact policy/input/slot-byte confirmation preserve revisions,
+  missed parents, future timestamps, publisher mismatch and delayed weekly
+  replicas. Reader gaps and old domain proof remain unknown/stale, not uptime.
+- The first combined run passed the existing report cases and functional store
+  controls, but pytest's generated oversized-byte case ID exceeded Windows'
+  environment-variable limit. Short explicit IDs fixed the fixture without
+  lowering the 64 KiB bound. The final store/independent-process CLI packet
+  passed 23 cases; six additional hardlink/path and reader expiry/foreign/future
+  controls passed. No cases skipped.
+- Post-publication write or lock-release acknowledgement failures keep an
+  unknown outcome and never retry. Fresh preprovisioned temporary stores prove
+  the real module CLI -> atomic slot -> independent reader flow, not installed
+  selection, native probe execution, full installer clean-room or Linux native
+  scheduling. Those lanes and carrier/activation effects remain open.
+- Review, exact-source CI and source merge still gate this implementation.
+  The parent remains Active; no runtime update, schedule or carrier was activated.
+- Number decoding now rejects floating-point input and oversized integer
+  strings before conversion, so a malformed stored slot cannot trip Python's
+  integer-conversion limit and fail the reader. The exact-source bounded-input
+  and normal CLI selection passed eight cases, including independent processes.
+- Reader policy/namespace revalidation and the final independent CLI flow
+  passed two focused cases. Ruff, documentation consistency, install contracts
+  and whitespace checks passed; the Machines patch changefile is included.
+
+### 2026-11-06 - Local store review corrections
+- The #11139 review found three valid gaps: a response-output failure could
+  misreport a committed slot as unapplied, a required input disappearing
+  between validation and read could escape bounded refusal, and synthesized
+  unknown domains omitted their nullable count/direction fields.
+- Apply-output failures now retain an unknown acknowledgement; required-file
+  disappearance raises a bounded error while optional vanished slots stay
+  missing. Synthesized domains share the explicit unknown observation shape.
+- Eight focused controls passed initially. An additional real buffered
+  closed-pipe CLI control then exposed Python's shutdown flush replacing
+  exit 2 with 120 after the correct unknown acknowledgement. Only the CLI's
+  own failed stdout descriptor is redirected to prevent that second failure;
+  embedded caller streams remain untouched.
+- The final nine-case packet passed without skips, including actual committed
+  storage plus a closed native stdout pipe, in-memory write/flush failures,
+  required/optional file races and the independent empty-domain CLI roundtrip.
+  Ruff and whitespace passed. Fresh review and exact-head CI still gate this
+  correction. No probe, schedule, carrier or running-service effect occurred.
+
+### 2026-11-06 - Local store merged; passive observations remain
+- #11139 merged as `bf30dc517d89befcebeff6b85741a4a1342e1c2c`
+  after actual current-head Copilot approval, resolved findings and required
+  green CI. This closes only the explicit local-storage consumer checkpoint;
+  supplied observations are not proof that native probes ran.
+- Pull-forward again aborted on squash-history conflicts. Every owned file
+  matched the confirmed merge, with no unmerged source delta. A retained
+  backup and non-destructive reconciliation preserved the landed result.
+- Next is bounded passive collection through the existing native observation
+  owners: inventory their supported read-only surfaces and caller restrictions,
+  then prove an owner observation -> local record -> age-qualified reader flow.
+  Do not invent a second agent inventory or infer authentication from a port.
+- Carrier exchange, native scheduling/lifetime, installed qualification,
+  enrollment and activation remain open. No runtime was updated or activated;
+  the parent remains Active and its worktree must not be finalized.
+
+### 2026-11-06 - Passive listener source consumer
+- Claimed #11157 after deduplication. The first passive adapter reads only an
+  explicitly selected loopback Bridge `/health` endpoint; its advertised
+  baseline contract and service/status fields qualify local listener response,
+  not authentication, credentials, Gateway access or logical agents.
+- One request has a two-second absolute transport deadline and 64 KiB aggregate
+  wire bound. No proxy, redirect, credential lookup, retry, discovery,
+  provisioning, service start, remediation or storage effect is performed.
+  Additive owner timings and large timestamps are discarded, not interpreted.
+- The normal observation CLI emits the existing typed input for separately
+  confirmed local recording. Other domains remain unknown. The store still
+  labels supplied data unverified and independently ages known proof to stale.
+- The initial combined observation/store/report packet passed 64 cases. The
+  final observer packet passed 23 cases with no skips, including the original
+  Bridge health handler's response from a separately prepared source test
+  interpreter, real loopback transport, normal module subprocesses, fresh local
+  store and stale readback. Diagnostics were isolated; no installed endpoint
+  or full daemon ASGI/lifespan was exercised. Trickle deadline, wire overflow,
+  redirect refusal and closed stdout retained bounded outcomes.
+- Ruff, documentation consistency, install contracts, module ceilings, effort
+  structure and whitespace passed. The first default Python had no Ruff;
+  the already available Ruff executable supplied the successful lint check.
+  Review, exact-source CI and source merge remain required.
+- This advances the machine-heartbeat domain-observation vision without
+  changing its intent or existing producer/owner contracts. Linux, installed
+  qualification, other domain owners, native scheduling, carrier delivery,
+  enrollment and activation remain open; the parent is not complete.
+
+### 2026-11-06 - Passive listener review corrections
+- The #11163 review identified a real framing gap: a bounded HTTP read can
+  return a valid JSON prefix despite missing declared Content-Length bytes.
+  Listener proof now additionally requires no declared body remainder. Reads
+  stay bounded; a huge advertised length cannot request a huge allocation.
+- Replaced the whitespace-only overflow fixture with an otherwise qualifying
+  JSON body padded to the body limit, so only aggregate header/body wire
+  enforcement prevents success. Removed a numeric substring assertion that
+  could accidentally match an unfrozen observation timestamp.
+- The final 26-case observer packet passed without skips, including actual
+  owner-response compatibility, real truncated length/chunk and huge-length
+  controls, overflow/trickle limits, source CLI/store readback and output
+  failure. Fresh current-head review and CI remain required. No operational
+  activation or carrier effect occurred.

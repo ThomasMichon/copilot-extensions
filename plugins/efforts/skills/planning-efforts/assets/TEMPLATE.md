@@ -87,8 +87,9 @@
 <!-- The implementation plan, in phases. Use checklists so progress is visible
      and a fresh agent can resume. Exploration items are fine ("- [ ] Locate X").
 
-     DECOMPOSE LIBERALLY: this README is loaded whole every time the effort is
-     resumed, so keep it a map. When a phase or slice grows a big self-contained
+     DECOMPOSE LIBERALLY: agents re-enter this README after every new context
+     window, resumption and merge, so keep it a map (budget ~40 KB) with
+     one-line items: state, summary, link to detail. When a phase or slice grows a big self-contained
      body (a detailed sub-plan, deep design notes, its own validation matrix),
      extract it to a sibling sub-doc (<effort-folder>/<phase>.md) and leave
      a checklist item here with a one-line summary and a link. Link back from the
@@ -126,8 +127,8 @@ _Pending._
      consistent.
 
      WHEN THIS GROWS: the Journal is append-only, so it is the section most
-     likely to bloat the README. When it (here, or an extracted journal.md)
-     nears ~800 lines, split it into dated files under
+     likely to bloat the README. Once it passes ~100 lines, move entries to
+     dated files under
      <effort-folder>/journal/<YYYY>/MM.DD <title>.md (one per day/entry) and
      leave this section (or journal.md) as a thin index linking them newest-first. -->
 

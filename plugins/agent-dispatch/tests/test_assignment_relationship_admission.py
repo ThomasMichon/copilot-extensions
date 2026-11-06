@@ -15,6 +15,7 @@ from agent_dispatch.task_obligations import read_snapshot
 from agent_dispatch.task_relationships import AssignmentSubject
 from tests.test_assignment_relationships import assignment as assignment
 from tests.test_assignment_relationships import claim
+from tests.test_assignment_relationships import independent_readiness as independent_readiness
 from tests.test_pool_placement import place, pool, publish
 
 
@@ -32,7 +33,9 @@ def test_unprotected_assignment_cannot_bypass_first_result_admission(assignment,
     owner.lose_reply = "bind"
     with pytest.raises(TaskError, match="unresolved"):
         claim(queue, workspace, task)
-    with queue._connect() as conn, pytest.raises(sqlite3.IntegrityError, match="unconfirmed"):
+    with queue._connect() as conn, pytest.raises(
+        sqlite3.IntegrityError, match="unconfirmed|readiness",
+    ):
         conn.execute(
             "UPDATE tasks SET status=?, owner=NULL WHERE id=?", (destination, task.id),
         )
@@ -188,7 +191,7 @@ def test_suspended_successor_keeps_original_claim_and_fences_old_native(assignme
 
 @pytest.mark.parametrize("pending", [False, True])
 def test_protected_startup_retry_continues_same_claim_after_exact_retirement(
-    assignment, monkeypatch, pending,
+    assignment, monkeypatch, pending, independent_readiness,
 ):
     from tests.test_pool_startup_policy import renew
 
@@ -269,7 +272,9 @@ def test_protected_startup_retry_continues_same_claim_after_exact_retirement(
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
 
 
-def test_submission_keeps_exact_relationship_after_execution_capacity_retires(assignment):
+def test_submission_keeps_exact_relationship_after_execution_capacity_retires(
+    assignment, independent_readiness,
+):
     queue, _, workspace, task = assignment
     publish(queue, pool())
     reservation, _ = place(queue, task)
@@ -310,7 +315,7 @@ def test_submission_keeps_exact_relationship_after_execution_capacity_retires(as
     (Status.COMPLETED, True, False), (Status.SUBMITTED, False, True),
 ])
 def test_retired_agent_detachment_does_not_readmit_execution_or_release_submitted_work(
-    assignment, state, closed, legacy_guard,
+    assignment, state, closed, legacy_guard, independent_readiness,
 ):
     queue, owner, workspace, task = assignment
     publish(queue, pool())

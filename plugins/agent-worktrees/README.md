@@ -937,6 +937,12 @@ explicit-cell namespace/payload ownership, so reuse notices repairs and
 revocation. The stdlib-only registry reader ignores optional metadata, including
 inline and block-style tag lists. It follows mapping indentation and preserves
 quoted ownership paths, including trailing comments and literal hash characters.
+The existing Windows entry also reuses a complete
+[original-owner prepared cell observation](docs/worktree-observations.md#prepared-installation-cell-membership),
+checking current context/payload, all original input witnesses and bounded
+validated receipt/manifest content without launching the admission interpreter.
+Cold, incomplete and incompatible observations retain the original resolver;
+this is not a complete shell-only cell-hook transition.
 Platform selection shares the runtime's
 kernel/container-aware classifier rather than inherited WSL environment labels.
 Persistent reuse is also scoped to that execution platform. Explicit per-project

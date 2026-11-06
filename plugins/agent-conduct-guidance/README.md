@@ -22,6 +22,7 @@ owns publication, recovery and provider upgrade/rollback mechanics.
 | Module | Instruction projection | Skill | What it covers |
 |--------|------------------------|-------|-----------------|
 | Useful autonomy and standing authority | [`useful-autonomy`](instructions/useful-autonomy.instructions.md) | [`using-standing-authority`](skills/using-standing-authority/SKILL.md) | Ordinary charter-bounded work without repeated permission questions; explicit effect-scope pre-clearance with original evidence, blast radius, limits and non-widening continuity |
+| Operator question framing | [`question-framing`](instructions/question-framing.instructions.md) | [`using-standing-authority`](skills/using-standing-authority/SKILL.md) | How-to-proceed questions framed at the real decision or operation class: broadest default within the requested authority including routine follow-through, a standing option for recurring questions, no self-invented narrowing qualifiers, and operator-chosen narrowing still binding |
 | Per-machine maintenance standby | [`maintenance-standby`](instructions/maintenance-standby.instructions.md) | Projection only | Read an owner-attributed local maintenance notice and wait using native Copilot 30-minute scheduled prompts when supporting agent tools are intentionally unavailable |
 | Consented Windows elevation | [`elevation-fallback`](instructions/elevation-fallback.instructions.md) | [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) | One reviewed administrator operation through a temporary limited interactive task, genuine RunAs consent, specified private output log, matching terminal marker and scoped task cleanup; no persistent elevation grant |
 | Multi-agent rules of engagement | [`multi-agent-rules-of-engagement`](instructions/multi-agent-rules-of-engagement.instructions.md) | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | In-scope same-operator peer authority without redundant approval, scope attenuation, real custody and gates, collective decisions/handoff, authoritative countermand, external ingress and minimal provenance |
@@ -117,13 +118,18 @@ validation and issue/PR publication to designated destinations. Agents should
 not ask permission to continue that work or invent one-shot consent for each
 ordinary revision or corrected command.
 
-This includes routine maintenance of an agent-owned PR: rebases and understood
-in-scope conflict resolution, verified source-attribution and `Co-authored-by`
-restoration, lossless squash-merge reconciliation, and fixing/rerunning affected
-CI checks after correction. Supported owner workflows still preserve authored
-content, other owners' work, required review/checks and explicit limits. Unknown
-outcomes, intent-changing conflicts, destructive discard, deployment, access
-changes and unrelated service repair retain their existing gates.
+An author agent keeps its context and git history, so managing its own PRs and
+the branches it created never needs an approval prompt: rebases and understood
+conflict resolution, pushing or force-pushing its own branch, regenerating
+derived artifacts, verified source-attribution and `Co-authored-by`
+restoration, lossless squash-merge reconciliation, fixing/rerunning affected CI
+checks, re-requesting review and replying to review threads. A mechanical
+rebase or conflict-only push is not a new revision of intent and counts against
+no review-round, revision or attempt cap; caps bind intent-changing revisions.
+Supported owner workflows still preserve authored content, other owners' work,
+required review/checks and explicit holds. Unknown outcomes, intent-changing
+conflicts, destructive discard, deployment, access changes and unrelated
+service repair retain their existing gates.
 
 Deployment, personal/non-source-controlled content, disclosure and external-owner
 resources require an applicable explicit effect scope. An operator may accept a
@@ -136,9 +142,25 @@ changes in an existing effort, charter or checkpoint.
 Record upfront approvals and one-time answers immediately; carry references,
 exclusions and current changes through checkpoints/handoffs. A copied record,
 receipt, plan or model summary does not grant permission. Current applicability,
-explicit pins, use limits, holds and revocation remain binding. The procedure
+explicit pins, use limits, holds and revocation remain binding. A revision pin
+or single-attempt limit is explicit when the operator stated it or chose it
+over an offered broader option; one an agent put in its only approving option
+is its proposal. Caps in an accepted class-level rerun policy bind.
+Agents read a grant by its stated operation class, treat a rerun after a
+reviewed fix as an ordinary bounded retry, and turn a repeated ask for one
+class into a single class-level pre-clearance request. The procedure
 works without a runtime, broker or companion plugin; it does not certify model
 compliance or replace execution-owner enforcement.
+
+The separate `question-framing` module covers how any how-to-proceed question
+is framed. Options name the real decision or operation class. The
+recommendation is the broadest choice that completes the goal within the
+requested authority, including routine follow-through such as retries after
+reviewed fixes. Questions that could recur include a standing option. Agents do
+not add self-invented narrowing qualifiers ("exact", "one", "only", "read-only",
+a revision pin) unless they name a concrete risk and still offer the broader
+option. An operator who picks a narrower option over an offered broader one has
+set a binding limit.
 
 At an unapproved effect boundary, the
 [decision-preparation procedure](skills/using-standing-authority/references/decision-preparation.md)
@@ -321,6 +343,7 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 | Path | Purpose |
 |------|---------|
 | [`instructions/useful-autonomy.instructions.md`](instructions/useful-autonomy.instructions.md) | Concise charter-bounded continuation and explicit effect-authority policy |
+| [`instructions/question-framing.instructions.md`](instructions/question-framing.instructions.md) | Decision-scoped operator question framing without self-invented narrowing qualifiers |
 | [`skills/using-standing-authority/SKILL.md`](skills/using-standing-authority/SKILL.md) | Capture, qualify, reuse and recover original scoped operator approvals |
 | [`skills/using-standing-authority/references/approval-evidence.md`](skills/using-standing-authority/references/approval-evidence.md) | Procedural record fields, synthetic pre-clearance and decision cases; not a grant API |
 | [`instructions/maintenance-standby.instructions.md`](instructions/maintenance-standby.instructions.md) | Static per-machine missing-tool standby policy, independent of removed payload helpers |

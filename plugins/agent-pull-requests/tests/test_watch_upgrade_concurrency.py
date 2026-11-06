@@ -72,8 +72,8 @@ def admitted(kind, payload):
     return dispatch(kind, payload)
 owner.writer.daemon._compute_request = admitted
 apply = WatchRegistry.apply_snapshot
-def polled(self, key, snapshot):
-    events = apply(self, key, snapshot)
+def polled(self, key, snapshot, **kwargs):
+    events = apply(self, key, snapshot, **kwargs)
     if key.number == 3 and events:
         (gates / "poll-event.json").write_text(
             json.dumps(event_payload(events[0])), encoding="utf-8",

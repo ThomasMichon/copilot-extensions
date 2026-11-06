@@ -205,6 +205,7 @@ config, effort tree/addendum, and static completion-gate projection.
 
 - `skills/planning-efforts/references/efforts.md` — the full reference guide
 - `skills/planning-efforts/assets/TEMPLATE.md` — the effort README template
+- `skills/planning-efforts/scripts/effort_digest.py` — read-only effort digest for targeted readback (outline, open items, latest journal, `--since` changes)
 - [Backlog burndown](skills/driving-backlog-burndown/SKILL.md) — the charter-driven recovery loop and reusable state/continuity templates
 - [docs/install-contract.md](../../docs/install-contract.md) — plugin/runtime
   contract (efforts has no runtime; payload-only)

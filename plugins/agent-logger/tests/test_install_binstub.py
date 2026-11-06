@@ -1031,6 +1031,197 @@ def _extract_ps1_functions(*names: str) -> str:
     return "\n\n".join(chunks)
 
 
+@pytest.mark.parametrize("state", ["current", "noncurrent", "publication-retry", "unhealthy"])
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_windows_legacy_completed_slot_reconciles_publication_without_rebuild(tmp_path, state, shell):
+    host = shutil.which(shell)
+    if host is None:
+        pytest.skip("native PowerShell unavailable")
+    script = tmp_path / "retained-publication.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        + _extract_ps1_functions("Install-Package")
+        + r"""
+$InstallDir = $env:FIXTURE_ROOT
+$LocalBin = Join-Path $InstallDir 'local-bin'
+$SrcVersion = '1.2.3'
+$script:SourceRuntimeIdentity = $null
+$script:RuntimeConstructionReuse = $true
+$script:publishGlobalBinstubs = $false
+$current = Join-Path $InstallDir 'current-version'
+$manifest = Join-Path $InstallDir 'deploy-manifest.json'
+$slot = Join-Path $InstallDir 'versions\1.2.3'
+New-Item -ItemType Directory -Path $slot -Force | Out-Null
+$completion = Join-Path $slot '.install-complete.json'
+[IO.File]::WriteAllText($completion, '{"version":"1.2.3","retained":true}')
+$before = [IO.File]::ReadAllBytes($completion)
+[IO.File]::WriteAllText($current, $(if ($env:FIXTURE_STATE -eq 'current') {'1.2.3'} else {'1.2.2'}))
+[IO.File]::WriteAllText($manifest, '{"source":{"version":"1.2.2"}}')
+$script:published = 0
+function Assert-SourceRuntime {}
+function Ensure-UvIndex {}
+function Ensure-Uv { return 'unused-offline-uv' }
+function Invoke-VersionedSlotClean { $script:RuntimeConstructionReuse = $true }
+function Test-LoggerRuntimeHealthy { return $env:FIXTURE_STATE -ne 'unhealthy' }
+function Invoke-VersionedActivate {
+    if (-not (Test-LoggerRuntimeHealthy)) { return $false }
+    [IO.File]::WriteAllText($current, $SrcVersion)
+    return $true
+}
+function Deploy-ResolverHelpers {}
+function Publish-PayloadSnapshot {}
+function Write-SyncTaskLauncher {}
+function New-SignedVenv { throw 'Completed immutable slot must not be rebuilt' }
+function Write-LoggerDeployManifest {
+    $script:published++
+    if ($env:FIXTURE_STATE -eq 'publication-retry' -and $script:published -eq 1) {
+        throw 'synthetic publication refusal after activation'
+    }
+    [IO.File]::WriteAllText($manifest, '{"source":{"version":"1.2.3"}}')
+}
+if ($env:FIXTURE_STATE -eq 'unhealthy') {
+    try { Install-Package; throw 'Unhealthy reuse incorrectly succeeded' }
+    catch {
+        if ($_.Exception.Message -eq 'Unhealthy reuse incorrectly succeeded') { throw }
+    }
+    if ($script:published -ne 0) { throw 'Unhealthy slot published a receipt' }
+} else {
+    if ($env:FIXTURE_STATE -eq 'publication-retry') {
+        try { Install-Package; throw 'Expected initial publication refusal' }
+        catch {
+            if ($_.Exception.Message -ne 'synthetic publication refusal after activation') { throw }
+        }
+    }
+    Install-Package
+    if ([IO.File]::ReadAllText($current) -ne $SrcVersion) { throw 'Retained target not selected' }
+    $receipt = Get-Content -Raw $manifest | ConvertFrom-Json
+    if ($receipt.source.version -ne $SrcVersion) { throw 'Successful reuse retained the stale receipt' }
+}
+if ([Convert]::ToBase64String($before) -ne [Convert]::ToBase64String([IO.File]::ReadAllBytes($completion))) {
+    throw 'Completed slot changed'
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        env={**os.environ, "FIXTURE_ROOT": str(tmp_path), "FIXTURE_STATE": state},
+        text=True, capture_output=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("state", ["current", "noncurrent", "publication-retry", "unhealthy"])
+def test_posix_legacy_completed_slot_reconciles_publication_without_rebuild(tmp_path, state):
+    if os.name == "nt":
+        git = shutil.which("git")
+        host = Path(git).resolve().parents[1] / "bin" / "bash.exe" if git else None
+        if host is None or not host.is_file():
+            pytest.skip("Git Bash unavailable")
+    else:
+        host = shutil.which("bash")
+        if host is None:
+            pytest.skip("Bash unavailable")
+    body = _INSTALL_SH.read_text(encoding="utf-8").split("install_package() {", 1)[1]
+    body = body.split("\n}\n", 1)[0]
+    script = tmp_path / "retained-publication.sh"
+    script.write_text(
+        "set -eu\ninstall_package() {" + body + "\n}\n" + r"""
+INSTALL_DIR="$PWD/runtime"
+LOCAL_BIN="$PWD/local-bin"
+SRC_VERSION=1.2.3
+SOURCE_RUNTIME_IDENTITY=''
+PUBLISH_GLOBAL_BINSTUBS=0
+_RUNTIME_CONSTRUCTION_REUSE=1
+mkdir -p "$INSTALL_DIR/versions/$SRC_VERSION"
+printf 'retained\n' > "$INSTALL_DIR/versions/$SRC_VERSION/.install-complete.json"
+if [[ "$FIXTURE_STATE" == current ]]; then selected="$SRC_VERSION"; else selected=1.2.2; fi
+printf '%s' "$selected" > "$INSTALL_DIR/current-version"
+printf 'stale' > "$INSTALL_DIR/receipt"
+published=0
+_assert_source_runtime() { return 0; }
+_ensure_uv_index() { return 0; }
+ensure_uv() { printf 'unused-offline-uv'; }
+_versioned_slot_clean() { _RUNTIME_CONSTRUCTION_REUSE=1; }
+_test_runtime_healthy() { [[ "$FIXTURE_STATE" != unhealthy ]]; }
+_versioned_activate() {
+    _test_runtime_healthy || return 1
+    printf '%s' "$SRC_VERSION" > "$INSTALL_DIR/current-version"
+}
+deploy_runtime_helpers() { return 0; }
+_fail() { printf '%s\n' "$*" >&2; }
+publish_payload_snapshot() {
+    published=$((published + 1))
+    if [[ "$FIXTURE_STATE" == publication-retry && "$published" == 1 ]]; then return 1; fi
+    printf '%s' "$SRC_VERSION" > "$INSTALL_DIR/receipt"
+}
+if [[ "$FIXTURE_STATE" == unhealthy ]]; then
+    if install_package; then exit 20; fi
+    [[ "$published" == 0 ]]
+else
+    if [[ "$FIXTURE_STATE" == publication-retry ]]; then
+        if install_package; then exit 21; fi
+    fi
+    install_package
+    [[ "$(cat "$INSTALL_DIR/current-version")" == "$SRC_VERSION" ]]
+    [[ "$(cat "$INSTALL_DIR/receipt")" == "$SRC_VERSION" ]]
+fi
+[[ "$(cat "$INSTALL_DIR/versions/$SRC_VERSION/.install-complete.json")" == retained ]]
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [str(host), "--noprofile", "--norc", script.name], cwd=tmp_path,
+        env={**os.environ, "FIXTURE_STATE": state},
+        text=True, capture_output=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows installer entrypoint")
+@pytest.mark.timeout(300)
+def test_windows_legacy_provision_retry_repairs_receipt_after_activation(tmp_path):
+    payload = _stage_release_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    _offline_uv(tmp_path, env)
+    binding = payload / "scripts" / "command_binding.py"
+    text = binding.read_text(encoding="utf-8")
+    text = text.replace(
+        'if __name__ == "__main__":',
+        'if __name__ == "__main__":\n'
+        '    if os.environ.get("FIXTURE_REFUSE_MANIFEST") == "1" and "--write-manifest" in sys.argv:\n'
+        '        raise SystemExit("fixture publication refusal after activation")',
+    )
+    binding.write_text(text, encoding="utf-8")
+    host = shutil.which("pwsh") or shutil.which("powershell")
+    assert host is not None
+    command = [
+        host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", str(payload / "scripts" / "install.ps1"), "provision",
+    ]
+    options = dict(
+        capture_output=True, text=True, timeout=120,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    first = subprocess.run(command, env={**env, "FIXTURE_REFUSE_MANIFEST": "1"}, **options)
+    assert first.returncode != 0
+    assert "fixture publication refusal after activation" in first.stdout + first.stderr
+    _assert_complete_runtime(home)
+    root = home / ".agent-logger"
+    version = (root / "current-version").read_text().strip()
+    completion = root / "versions" / version / ".install-complete.json"
+    before = (completion.stat().st_mtime_ns, completion.read_bytes())
+    retried = subprocess.run(command, env=env, **options)
+    assert retried.returncode == 0, retried.stdout + retried.stderr
+    assert (completion.stat().st_mtime_ns, completion.read_bytes()) == before
+    assert (root / "current-version").read_text().strip() == version
+    manifest = json.loads((root / "deploy-manifest.json").read_text())
+    assert manifest["source"]["version"] == version
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
 def test_windows_task_access_denied_classifier_downgrades_and_rethrows(

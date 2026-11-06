@@ -129,6 +129,11 @@ authorize production updates, recovery mutations or new access.
   Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
   ambiguity/collision/read-failure refusal and no mutations through the native
   CLI boundary. Source release is not caller adoption or installed recovery.
+- [ ] Qualify the incoming inspection bootstrap under #11083/U18. Run the
+  existing reader from canonically constructed incoming code without consulting
+  or changing the selected runtime, registrations, selectors or service state.
+  Keep preparation/read failures distinct from absence, installation and caller
+  adoption; U17's delivered source/release remains complete.
 
 ### Phase 3 - Release and completion
 
@@ -2637,3 +2642,91 @@ runtime cannot answer the versioned request; the old provider must not veto
 incoming construction. Existing construction, registration and routing owners
 retain their mechanisms. Local Windows historical-seed qualification and every
 separate installed-recovery gate remain; no worktree is finalized.
+
+### 2026-11-06 - U18 incoming inspection construction selected
+
+Claimed #11083 after deduplicating the remaining registration work. The
+payload's ordinary command still selects an installed provider, so its presence
+cannot establish that U17 is independently runnable before installation.
+The source-owned inspection entry composes the existing constructor, optional
+closed Source/profile/application inputs, retained owned child and unchanged
+version-1 reader. It adds no registry parser, dependency builder, installation
+receipt, writer or activation path. This closes part of the installer vision's
+authoritative incoming replacement gap without changing that target.
+
+The focused composition and existing-reader packet passes all 48 controls.
+Basic Python lint and the installation-contract checker pass. Native cold
+construction is not yet qualified: an initial fixture redundantly froze,
+committed and copied the full graph, then the 180-second child expired. A
+diagnostic run hit the original 300-second group limit before rendering a
+report. Removing the unnecessary fixture preparation retained actual source
+construction and produced usable phase evidence: source selection took 4.640
+seconds, retention took 59.485 seconds, and local first-party builds were still
+active at the unchanged 180-second child deadline. The final native call lasted
+180.35 seconds; cleanup completed. None of those attempts is a pass or an
+installed result, and no deadline or resource limit was increased.
+
+The existing explicitly dispatched Linux/Windows portfolio now has a separate
+incoming-construction step with exact-source pinning, actual native case
+admission and no skipped/failed evidence. It does not expand required-unit CI
+or add a matrix. Native qualification, complete U18 controls, source review,
+required CI, merge/release and caller adoption remain open. Local cold-source
+construction cost is an unresolved measured boundary, not a flake waiver.
+
+Published checkpoint `41930e203d3da562d0475b39e5edcf60b81b6df9`
+passes exact-source run `42290204186` on both hosted native platforms. Each
+downloaded artifact contains all 49 expected controls with zero skipped,
+failed or error cases: 39 existing-reader controls, nine incoming composition
+controls and one real incoming constructor/reader case. The latter takes
+21.660 seconds on Linux and 20.988 seconds on Windows, preserving the broken
+predecessor and canonical disabled exposure. This is native source-consumer
+evidence, not a local performance pass, installation or completed U18.
+
+The next checkpoint expands the real entry to both exposure choices, genuinely
+fresh native state, ambiguity and an actually unusable incoming UV executable.
+Every case runs twice and preserves existing file bytes, native identities and
+modification times, plus temporary-control cleanup. Its source-pinned native
+result is still required; no first-checkpoint evidence is relabeled for that
+expanded corpus. Item, child, group, plugin and hosted-job limits remain unchanged.
+
+Expanded checkpoint `c0fa12bd08eaa9ef0c9b348a17c81568d7d5ad10`
+runs as `42292146310`. Linux publishes all 53 passing controls, including
+all five actual-entry scenarios with repeats. Their native item times are
+39.241, 39.023, 37.658, 38.312 and 7.127 seconds. Windows publishes the
+original 39 passing reader controls, but its incoming step returns nonzero
+after roughly 304 seconds and no incoming JUnit report is retained. The
+failed-step log has no named native outcome or literal timeout diagnostic.
+That is missing qualification, not evidence that any Windows incoming case
+passed. Recover the exact failing boundary and named progress before another
+attempt; do not guess a timeout class or increase a resource/deadline limit.
+The original first-checkpoint native result remains independently valid for
+its own source and narrower corpus. No source PR is opened or merged yet.
+
+The full Windows job log also lacks runner output: its hidden subprocess
+inherited no explicit captured streams. Both registration qualification steps
+now capture and print stdout and stderr before checking the exit result; the
+incoming step retains flushed per-attempt progress through pytest's tee capture.
+The existing failed-runner guards now assert both diagnostic streams survive.
+All 15 focused portfolio/source guards and touched-file basic lint pass. No
+test case, execution limit or partition changes. A new exact-source run must
+identify the original failing boundary before choosing a runtime or scheduling
+fix; elapsed time alone still does not establish a timeout class.
+
+Diagnostic checkpoint `0729368271987b49041aac97c67d3901425f1408`
+passes exact-source run `42297364665` on both native platforms. Downloaded
+reports contain the complete 53 controls per platform, with no skipped, failed
+or error cases. Linux's five actual first/repeat scenario items take 20.586,
+20.286, 20.561, 20.561 and 3.350 seconds; Windows takes 43.008, 44.894,
+48.819, 45.147 and 2.259 seconds. All original limits remain. No partition
+change was needed. The earlier failed run's missing inner evidence does not
+permit a retrospective timeout or flake classification; future failures now
+retain their runner output and per-attempt progress.
+
+This qualifies ordinary incoming-source construction and the existing reader,
+not the optional complete prepared Source/application path end to end. That
+path has focused composition/custody coverage and retains the existing
+constructor's implementation; its actual prepared-source consumer remains a
+caller-adoption validation obligation. Local cold construction cost and Windows
+historical-seed performance also remain unresolved. Source review, required CI,
+merge and release are still required; parent and installed-recovery gates stay
+open.

@@ -362,10 +362,15 @@ class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlaceme
         }
         if result is not None:
             body["result"] = result
+        timeout = httpx.Timeout(self._http.timeout)
+        if timeout.read is not None:
+            # Protected submission observes three bounded 15-second owner reads.
+            timeout.read = max(timeout.read, 60.0)
         completed = self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/complete",
                 json=body,
+                timeout=timeout,
             )
         )
         if result is not None:

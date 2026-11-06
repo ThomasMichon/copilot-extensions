@@ -301,3 +301,58 @@ Discover `copilot` with `preferences --help` on the selected runtime first.
 Older providers retain their existing preview/exchange commands and reject this
 new operation; do not fall back to a general restore or hand-written settings
 change. Snapshot and exchange schemas remain unchanged.
+
+## Confirmed retained-telemetry defaults
+
+```text
+agent-machines preferences telemetry --state-dir <local-state> --producer agent-bridge --directory <absolute preprovisioned base> [--local-overrides <local.json>]
+agent-machines preferences telemetry --state-dir <local-state> --producer agent-bridge --directory <same base> [--local-overrides <local.json>] --apply --expect <preview-token>
+```
+
+`agent-dispatch` is the other supported producer. The policy must permit
+`telemetry`; values come only from an already accepted snapshot and the
+qualified native execution-machine/repository context. Shared, matching
+named-machine and explicit local choices retain their existing precedence.
+The directory is an explicit local selection, never a portable path.
+Its complete `retained` namespace must already exist.
+
+The adapter selects one immutable same-cell peer runtime through the existing
+owner launch boundary. Its capabilities, preview and apply use that same pin
+and revalidate installation governance on execution. An unavailable context,
+legacy/non-pinnable runtime, missing provider, unsupported discovery or a
+rolled-back provider without `input_fence: 1` blocks only this optional
+operation. Ordinary exchange and existing producer commands remain available.
+There is no PATH search, fallback configuration writer, bootstrap or update.
+Before selection and every producer call, Machines refuses a selected producer's
+nonempty `AGENT_BRIDGE_TELEMETRY_SINK` or `AGENT_DISPATCH_TELEMETRY_SINK`
+override. Dispatch adoption also refuses any `AGENT_DISPATCH_TASK_*` environment
+entry. The peer launcher's routing cleanup must not erase a custom sink or turn
+a restricted task into an unrestricted configuration caller; these checks repeat
+at capability discovery, preview and apply, including changes after preview.
+
+For `capture: retained-local`, the native configuration owner validates its
+target, preserves custom/legacy sinks and uses its own lock/atomic writer.
+The Machines confirmation binds the native preview, pinned executable,
+accepted revision, scope, policy and local choices. Digests come from the same
+bounded reads that supplied the validated values, not a second file read.
+Exact policy, accepted-snapshot and optional local-override bytes are passed
+as data-only input fences and rechecked inside the producer's transaction.
+Inputs cannot name or alias the native configuration target or its writer lock.
+Changed inputs require another preview. This does not claim a cross-file
+transaction against arbitrary external editors.
+
+Absent or `disabled` capture choices contribute nothing and contact no producer.
+Withdrawal does not erase adopted configuration, disable an existing sink or
+remove local overrides. Reporting choices remain stored/displayed with
+`reporting_adoption: unsupported`; no native reporting or schedule field is
+invented. Per-producer results are independent, not a fleet transaction.
+
+Output uses `agent-machines.preferences.telemetry`, version `1`. Exit `0` means
+a successful preview, configuration or no-contribution result; `1` means a
+reported native refusal; `2` means invalid/unavailable input or confirmation.
+An unknown native write outcome also exits `2`, never success or a known refusal.
+`configuration_applied`, `changed`, `activation: not-requested` and
+`running_capture: not-observed` are separate facts. A failed native apply with
+an unknown write outcome retains `configuration_applied: null`, not proof of no
+effects. Inspect current native state before deciding another operation.
+No service, sink factory, buffer, scheduled job or carrier is activated.

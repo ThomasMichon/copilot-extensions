@@ -37,24 +37,33 @@ def origin_dict(origin: PublicationOrigin | None) -> dict | None:
 def activate(config, identity: str | None, labels=()):
     """Select policy for this command only; exported configuration stays inert."""
     last_result.set(None)
+    target = getattr(config, "explicit_pr_target", None)
+    repo = target if target is not None else config.default_repo
+    prcfg = repo.pr
     if identity is None:
         if labels:
             raise ValueError("--publication-label requires --publication-origin")
-        if not config.default_repo.pr.publication_origin_active:
+        if not prcfg.publication_origin_active:
             return config
-        prcfg = replace(config.default_repo.pr, publication_origin_active=False)
-        return replace(config, repos={**config.repos, config.repo_name: replace(config.default_repo, pr=prcfg)})
-    prcfg = config.default_repo.pr
-    origin = parse_origin({"id": identity, "labels": list(labels)}) if labels else prcfg.publication_origin
-    if origin is None or origin.id != identity:
-        raise ValueError("No matching pr.publication_origin is configured")
-    validate_policy(prcfg, origin)
-    prcfg = replace(prcfg, publication_origin=origin, publication_origin_active=True)
-    return replace(config, repos={**config.repos, config.repo_name: replace(config.default_repo, pr=prcfg)})
+        prcfg = replace(prcfg, publication_origin_active=False)
+    else:
+        origin = parse_origin({"id": identity, "labels": list(labels)}) if labels else prcfg.publication_origin
+        if origin is None or origin.id != identity:
+            raise ValueError("No matching pr.publication_origin is configured")
+        validate_policy(prcfg, origin)
+        prcfg = replace(prcfg, publication_origin=origin, publication_origin_active=True)
+    if target is not None:
+        return replace(config, explicit_pr_target=replace(target, pr=prcfg))
+    return replace(config, repos={**config.repos, config.repo_name: replace(repo, pr=prcfg)})
 
 
 def selected(prcfg) -> PublicationOrigin | None:
     return prcfg.publication_origin if getattr(prcfg, "publication_origin_active", False) else None
+
+
+def selected_for_config(config) -> PublicationOrigin | None:
+    target = getattr(config, "explicit_pr_target", None)
+    return selected((target if target is not None else config.default_repo).pr)
 
 
 def validate_policy(prcfg, origin):
@@ -120,7 +129,7 @@ def _refresh(config, record, target) -> dict | None:
 
     if target is None:
         return None
-    desired = selected(config.default_repo.pr)
+    desired = selected_for_config(config)
     frozen = parse_origin(target.publication_origin) if target.publication_origin else None
     if desired and frozen and desired != frozen:
         return {"ok": False, "repo": target.repo, "number": target.number,

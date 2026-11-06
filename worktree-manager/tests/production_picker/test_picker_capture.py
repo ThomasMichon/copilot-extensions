@@ -593,13 +593,18 @@ def test_capture_update_state_override_reliably_paints(monkeypatch, tmp_path):
     "available"`` needs a real/staged update file this env never has) must
     reliably show that override every time, not race it."""
     _isolate_pivots(monkeypatch, tmp_path)
-    for _ in range(15):
+    for index in range(15):
+        manager_state = "available" if index % 2 else "idle"
         grid = pcap.capture(
             _fixture_source(), live=False,
-            update_state="current", manager_update_state="available",
+            update_state="current", manager_update_state=manager_state,
         )["text"]
-        assert "✓" in grid.splitlines()[0]
-        assert "Update available" in grid.splitlines()[0]
+        topbar = grid.splitlines()[0]
+        if manager_state == "available":
+            # A Manager update deliberately takes precedence over the engine indicator.
+            assert "↻ Update available" in topbar and "✓" not in topbar
+        else:
+            assert "✓" in topbar and "Update available" not in topbar
 
 
 def test_capture_modal_screenshots_a_native_modal(monkeypatch, tmp_path):

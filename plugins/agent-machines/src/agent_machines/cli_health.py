@@ -18,6 +18,83 @@ def add_parser(subparsers) -> None:
     report.add_argument("--now", help="aware ISO observation time (default: current UTC time)")
     report.add_argument("--chart", type=Path, help="create a new static SVG; never overwrite")
     report.set_defaults(func=run_report)
+    record = commands.add_parser("record", help="preview or confirm an explicit local hourly observation", allow_abbrev=False)
+    record.add_argument("--input", type=Path, required=True)
+    record.add_argument("--store-dir", type=Path, required=True, help="preprovisioned local store with policy.json")
+    record.add_argument("--now", help="aware ISO evaluation time (default: current UTC time)")
+    record.add_argument("--apply", action="store_true")
+    record.add_argument("--expect", default="", help="exact token from the current local preview")
+    record.set_defaults(func=run_slots)
+    inspect = commands.add_parser("inspect", help="read 168 age-qualified local health slots", allow_abbrev=False)
+    inspect.add_argument("--store-dir", type=Path, required=True)
+    inspect.add_argument("--now", help="aware ISO evaluation time (default: current UTC time)")
+    inspect.set_defaults(func=run_slots)
+    observe = commands.add_parser("observe", help="read one explicitly selected local Bridge listener", allow_abbrev=False)
+    observe.add_argument("--bridge-port", type=int, required=True, help="numeric loopback port; no discovery or service start")
+    observe.add_argument("--publisher", required=True)
+    observe.add_argument("--continuity", required=True)
+    observe.set_defaults(func=run_observe)
+
+
+def run_observe(args) -> int:
+    from .health_observe import observe_bridge
+    from .health_slots import HealthError
+
+    result = None
+    try:
+        result = observe_bridge(args.bridge_port, args.publisher, args.continuity)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0
+    except (ValueError, OSError, OverflowError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        reason = str(error) if isinstance(error, HealthError) else "observation-unavailable"
+        print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
+
+
+def _silence_failed_stdout() -> None:
+    if sys.stdout is sys.__stdout__:
+        # A second buffered flush must not replace the command's exit status.
+        try:
+            with open(os.devnull, "wb") as sink:
+                os.dup2(sink.fileno(), sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+
+
+def run_slots(args) -> int:
+    from . import health_slots
+
+    result = None
+    try:
+        now = datetime.fromisoformat(args.now.replace("Z", "+00:00")) if args.now else datetime.now(timezone.utc)
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise health_slots.HealthError("aware-time-required")
+        fields = {"now_ms": int(now.timestamp() * 1000)}
+        if args.health_command == "record":
+            result = health_slots.record(
+                args.store_dir, args.input, apply=args.apply, expected=args.expect, **fields,
+            )
+        else:
+            result = health_slots.inspect(args.store_dir, **fields)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        if result.get("status") == "unknown":
+            return 2
+        return 0 if result.get("eligible", True) else 1
+    except (ValueError, OSError, TimeoutError, OverflowError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        reason = (
+            "response-output-unavailable" if result is not None
+            else str(error) if isinstance(error, health_slots.HealthError) else "local-store-unavailable"
+        )
+        print(json.dumps({
+            "ok": False, "error": reason,
+            "applied": None if result is not None and getattr(args, "apply", False) else False,
+            "probe_execution": "not-performed", "carrier_publication": "not-requested",
+        }), file=sys.stderr)
+        return 2
 
 
 def run_report(args) -> int:
