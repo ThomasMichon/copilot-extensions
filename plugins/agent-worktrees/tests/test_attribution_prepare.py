@@ -187,3 +187,116 @@ def test_nested_repository_head_does_not_replace_source_head(monkeypatch, tmp_pa
     assert cli.cmd_attribution_prepare(args) == 0
     assert attribution.parse_marker(capfd.readouterr().out)["head"] == heads[0]
     assert heads[0] != heads[1]
+
+
+@pytest.mark.parametrize("mode,visibility,privacy,raw", [
+    ("codename", "public", "public", False),
+    ("codename", "internal", "public", False),
+    (True, "public", "public", False),
+    (True, "internal", "internal", True),
+])
+def test_comment_origin_is_distinct_compact_and_public_safe(mode, visibility, privacy, raw):
+    record, config = fixture(mode, explicit=True)
+    result = cli.prepare_comment_origin(record, config, visibility=visibility)
+    assert result == {
+        "protocol": "agent-worktrees.comment-origin/v1", "privacy": privacy,
+        "origin": {"codename": "bolted-circuit", **({"worktree": "private-tree"} if raw else {})},
+        "effects": "none",
+    }
+    assert "agent-worktrees:source" not in str(result)
+    assert "private-machine" not in str(result) and "session" not in str(result)
+    if not raw:
+        assert "private-tree" not in str(result)
+    assert record.codename == "bolted-circuit"
+
+
+def test_anonymous_comment_origin_never_invents_or_exposes_identity():
+    record, config = fixture(False)
+    record.codename = None
+    for visibility in ("public", "internal"):
+        result = cli.prepare_comment_origin(record, config, visibility=visibility)
+        assert result["privacy"] == "anonymous" and result["origin"] is None
+        assert "private-tree" not in str(result)
+
+
+def test_raw_private_optin_does_not_authorize_custom_codename_on_public_comment():
+    record, config = fixture(True, source="custom", explicit=True)
+    with pytest.raises(ValueError, match="provenance"):
+        cli.prepare_comment_origin(record, config)
+    assert cli.prepare_comment_origin(record, config, visibility="internal")["origin"] == {
+        "codename": "bolted-circuit", "worktree": "private-tree",
+    }
+    config.default_repo.pr.source_attribution = "codename"
+    assert cli.prepare_comment_origin(record, config)["origin"] == {"codename": "bolted-circuit"}
+
+
+@pytest.mark.parametrize("source,explicit", [("unknown", True), ("custom", False)])
+def test_comment_origin_refuses_unqualified_codename_without_raw_fallback(source, explicit):
+    record, config = fixture(source=source, explicit=explicit)
+    with pytest.raises(ValueError, match="provenance"):
+        cli.prepare_comment_origin(record, config)
+
+
+def test_comment_origin_rejects_unsafe_raw_stamp_without_echoing_it():
+    record, config = fixture(True)
+    record.worktree_id = "private/path\ninjected"
+    with pytest.raises(ValueError, match="stamp is not supported") as failure:
+        cli.prepare_comment_origin(record, config, visibility="internal")
+    assert "private/path" not in str(failure.value)
+    assert cli.prepare_comment_origin(record, config)["origin"] == {"codename": "bolted-circuit"}
+
+
+def test_real_comment_origin_handler_uses_owner_record_without_git_vault_or_provider(monkeypatch, capfd):
+    import argparse
+    import json
+
+    record, config = fixture(True)
+    config.repo_name = "fixture"
+    monkeypatch.setattr(cli.cfg, "load_config", lambda path: config)
+    monkeypatch.setattr(cli.cfg, "tracking_dir", lambda name: Path("fixture"))
+    monkeypatch.setattr(cli.tracking, "find_worktree_id_by_cwd", lambda *args, **kwargs: "fixture")
+    monkeypatch.setattr(cli.tracking, "load_record_by_id", lambda *args, **kwargs: record)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("compact comment origin must not acquire head, lineage or identity keys")
+
+    monkeypatch.setattr(cli.git_ops, "git", forbidden)
+    monkeypatch.setattr(cli.root_chain, "build_codename_marker_with_root", forbidden)
+    args = argparse.Namespace(config=None, body_file=None, tag=None, omit_source=False,
+                              json=True, comment_origin=True, visibility=None)
+    assert cli.cmd_attribution_prepare(args) == 0
+    assert json.loads(capfd.readouterr().out)["origin"] == {"codename": "bolted-circuit"}
+    for field, value in (("body_file", Path("not-read.md")), ("tag", "tag"), ("omit_source", True)):
+        conflicting = argparse.Namespace(**{**vars(args), field: value})
+        assert cli.cmd_attribution_prepare(conflicting) == 1
+        assert "cannot compose" in capfd.readouterr().out
+    args.comment_origin = False
+    args.visibility = "public"
+    assert cli.cmd_attribution_prepare(args) == 1
+    assert "requires comment-origin" in capfd.readouterr().out
+
+
+def test_real_lazy_dispatch_declares_comment_mode_and_rejects_abbreviated_flag(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(root / "src")
+    script = (
+        "from agent_worktrees.__main__ import _dispatch_lazy;"
+        "raise SystemExit(_dispatch_lazy('attribution-prepare',"
+        "['attribution-prepare',*__import__('sys').argv[1:]]))"
+    )
+    help_result = subprocess.run(
+        [sys.executable, "-c", script, "--help"], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=20,
+    )
+    assert help_result.returncode == 0 and "--comment-origin" in help_result.stdout
+    assert "--visibility" in help_result.stdout
+    typo = subprocess.run(
+        [sys.executable, "-c", script, "--comment-o"], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=20,
+    )
+    assert typo.returncode == 2 and "unrecognized arguments" in typo.stderr
