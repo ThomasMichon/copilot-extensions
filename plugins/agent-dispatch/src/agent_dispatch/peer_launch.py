@@ -34,6 +34,7 @@ OWNERS = {
     "agent-ssh", "agent-mcp", "agent-vault",
 }
 _packaged_primitives: dict[Path, ModuleType] = {}
+_peer_runtimes: dict[Path, tuple[tuple[tuple[str, int, int, int, int], ...], ModuleType]] = {}
 _primitive_lock = threading.Lock()
 
 
@@ -78,7 +79,7 @@ def _load_primitive(path: Path, name: str) -> ModuleType:
         raise ValueError(f"Installation-context primitive is unavailable: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
     return module
 
 
@@ -222,8 +223,45 @@ def _governance(
     return resolution
 
 
+def _peer_python_inprocess(context: dict[str, Any]) -> Path | None:
+    """Retain peer code, not its selection; replaced code requires a fresh caller."""
+    scripts = Path(context["payloadRoot"]) / "scripts"
+    resolver = scripts / "versioned_runtime.py"
+    if not resolver.is_file():
+        return None
+    key = resolver.resolve()
+    sources = tuple(sorted(scripts.glob("versioned_runtime*.py")))
+    signature = tuple(
+        (str(path), info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        for path in sources for info in (path.stat(),)
+    )
+    with _primitive_lock:
+        retained = _peer_runtimes.get(key)
+        if retained is None:
+            name = "_peer_runtime_" + str(len(_peer_runtimes))
+            module = ModuleType(name)
+            module.__file__ = str(key)
+            sys.modules[name] = module
+            exec(compile(key.read_bytes(), str(key), "exec"), module.__dict__)
+            _peer_runtimes[key] = (signature, module)
+        else:
+            original, module = retained
+            if original != signature:
+                raise ValueError("Peer runtime resolver changed; restart the observing caller")
+    resolve = getattr(module, "resolve_python", None)
+    if not callable(resolve):
+        return None
+    python = resolve(Path(context["pluginRoot"]))
+    if python is None:
+        raise ValueError(f"{context['pluginId']}: no completed runtime resolved")
+    return _checked_python(context, Path(python))
+
+
 def _peer_python(context: dict[str, Any], environment: dict[str, str]) -> Path:
-    """Ask the peer's actual resolver, never reconstruct its slot algorithm."""
+    """Use the peer's Python resolver; older peers retain their native boundary."""
+    python = _peer_python_inprocess(context)
+    if python is not None:
+        return python
     scripts = Path(context["payloadRoot"]) / "scripts"
     if os.name == "nt":
         resolver = scripts / "resolve-runtime.ps1"
@@ -257,7 +295,10 @@ def _peer_python(context: dict[str, Any], environment: dict[str, str]) -> Path:
     )
     if not result.stdout:
         raise ValueError(f"{context['pluginId']}: no completed runtime resolved")
-    python = Path(result.stdout)
+    return _checked_python(context, Path(result.stdout))
+
+
+def _checked_python(context: dict[str, Any], python: Path) -> Path:
     versions = Path(context["versionsRoot"])
     environment_root = python.parent.parent
     slot = environment_root.parent if environment_root.name == ".venv" else environment_root
@@ -312,10 +353,9 @@ def validate_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, An
     return own
 
 
-def launch(
-    owner: str, own_root: Path, raw_context: str, plugin: str, argv: list[str],
-) -> int:
-    """Validate both owners, delegate peer governance/resolution, then launch."""
+def _resolve_peer(
+    owner: str, own_root: Path, raw_context: str, plugin: str, *, allow_native: bool,
+) -> tuple[dict[str, Any], dict[str, str], Path | None]:
     if plugin not in PEERS:
         raise ValueError(f"Unsupported peer: {plugin}")
     own = validate_owner(owner, own_root, raw_context)
@@ -336,7 +376,9 @@ def launch(
     if validated != peer:
         raise ValueError("Peer installation changed during validation")
     before = _governance(peer_primitive, peer, durable, environment)
-    python = _peer_python(peer, environment)
+    python = (
+        _peer_python(peer, environment) if allow_native else _peer_python_inprocess(peer)
+    )
     if (
         validate_owner(owner, own_root, raw_context) != own
         or _active_context(peer_primitive, peer_receipt, durable, plugin,
@@ -344,6 +386,27 @@ def launch(
         or _governance(peer_primitive, peer, durable, environment) != before
     ):
         raise ValueError("Installation governance changed during peer resolution")
+    if not allow_native and _peer_python_inprocess(peer) != python:
+        raise ValueError("Peer runtime selection changed during observation")
+    return peer, environment, python
+
+
+def observe_peer_python(
+    owner: str, own_root: Path, raw_context: str, plugin: str,
+) -> Path | None:
+    """Observe the actual selection child-free; native-only peers remain unknown."""
+    return _resolve_peer(owner, own_root, raw_context, plugin, allow_native=False)[2]
+
+
+def launch(
+    owner: str, own_root: Path, raw_context: str, plugin: str, argv: list[str],
+) -> int:
+    """Validate both owners, delegate peer governance/resolution, then launch."""
+    _peer, environment, python = _resolve_peer(
+        owner, own_root, raw_context, plugin, allow_native=True,
+    )
+    if python is None:
+        raise ValueError(f"{plugin}: no completed runtime resolved")
     command = [str(python), "-I", "-B", "-X", "utf8", "-m", PEERS[plugin], *argv]
     if os.name != "nt":
         os.execve(python, command, environment)

@@ -214,6 +214,7 @@ def _assert_peer_refused(prefix: list[str]) -> None:
 
 def _make_live_peer(
     cell: Path, plugin: str, version: str, *, nested: bool = False,
+    python_resolver: bool = True,
 ) -> Path:
     """Disposable real venv + actual shipped governance and runtime resolver."""
     receipt = _make_namespaced_context(cell, plugin_id=plugin)
@@ -224,6 +225,9 @@ def _make_live_peer(
     source = Path(__file__).resolve().parents[2] / plugin / "scripts"
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
         shutil.copyfile(source / name, scripts / name)
+    if python_resolver:
+        for resolver in source.glob("versioned_runtime*.py"):
+            shutil.copyfile(resolver, scripts / resolver.name)
     for primitive in (source / "installation-context").glob("*.py"):
         shutil.copyfile(
             primitive,
@@ -276,6 +280,86 @@ def _make_live_peer(
     }), encoding="utf-8")
     (root / "current-version").write_text(version, encoding="utf-8")
     return python
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_peer_python_observation_and_launch_share_actual_resolver(
+    tmp_path, monkeypatch, nested,
+):
+    from agent_dispatch import peer_launch
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    first = _make_live_peer(cell, "agent-worktrees", "1.0.0", nested=nested)
+    second = _make_live_peer(cell, "agent-worktrees", "2.0.0", nested=nested)
+    peer = cell / "plugins" / "agent-worktrees"
+    (peer / "current-version").write_text("1.0.0", encoding="utf-8")
+    # This accepted Python marker is intentionally outside native JSON spelling.
+    marker = peer / "versions" / "1.0.0" / ".install-complete.json"
+    marker.write_text(json.dumps(json.loads(marker.read_text()), indent=2), encoding="utf-8")
+    monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    calls = []
+    register = getattr(os, "register_at_fork", None)
+    if register:
+        monkeypatch.setattr(os, "register_at_fork", lambda **kw: (calls.append(kw), register(**kw)))
+    arguments = ("agent-dispatch", own.parent, str(own), "agent-worktrees")
+    scripts = cell / "payloads" / "agent-worktrees" / "scripts"
+    before = {str(p): p.read_bytes() for p in scripts.rglob("*") if p.is_file()}
+    with monkeypatch.context() as no_child:
+        no_child.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("observer launched"))
+        assert peer_launch.observe_peer_python(*arguments) == first
+        count = len(calls)
+        for _ in range(16):
+            assert peer_launch.observe_peer_python(*arguments) == first
+        assert len(calls) == count
+        (peer / "current-version").write_text("2.0.0", encoding="utf-8")
+        assert peer_launch.observe_peer_python(*arguments) == second
+        assert len(calls) == count
+    assert {str(p): p.read_bytes() for p in scripts.rglob("*") if p.is_file()} == before
+    command = peer_launch.launch_prefix(*arguments)
+    for version, selected in (("1.0.0", first), ("2.0.0", second)):
+        (peer / "current-version").write_text(version, encoding="utf-8")
+        result = subprocess.run(
+            [*command, "probe", "literal argument"], capture_output=True,
+            encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["python"] == str(selected)
+    resolver = scripts / "versioned_runtime.py"
+    resolver.write_bytes(resolver.read_bytes() + b"\n# changed resolver fixture\n")
+    with pytest.raises(ValueError, match="resolver changed"):
+        peer_launch.observe_peer_python(*arguments)
+    monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
+    # Mutating the peer receipt must refuse observation, not use another owner.
+    _update_receipt(peer / "install.json", lambda data: data.update(generation=2))
+    with pytest.raises(ValueError):
+        peer_launch.observe_peer_python(*arguments)
+
+
+def test_native_only_peer_retains_execution_but_has_no_childfree_observation(tmp_path, monkeypatch):
+    from agent_dispatch import peer_launch
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    python = _make_live_peer(cell, "agent-worktrees", "1.0.0", python_resolver=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    arguments = ("agent-dispatch", own.parent, str(own), "agent-worktrees")
+    with monkeypatch.context() as no_child:
+        no_child.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("observer launched"))
+        assert peer_launch.observe_peer_python(*arguments) is None
+    result = subprocess.run(
+        [*peer_launch.launch_prefix(*arguments), "probe"], capture_output=True,
+        encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["python"] == str(python)
 
 
 @pytest.mark.parametrize(

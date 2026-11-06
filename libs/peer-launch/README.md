@@ -41,7 +41,26 @@ and same-cell peer receipts, checks owner activation and maintenance using the
 packaged primitive, delegates peer governance and interpreter resolution to
 the validated peer's shipped implementation, rechecks both governance states, and launches
 isolated Python with exact argv and inherited stdio. Only constant resolver
-commands cross POSIX shell or Windows PowerShell 5.1. Normal POSIX venv
+commands cross POSIX shell or Windows PowerShell 5.1 for older peers without
+a callable shipped `versioned_runtime.resolve_python`. Supported peers now
+use that peer-owned Python resolver for both execution and child-free
+`observe_peer_python`. A resolver failure refuses; it does not substitute
+the native resolver's different selection. Native-only peers retain execution
+but return unknown from observation.
+
+This intentionally adopts Python's canonical selector semantics for same-cell
+launch: legacy `current` link recovery, parsed completion JSON, and Python's
+interpreter subpath order apply. It is not an assertion that the prior shell
+and PowerShell selectors were interchangeable. The selected path still passes
+the existing physical slot/environment constraint. Code is retained under a
+serialized first load with a fork-reset lock; every observation recomputes
+selection and rechecks owner/peer receipts and governance. Replaced resolver
+source refuses cached observation until a fresh caller loads it, rather than
+using stale code or accumulating new fork callbacks. Imports do not write
+bytecode into the peer payload. Observation additionally rechecks selection
+and does not launch a child, provision or activate anything.
+
+Normal POSIX venv
 interpreter symlinks remain supported. This boundary does not provision,
 activate, or impose exemplar-only snapshot/completion receipt contracts.
 The selected interpreter may live directly in a version slot or in its

@@ -1,0 +1,9 @@
+{
+  "comment": "Unify same-cell peer execution and child-free observation through the peer-owned Python resolver while retaining native-only compatibility.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
