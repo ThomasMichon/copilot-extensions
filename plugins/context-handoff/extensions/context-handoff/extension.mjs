@@ -1784,12 +1784,18 @@ session.on("session.idle", async (event) => {
   // the next usage update; a reload re-checks any queued nudge itself.
   const settingsBeforeRefresh = liveSettingsRevision;
   await refreshHandoffConfig();
-  if (settingsBeforeRefresh !== liveSettingsRevision && !pendingNudge && latestUsageEvent) {
-    // A reload may have lowered a threshold below current usage; evaluate now
-    // so the nudge lands at this idle boundary instead of the next one.
+  if (settingsBeforeRefresh !== liveSettingsRevision && latestUsageEvent) {
+    // A reload may have moved a tier below current usage (or upgraded a
+    // queued soft nudge to hard/force); evaluate now so it lands at this idle
+    // boundary instead of the next one.
     clearTimeout(usageRetryTimer);
     usageRetryTimer = null;
+    const reloadRevision = state.windowRevision;
     await handleUsage(latestUsageEvent);
+    if (reloadRevision !== state.windowRevision || state.forceTriggered) {
+      pendingNudge = null;
+      return;
+    }
   }
   if (!pendingNudge) return;
   if (currentOverride().paused) {

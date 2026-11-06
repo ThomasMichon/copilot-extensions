@@ -71,6 +71,17 @@ await writeConfig("mode: auto\nnative_pressure: nudge\nthresholds:\n  soft_perce
 await emit("session.idle");
 assert.equal(session.prompts.length, 4);
 
+// A reload that moves hard below current usage while a soft nudge is queued
+// upgrades it at the same idle boundary.
+await emit("session.context_cleared", { messagesCleared: 8 });
+await emit("session.tools_updated", { model: "synthetic" });
+await writeConfig("mode: auto\nnative_pressure: nudge\nthresholds:\n  soft_percent: 60\n");
+await emit("session.usage_info", usage(660));
+await writeConfig("mode: auto\nnative_pressure: nudge\nthresholds:\n  soft_percent: 60\n  hard_percent: 65\n");
+await emit("session.idle");
+assert.equal(session.prompts.length, 5);
+assert.match(session.prompts[4], /hard checkpoint boundary reached/);
+
 // The command binds the invocation's session ID, so a pause persists to that
 // session's sidecar even before any tool call initialized state.
 const sessionDir = join(process.env.COPILOT_HOME, ".copilot", "session-state", "live-control-sid");
