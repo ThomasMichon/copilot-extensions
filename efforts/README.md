@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Inactive Worktree Relocation](active/inactive-worktree-relocation/README.md) | Active; proposal before implementation, complete stopped-clean flow first | #10879; mixed roots and broader inactive continuity; existing owners retained, no live migration or rollout |
 | [Maintainer Vision Adherence Review](active/maintainer-vision-adherence-review/README.md) | Active; public lens and paired skill proposed | #10864; existing vision/pattern/conformance and review owners retained, no runtime rollout |
 | [Machine Health Heartbeats](active/machine-health-heartbeats/README.md) | Draft; reviewed architecture before first local capture-to-report flow | #10873; existing telemetry/domain owners retained, no new daemon; adopter rollout configuration-only |
 | [Copilot Driver Core Refactor](active/copilot-driver-core/README.md) | Draft; reviewed main refactor plan before code | #10765; standalone core and all caller convergence, existing component owners retained, no shared rollout |
