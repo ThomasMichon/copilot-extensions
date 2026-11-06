@@ -49,15 +49,15 @@ def live_reader_pids(trace: Path, requests: list[dict[str, Any]], locks: Any) ->
 
 def owner_commands_settled(trace: Path, locks: Any, client: Any, pinned: dict[int, Any]) -> bool:
     for child in map(json.loads, trace.read_text(encoding="utf-8").splitlines()):
-        pid, birth = child["pid"], str(child["birth"])
+        pid, birth = child["pid"], child["birth"]
         handle = pinned.get(pid)
-        if handle is not None and str(client.birth(handle)) == birth:
+        if handle is not None and birth is not None and str(client.birth(handle)) == str(birth):
             if not client.exited(handle):
                 return False
             continue
         if locks.pid_alive(pid):
             current = locks.process_start_time(pid)
-            if current is None or str(current) == birth:
+            if birth is None or current is None or str(current) == str(birth):
                 return False
     return True
 
