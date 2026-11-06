@@ -49,11 +49,16 @@ def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bo
         return False
     expected = root if anchor else root / record.worktree_id
     resolved_expected = root.resolve() if anchor else root.resolve() / record.worktree_id
-    return (
+    current_namespace = (
         not checkout.is_symlink()
         and (not checkout.exists() or checkout.is_dir())
         and checkout == expected and checkout.resolve() == resolved_expected
     )
+    if current_namespace or anchor:
+        return current_namespace
+    from .retained_checkout import matches
+
+    return matches(record, config)
 
 
 def _local_record_selection(

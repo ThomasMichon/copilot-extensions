@@ -157,6 +157,7 @@ def _carve_paired_knowledge(
     machine_identity: WorktreeMachineIdentity | None = None,
     legacy_machine: str | None = None,
     revalidate_creation: Callable[[], None] | None = None,
+    retained_pair_path: Path | None = None,
 ) -> dict | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
@@ -237,7 +238,11 @@ def _carve_paired_knowledge(
     # Worktree-class knowledge -> carve its paired worktree.
     knowledge_id = f"{harness_id}-k"
     knowledge_branch = f"worktree/{knowledge_id}"
-    knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
+    from . import paired_allocation_location
+
+    knowledge_wt_root, original_path = paired_allocation_location.receiver_root(
+        config, harness_id, res, retained_pair_path,
+    )
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
     knowledge_ref = tracking.format_claim_ref(execution_machine, knowledge_name, knowledge_id)
     knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
@@ -328,6 +333,9 @@ def _carve_paired_knowledge(
             ) from exc
         if revalidate_creation is not None:
             revalidate_creation()
+        paired_allocation_location.require_receiver_root(
+            res, knowledge_wt_root, retained=original_path is not None,
+        )
         knowledge_codename = codename_tracking.assign_new_codename(
             knowledge_tracking_path, knowledge_wordlist
         )
@@ -811,7 +819,12 @@ def _create_worktree_core(
             owner_guard.__enter__()
 
         try:
-            receiving_nonce = secrets.token_hex(8) if receiving_allocation is not None else None
+            receiving_nonce = secrets.token_hex(8)
+            from .paired_allocation_location import reserve as reserve_pair_location
+            reserve_pair_location(
+                config, worktree_id, receiving_nonce, kind=kind, no_pair=no_pair,
+                machine_identity=machine_identity, platform_name=plat,
+            )
             if receiving_allocation is not None:
                 receiving_allocation.require_planned_identity(
                     worktree_id, receiving_nonce, str(worktree_path), branch,
@@ -897,7 +910,8 @@ def _create_worktree_core(
                 owner_ref=owner_ref or None,
                 bound_agent=bound_agent or None,
                 pending_seed=None,
-                **({"receiving_allocation": receiving_allocation, "creation_nonce": receiving_nonce}
+                creation_nonce=receiving_nonce,
+                **({"receiving_allocation": receiving_allocation}
                    if receiving_allocation is not None else {}),
             )
         finally:

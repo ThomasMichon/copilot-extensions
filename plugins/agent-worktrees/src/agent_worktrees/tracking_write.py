@@ -402,6 +402,7 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
         "tracking_write_endpoint": rv["endpoint"],
         "tracking_write_token": rv["token"],
         "tracking_write_generation": rv["generation"],
+        "checkout_relocation_writer_generation": 1,
         "tracking_write_verbs": sorted(_VERBS),
         "tracking_write_record_contract": resource_relationship.writer_contract(),
         # Only published when at least one verb actually needs it -- keeps

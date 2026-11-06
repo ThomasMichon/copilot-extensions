@@ -2351,6 +2351,9 @@ def _save_record_contents_unlocked(
     if path is None:
         path = record.yaml_path
     capture_before = save_notifications.prepare(current, path)
+    from .checkout_relocation_state import preserve as preserve_checkout_location
+
+    preserve_checkout_location(record, current, path)
     receiving_allocation.preserve(record, current, path)
     resource_producer.preserve_incarnation(record, current)
     if preserve_handoff_reservations and current is not None:

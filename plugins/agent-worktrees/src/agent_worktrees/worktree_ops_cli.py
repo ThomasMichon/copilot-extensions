@@ -71,6 +71,14 @@ def _remove_managed_worktree(*args, **kwargs):
 
 
 def add_parsers(sub) -> None:
+    move = sub.add_parser("move", help="Inspect or apply an identity-preserving inactive checkout relocation")
+    move.add_argument("worktree_id", nargs="?")
+    move.add_argument("--to", dest="destination")
+    effects = move.add_mutually_exclusive_group()
+    effects.add_argument("--apply", action="store_true", help="Apply the inspected move (default: read-only plan)")
+    effects.add_argument("--abort", action="store_true", help="Cancel a pre-publication move, preserving the source")
+    move.add_argument("--capabilities", action="store_true")
+    move.add_argument("--json", action="store_true")
     p = sub.add_parser(
         "create",
         help="Create a worktree programmatically (no launch, no mux) -- the "
@@ -254,6 +262,34 @@ def _slugify(text: str) -> str:
 
     s = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
     return s or "daemon"
+
+
+def cmd_move(args: argparse.Namespace) -> int:
+    from . import checkout_relocation
+
+    if args.capabilities:
+        if args.worktree_id or args.destination or args.apply or args.abort:
+            output.error("move capability discovery accepts no target or effects")
+            return 1
+        print(json.dumps(checkout_relocation.capabilities()))
+        return 0
+    try:
+        if not args.worktree_id or not args.destination:
+            raise ValueError("move requires an exact worktree ID and --to destination")
+        config = cfg.load_config()
+        operation = (
+            checkout_relocation.abort if args.abort
+            else checkout_relocation.move if args.apply else checkout_relocation.plan
+        )
+        result = operation(args.worktree_id, args.destination, config)
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    except (
+        ValueError, OSError, RuntimeError, git_ops.GitError,
+        checkout_relocation.execution_spaces.ExecutionSpaceError,
+    ) as exc:
+        print(json.dumps({"schema": checkout_relocation.SCHEMA, "error": str(exc), "complete": False}))
+        return 1
 
 
 def cmd_remove_system(args: argparse.Namespace) -> int:

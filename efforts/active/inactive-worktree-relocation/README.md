@@ -79,12 +79,15 @@ The phase decomposition and technical safeguards below are
 
 ## Scope Approvals
 
-Current admission is planning/coordination only: deduplicate and claim the public
-issue, allocate one isolated source worktree, author this effort and needed
-intent reconciliation, and drive the proposal through normal review/CI/merge.
-Implementation requires the proposal gate and a subsequent explicit go-ahead.
+The reviewed proposal is merged. Subsequent execution admission authorizes the
+first source implementation/qualification stretch: mixed-root prerequisites,
+independently configured companion allocation/recovery and old-active-record
+coexistence, plus the first complete stopped-clean merged/final ordinary
+linked-worktree relocation flow. Focused source tests and newly owned isolated
+native/clean-room fixtures are included, followed by normal source
+PR/review/required CI/merge. Additional commits preserve proposal history.
 
-No current permission to implement runtime code, move real worktrees, change
+No current permission to move real retained worktrees, change
 allocation defaults, install/update a runtime, stop owners/services, clear
 claims, or perform an adopter pilot. Review and source merge grant none of
 those effects. Fixture qualification in later source phases must use isolated,
@@ -129,7 +132,7 @@ authorized resources and the existing runner/lease/cleanup boundaries.
 The [focused validation matrix](validation.md) defines assertions and tier
 boundaries. It is not a claim that runtime checks have already passed.
 
-- [ ] Proposal: effort/vision structure, documentation consistency, public-safety
+- [x] Proposal: effort/vision structure, documentation consistency, public-safety
   audit, actual repository review verdict and required CI before merge.
 - [ ] First flow: real linked Git checkout, stopped-clean acceptance,
   complete transfer and post-move consumers on same and different volumes;
@@ -145,10 +148,11 @@ boundaries. It is not a claim that runtime checks have already passed.
 
 ## Proposal
 
-Review this effort, its linked design/validation obligations and the narrow
-Worktrees vision extension before runtime realization. A merged proposal
-satisfies only the source planning gate. The source objective remains open;
-execution admission and adopter effects remain separate gates.
+Reviewed proposal merged in [#10882](https://github.com/ThomasMichon/copilot-extensions/pull/10882)
+after Copilot approval and required CI. This satisfies only the source planning
+gate. The source objective remains open; execution admission and adopter
+effects remain separate gates. Phase 1 source implementation is admitted;
+adopter pilot feedback gates subsequent widening.
 
 ## Journal
 
@@ -160,3 +164,84 @@ execution admission and adopter effects remain separate gates.
   qualification and all-content preservation as explicit obligations.
 - Captured and rechecked the supplied request and old-merged/final-first
   sequencing. Proposal is source-only; implementation and all live effects held.
+
+### 2026-11-05 — Proposal accepted; execution held
+- #10882 merged to `dev` at `7ec813010fb90a25b02d984624c5120fd6b60655`;
+  Copilot approved the exact published head with no active review issues.
+  Required CI, attribution and identifier checks succeeded.
+- Pulled the existing source worktree forward with managed Git sync. #10879
+  remains open; the effort stays Active and bound to Phase 1. No finalization.
+- Structure, documentation consistency and runbook-reference checks passed.
+  Runtime/native/installed qualification was not run for this documentation-only
+  gate. No implementation, relocation, rollout or default change occurred.
+- Next action: await explicit execution admission, then prove the first
+  complete stopped-clean ordinary relocation flow before broadening support.
+  The location-evidence, session-reader, filesystem and original-intent
+  decisions in [design](design.md) retain their [validation](validation.md)
+  obligations.
+
+### 2026-11-05 — First source stretch admitted
+- Explicit subsequent admission permits Phase 1 source work and newly owned
+  isolated qualification fixtures, through source merge, without live
+  relocation, installed-runtime changes, service termination or default changes.
+- Keep the initial complete flow early; retain the effort/worktree for initial
+  adopter feedback before broader inactive support. Source qualification,
+  release, running adoption and real-data movement remain distinct.
+
+### 2026-11-05 — Candidate and qualification boundaries
+- Implemented the first conservative CLI flow, original-operation recovery,
+  pre-publication cancellation, immutable completed-operation history,
+  permission/record rebinding and retained-root Git/ledger authority.
+- Added selected-runtime discovery and a passive resident-writer generation
+  refusal. Source activation is not inferred from a test environment.
+- Native fixture revisions proved actual CLI creation/movement, ignored data,
+  read-only refusal, receipt replay and independent companion-root recovery.
+  Subsequent changes require final revalidation; these earlier passes are not
+  acceptance of the final candidate.
+- The existing Windows editable-input retention policy deliberately stages
+  beside same-volume source inputs. Preparation on a capacity-constrained
+  authoring volume failed before collection. No installer/dependency-policy
+  source was changed and no retained worktree or runtime was moved.
+- Next permitted approach: freeze a source commit into a newly owned disposable
+  input on approved test scratch, verify exact commit identity, and run the
+  existing isolated wrapper there. This is test input, not another authoring
+  venue or an operator-worktree migration.
+- A disposable second filesystem is not enrolled; real cross-volume acceptance
+  remains open. Keep #10879, the effort and source worktree active through this
+  gate and subsequent adoption feedback.
+
+### 2026-11-05 — Frozen-input proof; cross-volume gate still open
+- The current candidate's native flow, companion-root and existing writer
+  contract packet passed **71 controls**, with **one explicit skip**: no
+  disposable second filesystem was enrolled. Real CLI New/move, cancellation,
+  completed-history preservation, unchanged unrelated live database rows,
+  read-only refusal and original companion intent were exercised.
+- Existing allocation-replay, source-publication and execution-space packets
+  passed **190 controls**, with three platform/selection skips. These are
+  isolated source results, not installed-runtime acceptance.
+- Source lint, effort structure, documentation consistency, install contract
+  and the source module-size boundary passed. Kept the new paired policy in
+  its focused owner instead of widening the legacy module ceiling.
+- Used exact-commit disposable source inputs on approved scratch to satisfy
+  the existing same-volume editable-input preparation rule without changing
+  that rule, allocation defaults or the real authoring workspace.
+- **Genuine remaining first-slice gate:** enroll an explicitly approved private
+  disposable parent on a second filesystem, run the real native cross-volume
+  packet, then clear source PR/review/required CI/merge. No first-slice code PR,
+  release, selected-runtime activation or operator migration is claimed.
+- Keep the candidate, ownership, active effort and authoring worktree for that
+  gate. Do not broaden to every inactive case before the first qualified flow
+  and initial separately owned adoption feedback.
+
+### 2026-11-05 — Bounded native cross-volume roundtrip
+- The focused native case passed **1 control with no skips** on two distinct
+  Windows filesystems, transferring the same newly owned synthetic linked
+  checkout in both directions. The fixture enforced a 1 MiB content bound and
+  preserved its identity, nonce, Git registration, content/metadata and history.
+- Both transfer legs used the production move path. Successful cleanup retired
+  only the newly owned fixture; no retained user worktree, runtime, service or
+  allocation default changed. This qualifies the generic volume branch, not
+  any adopter's source ACL, filesystem features or target cohort.
+- The source first-flow gate can now proceed through normal code PR, actual
+  review verdict, required CI and merge. Selected-runtime activation and an
+  adopter pilot remain independently owned; broader inactive support stays open.
