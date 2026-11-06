@@ -1519,6 +1519,23 @@ Highlighting the right-docked **Configuration** entry immediately displays its
 last selected section. This is browsing only; Apply/confirmation remains
 required for changes. Escape returns to the previous operational view.
 
+Worktrees reads the selected engine's knowledge readiness off the input thread
+in both local and live modes. The last validated observation and button
+identities remain stable while a refresh is pending.
+Missing required knowledge shows **Configure knowledge**, which navigates to
+the native Repositories section and its confirmed existing-repository binding
+action. An unavailable binding payload shows preparation guidance in the
+Repositories banner. Unavailable/failed reads remain explicit; a banner is not
+proof of readiness. Completion refreshes the owner observation and reconciles
+current and saved Worktrees button focus before returning from Configuration.
+The native New gate
+still decides admission, while source-only Bare allocation and existing-session
+recovery retain their separate behavior. This flow does not create a repository,
+authenticate a provider, retrofit a pair or install a missing binding owner.
+Caller timeout does not establish rollback. Inspect native readiness before
+retrying; the binding worker retains registration serialization independently
+of a caller that has lost its result.
+
 One header update action is shown: a Manager update takes precedence when both
 Manager and payload report availability (that path also reconciles the payload).
 Otherwise the payload's staged-update action remains available.

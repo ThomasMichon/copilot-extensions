@@ -775,6 +775,8 @@ def bind(
     preserve_binding: bool = False,
     config_root: Path | None = None,
     platform_key: str = "",
+    precondition: Callable[[], None] | None = None,
+    pointer_committed: Callable[[], None] | None = None,
 ) -> BindSummary:
     """Write the machine-local binding. Idempotent. Returns a summary dict."""
     del product_repos  # Retained as a compatibility argument for existing callers.
@@ -802,7 +804,9 @@ def bind(
         )
     base = config_root if config_root is not None else Path(home) / f".{harness}"
     cfg = base / "config.yaml"
-    _binding_yaml.write_binding(cfg, harness, knowledge, preserve=preserve_binding)
+    _binding_yaml.write_binding(
+        cfg, harness, knowledge, preserve=preserve_binding, precondition=precondition, committed=pointer_committed,
+    )
 
     legacy_fragments = (
         base / ".github" / "instructions" / "knowledge-binding.instructions.md",
@@ -875,6 +879,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--harness", default="", help="The stateless harness repo name.")
     p.add_argument("--knowledge", default="", help="The knowledge repo name.")
     p.add_argument("--capabilities", action="store_true", help="Report binding support without effects.")
+    p.add_argument("--configuration", choices=("preview", "apply", "apply-locked"), help="Confirm an existing canonical binding.")
+    p.add_argument("--preview-token", default="")
     p.add_argument(
         "--control-plane",
         default="",
@@ -911,16 +917,24 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({
             "version": 1, "registration_classes": ["knowledge", "worktree"],
             "preserves_registration_class": True, "control_plane_pair": True,
+            "existing_binding_configuration": 2,
         }))
         return 0
     if not args.control_plane and not (args.harness and args.knowledge):
         p.error("--harness and --knowledge are required without --control-plane")
 
     try:
+        if args.configuration:
+            spec = importlib.util.spec_from_file_location(
+                "binding_configuration", Path(__file__).with_name("binding_configuration.py"),
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError("Cannot load the existing-binding Configuration owner")
+            binding_configuration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(binding_configuration)
+            return cast(int, binding_configuration.command(sys.modules[__name__], args))
         declaration = None
         if args.control_plane:
-            import importlib.util
-
             path = Path(__file__).with_name("control_plane_binding.py")
             spec = importlib.util.spec_from_file_location("control_plane_binding", path)
             if spec is None or spec.loader is None:

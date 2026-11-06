@@ -393,7 +393,8 @@ class PickerScreenSelectionMixin:
         bset = self.button_set()
         tm, te = self.create_target()
         host_tag = "  (this host)" if (tm, te) == self._src_local() else ""
-        labels = {"N": " + New worktree… ", "K": " ✕ Clean ", "SY": " ⟳ Sync "}
+        labels = {"N": " + New worktree… ", "K": " ✕ Clean ", "SY": " ⟳ Sync ",
+                  "KB": " Configure knowledge "}
 
         t = Text("  ")
         first = True

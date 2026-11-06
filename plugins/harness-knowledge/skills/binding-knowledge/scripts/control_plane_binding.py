@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import importlib.util
 import os
 import re
@@ -28,6 +29,7 @@ class BindingDeclaration(TypedDict):
     platform_key: str
     control_plane: dict[str, Any]
     source: object
+    registry_revision: str
 
 _git_spec = importlib.util.spec_from_file_location(
     "binding_git", Path(__file__).with_name("binding_git.py")
@@ -103,11 +105,39 @@ def resolve_binding(
     if knowledge and knowledge != roles["knowledge"]:
         raise RuntimeError("--knowledge conflicts with the declared control-plane pair")
 
-    harness, knowledge = roles["harness"], roles["knowledge"]
     platform = declaration.get("platform")
     if not isinstance(platform, str) or platform not in {"windows", "wsl", "linux"}:
         raise RuntimeError("control-plane reader did not identify its native platform")
+    result = resolve_registered_binding(
+        owner, command, harness=roles["harness"], knowledge=roles["knowledge"],
+        home=home, harness_path=harness_path, knowledge_path=knowledge_path,
+        platform=platform,
+    )
+    result["control_plane"] = roles
+    result["source"] = declaration.get("source")
+    return result
+
+
+def resolve_registered_binding(
+    owner: NativeOwner, command: str, *, harness: str, knowledge: str,
+    home: Path | None = None, harness_path: str = "", knowledge_path: str = "",
+    platform: str = "",
+) -> BindingDeclaration:
+    """Qualify an explicit existing pair without topology, registration or writes."""
+    if not command or any(
+        not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name)
+        for name in (harness, knowledge)
+    ):
+        raise RuntimeError("binding requires exact repository names and a native owner")
+    if harness.casefold() == knowledge.casefold():
+        raise RuntimeError("harness and knowledge repositories must be distinct")
     registry = _json_result(owner, command, ["repos", "list", "--json"])
+    native_platform = registry.get("platform", platform)
+    if not isinstance(native_platform, str) or native_platform not in {"windows", "wsl", "linux"} or (
+        platform and platform != native_platform
+    ):
+        raise RuntimeError("native registry did not identify the selected execution platform")
+    platform = native_platform
     entries = registry.get("repos")
     if not isinstance(entries, list):
         raise RuntimeError("native repository registry did not return a repository list")
@@ -188,6 +218,8 @@ def resolve_binding(
         )
         if readiness["status"] != "ready":
             raise RuntimeError(f"{role} registration is not ready: {readiness['reason']}")
+    if registry != _json_result(owner, command, ["repos", "list", "--json"]):
+        raise RuntimeError("canonical registration changed during binding preflight")
     return {
         "harness": harness,
         "knowledge": knowledge,
@@ -195,6 +227,9 @@ def resolve_binding(
         "knowledge_path": resolved["knowledge_path"],
         "config_root": str(root),
         "platform_key": platform,
-        "control_plane": roles,
-        "source": declaration.get("source"),
+        "control_plane": {"harness": harness, "knowledge": knowledge, "paired": True},
+        "source": None,
+        "registry_revision": hashlib.sha256(
+            json.dumps(registry, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
     }

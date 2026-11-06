@@ -1,0 +1,9 @@
+{
+  "comment": "Guide missing knowledge readiness to the real confirmed Configuration owner",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

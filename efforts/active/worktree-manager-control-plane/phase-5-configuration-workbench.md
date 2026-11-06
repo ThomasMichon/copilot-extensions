@@ -215,6 +215,50 @@ installation, credentials or host configuration are used for source validation.
 
 ## Validation Plan
 
+### Confirmed existing-knowledge binding (#10763)
+
+Claimed by `shiny-actuator` as a bounded Wave 2 / #542 continuation. This
+realizes the existing Configurator staged-onboarding and local binding intent,
+not a new source-editing or authentication authority.
+
+The native Repositories contribution already inspects registration, binding
+and tracked pairing. Extend it with an owner-qualified local binding action
+only for existing canonical knowledge/worktree repositories. The
+`harness-knowledge` payload owns read-only preview and confirmed preserving
+apply; agent-worktrees invokes it across its existing payload process boundary.
+Manager reuses its Configuration forms and post-input preview/confirmation.
+No Manager domain import, generic YAML writer, copied registry or new service
+is introduced.
+
+- [x] Publish explicit required/bound/unavailable readiness and a Worktrees
+  navigation affordance without making browse an installation or auth flow.
+- [x] Preview the selected project, canonical repository, machine-local
+  destination and effects. Bind only an absent or identical selection; retain
+  existing usable bindings and refuse conflicting inherited/local choices.
+- [x] Recheck canonical class/path/provider identity and the configuration
+  baseline before the pointer write under the binding owner's shared lock.
+  Changed registration, malformed state, missing owner and stale preview
+  refuse without partial configuration writes or an automatic retry.
+- [x] Preserve registration, repository/knowledge source bytes, account maps,
+  live sessions and leases. The only permitted source-workspace effect is the
+  existing owner-managed, ignored personal-plugin overlay.
+- [x] Exercise production Manager navigation, form, Cancel, preview, confirmed
+  real owner invocation, refreshed readiness and actual native New admission
+  in isolated roots. Include missing owner, stale selection and conflicts.
+- [ ] Run focused suites, F/E9, install/module/documentation guards and
+  current-head review/CI; journal source versus fresh-install, installed/live
+  and rollout evidence separately before resolving this finite slice.
+
+The binding action never clones or creates a repository, mutates a Git
+branch/default checkout, or starts credentials. #3004 ambient prompting, #3030 server
+landing-policy preflight, #4827 conventional/default/creation onboarding and
+#1419 retrofit pairing retain their own acceptance. An existing-repository
+binding flow does not complete those contracts or the wider first-run matrix.
+
+Source qualification and review outcomes are recorded in the
+[dated Journal entry](#2026-11-06---existing-knowledge-binding-source-qualification).
+Those results do not resolve the fresh-install, installed/live or rollout gates.
+
 | Gate | Required evidence |
 |---|---|
 | Contracts | Unit tests for malformed/legacy manifests, provenance, scope, reset, validation, stale revisions, secret redaction |
@@ -327,6 +371,122 @@ issue and owner in the parent Journal before implementation. Historical #357
 is acceptance provenance, not a replacement for those live execution tokens.
 
 ## Journal
+
+### 2026-11-06 - Existing-knowledge binding source qualification
+
+Evidence for the [bounded binding validation](#confirmed-existing-knowledge-binding-10763);
+current-head review/CI/merge remain pending in this record.
+
+**Initial source qualification:** 127 binding-owner controls,
+the 91-control native Repositories baseline plus three focused compatibility/
+partial-receipt controls, and 78 production Manager controls passed on Windows.
+The latter includes real native owner invocation and New allocation after
+confirmed binding, not a mocked binding result. The final CLI extraction also
+passed that complete flow independently. Strict Python 3.10 checks passed for
+Linux and Windows targets; F/E9, module-size, install-contract and documentation
+checks passed. No size baseline or preview schema was widened.
+
+The first source review identified unavailable-owner guidance that was not
+rendered and the missing readiness reader in the live-mode data source. The
+section now uses the supported warning banner, and live mode delegates to the
+same selected-engine reader. Four focused native controls passed, including
+the new no-write catalog warning. The Manager packet passed 75 controls,
+including the actual rendered missing-owner warning and confirmed binding/New
+flow; after correcting the readiness test fixture, its six runner-selected
+local/live observation and refresh cases passed separately. F/E9, documentation
+and install-contract guards passed again. Current-head review and CI remain
+publication gates; these source tests do not establish a live SSH or installed
+desktop qualification.
+
+The second review found a final-preflight registration race, post-pointer
+cleanup exceptions without a committed receipt, and stale saved Worktrees
+button focus. It also identified a console descendant in the existing plugin
+composer. Capability version 2 now routes public apply through the native
+registration transaction and retains its lock through commit. The preserving
+writer reports pointer completion before cleanup; failures after that boundary
+return an incomplete receipt. Readiness reconciles current/saved button focus,
+and composition uses a windowless Windows delegate. The updated Windows packet
+passed 104 binding/composition controls, five native binding controls and 82
+production Manager controls. This includes late registration drift refusal,
+writer serialization, an actual invalid-UTF-8 post-write cleanup failure,
+two actual composer descendants from a windowless parent, and confirmed binding
+with return-to-Worktrees focus in empty and populated projects. Strict
+Python 3.10 checks passed for Linux and Windows targets; F/E9, module,
+documentation and install-contract guards passed. Fresh review and CI remain
+required before source merge.
+
+The next review confirmed those High findings resolved and identified two
+activation-selection errors. The native adapter now uses its selected home
+and prefers the current-project activation root over the global fallback.
+Eight focused native binding controls passed, including real activation with
+distinct `AGENT_HOME` and process home, a project-installed owner against a
+globally selected directory copy, global sandbox fallback, and refusal to borrow
+a host-only owner. The affected complete native UI flow passed again; F/E9
+passed. The earlier 104/82 binding/composition and Manager controls remain
+separate qualified source evidence, not newly repeated runs.
+
+A later review reported no open findings but requested assessment of lock
+contention versus Manager's timeout. Source tracing confirmed that Manager's
+30-second command timeout could precede the old parent's ten-second lock wait
+plus a separately started 26-second worker budget. The native worker now owns
+the registry lock in the same process as the qualified binding payload, with
+the wait inside the finite caller-owned execution budget. Capability and worker
+capture are bounded; changed selected payloads refuse before execution.
+Nine focused native controls and all 83 Manager controls passed on Windows,
+including actual Manager timeout with a deliberately delayed fixture controller,
+a surviving native worker, the real preserving YAML writer, exclusion of a
+canonical registration writer until commit/worker exit, and exact handle cleanup.
+The fixture remains contained by its test runner; it is not installed or
+other-platform caller-death qualification. Both complete normal binding/New
+flows also passed. F/E9 and the module-size guard passed. A lost caller receipt
+remains an unknown outcome requiring readiness inspection, never a rollback claim.
+
+The subsequent no-open-findings overview requested assessment of refresh focus
+and sequential-probe deadlines. A remaining loading-state race was reproduced
+by source tracing: replacing a ready observation with loading could insert a
+button under the existing cursor. Refresh now retains the last validated
+observation until its replacement arrives. Two gated Textual cases exercise
+keyboard navigation during the held read, then unchanged/withdrawn readiness
+with preserved action identity or safe New selection. A separate native control
+uses a delayed capability probe, contended registration lock and shortened
+test-only aggregate budget: expiry confirms cleanup with no execution after
+the lock is released. Ten native binding controls and all 85 Manager controls
+passed on Windows, with F/E9 and module-size checks. No remote authentication,
+installed acceptance or broader deadline guarantee is inferred.
+
+The following overview identified an unsupported resource-name row that could
+still advertise a binding form even though preview necessarily refused it.
+Eligibility now includes the catalog's already-computed resource-name finding,
+without widening the shared validator. Eleven native controls passed, including
+an inspectable overlong row with no binding action beside an eligible valid
+knowledge row, with the full fixture tree unchanged. The affected complete
+native UI flow passed again; the earlier 85-control Manager qualification was
+not repeated for this one-condition native catalog fix.
+
+A later overview identified a missing-default lookup escaping binding-owner
+selection in a multi-repository project. The native `KeyError` is now translated
+at that boundary into a recoverable Configuration refusal, without choosing a
+repository or exposing raw lookup details. Actual unmocked multi-repository
+fixtures cover catalog findings and direct preview refusal with no writes.
+All 103 native Repositories Configuration controls passed on Windows, including
+the existing malformed/unsupported cases, and the affected complete native UI
+flow passed again. F/E9 passed; broader receiving gates remain separate.
+
+The next overview identified a second name-rule mismatch: generic Configuration
+resources permit initial punctuation that binding's identifier contract does
+not. One native binding-name check now drives both catalog eligibility and early
+invocation refusal; cards explain unsupported identifiers. Four additional
+catalog/actual-CLI cases cover initial underscore, dot, hyphen and an unsupported
+project name, while generic preference editing and a valid secret-shaped
+resource name remain available. All 107 native controls and the affected
+complete native UI flow passed on Windows. F/E9 and module-size checks passed;
+the shared generic validator and preview schema were not widened.
+
+Fresh-store configuration uses actual Git roots and native APIs but pre-provided
+native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
+live-provider and rollout lanes were not exercised: this source slice has no
+authorized receiving/deployment target. Their existing #352 / Wave 5, setup,
+provider and wider #542 owners retain those gates. No agent process was launched.
 
 - **2026-10-25** - Landed #8879's reviewed intent followed by #8891's
   Installation and Updates source slice. Manager now hosts the standing

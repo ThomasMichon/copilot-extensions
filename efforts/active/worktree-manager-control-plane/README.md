@@ -2863,6 +2863,23 @@ is authorized by tracker consolidation.
 
 ## Journal
 
+### 2026-11-05 - Confirmed existing-knowledge binding continuation
+
+- Claimed #10763 as `shiny-actuator`, a bounded Phase 5 Wave 2 / #542
+  continuation. The existing native Repositories inspection and Configuration
+  preview/confirmation shell will compose the harness-knowledge preserving
+  pointer writer, not a Manager YAML editor or new registry.
+- The first complete flow is missing required knowledge, navigation to
+  Repositories, explicit selection of an existing canonical knowledge/worktree
+  repository, read-only preview, confirmed owner apply, refreshed readiness,
+  then native New admission. Preserve a usable binding; stale registration,
+  changed configuration, unavailable writers and Cancel refuse without writes.
+- The [phase design](phase-5-configuration-workbench.md#confirmed-existing-knowledge-binding-10763)
+  records source boundaries and validation. This claim does not include
+  repository creation, default suggestions, provider-policy/authentication,
+  ambient first-restarted-model prompting, retrofit pairing or rollout.
+  #3004/#3030/#4827/#1419 and existing adoption/source owners remain separate.
+
 ### 2026-11-05 - Native New-authoring knowledge prerequisite
 
 - Taking only the native first-task admission prerequisite under #542 and the

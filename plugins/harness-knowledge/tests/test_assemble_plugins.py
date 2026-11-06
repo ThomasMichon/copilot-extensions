@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -108,9 +110,38 @@ def test_assemble_delegates_explicit_paths_and_parses_json(
                 str(knowledge),
                 "--json",
             ],
-            {"capture_output": True, "text": True, "check": False},
+            {"capture_output": True, "text": True, "check": False,
+             "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if sys.platform == "win32" else 0},
         )
     ]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows console creation contract")
+def test_composer_delegate_stays_windowless_from_windowless_parent(tmp_path: Path) -> None:
+    marker = tmp_path / "console.json"
+    child = (
+        "import ctypes,json,pathlib,sys;"
+        "pathlib.Path(sys.argv[1]).write_text(str(ctypes.windll.kernel32.GetConsoleWindow()));"
+        f"print({json.dumps(_summary('no-op'))!r})"
+    )
+    parent = (
+        "import importlib.util,sys;"
+        f"spec=importlib.util.spec_from_file_location('assembler',{str(_MOD)!r});"
+        "module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);"
+        f"module._resolve_command=lambda _: [sys.executable,'-c',{child!r},{str(marker)!r}];"
+        "from pathlib import Path;"
+        "result=[]\n"
+        "for _ in range(2):\n"
+        " module._delegate([], 'selected-owner')\n"
+        f" result.append(Path({str(marker)!r}).read_text())\n"
+        "assert result == ['0','0'], result\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", parent], capture_output=True, text=True, timeout=15,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+        env=dict(os.environ),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_assemble_from_pair_uses_public_command(monkeypatch: pytest.MonkeyPatch) -> None:

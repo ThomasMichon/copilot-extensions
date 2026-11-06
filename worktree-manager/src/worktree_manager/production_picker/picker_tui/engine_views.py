@@ -271,6 +271,14 @@ class WorktreesView:
     def build_data(self, add, width, sel, *, deferred=False):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
+        readiness = getattr(eng, "_knowledge_readiness", None)
+        if isinstance(readiness, dict) and readiness.get("ready") is not True:
+            message = (
+                "Knowledge binding is required before an ordinary New task."
+                if readiness.get("code") == "knowledge_binding_required" else
+                "Knowledge readiness is unavailable; inspect Configuration before New."
+            )
+            add(Text(f"  {message}", style=C_WARN))
         from .source_read_notices import worktree_read_feedback
         notices = worktree_read_feedback(eng)
         for notice in notices[:6]:
