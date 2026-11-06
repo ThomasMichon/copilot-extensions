@@ -725,7 +725,10 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
 
 
 @pytest.mark.parametrize("bridge_fails", [False, True])
-def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatch, bridge_fails):
+@pytest.mark.parametrize("cached_editable", [False, True])
+def test_manager_bridge_is_prepared_only_by_the_test_runner(
+    tmp_path, monkeypatch, bridge_fails, cached_editable,
+):
     manager = tmp_path / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -739,6 +742,16 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
     (runner.VENV_ROOT / "worktree-manager").mkdir(parents=True)
+    if cached_editable:
+        python = runner._venv_python("worktree-manager")
+        python.parent.mkdir(exist_ok=True)
+        python.touch()
+        previous = runner.dependency_fingerprint(
+            "worktree-manager", manager, tmp_path,
+            (*runner.RUNNER_DEPENDENCIES,
+             *runner.EXTERNAL_TEST_DEPENDENCIES.get("worktree-manager", ())),
+        )
+        (runner.VENV_ROOT / "worktree-manager" / ".dep-fingerprint").write_text(previous)
     calls = []
     monkeypatch.setattr(
         runner.subprocess, "run",
@@ -760,6 +773,8 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     manager_arguments, manager_options = calls[0]
     assert str(bridge) not in manager_arguments
     assert manager_options["cwd"] == manager
+    assert "-e" not in manager_arguments
+    assert manager_options["non_editable"] is True
     arguments, options = calls[1]
     assert arguments[arguments.index(str(bridge)) - 1] == "-e"
     assert options["cwd"] == bridge and options["trusted_source_roots"] == (tmp_path,)

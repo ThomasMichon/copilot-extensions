@@ -45,6 +45,7 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -53,7 +54,6 @@ import subprocess
 import sys
 import tempfile as tempfile  # Preserve the cleanup adapter used by runner contracts.
 import time
-import tomllib
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -63,7 +63,8 @@ from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 from plugin_test_cache import (
-    clear_cache_contents, dependency_fingerprint, ordinary_cache_root, source_resolution_arguments,
+    clear_cache_contents, dependency_fingerprint, has_dev_extra,
+    ordinary_cache_root, source_resolution_arguments,
 )
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
@@ -209,15 +210,7 @@ def _has_pyproject(name: str) -> bool:
 
 
 def _has_dev_extra(name: str) -> bool:
-    pyproject = _plugin_dir(name) / "pyproject.toml"
-    if not pyproject.is_file():
-        return False
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    extras = data.get("project", {}).get("optional-dependencies", {})
-    return "dev" in extras
+    return has_dev_extra(_plugin_dir(name))
 
 
 def all_plugins_with_suites() -> list[str]:
@@ -288,10 +281,15 @@ def _venv_python(name: str) -> Path:
 
 def _dep_fingerprint(name: str) -> str:
     """Bind cached installs to complete canonical/transitive local source bytes."""
-    return dependency_fingerprint(
+    fingerprint = dependency_fingerprint(
         name, _plugin_dir(name), REPO,
         (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
     )
+    if name == "worktree-manager":
+        fingerprint = hashlib.sha256(
+            ("manager-test-wheel-v1:" + fingerprint).encode("utf-8"),
+        ).hexdigest()
+    return fingerprint
 
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
@@ -332,11 +330,11 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             raise RuntimeError("uv replaced the leased environment directory")
     if fresh or reinstall:
         if _has_pyproject(name) and name not in SOURCE_ONLY_TEST_TARGETS:
-            # Install the plugin editable with its dev extras. cwd = the plugin
-            # dir so uv reads that pyproject's [tool.uv.sources] (vendored path
-            # deps).
+            # Manager embeds first-party metadata; editable retention rewrites
+            # those src finders. Its wheel keeps the embedded closure intact.
             spec = ".[dev]" if _has_dev_extra(name) else "."
-            cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
+            cmd = [uv, "pip", "install", "--python", str(py)]
+            cmd.extend([spec] if name == "worktree-manager" else ["-e", spec])
             if name == "agent-index":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
             if name == "agent-dispatch":
@@ -363,6 +361,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                     standalone_build_resources("fleet-manager", source_root=REPO)
                     if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh"} else ()
                 ),
+                **({"non_editable": True} if name == "worktree-manager" else {}),
             )
             if name == "worktree-manager":
                 # Materialized consumers have separate copies of shared libraries;

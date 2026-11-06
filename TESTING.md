@@ -5876,6 +5876,12 @@ Windows uses portable PSMux 3.3.5 in runner temp, pinned by archive SHA-256;
 it does not install or register a host service. This lane remains manual and
 outside required unit CI. Do not substitute a shared developer desktop for it.
 
+Manager's source-bound test environment installs its ordinary wheel, preserving
+the declared metadata of its embedded first-party libraries. Other plugin
+test environments remain editable; Manager's separate Bridge test dependency
+also remains editable. The cache distinguishes this preparation mode from
+an older editable Manager environment, without changing runtime installations.
+
 Agent MCP's focused home-binding lane is:
 
 ```text
