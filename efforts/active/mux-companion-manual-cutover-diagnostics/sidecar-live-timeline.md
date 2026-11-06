@@ -540,7 +540,7 @@ publication and installed support retain their separate qualification.
   lock-safe optional notification delivery. #10131 supplies this primitive;
   resident/native index intake and cross-process delivery remain in the
   preceding open item.
-- [ ] Supply live reported subagent/tool activity and owner-qualified accumulated
+- [x] Supply live reported subagent/tool activity and owner-qualified accumulated
   statistics with explicit coverage; preserve unknown current concurrency when
   the native/ACP source does not establish it.
   The [bounded tool-statistics amendment](sidecar-tool-statistics.md), reviewed in #10704, admits
@@ -548,8 +548,10 @@ publication and installed support retain their separate qualification.
   #10707 supplies the internal owner projection; #10712 adds negotiated optional
   provider/parser/CLI support and compatibility qualification. #10718 adds the
   actual Manager consumer and large-range, eviction and ordinary/narrow controls.
-  This closes the bounded range-occurrence amendment, not complete source
-  coverage, unique-call/lifetime totals or current concurrency.
+  #10915 qualifies the actual callback-to-view contribution path and explicit
+  local/remote/represented/retained-file coverage. Together these close the
+  supported reported-activity and range-occurrence source criterion, not
+  universal source coverage, unique-call/lifetime totals or current execution.
 - [x] Supply rich agenda-history access through its actual owner and an admitted
   locator for supported sources. Test old/missing sources as explicitly
   unavailable/observed-only, not as delivery of rich history.
@@ -797,9 +799,13 @@ is inferred from these presentation checks.
   #10579 qualifies the actual callback/route/CLI/Textual source chain and
   supported local waiters, with independent history and late-callback fences.
   Native-client and installed qualification remain separate.
-- [ ] Claims, reported contributions and known running concurrency stay distinct;
+- [x] Claims, reported contributions and known running concurrency stay distinct;
   missing native attribution or incomplete retained tool history cannot become
   zero activity, a fabricated parent relationship or lifetime totals.
+  #10915 qualifies actual callback-to-layout, represented and missing/invalid
+  attribution controls with explicit current execution/concurrency unknown.
+  This closes the finite evidence-distinction criterion, not current runtime
+  execution or universal source coverage.
 - [ ] Real process/three-source/UI joins, slow reads, late replies, cancellation,
   history restart and independently installed old/unsupported providers.
 - [ ] Actual isolated native-client/app tests and observer cleanup; preserve all
