@@ -136,6 +136,25 @@ pending. Unknown native kinds remain `source-event`, without prose inference.
 Reported lifecycle/tool/subagent events do not allocate, settle or release
 canonical resources.
 
+### Contribution and activity coverage
+
+| Source | Available evidence | Current execution/concurrency |
+| --- | --- | --- |
+| Local owned ACP callbacks | Reported lifecycle and attributed tool occurrences when the actual raw-event/update producer supplies their fields | Unknown; callback attribution is not a complete current actor census |
+| Locally hosted remote ACP/SSH/provider log | The same bounded semantic records, with its actual transport identity | Unknown; a local hosting log does not establish remote execution |
+| Represented interactive session | Partial memory-only retained reports at its known registration/log | Unknown; missing records or registration loss do not prove no active work |
+| Retained Worktrees session file | The separate [metadata provider](../../agent-worktrees/docs/session-observations.md) reports retained-file counts and lifecycle | Unknown; file order and a last start/completion do not establish runtime continuity |
+| Arbitrary federated handle or absent producer | Unavailable through this local known-session boundary | Unknown, not zero |
+
+The raw ACP lifecycle route requests optional native reports and may be absent,
+rejected or suppressed during load replay. Its remembered attribution map is
+not a running-agent registry. The EventLog's in-flight tool helper tracks
+reported starts and terminal updates; it is not exposed as a complete
+current-concurrency census by this contract. Neither a fresh reader nor a
+source-range occurrence counter repairs missing producer attribution or
+establishes continuous execution. Canonical resource claims remain separate
+owner evidence.
+
 The extensible bounded `details` object optionally retains reported `agent_name`
 and `agent_display_name`, alongside existing tool titles. Unsupported types or
 names longer than 512 characters are explicitly omitted. Task descriptions,

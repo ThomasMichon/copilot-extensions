@@ -605,8 +605,9 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       #10901 adds paired elapsed-clock diagnostics and reproduces a separate
       CPython 3.12 Windows deadline-quantization defect in the unchanged budget.
       Its 129-case native packet and two lookup controls pass with zero test
-      skips; the historical cold-read cause remains unproven. The precise-clock
-      source correction follows without changing the 50 ms/VM limits.
+      skips; the historical cold-read cause remains unproven. #10907 delivers
+      the precise-clock correction with the same 50 ms/VM limits and current
+      Windows qualification of exact creation and sixteen non-early checks.
       #10855 qualifies the supported strict owner-codec boundaries and
       rejects contradictory membership replay without imposing contiguous
       owner-local sequence numbers. Its 242 source controls do not complete
@@ -628,6 +629,13 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       whole S2-S5 and original root gates remain open.
 
 ## Validation Plan
+
+- [x] Step 7 finite membership deadline precision: reject true elapsed and VM
+      exhaustion without coarse Windows tick-driven early expiry. #10907
+      qualifies three fail-before decisions, unchanged writer/read fences,
+      source-bound HTTP52 capture and current Windows budget creation/no-early
+      controls. Historical cold-read causality, startup, installed operation
+      and every original parent gate remain open.
 
 - [x] Independent expected-head H3 optional Recovery consumer: 200 isolated
       process/codec/Textual controls qualify independent facts, Refresh/reopen,
