@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 
 from packaging.markers import Environment, Marker
-from packaging.requirements import Requirement
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -125,7 +125,7 @@ def _source_mapping(
 
 
 def _roots(
-    root: Path, catalog: dict, groups=GROUPS,
+    root: Path, catalog: dict, groups=GROUPS, root_names=None,
 ) -> dict[str, list[tuple[str, str, frozenset[str]]]]:
     if (
         not isinstance(groups, (tuple, list)) or not groups
@@ -133,12 +133,40 @@ def _roots(
         or len(set(groups)) != len(groups)
     ):
         raise InputError("groups must be nonempty, unique runtime environment names")
-    selected = runtime_roots(root, catalog)
+    try:
+        selected = (
+            runtime_roots(root, catalog) if root_names is None
+            else runtime_roots(root, catalog, root_names=root_names)
+        )
+    except ValueError as exc:
+        raise InputError(str(exc)) from exc
+    if root_names is not None:
+        selected = {group: roots for group, roots in selected.items() if group in groups and roots}
+        if {name for roots in selected.values() for name, _extra, _condition in roots} != set(root_names):
+            raise InputError("selected runtime roots are outside the requested environment groups")
+        return selected
     if any(not selected.get(group) for group in groups):
         if set(groups) == set(GROUPS):
             raise InputError("all three runtime environment roots must be present")
         raise InputError("selected runtime environment roots must be present")
     return {group: selected[group] for group in GROUPS if group in groups}
+
+
+def _build_inputs(data: dict, name: str, catalog: dict) -> list[str]:
+    groups = data.get("dependency-groups", {})
+    if not isinstance(groups, dict):
+        raise InputError(f"{name}: dependency groups must be a table")
+    values = groups.get("first-party-core", [])
+    if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+        raise InputError(f"{name}: first-party-core must be a flat requirement list")
+    for value in values:
+        try:
+            requirement = Requirement(value)
+        except InvalidRequirement as exc:
+            raise InputError(f"{name}: invalid first-party-core requirement") from exc
+        if requirement.url or canonicalize_name(requirement.name) not in catalog:
+            raise InputError(f"{name}: first-party-core requires canonical first-party projects")
+    return values
 
 
 def _environment(value: dict[str, str] | None) -> dict[str, str] | None:
@@ -242,13 +270,14 @@ def _resolver_settings(root: Path, manifest: Path, data: dict, documents: dict) 
 
 def collect_inputs(
     root: Path, *, groups=GROUPS, target_environment: dict[str, str] | None = None,
+    root_names: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
     """Project selected runtime roots, optionally for an explicit complete marker context."""
     root = root.resolve()
     environment = _environment(target_environment)
     catalog = _catalog(root)
     documents = {manifest: data for manifest, data in catalog.values()}
-    selected_groups = _roots(root, catalog, groups)
+    selected_groups = _roots(root, catalog, groups, root_names)
     groups, python_ranges = {}, {}
     for group, roots in selected_groups.items():
         pending = deque((name, extra, inherited, catalog[name][0]) for name, extra, inherited in roots)
@@ -274,6 +303,9 @@ def collect_inputs(
             metadata = _runtime_metadata(data["project"], name)
             if metadata != _runtime_metadata(catalog[name][1]["project"], name):
                 raise InputError(f"{name}: selected source runtime metadata differs from canonical")
+            build_inputs = _build_inputs(data, name, catalog)
+            if frozenset(build_inputs) != frozenset(_build_inputs(catalog[name][1], name, catalog)):
+                raise InputError(f"{name}: selected first-party build inputs differ from canonical")
             _resolver_settings(root, catalog[name][0], catalog[name][1], documents)
             if manifest != catalog[name][0]:
                 _resolver_settings(root, manifest, data, documents)
@@ -287,7 +319,10 @@ def collect_inputs(
                 conditional_python.add((name, metadata[0]))
             else:
                 python.add(metadata[0])
-            for value in _requirements(data["project"], extra, name):
+            for value in [
+                *_requirements(data["project"], extra, name),
+                *(build_inputs if not extra else []),
+            ]:
                 requirement = Requirement(value)
                 dependency = canonicalize_name(requirement.name)
                 conditions = inherited
@@ -360,10 +395,15 @@ def _python_floor(value: str) -> Version:
     return max(floors)
 
 
-def render(root: Path, *, groups=GROUPS, target_environment: dict[str, str] | None = None) -> str:
+def render(
+    root: Path, *, groups=GROUPS, target_environment: dict[str, str] | None = None,
+    root_names: tuple[str, ...] | None = None,
+) -> str:
     """Render inert inputs; target attribution is not native qualification or approval."""
     environment = _environment(target_environment)
-    groups, python_ranges = collect_inputs(root, groups=groups, target_environment=environment)
+    groups, python_ranges = collect_inputs(
+        root, groups=groups, target_environment=environment, root_names=root_names,
+    )
     python_floor = min(_python_floor(value) for value in python_ranges.values())
     lines = [
         "# Generated by tools/bundle_lock.py generate; candidate inputs, not an approved lock.",
@@ -382,6 +422,8 @@ def render(root: Path, *, groups=GROUPS, target_environment: dict[str, str] | No
         lines.append(f"{group} = [")
         lines.extend(f"    {json.dumps(value)}," for value in requirements)
         lines.append("]")
+    if root_names is not None:
+        lines.extend(["", "[tool.bundle-inputs]", "root-names = " + json.dumps(sorted(root_names))])
     if environment is not None:
         lines.extend(["", "[tool.bundle-inputs.target-environment]"])
         lines.extend(f"{key} = {json.dumps(value)}" for key, value in sorted(environment.items()))

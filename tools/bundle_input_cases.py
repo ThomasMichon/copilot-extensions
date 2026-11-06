@@ -39,6 +39,103 @@ def project(
     return path
 
 
+class TestFirstPartyBuildInputs:
+    def test_selected_manager_build_inputs_keep_transitive_extras_and_markers(self, tmp_path):
+        project(tmp_path, "worktree-manager", "manager", ["textual>=8"])
+        project(tmp_path, "plugins/unrelated", "unrelated", ["torch"])
+        project(
+            tmp_path, "libs/shared", "shared", ["pyyaml>=6.0.3"],
+            {"metrics": ['psutil>=7; sys_platform == "win32"']},
+        )
+        manifest = tmp_path / "worktree-manager/pyproject.toml"
+        with manifest.open("a", encoding="utf-8") as stream:
+            stream.write(
+                '\n[dependency-groups]\nfirst-party-core = ["shared[metrics]"]\n'
+                'dev = ["pytest>=8"]\n'
+            )
+        data = tomllib.loads(bundle.render(
+            tmp_path, groups=("core",), root_names=("manager",),
+        ))
+        requirements = [Requirement(value) for value in data["dependency-groups"]["core"]]
+        assert {value.name for value in requirements} == {"textual", "pyyaml", "psutil"}
+        assert next(value for value in requirements if value.name == "pyyaml").specifier == ">=6.0.3"
+        psutil = next(value for value in requirements if value.name == "psutil")
+        assert psutil.marker.evaluate({"sys_platform": "win32"})
+        assert not psutil.marker.evaluate({"sys_platform": "linux"})
+        assert data["tool"]["bundle-inputs"]["root-names"] == ["manager"]
+        full = bundle.collect_inputs(tmp_path, groups=("core",))[0]["core"]
+        assert "torch" in full
+        assert bundle.collect_inputs(tmp_path, root_names=("manager",))[0] == {
+            "core": data["dependency-groups"]["core"],
+        }
+
+    def test_build_inputs_follow_nested_groups_and_first_party_dependency_edges(self, tmp_path):
+        manager = project(tmp_path, "worktree-manager", "manager", ["textual>=8"])
+        first = project(
+            tmp_path, "libs/first", "first",
+            ['second[http]>=1; sys_platform == "win32"'], requires_python=">=3.11",
+        )
+        project(
+            tmp_path, "libs/second", "second", [],
+            {"http": ['httpx[http2]>=0.27; python_version < "3.13"']},
+        )
+        project(tmp_path, "libs/third", "third", ["attrs>=24"])
+        with manager.open("a", encoding="utf-8") as stream:
+            stream.write('\n[dependency-groups]\nfirst-party-core = ["first"]\n')
+        with first.open("a", encoding="utf-8") as stream:
+            stream.write('\n[dependency-groups]\nfirst-party-core = ["third"]\n')
+        requirements, ranges = bundle.collect_inputs(tmp_path, root_names=("manager",))
+        assert ranges == {"core": ">=3.10,>=3.11"}
+        parsed = [Requirement(value) for value in requirements["core"]]
+        assert {value.name for value in parsed} == {"textual", "attrs", "httpx"}
+        httpx = next(value for value in parsed if value.name == "httpx")
+        assert httpx.extras == {"http2"}
+        assert httpx.marker.evaluate({"sys_platform": "win32", "python_version": "3.12"})
+        assert not httpx.marker.evaluate({"sys_platform": "linux", "python_version": "3.12"})
+        assert not httpx.marker.evaluate({"sys_platform": "win32", "python_version": "3.13"})
+
+    def test_selected_root_outside_explicit_groups_refuses(self, tmp_path):
+        project(tmp_path, "worktree-manager", "manager")
+        with pytest.raises(bundle.InputError, match="outside"):
+            bundle.collect_inputs(tmp_path, groups=("index-service",), root_names=("manager",))
+
+    def test_selected_source_cannot_substitute_first_party_build_inputs(self, tmp_path):
+        manager = project(
+            tmp_path, "worktree-manager", "manager",
+            sources={"shared": {"path": "libs/shared"}},
+        )
+        canonical = project(tmp_path, "libs/shared", "shared")
+        mapped = project(tmp_path, "worktree-manager/libs/shared", "shared")
+        project(tmp_path, "libs/second", "second", ["attrs>=24"])
+        project(tmp_path, "libs/third", "third", ["requests>=2"])
+        for path, values in [
+            (manager, ["shared"]), (canonical, ["second"]), (mapped, ["third"]),
+        ]:
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(f"\n[dependency-groups]\nfirst-party-core = {json.dumps(values)}\n")
+        with pytest.raises(bundle.InputError, match="build inputs differ"):
+            bundle.collect_inputs(tmp_path, root_names=("manager",))
+
+    @pytest.mark.parametrize("names", [(), ("missing",), ("shared",), ("manager", "manager")])
+    def test_selected_roots_refuse_unknown_library_empty_or_duplicate(self, tmp_path, names):
+        project(tmp_path, "worktree-manager", "manager")
+        project(tmp_path, "libs/shared", "shared")
+        with pytest.raises(bundle.InputError, match="canonical runtime roots"):
+            bundle.collect_inputs(tmp_path, groups=("core",), root_names=names)
+
+    @pytest.mark.parametrize("inputs", [
+        '["requests"]', '[{include-group = "dev"}]', '["shared @ https://example.test/lib.whl"]',
+        '["*"]',
+    ])
+    def test_build_inputs_refuse_noncanonical_or_nonflat_declarations(self, tmp_path, inputs):
+        path = project(tmp_path, "worktree-manager", "manager")
+        project(tmp_path, "libs/shared", "shared")
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(f"\n[dependency-groups]\nfirst-party-core = {inputs}\n")
+        with pytest.raises(bundle.InputError, match="first-party-core"):
+            bundle.collect_inputs(tmp_path, groups=("core",), root_names=("manager",))
+
+
 class TestBundleInputs:
     @pytest.fixture
     def windows_target(self):

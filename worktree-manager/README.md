@@ -739,7 +739,7 @@ Unknown or ambiguous `--repo` syntax is not a Manager-source selector.
 
 `tools/local_install_source.py` freezes a Git commit and materializes its declared
 closure without changing package versions or consuming changefiles, then builds
-the Manager's first-party wheels. Existing commit/tree and assembly identities
+the Manager's first-party wheel. Existing commit/tree and assembly identities
 distinguish deployment generations even when package versions are unchanged.
 Use repeated `--project` selections for a bounded core preparation, for example
 `--project standalone:worktree-manager --project agent-worktrees`; this avoids
@@ -754,6 +754,18 @@ Only real Dev-to-Main promotion accumulates release versions.
 This build step produces first-party preparation data, not yet an installable
 native runtime profile. An incomplete snapshot explicitly refuses installation.
 Wheel files belong in ignored build output, never Git.
+
+The Manager wheel embeds the selected 14-library first-party core under ordinary
+import names, with declared resources and LICENSE notices. The standard
+`first-party-core` dependency group and existing source mappings describe build
+inputs; static runtime metadata retains ordinary third-party dependencies and
+their transitive constraints. Manager uses its own application environment.
+Combining that embedded wheel with separately installed copies of the libraries
+is refused on actual payload-file ownership collision; the shared-core inventory
+and profile identity are not silently changed. The complete source directories
+remain associated build inputs, and the sdist carries the inputs needed to
+rebuild without the original checkout. This does not qualify cold construction,
+serving, cutover or rollout.
 
 A complete snapshot additionally carries its prepared native profile and exact
 wheel closure. The adapter retains and inspects those bytes through the existing

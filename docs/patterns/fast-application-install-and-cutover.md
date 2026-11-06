@@ -134,6 +134,25 @@ or introduce per-library services, permanent venvs or a satellite framework.
 Source/provider-resource parity and import-only checks do not prove the final
 artifact, actual serving or cutover survival.
 
+The embedded Manager wheel belongs in its own application environment. Profiles
+containing Manager reject conflicting payload ownership involving that wheel before
+construction, including its embedded core combined with separate library distributions.
+The default consolidated-core inventory and identity remain unchanged: an
+incompatible combined installation refuses, rather than silently dropping Manager
+or a required library. Historical unbundled inputs with no file collision retain
+their normal admission path.
+Profiles for other applications retain their existing admission behavior.
+
+The standalone producer reads Manager's flat standard `first-party-core`
+dependency group and existing source mappings. Its source association retains
+the complete selected library directories as build resources, including their
+documentation and tests. The canonical setuptools owner uses ordinary package
+discovery and package-directory mappings, preserves declared data and LICENSE
+notices, and includes the build inputs in a self-sufficient sdist. Static Manager
+dependencies remain the ordinary third-party graph; the declaration regression
+uses the existing root-scoped lock-input traversal without qualifying a feed or
+removing the separate Linux local-wheel refusal.
+
 Worktrees' source-aware hook CLI retains its existing `session-lifecycle --stdin
 --source-bound` and `deregister-session --stdin --source-bound` operations.
 The provider ships `scripts/hook-runtime-contract.json` inside its installed
