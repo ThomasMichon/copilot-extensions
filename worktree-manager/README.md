@@ -750,6 +750,12 @@ bootstrap freezes Manager and SDK inputs through the canonical source freezer.
 Unmaterialized sources also retain the Manager's declared source-preparation
 tools inside that controller, with their bytes included in snapshot identity
 and readback validation.
+The execution root and retained-input directory use the queue owner's protected
+creation helper before any source is copied; existing permissions are preserved.
+Snapshot identity is independent of request sharing: unchanged source inputs,
+assets and revision reuse retained bytes even for unshared attempts. Those
+attempts carry a current-controller-only marker in the queued invocation, not
+in selected application arguments. No pending or live-worker inputs are pruned.
 Successful callers remove only their acquisition checkout, including detached
 callers after acceptance; the worker continues from its retained inputs.
 Detached callers first launch the worker through a finite retained controller,

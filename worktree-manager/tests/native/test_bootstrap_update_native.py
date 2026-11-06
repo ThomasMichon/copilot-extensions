@@ -817,6 +817,7 @@ def test_native_shell_controller_runs_a_prepared_source_without_new_bootstrap_co
     controller = Path((root / "fixture-controller").read_text(encoding="utf-8"))
     assert controller.is_relative_to(driver / "bootstrap-inputs")
     assert controller != old and "--update-participant" in request.runner.argv
+    assert "--bootstrap-attempt" in request.runner.argv
     assert str(controller / "scripts" / "runtime_install.py") in request.runner.argv
     (root / "release-suite").touch()
     assert caller.wait(timeout=20) == 23, log.read_text(encoding="utf-8")
@@ -824,6 +825,7 @@ def test_native_shell_controller_runs_a_prepared_source_without_new_bootstrap_co
     assert [row["phase"] for row in effects()] == ["manager", "suite-start", "suite-end"]
     assert effects()[1]["acquisition_budget"] == "600.0"
     assert effects()[1]["source_repo"] == str(source)
+    assert "--bootstrap-attempt" not in effects()[1]["argv"]
     assert not (old / "scripts").exists()
 
 

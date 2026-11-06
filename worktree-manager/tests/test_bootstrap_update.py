@@ -250,7 +250,11 @@ def test_bootstrap_retains_effective_budget_only_for_suite_execution(
         assert runner.argv[runner.argv.index("--engine-acquisition-timeout") + 1] == expected
 
 
-def test_observer_modes_share_the_actual_pending_installation_recipe(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("shared", [True, False])
+def test_observer_modes_share_the_actual_pending_installation_recipe(
+    tmp_path, monkeypatch, capsys, shared,
+):
+    import bootstrap_inputs
     import bootstrap_update
     import runtime_install
 
@@ -259,6 +263,7 @@ def test_observer_modes_share_the_actual_pending_installation_recipe(tmp_path, m
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
     monkeypatch.setattr(runtime_install.engine, "_package_roots", lambda payload: (tmp_path,))
     monkeypatch.setattr(runtime_install.engine, "_package_name", lambda path: "agent-procutil")
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, root, **kwargs: (payload, shared))
     queue = tmp_path / "queue"
     events = []
 
@@ -290,12 +295,22 @@ def test_observer_modes_share_the_actual_pending_installation_recipe(tmp_path, m
         assert bootstrap_update.execute(args, driver, source_digest="a" * 64) == (
             0 if "--detach" in mode else 23
         )
-    request, = core.status(root=queue)
-    assert request.state == "pending"
-    assert request.spec.argv == (
-        "--project", "sample", "--engine-acquisition-timeout", "600.0",
-    )
-    assert json.loads(capsys.readouterr().out)["request_id"] == request.id
+    requests = core.status(root=queue)
+    assert len(requests) == (1 if shared else 4)
+    for request in requests:
+        assert request.state == "pending" and request.runner.cwd == str(tmp_path)
+        assert request.spec.argv == (
+            "--project", "sample", "--engine-acquisition-timeout", "600.0",
+        )
+    if not shared:
+        attempts = [
+            request.runner.argv[request.runner.argv.index("--bootstrap-attempt") + 1]
+            for request in requests
+        ]
+        assert len(set(attempts)) == 4
+    else:
+        assert "--bootstrap-attempt" not in requests[0].runner.argv
+    assert json.loads(capsys.readouterr().out)["request_id"] == requests[0 if shared else 2].id
     assert events == ["worker", "wait", "worker", "wait", "worker", "drain", "wait"]
 
 

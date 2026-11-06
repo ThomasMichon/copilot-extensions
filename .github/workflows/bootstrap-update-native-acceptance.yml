@@ -17,6 +17,8 @@ on:
       - worktree-manager/tests/test_update_python_path.py
       - worktree-manager/tests/test_bootstrap_dispatch.py
       - worktree-manager/tests/test_install_source.py
+      - worktree-manager/tests/test_bootstrap_inputs.py
+      - worktree-manager/tests/test_bootstrap_update.py
 
 permissions:
   contents: read
@@ -53,10 +55,15 @@ jobs:
           --test-file tests/native/test_bootstrap_update_native.py
           --test-file tests/test_update_python_path.py
           --test-file tests/test_bootstrap_dispatch.py
-          --test-file tests/test_install_source.py --allow-explicit-tiers
+          --test-file tests/test_install_source.py
+          --test-file tests/test_bootstrap_inputs.py
+          --test-file tests/test_bootstrap_update.py --allow-explicit-tiers
           -k "not full_declared_repository_inputs_reach_immutable_retention and
           (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and
-          (not test_install_source or standalone_prepared_updates)"
+          (not test_install_source or standalone_prepared_updates) and
+          (not test_bootstrap_inputs or first_touch_retention or unresolved_source_selection or
+          prepared_source_retains_only) and
+          (not test_bootstrap_update.py or observer_modes_share)"
 
   bootstrap-update-windows:
     name: Whole bootstrap update (Windows)

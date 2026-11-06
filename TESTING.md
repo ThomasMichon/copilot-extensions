@@ -727,6 +727,11 @@ state to check waited completion, excluded observer modes and publication failur
 They select the source-anchor-loss dispatch controls and standalone prepared-source
 acquisition controls from `test_bootstrap_dispatch.py` and `test_install_source.py`
 without adding those files' unrelated cases to this acceptance packet.
+They also check first-touch private queue directories, addressed reuse for
+unshared source inputs and distinct real pending submissions using the same
+retained controller. The permissions control reads actual POSIX modes under
+umask `022` or protected Windows DACL flags. Old UUID-named snapshots are not
+deleted or migrated, and storage is not claimed bounded across distinct inputs.
 Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
 is unchanged. Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.

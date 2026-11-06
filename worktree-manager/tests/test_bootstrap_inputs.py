@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from pathlib import Path
+import stat
 from types import SimpleNamespace
 
 import pytest
@@ -59,23 +61,70 @@ def test_changed_retained_source_is_refused_not_overwritten(inputs):
     assert damaged.read_text() == "VALUE = 2\n"
 
 
-def test_unresolved_source_selection_does_not_even_coalesce_pending_work(inputs, monkeypatch):
+@pytest.mark.parametrize("channel,has_revision", [("dev", True), ("marketplace", False)])
+def test_unresolved_source_selection_reuses_bytes_without_allowing_request_sharing(
+    inputs, monkeypatch, channel, has_revision,
+):
     helper, payload, driver = inputs
     monkeypatch.setattr(
-        runtime_source_config, "configured_source", lambda: SimpleNamespace(channel="dev"),
+        runtime_source_config, "configured_source", lambda: SimpleNamespace(channel=channel),
     )
+    if not has_revision:
+        (payload.parent / ".git").rmdir()
     first, share = helper.retain(payload, driver)
     second, share_again = helper.retain(payload, driver)
-    assert first != second and share is False and share_again is False
+    assert first == second and share is False and share_again is False
+    assert len(list((driver / "bootstrap-inputs").glob("*/worktree-manager"))) == 1
 
 
 def test_prepared_source_retains_only_its_current_controller_without_sharing(inputs):
     helper, payload, driver = inputs
     first, share = helper.retain(payload, driver, include_sdk=False)
     second, share_again = helper.retain(payload, driver, include_sdk=False)
-    assert first != second and share is False and share_again is False
+    assert first == second and share is False and share_again is False
     assert (first / "src" / "module.py").read_text() == "VALUE = 1\n"
     assert not (first.parent / "plugins").exists()
+
+
+def test_first_touch_retention_creates_private_queue_directories(inputs):
+    helper, payload, driver = inputs
+    previous = os.umask(0o022)
+    try:
+        helper.retain(payload, driver)
+    finally:
+        os.umask(previous)
+    directories = (driver, driver / "bootstrap-inputs")
+    if os.name != "nt":
+        assert [stat.S_IMODE(path.stat().st_mode) for path in directories] == [0o700, 0o700]
+        return
+    import ctypes as c
+    from ctypes import wintypes as w
+
+    security = c.WinDLL("advapi32", use_last_error=True)
+    kernel = c.WinDLL("kernel32", use_last_error=True)
+    security.GetNamedSecurityInfoW.argtypes = [
+        w.LPWSTR, c.c_int, w.DWORD, w.LPVOID, w.LPVOID, w.LPVOID, w.LPVOID,
+        c.POINTER(w.LPVOID),
+    ]
+    security.GetNamedSecurityInfoW.restype = w.DWORD
+    security.GetSecurityDescriptorControl.argtypes = [
+        w.LPVOID, c.POINTER(w.USHORT), c.POINTER(w.DWORD),
+    ]
+    security.GetSecurityDescriptorControl.restype = w.BOOL
+    kernel.LocalFree.argtypes = [w.LPVOID]
+    kernel.LocalFree.restype = w.LPVOID
+    for path in directories:
+        descriptor, control, revision = w.LPVOID(), w.USHORT(), w.DWORD()
+        assert security.GetNamedSecurityInfoW(
+            str(path), 1, 4, None, None, None, None, c.byref(descriptor),
+        ) == 0
+        try:
+            assert security.GetSecurityDescriptorControl(
+                descriptor, c.byref(control), c.byref(revision),
+            )
+            assert control.value & 0x1000
+        finally:
+            kernel.LocalFree(descriptor)
 
 
 def test_moving_revision_is_not_published_or_joined(inputs, monkeypatch):

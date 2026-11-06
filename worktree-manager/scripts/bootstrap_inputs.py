@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import tempfile
-import uuid
 
 import installer_engine as engine
 import versioned_runtime as runtime
@@ -53,6 +52,7 @@ def retain(
 ) -> tuple[Path, bool]:
     from worktree_manager.runtime_source import _git
     from worktree_manager.runtime_source_config import configured_source
+    from update_driver.core import create_queue_directory
 
     payload = payload.resolve(strict=True)
     source = payload.parent
@@ -75,14 +75,14 @@ def retain(
     revision = _git(source, "rev-parse", "--verify", "HEAD") if (source / ".git").is_dir() else None
     share = include_sdk and revision is not None and configured_source().channel == "marketplace"
     key = hashlib.sha256(json.dumps(
-        {"inputs": digest, "assets": asset_digest, "revision": revision,
-         "unshared": None if share else uuid.uuid4().hex},
+        {"inputs": digest, "assets": asset_digest, "revision": revision},
         sort_keys=True,
     ).encode()).hexdigest()
     directory = execution_root / "bootstrap-inputs"
     if directory.resolve() != directory:
         raise RuntimeError("Bootstrap inputs must not traverse an indirect path")
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    create_queue_directory(execution_root)
+    create_queue_directory(directory)
     destination = directory / key
     relative = tuple(application.relative_to(common) for application in applications)
     with runtime.construction_lease(directory, key):

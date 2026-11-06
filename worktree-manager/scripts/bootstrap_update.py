@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
+import uuid
 
 
 def _request_control(options, forwarded) -> bool:
@@ -47,7 +48,7 @@ def execute(args, driver, *, source_digest: str) -> int:
 
     if args.install_source is None:
         materialized_assets = _preparation_assets(selected_payload)
-        payload, _shared = retain(
+        payload, shared = retain(
             selected_payload, driver.default_root(),
             expected_payload_digest=source_digest if materialized_assets else None,
         )
@@ -55,7 +56,7 @@ def execute(args, driver, *, source_digest: str) -> int:
         if materialized_assets:
             source_digest = _source_digest(selected_payload)
     else:
-        payload, _shared = retain(
+        payload, shared = retain(
             Path(__file__).resolve().parents[1], driver.default_root(), include_sdk=False,
         )
     arguments = [
@@ -64,6 +65,9 @@ def execute(args, driver, *, source_digest: str) -> int:
         "--root", str(args.root.resolve()), "--payload", str(selected_payload),
         "--update-participant", "--source-digest", source_digest,
     ]
+    if not shared:
+        # Reuse retained bytes without joining requests with unresolved later targets.
+        arguments.extend(["--bootstrap-attempt", uuid.uuid4().hex])
     if args.repair_update:
         arguments.append("--repair-update")
     if args.install_source is not None:
