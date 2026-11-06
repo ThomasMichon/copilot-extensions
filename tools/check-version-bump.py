@@ -277,6 +277,10 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
     needing: dict[str, set[str]] = {}
     packaged_sources: dict[str, set[str]] = {}
     manifests = list(PLUGINS_DIR.glob("*/packaged-assets.json"))
+    manifests.extend(
+        REPO / name / "packaged-assets.json" for name in uer._EXTRA_CONSUMER_DIRS
+        if (REPO / name / "packaged-assets.json").is_file()
+    )
     if manifests:
         import launch_wrapper_assets_ref as assets
 
@@ -286,8 +290,10 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
         )
         assert manifest is not None
         for name in manifest.files:
-            source = f"{manifest.canonical_dir_raw}/{name}"
-            packaged_sources.setdefault(source, set()).add(manifest_path.parent.name)
+            source = manifest.source_relative(name)
+            consumer = manifest_path.parent
+            name = consumer.name if consumer.parent == PLUGINS_DIR else consumer.relative_to(REPO).as_posix()
+            packaged_sources.setdefault(source, set()).add(name)
     for path in changed:
         for consumer in packaged_sources.get(path, ()):
             needing.setdefault(consumer, set()).add(f"packaged source {path}")

@@ -1,0 +1,9 @@
+{
+  "comment": "Require complete provider-output reuse in the existing native fixture sources",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

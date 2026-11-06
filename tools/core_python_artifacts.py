@@ -209,7 +209,10 @@ def payload_hash(builder, closure: CoreSources, selection: dict | None = None, *
     )
 
 
-def build_core_artifacts(*, out_dir: Path, python=None, toolchain=None, builder=None) -> dict:
+def build_core_artifacts(
+    *, out_dir: Path, python=None, toolchain=None, builder=None,
+    uv: str = "uv", deadline: float | None = None,
+) -> dict:
     if builder is None:
         import build_python_artifacts as builder
     try:
@@ -221,4 +224,5 @@ def build_core_artifacts(*, out_dir: Path, python=None, toolchain=None, builder=
         raw_version=closure.version, schema_version=5, resources=closure.resources,
         selection=closure.selection, payload_hash=payload_hash(builder, closure),
         out_dir=out_dir, python=python, toolchain=toolchain,
+        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )

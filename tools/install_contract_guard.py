@@ -200,6 +200,8 @@ IGNORED_SCAN_DIR_NAMES = {
     "venv",
     ".venv-tools",
     ".test-venvs",
+    ".test-runs",
+    ".pytest_cache",
     "node_modules",
 }
 

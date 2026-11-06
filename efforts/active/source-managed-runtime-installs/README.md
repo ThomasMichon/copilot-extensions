@@ -129,6 +129,15 @@ contributors from other operators. The [contributor handoff](wheel-first-contrib
 defines discovery/claim, evidence and publication steps. Existing ownership
 and review gates remain; this is not a second effort or a global merge queue.
 
+**Qualification decision (2026-11-06):** where should the remaining MCP native
+case run when the shared host has a live candidate whose ownership is unknown?
+The default is the same existing case on an admitted isolated Windows lane at
+the final integration PR tree, retaining its resource envelope and the #9716
+refusal. Verify lane support first; otherwise record CI capacity as a blocker.
+Do not add another fixture family or repeat the unchanged local case. The
+single integration PR, review and release follow the approved existing-case
+slice; production cutover remains separately approved.
+
 ## Context
 
 Manager has independent runtime-source policy and owned acquisition diagnostics,
@@ -560,6 +569,11 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Land Manager's independent default-off source policy and owned exact-commit acquisition diagnostics, refusing unconnected source-backed updates rather than silently installing from marketplace.
 - [x] Ship the trusted canonical preparation toolkit inside Manager's own payload and qualify standalone Manager preparation, exact retained assets and fetched-tools-as-data isolation before connecting source-backed execution.
 - [x] **Agent-recommended integration prerequisite:** preserve Worktrees' canonical command-binding receipt at Python-owned manifest publication and qualify a separately prepared source artifact through the real native global installer, retaining its existing owner, data root and global command.
+  The complete-application requalification also passes collected updater execution,
+  all three supported Windows shell hosts, unchanged fixture state/global owner,
+  source-absent command execution and retained-generation restoration. Its
+  [bounded evidence](journal/2026/11.02%20composition-association.md) does not close
+  the whole eligible portfolio, live resident readiness or installed adoption.
 - [x] **Agent-recommended updater provider slice:** qualify collected prepared-source runtime steps against the installed owner, exact source pin, actual selected/completed slot and original global data, preserving native execution, module fallback, machine gates and explicit older-helper refusal before connecting Manager's whole-suite source orchestration.
 - [x] **Agent-recommended process-boundary slice:** qualify the executing engine's advertised prepared-source suite contract, durable exact input and complete eligible-portfolio admission before enabling Manager's capability-aware caller.
 - [x] **Agent-recommended normal caller slice:** qualify Manager's capability-aware, once-acquired service source and trusted preparation through the existing suite process, preserving the exact provider argv, independent Manager self-source and explicit unsupported bootstrap/repair/targeted paths.
@@ -572,10 +586,23 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] **Agent-recommended standalone Manager bootstrap slice:** reuse that acquisition and trusted preparation from the isolated base-interpreter bootstrap before Manager construction. Preserve explicit prepared inputs without reselecting Dev, recovery-only/adopted recovery, the original ownership SDK and all service-source repair refusal guards. Qualify actual native Windows/Linux construction, refusal, installed health and fixture-default continuity; keep shell prerequisite/download transport, service-source repair and production rollout separate.
 - [x] **Agent-recommended bounded service-source repair slice:** retain the incumbent legacy engine owner and default data root while preparing its independent service source for native runtime-only repair. Hold one original commit/tree and acquisition lease through repaired-engine inventory and suite preparation/execution; preserve targeted/non-repair bootstrap refusal and reject unsupported scoped source repair before native refresh. Qualify actual Windows/Linux construction, installed/global commands, fixture data continuity and an upstream advance between repair and inventory. Keep final portfolio execution, production migration compatibility and rollout separate.
 - [x] **Agent-recommended bounded existing-profile qualification:** preserve an installation's existing Containers dependency profile through prepared-source updater planning, native construction and source-qualified currentness. Qualify the actual selected profile/generation, unchanged-source reuse and explicit unsupported/foreign/incomplete outcomes without changing its root, enabling an unused role or substituting a base-profile runtime. Retain the full source pin and canonical native profile owner; existing profile support in a standalone installer is not collected-updater qualification.
+  Complete-application base and `provider-exec` witnesses pass canonical
+  preparation/reuse, collected update, installed profile/code, global dispatch,
+  unchanged completion and fixture state after source/snapshot removal.
+  Its [bounded evidence](journal/2026/11.02%20composition-association.md) does not
+  qualify a single-current-revision profile matrix, complete portfolio or
+  production adoption; each witness retains its recorded revision and budget.
 - [ ] **Agent-recommended bounded portfolio follow-through:** qualify source-backed updater readiness and actual execution across the eligible runtime owners rather than inferring a complete portfolio from the engine/profile witnesses. Preserve each installed command owner, canonical lifecycle tooling, existing default root, configured role and independent Manager/service/plugin selections. Use the existing collected updater and driver, retain one exact service commit and complete packet, and keep production data/serving cutover and recurring-maintenance consent separate.
 - [x] **Agent-recommended bounded source-owner SDK readiness:** ship the existing canonical lifecycle SDK in every current required-context Python runtime payload and qualify actual materialization plus the installed owner's source validator. Preserve command/catalog bytes and legacy compatibility; this finite prerequisite does not close whole-portfolio execution or adoption.
 - [x] **Agent-recommended bounded service-less execution witness:** qualify actual collected prepared-source updates through SSH's native install/update and Machines' native init frontends, retaining their original command owner, default fixture root/state, installed consumers, selected-source currentness, healthy reuse and source-unavailable global dispatch. Preserve Machines' CMD-only Windows contract and actual persistent-environment containment; this pair does not close the complete eligible portfolio or production adoption.
+  Complete-application SSH and Machines requalification now passes those
+  boundaries, including exact retained binding and final fixture database
+  checks; [recorded revisions and limits](journal/2026/11.02%20composition-association.md)
+  remain distinct from a single-current-tree portfolio or installed adoption.
 - [x] **Agent-recommended bounded MCP execution witness:** qualify native construction and collected prepared-source updates while retaining its original global command owner, default fixture state, exact installed source/currentness and completion-preserving reuse. Explicitly disable cutover and version reaping in the fixture; do not infer live daemon replacement, serving readiness or whole-portfolio completion from construction/publication evidence.
+  Historical bounded evidence does not close current complete-application
+  requalification, which is locally blocked before preparation by the tracked
+  live-unknown census boundary in #9716; the remaining isolated-lane witness is open.
 - [ ] **MCP authoritative-replacement adoption delta:** under existing #10054/#7028/#9716/#10377 owners, qualify #10652's incoming-publication correction, #6389's actual fresh-generation convergence and #10653's unsafe forced-cutover correction. Incoming readiness plus every current selector, command, route and registration must not require predecessor census/settlement, old control-home idleness or reset. Unknown outgoing cleanup is separately deferred; real incoming acquisition/build/authentication/permission/I/O/health failures and necessary state-preserving compatibility remain readiness gates. Preserve old keepers and retain #10486's full adopted-client reattachment as separate work. Qualify both native front doors, failure/retry and mutation-time central-role/native-identity/then-current-selection protection. Historical construction/reset controls remain credited; this item claims no implementation or transferred ownership.
 - [x] Qualify the bounded #9022 JSON maintenance-standby source projection and owner-attributed per-machine notice, retaining the native 30-minute polling instruction and explicit unsupported/missing-notice outcomes without a service dependency. This is static source delivery, not native polling or the subsequent YAML/update-veto contract. Preserve #8669's wrapper/removal/survival owner and every release/adoption/approval gate.
 - [x] Align the disposable-service visions and review the [shared YAML maintenance-banner contract](maintenance-banner.md), tracked by #9040, before consumer implementation.
@@ -1602,6 +1629,8 @@ the new guide/matrix's exact local paths/anchors pass. Runtime unit, clean-room
 and live-venue reruns are inapplicable to this documentation-only slice; the
 matrix retains their outstanding application gates instead of implying a pass.
 
+- [2026-11-02 - composed source association](journal/2026/11.02%20composition-association.md). Canonical Main-seeded snapshot/profile association and native copied-application CWD correction; complete reuse and whole-flow acceptance remain open.
+- [2026-11-02 - historical selector publication](journal/2026/11.02%20selector-publication.md). Bounded Manager I/O-only correction; whole-flow and installed acceptance remain open.
 - [2026-11-01 - finite source merge and separately prepared non-UI validation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md). Phase 4a/4b, native replacement and installed adoption remain open.
 
 ### 2026-10-28 - Fresh-default installation and recognizer manifests

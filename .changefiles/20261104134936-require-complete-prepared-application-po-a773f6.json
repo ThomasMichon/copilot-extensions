@@ -1,0 +1,13 @@
+{
+  "comment": "Require complete prepared application portfolios through the existing suite executor and preserve owned profile selection and application receipts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

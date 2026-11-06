@@ -21,6 +21,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from . import reconcile
+from .update_runtime_application import plan_step as _application_step
 
 if TYPE_CHECKING:
     from .update_runtime import _RegisteredPluginTarget
@@ -103,11 +104,10 @@ def _select_inputs(
     try:
         environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
         environment = dict(environment)
-        source_target = None
         if source is not None:
             from . import update_runtime as runtime
             from .update_runtime_source import PIN_ENV
-            from .update_runtime_target import TARGET_ENV, plan_target
+            from .update_runtime_target import TARGET_ENV
 
             environment.pop(PIN_ENV, None)
             environment.pop(TARGET_ENV, None)
@@ -129,9 +129,9 @@ def _select_inputs(
             if step.name != "agent-index":
                 source.validate(step.name, step.payload, environment)
                 project = (project or Path.cwd()).resolve()
-            source_target = plan_target(source, step.name, step.payload, root, environment)
-            if source_target is not None:
-                environment[TARGET_ENV] = source_target.document
+            if source.application is None:
+                raise ValueError("Complete application inputs are required; prepare packet V2")
+            source.application.validate(step.payload, root, environment)
             environment.update({
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
@@ -143,10 +143,9 @@ def _select_inputs(
         environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str((project or Path.cwd()).resolve())
         return dataclasses.replace(
             step, source=source, environment=environment, runtime_root=root,
-            source_target=source_target,
             target_version=(
-                source_target.version if source_target else
-                source.version if source else reconcile.payload_version(step.payload)
+                source.application.version if source and source.application else
+                reconcile.payload_version(step.payload)
             ),
             project_root=project,
         )
@@ -158,9 +157,8 @@ def _select_inputs(
 def _deployed_version(step: RuntimeUpdateStep) -> str | None:
     if step.source is not None:
         assert step.runtime_root is not None
-        return step.source.deployed_version(
-            step.runtime_root, step.payload, target=step.source_target,
-        )
+        assert step.source.application is not None
+        return step.source.application.deployed_version(step.runtime_root, step.payload)
     return reconcile.runtime_deployed_version(step.name, root=step.runtime_root)
 
 
@@ -170,6 +168,8 @@ def _runtime_footprint_current(step: RuntimeUpdateStep) -> bool:
 
     if step.runtime_root is None:
         return False
+    if step.source is not None:
+        return _deployed_version(step) == step.target_version
     probe = """
 import json, sys
 from pathlib import Path
@@ -257,6 +257,8 @@ def plan_registered(
             and reconcile._versions_equal(dver, pver)
             and (not check_footprint or _runtime_footprint_current(step))):
         return dataclasses.replace(step, status="SKIPPED (current)")
+    if source is not None:
+        return _application_step(step, force=force)
     context = environment.get("COPILOT_EXTENSIONS_CONTEXT")
     if context is not None:
         if force:
@@ -347,6 +349,8 @@ def plan_module(
     if (name != "agent-bridge" and not force and pver and dver
             and pver == dver and (not check_footprint or _runtime_footprint_current(step))):
         return dataclasses.replace(step, status="SKIPPED (current)")
+    if source is not None:
+        return _application_step(step, force=force)
     # Modules historically use install/update even in a selected cell. Never
     # replace that contract with the registered-runtime init/cell-provision path.
     prefix = _shell_prefix(pdir, platform_name)
@@ -484,6 +488,8 @@ def plan_engine(
             and (not check_footprint or _runtime_footprint_current(step))):
         if "COPILOT_EXTENSIONS_CONTEXT" in environment or not reconcile.hook_shims_drifted(plugin_dir):
             return dataclasses.replace(step, status="SKIPPED (current)")
+    if source is not None:
+        return _application_step(step, force=force)
     prefix = _shell_prefix(plugin_dir, platform_name)
     if isinstance(prefix, str):
         return dataclasses.replace(step, status=prefix)

@@ -30,6 +30,9 @@ class LaunchWrapperAssets:
     def payload_dir(self, *, plugin_dir: Path | None = None) -> Path:
         return (plugin_dir or self.plugin_dir) / self.payload_dir_raw
 
+    def source_relative(self, name: str) -> str:
+        return (Path(self.canonical_dir_raw) / name).as_posix()
+
 
 def _is_relative_subpath(value: str) -> bool:
     path = Path(value)
@@ -53,6 +56,15 @@ def _is_plain_basename(value: str) -> bool:
     )
 
 
+def _is_member_path(value: str) -> bool:
+    return (
+        _is_relative_subpath(value)
+        and not any(char in value for char in "\\:*?\"<>|")
+        and all(not part.endswith((".", " ")) and not PureWindowsPath(part).is_reserved()
+                for part in value.split("/"))
+    )
+
+
 def load_manifest(plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME) -> LaunchWrapperAssets | None:
     manifest_path = plugin_dir / manifest_name
     if not manifest_path.is_file():
@@ -61,7 +73,9 @@ def load_manifest(plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME) -> La
     if not isinstance(data, dict):
         raise ValueError(f"{manifest_path}: expected an asset manifest object")
     schema = _SCHEMA if manifest_name == MANIFEST_NAME else "copilot-extensions.packaged-assets"
-    if data.get("schema") != schema or data.get("version") != 1:
+    version = data.get("version")
+    nested = manifest_name == PACKAGED_MANIFEST_NAME and type(version) is int and version == 2
+    if data.get("schema") != schema or not (type(version) is int and version == 1 or nested):
         raise ValueError(f"{manifest_path}: unsupported launch-wrapper-assets schema")
     canonical_dir = data.get("canonicalDir")
     files = data.get("files")
@@ -70,18 +84,30 @@ def load_manifest(plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME) -> La
         (lambda value: _is_relative_subpath(value) and "\\" not in value)
         if manifest_name == PACKAGED_MANIFEST_NAME else _is_plain_basename
     )
-    if not isinstance(canonical_dir, str) or not _is_relative_subpath(canonical_dir):
+    if not isinstance(canonical_dir, str) or not (
+        _is_relative_subpath(canonical_dir) or nested and canonical_dir == "."
+    ):
         raise ValueError(f"{manifest_path}: canonicalDir must be a non-empty string")
     if not isinstance(payload_dir, str) or not _is_relative_subpath(payload_dir):
         raise ValueError(f"{manifest_path}: payloadDir must be a relative subdirectory")
     if (
         not isinstance(files, list)
         or not files
-        or any(not isinstance(name, str) or not valid_file(name) for name in files)
-        or len(set(files)) != len(files)
+        or any(
+            not isinstance(name, str) or not (
+                _is_member_path(name) if nested else valid_file(name)
+            ) for name in files
+        )
+        or len({name.casefold() if nested else name for name in files}) != len(files)
     ):
-        shape = "safe relative file" if manifest_name == PACKAGED_MANIFEST_NAME else "basename-only"
-        raise ValueError(f"{manifest_path}: files must be a non-empty {shape} string list")
+        kind = "safe relative file" if manifest_name == PACKAGED_MANIFEST_NAME else "basename-only"
+        raise ValueError(f"{manifest_path}: files must be a non-empty {kind} string list without aliases")
+    members = {name.casefold() for name in files}
+    if nested and any(
+        parent.as_posix().casefold() in members
+        for name in files for parent in Path(name).parents if parent != Path(".")
+    ):
+        raise ValueError(f"{manifest_path}: files contain a file/directory collision")
     return LaunchWrapperAssets(
         manifest_path=manifest_path,
         canonical_dir_raw=canonical_dir,

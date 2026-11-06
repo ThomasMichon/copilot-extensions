@@ -8,6 +8,12 @@ import sys
 import worktree_manager
 
 
+def local_bin_hint() -> str:
+    """Render the command directory resolved by the current installation policy."""
+    from .self_install import local_bin
+    return str(local_bin())
+
+
 def running_payload_dir() -> Path:
     """The project dir of the currently-running payload (has pyproject.toml)."""
     # .../worktree-manager/src/worktree_manager/self_install.py -> parents[2] == project.

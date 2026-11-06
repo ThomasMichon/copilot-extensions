@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -24,11 +25,17 @@ REPO = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--main-seed", help="exact official Main commit for composed fixture inputs")
     parser.add_argument(
         "--contract", choices=("runtime", "callbacks", "updater", "source", "engine-source", "uninstall"),
         default="runtime",
     )
     args = parser.parse_args()
+    if args.main_seed is not None and (
+        args.contract not in {"runtime", "callbacks", "source"}
+        or re.fullmatch(r"[0-9a-f]{40}", args.main_seed) is None
+    ):
+        parser.error("--main-seed requires a full commit and a source-composing contract")
     root = args.root.resolve()
     if root == REPO or not root.is_relative_to(REPO):
         raise ValueError("Acceptance storage must be an explicit directory below this checkout")
@@ -60,6 +67,8 @@ def main() -> int:
         sandbox = Path(raw)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         env = isolated_environment(os.environ, sandbox)
+        if args.main_seed is not None:
+            env["MANAGER_RUNTIME_ACCEPTANCE_MAIN_SEED"] = args.main_seed
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
         prepare_command = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
         assertions = [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",

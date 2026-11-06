@@ -31,6 +31,34 @@ PINS = {"setuptools": "84.0.0", "wheel": "0.46.0", "packaging": "25.0"}
 HASHES = {name: ("a" * 64,) for name in PINS}
 
 
+@pytest.mark.parametrize("deadline", [135.0, 180.0])
+def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadline):
+    import io
+    import seasoned_public_feed as feed
+
+    now, timeouts = [100.0], []
+    monkeypatch.setattr(feed.time, "monotonic", lambda: now[0])
+
+    def open_url(request, *, timeout):
+        timeouts.append(timeout)
+        now[0] += 20
+        return io.BytesIO(b"metadata fixture")
+
+    def resolve(name, **options):
+        assert options["fetch"]("https://example.invalid/" + name) == b"metadata fixture"
+        return SeasonedPublicRelease(PINS[name], HASHES[name])
+
+    monkeypatch.setattr(feed.urllib.request, "urlopen", open_url)
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve)
+    if deadline == 135:
+        with pytest.raises(btl.ArtifactBuildError, match="deadline"):
+            public.resolve_public_source(tuple(PINS), 7, deadline=deadline)
+        assert timeouts == [30, 15]
+    else:
+        assert public.resolve_public_source(tuple(PINS), 7, deadline=deadline).packages == PINS
+        assert timeouts == [30, 30, 30]
+
+
 @pytest.mark.parametrize(
     "workflow",
     sorted(path.name for path in (Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml")),

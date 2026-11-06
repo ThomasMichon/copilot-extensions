@@ -12,6 +12,8 @@ import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
+from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
 from . import config as cfg
 from . import output, registry_paths
 
@@ -24,8 +26,15 @@ def add_parsers(sub) -> None:
     release.add_argument("--json", action="store_true")
 
 
+def _runtime_slot() -> Path:
+    location = runtime_slot_paths(Path(sys.prefix).resolve())
+    if location is None:
+        raise RuntimeError("Dev operations must execute from an installation's retained slot")
+    return Path(location[1])
+
+
 def _lifecycle():
-    slot = Path(sys.prefix).resolve()
+    slot = _runtime_slot()
     bootstrap = slot / ".runtime-bootstrap"
     helper = bootstrap / "runtime_install.py"
     if bootstrap.is_symlink() or not helper.is_file() or helper.is_symlink():
@@ -90,7 +99,7 @@ def cmd_dev_release(args: argparse.Namespace) -> int:
     buffer = io.StringIO()
     try:
         lifecycle = _lifecycle()
-        root, slot = cfg.install_dir().resolve(), Path(sys.prefix).resolve()
+        root, slot = cfg.install_dir().resolve(), _runtime_slot()
         if slot.parent != root / "versions":
             raise RuntimeError("Dev release must execute from this installation's retained slot")
         # The mutable dev slot cannot use the immutable launcher's admission.
@@ -124,13 +133,14 @@ def _cmd_dev_release(args: argparse.Namespace) -> int:
         import runtime_install_modes as modes
 
         root = cfg.install_dir().resolve()
-        if Path(sys.prefix).resolve().parent != root / "versions":
+        if _runtime_slot().parent != root / "versions":
             raise RuntimeError("Dev release must execute from this installation's retained slot")
-        payload = registry_paths._payload_root()
         # Legacy mode needs no checkout identity. Namespaced mode still requires
         # the explicitly authorized installed payload, not the claiming worktree.
         if not lifecycle.os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
             payload = lifecycle.SCRIPTS
+        else:
+            payload = registry_paths._payload_root()
         governance = lifecycle.Governance(root, payload)
         owner = modes._resolve_owner(
             Path.cwd(), getattr(args, "owner", None), source_required=False,
