@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the non-wire Worktrees resident-advertisement source classification; preserve HTTP generations, capabilities and historical contract evidence.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
