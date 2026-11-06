@@ -166,15 +166,19 @@ def test_different_source_reconcile_uses_existing_guarded_cutover(
     assert calls == [running]
 
 
+@pytest.mark.parametrize(("running", "target"), [
+    ("9.0.0", FIRST),
+    (f"{PACKAGE}+vendor.2", f"{PACKAGE}+vendor.1.repair.{'a' * 32}"),
+])
 def test_source_target_cannot_downgrade_a_newer_serving_package(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], running: str, target: str,
 ) -> None:
     @contextmanager
     def observed(_root: Path) -> Iterator[SimpleNamespace]:
-        yield SimpleNamespace(version="9.0.0")
+        yield SimpleNamespace(version=running)
 
     calls = []
-    monkeypatch.setattr(agent_bridge, "__version__", FIRST)
+    monkeypatch.setattr(agent_bridge, "__version__", target)
     monkeypatch.setattr(serving_reconcile, "observe_serving", observed)
     monkeypatch.setattr(venue_cli, "_cmd_deploy", lambda args, *, serving: calls.append(serving))
     with pytest.raises(SystemExit) as stopped:
