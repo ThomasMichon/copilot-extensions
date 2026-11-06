@@ -1083,3 +1083,26 @@ implementation. The exact support closure follows the consumer trace and tests.
 - The replacement reference now documents selector custody and its refusal
   outcome. Review, exact-head CI, release and installed/external acceptance
   remain open. No live service was changed by these source tests.
+
+### 2026-11-06 - Retain native resume custody and contain helper failures
+
+- The next #11072 review found two concrete failure classes. A syntactically
+  valid truncated retained helper can raise an ordinary acquisition error
+  outside the previous exception list. A failed native resume attaches the
+  unsettled pin to its exception, which the predecessor adapter discarded.
+- Helper loading/acquisition now converts ordinary exceptions before yielding
+  custody into `refused-selection-custody`; exceptions from the retirement
+  body are not swallowed by that loader.
+- The predecessor retains an unsettled native pin and reports
+  `refused-native-resume`. The existing lifecycle retries only its resume/close,
+  including after reselection. Shutdown closes work admission and keeps
+  resident custody until the pin settles, without another retirement attempt,
+  new watchdog or process rediscovery. Persistent resume failure remains an
+  explicit unresolved shutdown rather than false cleanup success.
+- Nine focused regressions pass, including syntactically valid truncated
+  helper refusal, exact-pin retention and an actual native paused process
+  held through reselection/shutdown before controlled resume. The complete
+  affected generation/predecessor/request-settlement/resident-lifetime packet
+  then passes 107 cases with one Linux-only skip and no held-cleanup diagnostic.
+  Linux-native, installed whole-update and external acceptance remain separate.
+  No live service was changed. Review and exact-head CI remain required.

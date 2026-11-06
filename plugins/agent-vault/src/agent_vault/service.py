@@ -1031,6 +1031,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         generation = getattr(service, "_generation", None)
         try:
             if generation is not None:
+                await settle_owned(generation.settle_retirements())
                 await generation.close_handoff()
         finally:
             await settle_owned(connections.close(

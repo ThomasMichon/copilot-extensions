@@ -121,6 +121,13 @@ No child is terminated. A stuck backend can therefore retain write exclusion;
 it is not silently treated as a completed cold replacement. Admitted backend
 work may finish normally and transfer custody after a refused cold attempt.
 
+If native resume is unconfirmed after a refused attempt, the generation retains
+the original paused process pin and reports `refused-native-resume`. Its existing
+lifecycle retries only resume/close on that pin, even after reselection, never
+another retirement attempt. Shutdown closes work admission and retains its
+resident custody until those pins settle; persistent native resume failure is
+an explicit unresolved shutdown, not a discarded handle or successful cleanup.
+
 Health's additive `predecessor_retirement` and
 `writer_predecessor_retirement` report `grace`, `exited`,
 `cold-retired` or a specific `refused-*` outcome independently of
@@ -203,6 +210,10 @@ KeePassXC edit constructor proves refusal while backend mutation remains live,
 followed by cooperative settlement. Unit controls separately cover
 missing or invalid retained SDK custody. A real SDK rollback attempted after
 the final owner check remains blocked until pinned predecessor exit is confirmed.
+Syntactically valid truncated SDK helpers also refuse without taking down the
+incoming service. A real paused-process control holds resume failure through
+reselection and shutdown, then confirms original-process continuation without
+termination once the retained pin can settle.
 Other unit controls cover
 owner/selection/birth refusal, changed lease holders, unconfirmed retirement,
 PID reuse, literal receipt admission, stale/live/replaced Unix aliases and

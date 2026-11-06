@@ -41,6 +41,6 @@ def selection_custody(root: Path, slot: Path):
                 ):
                     raise ValueError("Retained selector custody requires ordinary paths")
             custody.enter_context(_retained_leases(helper)._publication_lease(root, timeout=0))
-        except (OSError, RuntimeError, ValueError, ImportError, AttributeError, SyntaxError, TypeError) as error:
+        except Exception as error:
             raise SelectionCustodyUnavailable("Retained selector custody is unavailable") from error
         yield

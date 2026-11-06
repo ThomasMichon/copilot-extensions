@@ -295,6 +295,7 @@ def test_confirmed_retirement_is_not_reactivated_when_the_successor_disappears(
     controller = object.__new__(generation.ServiceGeneration)
     controller.service = SimpleNamespace(_runtime_can_work=True, _shutdown=False)
     controller.connections = SimpleNamespace(work={object()})
+    controller.predecessor = controller.writer_predecessor = None
     controller.retiring = {"runtime_generation": "displaced-successor"}
     monkeypatch.setattr(generation, "selected_generation", lambda: "next-successor")
     asyncio.run(controller.tick())
@@ -329,6 +330,7 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
     controller = object.__new__(generation.ServiceGeneration)
     controller.service = vault
     controller.connections = connections
+    controller.predecessor = controller.writer_predecessor = None
     controller.retiring = {"runtime_generation": "displaced-successor"}
     monkeypatch.setattr(generation, "selected_generation", lambda: "next-successor")
 
@@ -406,6 +408,7 @@ def test_malformed_successor_health_cannot_retire_the_incumbent(
     controller.root = tmp_path
     controller.retiring = None
     controller.superseded = 0
+    controller.predecessor = controller.writer_predecessor = None
     controller.service = SimpleNamespace(_runtime_can_work=True, _shutdown=False)
     monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(pid=123))
     monkeypatch.setattr(generation, "endpoint_health", lambda _: response)
@@ -634,7 +637,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 root, identity, port, mode = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
-if mode in {"hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "rollback-successor", "passive-legacy", "backend-work"}:
+if mode in {"hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "rollback-successor", "resume-failure-successor", "passive-legacy", "backend-work"}:
     sys.path.insert(0, str(root / "versions" / identity))
 os.environ.update(
     AGENT_VAULT_HOME=str(root), AGENT_VAULT_RUN_DIR=str(root / "run"),
@@ -646,8 +649,24 @@ os.environ.pop("AGENT_VAULT_INSTALLATION_ID", None)
 from agent_vault import service, service_generation as generation
 from agent_vault import service_handoff
 from agent_vault import service_predecessor
-if mode in {"bounded-successor", "prepared-successor", "rollback-successor"}:
+if mode in {"bounded-successor", "prepared-successor", "rollback-successor", "resume-failure-successor"}:
     service_predecessor.GRACE_SECONDS = 3
+if mode == "resume-failure-successor":
+    from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
+    close = PinnedProcess.close
+    def held_resume(self):
+        if self._paused and not (root / "resume.release").exists():
+            error = RetirementRefused("Owned fixture resume is held")
+            error.process = self
+            raise error
+        return close(self)
+    PinnedProcess.close = held_resume
+    service_predecessor._has_children = lambda _: True
+    settle = generation.ServiceGeneration.settle_retirements
+    async def observed_settlement(self):
+        (root / "resume.shutdown").touch()
+        await settle(self)
+    generation.ServiceGeneration.settle_retirements = observed_settlement
 if mode == "rollback-successor":
     from agent_procutil.process_retirement import PinnedProcess
     terminate = PinnedProcess.terminate
@@ -868,7 +887,8 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
     source = (
         root / "versions" / identity / "agent_vault" / "service.py"
         if mode in {
-            "hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "rollback-successor",
+            "hung-cleanup", "hung-work", "bounded-successor", "prepared-successor",
+            "rollback-successor", "resume-failure-successor",
             "passive-legacy", "backend-work",
         }
         else Path(generation.__file__).with_name("service.py")
@@ -884,6 +904,7 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
 def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
     (root / "backend.release").touch()
     (root / "retire.continue").touch()
+    (root / "resume.release").touch()
     for identity in ("newer", "middle", "older"):
         (root / (identity + ".start")).touch()
         (root / (identity + ".release")).touch()
@@ -1087,7 +1108,55 @@ assert (root / "current-version").read_text().strip() == "newer"
             _settle(tmp_path, children)
 
 
-@pytest.mark.parametrize("layout", ("missing", "foreign-slot", "directory-helper", "corrupt", "busy"))
+@pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned recovery")
+def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    for identity in ("newer", "older"):
+        _stage_generation(tmp_path, identity)
+    (tmp_path / "current-version").write_text("newer")
+    old = _start(tmp_path, "newer", 0, "hung-work")
+    children = [old]
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        try:
+            _until(lambda: _endpoint(tmp_path) is not None, children)
+            first = _endpoint(tmp_path)
+            pending = worker.submit(
+                _send, _target(first),
+                {"action": "has", "kpdb": str(tmp_path / "fixture.kdbx"), "entry": "fixture"},
+            )
+            _until(lambda: (tmp_path / "newer.entered").exists(), children)
+            (tmp_path / "current-version").write_text("older")
+            new = _start(tmp_path, "older", 0, "resume-failure-successor")
+            children.append(new)
+            _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
+            incoming = _endpoint(tmp_path)
+            target = _target(incoming)
+            _until(
+                lambda: _send(target, {"action": "ping"})["predecessor_retirement"] == "refused-native-resume",
+                children,
+            )
+            assert not _send(target, {"action": "ping"})["accepting_work"]
+            assert old.poll() is None and not pending.done()
+            (tmp_path / "current-version").write_text("newer")
+            (tmp_path / "older.stop").touch()
+            _until(lambda: (tmp_path / "resume.shutdown").exists(), children)
+            assert new.poll() is None
+            assert old.poll() is None and not pending.done()
+            (tmp_path / "resume.release").touch()
+            new.communicate(timeout=6)
+            assert new.returncode == 0
+            assert old.poll() is None
+            (tmp_path / "newer.release").touch()
+            assert pending.result(timeout=3)["ok"]
+        finally:
+            _settle(tmp_path, children)
+    assert old.returncode == 0
+
+
+@pytest.mark.parametrize("layout", (
+    "missing", "foreign-slot", "directory-helper", "corrupt", "truncated", "busy",
+))
 def test_missing_or_unattributable_sdk_cannot_retire_a_predecessor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str,
 ) -> None:
@@ -1103,6 +1172,11 @@ def test_missing_or_unattributable_sdk_cannot_retire_a_predecessor(
         (bootstrap / "versioned_runtime_leases.py").mkdir()
     if layout == "corrupt":
         (bootstrap / "versioned_runtime_leases.py").write_text("def _publication_lease(:")
+    if layout == "truncated":
+        (bootstrap / "versioned_runtime_leases.py").write_text(
+            "def _publication_lease(root, *, timeout=60):\n"
+            "    return _kernel_lease(root, timeout=timeout)\n",
+        )
     monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
     monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
     monkeypatch.setattr(generation, "PROCESS_SLOT", tmp_path if layout == "foreign-slot" else slot)

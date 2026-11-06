@@ -31,6 +31,7 @@ class Predecessor:
         self.root = root
         self.record = dict(record)
         self.registry_root = registry_root
+        self.recovery_process: PinnedProcess | None = None
 
     @classmethod
     def capture(
@@ -117,6 +118,8 @@ class Predecessor:
 
     def retire(self, current: Callable[[], bool]) -> str:
         """Revalidate selection and central-role custody at the native mutation."""
+        if self.recovery_process is not None:
+            return "refused-native-resume"
         try:
             if self.exited():
                 return "exited"
@@ -132,8 +135,23 @@ class Predecessor:
                     return "refused-live-workers"
                 process.terminate(timeout=5)
             return "cold-retired"
-        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused):
+        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused) as error:
+            process = getattr(error, "process", None)
+            if process is not None:
+                self.recovery_process = process
+                return "refused-native-resume"
             return "refused-native-retirement"
+
+    def recover(self) -> bool:
+        """Settle only the retained pin's resume/close, never repeat retirement."""
+        if self.recovery_process is None:
+            return True
+        try:
+            self.recovery_process.close()
+        except (OSError, ValueError, RuntimeError):
+            return False
+        self.recovery_process = None
+        return True
 
 
 def _has_children(pid: int) -> bool:

@@ -206,6 +206,55 @@ def test_live_credential_worker_refuses_parent_retirement_and_resumes_it(
     assert events == ["paused", "resume-and-close"]
 
 
+def test_failed_resume_retains_the_original_pin_until_recovery_settles(
+    owned, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint, root, _ = owned
+    captured = predecessor.Predecessor.capture(endpoint, root)
+    assert captured is not None
+    events = []
+    failed = True
+
+    class Process:
+        def __init__(self, *args):
+            events.append("pin")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            self.close()
+
+        def exited(self):
+            return False
+
+        def pause(self):
+            events.append("pause")
+
+        def close(self):
+            events.append("resume")
+            if failed:
+                error = predecessor.RetirementRefused("fixture resume unconfirmed")
+                error.process = self
+                raise error
+
+        def terminate(self, **kwargs):
+            pytest.fail("A refused parent must not be terminated during recovery")
+
+    monkeypatch.setattr(predecessor, "PinnedProcess", Process)
+    monkeypatch.setattr(predecessor, "_has_children", lambda _: True)
+    assert captured.retire(lambda: True) == "refused-native-resume"
+    pin = captured.recovery_process
+    assert pin is not None
+    assert not captured.recover()
+    assert captured.recovery_process is pin
+    assert captured.retire(lambda: pytest.fail("No second retirement attempt")) == "refused-native-resume"
+    failed = False
+    assert captured.recover()
+    assert captured.recovery_process is None
+    assert events == ["pin", "pause", "resume", "resume", "resume"]
+
+
 @pytest.mark.parametrize("image", ("system-console", "foreign-console", "backend"))
 def test_worker_census_exempts_only_the_actual_system_console_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image: str,
