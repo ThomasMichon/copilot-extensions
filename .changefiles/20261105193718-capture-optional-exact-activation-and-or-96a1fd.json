@@ -1,0 +1,13 @@
+{
+  "comment": "Capture optional exact activation and original worktree identity in existing handoff consumption records",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
