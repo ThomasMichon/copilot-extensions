@@ -328,8 +328,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   Protected original-readback proof commits merged in #10977; negotiated v6
   reads merged in #10979. This is the finite synthetic source exit, not native,
   live-provider, installed or full B3/A2 acceptance.
-- [ ] Review and land the [compact comment-identity contract](comment-identity.md)
-  before adding preparation, persistence or publisher behavior.
+- [x] Review and land the [compact comment-identity contract](comment-identity.md)
+  before adding preparation, persistence or publisher behavior (#11129).
 - [ ] Deliver the contract's shared preparation, actual all-forge comment
   consumer inventory, existing-owner correlation and separately qualified
   adopter leaves. Keep AI-profile/privacy policy, minimal clutter, stable
@@ -983,6 +983,21 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Review compact forge-comment provenance before implementation
+
+- #11129 actually merged as `5687588a648f5ac54bcd7acf6e5857fdebe4ada4`
+  after exact-head Copilot approval with no open issues and all required CI
+  green. The source worktree reconciled through its normal completion path.
+- The shared vision and #11128 contract preserve configured AI attribution,
+  compact source provenance, stable comment/per-write identity and the
+  existing native proof/publication owners. Ordinary comment origin cannot
+  become a PR-ownership refresh, and metadata does not get a filler comment.
+- Re-read the current canonical Plan and Validation Plan; the parent remains
+  Active. Begin the finite source-owner origin producer, then shared body
+  preparation, actual publisher inventory/integration and correlation. A pure
+  producer/helper does not close #11128 or all-forge/adopter acceptance.
+  No runtime deployment, live-comment rewrite or custody transfer occurred.
 
 ### 2026-11-06 - Complete the finite historical-readback source leaves
 
