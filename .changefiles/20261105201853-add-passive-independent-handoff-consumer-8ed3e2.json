@@ -1,0 +1,9 @@
+{
+  "comment": "Add passive independent handoff consumer, durable head and Picker comparison with bounded owning reads",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
