@@ -2556,9 +2556,10 @@ and exact result/exception identity in both modes. Profiled timings include
 instrumentation and are diagnostic evidence, not native performance acceptance.
 The fixture's state reader also opens its Windows handle with read/write/delete
 sharing, matching atomic publication rather than temporarily denying its
-publisher's DELETE access. A native negative control retains the old ordinary
-reader's replacement refusal; the shared reader allows replacement while
-retaining its original complete JSON and then reads the newly published file.
+publisher's DELETE access. A native control holds the publisher's DELETE-access
+handle: the old ordinary reader refuses while the shared reader obtains complete
+JSON. After the publisher closes, replacement and a complete new read succeed.
+This does not claim that `MoveFileEx` can replace a still-open destination.
 Only a missing publication is deferred. Access, sharing and malformed-JSON
 errors remain failures; there is no permission-error retry or deadline reset.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later

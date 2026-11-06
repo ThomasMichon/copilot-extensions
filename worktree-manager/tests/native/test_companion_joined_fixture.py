@@ -23,18 +23,33 @@ from worktree_manager import agenda_transport, companion_bridge_source, mux_comp
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows delete-sharing semantics")
-def test_native_state_reader_preserves_atomic_replacement_and_original_handle(
+def test_native_state_reader_shares_publisher_delete_access_and_complete_reads(
     tmp_path: Path,
 ) -> None:
+    import ctypes
+    from ctypes import wintypes
+
     target, replacement = tmp_path / "state.json", tmp_path / "next.json"
     target.write_text('{"revision":1}', encoding="utf-8")
     replacement.write_text('{"revision":2}', encoding="utf-8")
-    with target.open("rb"):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    publisher = kernel.CreateFileW(str(target), 0x10000, 0x7, None, 3, 0x80, None)
+    assert publisher != wintypes.HANDLE(-1).value, ctypes.WinError(ctypes.get_last_error())
+    try:
         with pytest.raises(PermissionError):
-            replacement.replace(target)
-    with native_state_reader(target) as stream:
-        replacement.replace(target)
-        assert json.load(stream) == {"revision": 1}
+            target.open("rb")
+        with native_state_reader(target) as stream:
+            assert json.load(stream) == {"revision": 1}
+    finally:
+        assert kernel.CloseHandle(publisher)
+    replacement.replace(target)
     with native_state_reader(target) as stream:
         assert json.load(stream) == {"revision": 2}
 
