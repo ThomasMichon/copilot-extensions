@@ -1595,6 +1595,19 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   still-unsettled obligations to a durable **orphanage** (not dropped);
   selective `claims cleanup <ref-or-source-worktree>` accepts/reclaims them.
   *(Phases 4–6 complete; effort `resource-obligation-settlement` closed.)*
+- **Derived output claims (`agent_worktrees.derived_claims`).** A producer that
+  creates a regenerable directory inside the checkout journals it as a
+  `derived` claim (`claims add derived <path> --creator <tool>`), writing a
+  `.derived-claim.json` marker whose worktree id + nonce match the ledger
+  entry's note; a pre-existing directory without that proof is never adopted.
+  The claim blocks finalize through the same kind-agnostic gate, and nothing
+  deletes it implicitly: finalize never removes the directory and the sweep
+  skips the kind. Only the owner's explicit, single-path
+  `claims settle <path> --reclaim` deletes it (via `gc.remove_tree`), after
+  re-checking the marker/nonce, checkout containment, Git-tracked contents,
+  links/reparse points (never followed) and live-process use; any failure
+  refuses and leaves the claim open. `claims release <path>` keeps the
+  directory and drops the claim.
 
 ### Recovery Mode
 

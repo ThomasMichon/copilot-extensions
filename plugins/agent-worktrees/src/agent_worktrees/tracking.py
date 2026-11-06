@@ -518,7 +518,7 @@ def stamp_frozen_attribution(
 # worktree-finality-and-obligations/README.md``; the rest are placeholders the ledger view already
 # understands so later phases can journal them without a schema change.
 ResourceKind = Literal[
-    "worktree", "codespace", "container", "ssh", "workdir", "pr", "task", "session"
+    "worktree", "codespace", "container", "ssh", "workdir", "pr", "task", "session", "derived"
 ]
 
 # Claim disposition (resource-obligation-settlement): "active" while unsettled

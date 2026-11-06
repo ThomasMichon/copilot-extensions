@@ -1,0 +1,9 @@
+{
+  "comment": "Add derived claims: producers record regenerable output directories as marker-proven open claims that block finalize; the owner settles each path explicitly with 'claims settle <path> --reclaim' (safety-checked single-path delete) or 'claims release <path>' (keep). Finalize and the sweep never delete them.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
