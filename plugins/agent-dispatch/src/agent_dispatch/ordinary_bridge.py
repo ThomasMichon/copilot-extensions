@@ -255,13 +255,16 @@ def start(
     info = reservation.get("agent_info")
     from .ordinary_writer_admission import REQUIREMENT, OrdinaryWriterAdmission, writer_requirement
 
-    retained_writer = info.get(REQUIREMENT) if isinstance(info, dict) else None
-    if isinstance(info, dict) and REQUIREMENT in info:
+    retained_writer = reservation.get(REQUIREMENT)
+    writer_retained = retained_writer is not None
+    if retained_writer is not None:
         retained_writer = writer_requirement(retained_writer)
+        if info and info.get(REQUIREMENT) != retained_writer:
+            raise BridgeCarriedSessionBusy("ordinary agent differs from original allocation writer requirement")
         if worktree_writer is not None and writer_requirement(worktree_writer) != retained_writer:
             raise BridgeCarriedSessionBusy("ordinary Bridge original writer requirement changed")
         worktree_writer = retained_writer
-    elif info and worktree_writer is not None:
+    elif info and (worktree_writer is not None or REQUIREMENT in info):
         raise BridgeCarriedSessionBusy("historical ordinary agent has no original writer requirement")
     if reservation.get("task_relationship_required") is True and worktree_writer is None:
         raise BridgeCarriedSessionBusy("governed ordinary startup lacks its qualified writer requirement")
@@ -562,7 +565,17 @@ def start(
             try:
                 writer_input = None
                 if writer_admission is not None:
-                    writer_admission.admit_create(run)
+                    writer_admission.admit_create(run, retained=writer_retained)
+                    retained = client.record_spawn_allocation(
+                        key, project, worktree_writer_requirement=writer_admission.requirement,
+                    )
+                    if (
+                        retained.get("creation_key") != reservation["creation_key"]
+                        or any(retained.get(field) != reservation.get(field)
+                               for field in ("worktree", "worktree_path", "allocation_project"))
+                        or writer_requirement(retained.get(REQUIREMENT)) != writer_admission.requirement
+                    ):
+                        raise TaskError("coordinator did not retain the original ordinary writer requirement")
                     argv += ["--worktree-writer-file", "-"]
                     writer_input = json.dumps(writer_admission.requirement)
                 created = run(argv, prompt_input=writer_input)

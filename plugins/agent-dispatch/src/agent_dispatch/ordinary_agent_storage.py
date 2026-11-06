@@ -156,6 +156,9 @@ def _record_agent(
                 raise TaskError("historical ordinary invocation is unavailable")
         from .ordinary_writer_admission import REQUIREMENT, retain_requirement
         retain_requirement(json.loads(row["agent_info"]) if row["agent_info"] else None, agent_info)
+        expected_writer = json.loads(row[REQUIREMENT]) if row[REQUIREMENT] else None
+        if expected_writer != agent_info.get(REQUIREMENT):
+            raise TaskError("ordinary Bridge original writer requirement differs from allocation intent")
         if row["task_relationship_required"] and REQUIREMENT not in agent_info:
             raise TaskError("governed ordinary startup lacks its original writer requirement")
         if startup_invocation is not None:

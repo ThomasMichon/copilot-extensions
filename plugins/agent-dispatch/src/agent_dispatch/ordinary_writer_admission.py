@@ -40,6 +40,20 @@ def retain_requirement(previous: dict | None, incoming: dict) -> None:
         raise TaskError("ordinary Bridge original writer requirement cannot change")
 
 
+def allocation_requirement(row: dict, project: str, value: dict | None) -> str | None:
+    retained = row[REQUIREMENT]
+    if value is None:
+        return retained
+    requirement = OrdinaryWriterAdmission(value, {**row, "allocation_project": project}).requirement
+    if row["driver"] != "ordinary-bridge" or not row["creation_key"]:
+        raise TaskError("ordinary Bridge writer requirement lacks its original creation key")
+    if retained is not None and json.loads(retained) != requirement:
+        raise TaskError("ordinary Bridge original writer requirement cannot change")
+    if retained is None and (row["agent_info"] or row["session_handle"]):
+        raise TaskError("historical ordinary agent has no original writer requirement")
+    return json.dumps(requirement, sort_keys=True)
+
+
 class OrdinaryWriterAdmission:
     """Expected writer and original workspace, not a closed-cohort ready permit."""
 
@@ -99,9 +113,9 @@ class OrdinaryWriterAdmission:
         ):
             raise TaskError("ordinary Bridge writer workspace incarnation changed")
 
-    def admit_create(self, run) -> None:
+    def admit_create(self, run, *, retained: bool = False) -> None:
         """A future journal cannot admit the earlier first relationship."""
-        support = self._read(run, ["cli-contracts"])
+        support = self._read(run, ["version", "--contracts-json"])
         contracts = support.get("contracts")
         required = {
             "agent-bridge.create": {"keyed-worktree-writer"},
@@ -121,7 +135,7 @@ class OrdinaryWriterAdmission:
         ):
             raise TaskError("executing ordinary Bridge CLI writer support is unconfirmed")
         health = self._health(run)
-        if health.get("worktree_record_writer") != self.requirement["identity"]:
+        if not retained and health.get("worktree_record_writer") != self.requirement["identity"]:
             raise TaskError("ordinary Bridge selected writer differs from the admitted writer")
 
     def inspect_session(self, run, info: dict) -> dict:

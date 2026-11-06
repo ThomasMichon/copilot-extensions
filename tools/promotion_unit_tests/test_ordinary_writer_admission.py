@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import copy
+import argparse
 import importlib.util
+import io
 import json
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from contextlib import redirect_stdout
 
 import pytest
 
@@ -86,7 +89,7 @@ def admission(monkeypatch):
     def run(argv, **kwargs):
         assert kwargs == {"read_only": True}
         calls.append(argv)
-        value = support if argv[1] == "cli-contracts" else health if len(argv) == 2 else {
+        value = support if argv[1:] == ["version", "--contracts-json"] else health if len(argv) == 2 else {
             **info, "worktree_writer_observation": observation,
         }
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
@@ -97,7 +100,48 @@ def admission(monkeypatch):
 def test_future_admission_needs_no_impossible_prior_journal(admission):
     owner, _, _, _, _, calls, run = admission
     owner.admit_create(run)
-    assert calls == [["--json", "cli-contracts"], ["--json", "status"]]
+    assert calls == [["--json", "version", "--contracts-json"], ["--json", "status"]]
+
+
+def test_discovery_argv_executes_the_shipped_bridge_parser_and_contract(admission, monkeypatch):
+    root = Path(__file__).resolve().parents[2] / "plugins/agent-bridge/src/agent_bridge"
+    package = "promotion_ordinary_bridge_cli"
+
+    def stub(name, **attributes):
+        value = ModuleType(name)
+        value.__dict__.update(attributes)
+        monkeypatch.setitem(sys.modules, name, value)
+        return value
+
+    stub(package, __path__=[str(root)], __version__="0.synthetic")
+    stub("uvicorn")
+    stub("agent_procutil", __path__=[])
+    stub("agent_procutil.daemon_instances",
+         daemon_entrypoint=lambda *a, **kw: lambda function: function)
+    stub(f"{package}.diagnostic_logs", register_log_commands=lambda sub: None)
+    stub(f"{package}.__main__", _add_stream_args=lambda parser: None)
+    spec = importlib.util.spec_from_file_location(f"{package}.service_start_cli", root / "service_start_cli.py")
+    assert spec and spec.loader
+    service = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, service)
+    spec.loader.exec_module(service)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--json", action="store_true")
+    service.register_service_start_commands(parser.add_subparsers(required=True))
+    owner, _, _, _, _, calls, run = admission
+
+    def actual(argv, **kwargs):
+        if argv[1] != "version":
+            return run(argv, **kwargs)
+        calls.append(argv)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            args = parser.parse_args(argv)
+            args.func(args)
+        return subprocess.CompletedProcess(argv, 0, output.getvalue(), "")
+
+    owner.admit_create(actual)
+    assert calls == [["--json", "version", "--contracts-json"], ["--json", "status"]]
 
 
 @pytest.mark.parametrize("change", [
@@ -128,7 +172,7 @@ def test_future_admission_refuses_unknown_cli_daemon_or_selected_writer(admissio
         health["draining"] = True
     with pytest.raises(TaskError):
         owner.admit_create(run)
-    assert all(call[1] in {"cli-contracts", "status"} for call in calls)
+    assert all(call[1] in {"version", "status"} for call in calls)
 
 
 def test_continuation_uses_original_journal_not_changed_dynamic_selection(admission):

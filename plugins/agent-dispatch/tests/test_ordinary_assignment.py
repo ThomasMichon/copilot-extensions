@@ -75,8 +75,10 @@ def assigned(tmp_path, monkeypatch, request):
                 **reservation_native_facts(queue, key),
             }
 
-        def record_spawn_allocation(self, key, project):
-            return asdict(queue.record_spawn_allocation(key, project))
+        def record_spawn_allocation(self, key, project, **kwargs):
+            if kwargs:
+                calls.append("writer-intent")
+            return asdict(queue.record_spawn_allocation(key, project, **kwargs))
 
         def record_created_agent(self, key, **facts):
             calls.append("created-store")
@@ -101,7 +103,8 @@ def assigned(tmp_path, monkeypatch, request):
         command = argv[2]
         calls.append("receipt" if "--receipt-only" in argv else command)
         requirement = snapshot.get("_writer_requirement")
-        if command == "cli-contracts":
+        if command == "version":
+            assert argv == ["bridge", "--json", "version", "--contracts-json"]
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "schema": "agent-bridge.cli-contracts", "version": 1,
                 "contracts": {
@@ -130,7 +133,7 @@ def assigned(tmp_path, monkeypatch, request):
                         "worktree_record_delegation": 1, "retained_workspace_creation_writer": 1,
                         "retained_workspace_creation_writer_inspection": 1,
                     },
-                    "worktree_record_writer": requirement["identity"],
+                    "worktree_record_writer": snapshot.get("_selected_writer", requirement["identity"]),
                 }), "")
             if "--full" not in argv:
                 assert argv == ["bridge", "--json", "status", "bridge-a"]
@@ -160,6 +163,7 @@ def assigned(tmp_path, monkeypatch, request):
             if requirement is not None:
                 assert argv[-2:] == ["--worktree-writer-file", "-"]
                 assert json.loads(kwargs["input"]) == requirement
+                assert queue.get_reservation(reservation.key).worktree_writer_requirement == requirement
             else:
                 assert kwargs.get("input") is None
             record.update(last_session_id="native-a", session_count=1)
@@ -230,7 +234,7 @@ def test_qualified_ordinary_create_retains_requirement_and_rechecks_original_jou
     assert first["native_session_id"] == "native-a"
     stored = queue.get_reservation(task["spawn_reservation_key"]).agent_info
     assert stored["worktree_writer_requirement"] == task["_writer_requirement"]
-    assert calls.index("cli-contracts") < calls.index("create") < calls.index("created-store")
+    assert calls.index("version") < calls.index("writer-intent") < calls.index("create") < calls.index("created-store")
     assert calls[-3:] == ["status", "status", "send"]
     calls.clear()
     response["status"] = "stopped"
@@ -244,7 +248,7 @@ def test_qualified_ordinary_create_retains_requirement_and_rechecks_original_jou
 
     ordinary_bridge.subprocess.run = resume
     _qualified_start(assigned, explicit=False)
-    assert "create" not in calls and "cli-contracts" not in calls
+    assert "create" not in calls and "version" not in calls
     assert calls.count("resume") == 1 and calls.count("send") == 1
     assert queue.get_reservation(task["spawn_reservation_key"]).agent_info[
         "worktree_writer_requirement"
@@ -303,7 +307,11 @@ def test_qualified_ordinary_refuses_older_coordinator_before_owner_or_native_eff
     assert not calls and asdict(queue.get_reservation(task["spawn_reservation_key"])) == before
 
 
-def test_qualified_ordinary_lost_create_reply_replays_original_key_not_worktree_resume(assigned):
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("selector_changed", [False, True])
+def test_qualified_ordinary_lost_create_reply_replays_original_key_not_worktree_resume(
+    assigned, explicit, selector_changed,
+):
     queue, task, _, record, _, calls = assigned
     _required_writer(assigned)
     original = ordinary_bridge.subprocess.run
@@ -322,12 +330,52 @@ def test_qualified_ordinary_lost_create_reply_replays_original_key_not_worktree_
         _qualified_start(assigned)
     retained = queue.get_reservation(task["spawn_reservation_key"])
     assert retained.agent_info is None and record["last_session_id"] == "native-a"
-    _qualified_start(assigned)
+    assert retained.worktree_writer_requirement == task["_writer_requirement"]
+    if selector_changed:
+        task["_selected_writer"] = {"installation_root": "/new", "runtime_generation": "b" * 32}
+    _qualified_start(assigned, explicit=explicit)
     assert keys == [retained.creation_key, retained.creation_key]
     assert "resume" not in calls and calls.count("send") == 1
     assert queue.get_reservation(task["spawn_reservation_key"]).agent_info[
         "worktree_writer_requirement"
     ] == task["_writer_requirement"]
+
+
+@pytest.mark.parametrize("change", ["identity", "nonce", "drop"])
+def test_allocation_writer_intent_survives_omission_and_refuses_replacement(assigned, change):
+    queue, task, client, _, _, _ = assigned
+    _required_writer(assigned)
+    requirement = task["_writer_requirement"]
+    key = task["spawn_reservation_key"]
+    client.record_spawn_allocation(key, "execution-project", worktree_writer_requirement=requirement)
+    before = asdict(queue.get_reservation(key))
+    incoming = copy.deepcopy(requirement)
+    if change == "drop":
+        client.record_spawn_allocation(key, "execution-project")
+        assert queue.get_reservation(key).worktree_writer_requirement == requirement
+    else:
+        if change == "identity":
+            incoming["identity"]["runtime_generation"] = "b" * 32
+        else:
+            incoming["creation_nonce"] = "other-incarnation"
+        with pytest.raises(TaskError, match="writer requirement"):
+            client.record_spawn_allocation(key, "execution-project", worktree_writer_requirement=incoming)
+        assert asdict(queue.get_reservation(key)) == before
+
+
+def test_original_allocation_retry_carries_requirement_before_agent_facts_exist(assigned):
+    queue, task, client, _, _, _ = assigned
+    _required_writer(assigned)
+    key = task["spawn_reservation_key"]
+    client.record_spawn_allocation(
+        key, "execution-project", worktree_writer_requirement=task["_writer_requirement"],
+    )
+    queue.defer_spawn(key, detail="create not attempted")
+    retry, reserved = queue.reserve_spawn(task["id"], reserved_by="supervisor", driver="ordinary-bridge")
+    assert reserved and retry.key != key
+    assert retry.creation_key == queue.get_reservation(key).creation_key
+    assert retry.worktree_writer_requirement == task["_writer_requirement"]
+    assert retry.agent_info is None
 
 
 def test_qualified_ordinary_refuses_retrofit_of_historical_unpinned_agent(assigned):
@@ -862,6 +910,41 @@ def test_ordinary_assignment_resumed_client_route_and_raw_facts(assigned):
             assert result["agent_info"]["acp_session_id"] == "native-a"
             assert result["agent_info"]["fact_kind"] == "resumed"
             assert "ready" not in result["agent_info"]
+    finally:
+        api.close()
+
+
+def test_qualified_allocation_requirement_uses_actual_client_and_provider_before_create(assigned):
+    from agent_dispatch.client import DispatchError
+    queue, task, _, _, _, _ = assigned
+    _required_writer(assigned)
+    api = TestClient(create_app_for(queue))
+
+    def exchange(request):
+        result = api.request(request.method, str(request.url), content=request.content,
+                             headers=dict(request.headers))
+        return httpx.Response(result.status_code, json=result.json())
+
+    try:
+        with DispatchClient("http://testserver", transport=httpx.MockTransport(exchange)) as client:
+            key = task["spawn_reservation_key"]
+            requirement = task["_writer_requirement"]
+            result = client.record_spawn_allocation(
+                key, "execution-project", worktree_writer_requirement=requirement,
+            )
+            assert result["agent_info"] is None
+            assert result["worktree_writer_requirement"] == requirement
+            assert client.get_reservation(key)["worktree_writer_requirement"] == requirement
+            assert client.record_spawn_allocation(key, "execution-project")[
+                "worktree_writer_requirement"
+            ] == requirement
+            changed = copy.deepcopy(requirement)
+            changed["identity"]["runtime_generation"] = "b" * 32
+            with pytest.raises(DispatchError, match="writer requirement"):
+                client.record_spawn_allocation(
+                    key, "execution-project", worktree_writer_requirement=changed,
+                )
+            assert queue.get_reservation(key).worktree_writer_requirement == requirement
     finally:
         api.close()
 
