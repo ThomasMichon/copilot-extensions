@@ -93,6 +93,13 @@ They distinguish environment staging, candidate readiness, activation and
 release; they do not claim that every app already implements the target flow.
 Existing plugin-native installation remains supported during the migration.
 
+Complete-application publication uses the existing path-scoped launcher leases
+in addition to the installation root's selector lease. Installations sharing a
+command directory serialize comparison, replacement and rollback; startup
+completion rechecks those commands under the same path custody. Canonical local
+composition discards inherited Git selectors, while intentionally supplied
+temporary-index overrides remain local to their owning operation.
+
 Worktrees' source-application startup completes its deployment manifest through
 the original command owner's existing lifecycle publication lease, after monitor
 readiness. Its Source/profile identity remains separate from legacy payload

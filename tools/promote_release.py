@@ -53,6 +53,8 @@ from promotion_candidate import (
 )
 from promotion_source_archive import (
     changefile_existed_at as _changefile_existed_at,
+    git_environment,
+    is_ancestor,
     main_version_inputs as _main_version_inputs,
 )
 
@@ -82,10 +84,13 @@ def _git(
     args: list[str], *, cwd: Path | None = None, check: bool = True,
     env: dict[str, str] | None = None, input_text: str | None = None,
 ) -> str:
+    environment = git_environment()
+    if env is not None:
+        environment.update(env)
     result = subprocess.run(
         ["git", *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"]
                   if os.name == "nt" else []), *args],
-        cwd=str(cwd or REPO), capture_output=True, env=env,
+        cwd=str(cwd or REPO), capture_output=True, env=environment,
         input=input_text.encode("utf-8") if input_text is not None else None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -102,16 +107,7 @@ def _rev_parse(ref: str, *, cwd: Path | None = None) -> str | None:
 
 
 def _is_ancestor(ancestor: str, descendant: str, *, cwd: Path | None = None) -> bool:
-    """True when ``ancestor`` is reachable from ``descendant`` (``git
-    merge-base --is-ancestor``) -- includes the equal-commit case."""
-    result = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
-        cwd=str(cwd or REPO),
-        capture_output=True,
-        text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    return result.returncode == 0
+    return is_ancestor(cwd or REPO, ancestor, descendant)
 
 
 def _load_module(path: Path, name: str) -> types.ModuleType:
@@ -238,7 +234,7 @@ def _sync_instruction_projections(
         return []
     proc = subprocess.run(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     try:
@@ -593,7 +589,7 @@ def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
     baseline with no real code change behind it as a real promotion."""
     with tempfile.TemporaryDirectory() as tmp:
         index_file = Path(tmp) / "index"
-        env = {**os.environ, "GIT_INDEX_FILE": str(index_file)}
+        env = git_environment(GIT_INDEX_FILE=str(index_file))
         subprocess.run(
             ["git", "read-tree", tree_sha], cwd=str(repo), env=env,
             check=True, capture_output=True,

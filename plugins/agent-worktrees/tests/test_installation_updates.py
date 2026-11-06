@@ -221,6 +221,21 @@ def test_inventory_observes_application_selection_not_stale_legacy_version(
     assert before == {path: path.read_bytes() for path in before}
 
 
+@pytest.mark.parametrize("selected", ["dev", "dev-" + "a" * 32, "dev-" + "b" * 64, "dev-../outside"])
+def test_inventory_keeps_legacy_dev_manifest_fallback_without_accepting_unsafe_names(
+    installed, tmp_path, selected,
+):
+    root = tmp_path / "selected" / "agent-example"
+    root.mkdir(parents=True)
+    marker = root / "current-version"
+    marker.write_text(selected, encoding="utf-8")
+    before = marker.read_bytes(), marker.stat().st_mtime_ns
+    row = next(row for row in owner.inventory()["entries"] if row["id"] == "agent-example")
+    assert row["selected"] == ("unknown / invalid application selection" if ".." in selected else "1")
+    assert row["running"] == "0" and row["updatable"]
+    assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
+
+
 @pytest.mark.parametrize("available", [False, True])
 def test_inventory_source_profile_support_does_not_change_marketplace_eligibility(
     installed, monkeypatch, tmp_path, available,
