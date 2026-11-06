@@ -1862,8 +1862,8 @@
       "sha256": "55d50b75d31d09b450b01aafaa8f26c80d6882c89eddecbea97c851e6c860843"
     },
     "plugins/agent-bridge/contract/README.md": {
-      "blob": "8effcd069939dd8d5f69c357bba00a1bfc1065c2",
-      "sha256": "c1fabf8d7eb718d82749e25b3d73f1b92e497904da94061d8c313eb44c6b7354"
+      "blob": "2c5a2ec50ce55df5e589a953bd5367fb16901370",
+      "sha256": "7d1d5e4686335b79ba64e08ec9d5d7e2f7f39a21385213c0fe4d632abb55b170"
     },
     "plugins/agent-bridge/contract/inputs/http47/capture-cases.json": {
       "blob": "758c89a061c301140849ee6be7d12aadf35e2294",
@@ -2322,8 +2322,8 @@
       "sha256": "9bf81ff5ecc2c3ff01330020ab08b1d3eefc67c82db07dc2818585dafdc0c554"
     },
     "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py": {
-      "blob": "19579750b885d520c730828dcf6e7b71f21e27b9",
-      "sha256": "374446c834b746da0e381396aee61610c98b5e474c05abef8340d88997412441"
+      "blob": "f285d1b940696a1b9d1bf811005502f925672f8d",
+      "sha256": "08ac3b2329d3adb9a21638efc3a07c3a0acd4c4dd4fa38d35f642426101dece6"
     },
     "plugins/agent-bridge/src/agent_bridge/admin_resolver.py": {
       "blob": "9d517784a291e16bafeeee72adc549718d2c04e8",
@@ -3702,8 +3702,8 @@
       "sha256": "fc210f1e674e16e2c494505bc4fe4f9feed5d36196cd990593ca90ea3c3e1d88"
     },
     "plugins/agent-bridge/tests/test_acquisition_writer_inspection.py": {
-      "blob": "01af056e327e12009642a0ddde22187d1ead67f9",
-      "sha256": "f884b42928372368cfe26064650abc11ebff1c897d58329dc6070afdee4c6152"
+      "blob": "0ad74c35d26eb4592892fe406e17480354a18203",
+      "sha256": "7502aaf815803886dcdd267f97c0331cfe128c50e10bc7997b259df14c35ab15"
     },
     "plugins/agent-bridge/tests/test_cold_drain.py": {
       "blob": "eb3ee6e8fe4f7467e9edc4470d7e8dcc7d44028b",
@@ -3750,8 +3750,8 @@
       "sha256": "7c9df7bbadc5095d16b51d1bd96690552613be534db45e06b09afab4e017c426"
     },
     "plugins/agent-bridge/tests/test_http51_capture_probes.py": {
-      "blob": "1840b34c0fde34c411b68e4b2f0edf73a7550537",
-      "sha256": "ca0b65d458f9b82e3c7198e360ee17168e33101c5bf3e00f3ac5913e2bf49fc4"
+      "blob": "69c5056d51aec3d0b0ef74918acf9cf44204a9a5",
+      "sha256": "036e08c816174aa5d9d2e297cea16c2bec27b9d7fdb3a2463944df980c69a81a"
     },
     "plugins/agent-bridge/tests/test_inbox_consumer_enrollment.py": {
       "blob": "b0e56a0c8e94a11f17e3ef487d6a78fc13048212",
@@ -6942,8 +6942,8 @@
       "sha256": "553691f6ec04ee428538246a11df891b64d705c790bfa8134f4ce793a1138058"
     },
     "tools/bridge_http52_evidence.py": {
-      "blob": "81282c2b355fd30b81f60933b50cfd2ec0159f9b",
-      "sha256": "6baa1a4e64db532ebbfe08f0fef9829b01a892d3a30f16f0256fee1c0cf75e68"
+      "blob": "6f7353bfd47a924c9fee7da95bea5bde6778f71a",
+      "sha256": "78865ca1e6ef7e7f90e0e055493e96a5fb86795a7383a3b2aa5c37b823488ea8"
     },
     "tools/bridge_http_retained_evidence.py": {
       "blob": "682a27a08d18d5ec3bea54dc2e24dcd37f4d085a",
@@ -8650,7 +8650,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "7c76071700c76f999f79763561c1a9ad9353f6ff34c369ddc3749b563e7196df",
+  "execution_closure_sha256": "1dbc6863fb46e4bbd05dab2ee803a956747aaf82975f4127d1b85322e4860ba4",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -8739,11 +8739,12 @@
     "test_required_writer_refuses_before_native_effects": 6,
     "test_retained_acquisition_and_later_lineage_use_actual_owner_processes": 1,
     "test_retained_session_receiver_refuses_changed_scope_without_resident_fallback": 12,
-    "test_retained_writer_inspection_cli_http": 3
+    "test_retained_writer_inspection_cli_http": 3,
+    "test_retained_writer_inspection_unavailable_http": 4
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "771c56a77106ec4bc6f73a043a3856db5e247deb",
+    "commit": "4944bb5c37b75376e415fa9e2ce1eb3d02ec3745",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
