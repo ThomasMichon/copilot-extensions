@@ -62,7 +62,9 @@ from pathlib import Path
 from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
-from plugin_test_cache import clear_cache_contents, dependency_fingerprint, ordinary_cache_root
+from plugin_test_cache import (
+    clear_cache_contents, dependency_fingerprint, ordinary_cache_root, source_resolution_arguments,
+)
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
@@ -343,6 +345,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if name == "agent-ssh":
                 cmd.extend(["-e", str(REPO / "fleet-manager")])
+            cmd.extend(source_resolution_arguments(name, _plugin_dir(name), REPO, venv))
             if reinstall or drifted:
                 # A new venv can still consume uv's stale local-path wheels.
                 cmd.append("--reinstall")

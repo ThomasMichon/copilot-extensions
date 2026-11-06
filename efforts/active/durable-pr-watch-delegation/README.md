@@ -939,6 +939,52 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Retain the released-account setup failure
+
+- The single native acceptance run
+  [42151348602](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42151348602)
+  used release `32c045f081ba8d9c4b5759dfb3c9bfa21ec68d55` and selected
+  only the existing 15 PR-owner jobs, with their original deadlines.
+  Every selected job failed during environment preparation, before pytest
+  acceptance. No installed-contract or deployment success is credited.
+- Linux and macOS report conflicting `agent-procutil` URLs from the PR and
+  Fleet payloads' separate vendored libraries. Windows reports the failed
+  UV preparation command without subordinate resolver stderr. This extends
+  the existing released-checkout defect #9277; its source repair is now the
+  next prerequisite, not another installation-cell implementation.
+- The temporary qualification tag was removed after preserving the terminal
+  result and checking its exact commit. No workflow rerun, local update,
+  shared-service control or fleet rollout occurred. The retained #6286
+  installed exit and all broader parent/resource gates remain open.
+- The bounded #9277 source repair keeps canonical library selection in the
+  runner's existing cache helper and preserves version constraints separately
+  from UV source overrides. Both selected canonical bytes and their mapping
+  invalidate stale cached environments; unsupported identity or requirement
+  forms refuse rather than guessing.
+- Fifty focused Windows tests pass, including actual offline UV resolution
+  for the two-consumer PR/Fleet and three-consumer Dispatch/PR/Fleet layouts,
+  plus incompatible-version refusal. Fatal Python lint, the unchanged module
+  cap and diff checks pass. These are source/resolver proofs, not successful
+  fresh-account installation, release promotion or installed adoption.
+
+### 2026-11-05 - Land the qualified Manager source-acceptance leaf
+
+- #10671 merged at `6a6bbb0c306ca93d65e388ba97a2ff81533d9018`, after
+  current-head Copilot approval, resolved documentation feedback and green
+  required CI. The finite source-scheduling/fixture issue #10632 is closed.
+  The earlier four-construction/native evidence and its limits remain below.
+- The source workspace was pulled forward without losing work; its complete
+  published head remains on a verified recovery branch. No source PR remains
+  open for this leaf.
+- The actual parent installation-cell, governed cutover, Phase 4 and
+  Validation rows were read after merge and remain open. The next stretch
+  returns to #6286's retained isolated installed-contract acceptance;
+  source qualification alone does not close it or the broader #6007/#7188
+  outcomes. Live updates, credentials, service activation and deployment
+  still require their separately applicable authorization.
+- Existing source/resource owners and cleanup holds are unchanged. The
+  delegation worktree and parent effort are retained, not declared complete.
+
 ### 2026-11-05 - Qualify all four real Manager source constructions
 
 - The source contract passed at `4e73aecca7fe744129e5322f489686222b6f05e8`
