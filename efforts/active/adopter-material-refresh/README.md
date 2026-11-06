@@ -122,6 +122,25 @@ implicitly assigned by this bounded documentation claim.
       and standing future intent; do not make a docs-only patch claim to fix a
       runtime gap.
 
+### Bounded Dispatch prose inventory (agent-recommended)
+
+This finite #433 intake belongs to the remaining plugin-owner prose inventory,
+not the released primary-documentation claim. #561 already delivered the
+original CLI help/error/docstring repair; it must not be redone or described
+as missing.
+
+- [ ] Inventory the three remaining generic statements under
+      `plugins/agent-dispatch/src/agent_dispatch/`: provenance wording in
+      `conflict_dispatch.py`, the rule docstring in `registrar_lane_aliases.py`,
+      and label comments in `queue_steering.py`, with owner/source/build context.
+- [ ] In a separately claimed, reviewed plugin slice, neutralize only those
+      deployment-specific wordings and perform the original quick same-term
+      plugin scan. Preserve behavior, APIs and task/queue/routing semantics;
+      no blanket term ban, branding sweep or unrelated renaming follows.
+- [ ] Deliver or explicitly transfer every finite wording residual with the
+      owning checks and required plugin changefile. This planning intake does
+      not edit the three source modules or appoint an execution lead.
+
 ### Phase 3 — Refresh preview assets (agent-recommended)
 - [ ] Reuse the owning public-safe asset/capture tooling, or establish the
       smallest justified reproducible fixture when none exists.
@@ -151,6 +170,12 @@ implicitly assigned by this bounded documentation claim.
       inputs/outputs are public-safe and credential-free.
 - [ ] Final material families are internally consistent across README, linked
       docs, images, captions, and accessibility descriptions.
+- [ ] For #433's finite prose family, compare the eventual final diff with all
+      three retained statements and the original CLI/scan scope. Verify neutral
+      wording, credit the delivered #561 CLI repair, and establish that only
+      intended help/docstring/comment prose changes, not behavior, APIs or task
+      semantics. Check the owning source/build and appropriate existing checks;
+      no new native matrix or whole-materials completion bar is added to #433.
 - [ ] All Plan and Validation Plan items are resolved or explicitly transferred
       before execution declares the sibling effort Done.
 
@@ -162,6 +187,20 @@ normal review gate in `#5807`. No runtime implementation, service repair,
 repository creation, or private-environment capture was part of that proposal.
 
 ## Journal
+
+### 2026-11-06 - Narrow Dispatch prose planning intake
+
+- Retained #433's three wording-only residuals as one bounded family within
+  the remaining plugin-owner inventory, with direct Plan and global Validation.
+  #561's original CLI correction stays credited; this is not a runtime redesign
+  or general identifier sweep.
+- The campaign stays Active under OPEN #5799. The completed documentation
+  participant stays released; execution, preview assets and the remaining
+  reference audit stay unassigned. No source module, screenshot, runtime,
+  installed payload or existing ownership/approval boundary changes here.
+- Actual whole receiving-issue intake and readback still precede any separate
+  #433 administrative tracking retirement. Material completion remains subject
+  to the existing Plan/Validation and normal review.
 
 ### 2026-10-12 — Verified primary-documentation slice released
 - Direction `#6289` merged as `26680fbad595691d93276fc4e9e94e492c61e703`;
