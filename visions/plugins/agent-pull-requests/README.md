@@ -3,7 +3,7 @@
 - **Subject:** The first-class pull-request plugin and independently operable PR service.
 - **Scope:** leaf (child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-03
+- **Last revised:** 2026-11-06
 - **Reality docs:** [PR plugin](../../../plugins/agent-pull-requests/README.md)
 
 ## Purpose & Intent
@@ -159,6 +159,12 @@ completion remain distinguishable. Confirmed feedback returns handled work to
 the back of the line without swallowing newer events; priority and aging keep
 other admitted PRs moving. Assignment lineage belongs to the task owner, and
 an interest or cached recommendation never grants mutation authority.
+
+Authored feedback should consume the shared
+[compact comment-provenance contract](../../harness-guidance/README.md#compact-forge-comment-provenance).
+Logical comment and intentional-write identity remain reconcilable through
+the current native observation and receipt owners; a matching tag alone
+cannot establish an echo or mark another participant's work handled.
 
 ### bounded-conversation-and-terminal-tombstones
 

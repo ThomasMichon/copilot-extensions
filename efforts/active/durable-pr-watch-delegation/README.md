@@ -11,6 +11,8 @@
   `delegated-source-with-preserved-custody` and
   `one-supported-workflow-in-consumer-guidance`
 - **Umbrella issue:** #6007
+- **Comment identity intent:** [Compact forge-comment provenance](../../../visions/harness-guidance/README.md#compact-forge-comment-provenance)
+- **Comment identity source:** #11128 (compact metadata and retry-stable comment/write identity)
 - **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment)
 
 ## Guiding Intent
@@ -41,6 +43,15 @@ native/fleet switch alone does not deliver this service intake model.
 | Author-publication implementation driver | Finite A0-A5 authorship contribution, integration, validation and PR stewardship | Bounded implementation claim #10383; existing broader owners retained |
 
 ## Coordination
+
+The [compact comment-identity extension](comment-identity.md) composes the
+existing AI-attribution profile and Worktrees source-identity owners with
+current publication, intent/receipt and observation custody. Issue-comment
+consumers may reuse the preparation contract without transferring issue
+lifecycle ownership here. Ordinary comment origin never refreshes PR
+ownership; existing source/resource, provider and credential claims remain.
+Review the portable contract before implementation and resolve concrete
+overlaps through normal reviewed contributions, not a new sign-off ceremony.
 
 The direct #2874 unchanged-cursor family keeps waiter and independent periodic-evaluator
 consumers distinct, including honest timeout and retry-ceiling escalation. Preserve
@@ -317,6 +328,13 @@ _Operator-required outcome; agent-recommended slices and validation._
   Protected original-readback proof commits merged in #10977; negotiated v6
   reads merged in #10979. This is the finite synthetic source exit, not native,
   live-provider, installed or full B3/A2 acceptance.
+- [ ] Review and land the [compact comment-identity contract](comment-identity.md)
+  before adding preparation, persistence or publisher behavior.
+- [ ] Deliver the contract's shared preparation, actual all-forge comment
+  consumer inventory, existing-owner correlation and separately qualified
+  adopter leaves. Keep AI-profile/privacy policy, minimal clutter, stable
+  comment/per-write identity and native proof distinct; a helper alone is
+  not full publication coverage.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -861,6 +879,11 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] Resolve the [comment-identity validation obligations](comment-identity.md#validation-obligations)
+  through the real owning preparation, publication, receipt and acquisition
+  boundaries, with explicit surface/provider coverage and evidence tiers.
+  Preserve every existing attention, native, installed and shadow gate.
 
 - [x] Qualify the finite B4 source contract through existing-owner storage,
   actual protected synthetic readback and negotiated CLI/client/Gateway/service
