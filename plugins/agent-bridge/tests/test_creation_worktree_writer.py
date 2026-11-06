@@ -468,10 +468,13 @@ def test_required_creation_writer_cli_rejects_remote_before_connect(monkeypatch,
     assert failure.value.code == 2
 
 
-def test_required_creation_writer_round_trips_through_actual_http_owner(writer_creation, monkeypatch):
+def test_required_creation_writer_round_trips_through_actual_http_owner(
+    writer_creation, monkeypatch, capsys,
+):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from agent_bridge import creation_writer_inspection as inspection
+    from agent_bridge import __main__ as core
     from agent_bridge.routes import health, sessions
 
     fixture = writer_creation
@@ -513,6 +516,17 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(writer_c
         observed = client.get_session(result["session_id"], worktree_writer=True)
         assert observed["worktree_writer_observation"]["worktree_writer"] == fixture.requirement.model_dump()
         assert observed["worktree_writer_observation"]["bridge_instance"] == instance
+        monkeypatch.setattr(core, "_get_client", lambda **_: client)
+        cli_args = core.build_parser().parse_args([
+            "status", result["session_id"], "--full", "--worktree-writer",
+        ])
+        cli_args.func(cli_args)
+        assert json.loads(capsys.readouterr().out) == observed
+        cli_args = core.build_parser().parse_args(["--json", "status"])
+        cli_args.func(cli_args)
+        health_info = json.loads(capsys.readouterr().out)
+        assert health_info["capabilities"]["retained_workspace_creation_writer_inspection"] == 1
+        assert health_info["worktree_record_writer"] == fixture.requirement.identity.model_dump()
         assert "worktree_writer_observation" not in client.get_session(result["session_id"])
         assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == original
         assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
