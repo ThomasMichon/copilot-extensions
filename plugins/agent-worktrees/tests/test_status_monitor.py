@@ -1414,6 +1414,59 @@ def test_native_mutation_rejects_non_native_and_batches_before_effects():
                 "nativeToolMutation", payload, policy=object(), segment_cache=object(),
             )
 
+@pytest.mark.parametrize("calls", [
+    None, {}, [], [None], [{"name": []}], [{"name": ""}],
+    [{"name": "edit"}, None],
+    [{"name": "edit"}, {"name": "powershell", "args": {"command": "git commit"}}],
+    [{"name": "edit"}, {"name": "view", "cwd": "other"}],
+    [{"name": "edit"}] * 129,
+])
+def test_native_batch_rejects_entire_unsupported_event_before_effects(calls):
+    from agent_worktrees.hook_ipc import HookUnavailable
+
+    with pytest.raises(HookUnavailable):
+        m._resident_hook_decision(
+            "nativeToolBatchMutation", {"toolCalls": calls},
+            policy=m._ResidentHookPolicy(m._load_hook_client_module()),
+            segment_cache=object(),
+        )
+
+
+@pytest.mark.parametrize("case", ["targets", "reads", "unknown", "overflow"])
+def test_native_batch_reuses_original_normalization_and_bounded_targets(tmp_path, case):
+    calls = [
+        {"name": "view", "args": {"path": "not-a-write"}},
+        {"name": "multi_edit", "args": {"edits": [{"path": "one"}, {"path": "two"}]}},
+        {"name": "apply_patch", "args": "*** Update File: two\n*** Move to: three\n"},
+        {"name": "edit", "args": '{"path":"three","target_file":"four"}'},
+    ]
+    expected = [str(tmp_path / name) for name in ("one", "two", "three", "four")]
+    if case == "reads":
+        calls = calls[:1]
+        expected = []
+    elif case == "unknown":
+        calls = [{"name": "edit", "args": {"path": ["not-a-path"]}}]
+        expected = [str(tmp_path)]
+    elif case == "overflow":
+        calls = [
+            {"name": "multi_edit", "args": {"files": [{"path": f"file-{i}"} for i in range(128)]}},
+            {"name": "edit", "args": {"path": "overflow"}},
+        ]
+        expected = ["all"]
+    invalidated = []
+    cache = types.SimpleNamespace(
+        invalidate=lambda path: invalidated.append(path),
+        invalidate_all=lambda: invalidated.append("all"),
+    )
+    assert m._resident_hook_decision(
+        "nativeToolBatchMutation", {
+            "cwd": str(tmp_path / "other"), "workingDirectory": str(tmp_path),
+            "toolCalls": calls,
+        },
+        policy=m._ResidentHookPolicy(m._load_hook_client_module()), segment_cache=cache,
+    ) == {}
+    assert invalidated == expected
+
 
 def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path, monkeypatch):
     registry = tmp_path / "repos.yaml"
@@ -5129,7 +5182,10 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     assert len(writes) == 2  # startup ownership stamp only; no loop renewal
 
 
-@pytest.mark.parametrize("kind", ["handoffWake", "nativeToolMutation", "native-unadmitted"])
+@pytest.mark.parametrize("kind", [
+    "handoffWake", "nativeToolMutation", "native-unadmitted",
+    "nativeToolBatchMutation", "batch-unadmitted", "batch-reads",
+])
 def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, monkeypatch, kind):
     """Wiring-level regression: a real ``handoffWake`` request, dialed through
     the actual loopback ``HookIpcServer`` (the same path ``hook_ipc.
@@ -5154,7 +5210,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
             return object()  # any non-None stub satisfies ready()'s check
 
         def _managed_session_admitted(self, payload):
-            return kind != "native-unadmitted"
+            return kind not in {"native-unadmitted", "batch-unadmitted"}
 
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
@@ -5217,15 +5273,25 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                     kind, {"worktree_id": "wt-1"}, lock_path=endpoint_lock,
                 ))
             else:
+                batch = kind in {"nativeToolBatchMutation", "batch-unadmitted", "batch-reads"}
+                payload = {"toolName": "edit", "cwd": str(tmp_path), "toolArgs": {"path": "one"}}
+                if batch:
+                    payload = {"cwd": str(tmp_path), "toolCalls": [{
+                        "name": "view" if kind == "batch-reads" else "edit",
+                        "args": {"path": "one"},
+                    }]}
                 request = {
-                    "version": 1, "token": self.token, "kind": "nativeToolMutation",
+                    "version": 1, "token": self.token,
+                    "kind": "nativeToolBatchMutation" if batch else "nativeToolMutation",
                     "hook_generation": self.generation, "deadline": time.time() + 1,
-                    "payload": {"toolName": "edit", "cwd": str(tmp_path), "toolArgs": {"path": "one"}},
+                    "payload": payload,
                 }
                 with socket.create_connection(self.server.server_address, timeout=1) as conn:
                     conn.sendall(json.dumps(request).encode() + b"\n")
                     dial_results.append(conn.recv(1) == b"")
-                assert self.has_recent_hook_demand() is (kind == "nativeToolMutation")
+                assert self.has_recent_hook_demand() is (
+                    kind not in {"native-unadmitted", "batch-unadmitted"}
+                )
             wake_at_reply.append((before, wake_event.is_set()))
 
     monkeypatch.setattr(hook_ipc, "HookIpcServer", _DialingServer)
@@ -5235,7 +5301,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     assert dial_results == [True], "the real wire round-trip must be accepted"
     assert len(bound) == 1
     # The loop may legitimately consume the event while draining after start().
-    assert wake_at_reply == [(False, kind != "native-unadmitted")], (
+    assert wake_at_reply == [(False, kind not in {"native-unadmitted", "batch-unadmitted", "batch-reads"})], (
         "a real handoffWake request through the actual HookIpcServer must "
         "set the real wake_event the sweep loop waits on, not just satisfy "
         "the _kind_wakes_sweep predicate in isolation"

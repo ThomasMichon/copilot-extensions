@@ -111,7 +111,22 @@ def test_send_only_read_demand_keeps_original_admission_and_expiry(api, case):
     "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
 ])
 def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, case):
+    _assert_native_mutation_boundary(api, case, "nativeToolMutation")
+
+
+@pytest.mark.parametrize("case", [
+    "current", "generation", "closed", "unavailable", "legacy",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+])
+def test_native_batch_mutation_uses_original_send_only_boundary(api, case):
+    _assert_native_mutation_boundary(api, case, "nativeToolBatchMutation")
+
+
+def _assert_native_mutation_boundary(api, case, kind):
     seen = []
+    payload = {"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}}
+    if kind == "nativeToolBatchMutation":
+        payload = {"toolCalls": [{"name": "multi_edit", "args": payload["toolArgs"]}]}
 
     def decide(*args):
         if case == "unavailable":
@@ -124,9 +139,9 @@ def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, 
     def change(request, server, handler):
         request.clear()
         request.update(
-            version=1, token="expected", kind="nativeToolMutation",
+            version=1, token="expected", kind=kind,
             hook_generation=api.owner.generation, deadline=101.0,
-            payload={"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}},
+            payload=payload,
         )
         api.owner._native_mutation_decide = decide
         server.decide = lambda *_a: pytest.fail("notification invoked response policy")
@@ -156,9 +171,7 @@ def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, 
     assert bool(seen) is (case == "current")
     assert api.owner.has_recent_hook_demand() is (case == "current")
     if seen:
-        assert seen[0][:2] == (
-            "nativeToolMutation", {"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}},
-        )
+        assert seen[0][:2] == (kind, payload)
 
 
 @pytest.mark.parametrize("case", [

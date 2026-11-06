@@ -4109,20 +4109,23 @@ class _ResidentHookPolicy:
 
     def mutation_targets(self, payload: dict) -> list[str] | None:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
-        if tool in _HOOK_WRITE_TOOLS:
-            args = payload.get("toolArgs") or payload.get("tool_input") or {}
-            cwd = _hook_payload_cwd(payload)
+        batch = "toolCalls" in payload
+        if batch or tool in _HOOK_WRITE_TOOLS:
+            from .hook_ipc import HookUnavailable
+
             forms = self._module("tool_call_forms.py")
             if forms is None:
+                if batch:
+                    raise HookUnavailable
                 return None
             try:
-                targets = forms.write_targets(tool, args)
-            except ValueError:
+                return forms.native_mutation_targets(
+                    payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload),
+                )
+            except ValueError as exc:
+                if batch:
+                    raise HookUnavailable from exc
                 return None
-            return [
-                path if os.path.isabs(path) else os.path.join(cwd, path)
-                for path in targets
-            ] or [cwd]
         if tool not in _HOOK_SHELL_TOOLS:
             return []
         args = payload.get("toolArgs") or payload.get("tool_input") or {}
@@ -4152,11 +4155,13 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind == "nativeToolMutation":
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
-        if (
-            not isinstance(tool, str) or tool.lower() not in _HOOK_WRITE_TOOLS
-            or "toolCalls" in payload
+        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
+            kind == "nativeToolMutation" and (
+                not isinstance(tool, str) or tool.lower() not in _HOOK_WRITE_TOOLS
+                or "toolCalls" in payload
+            )
         ):
             from .hook_ipc import HookUnavailable
 

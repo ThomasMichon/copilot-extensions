@@ -138,7 +138,8 @@ def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
         server.close()
 
 
-def test_native_mutation_wire_is_generation_bound_and_send_only():
+@pytest.mark.parametrize("kind", ["nativeToolMutation", "nativeToolBatchMutation"])
+def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
     calls = []
     server = HookIpcServer(
         lambda *args: pytest.fail("notification must not use response policy"),
@@ -147,10 +148,15 @@ def test_native_mutation_wire_is_generation_bound_and_send_only():
     server.start()
     try:
         assert hook_ipc.NATIVE_MUTATION_CAPABILITY in server.capabilities()
+        assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY in server.capabilities()
         request = {
-            "version": 1, "token": server.token, "kind": "nativeToolMutation",
+            "version": 1, "token": server.token, "kind": kind,
             "hook_generation": server.generation, "deadline": time.time() + 1,
-            "payload": {"toolName": "edit", "toolArgs": {"path": "one"}},
+            "payload": (
+                {"toolCalls": [{"name": "edit", "args": {"path": "one"}}]}
+                if kind == "nativeToolBatchMutation"
+                else {"toolName": "edit", "toolArgs": {"path": "one"}}
+            ),
         }
 
         def send(change=None, suffix=b"\n"):
@@ -174,10 +180,11 @@ def test_native_mutation_wire_is_generation_bound_and_send_only():
         server.open_admission()
         send()
         assert len(calls) == 1
-        assert calls[0][:2] == ("nativeToolMutation", request["payload"])
+        assert calls[0][:2] == (kind, request["payload"])
         assert server.has_recent_hook_demand()
         server._native_mutation_decide = None
         assert hook_ipc.NATIVE_MUTATION_CAPABILITY not in server.capabilities()
+        assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY not in server.capabilities()
         send()
         assert len(calls) == 1
     finally:
