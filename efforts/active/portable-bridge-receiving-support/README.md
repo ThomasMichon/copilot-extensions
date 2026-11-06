@@ -750,3 +750,30 @@ implementation. The exact support closure follows the consumer trace and tests.
   update, then qualify the actual installed account/owner callbacks and one
   existing receiving venue before the broader live checks. Source/runtime
   publication never grants deployment or guest-suite upgrade authority.
+
+### 2026-11-06 - Release blocked before native test collection
+
+- #10826 is verified merged after exact-head approval and required green CI.
+  Re-read this complete effort; all installed/native/external gates remain open.
+- Promotion run `42139267241` passed candidate construction, unit qualification
+  and artifact attestation, then refused the frozen source/base binding after
+  Main advanced. The existing #8660 records that occurrence; no stale candidate
+  was forced through.
+- The new required Windows Resume gate failed during environment preparation
+  in runs `42141026158` and `42142292967`, before test collection. The missing
+  evidence upload is secondary, not a failed Resume assertion.
+- Verified the exact second run's frozen bundle and reproduced preparation
+  failure from candidate `a70eb8ce02f9b0b35e6b382f336fd61989366b51`.
+  Captured UV diagnostics identify conflicting `agent-update-driver` URLs in
+  Manager's and Bridge's separate materialized library copies. Dev's shared
+  canonical library paths do not exercise this setup difference.
+- The preparation-only reproduction used local Python 3.13, not the hosted
+  Python 3.12. It ran no native assertions or daemon. The initial general
+  archive extraction was stopped; the selected setup closure was extracted
+  separately from the same immutable archive.
+- Supplied the exact diagnosis on #10823 and to the already-claimed #10830
+  investigation. That owner retains the correction; no competing runner,
+  installer-policy or controller change was made. Keep the native gate required.
+- #10812 remains merged but unreleased. Next: observe the existing owner's
+  correction and successful promotion, verify actual release bytes, then use
+  the authorized installation and original single-venue acceptance path.
