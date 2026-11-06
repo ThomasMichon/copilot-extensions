@@ -330,6 +330,27 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [registered-anchor and current-owner observation cohorts](anchor-and-owner-observation-cohorts.md)
+account for twenty complete qualified originals and two independent
+actual OPEN parent intakes: #7689 under #4173 and #7180 under #4619.
+Complete current bodies preserve incumbent scope, direct Plan/global
+Validation, exact record/anchor authority and every existing source/
+resource owner. Both originals stay OPEN pending normal planning review
+and separate disposition. Eighteen other contracts retain finite
+acceptance and actual holds; no new native/installed proof is inferred.
+The journal retains the 805-whole-open/1,017-audit observation and the
+still-Active canonical Plan/Validation and fixed 729 checkpoint.
+
+The journal records reviewed #11045 delivery, complete published
+target-to-delivery readback and separate #6752 NOT_PLANNED tracking
+retirement under OPEN #6394. All mechanical receipt/nudge requirements,
+actual source/publisher custody and the unresolved phase decision remain.
+Complete 09:20 PST scans measure 805 whole OPEN, 1,017 audited dispositions
+and 76 above 729. Three completed studies cover the measured next twenty
+qualified originals without widening source/author boundaries; their
+receiving decisions and any future dispositions remain separate.
+The canonical Plan/Validation and fixed checkpoint remain Active.
+
 The [target-to-delivery and reconcile study](bridge-target-and-reconcile-contracts.md)
 accounts for 24 more whole originals and actual OPEN #6394's complete
 #6752 target-diagnostic intake, preserving mechanical receipt/nudge
