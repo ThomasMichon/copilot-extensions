@@ -318,7 +318,7 @@ legacy lineage success alone grants no admission or cleanup authority.
 
 The existing `/health` response additionally advertises
 `capabilities.worktree_record_delegation: 1` and a `worktree_record_writer`
-object with `installation_root`. Observation and execution share the canonical
+object with `installation_root` and optional `runtime_generation`. Observation and execution share the canonical
 selection resolver. A validated same-cell or completed legacy runtime reports
 its selected root; unavailable/refused selection and the unattributable legacy
 PATH compatibility path report null. Ordinary health does not execute Worktrees,
@@ -331,13 +331,28 @@ Same-cell observations similarly retain the packaged validator code, but
 revalidate installation, namespace and governance receipts on every poll.
 Independently selected peer payload validators are not retained.
 
+For the completed legacy selection, `runtime_generation` reads the build UUID
+published by Worktrees candidate preparation in the exact selected version
+slot's `.runtime-bootstrap/runtime-generation`. Both physical `.venv`
+application environments and historical direct-slot environments are supported.
+Redirected directories, indirect/non-regular generation files, malformed or
+missing metadata and the mutable `dev` slot leave that generation unknown.
+Selection and metadata are rechecked around the observation; a change leaves
+both fields unknown. Root-wide deployment stamps and newer payload metadata
+are not consulted. The same-cell native launcher does not yet expose its
+resolved interpreter without launching a child, so its root remains observable
+but its build generation stays null rather than being guessed from that root.
+Older responses may omit the additive field entirely.
+
 This declaration covers coherent acquisition/lineage delegation, not support in
 the selected Worktrees build. An assembling owner must independently observe that
 executing writer's root, build generation and serializer contract. Bridge's
 existing `slot.pid`, `slot.role` and `slot.active.generation` identify the serving
 selection; only the active process is relevant, and its generation is the
 existing routing counter, not a new build UUID. A changed slot or delegated
-root invalidates that observation. Older receivers omit these additive fields;
+root or selected build invalidates that observation. A slot UUID describes the
+selected build, not a live executing response or a pinned future launch; the
+execution trampoline still resolves again when invoked. Older receivers omit these additive fields;
 they keep baseline health/acquisition behavior but cannot satisfy this optional
 qualification. No ordinary caller is activated by this provider expansion.
 

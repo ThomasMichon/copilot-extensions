@@ -53,6 +53,15 @@ This repairs execution selection; it adds no executing-build observation or
 cohort admission. Its unchanged dynamic launch prefix is still not an immutable
 build binding, and the health root alone cannot establish one.
 
+The installed candidate already publishes its build UUID inside the immutable
+slot, independently of root-wide deployment stamps. The next bounded source
+step observes that UUID for Bridge's legacy selection through the existing
+canonical resolver, with selection and metadata rechecks and no child process.
+The same-cell native launcher still has no child-free selected-interpreter
+observation, so that path remains unknown. Even a known selected-slot UUID is
+not the delegated process's live serializer response or a pinned future launch.
+Independent admission must retain both distinctions before ordinary integration.
+
 ## Selected admission requirements
 
 The assembling owner must identify the actual participating writers for the

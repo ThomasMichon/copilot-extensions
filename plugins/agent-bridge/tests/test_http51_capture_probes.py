@@ -172,7 +172,7 @@ def test_http51_capture_actual_observations(
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
     observed["worktree_record_delegation"] = health["capabilities"]["worktree_record_delegation"]
-    assert set(health["worktree_record_writer"]) == {"installation_root"}
+    assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)
     receipt = json.loads(capsys.readouterr().out)

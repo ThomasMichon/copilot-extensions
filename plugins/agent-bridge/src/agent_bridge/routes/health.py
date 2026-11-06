@@ -27,7 +27,7 @@ from ..live_keyed_receipt import CAPABILITY as LIVE_KEYED_RECEIPT_CAPABILITY
 from ..live_exact_notify import CAPABILITY as LIVE_EXACT_NOTIFY_CAPABILITY
 from ..session_observation_contract import CURRENT_REQUESTS, HISTORY, OBSERVATIONS, TOOL_STATISTICS
 from ..owner_membership import CAPABILITY as OWNER_MEMBERSHIP
-from ..session_lifecycle_cli import _agent_worktrees_selection
+from ..worktree_writer_observation import observe as observe_worktree_writer
 from .._peer_launch import ContextRefused
 
 router = APIRouter()
@@ -83,12 +83,10 @@ async def health(request: Request) -> dict:
         self_retire_status=getattr(request.app.state, "self_retire_status", None),
     )
     try:
-        selection = await asyncio.to_thread(_agent_worktrees_selection)
+        writer = await asyncio.to_thread(observe_worktree_writer)
     except (ContextRefused, OSError, ValueError, ImportError):
-        selection = None
-    body["worktree_record_writer"] = {
-        "installation_root": str(selection[1]) if selection and selection[1] else None,
-    }
+        writer = {"installation_root": None, "runtime_generation": None}
+    body["worktree_record_writer"] = writer
     readiness_error = getattr(request.app.state, "readiness_error", None)
     if readiness_error:
         body["readiness_error"] = readiness_error
