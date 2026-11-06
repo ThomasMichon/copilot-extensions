@@ -68,35 +68,6 @@ else:
     sys.exit(main.main(argv))
 """
 
-MIXED_BOOTSTRAP = BOOTSTRAP.replace(
-    "status_monitor_runtime._status_monitor_enabled = lambda: False",
-    r"""
-import atexit, os
-from agent_worktrees import locks, tracking_write
-os.environ.pop("PYTEST_CURRENT_TEST", None)
-assert status_monitor_runtime._status_monitor_enabled()
-def resident(kind, payload):
-    with (state / "resident-calls").open("a") as stream:
-        stream.write(json.dumps(payload) + "\n")
-    return {"error": "lifecycle", "message": "unqualified resident received session write"}
-server = tracking_write.start_server(resident)
-server.start()
-atexit.register(server.close)
-rv = server.rendezvous()
-lock = state / "status-monitor.lock"
-lock.write_text(json.dumps({
-    "pid": os.getpid(), "start_time": locks.process_start_time(os.getpid()),
-    "runtime_generation": "b" * 32,
-    "tracking_write_transport": rv["transport"],
-    "tracking_write_endpoint": rv["endpoint"],
-    "tracking_write_token": rv["token"],
-    "tracking_write_verbs": ["session_register", "session_link_succession"],
-    "tracking_write_verb_versions": {"session_register": 3, "session_link_succession": 2},
-}))
-status_monitor_runtime._monitor_lock_path = lambda: lock
-""",
-)
-
 
 @pytest.fixture
 def selected_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -177,13 +148,13 @@ def test_retained_session_receiver_refuses_changed_scope_without_resident_fallba
 ):
     root = Path(__file__).resolve().parents[3]
     state = tmp_path / "authority"
+    state.mkdir()
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
-    bootstrap = MIXED_BOOTSTRAP.replace(
-        'project = state / "project"',
-        "relationship.writer_identity = lambda: " + repr(identity) + "\n"
-        'project = state / "project"',
-    )
-    prefix = [sys.executable, "-c", bootstrap, str(root), str(state)]
+    (state / "writer-identity.json").write_text(json.dumps(identity), encoding="utf-8")
+    prefix = [
+        sys.executable, str(Path(__file__).parent / "fixtures/worktree_record_owner.py"),
+        str(root), str(state), "example", "host",
+    ]
     snapshot(prefix, "protect")
     before = snapshot(prefix)
     scope = {

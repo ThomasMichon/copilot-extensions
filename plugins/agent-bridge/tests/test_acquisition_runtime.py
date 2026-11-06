@@ -788,7 +788,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     import sys
     from agent_bridge import acquisition_worktree_writer as writer, session_lifecycle_cli as lifecycle
     from agent_bridge import worktree_lineage
-    from test_worktree_lineage_authority import MIXED_BOOTSTRAP, snapshot
+    from test_worktree_lineage_authority import snapshot
     from pathlib import Path
 
     state = tmp_path / "authority"
@@ -797,22 +797,10 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     identity_file = state / "writer-identity.json"
     identity_file.write_text(json.dumps(identity), encoding="utf-8")
-    bootstrap = MIXED_BOOTSTRAP.replace('"example"', '"test-project"').replace(
-        "local/example/", "local/test-project/",
-    ).replace("host", "worktree-a").replace(
-        "cfg.tracking_dir = lambda:", "cfg.tracking_dir = lambda *a, **k:",
-    )
-    bootstrap = bootstrap.replace(
-        'project = state / "project"',
-        "relationship.writer_identity = lambda: json.loads((state / 'writer-identity.json').read_text())\n"
-        "sys.excepthook = lambda kind, error, tb: print(kind.__name__ + ': ' + str(error), file=sys.stderr)\n"
-        "(state / 'calls').open('a').write(json.dumps(argv) + '\\n')\n"
-        'project = state / "project"\n'
-        "project.mkdir(exist_ok=True)\n"
-        "(project / 'config.yaml').write_text('machine: local\\nplatform: linux\\nrepos:\\n"
-        "  test-project:\\n    anchor: ' + json.dumps(str(state)) + '\\n')",
-    )
-    prefix = [sys.executable, "-c", bootstrap, str(root), str(state)]
+    prefix = [
+        sys.executable, str(Path(__file__).parent / "fixtures/worktree_record_owner.py"),
+        str(root), str(state), "test-project", "worktree-a",
+    ]
     protected = snapshot(prefix, "protect")
     before = snapshot(prefix)
     checkout = state / "trees" / "worktree-a"
