@@ -591,3 +591,9 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   source/process controls, not installed immutable-slot or carrier qualification.
   Fresh exact-head CI and a passing review still gate this correction; no
   rollout, capture, carrier publication or activation is authorized by it.
+- The fresh review confirmed both handoff corrections and found an exit-contract
+  mismatch: a native invalid/unavailable request was classified as a preservation
+  refusal. The CLI now returns `2` for native errors or unknown write outcomes,
+  retaining `1` for known refusals. Three focused actual-producer CLI controls
+  passed for missing retained storage, custom-sink preservation and an unknown
+  post-write acknowledgement; the last still performs exactly one write.

@@ -131,6 +131,8 @@ def run_telemetry(args) -> int:
             local=args.local_overrides, apply=args.apply, expected=args.expect,
         )
         print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        if result["status"] in {"error", "unknown"} or result.get("native", {}).get("status") == "error":
+            return 2
         return 0 if result["eligible"] else 1
     except (
         preferences.PreferenceError, ConfigurationError, ContextRefused,

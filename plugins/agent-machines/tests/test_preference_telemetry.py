@@ -185,6 +185,28 @@ def test_normal_cli_reaches_actual_producer_without_activation(configured, capsy
     assert list((directory / "retained").iterdir()) == []
 
 
+@pytest.mark.parametrize("failure,exit_code,status", [
+    ("missing-retained", 2, "error"), ("custom-sink", 1, "refused"),
+])
+def test_cli_distinguishes_invalid_request_from_preservation_refusal(
+    configured, capsys, failure, exit_code, status,
+):
+    state, target, directory = configured
+    if failure == "missing-retained":
+        (directory / "retained").rmdir()
+    else:
+        target.write_text('{"sink":"custom.module:factory"}', encoding="utf-8")
+    before = target.read_bytes() if target.exists() else None
+    assert cli.main([
+        "preferences", "telemetry", "--state-dir", str(state), "--producer", "agent-dispatch",
+        "--directory", str(directory),
+    ]) == exit_code
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == status and not result["configuration_applied"]
+    assert (target.read_bytes() if target.exists() else None) == before
+    assert not target.with_suffix(".json.lock").exists()
+
+
 @pytest.mark.parametrize("changed", ["policy.json", "accepted.json", "local.json"])
 def test_parent_check_cannot_authorize_changed_inputs_at_producer(configured, tmp_path, monkeypatch, changed):
     state, target, directory = configured
@@ -282,7 +304,7 @@ def test_malformed_native_preview_is_not_an_authorization(configured, monkeypatc
     assert not target.exists() and not target.with_suffix(".json.lock").exists()
 
 
-def test_unknown_native_acknowledgement_is_not_reported_as_untouched(configured, monkeypatch):
+def test_unknown_native_acknowledgement_is_not_reported_as_untouched(configured, monkeypatch, capsys):
     state, target, directory = configured
     arguments = dict(producer="agent-dispatch", directory=directory)
     preview = adapter.adopt(state, **arguments)
@@ -297,7 +319,11 @@ def test_unknown_native_acknowledgement_is_not_reported_as_untouched(configured,
         return response
 
     monkeypatch.setattr(adapter, "_call", call)
-    result = adapter.adopt(state, apply=True, expected=preview["preview_token"], **arguments)
+    assert cli.main([
+        "preferences", "telemetry", "--state-dir", str(state), "--producer", "agent-dispatch",
+        "--directory", str(directory), "--apply", "--expect", preview["preview_token"],
+    ]) == 2
+    result = json.loads(capsys.readouterr().out)
     assert result["status"] == "unknown" and result["configuration_applied"] is None
     assert len(applies) == 1
     assert json.loads(target.read_bytes())["retained_spool"]["directory"] == str(directory)

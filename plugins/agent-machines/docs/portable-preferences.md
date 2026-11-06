@@ -349,6 +349,7 @@ invented. Per-producer results are independent, not a fleet transaction.
 Output uses `agent-machines.preferences.telemetry`, version `1`. Exit `0` means
 a successful preview, configuration or no-contribution result; `1` means a
 reported native refusal; `2` means invalid/unavailable input or confirmation.
+An unknown native write outcome also exits `2`, never success or a known refusal.
 `configuration_applied`, `changed`, `activation: not-requested` and
 `running_capture: not-observed` are separate facts. A failed native apply with
 an unknown write outcome retains `configuration_applied: null`, not proof of no
