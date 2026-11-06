@@ -59,6 +59,8 @@ health. It is **per-project** (run it through each project's binstub, e.g.
    releases claims, stops processes, or declares an unavailable process
    inspection safe. Local process probes exclude other execution spaces;
    unresolved execution identity is reported rather than probed as local.
+   Externally owned (`checkout_managed: false`) checkouts retain ownership
+   checks but skip process-use probes, matching tracking-only retirement.
 
 ## Procedure
 

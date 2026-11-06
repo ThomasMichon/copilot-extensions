@@ -98,6 +98,7 @@ class TestRetirementHolds:
         return SimpleNamespace(
             worktree_id=path.name, worktree_path=str(path), status=status, prs=[],
             execution_machine="local", platform=health.cfg.detect_platform(),
+            checkout_managed=True,
             sessions=[SessionEntry("saved-session", "2026-01-01T00:00:00")],
             resources=[ResourceClaim(
                 kind="session", ref="host/project/worktree#saved-session",
@@ -161,6 +162,18 @@ class TestRetirementHolds:
         report = health.audit_retirement_holds([record])
         assert report["found"] == 0
         assert report["other_execution_spaces"] == 1
+
+    def test_unmanaged_checkout_keeps_only_ownership_hold(self, tmp_path, monkeypatch):
+        record = self._record(tmp_path)
+        record.checkout_managed = False
+        def unexpected(root):
+            raise AssertionError("externally owned checkout was probed")
+        monkeypatch.setattr("agent_worktrees.procs.checkout_retirement_blocker", unexpected)
+        item = health.audit_retirement_holds([record])["items"][0]
+        assert item["ownership"]["bucket"] == "held-claims"
+        assert item["checkout"] is None
+        record.resources[0].state = "released"
+        assert health.audit_retirement_holds([record])["found"] == 0
 
 
 # --------------------------------------------------------------------------- #

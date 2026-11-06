@@ -81,7 +81,9 @@ def audit_retirement_holds(records: list[tracking.WorktreeRecord]) -> dict:
         ownership = retirement_safety.retirement_blocker(record)
         checkout = None
         local = False
-        if record.platform != cfg.detect_platform():
+        if not record.checkout_managed:
+            pass
+        elif record.platform != cfg.detect_platform():
             other_spaces += 1
         else:
             try:
