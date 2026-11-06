@@ -368,6 +368,13 @@ retains the operator's wording.
   intent; a maintenance hold keeps installed tasks runnable but quiescent.
   The manual program wipe is not supported-uninstaller conformance evidence.
 - [ ] Verify containing normal Main release and exact released behavior.
+  - [x] Verify the containing #11008 release through normal promotion #11033:
+    Main `cd7e8658ff0bc7334a807880de2c688f7c220f01`, admitted Dev
+    `101e0713c081f4100e6a5a8c7fac446b6bb0556a`, immutable candidate
+    `591ab070343f4a0893102922167d7be53fb69705` and Manager 0.6.317-dev1.
+    All eight selected implementation/test blobs match the reviewed repair.
+    The sole shared TESTING.md delta describes unrelated HTTP-52 controls;
+    admitted source and artifact evidence is published. No rollout is claimed.
   - [x] Verify the containing #10559 release through normal promotion #11007:
     Main `0dbbdd374e1af0b6443c84cead45102333855da3`, admitted Dev
     `2161ab2b11723828c83ad107d8034463774c9870`, Worktrees 1.24.506-dev1,
