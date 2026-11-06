@@ -411,6 +411,10 @@ def cmd_doctor(args) -> int:
     stale = []
     stale_fixed = 0
     stale_active, stale_active_fixed = [], 0
+    retirement_holds = {
+        "checked": 0, "found": 0, "report_only": True,
+        "other_execution_spaces": 0, "items": [],
+    }
     gc_result = {"count": 0, "removed_dirs": 0, "removed_rows": 0, "ids": []}
     misaligned = []
     orphaned = []
@@ -472,6 +476,7 @@ def cmd_doctor(args) -> int:
             )
 
         records = tracking.list_records(tracking_dir)
+        retirement_holds = health.audit_retirement_holds(records)
 
         for record in health.find_stale_head_caches(records):
             stale_heads.append(record.worktree_id)
@@ -566,6 +571,7 @@ def cmd_doctor(args) -> int:
         },
         "stale_active": {"found": len(stale_active), "fixed": stale_active_fixed,
                          "items": [f.as_dict() for f in stale_active]},
+        "retirement_holds": retirement_holds,
         "empty_sessions": gc_result,
         "misaligned": {"count": len(misaligned), "worktrees": misaligned},
         "orphaned_handoffs": {
@@ -722,6 +728,7 @@ def _render_doctor_report(
         print(f"  {chk} No active records disagree with their real state")
 
     doctor_render.render_daemon_health_report(report.get("daemon_health") or {})
+    doctor_render.render_retirement_holds(report.get("retirement_holds"))
 
     empty_sessions = report["empty_sessions"]
     if empty_sessions["count"]:

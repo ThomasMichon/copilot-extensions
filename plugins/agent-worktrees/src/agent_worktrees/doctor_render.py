@@ -128,3 +128,28 @@ def render_dropin_registry_report(label: str, report: dict) -> None:
         print(f"      - {finding.get('entry', '?')}: {finding.get('reason', 'unknown')}{target}")
         if finding.get("remedy"):
             print(f"        -> {finding['remedy']}")
+
+
+def render_retirement_holds(report: dict | None) -> None:
+    """Display independent ownership and process-use holds without repair authority."""
+    if report is None:
+        return
+    if report.get("other_execution_spaces"):
+        print(
+            "  \u2022 Retirement checkout probes skipped for other execution spaces: "
+            f"{report['other_execution_spaces']}"
+        )
+    items = report["items"]
+    if not items:
+        print("  \u2713 No terminal worktree retirement holds detected")
+        return
+    print(f"  ! Retirement holds (report-only): {len(items)} terminal worktree(s)")
+    for item in items:
+        print(f"      - {item['worktree_id']}")
+        if item["ownership"] is not None:
+            print(f"        ownership: {item['ownership']['reason']}")
+            print(f"        -> inspect claims for {item['worktree_id']}; verify each resource with its owner")
+        if item["checkout"] is not None:
+            print(f"        checkout: {item['checkout']}")
+            print("        -> settle process use with its owner before retrying cleanup")
+    print("      These holds remain protected; --fix does not release claims or stop processes.")
