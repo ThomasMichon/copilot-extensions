@@ -1069,6 +1069,86 @@ callback an implicit credential store.
 - Re-read the complete current Plan and Validation Plan. Keep the parent Active
   and preserve every independent source/resource, provider and rollout gate.
 
+### 2026-11-06 - Repair bounded native acceptance prerequisites
+
+- #10927's Linux/Windows baseline failure came from the concurrency fixture's
+  snapshot hook dropping the production poller's `fetch_revision` keyword.
+  Forwarding the keyword preserves revision fencing and the original held-work,
+  notification, writer-transfer and timeout assertions. The complete isolated
+  race now passes.
+- Shared ZDD now exposes Darwin birth tokens, but the governed owner still
+  supports Windows/Linux decimal tokens. Unsupported formats now refuse at
+  controller/instance capture, before journal or selection publication, rather
+  than persisting evidence its own schema rejects. The native macOS test retains
+  this governed refusal; it no longer assumes shared Darwin exit APIs are absent.
+- Isolated source controls passed: three process tests with one macOS-only skip,
+  plus five read-only failure-evidence controls. Touched Python lint and the
+  thirteen-plugin installation contract passed. No native OS-account, installed
+  or fleet test was run locally.
+- Windows shipped-cell startup followed by native-identity refusal remains
+  unresolved. A narrowed disposable direct-start experiment failed before
+  publishing child custody, not at that hosted boundary, and is not shipped or
+  counted as acceptance. The actual shipped-cell failure now records bounded,
+  read-only native-birth comparison and original-exit observations separately,
+  retaining unknown/refused evidence without control, retry or cleanup bypass.
+- Fresh hosted qualification needs a new exact-source approval; both earlier
+  one-run grants are consumed. Keep #10927, #9277 and every original installed,
+  operational, resource and parent completion obligation open.
+
+### 2026-11-06 - Confirm the exact candidate checker budget
+
+- Normal promotion `42174892203` produced release #10919 at Main
+  `b17ff8924cd88e2249441f99614ae78e8a5b26d1`; its checker source exactly
+  matches #10909. That producing run's admitted candidate typecheck passed
+  in 127 seconds under the unchanged six-minute limit, and the exact-candidate
+  merge succeeded. #10895 is closed on that evidence, not on a run's creation
+  timestamp, source-only timing or a manual retry.
+- This finite source/release result does not qualify every future workload,
+  authorize rollout or close the installed failures in #10927, the original
+  Dispatch reproduction in #9277, or the parent effort.
+
+### 2026-11-06 - Retain the corrected hosted installed-contract result
+
+- One separately authorized `watch_owner` run, `42178491630`, exercised released
+  `4a3d3e28799c17f7fe16b2af3dfbf34571060e88`. All 15 selected disposable jobs
+  reached pytest: 11 passed and four failed. The earlier preparation blocker
+  is cleared for this PR-owner/Fleet cohort, not the original Dispatch
+  reproduction in #9277 or the complete installed contract.
+- Linux normal upgrade, shipped cells, peer roundtrip, both lease-only refusal
+  cases and controller-death recovery passed. Windows normal upgrade, peer
+  roundtrip, both lease-only refusal cases and controller-death recovery passed.
+- #10927 retains the failed Linux/Windows initial-baseline concurrency waits,
+  unhandled macOS controller-identity refusal, and Windows first-cell health
+  native-identity failure. The logs do not establish their root causes.
+  Keep the existing identity checks, timeout bounds and cleanup custody;
+  passing setup or eleven cells is not complete installed acceptance.
+- The result and provider logs are retained. The exact temporary qualification
+  tag was deleted only after a fresh matching-SHA check; readback confirmed
+  absence. The one-run approval is consumed, with no automatic repeat or
+  local/fleet/shared-service effects. Continue the bounded source repair,
+  retaining all parent Plan, Validation, Coordination and resource holds.
+
+### 2026-11-06 - Reduce checker repetition and retain installed acceptance
+
+- #10909 merged at `20618b0826b4d321e3e7d46ce073772c488e1802`,
+  after current-head Copilot approval with no findings and green required CI
+  `42173423874`. Ordinary MyPy dependency caches are shared without dropping
+  projects, matrix cells, source verification or cache-disabled scopes.
+  The source CI admitted typecheck passed in 116 seconds; exact-candidate
+  timing remains open under #10895.
+- All 40 admitted projects passed their declared matrices across two bounded
+  Windows-host runs, alongside 25 focused controls and actual-MyPy cache
+  invalidation coverage. This is not a single-run six-minute Windows pass or
+  an installed-contract result.
+- Normal promotion `42167730047` completed successfully. Released Main
+  `4a3d3e28799c17f7fe16b2af3dfbf34571060e88` contains the exact #10861
+  test-preparation helper. The earlier one-run hosted approval was consumed;
+  a corrected pinned qualification repeat still needs separate authorization.
+- The complete current Plan, Validation and Coordination were read back.
+  No operational, credential, service/fleet or resource row closes from this
+  tooling optimization. Keep #6007, #9277 and the retained installed exit open;
+  no runtime rollout or owner transfer follows.
+
 ### 2026-11-06 - Land the released-checkout test-preparation repair
 
 - #10861 merged at `0c269795980dfd898dd0f1a04142ae4e63f7b767`, after

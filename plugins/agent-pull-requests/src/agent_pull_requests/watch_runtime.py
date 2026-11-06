@@ -167,6 +167,17 @@ class WatchRuntime:
         return runtime
 
 
+def native_start_time(pid: int) -> str | None:
+    """Return only birth tokens supported by the governed owner contract."""
+    token = diagnostics.process_start_time(pid)
+    if (
+        not isinstance(token, str) or not 0 < len(token) <= 64
+        or not token.isascii() or not token.isdecimal()
+    ):
+        return None
+    return token
+
+
 @dataclass(frozen=True)
 class WatchInstance:
     """Expected identity obtained from an attributable launch or owner journal.

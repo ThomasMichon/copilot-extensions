@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse unsupported governed-owner birth tokens before publication and repair concurrency qualification forwarding.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

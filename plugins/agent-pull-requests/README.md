@@ -658,9 +658,11 @@ including a private reserved launch that never reached ordinary binding.
 Denied, unknown or unsupported native evidence never means exit, and policy-off
 observation still cannot resume a writer or complete the transaction.
 Native governed-owner identity and exit references currently support Windows
-and Linux. On macOS, unavailable native birth evidence refuses governed startup,
-and unsupported exit evidence refuses cleanup/recovery rather than guessing from
-a PID or switching to legacy state. An absent-owner stop remains bounded;
+and Linux. Other native birth-token formats, including shared ZDD's Darwin
+tokens, refuse governed startup before journal or selection publication.
+Unavailable exit evidence refuses cleanup/recovery rather than guessing from
+a PID or switching to legacy state. Shared-library Darwin exit support does not
+by itself enable governed macOS owners. An absent-owner stop remains bounded;
 ordinary no-context legacy commands retain their existing behavior.
 Governed `restart --json` retains the legacy response shape:
 `{"restarted": true, "was_running": <boolean>}`. The incumbent flag comes from

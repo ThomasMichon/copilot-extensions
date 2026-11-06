@@ -16,11 +16,9 @@ from pathlib import Path
 from types import ModuleType
 from uuid import uuid4
 
-from zdd import diagnostics
-
 from . import _installation_context as api
 from .watch_installation import PLUGIN_ID, WatchInstallation
-from .watch_runtime import WatchInstance, WatchRuntime
+from .watch_runtime import WatchInstance, WatchRuntime, native_start_time
 
 _peer_launchers: dict[Path, ModuleType] = {}
 _peer_launcher_lock = threading.Lock()
@@ -233,7 +231,7 @@ class WatchInvocation:
     def instance(self, *, instance_id: str | None = None) -> WatchInstance:
         self.require_current()
         pid = os.getpid()
-        birth = diagnostics.process_start_time(pid)
+        birth = native_start_time(pid)
         if birth is None:
             raise ProcessLookupError("watch running process lacks native birth evidence")
         return WatchInstance(
