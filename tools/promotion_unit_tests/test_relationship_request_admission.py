@@ -110,7 +110,48 @@ def boundary(monkeypatch):
     return SimpleNamespace(
         writer=make(), make=make, request=request, workspace=workspace, identity=identity, calls=calls,
         admitted=admitted, Refused=Refused, module=owner_module, monkeypatch=monkeypatch,
+        relationships=relationships,
     )
+
+
+@pytest.mark.parametrize(
+    "change", [None, "queue", "authority", "assignment", "request", "typed-generation", "missing"],
+)
+def test_original_queue_admission_uses_its_own_exact_request_snapshot(boundary, change):
+    b = boundary
+    snapshot = {
+        "queue_identity": b.request["recovery"]["queue_identity"],
+        "assignment": {"event_id": 7, "worker_id": b.workspace.worker_id},
+        "relationship": copy.deepcopy(b.request),
+    }
+    queue = b.relationships.QueueTaskRelationshipsMixin()
+    queue._relationship_authority = "local"
+    if change == "queue":
+        snapshot["queue_identity"] = "d" * 32
+    elif change == "authority":
+        queue._relationship_authority = "central"
+    elif change == "assignment":
+        snapshot["assignment"]["worker_id"] = "other/workspace"
+    elif change == "request":
+        snapshot["relationship"]["reservation_key"] = "replacement"
+    elif change == "typed-generation":
+        snapshot["relationship"]["generation"] = True
+    elif change == "missing":
+        snapshot = None
+    reads = []
+
+    def read(owner, task_id, *, assignment_event_id):
+        reads.append((owner, task_id, assignment_event_id))
+        return snapshot
+
+    b.monkeypatch.setattr(sys.modules[f"{PACKAGE}.task_obligations"], "read_snapshot", read, raising=False)
+    if change is None:
+        assert queue._admit_original_relationship_request(b.request) == snapshot
+    else:
+        with pytest.raises(b.Refused, match="original queue"):
+            queue._admit_original_relationship_request(b.request)
+    assert reads == [(queue, b.request["task_id"], 7)]
+    assert b.calls == []
 
 
 def test_bound_snapshot_isolated_from_caller_and_admission_mutation(boundary):

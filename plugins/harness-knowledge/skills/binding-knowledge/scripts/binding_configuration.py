@@ -68,6 +68,9 @@ def apply(owner: Any, command: str, harness: str, knowledge: str, token: str) ->
     def revalidate() -> None:
         if not hmac.compare_digest(token, preview(owner, command, harness, knowledge)["token"]):
             raise RuntimeError("binding preview changed; refresh and preview again")
+        precondition = getattr(owner, "_NATIVE_BINDING_PRECONDITION", None)
+        if precondition is not None:
+            precondition()
 
     selected = _selection(owner, command, harness, knowledge)
     if not hmac.compare_digest(token, _digest(selected)):

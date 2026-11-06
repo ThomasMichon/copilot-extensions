@@ -3739,7 +3739,7 @@ def test_knowledge_acquisition_original_gate_outcomes(
     expected = ScanAuthority.INDETERMINATE if mode == "invalid-binding" else ScanAuthority.COMPLETE
     assert owned[-1].authority is expected
     if mode == "invalid-binding":
-        assert any(f.detail == "AttributeError" for f in report.findings)
+        assert any(f.detail == "KnowledgeBindingError" for f in report.findings)
 
 
 @pytest.mark.parametrize("mode", ["populated", "malformed", "missing", "denied"])

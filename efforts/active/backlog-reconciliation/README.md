@@ -331,6 +331,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11032 merge, complete canonical startup-root and
+#3303 receiving readback, then separate `NOT_PLANNED` retirement of
+#3789/#3942/#4097. All whole source contracts, old61 check states, new eight
+unchecked rows, original20/20 gate and actual custodians remain. Complete
+08:09 PST scans measure812 whole OPEN,1010 effective audited dispositions
+and83 above729. The campaign and startup effort remain Active; planning
+intake is not implementation, native/installed proof or resource release.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records reviewed #11029 delivery and a proposed WHOLE launch-readiness family
 under existing OPEN #3303 and its Active canonical startup effort. Complete
 #3789 read trust AND runtime/activation reverse join, #3942's original CWD

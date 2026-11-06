@@ -25,8 +25,6 @@ import importlib.util
 import json
 import os
 import re
-import shlex
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -85,6 +83,13 @@ class _GitModule(Protocol):
     default_branch: Callable[[str], str]
 
 
+class _CommandsModule(Protocol):
+    command: Callable[[str, list[str]], list[str]]
+    run: Callable[..., subprocess.CompletedProcess[str] | None]
+    registration_argv: Callable[..., list[str]]
+    render_command: Callable[[list[str]], str]
+
+
 MANAGED_MARKER = "<!-- managed by harness-knowledge -->"
 
 _yaml_spec = importlib.util.spec_from_file_location(
@@ -107,6 +112,14 @@ if _git_spec is None or _git_spec.loader is None:
     raise ImportError("Cannot load the binding Git module")
 _binding_git = cast(_GitModule, importlib.util.module_from_spec(_git_spec))
 _git_spec.loader.exec_module(cast(Any, _binding_git))
+
+_commands_spec = importlib.util.spec_from_file_location(
+    "binding_commands", Path(__file__).with_name("binding_commands.py")
+)
+if _commands_spec is None or _commands_spec.loader is None:
+    raise ImportError("Cannot load the binding command module")
+_binding_commands = cast(_CommandsModule, importlib.util.module_from_spec(_commands_spec))
+_commands_spec.loader.exec_module(cast(Any, _binding_commands))
 
 
 def knowledge_origin(knowledge_path: str) -> str:
@@ -187,23 +200,10 @@ def _run_agent_worktrees(
     cwd: str = "",
     noninteractive: bool = False,
 ) -> subprocess.CompletedProcess[str] | None:
-    if not agent_worktrees_path:
-        return None
-    command = _agent_worktrees_command(agent_worktrees_path, args)
-    if not command:
-        return None
-    try:
-        return subprocess.run(
-            command,
-            cwd=cwd or None,
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL if noninteractive else None,
-            timeout=120,
-            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    return _binding_commands.run(
+        agent_worktrees_path, args, cwd=cwd, noninteractive=noninteractive,
+        reader=globals().get("_NATIVE_BINDING_READ_RUNNER"), command_builder=_agent_worktrees_command,
+    )
 
 
 def _same_path(left: str, right: str) -> bool:
@@ -222,61 +222,9 @@ def _current_platform_key() -> str:
     return "linux"
 
 
-def _registration_argv(
-    knowledge: str,
-    knowledge_path: str,
-    *,
-    remote: str,
-    default_branch: str,
-    account: str,
-    repo_class: str = "knowledge",
-) -> list[str]:
-    argv = [
-        "repos",
-        "add",
-        knowledge,
-        knowledge_path,
-        "--class",
-        repo_class,
-    ]
-    if remote:
-        argv.extend(["--remote", remote])
-    if default_branch:
-        argv.extend(["--default-branch", default_branch])
-    if account:
-        argv.extend(["--account", account])
-    return argv
-
-
-def _agent_worktrees_command(
-    agent_worktrees_path: str,
-    args: list[str],
-) -> list[str]:
-    if (
-        os.name == "nt"
-        and Path(agent_worktrees_path).suffix.casefold() == ".ps1"
-    ):
-        host = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
-        if not host:
-            return []
-        return [
-            host,
-            "-NoProfile",
-            "-NoLogo",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            agent_worktrees_path,
-            *args,
-        ]
-    return [agent_worktrees_path, *args]
-
-
-def _render_command(command: list[str]) -> str:
-    if os.name == "nt":
-        quoted = ["'" + value.replace("'", "''") + "'" for value in command]
-        return "& " + " ".join(quoted)
-    return shlex.join(command)
+_registration_argv = _binding_commands.registration_argv
+_agent_worktrees_command = _binding_commands.command
+_render_command = _binding_commands.render_command
 
 
 def _inspect_github_account(
@@ -918,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
             "version": 1, "registration_classes": ["knowledge", "worktree"],
             "preserves_registration_class": True, "control_plane_pair": True,
             "existing_binding_configuration": 2,
+            "portable_binding_precondition": 1,
         }))
         return 0
     if not args.control_plane and not (args.harness and args.knowledge):

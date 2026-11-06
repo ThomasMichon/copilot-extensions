@@ -1218,6 +1218,7 @@ def _knowledge_owner(api, monkeypatch):
     api.load("runtime_paths")
     api.load("machine_registry_acquisition")
     owner = api.load("config")
+    api.load("config_sources")
     launch = Path("synthetic-launch")
     knowledge = Path("synthetic-knowledge")
     launch_file = launch / owner.CANONICAL_INREPO_CONFIG_DIR / "config.yaml"
@@ -1322,7 +1323,7 @@ def test_knowledge_preference_owner_gate_decisions(api, monkeypatch, mode):
     )
     if mode == "invalid-binding":
         assert [(f.reason, f.detail) for f in owned[0].findings] == [
-            ("knowledge-preferences-failed", "AttributeError"),
+            ("knowledge-preferences-failed", "KnowledgeBindingError"),
         ]
     assert api.config.current_observations() is None
 

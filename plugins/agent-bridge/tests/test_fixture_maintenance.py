@@ -147,6 +147,23 @@ def test_capture_git_show_reads_exact_object_under_long_checkout(batch_evidence,
         evidence.git(root, "show", commit + ":missing.json")
 
 
+def test_http52_inventory_uses_captured_owner_tree_not_future_checkout(batch_evidence):
+    evidence = importlib.import_module("bridge_http52_evidence")
+    retained = importlib.import_module("bridge_http_retained_evidence")
+    worktrees = "plugins/agent-worktrees/src/agent_worktrees/"
+    codespaces = "plugins/agent-codespaces/src/agent_codespaces/"
+    fixed = "plugins/agent-bridge/tests/fixture.json"
+    inventory = retained.captured_inventory(
+        evidence.SPEC,
+        {fixed, worktrees + "future.py", codespaces + "future.py"},
+        {worktrees + "captured.py": (), codespaces + "captured.py": ()},
+    )
+    assert inventory == {fixed, worktrees + "captured.py", codespaces + "captured.py"}
+    assert retained.captured_inventory(evidence.SPEC, set(), {
+        worktrees + "__pycache__/cached.py": (),
+    }) == set()
+
+
 @pytest.mark.timeout(180)
 def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
     snapshot = tmp_path / "repo"
