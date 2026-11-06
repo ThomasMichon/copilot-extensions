@@ -106,6 +106,10 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   observations into 168 absolute-hour slots; `health inspect` reports ages,
   gaps and stale/unknown evidence. Neither executes probes nor publishes to a
   carrier. See [the local observation contract](docs/health-report.md#explicit-local-hourly-observations).
+- **Passive local listener observation.** `health observe` reads an explicitly
+  selected loopback Bridge `/health` endpoint once and emits a typed observation
+  for the local record flow. It starts nothing, uses no credentials and does
+  not infer authentication or agent counts from listener health.
 - **Live Copilot CLI controls.** `copilot-cli` inspects native update preferences
   and cached versions, previews/applies live on/off and native update operations,
   and deliberately launches a cached version without another installer or

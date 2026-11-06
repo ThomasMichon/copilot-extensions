@@ -202,3 +202,64 @@ These are additive explicitly selected commands. Existing `health report`
 behavior is unchanged. Discover `health --help` on the selected runtime before
 calling them; an older runtime's missing command does not authorize a fallback
 writer, direct slot edits, runtime update or carrier enrollment.
+
+## Passive local Bridge listener
+
+```text
+agent-machines health observe --bridge-port <selected-port> --publisher <publisher> --continuity <generation>
+```
+
+This additive, on-demand command performs one unauthenticated `GET /health`
+against numeric IPv4 loopback on the explicitly supplied port. Select that port
+through the existing Bridge owner; the observer does not discover endpoints,
+ensure a daemon, bootstrap a runtime or start a service. It never uses proxies,
+redirects, cookies or credentials. The read has a two-second absolute transport
+deadline and a 64 KiB total HTTP-wire budget, including headers and framing.
+There is no retry or network-host option.
+
+The actual response must identify `agent-bridge`, report `status: ok`, and
+advertise a protocol range containing the baseline health contract, generation
+1. Missing, malformed or incompatible support remains unknown/unsupported.
+Additive owner fields are tolerated but discarded. A supported response proves
+only `local_listener: ok`; `ready`, credential-relay flags, carrier diagnostics
+and process/host counts are not authentication, Gateway, credential or logical
+agent evidence. All other domains remain explicitly unknown with null count
+and direction. A refused, invalid, oversized, unavailable or timed-out response
+is also unknown, not a diagnosed machine failure.
+
+Stdout is one existing `agent-machines.health.observation` version-1 record,
+with current source timestamps, revision 1 and null parent. There is no `--now`
+override, file write, cloud publication or scheduled execution. Save it only to
+an explicitly selected local input, then use the normal `health record` preview
+and confirmation. Preserve the store's configured publisher and continuity.
+Repeated observations within one hour still require the record owner's explicit
+revision/parent handling; the observer never edits a prior slot.
+
+Exit 0 means an observation was emitted, including unknown/unsupported evidence;
+it does not mean a healthy machine. Exit 2 means invalid invocation or unavailable
+output. The local store continues to label supplied input as unverified, even
+when its producer was this command: it cannot attest a saved file's provenance.
+An aged listener result becomes stale through the existing reader.
+
+`tests/test_health_observe.py` covers the projection and unsupported/error
+contracts. The explicitly selected native packet below exercises real loopback
+HTTP, normal isolated CLI subprocesses, local recording and stale readback, plus
+redirect, overflow and continuously trickling-response controls:
+
+```text
+python tools/run-plugin-tests.py agent-machines --test-file tests/test_health_observe.py --test-file tests/native/test_health_observe_consumer.py --allow-explicit-tiers
+```
+
+Its finite listener supplies synthetic owner responses, not an installed Bridge.
+An additional opt-in case invokes the original Bridge health handler in a
+separately prepared source-bound test interpreter, with diagnostic dependencies
+isolated, then sends its actual response through the same HTTP/CLI/store flow.
+Select that interpreter through `AGENT_MACHINES_TEST_BRIDGE_PYTHON`; obtain it
+from `python tools/run-plugin-tests.py agent-bridge --prepare-only`, not a
+production runtime or ambient executable. Absence skips only this extra case,
+not the synthetic transport controls. This proves source-response compatibility,
+not the full daemon's ASGI/lifespan or installed listener.
+
+Neither case is full host/SSH/Gateway qualification. Windows source success does not
+qualify Linux, installed runtime selection, scheduler lifetime, carrier delivery
+or enrollment. Those remain separate acceptance gates.
