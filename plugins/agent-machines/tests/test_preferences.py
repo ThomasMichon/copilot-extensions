@@ -207,3 +207,18 @@ def test_replaced_file_is_rejected_before_reading_other_identity(tmp_path, monke
     monkeypatch.setattr(prefs.os, "open", replaced)
     with pytest.raises(prefs.PreferenceError, match="input-changed"):
         prefs.read(path)
+
+
+def test_cli_sanitizes_overlong_json_integer_on_runtimes_with_or_without_digit_limits(tmp_path, capsys):
+    path = tmp_path / "overlong-integer.json"
+    raw = json.dumps(snapshot()).replace('"revision": 1', '"revision": ' + "1" * 5000)
+    path.write_text(raw, encoding="utf-8")
+    assert main([
+        "preferences", "preview", "--input", str(path),
+        "--publisher", "example-publisher", "--machine", "example-worker", "--harness", "repo-first",
+    ]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    diagnostic = json.loads(output.err)
+    assert diagnostic["ok"] is False
+    assert diagnostic["error"] in {"invalid-json", "invalid-revision"}

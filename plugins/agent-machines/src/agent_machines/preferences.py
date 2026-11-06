@@ -61,7 +61,9 @@ def decode(raw: bytes) -> dict:
         raise PreferenceError("document-too-large")
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_constant)
-    except (UnicodeError, RecursionError, json.JSONDecodeError) as error:
+    except PreferenceError:
+        raise
+    except (ValueError, RecursionError) as error:
         raise PreferenceError("invalid-json") from error
     pending = [(value, 0)]
     while pending:
