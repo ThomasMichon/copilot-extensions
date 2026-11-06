@@ -1,0 +1,9 @@
+{
+  "comment": "Release shared retained telemetry configuration helpers",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

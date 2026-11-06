@@ -6,6 +6,7 @@ export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 
 PASSIVE_OBSERVATION=0
+CONFIGURATION_ONLY=0
 SKIP_PROJECT=0
 FIRST_ARGUMENT=1
 for ARGUMENT in "$@"; do
@@ -26,6 +27,7 @@ for ARGUMENT in "$@"; do
             PASSIVE_OBSERVATION=1
             break
             ;;
+        telemetry) CONFIGURATION_ONLY=1; break ;;
         *) break ;;
     esac
 done
@@ -202,13 +204,17 @@ if [[ -z "$CONTEXT" ]]; then
     }
 fi
 
-if [[ "$PASSIVE_OBSERVATION" == 1 ]]; then
+if [[ "$PASSIVE_OBSERVATION" == 1 || "$CONFIGURATION_ONLY" == 1 ]]; then
     resolve_runtime read-only
 else
     resolve_runtime
 fi
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
+fi
+if [[ "$CONFIGURATION_ONLY" == 1 ]]; then
+    printf '[agent-bridge] runtime not provisioned (configuration-only; no self-provision).\n' >&2
+    exit 1
 fi
 
 if [[ "$PASSIVE_OBSERVATION" == 1 ]]; then
