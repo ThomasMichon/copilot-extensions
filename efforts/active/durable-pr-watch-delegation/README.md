@@ -304,18 +304,19 @@ _Operator-required outcome; agent-recommended slices and validation._
   position are required. Unsupported attribution and longer chains remain
   unavailable. The optional [retained reader](../../../plugins/agent-pull-requests/docs/attention-reader.md)
   source merged in #10906, including conservative captured-feedback availability
-  and the negotiated CLI/client/Gateway path. Complete B3/A2, historical
-  per-operation readback, normal-host/provider/installed serving and the remaining
-  parent acceptance stay open.
+  and the negotiated CLI/client/Gateway path. Complete B3/A2,
+  normal-host/provider/installed serving and the remaining parent acceptance
+  stay open.
 - [x] Review and land [B4 historical original-position readback](captured-attention-feedback.md#b4---historical-original-position-readback-proof)
   before changing the strict owner layout or executing behavior (#10970).
-- [ ] Deliver B4's finite existing-owner storage, protected proof and negotiated
+- [x] Deliver B4's finite existing-owner storage, protected proof and negotiated
   read-consumer leaves; qualify overlapping operations, original identity,
   capacity, restart, unavailable evidence and old/new compatibility without
   weakening B2/B3 or closing broader attention/provider/installed acceptance.
   The finite explicit v6/capture-v2 storage prerequisite merged in #10972.
   Protected original-readback proof commits merged in #10977; negotiated v6
-  reads remain a separate exit.
+  reads merged in #10979. This is the finite synthetic source exit, not native,
+  live-provider, installed or full B3/A2 acceptance.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -861,6 +862,12 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite B4 source contract through existing-owner storage,
+  actual protected synthetic readback and negotiated CLI/client/Gateway/service
+  consumers: 232 coupled cases, including exact proof, overlapping operations,
+  capacity, restart/reopen and strict old/new refusal (#10979). Native,
+  provider, installed and shadow evidence remain at their parent gates.
+
 - [ ] Resolve the Author/Reviewer amendment's full
   [validation matrix](author-reviewer-perspectives.md#validation-matrix):
   normalized provider facts, event/cursor semantics, fair role-aware attention,
@@ -953,6 +960,29 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Complete the finite historical-readback source leaves
+
+- #10979 actually merged as `efd2f76812f8e84d2056f9b4d1bfda89c7fa7105`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. The source worktree reconciled through its normal completion path.
+- Together with reviewed plan #10970, storage #10972 and protected proof #10977,
+  the optional attention-read/v2 consumer qualifies per-operation original
+  readback under explicitly adopted v6 storage. Current handled/echo progress
+  remains independent; v1/v5 defaults and ordinary host behavior are unchanged.
+- The review's epoch-filter issue was fixed before merge: confirmed actions
+  without original readback remain unavailable across reopen, while certified
+  history permits genuine new-epoch work and independent consumers. The final
+  bounded coupled packet passes 232 cases with cleanup verified.
+- Fatal lint, module/docs/install contracts and the admitted strict service
+  Linux/win32 targets pass. These are isolated synthetic/source controls, not
+  native Windows, live provider, installed hosting or shadow acceptance.
+- Re-read the current full Plan and Validation Plan and mark only B4's finite
+  source exit complete. The parent stays Active. Full B3/A2 still requires
+  unsupported reply/edit/vote version attribution and longer echo-chain
+  qualification; broader retention, provider, CLI/Dispatch, installed and
+  shadow/presentation outcomes remain open under their existing owners.
+  No deployment, live feedback, migration or resource release occurred.
 
 ### 2026-11-06 - Retain actual protected original-readback proof
 
