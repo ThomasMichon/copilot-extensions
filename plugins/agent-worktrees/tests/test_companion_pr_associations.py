@@ -969,3 +969,55 @@ def test_committed_value_failures_cannot_qualify_disk_fallback(
     )
     assert values == [{"marker": marker}]
     assert disk.read_text() == "marker: disk\n"
+
+
+def test_associations_share_one_strict_registry_read_across_targets(source, monkeypatch):
+    reads = []
+
+    def registry(**kwargs):
+        reads.append(kwargs)
+        return []
+
+    monkeypatch.setattr(repos, "list_repos", registry)
+    monkeypatch.setattr(
+        config,
+        "_control_plane_related_pr_map",
+        lambda: {
+            "first": {"provider": "github", "repository": "example/repository"},
+            "second": {"provider": "github", "repository": "example/second"},
+        },
+    )
+    entries = source.read(
+        [
+            _pr(),
+            _pr(
+                pr_id="b" * 32,
+                repo="example/second",
+                url="https://github.com/example/second/pull/7",
+            ),
+        ]
+    )["associations"]
+    assert all(entry["binding"]["available"] for entry in entries)
+    assert reads == [{"strict": True}]
+
+
+def test_suppressed_related_config_failure_cannot_qualify_active_defaults(source, monkeypatch):
+    from agent_worktrees import related
+
+    monkeypatch.setattr(config, "_control_plane_related_pr_map", config._CONTROL_PLANE_PR_OWNER)
+    monkeypatch.setattr(related, "find_control_plane_anchor", lambda: None)
+    monkeypatch.setattr(related, "installed_plugin_related_anchors", lambda: ["/example/overlay"])
+    monkeypatch.setattr(
+        related,
+        "read_related_grafted",
+        lambda *args: (_ for _ in ()).throw(OSError("fixture overlay unavailable")),
+    )
+    monkeypatch.setattr(
+        repos,
+        "list_repos",
+        lambda **kwargs: [
+            SimpleNamespace(name="sample", remote="https://github.com/example/repository.git")
+        ],
+    )
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is False for entry in entries)

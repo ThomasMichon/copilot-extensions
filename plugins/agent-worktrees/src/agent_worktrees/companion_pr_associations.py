@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from . import config as cfg
-from . import config_acquisition, output, pr_config, providers, tracking
+from . import config_acquisition, output, pr_config, providers, repos, tracking
 from .config_cache import ConfigCacheSession
 from .inrepo_config_source import resolution_budget
 from .strict_yaml import load_strict_yaml_document
@@ -133,6 +133,8 @@ def _config_failed(observations) -> bool:
                 "invalid-registry-source",
                 "registry-helper-unavailable",
                 "migration-failed",
+                "control-plane-related-pr-failed",
+                "source-selection-failed",
             }
             for finding in observation.findings
         )
@@ -140,7 +142,7 @@ def _config_failed(observations) -> bool:
     )
 
 
-def _binding(config, entry: dict) -> dict:
+def _binding(config, entry: dict, registry_entries: list) -> dict:
     if (
         not re.fullmatch(r"[0-9a-f]{32}", entry["pr_id"])
         or type(entry["pr_revision"]) is not int
@@ -163,6 +165,7 @@ def _binding(config, entry: dict) -> dict:
         config,
         entry["repo"],
         allow_git=False,
+        registry_entries=registry_entries,
     )
     if not resolution.resolved:
         return {"available": False, "reason": "target-binding-unavailable"}
@@ -272,6 +275,7 @@ def extend_bundle(
                         config = cfg.load_config(
                             path=cfg.project_dir(project) / "config.yaml", project=project
                         )
+                        registry_entries = repos.list_repos(strict=True)
                     except Exception:
                         config = None
                 if _config_failed(initial):
@@ -287,7 +291,7 @@ def extend_bundle(
                             continue
                         with config_acquisition.capture_config_observations() as observed:
                             try:
-                                entry["binding"] = _binding(config, entry)
+                                entry["binding"] = _binding(config, entry, registry_entries)
                             except Exception:
                                 entry["binding"] = {
                                     "available": False,

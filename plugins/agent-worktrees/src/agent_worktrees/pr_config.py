@@ -66,6 +66,7 @@ class ForeignRepoResolution:
 
 def resolve_repo_config_for_slug(
     config: cfg.Config, repo_slug: str, *, allow_git: bool = True,
+    registry_entries: list | None = None,
 ) -> ForeignRepoResolution:
     """Resolve the :class:`~agent_worktrees.config.RepoConfig` that OWNS
     ``repo_slug`` (``owner/name`` or ADO ``project/repo``), independent of the
@@ -91,6 +92,8 @@ def resolve_repo_config_for_slug(
     block fallback, so malformed or inaccessible project policy is not bypassed.
     ``allow_git=False`` requires registered remote evidence and refuses ambiguous
     registry matches; it never discovers an anchor's remote through Git.
+    Read-only callers may supply their own fresh strict ``registry_entries`` to
+    share that acquisition across targets; absent input retains the native read.
     """
     from . import repos as repos_mod
 
@@ -101,10 +104,12 @@ def resolve_repo_config_for_slug(
         except Exception:
             active_remote = ""
     else:
-        try:
-            entries = repos_mod.list_repos(strict=True)
-        except Exception:
-            return ForeignRepoResolution(None, error="Repository registry unavailable")
+        entries = registry_entries
+        if entries is None:
+            try:
+                entries = repos_mod.list_repos(strict=True)
+            except Exception:
+                return ForeignRepoResolution(None, error="Repository registry unavailable")
         matches = [
             entry for entry in entries
             if entry.remote and git_ops.slug_from_url(entry.remote) == repo_slug

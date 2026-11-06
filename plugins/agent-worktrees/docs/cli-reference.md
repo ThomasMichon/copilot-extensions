@@ -66,7 +66,11 @@ it is not authorization, provider reachability or observation freshness.
 Discovery projects at most 24 associations, with explicit omissions, within
 the existing 1 MiB body budget, measured using the actual versioned, indented
 stdout envelope and newline. One invocation shares one fresh configuration
-acquisition scope. It performs no credential/forge read, Git remote discovery,
+acquisition scope and one strict registry snapshot across association targets.
+Concrete failed configuration acquisitions, including suppressed related-overlay
+failures and malformed/lossy committed inputs, cannot qualify fallback bindings.
+Opaque owner-provenance diagnostics alone are not configuration value failures.
+It performs no credential/forge read, Git remote discovery,
 Git fetch, service startup or canonical write of its own; the status command's
 existing Git/liveness/bootstrap behavior is unchanged.
 Duplicate YAML keys in record evidence and malformed or duplicate-key registry
