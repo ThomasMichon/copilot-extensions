@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -382,13 +383,27 @@ def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mu
             encoding="utf-8", errors="replace", timeout=timeout, **no_window_kwargs(),
         )
 
+    stop = threading.Event()
+    control_errors = []
+
+    def control_traffic():
+        while not stop.wait(.001):
+            try:
+                command("list-sessions", timeout=0.5)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                if not control_errors:
+                    control_errors.append(type(error).__name__)
+
+    controller = threading.Thread(target=control_traffic)
     try:
-        for session, marker in probes:
+        for index, (session, marker) in enumerate(probes):
             argv = _probe_argv(marker, None if launcher == "direct-python" else powershell)
             if launcher == "powershell-noninteractive":
                 argv.insert(3, "-NonInteractive")
             created = command("new-session", "-d", "-s", session, "--", *argv)
             assert created.returncode == 0, created.stderr
+            if index == 0:
+                controller.start()
 
         def ready():
             # Match the owner's immediate control request during shell startup,
@@ -409,13 +424,18 @@ def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mu
         workers = _wait(
             ready, failure,
         )
+        assert not control_errors, control_errors
         assert all(_live(worker) for worker in workers)
         assert all(worker["stdin_tty"] and worker["stdout_tty"] for worker in workers), workers
         sentinel_mux()
     finally:
+        stop.set()
+        if controller.ident is not None:
+            controller.join(timeout=1)
         for session, marker in probes:
             _kill(_read(marker))
             command("kill-session", "-t", session)
+        assert not controller.is_alive(), "private control probe did not stop"
 
 
 @pytest.mark.parametrize("phase", ["pending", "bound"])
