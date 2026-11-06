@@ -16,7 +16,10 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 SHELLS = [(name, shutil.which(name)) for name in ("powershell", "pwsh")]
 DIGEST = "a" * 64
-pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows completion consumer")
+pytestmark = [
+    pytest.mark.portfolio_tier("T3"),
+    pytest.mark.skipif(os.name != "nt", reason="Windows completion consumer"),
+]
 
 
 def _quote(value: str | Path) -> str:
@@ -60,6 +63,8 @@ def test_dispatch_completion_preserves_pywin32_policy_and_child_error(
     before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
     candidate = root / "versions" / "1.2.3"
     site = candidate / "Lib" / "site-packages"
+    executed = tmp_path / "hook-executed"
+    hook = f"from pathlib import Path\nPath({str(executed)!r}).touch()\n"
     setup = payload / "package_fixture.py"
     setup.write_text(
         "from pathlib import Path\n"
@@ -71,10 +76,10 @@ def test_dispatch_completion_preserves_pywin32_policy_and_child_error(
         "(site.parent.parent / 'pyvenv.cfg').write_text("
         "'include-system-site-packages = false\\n')\n"
         + (
-            "(library / 'pywin32_bootstrap.py').write_text("
-            "\"raise AssertionError('static admission must not execute this hook')\\n\")\n"
+            f"(library / 'pywin32_bootstrap.py').write_text({hook!r})\n"
             if case != "missing-bootstrap" else ""
         )
+        + f"(site / 'unverified_hook.py').write_text({hook!r})\n"
         + "(site / 'pywin32.pth').write_text("
         + repr(
             "# .pth file for the PyWin32 extensions\nwin32\nwin32\\lib\npythonwin\n"
@@ -141,6 +146,7 @@ exit $code
     pid = re.search(r"^HELPER_PID=(\d+)$", result.stdout, re.MULTILINE)
     assert pid is not None, result.stdout + result.stderr
     assert "HELPER_SETTLED" in result.stdout, result.stdout + result.stderr
+    assert not executed.exists(), "installed path hook executed during static admission"
     assert all(path.read_bytes() == contents for path, contents in before.items())
     if case == "packaged":
         assert "COMPLETED" in result.stdout

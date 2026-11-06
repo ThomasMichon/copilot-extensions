@@ -955,7 +955,10 @@ PowerShell 5.1 and 7 each accept a synthetic packaged pywin32 path hook without
 executing it, reject missing or modified bootstrap inputs with the original child
 diagnostic, and confirm helper exit and preserved prior slot, selector,
 configuration and deployment metadata. The complete retained helper bundle is
-required, just as in the actual caller. This is a completion-boundary check,
+required, just as in the actual caller. An external sentinel must remain absent
+even when the rejected candidate is removed; a caught import exception is not
+proof that a path hook never ran. The T3 tier keeps all six controls skipped
+without explicit opt-in. This is a completion-boundary check,
 not package-feed, full installer, selected Dispatch CLI or affected-host recovery
 qualification; no runtime or service is installed.
 The MCP retirement packet adds native Windows controls for one birth-checked

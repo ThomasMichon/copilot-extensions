@@ -93,15 +93,17 @@ and Job-scope key stability, and meaningful build-environment invalidation.
 These are constructor consumers, not a complete ordinary suite update.
 
 The packaged pywin32 allowance from #9623 and original completion diagnostic
-from #9878 now also have a joined native Dispatch completion packet: six
-Windows PowerShell 5.1/7 controls pass in 47.09 seconds on source based at
-`aea7ecc6e9`. The actual caller and shipped helper accept the static packaged
-hook, reject missing/modified bootstrap inputs with the child diagnostic,
-confirm helper exit and preserve the prior slot/selector/configuration/manifest.
-This does not execute the bootstrap hook, acquire packages, activate a Dispatch
-CLI or qualify #7305's installed ordinary-update outcome. The new tests are
-source qualification; differing current Dev/Main helper bundles are not
-described as identical released-consumer executions.
+from #9878 now also have a joined native Dispatch completion packet. Twelve
+Windows PowerShell 5.1/7 controls pass in 98.16 seconds: six against the current
+source and six against the complete released Main script snapshot
+`b408a6500bdd8a9ec5812cfaab1bbd882a610381`. The actual caller and helper
+accept the static packaged hook, reject missing/modified bootstrap inputs with
+the child diagnostic, confirm helper exit and preserve the prior state.
+An external sentinel remains absent even for removed rejected candidates.
+Without opt-in the six permanent T3 controls skip. This does not acquire
+packages, activate a Dispatch CLI or qualify #7305's installed ordinary-update
+outcome; the released Git replay is separate from the differing current source
+and from inspection or installation of packaged release artifacts.
 
 #9290 retains its existing lifecycle/publication-envelope correction and the
 separate promoted-input/profile work. #9572 fixes Job-custody identity only;

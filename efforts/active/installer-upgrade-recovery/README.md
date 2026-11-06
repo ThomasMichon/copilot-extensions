@@ -1673,3 +1673,23 @@ The enforced type-check portfolio passes all forty admitted projects for both
 declared platform profiles; that is static checking, not native Linux execution.
 Review, required CI and merge of this test-only slice remain; the parent
 Plan/Validation and all deployment boundaries stay open.
+
+The current-head review identifies two valid test gaps: ordinary Windows
+discovery would execute the nominally opt-in packet without a T3 marker, and
+an exception-raising hook is not proof of non-execution because Python may
+catch path-hook exceptions. The packet now declares its existing T3 tier and
+uses an external execution sentinel for both bootstrap and modified-hook
+inputs. Its absence is checked after every case, including removed candidates.
+
+The revised packet passes twelve native controls in 98.16 seconds
+(214.02 with ordinary preparation/cleanup): six against current source and
+six against the complete released Main scripts at
+`b408a6500bdd8a9ec5812cfaab1bbd882a610381`. The release replay uses the same
+test body with the released script subtree as its input; its temporary fixture
+is removed after execution, not committed as a historical Git prerequisite for
+ordinary suites. An initial partial script copy omitted `base-python.ps1` and
+failed before construction; the complete subtree corrects only that fixture.
+No released script is rewritten or package acquired. A separate default run
+skips all six T3 controls in 0.59 seconds (21.84 with preparation/cleanup).
+This strengthens the bounded completion proof; it still does not activate a
+Dispatch CLI or establish #7305's whole installed-update outcome.
