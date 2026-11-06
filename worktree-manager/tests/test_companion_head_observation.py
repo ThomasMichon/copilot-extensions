@@ -253,6 +253,7 @@ def test_real_selected_process_preserves_envelope_and_old_row_api(tmp_path):
 
 def _wire_app(monkeypatch, *, result=None):
     values = {"observation": result or observation(durable="old"), "reads": 0}
+    monkeypatch.setattr(ec, "engine_base_command", lambda: ["fixture-engine"])
     monkeypatch.setattr(
         ec,
         "current_worktree_status",
@@ -304,6 +305,73 @@ def _wire_app(monkeypatch, *, result=None):
         companion.hc, "trigger_cutover", lambda *a, **k: pytest.fail("implicit cutover")
     )
     return values
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_load_pins_discovery_runtime_across_activation_or_rollback(
+    monkeypatch, tmp_path, declared
+):
+    value = observation()
+    snapshot = {"sessions": [{"id": "new", "is_head": True}]}
+    if declared:
+        snapshot["handoff_head_observation"] = declaration()
+    selected = tmp_path / "selected.py"
+    selected.write_text(
+        "import sys\n"
+        "if sys.argv[1:] == ['list-sessions','--worktree','selected','--json']:\n"
+        f" print({json.dumps(snapshot)!r})\n"
+        "elif sys.argv[1:] == ['--project','example','handoff-head-observation',"
+        "'--worktree','selected','--contract-version','1','--json']:\n"
+        f" print({json.dumps(value)!r})\n"
+        "else: raise SystemExit(2)\n",
+        encoding="utf-8",
+    )
+    replacement = tmp_path / "replacement.py"
+    replacement.write_text(
+        "raise SystemExit('unexpected replacement invocation')\n", encoding="utf-8"
+    )
+    selected_command = [sys.executable, str(selected)]
+    monkeypatch.setattr(
+        ec, "current_worktree_status", lambda **k: {"id": "selected", "repo": "example"}
+    )
+    monkeypatch.setattr(companion.cc, "worktree_status_bundle", lambda *a, **k: {})
+    actual_runner = cancellable_read_runner(Event(), cwd=str(tmp_path))
+    calls = []
+
+    def runner(command, timeout):
+        calls.append(command)
+        result = actual_runner(command, timeout)
+        if "list-sessions" in command:
+            ec.set_engine_command([sys.executable, str(replacement)])
+        return result
+
+    ec.set_engine_command(selected_command)
+    try:
+        data = companion._load_current_worktree(str(tmp_path), runner=runner)
+    finally:
+        ec.set_engine_command(None)
+    assert not data.error and not data.sessions_error and data.sessions == snapshot["sessions"]
+    assert all(command[:2] == selected_command for command in calls)
+    if declared:
+        assert len(calls) == 2 and data.head_observation == value
+        assert data.head_observation_error is None
+    else:
+        assert len(calls) == 1 and data.head_observation is None
+        assert data.head_observation_error == "unsupported-provider"
+
+
+def test_load_cannot_reuse_a_declaration_when_no_engine_is_selected(monkeypatch):
+    monkeypatch.setattr(
+        ec, "current_worktree_status", lambda **k: {"id": "selected", "repo": "example"}
+    )
+    monkeypatch.setattr(ec, "engine_base_command", lambda: None)
+    monkeypatch.setattr(
+        ec, "list_worktree_session_snapshot", lambda *a, **k: pytest.fail("unselected discovery")
+    )
+    monkeypatch.setattr(companion.cc, "worktree_status_bundle", lambda *a, **k: {})
+    data = companion._load_current_worktree()
+    assert not data.error and data.sessions_error == "The selected engine is unavailable."
+    assert data.head_observation is None
 
 
 @pytest.mark.parametrize("size", [(50, 24), (110, 40)])

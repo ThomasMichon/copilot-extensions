@@ -48,7 +48,12 @@ def load_current_worktree(cwd: str | None = None, *, runner=None) -> CompanionDa
     worktree_id = payload.get("id")
     if worktree_id:
         try:
-            snapshot = ec.list_worktree_session_snapshot(None, worktree_id, runner=runner)
+            engine_command = ec.engine_base_command()
+            if engine_command is None:
+                raise ec.EngineError("The selected engine is unavailable.")
+            snapshot = ec.list_worktree_session_snapshot(
+                None, worktree_id, runner=runner, engine_command=engine_command
+            )
             rows = snapshot.get("sessions")
             data.sessions = (
                 [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
@@ -58,6 +63,7 @@ def load_current_worktree(cwd: str | None = None, *, runner=None) -> CompanionDa
                 worktree_id,
                 snapshot,
                 runner=runner,
+                engine_command=engine_command,
             )
         except ec.EngineError as exc:
             data.sessions_error = str(exc)

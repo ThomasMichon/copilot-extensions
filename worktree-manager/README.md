@@ -452,7 +452,9 @@ baton/incarnation/activation evidence is collapsed by default.
 
 The optional read runs off the UI/render path through the same selected-cwd,
 caller-owned process boundary, with a five-second hard deadline and existing
-child cleanup. It publishes only to the current load generation. Reopening
+child cleanup. Discovery and its optional read retain one resolved engine argv,
+so activation or rollback between requests cannot transfer a declaration to
+another runtime. It publishes only to the current load generation. Reopening
 derives another observation; there is no timer, cache or persistent Companion
 registry. Legacy, unsupported, malformed, failed or rolled-back providers leave
 all other views and existing actions usable. Detection performs no head repair,

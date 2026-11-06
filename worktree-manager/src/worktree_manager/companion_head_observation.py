@@ -148,6 +148,7 @@ def read_observation(
     snapshot: dict,
     *,
     runner=None,
+    engine_command: list[str] | None = None,
 ) -> tuple[dict | None, str | None]:
     """Read once after declaration; never probe legacy syntax or retry effects."""
     error = declaration_error(snapshot)
@@ -161,6 +162,7 @@ def read_observation(
             [COMMAND, "--worktree", worktree_id, "--contract-version", "1", "--json"],
             timeout=5,
             runner=runner,
+            engine_command=engine_command,
         )
     except ec.EngineCleanupError:
         raise
