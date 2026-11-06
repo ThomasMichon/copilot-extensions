@@ -104,6 +104,50 @@ def test_candidate_binds_raw_manifest_and_preserves_native_policy(inputs):
     assert _produce(inputs).canonical == profile.canonical
 
 
+def test_core_candidate_keeps_the_complete_manifest_for_isolated_manager(inputs):
+    from build_toolchain_lock import _hash_fields
+
+    manifest, native, paths = inputs
+    name = "copilot_extensions_worktree_manager"
+    distribution = name.replace("_", "-")
+    filename = f"{name}-1.0-py3-none-any.whl"
+    path = next(iter(paths.values())).parent / filename
+    path.write_bytes(_wheel_bytes(
+        name, "1.0", members={"shared_core/__init__.py": b"embedded\n"},
+    ))
+    digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    paths[filename] = path
+    manifest["selection"]["roots"].append({"name": distribution, "extra": "", "condition": ""})
+    manifest["selection"]["projects"].append({
+        "name": distribution, "source": "worktree-manager", "role": "standalone",
+    })
+    manifest["wheels"].append({
+        "name": name, "source": "worktree-manager", "role": "standalone",
+        "filename": filename, "sha256": digest,
+        "generator": manifest["wheels"][0]["generator"],
+        "python_tag": "py3", "abi_tag": "none", "platform_tag": "any",
+    })
+    fields = [
+        value for row in sorted(manifest["wheels"], key=lambda row: row["filename"])
+        for value in (row["filename"], row["sha256"])
+    ]
+    manifest["artifact_id"] = "sha256:" + _hash_fields(
+        manifest["payload_hash"], manifest["python_tag"], manifest["abi_tag"],
+        manifest["platform_tag"], manifest["build_toolchain"]["lock_id"], *fields,
+    )
+    native["roots"].append(distribution + "==1.0")
+    native["wheels"].append({
+        "name": distribution, "version": "1.0", "filename": filename, "sha256": digest,
+        "requires_python": "", "provides_extras": [], "selected_extras": [],
+        "requires_dist": [],
+    })
+    with pytest.raises(ProfileError, match="ownership collision"):
+        _produce(inputs)
+    profile = _produce(inputs, layout="manager-isolated")
+    assert profile.record()["artifact"]["artifact_id"] == manifest["artifact_id"]
+    assert {row["filename"] for row in profile.record()["wheels"]} == set(paths)
+
+
 def test_whitespace_changes_exact_manifest_binding(inputs):
     manifest, _, _ = inputs
     compact = _produce(inputs)

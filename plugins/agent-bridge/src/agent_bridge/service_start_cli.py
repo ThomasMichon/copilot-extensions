@@ -333,6 +333,11 @@ def _run_start(
 
 def _cmd_status(args: argparse.Namespace) -> None:
     core = _core()
+    if getattr(args, "worktree_writer", False) and (
+        not getattr(args, "session_id", None) or not getattr(args, "full", False)
+    ):
+        print("[FAIL] status --worktree-writer requires a session ID and --full", file=sys.stderr)
+        sys.exit(2)
     if getattr(args, "session_id", None):
         core._cmd_session_status(args)
         return
@@ -343,6 +348,9 @@ def _cmd_status(args: argparse.Namespace) -> None:
     base = getattr(client, "_base", "")
     try:
         info = client.health()
+        if getattr(args, "json", False):
+            core._json_out(info)
+            return
         svc = info.get("service", "agent-bridge")
         if base:
             print(f"[OK] agent-bridge is running -- {svc} ({base})")
@@ -350,9 +358,12 @@ def _cmd_status(args: argparse.Namespace) -> None:
             print(f"[OK] agent-bridge is running -- {svc}")
     except SystemExit:
         raise
-    except Exception:
+    except Exception as exc:
         suffix = f" at {base}" if base else ""
-        print(f"[FAIL] agent-bridge is not responding{suffix}")
+        if getattr(args, "json", False):
+            print(f"[FAIL] agent-bridge is not responding{suffix}: {exc}", file=sys.stderr)
+        else:
+            print(f"[FAIL] agent-bridge is not responding{suffix}")
         sys.exit(1)
 
 
@@ -373,7 +384,10 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
     sid = args.session_id
     try:
         if getattr(args, "full", False):
-            core._json_out(client.get_session(sid))
+            if getattr(args, "worktree_writer", False):
+                core._json_out(client.get_session(sid, worktree_writer=True))
+            else:
+                core._json_out(client.get_session(sid))
             return
         st = client.get_session_status(sid, caller_id=core._caller_id_for(args))
     except BridgeClientError as exc:
@@ -756,6 +770,11 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         "--full",
         action="store_true",
         help="Emit the exact session's full SessionInfo as JSON instead of compact status",
+    )
+    status_p.add_argument(
+        "--worktree-writer",
+        action="store_true",
+        help="With an exact session ID and --full, requalify its original keyed-creation writer",
     )
     status_p.add_argument(
         "--steps",

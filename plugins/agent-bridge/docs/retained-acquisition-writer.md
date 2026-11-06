@@ -109,6 +109,10 @@ creation forms and conflicting stdin refuse before connecting to the daemon.
 The existing client negotiates the capability on each attempt and never retries
 without the requirement. Omitting the option preserves ordinary unpinned behavior.
 This transport does not independently admit the writer or close its cohort.
+The executing CLI advertises `agent-bridge.create` version 1 with
+`keyed-worktree-writer` through its existing `version --contracts-json` response.
+Required callers select that support before using the option; absent or invalid
+metadata does not establish support, including after a CLI rollback.
 
 This route does **not** create an acquisition attempt. Its original
 `workspace_embodiments` row atomically retains the creation facts, workspace
@@ -140,6 +144,14 @@ digest, exact session/native/workspace, original requirement, serializer
 contract and Bridge instance. It exposes no command or environment. An
 unqualified exact owner returns 409; an older reader ignoring the query is
 unconfirmed, not successful evidence. Ordinary session reads remain unchanged.
+
+The existing full-session CLI exposes the same optional observation through
+`status <exact-session-id> --full --worktree-writer`. Its
+`agent-bridge.status` CLI contract separately advertises
+`exact-session-worktree-writer`; daemon capability negotiation still governs the
+actual read. See the [CLI reference](../skills/agent-bridge/references/cli-commands.md#service-control)
+for executing-CLI discovery and passive health JSON. This does not add another
+provider operation or change the HTTP generation.
 
 This is read-only qualification of the creation's delegated writer, not a
 ready permit, native-liveness assertion or admission of every other writer
