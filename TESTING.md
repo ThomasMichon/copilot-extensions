@@ -10,6 +10,7 @@ prerequisites for one contribution.
 |----------|------------|
 | What does required PR/promotion testing cover? | [Unit packet](#unit-only-promotion-packet), [portfolio invariants](#test-portfolio-invariants), and the bounded Windows Resume promotion exception below |
 | How do I run a focused local selection? | [Turn-key runner](#the-turn-key-runner); select the affected files/contracts rather than the whole portfolio |
+| What should I do after a run times out? | [Per-test diagnosis and residual runs](#per-test-diagnosis-and-residual-runs); inspect retained progress before repeating or enlarging a run |
 | How do I isolate portable integration? | [Devcontainer isolation](#optional-devcontainer-based-isolation-linux) and the declared periodic inventory in `tools/periodic-integration-inventory.json` |
 | What proves a native or external consumer? | Its explicitly selected packet below, with the actual platform, launch mode and prerequisites; a portable or synthetic pass is not equivalent |
 | What are the source checks? | [Lint and contract gates](#lint--contract-gates-before-a-push), scoped by the contribution policy |
@@ -32,6 +33,53 @@ useful evidence without passing the original full acceptance gate. Preserve
 that remaining gate, real assertions, cleanup and resource bounds. Required
 CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
+
+## Per-test diagnosis and residual runs
+
+A timeout is not a default request for one more run with twice the allowance.
+Read the existing run log first: each named test's outcome and setup/call/
+teardown duration, the last started but unfinished item, and separate preparation,
+collection, native-child and cleanup costs. Do not rank tests by a whole-packet
+duration or infer CPU contention without contemporaneous measurements.
+
+Identify the costly cases and make them smaller while preserving their actual
+assertions and consumer properties. Common targets are repeated fixture
+construction, copying unrelated source, repeated large inputs, and real sleeps
+used only to test deadline arithmetic. Keep real OS, cold-start, concurrency
+and lifetime behavior where those are the property under test; replacing them
+with mocks would answer a different question.
+
+It is valid to exclude confirmed passing independent tests from another run
+and execute the failed, unfinished or unstarted remainder within the existing
+bound when relevant source, fixture and environment inputs still match.
+Use the runner's supported selectors, check the resulting test identities,
+and retain the original selection plus passed/remaining coverage. A pass needs
+its required phases, including teardown. Anonymous dots or a summary count
+cannot establish which tests are safely reusable. Changed inputs need an impact
+assessment, not automatic reuse or an automatic full rerun.
+
+Do not claim that disjoint runs prove one stateful installation sequence,
+ordering/stress property, cold aggregate budget or other indivisible flow.
+Such tests need shorter internal preparation/operations or a separately
+justified design change. Required exact-source CI and acceptance gates still
+apply; a residual diagnostic is not a fabricated monolithic pass.
+
+Inspect named progress during a long run instead of waiting many minutes for
+its final exit. Retain timing/progress through the existing runner/log owner
+so a timeout leaves useful evidence. The turn-key runner's `--junit-dir`
+retains requested per-group JUnit, but a killed run may never finish that XML;
+do not promise incremental phase data it did not record. If durations, named
+outcomes or the last-started item are absent, report that precise logging gap
+and arrange those records for the next justified run, rather than inventing
+numbers or repeating the same blind packet. Keep preparation and cleanup out
+of test-call timing while retaining their total cost.
+
+Use concrete action names such as "measure fixture copying" or "test Windows
+Resume", not an unexplained "qualification round". These are ordinary
+within-scope decisions, not a new per-command approval ceremony. Preserve
+explicit attempt/resource limits. A genuine indivisible cost may justify
+requesting a revised bound, but only after this diagnosis; larger deadlines
+must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
