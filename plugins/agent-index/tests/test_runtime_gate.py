@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from test_install_engine_adoption import environment
+
 PLUGIN = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PLUGIN / "src"
 
@@ -161,6 +163,10 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
     payload = tmp_path / f"payload-{shell}"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copytree(
+        SOURCE_ROOT, payload / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     (payload / "pyproject.toml").write_text(
         '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
         encoding="utf-8",
@@ -175,7 +181,7 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
         "raise SystemExit(0)\n",
         encoding="utf-8",
     )
-    env = os.environ.copy()
+    env = environment(tmp_path)
     env["AGENT_INDEX_HOME"] = str(tmp_path / f"home-{shell}")
     env["USERPROFILE"] = str(tmp_path)
     env["PYTHONPATH"] = os.pathsep.join(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import os
@@ -89,7 +90,9 @@ def test_payload_readiness_relays_native_adapter_without_provisioning(
     env["TEST_PYTHON"] = runtime.as_posix() if shell == "bash" else str(runtime)
     result = _run(shell, script, env, "installer-readiness")
     assert result.returncode == exit_code, result.stdout + result.stderr
-    assert json.loads(result.stdout)["state"] == state
+    observed = json.loads(result.stdout)
+    assert observed["state"] == state
+    assert observed["detail"] == "native adapter"
     assert not Path(env["AGENT_INDEX_HOME"]).exists()
 
 
@@ -117,12 +120,17 @@ def test_payload_configuration_failure_is_not_empty_readiness(tmp_path, shell, f
     assert not Path(env["AGENT_INDEX_HOME"]).exists()
 
 
-@pytest.mark.parametrize("payload", ["", "not-base64", "e30="])
+@pytest.mark.parametrize("payload", ["", "not-base64", "valid-no-indexer"])
 def test_explicit_role_reader_distinguishes_invalid_and_empty(payload, monkeypatch, capsys):
     reader = _role_reader()
+    valid = payload == "valid-no-indexer"
+    if valid:
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"corpus": {"sources": [{"name": "git:example"}]}}).encode(),
+        ).decode()
     monkeypatch.setattr(sys, "argv", ["role-reader", "--data-b64", payload, "--machine", "client"])
     result = reader.main()
-    if payload == "e30=":
+    if valid:
         assert result == 0
         assert capsys.readouterr().out.strip() == "unconfigured"
     else:
