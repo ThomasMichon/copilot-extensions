@@ -67,8 +67,9 @@ def test_native_ssh_setup_keeps_sandbox_lease_and_original_limits(tmp_path, monk
     assert events == ["run", "released"]
 
 
+@pytest.mark.parametrize("controller_held", [False, True])
 def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
-    tmp_path, monkeypatch, capsys,
+    tmp_path, monkeypatch, capsys, controller_held,
 ):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     root = tmp_path / "fleet-manager"
@@ -93,10 +94,41 @@ def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
     monkeypatch.setattr(runner, "acquire", lambda *args: type(
         "Lease", (), {"release": lambda self: events.append("released")},
     )())
-    monkeypatch.setattr(runner, "run_contained", run)
+    arguments = ["fleet-manager", "--timeout", "10"]
+    if controller_held:
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+
+        owner = sys.modules[runner.run_contained.__module__]
+        lifecycle = importlib.import_module("plugin_test_lifecycle")
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+        monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_NATIVE", "1")
+        monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+        monkeypatch.setattr(lifecycle, "_native_scope_environment", lambda env: env)
+
+        @contextmanager
+        def held_cleanup(**kwargs):
+            try:
+                yield {}
+            finally:
+                kwargs["cleanup_results"].append(SimpleNamespace(status="held"))
+
+        def controller(*args, **kwargs):
+            (kwargs["sandbox"] / "still-owned").write_text("preserve")
+            raise owner.ContainmentError("controller failed before result")
+
+        monkeypatch.setattr(owner, "daemon_test_lifecycle", held_cleanup)
+        monkeypatch.setattr(owner, "_run_contained_process", controller)
+        monkeypatch.setattr(owner, "_read_registry_environment", lambda: None)
+        monkeypatch.setattr(owner, "_registry_environment_drift", lambda _: [])
+        arguments.append("--ephemeral-native-ssh-setup")
+    else:
+        monkeypatch.setattr(runner, "run_contained", run)
     monkeypatch.setattr(runner, "cleanup_sandbox",
                         lambda temporary: pytest.fail("unreaped sandbox was cleaned"))
-    assert runner.main(["fleet-manager", "--timeout", "10"]) == 1
+    assert runner.main(arguments) == 1
     temporary = retained[0]
     try:
         assert temporary.retained

@@ -550,7 +550,9 @@ envelope retains the original bounded-worker limits and runner-renewed daemon
 lease, but permits explicit application-daemon escape from caller cleanup
 Jobs/process groups. Bounded descendants remain caller-owned; held daemon
 cleanup fails and retains the sandbox. Ordinary tests still suppress daemon
-escape. This distinction matters because the real Source constructor closes
+escape. Held cleanup retains the sandbox even when the controller raises,
+preserving the original failure as the exception cause.
+This distinction matters because the real Source constructor closes
 an inner cleanup scope before the engine checks the selected host's readiness.
 On Linux, a caller cleanup unit also requires the current user's already-running,
 owned user-manager bus. The native envelope selects that fixed local bus endpoint

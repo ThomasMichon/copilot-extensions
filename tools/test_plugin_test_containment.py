@@ -124,7 +124,10 @@ def test_native_application_refuses_without_disposable_owner(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("held", [False, True])
-def test_native_application_retains_runner_lease_limits_and_cleanup(tmp_path, monkeypatch, held):
+@pytest.mark.parametrize("controller_failure", [False, True])
+def test_native_application_retains_runner_lease_limits_and_cleanup(
+    tmp_path, monkeypatch, held, controller_failure,
+):
     from contextlib import contextmanager
     from types import SimpleNamespace
     from tools import plugin_test_lifecycle
@@ -137,18 +140,23 @@ def test_native_application_retains_runner_lease_limits_and_cleanup(tmp_path, mo
     events = []
     limits = Limits(wall_seconds=180)
     environment = {plugin_test_containment.CONTAINED_ENV: "1", "KEEP": "yes"}
+    original = plugin_test_containment.ContainmentError("controller failed")
 
     @contextmanager
     def lifecycle(**kwargs):
         events.append("lease")
-        yield {"LEASE": "owned"}
-        events.append("cleanup")
-        kwargs["cleanup_results"].append(SimpleNamespace(status="held" if held else "settled"))
+        try:
+            yield {"LEASE": "owned"}
+        finally:
+            events.append("cleanup")
+            kwargs["cleanup_results"].append(SimpleNamespace(status="held" if held else "settled"))
 
     def run(command, **kwargs):
         assert kwargs["limits"] is limits and kwargs["native_application"] is True
         assert kwargs["env"] == {"KEEP": "yes", "LEASE": "owned"}
         events.append("run")
+        if controller_failure:
+            raise original
         return 0
 
     monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
@@ -156,11 +164,19 @@ def test_native_application_retains_runner_lease_limits_and_cleanup(tmp_path, mo
     monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
     monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
     if held:
-        with pytest.raises(plugin_test_containment.UnreapedProcessError, match="unsettled"):
+        with pytest.raises(plugin_test_containment.UnreapedProcessError, match="unsettled") as refused:
             plugin_test_containment.run_contained(
                 ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
                 limits=limits, native_application=True,
             )
+        assert refused.value.__cause__ is (original if controller_failure else None)
+    elif controller_failure:
+        with pytest.raises(plugin_test_containment.ContainmentError) as refused:
+            plugin_test_containment.run_contained(
+                ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
+                limits=limits, native_application=True,
+            )
+        assert refused.value is original
     else:
         assert plugin_test_containment.run_contained(
             ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,

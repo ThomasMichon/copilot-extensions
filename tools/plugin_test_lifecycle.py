@@ -62,28 +62,36 @@ def run_contained(
         qualification.boundary.require(owner.time.monotonic, work=True)
     unreaped = None
     try:
-        with owner.daemon_test_lifecycle(
-            owner=f"contained-test-runner:{owner.os.getpid()}",
-            registry_root=sandbox.resolve() / "daemon-instances",
-            purpose=daemon_purpose,
-            lease=daemon_lease,
-            **(
-                {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
-                if qualification is not None else (
-                    {"cleanup_results": lifecycle_results} if native_application else {}
+        execution_error = None
+        try:
+            with owner.daemon_test_lifecycle(
+                owner=f"contained-test-runner:{owner.os.getpid()}",
+                registry_root=sandbox.resolve() / "daemon-instances",
+                purpose=daemon_purpose,
+                lease=daemon_lease,
+                **(
+                    {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
+                    if qualification is not None else (
+                        {"cleanup_results": lifecycle_results} if native_application else {}
+                    )
+                ),
+            ) as daemon_environment:
+                result = owner._run_contained_process(
+                    command, cwd=cwd, env={**env, **daemon_environment},
+                    sandbox=sandbox, limits=limits,
+                    **({"qualification": qualification} if qualification is not None else {}),
+                    **({"native_application": True} if native_application else {}),
                 )
-            ),
-        ) as daemon_environment:
-            result = owner._run_contained_process(
-                command, cwd=cwd, env={**env, **daemon_environment},
-                sandbox=sandbox, limits=limits,
-                **({"qualification": qualification} if qualification is not None else {}),
-                **({"native_application": True} if native_application else {}),
-            )
-        if native_application and any(
-            outcome.status not in ("settled", "missing") for outcome in lifecycle_results
-        ):
-            raise owner.UnreapedProcessError("Native application daemon cleanup remains unsettled.")
+        except BaseException as error:
+            execution_error = error
+            raise
+        finally:
+            if native_application and any(
+                outcome.status not in ("settled", "missing") for outcome in lifecycle_results
+            ):
+                raise owner.UnreapedProcessError(
+                    "Native application daemon cleanup remains unsettled."
+                ) from execution_error
         if qualification is not None:
             qualification.boundary.require(owner.time.monotonic)
             qualification.lifecycle_settled = all(
