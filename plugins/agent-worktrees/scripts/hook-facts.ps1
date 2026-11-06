@@ -210,6 +210,44 @@ function Get-PostToolPositiveInt {
     return $Default
 }
 
+function Get-PostToolNoteIdentity {
+    param($Value)
+    if ($Value -isnot [string]) { return $Value }
+    $stamp = [DateTimeOffset]::MinValue
+    if ([DateTimeOffset]::TryParse(
+        $Value, [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$stamp
+    )) {
+        return $stamp.ToUniversalTime().ToString(
+            "yyyy-MM-dd'T'HH:mm:ss.ffffff'+00:00'", [Globalization.CultureInfo]::InvariantCulture
+        )
+    }
+    return $Value
+}
+
+function Enter-PostToolCounterLock {
+    param([string]$Path)
+    $stream = $null
+    try {
+        $null = Get-PreparedWorktreesPath $Path
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        while ($true) {
+            try {
+                $stream.Lock(0, 1)
+                return $stream
+            } catch [IO.IOException] {
+                if ($clock.Elapsed.TotalMilliseconds -ge 100) { break }
+                [Threading.Thread]::Sleep(5)
+            }
+        }
+    } catch {}
+    if ($null -ne $stream) { $stream.Dispose() }
+    return $null
+}
+
 function Invoke-PreparedPostToolRead {
     param([string]$Raw)
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
@@ -264,16 +302,20 @@ function Invoke-PreparedPostToolRead {
         $sidecar = [IO.Path]::Combine($stateHome, $worktree + '.json')
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
         $messages = [Collections.Generic.List[string]]::new()
+        $counterLock = $null
         try {
             $null = Get-PreparedWorktreesPath $sidecar
             if (([string]$env:AGENT_WORKTREES_NUDGE).Trim().ToLowerInvariant() -notin @('0', 'off', 'false', 'no')) {
-                if ($facts['status'] -in @('completed', 'finalized', 'removed', 'pruned')) {
+                $counterLock = Enter-PostToolCounterLock ([IO.Path]::Combine($stateHome, $worktree + '.lock'))
+                if ($null -eq $counterLock) {
+                    # Contention is advisory; the independent bind reminder still runs.
+                } elseif ($facts['status'] -in @('completed', 'finalized', 'removed', 'pruned')) {
                     try { [IO.File]::Delete($sidecar) } catch {}
                 } else {
                     $data = Read-PostToolBoundedJson $sidecar 4096
-                    $note = $facts['status_note_at']
+                    $note = Get-PostToolNoteIdentity $facts['status_note_at']
                     if ($null -eq $data -or
-                        -not [string]::Equals($data['seen_note_at'], $note, [StringComparison]::Ordinal) -or
+                        -not [string]::Equals((Get-PostToolNoteIdentity $data['seen_note_at']), $note, [StringComparison]::Ordinal) -or
                         -not $data.ContainsKey('window_start')) {
                         $data = @{ count = 0; window_start = $now; seen_note_at = $note }
                     }
@@ -310,7 +352,9 @@ function Invoke-PreparedPostToolRead {
                     }
                 }
             }
-        } catch {}
+        } catch {} finally {
+            if ($null -ne $counterLock) { $counterLock.Dispose() }
+        }
         try {
             if (-not $facts['record_head_session']) {
                 $stamp = [IO.Path]::Combine($locator['projectRoot'], 'worktrees', $worktree + '.bind-nudge-at')

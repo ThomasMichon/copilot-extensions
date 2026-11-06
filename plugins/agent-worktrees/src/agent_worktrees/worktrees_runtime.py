@@ -402,7 +402,7 @@ class WorktreesRuntime:
             | self.observations.projects()
         )
 
-    def publish(self, project: str, rows, *, observed_at: float) -> None:
+    def publish(self, project: str, rows, *, observed_at: float, record_heads=None) -> None:
         project = _identity(project, name="project")
         with self._activation_lock:
             with self._lock:
@@ -418,6 +418,7 @@ class WorktreesRuntime:
                     if self.hook_facts is not None:
                         self.hook_facts.publish(
                             project, self.store.read(project, contract_version=2),
+                            record_heads=record_heads,
                         )
                 self.agendas.roster_changed(project)
             except ProjectionUnavailable as exc:

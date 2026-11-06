@@ -17,7 +17,7 @@ MAX_BYTES = 16 * 1024
 MAX_STRING_BYTES = 4096
 MAX_VIEWS = 4096
 _CONTEXT_FIELDS = ("marketplaceId", "installReceipt", "pluginRoot")
-_TEXT_FACTS = ("status", "status_note_at", "last_session_id", "record_head_session")
+_TEXT_FACTS = ("status", "status_note_at", "last_session_id")
 
 
 def _text(value: object, *, required: bool = False) -> str | None:
@@ -87,7 +87,7 @@ class HookFactsPublisher:
             _child(home, directory=True)
         return home
 
-    def _encode(self, project: str, row: dict, projection: dict) -> bytes | None:
+    def _encode(self, project: str, row: dict, projection: dict, record_heads) -> bytes | None:
         provenance = (row.get("fact_provenance") or {}).get("record") or {}
         if (
             provenance.get("quality") != "current" or row.get("id") == "@anchor"
@@ -108,8 +108,13 @@ class HookFactsPublisher:
         revision = row.get("semantic_revision")
         if type(revision) is not int or revision < 1:
             raise ValueError("invalid hook fact row revision")
+        head = None if record_heads is None else record_heads.get(worktree)
+        head_known = (
+            isinstance(head, dict) and "head_session" in head
+            and head.get("creation_nonce") == nonce and head.get("workspace") == workspace
+        )
         value = {
-            "version": VERSION if "record_head_session" in row else 1,
+            "version": VERSION if head_known else 1,
             "quality": "advisory",
             "completeness": "partial",
             "scope": {
@@ -122,10 +127,8 @@ class HookFactsPublisher:
             },
             "revision": revision,
             "facts": {
-                **{
-                    field: _text(row.get(field)) for field in _TEXT_FACTS
-                    if field != "record_head_session" or field in row
-                },
+                **{field: _text(row.get(field)) for field in _TEXT_FACTS},
+                **({"record_head_session": _text(head["head_session"])} if head_known else {}),
                 "head_yielded": yielded,
             },
         }
@@ -170,12 +173,12 @@ class HookFactsPublisher:
             for project in tuple(self._files):
                 self.withdraw(project)
 
-    def publish(self, project: str, publication: dict) -> None:
+    def publish(self, project: str, publication: dict, *, record_heads=None) -> None:
         with self._lock:
             if self._active:
-                self._publish(project, publication)
+                self._publish(project, publication, record_heads)
 
-    def _publish(self, project: str, publication: dict) -> None:
+    def _publish(self, project: str, publication: dict, record_heads) -> None:
         try:
             segment(project, "hook fact project")
             rows = publication["worktrees"]
@@ -184,7 +187,7 @@ class HookFactsPublisher:
                 raise ValueError("hook fact roster is unavailable or exceeds its bound")
             desired = {}
             for row in rows:
-                raw = self._encode(project, row, projection)
+                raw = self._encode(project, row, projection, record_heads)
                 if raw is not None:
                     desired[segment(row["id"], "hook fact worktree")] = raw
             retained = self._files.setdefault(project, {})

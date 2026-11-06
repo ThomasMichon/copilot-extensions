@@ -369,6 +369,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
     record = tracking._load_record_uncached(path)
     record.repo = "example"
     record.creation_nonce = "read-incarnation"
+    record.status_note_at = "2026-11-05T20:00:00.123+05:30"
     tracking.save_record(record, path)
     tracking.register_session("worktree", "prepared")
     record = tracking._load_record_uncached(path)
@@ -378,16 +379,22 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
     assert binding["hookFacts"]["projectRoot"] == str(project)
     assert binding["hookFacts"]["workspace"] == str(workspace)
     row = main._worktree_to_dict(record, current_only=True)
-    assert row["record_head_session"] == "prepared"
+    assert "record_head_session" not in row
+    record_heads = {
+        record.worktree_id: {
+            "creation_nonce": record.creation_nonce, "workspace": record.worktree_path,
+            "head_session": record.resolved_head_session,
+        },
+    }
+    assert record_heads[record.worktree_id]["head_session"] == "prepared"
     row.update(
         live_session_ids=["prepared"],
         fact_provenance={"record": {"quality": "current", "observed_at": 1}},
-        status_note_at="2026-11-05T20:00:00.123+05:30",
     )
     publisher = HookFactsPublisher(registry, "a" * 32, project_root=lambda name: project)
     runtime = WorktreesRuntime(tmp_path / "current.sqlite3", hook_facts=publisher)
     runtime.activate()
-    runtime.publish("example", [row], observed_at=1)
+    runtime.publish("example", [row], observed_at=1, record_heads=record_heads)
     fact_path = project / "worktrees" / "worktree" / "hook-facts" / f"{publisher.generation}.json"
     discovery = {
         "hook_facts_version": 2, "hook_facts_generation": publisher.generation,
@@ -412,8 +419,15 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
     )
     command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
     measured_command = command.removesuffix("exit 0") + (
+        "$entrySeconds=$entryClock.Elapsed.TotalSeconds\n"
+        f"$counterPath='{str(registry / 'nudge-state' / 'worktree.lock').replace(chr(39), chr(39)*2)}'\n"
+        "if (-not $env:COUNTER_TEST_ROLE -and [IO.File]::Exists($counterPath)) {\n"
+        " $probe=[IO.File]::Open($counterPath,[IO.FileMode]::Open,"
+        "[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)\n"
+        " try { $probe.Lock(0,1) } finally { $probe.Dispose() }\n"
+        "}\n"
         "[Console]::Error.WriteLine('entry_seconds=' + "
-        "$entryClock.Elapsed.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)); exit 0"
+        "$entrySeconds.ToString([Globalization.CultureInfo]::InvariantCulture)); exit 0"
     )
     harness = tmp_path / "registered-read.ps1"
     harness.write_text(
@@ -434,7 +448,8 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
     try:
         yield dict(
             env=env, harness=harness, payload=payload, facts=fact_path,
-            row=row, runtime=runtime, session=session, registry=registry,
+            row=row, record_heads=record_heads, runtime=runtime, session=session, registry=registry,
+            home=tmp_path, tracking_path=path,
             sidecar=registry / "nudge-state" / "worktree.json",
         )
     finally:
@@ -448,7 +463,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", [
     "accounting", "note-reset", "bind-reminder", "malformed-counter", "disabled", "terminal",
-    "missing-membership", "changed-input", "missing-locator", "wrong-incarnation",
+    "mixed-note", "missing-membership", "changed-input", "missing-locator", "wrong-incarnation",
     "wrong-workspace", "missing-discovery", "legacy-facts", "malformed-facts",
 ])
 def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, shell, case):
@@ -478,6 +493,34 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
         print(f"{shell}/{case}/{tool}: entry={entry:.4f}s process={elapsed:.4f}s")
         return json.loads(result.stdout) if result.stdout else {}
 
+    if case == "mixed-note":
+        from agent_worktrees import tracking
+        from test_nudge_status import nudge
+
+        assert invoke() == {}
+        assert "T" not in fixture["row"]["status_note_at"]
+        text = nudge.decide(
+            {**payload, "toolName": "edit"}, env=env, home=fixture["home"],
+            tracking_record=("worktree", fixture["tracking_path"]),
+        )
+        assert "2 tool call(s)" in text
+        assert invoke() == {}
+        assert json.loads(sidecar.read_text())["count"] == 1
+        record = tracking._load_record_uncached(fixture["tracking_path"])
+        record.status_note_at = "2026-11-05T20:01:00.123+05:30"
+        tracking.save_record(record, fixture["tracking_path"])
+        saved = tracking._load_record_uncached(fixture["tracking_path"])
+        row = {**fixture["row"], "status_note_at": saved.status_note_at}
+        fixture["runtime"].publish(
+            "example", [row], observed_at=2, record_heads=fixture["record_heads"],
+        )
+        assert nudge.decide(
+            {**payload, "toolName": "edit"}, env=env, home=fixture["home"],
+            tracking_record=("worktree", fixture["tracking_path"]),
+        ) is None
+        assert json.loads(sidecar.read_text())["count"] == 1
+        assert "2 tool call(s)" in invoke()["additionalContext"]
+        return
     if case in {"accounting", "note-reset", "terminal"}:
         assert invoke() == {}
         assert json.loads(sidecar.read_text())["count"] == 1
@@ -492,15 +535,18 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
             row["status_note_at"] = "2026-11-05T20:01:00Z"
         else:
             row["status"] = "completed"
-        fixture["runtime"].publish("example", [row], observed_at=2)
+        fixture["runtime"].publish(
+            "example", [row], observed_at=2, record_heads=fixture["record_heads"],
+        )
         assert invoke() == {}
         assert sidecar.exists() is (case == "note-reset")
         if sidecar.exists():
             assert json.loads(sidecar.read_text())["count"] == 1
         return
     if case in {"bind-reminder", "malformed-counter"}:
-        row = {**fixture["row"], "record_head_session": None, "last_session_id": "resumable"}
-        fixture["runtime"].publish("example", [row], observed_at=2)
+        row = {**fixture["row"], "last_session_id": "resumable"}
+        heads = {"worktree": {**fixture["record_heads"]["worktree"], "head_session": None}}
+        fixture["runtime"].publish("example", [row], observed_at=2, record_heads=heads)
         if case == "malformed-counter":
             sidecar.parent.mkdir(parents=True)
             sidecar.write_text(json.dumps({
@@ -533,12 +579,106 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
         (registry / "status-monitor.lock").unlink()
     elif case == "legacy-facts":
         row = dict(fixture["row"])
-        row.pop("record_head_session")
         fixture["runtime"].publish("example", [row], observed_at=2)
     else:
         fixture["facts"].write_text('{"version":')
     assert invoke() == {}
     assert not sidecar.exists()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("network")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native shared shell/Python counter transaction")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("second_owner", ["shell", "python"])
+def test_overlapping_read_and_edit_share_counter_transaction(
+    prepared_read_event, shell, second_owner,
+):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    fixture = prepared_read_event
+    home = fixture["home"]
+    first_ready, second_ready, release = [home / name for name in ("first-ready", "second-ready", "release")]
+    support = fixture["harness"].parent / "payload" / "scripts" / "hook-facts.ps1"
+    quote = lambda path: str(path).replace("'", "''")
+    with support.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n$script:CounterRead = ${function:Read-PostToolBoundedJson}\n"
+            "$script:CounterEnter = ${function:Enter-PostToolCounterLock}\n"
+            "function Read-PostToolBoundedJson { param($Path, $Limit)\n"
+            f" if ($env:COUNTER_TEST_ROLE -eq 'first' -and $Path -ceq '{quote(fixture['sidecar'])}') {{\n"
+            f"  [IO.File]::WriteAllText('{quote(first_ready)}', 'locked')\n"
+            "  $clock = [Diagnostics.Stopwatch]::StartNew()\n"
+            f"  while (-not [IO.File]::Exists('{quote(release)}')) {{\n"
+            "   if ($clock.Elapsed.TotalSeconds -ge 5) { throw 'release not observed' }\n"
+            "   [Threading.Thread]::Sleep(5)\n"
+            "  }\n }\n & $script:CounterRead $Path $Limit\n}\n"
+            "function Enter-PostToolCounterLock { param($Path)\n"
+            " if ($env:COUNTER_TEST_ROLE -eq 'second') {\n"
+            f"  [IO.File]::WriteAllText('{quote(second_ready)}', 'entering')\n"
+            " }\n & $script:CounterEnter $Path\n}\n"
+        )
+    env = {**fixture["env"], "AGENT_WORKTREES_NUDGE_CALLS": "999"}
+    children = []
+
+    def start(command, role):
+        child = subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env={**env, "COUNTER_TEST_ROLE": role}, **no_window_kwargs(),
+        )
+        children.append(child)
+        child.stdin.write(json.dumps(fixture["payload"]))
+        child.stdin.close()
+        child.stdin = None
+        return child
+
+    def wait_for(path):
+        until = time.monotonic() + 5
+        while not path.exists():
+            assert time.monotonic() < until, f"barrier not reached: {path.name}"
+            time.sleep(0.005)
+
+    command = [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])]
+    try:
+        first = start(command, "first")
+        wait_for(first_ready)
+        if second_owner == "python":
+            script = (
+                "import importlib.util,json,os,pathlib,sys;"
+                f"s=importlib.util.spec_from_file_location('nudge',{str(PLUGIN / 'scripts' / 'nudge_status.py')!r});"
+                "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+                f"pathlib.Path({str(second_ready)!r}).write_text('entering');"
+                f"result=m.decide(json.load(sys.stdin),env=os.environ,home=pathlib.Path({str(home)!r}),"
+                f"tracking_record=('worktree',pathlib.Path({str(fixture['tracking_path'])!r})));"
+                "assert result is None,result"
+            )
+            command = [sys.executable, "-c", script]
+        second = start(command, "second")
+        wait_for(second_ready)
+        stdout, stderr = second.communicate(timeout=10)
+        assert second.returncode == 0, (stdout, stderr)
+        assert not stdout
+        assert not fixture["sidecar"].exists()
+        release.write_text("continue")
+        def finish(child):
+            stdout, stderr = child.communicate(timeout=10)
+            assert child.returncode == 0, (stdout, stderr)
+            assert not stdout
+            assert not stderr or stderr.startswith("entry_seconds="), stderr
+        finish(first)
+        finish(start(command, "sequential"))
+        assert json.loads(fixture["sidecar"].read_text())["count"] == 2
+    finally:
+        release.touch(exist_ok=True)
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+            child.communicate(timeout=10)
 
 
 @pytest.mark.portfolio_tier("T2")

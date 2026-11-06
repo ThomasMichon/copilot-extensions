@@ -98,8 +98,11 @@ projection generations and the existing installation-context fields. Facts
 contain only `status`, `status_note_at`, `last_session_id` and `head_yielded`.
 Version 2 additionally carries `record_head_session`, the canonical record's
 resolved head, independently of the listing/resume target. A yielded session or
-an execution-leg resume target is not a recorded head. Rows without that
-original field retain version 1; absence is unknown, not an asserted empty head.
+an execution-leg resume target is not a recorded head. The producer passes this
+observation separately from its original in-memory records, matching worktree,
+incarnation and workspace against the accepted row. It never extends the legacy
+roster wire or durable row schema. Missing or mismatched observations retain
+version 1; absence is unknown, not an asserted empty head.
 The listing session is an observation, **not head custody or permission to
 bind, resume or retire anything**. Missing facts stay null. The whole envelope
 is always advisory and partial, even when its source record was current.
@@ -165,7 +168,15 @@ incarnation is inferred from a directory name.
 
 The original discovery selects one publisher file. Version-2 facts drive the
 existing disposition window/call counter and bind-reminder cooldown at their
-original sidecar paths. Note changes reset the window, terminal observations
+original sidecar paths. Shell and Python counter updates and terminal clears
+share a byte-range transaction on `nudge-state/<worktree>.lock`, waiting at most
+100 ms for contention (or the remaining Python event deadline). A contended
+event skips this advisory counter without changing it or replaying the event;
+the independent bind reminder remains eligible. The stable lock file is not
+deleted on release. Timestamp note identities normalize to UTC microseconds in
+both paths, including existing sidecar values, so YAML's equivalent space/T or
+offset representations do not reset mixed read/edit accounting.
+Note changes reset the window, terminal observations
 clear its counter, live environment controls remain live, and a listing target
 does not suppress the no-recorded-head reminder. Neither a reminder nor its
 absence changes head custody or permission. No current event is sent or replayed.

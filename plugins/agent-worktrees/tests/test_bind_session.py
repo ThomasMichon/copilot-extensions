@@ -1024,13 +1024,13 @@ def test_list_row_keeps_a_yielded_head_resumable(tmp_tracking_dir: Path, monkeyp
     row = m._worktree_to_dict(rec)
     assert row["last_session_id"] == "orchestrator"
     assert row["head_yielded"] is True
-    assert row["record_head_session"] is None
+    assert "record_head_session" not in row
 
     tracking.register_session("wt-yield", "successor")  # a successor that does register wins
     row = m._worktree_to_dict(load_record(tmp_tracking_dir / "wt-yield.yaml"))
     assert row["last_session_id"] == "successor"
     assert "head_yielded" not in row
-    assert row["record_head_session"] == "successor"
+    assert "record_head_session" not in row
 
 
 def test_resume_reopens_a_yielded_head_over_a_newer_conversation(

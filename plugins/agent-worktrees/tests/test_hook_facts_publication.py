@@ -73,14 +73,57 @@ def test_accepted_row_is_detached_partial_and_shell_readable(owner, tmp_path):
 
 
 def test_recorded_head_is_not_the_listing_or_execution_leg_resume_target(owner, tmp_path):
+    from agent_worktrees import worktrees_projection as projection
+
     runtime, publisher, project = owner
-    source = row(tmp_path, record_head_session=None, last_session_id="resumable")
-    runtime.publish("project", [source], observed_at=1)
+    source = row(tmp_path, last_session_id="resumable")
+    runtime.publish("project", [source], observed_at=1, record_heads={
+        source["id"]: {
+            "creation_nonce": source["creation_nonce"], "workspace": source["path"],
+            "head_session": None,
+        },
+    })
     value = json.loads(output_path(publisher, project).read_bytes())
     assert value["version"] == 2
     assert value["facts"]["record_head_session"] is None
     assert value["facts"]["last_session_id"] == "resumable"
+    # Freeze the old strict row allowlist after the new publisher has written.
+    # Both wire contracts and durable fallback must remain readable on rollback.
+    old_fields = projection.ROW_FIELDS - {"record_head_session"}
+    for version in (1, 2):
+        publication = runtime.store.read("project", contract_version=version)
+        for item in publication["worktrees"]:
+            legacy_row = {key: value for key, value in item.items() if key != "semantic_revision"}
+            assert set(legacy_row) <= old_fields
+            identity, encoded = projection._encode_row(legacy_row)
+            assert projection._decode_row(identity, encoded) == legacy_row
+        durable = projection.read_advisory(
+            tmp_path / "current.sqlite3", "project", contract_version=version,
+        )
+        assert durable["worktrees"] == publication["worktrees"]
     runtime.publish("project", [row(tmp_path)], observed_at=2)
+    value = json.loads(output_path(publisher, project).read_bytes())
+    assert value["version"] == 1
+    assert "record_head_session" not in value["facts"]
+
+
+@pytest.mark.parametrize("mismatch", ["missing-head", "incarnation", "workspace", "worktree"])
+def test_head_observation_must_match_the_accepted_roster(owner, tmp_path, mismatch):
+    runtime, publisher, project = owner
+    source = row(tmp_path)
+    head = {
+        "creation_nonce": source["creation_nonce"], "workspace": source["path"],
+        "head_session": "canonical-head",
+    }
+    if mismatch == "missing-head":
+        head.pop("head_session")
+    elif mismatch == "incarnation":
+        head["creation_nonce"] = "previous-incarnation"
+    elif mismatch == "workspace":
+        head["workspace"] = str(tmp_path / "another-checkout")
+    runtime.publish("project", [source], observed_at=1, record_heads={
+        "another-worktree" if mismatch == "worktree" else source["id"]: head,
+    })
     value = json.loads(output_path(publisher, project).read_bytes())
     assert value["version"] == 1
     assert "record_head_session" not in value["facts"]
