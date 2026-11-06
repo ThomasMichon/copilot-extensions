@@ -289,6 +289,19 @@ $root = $env:TEST_CELL_ROOT
     return scripts / "runtime-gate.ps1", env
 
 
+def _configure_repository_role(root: Path, env: dict[str, str], role: str) -> None:
+    machine = "fixture-local"
+    indexer = machine if role == "host" else "fixture-remote"
+    config = root / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        f"indexers:\n  - machine: {indexer}\n    ssh: fixture-indexer\n",
+        encoding="utf-8",
+    )
+    env["AGENT_INDEX_MACHINE"] = machine
+    env["AGENT_INDEX_ROLE"] = role
+
+
 def _run(
     shell: str,
     script: Path,
@@ -729,7 +742,7 @@ def test_windows_powershell5_dispatches_from_non_ascii_path(
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(unicode_root, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {
@@ -852,7 +865,8 @@ def test_installer_readiness_never_provisions_at_session_start(
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["state"] == "configuration-empty"
-    assert "does not provision" in payload["detail"]
+    assert payload["detail"]
+    assert "::agent-provisioning::" not in result.stdout + result.stderr
     assert not home.exists()
 
 
@@ -943,7 +957,7 @@ def test_configured_role_with_missing_runtime_is_not_called_dormant(
         pytest.skip("bash is not installed")
     script, env = _fixture(tmp_path, shell)
     env["TEST_PYTHON"] = ""
-    env["AGENT_INDEX_ROLE"] = "client"
+    _configure_repository_role(tmp_path, env, "client")
 
     result = _run(shell, script, env, "status")
 
@@ -962,7 +976,7 @@ def test_configured_roles_are_reported_without_mutation(
     if shell == "bash" and shutil.which("bash") is None:
         pytest.skip("bash is not installed")
     script, env = _fixture(tmp_path, shell)
-    env["AGENT_INDEX_ROLE"] = role
+    _configure_repository_role(tmp_path, env, role)
 
     result = _run(shell, script, env, "role", "--json")
 
@@ -976,7 +990,7 @@ def test_configured_roles_are_reported_without_mutation(
 def test_stdio_mcp_never_provisions_missing_runtime(tmp_path: Path, shell: str, role: str):
     script, env = _fixture(tmp_path, shell)
     env["TEST_PYTHON"] = ""
-    env["AGENT_INDEX_ROLE"] = role
+    _configure_repository_role(tmp_path, env, role)
     result = _run(shell, script, env, "mcp")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "this command cannot provision a runtime" in result.stderr
@@ -1223,7 +1237,7 @@ def test_active_cell_option_command_is_one_validator_argument(
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(tmp_path, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {"status": "ready", "reason": "namespaced-active",
@@ -1260,7 +1274,7 @@ def test_active_cell_dispatch_sets_cell_roots_and_context(tmp_path: Path) -> Non
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(tmp_path, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {
@@ -1431,7 +1445,7 @@ def test_active_cell_rejects_validator_interpreter_outside_selected_slot(
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
     env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
-    env["AGENT_INDEX_ROLE"] = "host"
+    _configure_repository_role(tmp_path, env, "host")
     env["TEST_CELL_ROOT"] = str(cell_root)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {
