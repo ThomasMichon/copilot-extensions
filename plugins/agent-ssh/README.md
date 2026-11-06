@@ -541,9 +541,9 @@ startup gate, cold-cache behavior or latency tails.
 
 The opt-in Windows visibility lane is
 `tests/test_snapshot_windows_visibility.py` with
-`AGENT_SSH_WINDOWS_VISIBILITY=1`. It requires the active interactive input
-desktop; a locked/inaccessible desktop is an explicit blocker, not a zero-event
-pass. A real GUI-subsystem Python parent drives completed SSH/Worktrees runtimes,
+`AGENT_SSH_WINDOWS_VISIBILITY=1`. It requires access to the active input
+desktop, not a focused application; a locked/inaccessible desktop is an explicit
+blocker, not a zero-event pass. A real GUI-subsystem Python parent drives completed SSH/Worktrees runtimes,
 two native callbacks, a missing-adapter red control and resolution/execution
 timeout cleanup while Win32 enumerates visible windows and foreground changes.
 The fixture requires the native adapter and makes shell fallback fail closed.

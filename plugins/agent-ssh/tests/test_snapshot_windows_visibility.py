@@ -99,11 +99,48 @@ def _interactive_desktop(user32, kernel32):
             return value.value
 
         current = user32.GetThreadDesktop(kernel32.GetCurrentThreadId())
-        if name(current) != name(desktop) or not user32.GetForegroundWindow():
-            pytest.fail("BLOCKED: native observer is not on the active foreground desktop")
+        if name(current) != name(desktop):
+            pytest.fail("BLOCKED: native observer is not on the active input desktop")
         return name(desktop)
     finally:
         user32.CloseDesktop(desktop)
+
+
+@pytest.mark.parametrize(
+    ("current_name", "accessible", "error"),
+    [
+        ("Default", True, None),
+        ("Other", True, "not on the active input desktop"),
+        ("Default", False, "cannot open the input desktop"),
+    ],
+)
+def test_desktop_admission_does_not_require_a_focused_window(current_name, accessible, error):
+    from unittest.mock import Mock
+
+    user32, kernel32 = Mock(), Mock()
+    user32.GetProcessWindowStation.return_value = 1
+    user32.OpenInputDesktop.return_value = 2 if accessible else None
+    user32.GetThreadDesktop.return_value = 3
+    user32.GetForegroundWindow.return_value = 0
+    kernel32.GetCurrentThreadId.return_value = 4
+
+    def information(handle, kind, value, *_):
+        if kind == 1:
+            value._obj.flags = 1
+        else:
+            value.value = current_name if handle == 3 else "Default"
+        return True
+
+    user32.GetUserObjectInformationW.side_effect = information
+    if error is None:
+        assert _interactive_desktop(user32, kernel32) == "Default"
+    else:
+        with pytest.raises(pytest.fail.Exception, match=error):
+            _interactive_desktop(user32, kernel32)
+    if accessible:
+        user32.CloseDesktop.assert_called_once_with(2)
+    else:
+        user32.CloseDesktop.assert_not_called()
 
 
 @pytest.mark.skipif(
@@ -296,6 +333,7 @@ def test_windowless_writer_chain_two_cycles_and_timeout(tmp_path, monkeypatch, c
                 {
                     "measurement": "native-windows-windowless-parent-observer",
                     "desktop": desktop,
+                    "initial_foreground_present": bool(observer.foreground),
                     "visible_windows": 0,
                     "foreground_transitions": 0,
                     **value,
