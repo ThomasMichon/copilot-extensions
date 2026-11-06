@@ -2714,6 +2714,16 @@ change the 50 ms/VM budgets or make a failed read pass. Other runs remain
 unprofiled unless explicitly selected. Portable controls preserve one call
 and exact result/exception identity in both modes. Profiled timings include
 instrumentation and are diagnostic evidence, not native performance acceptance.
+The same optional boundary brackets each original private budget's creation and
+checks with `perf_counter`, reports both elapsed-clock implementations/resolutions,
+and retains at most eight budgets with their last check, unchanged limits and VM
+steps. `elapsed_min_ms`/`elapsed_max_ms` bracket the check's elapsed instant;
+`monotonic_after_ms` is a separately sampled post-check deadline-clock delta.
+Instrumentation still counts toward the original deadline. A native Windows
+control compares both clocks around sixteen bounded delayed checks, distinguishing
+an observed early refusal from true elapsed exhaustion or a non-reproduction.
+This is a clock hypothesis control, not proof of a historical failure's cause,
+a CPU-clock substitution, a retry, or a production budget change.
 The fixture's state reader also opens its Windows handle with read/write/delete
 sharing, matching atomic publication rather than temporarily denying its
 publisher's DELETE access. A native control holds the publisher's DELETE-access
