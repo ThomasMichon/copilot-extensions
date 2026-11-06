@@ -84,7 +84,8 @@ def test_skill_and_record_are_discoverable_without_a_runtime():
     "not automatic tool approval",
     "not its narrowest past invocation",
     "a failure followed by a reviewed fix is such a retry",
-    "a limit the agent wrote into its own question is its proposal, not a pin",
+    "accepted rerun caps",
+    "a pin or one-shot limit in the agent's only approving option is its proposal",
     "seek class-level pre-clearance",
 ])
 def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
@@ -131,6 +132,10 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
         "The same operation class would need approval a second time",
         "Ask once for class-level pre-clearance with a bounded rerun policy, not per invocation.",
     ),
+    (
+        "Operator accepts a class-level rerun policy with a run cap",
+        "The cap binds as granted scope; ask for an amendment before exceeding it.",
+    ),
 ])
 def test_record_preserves_explicit_decision_cases(situation, required):
     assert f"| {situation} | {required} |" in _RECORD.read_text()
@@ -167,7 +172,8 @@ def test_skill_checks_recorded_grants_and_limit_origin_before_asking():
     skill = " ".join(_SKILL.read_text().split())
     for clause in (
         "Before asking for approval of an operation, run this self-check",
-        "Classify each recorded limit by origin",
+        "Classify each recorded revision pin or one-shot limit by origin",
+        "Accepted rerun caps, budgets and deadlines bind as granted scope",
         "only agent-proposed limits stand in the way",
         "Offer narrower one-shot or revision-pinned options only as clearly labeled alternatives",
         "Worked example: repeated qualification runs",

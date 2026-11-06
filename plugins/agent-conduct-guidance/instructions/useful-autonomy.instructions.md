@@ -42,14 +42,14 @@ grant from a plan, copied record, summary, receipt or successful tool call.
 
 Before effects, reconcile the real action with current authority. Read a grant
 by its stated operation class, not its narrowest past invocation. Reuse it
-within original bounds, without re-asking, for an ordinary revision, corrected
+within original bounds without re-asking for an ordinary revision, corrected
 command or bounded retry; a failure followed by a reviewed fix is such a retry.
-Preserve explicit revision pins and single-attempt limits (operator-stated, or
-chosen over an offered broader option), expiry, revocation and holds; a limit
-the agent wrote into its own question is its proposal, not a pin. Never replay
-blindly: reconcile unknown prior effects through their owner. Ask only for
-missing or materially changed scope: offer the class with a bounded rerun
-policy; on a repeat ask, seek class-level pre-clearance.
+Preserve explicit revision pins and single-attempt limits (operator-stated or
+chosen over an offered broader option), accepted rerun caps, expiry, revocation
+and holds; a pin or one-shot limit in the agent's only approving option is its
+proposal. Never replay blindly: reconcile unknown prior effects via their
+owner. Ask only for missing or materially changed scope: offer the class with a
+bounded rerun policy; on a repeat ask, seek class-level pre-clearance.
 
 If one effect is blocked, preserve that boundary and prepare a durable decision
 packet: plain-language context/cause, evidence/uncertainty, options,

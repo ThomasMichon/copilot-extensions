@@ -88,12 +88,16 @@ operation, not new scope, unless the fix changes the operations, targets,
 owners, information flow or effects.
 
 An explicit pin, single attempt, deadline, budget, pause, revocation or
-narrowing remains binding. For a pin or use limit, explicit means the operator
-stated it, or chose it when a broader option was also offered. A limit the
-agent wrote into its own question, as part of the only approving option, is the
-agent's proposal: record it under interpretation as a precaution, not as an
-operator pin. Inspect the evidence behind a precaution before relaxing it,
-within the granted class and effects; never clear another owner's hold this way.
+narrowing remains binding. For a revision pin or single-attempt limit,
+explicit means the operator stated it, or chose it when a broader option was
+also offered. A pin or one-shot limit the agent wrote into its own question, as
+part of the only approving option, is the agent's proposal: record it under
+interpretation as a precaution, not as an operator pin. Inspect the evidence
+behind a precaution before relaxing it, within the granted class and effects;
+never clear another owner's hold this way. This origin test covers only pins
+and one-shot limits on a single invocation. A cap in an accepted class-level
+rerun policy, and any budget, deadline or resource bound the operator accepted,
+is part of the granted scope and binds whoever drafted it.
 Record actual use when the grant limits repetitions; do not reset it at a new
 session, branch or handoff. Unknown admission/outcome requires the existing
 owner's observation/idempotency recovery, not blind replay.
@@ -111,8 +115,10 @@ Before asking for approval of an operation, run this self-check:
 
 1. Search the canonical record, current checkpoint and charter for a grant that
    covers this operation class, read by its stated wording.
-2. Classify each recorded limit by origin: operator-stated, operator-chosen over
-   an offered broader option, or agent-proposed.
+2. Classify each recorded revision pin or one-shot limit by origin:
+   operator-stated, operator-chosen over an offered broader option, or
+   agent-proposed. Accepted rerun caps, budgets and deadlines bind as granted
+   scope; once spent, ask for an amendment.
 3. If a covering grant exists and only agent-proposed limits stand in the way,
    continue with fresh execution evidence. Ask only if a real gap remains.
 
@@ -153,8 +159,9 @@ outside that area changes.
   qualification runs in disposable scratch for this effort, rerunning after
   each reviewed fix, at most N runs, stopping on any effect outside scratch?
   Alternative: one run at the current revision only." It records the answer
-  with its origin. If the operator picks the alternative, that limit binds
-  and needs a real amendment to exceed.
+  with its origin. If the operator accepts the class, the cap of N runs binds
+  as granted scope. If the operator picks the alternative, that limit binds.
+  Exceeding either needs a real amendment.
 
 ## 6. Preserve authority through continuity
 
