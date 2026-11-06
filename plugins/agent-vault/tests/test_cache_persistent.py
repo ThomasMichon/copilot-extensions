@@ -504,13 +504,16 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
         assert persistent.get("Example/one") is None
 
 
-def test_batch_can_populate_cache_with_valid_existing_key_only(
-    enabled_cache, monkeypatch, capsys,
+@pytest.mark.parametrize("existing_key", [False, True])
+def test_batch_can_populate_fresh_cache_without_rekeying(
+    enabled_cache, monkeypatch, capsys, existing_key,
 ):
     persistent = get_cache()
-    assert persistent.put("Example/one", "password", "previous")
-    key_before = persistent._key_file.read_bytes()
-    persistent._cache_file.unlink()
+    key_before = None
+    if existing_key:
+        assert persistent.put("Example/one", "password", "previous")
+        key_before = persistent._key_file.read_bytes()
+        persistent._cache_file.unlink()
     monkeypatch.setattr(cache_mod, "get_cache", lambda: PersistentCache())
     monkeypatch.setattr(cli, "ensure_service", lambda: True)
     monkeypatch.setattr(cli, "send_command", lambda *_args, **_kwargs: {
@@ -521,7 +524,10 @@ def test_batch_can_populate_cache_with_valid_existing_key_only(
     assert cli.main(["batch-get"]) == 0
     result, = json.loads(capsys.readouterr().out)["results"]
     assert result["value"] == "authoritative"
-    assert persistent._key_file.read_bytes() == key_before
+    if existing_key:
+        assert persistent._key_file.read_bytes() == key_before
+    else:
+        assert persistent._key_file.exists()
     assert PersistentCache().get("Example/one") == "authoritative"
 
 
@@ -635,9 +641,12 @@ def test_batch_rejects_malformed_service_values_before_cache_write(
 
 
 @pytest.mark.parametrize("refresh", [False, True])
-@pytest.mark.parametrize("failure", ["ciphertext", "key", "changed-key"])
+@pytest.mark.parametrize("failure,key_only", [
+    ("ciphertext", False), ("key", False), ("changed-key", False), ("deleted-key", False),
+    ("ciphertext", True), ("key", True), ("deleted-key", True),
+])
 def test_batch_does_not_replace_cache_corrupted_during_service_read(
-    enabled_cache, monkeypatch, capsys, refresh, failure,
+    enabled_cache, monkeypatch, capsys, refresh, key_only, failure,
 ):
     from cryptography.fernet import Fernet
 
@@ -645,13 +654,17 @@ def test_batch_does_not_replace_cache_corrupted_during_service_read(
 
     persistent = get_cache()
     assert persistent.put("Example/retained", "password", "cached-value")
-    cache_before = persistent._cache_file.read_bytes()
+    if key_only:
+        persistent._cache_file.unlink()
+    cache_before = persistent._cache_file.read_bytes() if persistent._cache_file.exists() else None
     key_before = persistent._key_file.read_bytes()
     changed_key = kek.wrap_bytes(Fernet.generate_key())
 
     def send(*_args, **_kwargs):
         if failure == "ciphertext":
             persistent._cache_file.write_bytes(b"corrupted-during-read")
+        elif failure == "deleted-key":
+            persistent._key_file.unlink()
         else:
             persistent._key_file.write_bytes(
                 changed_key if failure == "changed-key" else b"corrupted-during-read",
@@ -670,13 +683,18 @@ def test_batch_does_not_replace_cache_corrupted_during_service_read(
     assert result["value"] is None
     assert "could not be reconciled" in result["error"]
     assert "not-published" not in captured.out + captured.err
-    assert persistent._cache_file.read_bytes() == (
-        b"corrupted-during-read" if failure == "ciphertext" else cache_before
-    )
-    assert persistent._key_file.read_bytes() == (
-        key_before if failure == "ciphertext"
-        else changed_key if failure == "changed-key" else b"corrupted-during-read"
-    )
+    expected_cache = b"corrupted-during-read" if failure == "ciphertext" else cache_before
+    if expected_cache is None:
+        assert not persistent._cache_file.exists()
+    else:
+        assert persistent._cache_file.read_bytes() == expected_cache
+    if failure == "deleted-key":
+        assert not persistent._key_file.exists()
+    else:
+        assert persistent._key_file.read_bytes() == (
+            key_before if failure == "ciphertext"
+            else changed_key if failure == "changed-key" else b"corrupted-during-read"
+        )
 
 
 @pytest.mark.parametrize("value,ok", [("cached-value", True), (42, False)])

@@ -172,8 +172,13 @@ class PersistentCache:
 
     def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
         if not self._cache_file.exists():
-            if strict and self._key_file.exists():
-                self._get_fernet(readonly=True)
+            if strict:
+                from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
+
+                if self._key_file.exists():
+                    self._get_fernet(readonly=True)
+                elif self._fernet is not None and not isinstance(self._fernet, DpapiCacheCipher):
+                    raise CacheProtectionError("cache key disappeared; cache was not replaced")
             return {"v": 1, "entries": {}}
         if not self._key_file.exists():
             from .cache_dpapi import MAGIC, CacheProtectionError
