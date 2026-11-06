@@ -1547,6 +1547,32 @@ onto one branch.
 
 ## Journal
 
+### 2026-11-06 - Integration review deadline and CI corrections
+
+PR #11121's public metadata fetch now interrupts its owned response socket at
+the caller's body deadline, including continuously streamed body bytes and
+partial chunk framing. The bounded watchdog is canceled and joined on every
+read exit. Containers' operating documentation now distinguishes version-one
+target/profile declarations from the required V2 complete-application packet
+and selected-application currentness.
+
+The launch census records the two adopted native installer drivers and the
+Manager recovery spawn's current function. The unit manifest binds the exact
+canonical Python assets materialized by the existing Manager-provider test;
+unit effect restrictions are unchanged. The Windows nonzero-CIM-owner fixture
+explicitly selects and witnesses the CIM fallback instead of depending on the
+native token-owner path failing for a synthetic PID.
+
+Contained deadline/selection controls passed 79 cases; packaged-provider and
+Windows CIM controls passed 86 cases, with cleanup verified in both runs.
+The broader historical workflow test selection still encounters the
+[previously recorded non-enrolled recipe gap](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6627995884)
+and [retired-workflow fixture failures](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6282693571).
+Those results are not a full-portfolio pass or authority to restore retired
+required jobs. Exact-head independent review, required CI, source merge,
+promotion, the outstanding isolated MCP capacity gate and separately authorized
+installed adoption remain open. No host runtime or production state changed.
+
 ### 2026-10-30 - Proposed combined-trigger admission case
 
 Added unchecked direct #5353 Plan/local AND actual global Validation and

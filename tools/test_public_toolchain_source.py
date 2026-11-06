@@ -34,6 +34,7 @@ HASHES = {name: ("a" * 64,) for name in PINS}
 @pytest.mark.parametrize("deadline", [135.0, 180.0])
 def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadline):
     import io
+    from types import SimpleNamespace
     import seasoned_public_feed as feed
 
     now, timeouts = [100.0], []
@@ -42,7 +43,11 @@ def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadl
     def open_url(request, *, timeout):
         timeouts.append(timeout)
         now[0] += 20
-        return io.BytesIO(b"metadata fixture")
+        response = io.BytesIO(b"metadata fixture")
+        response.fp = SimpleNamespace(raw=SimpleNamespace(
+            _sock=SimpleNamespace(shutdown=lambda how: pytest.fail("fixture read exceeded its deadline")),
+        ))
+        return response
 
     def resolve(name, **options):
         assert options["fetch"]("https://example.invalid/" + name) == b"metadata fixture"

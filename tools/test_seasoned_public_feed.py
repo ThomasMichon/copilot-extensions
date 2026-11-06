@@ -3,7 +3,10 @@ from __future__ import annotations
 import http.client
 import importlib
 import json
+import socket
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +27,55 @@ def _releases_payload(releases: dict) -> bytes:
 
 def _file(upload_time: str, *, yanked: bool = False) -> dict:
     return {"upload_time_iso_8601": upload_time, "yanked": yanked}
+
+
+@pytest.mark.parametrize("framing", ["length", "chunked", "chunk-header"])
+def test_default_fetch_deadline_interrupts_continuous_response_bytes(monkeypatch, framing):
+    reader, writer = socket.socketpair()
+    stop = threading.Event()
+    header = b"Content-Length: 100000\r\n" if framing == "length" else b"Transfer-Encoding: chunked\r\n"
+    writer.sendall(b"HTTP/1.1 200 OK\r\n" + header + b"\r\n")
+    response = http.client.HTTPResponse(reader)
+    response.begin()
+    reader.settimeout(1)
+
+    def stream():
+        try:
+            while not stop.wait(0.02):
+                writer.sendall(b"1\r\nx\r\n" if framing == "chunked" else b"1")
+        except OSError:
+            pass
+
+    producer = threading.Thread(target=stream)
+    monkeypatch.setattr(spf.urllib.request, "urlopen", lambda *args, **kwargs: response)
+    producer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
+            spf._default_fetch("https://pypi.org/pypi/pkg/json", deadline=started + 0.15)
+        assert time.monotonic() - started < 0.75
+    finally:
+        stop.set()
+        producer.join(timeout=1)
+        response.close()
+        reader.close()
+        writer.close()
+    assert not producer.is_alive()
+
+
+def test_default_fetch_completes_response_before_deadline(monkeypatch):
+    reader, writer = socket.socketpair()
+    writer.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+    response = http.client.HTTPResponse(reader)
+    response.begin()
+    monkeypatch.setattr(spf.urllib.request, "urlopen", lambda *args, **kwargs: response)
+    try:
+        assert spf._default_fetch("https://pypi.org/pypi/pkg/json", deadline=time.monotonic() + 1) == b"{}"
+    finally:
+        response.close()
+        reader.close()
+        writer.close()
+
 
 def test_release_retains_only_selected_seasoned_file_hashes():
     old = {**_file("2026-01-01T00:00:00Z"), "digests": {"sha256": "a" * 64}}

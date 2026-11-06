@@ -35,6 +35,8 @@ import http.client
 import json
 import math
 import re
+import socket
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -122,6 +124,37 @@ class SeasonedVersionError(RuntimeError):
     an unseasoned "latest"."""
 
 
+def _read_before_deadline(response: http.client.HTTPResponse, deadline: float) -> bytes:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    # HTTPResponse.read() can receive indefinitely while every socket read
+    # clears its idle timeout, including inside chunk framing. Interrupt the
+    # owned transport, not the buffered reader's potentially locked close().
+    transport = response.fp.raw._sock
+    expired = threading.Event()
+
+    def interrupt() -> None:
+        expired.set()
+        try:
+            transport.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    timer = threading.Timer(remaining, interrupt)
+    timer.start()
+    try:
+        try:
+            result = response.read()
+        finally:
+            if expired.is_set() or time.monotonic() >= deadline:
+                raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+        return result
+    finally:
+        timer.cancel()
+        timer.join()
+
+
 def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
     """The real network fetch -- isolated behind the injectable ``fetch``
     parameter below so every test exercises the actual selection logic
@@ -136,7 +169,7 @@ def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
             raise SeasonedVersionError("public toolchain resolution deadline exceeded")
     request = urllib.request.Request(url, headers={"User-Agent": "copilot-extensions-build-toolchain-lock"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+        return response.read() if deadline is None else _read_before_deadline(response, deadline)
 
 
 def _resolve_seasoned_release(

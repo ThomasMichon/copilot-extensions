@@ -646,11 +646,16 @@ def test_nonzero_cim_owner_result_ignores_only_confirmed_exited_process(
 ):
     native = MODULE._load(SOURCE.with_name("installer_engine_uninstall_windows.py"))
     prelude = f"""
+$script:CimOwnerCalls=0
+function Add-Type {{ throw 'Fixture selects the CIM ownership fallback' }}
 function Get-CimInstance {{
     [pscustomobject]@{{ProcessId=64123;ParentProcessId=0;Name='python.exe';
         ExecutablePath='';CommandLine='fixture candidate'}}
 }}
-function Invoke-CimMethod {{ [pscustomobject]@{{ReturnValue=2}} }}
+function Invoke-CimMethod {{
+    $script:CimOwnerCalls++
+    [pscustomobject]@{{ReturnValue=2}}
+}}
 function Get-Process {{
     $result=[pscustomobject]@{{HasExited=${str(exited).lower()}}}
     $result | Add-Member -MemberType ScriptMethod -Name Dispose -Value {{ }}
@@ -662,7 +667,12 @@ function Get-Process {{
         process_lookup = "[Diagnostics.Process]::GetProcessById($processId)"
         assert argv[-1].count(process_lookup) == 1
         program = argv[-1].replace(process_lookup, "(Get-Process -Id $processId)")
-        return MODULE._run(tmp_path, [*argv[:-1], prelude + program])
+        checked = (
+            prelude + "\ntry {\n" + program
+            + "\n} finally { if ($script:CimOwnerCalls -lt 1) "
+            + "{ throw 'Fixture did not exercise CIM ownership' } }\n"
+        )
+        return MODULE._run(tmp_path, [*argv[:-1], checked])
 
     inspect = lambda: native.inspect_processes(
         tmp_path, HOST, "fixture_module", run, descendants=descendants,
