@@ -492,7 +492,12 @@
         "plugins/copilot-extensions-harness"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "import_roots": [
+        "tools",
+        "plugins/copilot-extensions-harness/scripts",
+        "plugins/customizing-copilot/skills/reviewing-customizations/scripts"
+      ]
     },
     {
       "name": "customizing-copilot",

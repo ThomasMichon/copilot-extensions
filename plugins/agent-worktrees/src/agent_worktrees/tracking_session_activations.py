@@ -133,6 +133,31 @@ def source_end_authoritative(entry: SessionEntry, source: str) -> bool:
     return not entry.source_history_saturated and source not in entry.pruned_sources
 
 
+def session_activation_observation(entry: SessionEntry | None) -> dict[str, object] | None:
+    """Project one exact current activation without qualifying legacy history."""
+    if entry is None or entry.ended_at or not entry.activations:
+        return None
+    latest = max(entry.activations, key=lambda item: item.ordinal)
+    if (
+        latest.ordinal <= 0 or latest.ended_at or latest.source_ambiguous
+        or not latest.source_identity or not latest.started_at or not latest.start_recorded_at
+        or not source_end_authoritative(entry, latest.source_identity)
+        or sum(item.ordinal == latest.ordinal for item in entry.activations) != 1
+        or sum(item.ended_at is None for item in entry.activations) != 1
+        or sum(
+            item.source_identity == latest.source_identity for item in entry.activations
+        ) != 1
+    ):
+        return None
+    return {
+        "version": 1,
+        "ordinal": latest.ordinal,
+        "startedAt": latest.started_at,
+        "startRecordedAt": latest.start_recorded_at,
+        "sourceIdentity": latest.source_identity,
+    }
+
+
 def activation_fields(entry: SessionEntry) -> dict:
     """Serialize activation history and its independent bounded pruning fence."""
     fields = {}

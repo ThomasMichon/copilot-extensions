@@ -1530,6 +1530,206 @@ def fragment_source(tmp_path: Path) -> tuple[str, ...]:
     return tuple(path.relative_to(tmp_path).as_posix() for path in sorted(directory.glob("*.py")))
 
 
+def guard_source(
+    root: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[typecheck.Project, tuple[str, ...], Path, Lease]:
+    """Keep the original guard body and one extra current owned target."""
+    source = root / views.GUARD_ENTRY
+    source.parent.mkdir(parents=True)
+    source.write_bytes((typecheck.ROOT / views.GUARD_ENTRY).read_bytes())
+    extra = source.with_name("new_owned_member.py")
+    extra.write_bytes(b"value: int = 1\n")
+    (root / "libs/installer-engine").mkdir(parents=True)
+    environment = root / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+    monkeypatch.setattr(typecheck, "environment_path", lambda *_args, **_kwargs: (environment, "test-context"))
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
+    monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: lease)
+    item = typecheck.Project(
+        "copilot-extensions-harness", ("plugins/copilot-extensions-harness",), (),
+        "pending", "3.10", ("linux", "win32"), "requirements.txt",
+        import_roots=("plugins/copilot-extensions-harness/scripts",),
+    )
+    paths = (views.GUARD_ENTRY, extra.relative_to(root).as_posix())
+    return item, paths, environment, lease
+
+
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+def test_guard_alias_exact_scope_bytes_full_map_and_current_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    selected: bool, newline: bytes,
+) -> None:
+    item, paths, environment, lease = guard_source(tmp_path, monkeypatch)
+    source = tmp_path / views.GUARD_ENTRY
+    content = source.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n").replace(b"\n", newline)
+    source.write_bytes(content)
+    if not selected:
+        item = replace(project(), platforms=("linux", "win32"))
+        (tmp_path / "sample.py").write_bytes(b"value: int = 1\n")
+    owned = paths if selected else ("sample.py",)
+    calls = 0
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        assert env is not None
+        targets = Path(argv[-1][1:]).read_text(encoding="utf-8").splitlines()
+        assert len(targets) == len(owned)
+        if not selected:
+            assert targets == ["sample.py"]
+            assert "source-views-" not in env["MYPYPATH"]
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        alias = Path(targets[0])
+        assert alias.name == views.GUARD_MODULE + ".py" and alias.read_bytes() == content
+        assert targets[1:] == list(paths[1:]) and views.GUARD_ENTRY not in targets
+        assert env["MYPYPATH"].split(os.pathsep).count(str(alias.parent)) == 1
+        assert argv[argv.index("--cache-dir") + 1] == os.devnull
+        diagnostics = "".join(
+            f"{alias}:{number}:7: error: mapped\n"
+            for number in range(1, len(content.splitlines()) + 1)
+        )
+        return subprocess.CompletedProcess(argv, 0, diagnostics, "")
+
+    monkeypatch.setattr(typecheck, "_run", run)
+    assert typecheck.check_project(tmp_path, item, owned, all_paths=(*paths, *(() if selected else owned))) == 0
+    output = capsys.readouterr().out
+    if selected:
+        for number in range(1, len(content.splitlines()) + 1):
+            assert f"{views.GUARD_ENTRY}:{number}:7: error: mapped\n" in output
+        assert f"{len(paths)} physical files, {len(paths)} targets" in output
+    assert calls == 2 and lease.released and source.read_bytes() == content
+    assert not list(environment.glob("typecheck-*"))
+    assert not list((tmp_path / "source-views-environment").rglob("*.py"))
+
+
+@pytest.mark.parametrize("change", [
+    "source-bytes", "source-identity", "source-parent", "view-bytes", "view-identity",
+    "stage-identity", "provider", "stub", "namespace", "extra-stage", "timeout", "cleanup",
+    "installation-source", "unchanged",
+])
+def test_guard_alias_refuses_drift_and_cleans_only_owned_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    item, paths, environment, lease = guard_source(tmp_path, monkeypatch)
+    installation = fragment_source(tmp_path)
+    source = tmp_path / views.GUARD_ENTRY
+    original = source.read_bytes()
+    stage = tmp_path / "source-views-environment" / item.name
+    alias = stage / (views.GUARD_MODULE + ".py")
+    installation_output = stage / "installation_context.py"
+    unlink = Path.unlink
+    calls = 0
+
+    def cleanup(path: Path, missing_ok: bool = False) -> None:
+        unlink(path, missing_ok=missing_ok)
+        if path.name == "typecheck-mypy.ini":
+            source.write_bytes(original + b"\n")
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        assert alias.is_file() and installation_output.is_file() and env is not None
+        assert env["MYPYPATH"].split(os.pathsep).count(str(stage)) == 1
+        if change in {"source-bytes", "timeout"}:
+            before = source.stat()
+            source.write_bytes(original + b"\n")
+            os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+        elif change == "source-identity":
+            source.rename(source.with_suffix(".saved"))
+            source.write_bytes(original)
+        elif change == "source-parent":
+            source.parent.rename(source.parent.with_name("saved-scripts"))
+            source.parent.mkdir()
+            source.write_bytes(original)
+            (tmp_path / paths[1]).write_bytes(b"value: int = 1\n")
+        elif change == "view-bytes":
+            alias.write_bytes(original + b"\n")
+        elif change == "view-identity":
+            alias.rename(alias.with_suffix(".saved"))
+            alias.write_bytes(original)
+        elif change == "stage-identity":
+            stage.rename(stage.with_name("saved-stage"))
+            stage.mkdir()
+            alias.write_bytes(original)
+            installation_output.write_bytes(b"foreign: int = 1\n")
+        elif change in {"provider", "stub"}:
+            source.with_name(views.GUARD_MODULE + (".py" if change == "provider" else ".pyi")).write_bytes(b"")
+        elif change == "namespace":
+            source.with_name(views.GUARD_MODULE).mkdir()
+        elif change == "extra-stage":
+            (stage / "unknown.py").write_bytes(b"")
+        elif change == "installation-source":
+            fragment = tmp_path / installation[0]
+            fragment.write_bytes(fragment.read_bytes() + b"\n")
+        if change == "timeout":
+            raise subprocess.TimeoutExpired(argv, 120)
+        return subprocess.CompletedProcess(argv, int(change != "unchanged"), "", "")
+
+    if change == "cleanup":
+        monkeypatch.setattr(Path, "unlink", cleanup)
+    monkeypatch.setattr(typecheck, "_run", run)
+    if change == "unchanged":
+        assert typecheck.check_project(tmp_path, item, paths, all_paths=(*paths, *installation)) == 0
+    else:
+        with pytest.raises((typecheck.TypecheckError, views.SourceViewError)):
+            typecheck.check_project(tmp_path, item, paths, all_paths=(*paths, *installation))
+    assert calls == (2 if change == "unchanged" else 1) and lease.released
+    assert not list(environment.glob("typecheck-*"))
+    assert alias.exists() == (change in {"view-identity", "stage-identity"})
+    assert installation_output.exists() == (change == "stage-identity")
+    if change == "extra-stage":
+        assert (stage / "unknown.py").exists()
+
+
+@pytest.mark.parametrize("refusal", [
+    "missing", "unowned", "incomplete", "provider", "stub", "package", "native-case", "stage",
+])
+def test_guard_alias_refuses_incomplete_binding_or_existing_shadows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: str,
+) -> None:
+    item, paths, environment, lease = guard_source(tmp_path, monkeypatch)
+    owned = paths
+    source = tmp_path / views.GUARD_ENTRY
+    if refusal == "missing":
+        source.unlink()
+    elif refusal == "unowned":
+        item = replace(item, include=(paths[1],))
+    elif refusal == "incomplete":
+        owned = paths[1:]
+    elif refusal in {"provider", "stub", "native-case"}:
+        name = views.GUARD_MODULE + (".pyi" if refusal == "stub" else ".py")
+        if refusal == "native-case":
+            name = name.upper()
+            if os.name != "nt":
+                pytest.skip("case-alias refusal follows the native filesystem")
+        source.with_name(name).write_bytes(b"")
+    elif refusal == "package":
+        package = source.with_name(views.GUARD_MODULE)
+        package.mkdir()
+        (package / "__init__.py").write_bytes(b"")
+    else:
+        stage = tmp_path / "source-views-environment" / item.name
+        stage.mkdir(parents=True)
+        (stage / "unknown.py").write_bytes(b"")
+
+    def run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        pytest.fail("A refused binding cannot reach the analyzer")
+
+    monkeypatch.setattr(typecheck, "_run", run)
+    with pytest.raises((OSError, typecheck.TypecheckError, views.SourceViewError)):
+        typecheck.check_project(tmp_path, item, owned, all_paths=paths)
+    assert lease.released and not list(environment.glob("typecheck-*"))
+    if refusal == "stage":
+        assert (stage / "unknown.py").exists()
+
+
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
 def test_source_view_accounts_for_order_bytes_and_physical_lines(
     tmp_path: Path, newline: bytes,

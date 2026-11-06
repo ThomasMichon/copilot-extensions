@@ -620,6 +620,117 @@ def environment(home, anchor):
     return env
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("linked", [False, True])
+def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, shell, linked):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, _ = fixture_project(tmp_path)
+    workspace = fixture_linked_worktree(tmp_path, anchor)[0] if linked else anchor
+    workspace = workspace / "src"
+    workspace.mkdir()
+    session = tmp_path / ".copilot" / "session-state" / "prepared"
+    session.mkdir(parents=True)
+    payload = {"sessionId": "prepared", "cwd": str(workspace), "toolName": "view"}
+    assert module.admitted(payload, home=tmp_path)
+    command = (
+        ". $env:PREPARED_MEMBERSHIP_SCRIPT; "
+        "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }; "
+        "$raw = [Console]::In.ReadToEnd(); "
+        "[Console]::Out.Write((Test-ManagedWorktreesSession -Raw $raw).ToString())"
+    )
+    env = environment(tmp_path, workspace)
+    env["PREPARED_MEMBERSHIP_SCRIPT"] = str(SCRIPTS / "managed-session.ps1")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+        input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "True", result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("damage", [
+    "withdraw", "nested", "git-link", "session", "registry", "context",
+    "missing-witness", "malformed", "oversize", "wrong-type", "workspace-unicode",
+    "session-array", "cwd-array", "working-directory-array",
+])
+def test_prepared_native_membership_rejects_changed_or_unavailable_inputs(
+    tmp_path, monkeypatch, shell, damage,
+):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    workspace, admin = fixture_linked_worktree(tmp_path, anchor)
+    nested = workspace / "src"
+    nested.mkdir()
+    session = tmp_path / ".copilot" / "session-state" / "prepared"
+    session.mkdir(parents=True)
+    payload = {"sessionId": "prepared", "cwd": str(anchor if damage == "workspace-unicode" else nested)}
+    assert module.admitted(payload, home=tmp_path)
+    marker = session / "agent-worktrees" / "managed-session.json"
+    env = environment(tmp_path, nested)
+    if damage == "withdraw":
+        (registry / "projects.yaml").write_text("projects: {}\n")
+    elif damage == "nested":
+        fixture_checkout(nested)
+    elif damage == "git-link":
+        (admin / "gitdir").write_text(str(tmp_path / "foreign" / ".git") + "\n")
+    elif damage == "session":
+        payload["sessionId"] = "another"
+    elif damage == "registry":
+        env["AGENT_HOME"] = str(tmp_path / "another")
+    elif damage == "context":
+        env["COPILOT_EXTENSIONS_CONTEXT"] = str(tmp_path / "install.json")
+    elif damage == "missing-witness":
+        value = json.loads(marker.read_text())
+        del value["inputs"][os.path.normcase(str(workspace / ".git"))]
+        marker.write_text(json.dumps(value))
+    elif damage == "malformed":
+        marker.write_text("{")
+    elif damage == "oversize":
+        marker.write_bytes(b" " * (1024 * 1024 + 1))
+    elif damage == "wrong-type":
+        value = json.loads(marker.read_text())
+        value["scope"]["session"] = ["prepared"]
+        marker.write_text(json.dumps(value))
+    elif damage == "workspace-unicode":
+        other = fixture_checkout(tmp_path / "anchor-e\u0301")
+        payload["cwd"] = str(other)
+        assert not module.admitted(payload, home=tmp_path)
+    elif damage == "session-array":
+        payload["sessionId"] = ["prepared"]
+        assert not module.admitted(payload, home=tmp_path)
+    elif damage == "cwd-array":
+        payload["cwd"] = [str(nested)]
+        assert not module.admitted(payload, home=tmp_path)
+    elif damage == "working-directory-array":
+        payload["workingDirectory"] = [payload.pop("cwd")]
+        assert not module.admitted(payload, home=tmp_path)
+    env["PREPARED_MEMBERSHIP_SCRIPT"] = str(SCRIPTS / "managed-session.ps1")
+    command = (
+        ". $env:PREPARED_MEMBERSHIP_SCRIPT; "
+        "$raw = [Console]::In.ReadToEnd(); "
+        "[Console]::Out.Write((Test-PreparedManagedWorktreesSession -Raw $raw).ToString())"
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+        input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+        cwd=nested, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "False", result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("kind", ["preToolUse", "postToolUse", "sessionStart", "sessionEnd"])
 @pytest.mark.parametrize("repo_class", ["worktree", "reference", None])
 def test_real_python_entry_is_inert_for_registry_only_repo(kind, repo_class, tmp_path):

@@ -4,7 +4,10 @@ This is the bounded source realization of the [parent's retained P3/P4 and
 V3/V4 acceptance](README.md#direct-retained-4369-manual-diagnostic-and-independent-expected-head-acceptance),
 not a replacement effort or a new head authority. Coordination remains
 [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
-Implementation follows reviewed admission of this plan.
+Plan #10865 merged as `5c8cf8466cbaca830af80ebe7347efad83d3111f`.
+The source captures optional identity in the existing binding and consumption
+records. The passive comparison reader and Companion consumer remain
+unimplemented.
 
 ## Intent and existing evidence
 
@@ -52,28 +55,30 @@ distinction; a durable-head match alone cannot promise the same resume target.
 
 ### H0 - Reviewed design admission
 
-- [ ] Land this source/validation plan through normal independent review and
+- [x] Land this source/validation plan through normal independent review and
       required CI, then read the complete parent before implementation.
-      Existing source readbacks can travel in the same contribution.
+      #10865 received current-head independent approval and every required
+      green check. The complete parent and all four linked Sidecar contracts,
+      plus this plan, were read immediately after actual merge.
 
 ### H1 - Capture identity in the existing owner records
 
-- [ ] Extend the existing qualified Worktrees binding stamp with an optional
+- [x] Extend the existing qualified Worktrees binding stamp with an optional
       exact activation observation from the same rechecked record. Preserve its
       current nonblocking ownership, atomic publication and legacy behavior.
       Missing, ambiguous, pruned or unavailable activation evidence is not a
       qualified incarnation.
-- [ ] Context Handoff captures the original project, exact worktree, creation
+- [x] Context Handoff captures the original project, exact worktree, creation
       nonce and predecessor identity from that existing binding when authoring
       metadata/request state. Capture the consumer's session/activation identity
       when actual consumption succeeds, not merely when delivery is prepared.
       Keep this optional enrichment separate from existing consume authority.
-- [ ] Preserve the file consume lock, task-consumption checkpoint, same-session
+- [x] Preserve the file consume lock, task-consumption checkpoint, same-session
       replay and failed/unknown outcome semantics. A retry must not silently
       replace an already-recorded consumer incarnation with a later one.
       Missing optional identity must not break ordinary handoff consumption,
       arm a baton or change the head-promotion algorithm.
-- [ ] Retain identities in the existing file/task/predecessor records needed by
+- [x] Retain identities in the existing file/task/predecessor records needed by
       their respective recovery paths. Do not copy prompts into another ledger,
       create a Companion state file or repair historical records.
 
@@ -152,7 +157,7 @@ latency; unit duration is not native input-ready performance.
 
 ## Validation Plan
 
-- [ ] H1: exercise the actual binding stamp and file/task consume functions.
+- [x] H1: exercise the actual binding stamp and file/task consume functions.
       Cover non-head registration, exact source/incarnation, failed promotion
       after successful consume, preparation without consumption, optional legacy
       absence, same-session retry and unchanged refusal/unknown outcomes.

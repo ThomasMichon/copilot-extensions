@@ -142,6 +142,44 @@ recovery. Older providers remain usable by placing the section in authored
 Markdown; the storage/consume contract is unchanged. Native checkpoint
 persistence remains host-owned, not implemented or certified by this plugin.
 
+## Optional handoff identity observations
+
+Handoff metadata and the predecessor's existing `handoff-request.json` retain
+an `authorIdentity` snapshot from the author's exact `worktree-binding.json`.
+Task creation returns metadata from the retained task payload, including on a
+same-content deduplication after resume. It uses the returned inline payload
+when available, otherwise the existing read-only task-payload command. A legacy
+payload does not acquire fresh author identity, and a failed metadata read
+leaves author identity unknown rather than substituting today's binding.
+On successful consumption, the existing file record or task-delivery checkpoint
+also retains `consumerIdentity`; that same snapshot is copied to the matching
+predecessor request. Preparing a delivery, attempting an uncertain consume or
+observing a recovery prompt does not record successful consumption.
+
+An identity observation has `version: 1`, `project`, `worktreeId`,
+`creationNonce`, `sessionId` and optional `activation`. The activation carries
+`version: 1`, `ordinal`, `startedAt`, `startRecordedAt` and `sourceIdentity`,
+as supplied by the Worktrees binding writer. Missing/unqualified bindings
+produce `null`; older bindings with project/incarnation but no qualified
+activation retain `activation: null`. Neither is an exact activation claim.
+Unsupported activation versions remain unqualified. Existing handoff/request/
+delivery schema versions and CLI syntax are unchanged; old readers may ignore
+the additive fields, and rollback to an older writer preserves ordinary consume.
+
+Capture reads at most 16 KiB plus one overflow byte from one exact-session
+regular binding file, without enumerating sessions, creating missing state,
+invoking another CLI or waking a daemon. The file consume lock and task
+`steps.taskConsumed` remain the actual consumption boundaries. Identity is
+persisted with successful consumption before best-effort head promotion, so a
+failed promotion does not erase the consume observation. Same-session delivery
+replay retains the original identity, including unknown legacy evidence; it
+never substitutes a resumed activation or upgrades a historical receipt from
+today's mutable binding. A successful task retry after an earlier uncertain
+attempt records `consumerIdentity: null`, because the earlier attempt may have
+consumed the task before failing. These snapshots grant no authority and do not compare
+against the current durable head or Picker resume choice. That passive reader
+and its optional Companion display remain separate work.
+
 ## Recovery prompt receipts
 
 The first root user message captures its recovery locator without invoking a

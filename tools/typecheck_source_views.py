@@ -5,11 +5,14 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import io
+import os
 from pathlib import Path
 import re
 import tokenize
 
 INSTALLATION_ENTRY = "libs/installation-context/installation_context.py"
+GUARD_ENTRY = "plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py"
+GUARD_MODULE = "copilot_mention_guard"
 _WRAPPER = r'''
 """Resolve, validate, and explicitly mutate marketplace installation context."""
 from __future__ import annotations
@@ -46,6 +49,7 @@ class SourceView:
     content: bytes
     inputs: tuple[tuple[str, bytes], ...]
     lines: tuple[SourceLine, ...]
+    identity: tuple[int, int]
 
     def verify(self, root: Path) -> None:
         """Do not credit changed inputs or a changed checker view."""
@@ -59,6 +63,9 @@ class SourceView:
             raise SourceViewError(
                 "Installation-context fragment membership changed during type checking"
             )
+        self._verify_bytes(root)
+
+    def _verify_bytes(self, root: Path) -> None:
         for path, content in self.inputs:
             if _read(root, path) != content:
                 raise SourceViewError(f"{path}: source changed during type checking")
@@ -90,6 +97,66 @@ class SourceView:
             return f"{source.path}:{source.number}{match.group(2)}"
 
         return expression.sub(replace, text)
+
+
+@dataclass(frozen=True)
+class GuardAliasView(SourceView):
+    def verify(self, root: Path) -> None:
+        if (
+            tuple(path for path, _content in self.inputs) != (GUARD_ENTRY,)
+            or self.output.name != GUARD_MODULE + ".py"
+        ):
+            raise SourceViewError("Guard alias requires its exact single-source binding")
+        self._verify_bytes(root)
+
+
+def _write_view(output: Path, content: bytes) -> tuple[int, int]:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    identity: tuple[int, int] | None = None
+    try:
+        with output.open("xb") as stream:
+            info = os.fstat(stream.fileno())
+            identity = info.st_dev, info.st_ino
+            stream.write(content)
+    except BaseException:
+        if identity is not None:
+            current = output.lstat()
+            if (current.st_dev, current.st_ino) != identity:
+                raise SourceViewError("Checker output replaced during creation; retained")
+            output.unlink()
+        raise
+    assert identity is not None
+    return identity
+
+
+def _reject_directives(path: str, content: bytes) -> None:
+    normalized = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    for token in tokenize.tokenize(io.BytesIO(normalized).readline):
+        if token.type == tokenize.COMMENT and (
+            re.match(r"#\s*mypy:", token.string)
+            or (
+                re.match(r"#\s*type:\s*ignore\b", token.string)
+                and not token.line[: token.start[1]].strip()
+            )
+        ):
+            raise SourceViewError(
+                f"{path}: module-wide checker directives cannot qualify a composition"
+            )
+
+
+def guard_alias_view(root: Path, paths: tuple[str, ...], output: Path) -> GuardAliasView:
+    """Expose exactly one real hyphenated source without rewriting any bytes."""
+    if paths.count(GUARD_ENTRY) != 1 or output.name != GUARD_MODULE + ".py":
+        raise SourceViewError("Guard alias requires its exact owned physical source")
+    content = _read(root, GUARD_ENTRY)
+    _parse(content, GUARD_ENTRY)
+    _reject_directives(GUARD_ENTRY, content)
+    identity = _write_view(output, content)
+    return GuardAliasView(
+        output, content, ((GUARD_ENTRY, content),),
+        tuple(SourceLine(GUARD_ENTRY, number) for number in range(1, len(content.splitlines()) + 1)),
+        identity,
+    )
 
 
 def _read(root: Path, relative: str) -> bytes:
@@ -176,18 +243,7 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
     ) -> None:
         source_lines = content.splitlines(keepends=True)
         source_tree = _parse(content, path) if fragment else None
-        normalized = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        for token in tokenize.tokenize(io.BytesIO(normalized).readline):
-            if token.type == tokenize.COMMENT and (
-                re.match(r"#\s*mypy:", token.string)
-                or (
-                    re.match(r"#\s*type:\s*ignore\b", token.string)
-                    and not token.line[: token.start[1]].strip()
-                )
-            ):
-                raise SourceViewError(
-                    f"{path}: module-wide checker directives cannot qualify a composition"
-                )
+        _reject_directives(path, content)
         future_lines: set[int] = set()
         if source_tree is not None:
             for node in source_tree.body:
@@ -225,6 +281,5 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
     )
     content = b"".join(chunks)
     _parse(content, str(output))
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(content)
-    return SourceView(output, content, inputs, tuple(lines))
+    identity = _write_view(output, content)
+    return SourceView(output, content, inputs, tuple(lines), identity)

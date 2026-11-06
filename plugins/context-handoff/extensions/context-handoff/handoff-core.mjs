@@ -35,6 +35,7 @@ import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
 import { observeResidentReceipt } from "./resident-receipt-client.mjs";
 import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
+import { captureHandoffIdentity } from "./handoff-identity.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -1502,6 +1503,7 @@ export function makeHandoffMetadata(
     worktree,
     worktreeDir: wtDir,
     stateDir,
+    authorIdentity: captureHandoffIdentity(sid, worktree),
     createdAt: new Date().toISOString(),
   };
 }
@@ -1863,6 +1865,9 @@ export function markFileHandoffConsumed(path, record, sid) {
     consumed: true,
     consumedAt: record.consumedAt || new Date().toISOString(),
     consumedBySession: sid || record.consumedBySession || null,
+    ...(!record.consumed ? {
+      consumerIdentity: captureHandoffIdentity(sid, record.worktree),
+    } : {}),
   };
   writeJsonAtomic(path, consumed);
   return consumed;
@@ -2054,13 +2059,13 @@ export function agentDispatchJson(argv, cwd, execute = runCli) {
   }
 }
 
-export function abandonSupersededHandoffs(cwd, worktree, keepId) {
+export function abandonSupersededHandoffs(cwd, worktree, keepId, execute = runCli) {
   const tasks = agentDispatchJson(
-    ["list", "--status", "proposed,queued", "--label", "handoff"], cwd,
+    ["list", "--status", "proposed,queued", "--label", "handoff"], cwd, execute,
   );
   for (const id of supersededHandoffIds(tasks, worktree, keepId)) {
     try {
-      runCli("agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
+      execute("agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
         ["abandon", id, "--permit", "--reason", "superseded by a newer handoff for this worktree"],
         { cwd, timeout: 15000 });
     } catch { /* best-effort -- GC orphan pass is the backstop */ }
@@ -2173,16 +2178,19 @@ export function handoffDedupKey(sid, promptText) {
   return `handoff-${sid}-${contentHash}`;
 }
 
-export function dispatchHandoff(promptText, sid, cwd, title) {
-  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
+export function dispatchHandoff(
+  promptText, sid, cwd, title,
+  { get = agentWorktreesGet, execute = runCli } = {},
+) {
+  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" }, get);
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   const tmp = join(dir, `${metadata.id}-payload-${process.pid}.md`);
   try {
     mkdirSync(dir, { recursive: true });
     writeFileSync(tmp, encodeHandoffPayload(promptText, metadata), "utf-8");
-    const machine = agentWorktreesGet("machine", cwd, sid);
-    const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
+    const machine = get("machine", cwd, sid);
+    const wtDir = get("worktree-dir", cwd, sid);
     const worktree = wtDir ? basename(wtDir) : null;
     // A handoff must land in its OWN worktree; without one, bail to the file
     // flow rather than file an unpinned, anyone-can-claim task.
@@ -2194,17 +2202,27 @@ export function dispatchHandoff(promptText, sid, cwd, title) {
       "--target-worktree", worktree, "--affinity", `worktree=${worktree}`,
     ];
     if (machine) argv.push("--target-machine", machine);
-    const task = JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
+    const task = JSON.parse(execute("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
     if (task?.id) {
-      addHandoffClaim(cwd, task.id, worktree);
+      addHandoffClaim(cwd, task.id, worktree, execute);
       // #3248 review comment 9: the task was already publicly claimable
       // above, before this claim existed -- close that race's window right
       // here rather than trusting only the async server-side hook, which
       // may already have lost it.
-      releaseHandoffClaimIfTerminal(cwd, task.id, worktree);
-      abandonSupersededHandoffs(cwd, worktree, task.id);
+      releaseHandoffClaimIfTerminal(cwd, task.id, worktree, execute);
+      abandonSupersededHandoffs(cwd, worktree, task.id, execute);
     }
-    return task?.id ? { id: task.id, metadata: { ...metadata, taskId: task.id } } : null;
+    if (!task?.id) return null;
+    const retained = decodeHandoffPayload(
+      typeof task.payload_inline === "string"
+        ? task.payload_inline : readTaskPayloadRaw(cwd, task.id, execute),
+    ).metadata;
+    return {
+      id: task.id,
+      metadata: {
+        ...(retained || { ...metadata, authorIdentity: null }), taskId: task.id,
+      },
+    };
   } catch {
     return null;
   } finally {
@@ -2272,6 +2290,7 @@ export function writeSessionStateHandoff(
     worktree: stored.metadata?.worktree || null,
     worktreeDir: stored.metadata?.worktreeDir || null,
     stateDir: stored.metadata?.stateDir || null,
+    authorIdentity: stored.metadata?.authorIdentity || null,
     title: stored.metadata?.title || "",
     seed,
     promptText,
@@ -2297,7 +2316,10 @@ export function writeSessionStateHandoff(
 
 export function markSessionStateHandoffConsumed(
   predecessorSessionId,
-  { consumedBySession = null, handoffId = null, aborted = false, abortReason = null } = {},
+  {
+    consumedBySession = null, handoffId = null, aborted = false, abortReason = null,
+    consumerIdentity = null,
+  } = {},
 ) {
   if (!predecessorSessionId) return null;
   const found = readSessionStateHandoff(predecessorSessionId);
@@ -2311,6 +2333,7 @@ export function markSessionStateHandoffConsumed(
     consumed: true,
     consumedAt: current.consumedAt || new Date().toISOString(),
     consumedBySession: consumedBySession || current.consumedBySession || null,
+    ...(!current.consumed && !aborted ? { consumerIdentity } : {}),
     ...(aborted ? { aborted: true, abortReason: abortReason || current.abortReason || null } : {}),
   };
   writeJsonAtomic(found.path, consumed);
@@ -2616,6 +2639,7 @@ export function consumeDispatchHandoffTask(
       : checkpoint.payload || before.text || "",
   };
   if (!checkpoint.steps?.taskConsumed) {
+    const firstConsumeAttempt = checkpoint.steps?.consumeAttempted === false;
     checkpointStep(checkpoint, "consumeAttempted");
     try {
       const consumed = consumeTask(cwd, taskId, deferComplete);
@@ -2624,6 +2648,8 @@ export function consumeDispatchHandoffTask(
       if (fromConsume.metadata) decoded.metadata = fromConsume.metadata;
       checkpoint.payload = decoded.text;
       checkpoint.metadata = decoded.metadata;
+      checkpoint.consumerIdentity = firstConsumeAttempt
+        ? captureHandoffIdentity(sid, decoded.metadata?.worktree) : null;
       checkpointStep(checkpoint, "taskConsumed");
     } catch (error) {
       const predecessorSessionId = decoded.metadata?.sessionId || checkpoint.predecessorSession || null;
@@ -2647,7 +2673,7 @@ export function consumeDispatchHandoffTask(
   const predecessorSessionId = decoded.metadata?.sessionId || checkpoint.predecessorSession || null;
   markSessionStateHandoffConsumed(
     predecessorSessionId,
-    { consumedBySession: sid, handoffId: taskId },
+    { consumedBySession: sid, handoffId: taskId, consumerIdentity: checkpoint.consumerIdentity || null },
   );
   safePromoteHead(
     promoteHead,
@@ -2686,7 +2712,7 @@ export function consumeFileHandoff(
   const predecessorSessionId = record.sessionId || null;
   markSessionStateHandoffConsumed(
     predecessorSessionId,
-    { consumedBySession: sid, handoffId: record.id },
+    { consumedBySession: sid, handoffId: record.id, consumerIdentity: record.consumerIdentity || null },
   );
   safePromoteHead(promoteHead, cwd, record.worktree || null, predecessorSessionId, sid, record.id);
   return {

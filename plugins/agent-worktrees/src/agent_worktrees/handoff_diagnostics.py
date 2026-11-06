@@ -18,6 +18,7 @@ from .session_tracking_cli import (
     _find_tracking_file_exact,
     _project_for_tracking_file,
 )
+from .tracking_session_activations import session_activation_observation
 
 HANDOFF_STAGES: dict[int, str] = {
     1: "worktree_created",
@@ -166,6 +167,9 @@ def stamp_session_state_worktree_binding(
                     )
                 ):
                     record.update(project=current.repo, creationNonce=current.creation_nonce)
+                    activation = session_activation_observation(current.session_entry(session_id))
+                    if activation is not None:
+                        record["sessionActivation"] = activation
             tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
             tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
             tmp.replace(path)
