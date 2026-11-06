@@ -249,3 +249,7 @@ gap, with no new sandbox, process interception, service, or security guarantee.
 - The anchor module's size guard required moving its unchanged Git tokenizer
   into that same already-shipped parser; no cap or deployment inventory changed.
   Fresh parser/guard controls passed 238 tests before the attached-operand fix.
+- Attached/spaced redirect and argument controls, including nested linked
+  destinations and unchanged stricter delegation, passed 266 tests.
+- Rebased onto the current contribution branch, preserving the concurrent
+  effort-index addition and all implementation commits.
