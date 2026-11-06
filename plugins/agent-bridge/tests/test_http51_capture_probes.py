@@ -233,6 +233,8 @@ from test_creation_writer_resume import (
     as test_required_resume_worktree_selector_refuses_before_discovery,
     test_required_resume_cannot_fallback_or_accept_replacement
     as test_required_resume_cannot_fallback_or_accept_replacement,
+    test_required_resume_pins_capability_peer_during_observer_cutover
+    as test_required_resume_pins_capability_peer_during_observer_cutover,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
