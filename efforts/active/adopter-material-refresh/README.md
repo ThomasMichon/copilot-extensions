@@ -141,6 +141,25 @@ as missing.
       owning checks and required plugin changefile. This planning intake does
       not edit the three source modules or appoint an execution lead.
 
+### All-plugin runtime-advice wording inventory (agent-recommended)
+
+This #3941 family is independent from #433's three Dispatch prose residuals.
+Keep the original all-plugin/non-help scope and help discoverability; reported
+examples are leads, not an exhaustive inventory or an implemented correction.
+
+- [ ] Inventory all plugin runtime override-advice sites with owner, source/
+      build and user-visible context. Distinguish unsolicited runtime advice
+      from help/usage/parser declarations, truthful requested-command/policy
+      evidence and machine-readable facts.
+- [ ] Remove qualifying unsolicited references/advice, or apply a narrower
+      wording disposition only when explicitly accepted under the original/
+      refined policy. Keep policy reconciliation explicit; preserve meaningful
+      refusal/recovery choices, override behavior/admission and operator choice.
+- [ ] Reconcile every inventoried site as changed, retained as non-advice or
+      a named tracked residual, through separately claimed/reviewed plugin
+      slices with required changefiles. This plan edits no output/source and
+      does not appoint an execution lead.
+
 ### Phase 3 — Refresh preview assets (agent-recommended)
 - [ ] Reuse the owning public-safe asset/capture tooling, or establish the
       smallest justified reproducible fixture when none exists.
@@ -178,6 +197,13 @@ as missing.
       no new native matrix or whole-materials completion bar is added to #433.
 - [ ] All Plan and Validation Plan items are resolved or explicitly transferred
       before execution declares the sibling effort Done.
+- [ ] For #3941's independent all-plugin family, exercise each actual changed
+      output path with bounded tests and verify removed/explicitly accepted
+      narrower advice. Preserve help/parser, truthful command/policy facts,
+      override admission and behavior, unsaved-work/data-loss/live-holder/
+      unknown-liveness safeguards and useful recovery choices. Reconcile all
+      plugin inventory; no override/destructive action, native/installed/
+      every-platform or all-materials gate is added to this finite wording work.
 
 ## Proposal
 
@@ -187,6 +213,19 @@ normal review gate in `#5807`. No runtime implementation, service repair,
 repository creation, or private-environment capture was part of that proposal.
 
 ## Journal
+
+### 2026-11-06 - Independent runtime-advice wording planning intake
+
+- Add #3941's complete all-plugin/non-help runtime-advice family to the
+  remaining materials inventory, with direct Plan/global Validation.
+  Keep removal/help discovery and any explicitly accepted narrower disposition
+  distinct from parser, factual policy output and real override safeguards.
+- Existing #433, previews and references remain; the completed documentation
+  participant stays released and material execution unassigned. No source
+  message, behavior, runtime, native state or resource is changed by this plan.
+- Reviewed canonical delivery and whole actual #5799 receiving readback still
+  precede any separate administrative tracking retirement. Its underlying
+  cross-plugin wording and validation remain unchecked.
 
 ### 2026-11-06 - Narrow Dispatch prose planning intake
 
