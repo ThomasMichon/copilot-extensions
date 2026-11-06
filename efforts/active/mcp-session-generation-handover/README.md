@@ -1262,3 +1262,17 @@ migration already works.
 - Current-head review/CI, publication, release and installed acceptance remain
   coordinator-owned. Full session handover, prepared qualification and pre-feature
   adoption holds remain open; this slice is not whole-effort completion.
+
+### 2026-11-06 - Windows host-state actor aliases remain private
+
+- The existing default/explicit auth controls reproduced duplicate lowercase
+  and mixed-case host-directory keys in the Windows host-state actor branch.
+  That branch now removes only aliases of each always-private variable before
+  assigning its canonical private value, matching the ordinary isolation branch.
+  POSIX case semantics and other host-state settings are unchanged.
+- Both controls failed before the fix. Final affected pure auth/environment
+  controls passed **23 tests** with verified cleanup; the native UV case was
+  deliberately not run. Input mappings remain unchanged.
+- F/E9, module caps and canonical binding verification passed. Only the admitted
+  preparation-owner digest changed; **4234/598/300** remains intact. No native,
+  full-unit or MCP packet was repeated, and no new gate or actor was admitted.

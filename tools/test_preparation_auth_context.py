@@ -61,13 +61,21 @@ def test_auth_location_is_captured_before_isolation_and_not_given_to_actors(tmp_
     assert "GH_TOKEN" not in prepared and "COPILOT_EXTENSIONS_CONTEXT" not in prepared
     assert Path(prepared["HOME"]).is_relative_to(tmp_path / "prepared")
     assert Path(prepared["AGENT_BRIDGE_CONFIG_DIR"]).is_relative_to(tmp_path / "prepared")
+    actor_base = dict(prepared)
+    if os.name == "nt":
+        actor_base["uv_credentials_dir"] = str(original / "lowercase-auth")
+        actor_base["Uv_CrEdEnTiAlS_DiR"] = str(original / "mixedcase-auth")
+    untouched = dict(actor_base)
     for host_state in (False, True):
         actor = isolated_environment(
-            prepared, tmp_path / f"actor-{host_state}",
+            actor_base, tmp_path / f"actor-{host_state}",
             allow_explicit_tiers=host_state, allow_host_state=host_state,
         )
         assert Path(actor["UV_CREDENTIALS_DIR"]).is_relative_to(tmp_path / f"actor-{host_state}")
         assert actor["UV_CREDENTIALS_DIR"] != prepared["UV_CREDENTIALS_DIR"]
+        if os.name == "nt":
+            assert [name for name in actor if name.casefold() == "uv_credentials_dir"] == ["UV_CREDENTIALS_DIR"]
+    assert actor_base == untouched
 
 
 @pytest.mark.parametrize("failure", [

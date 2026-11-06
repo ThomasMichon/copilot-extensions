@@ -234,6 +234,10 @@ def isolated_environment(
     if allow_host_state:
         env[ALLOW_HOST_STATE_ENV] = "1"
         for name in ALWAYS_SANDBOX_ENV_NAMES:
+            if os.name == "nt":
+                for inherited_name in tuple(env):
+                    if inherited_name.casefold() == name.casefold():
+                        env.pop(inherited_name)
             value = root.joinpath(*_ROOT_ENV[name].split("/"))
             value.mkdir(parents=True, exist_ok=True)
             env[name] = str(value)
