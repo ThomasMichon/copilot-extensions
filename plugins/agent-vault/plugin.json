@@ -6,6 +6,12 @@
   "sessionContext": "session-context.json",
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
+  "runtimeActivation": {
+    "schema": "copilot-extensions.runtime-activation",
+    "version": 1,
+    "module": "agent-vault/runtime",
+    "path": "scripts/runtime-activation.py"
+  },
   "author": {
     "name": "Thomas Michon"
   },

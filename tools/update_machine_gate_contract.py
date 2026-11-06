@@ -128,6 +128,10 @@ def _check_receipt_judgment(source: Path) -> None:
     package = ModuleType(package_name)
     package.__path__ = []
     reconcile = ModuleType(f"{package_name}.reconcile")
+    readiness = ModuleType(f"{package_name}.update_runtime_readiness")
+    readiness.INACTIVE = "SKIPPED (configuration-empty)"
+    readiness.activation_declared = lambda *_args: False
+    readiness.configuration_empty = lambda *_args: False
     update_driver = ModuleType("update_driver")
     update_driver.participant_environment = dict
     state = {}
@@ -156,6 +160,7 @@ def _check_receipt_judgment(source: Path) -> None:
     _expect(type(watchdog) is int and watchdog == 124, "installer watchdog exit changed")
     with patch.dict(sys.modules, {
         package_name: package, reconcile.__name__: reconcile, update_driver.__name__: update_driver,
+        readiness.__name__: readiness,
     }):
         judge = _function(source / "installer_run.py", "_judge", {
             "__package__": package_name, "_WATCHDOG_EXIT": watchdog,
@@ -215,6 +220,7 @@ def _check_receipt_judgment(source: Path) -> None:
             status="", name="agent-example", source=None, runtime_root=root, project_root=None,
             payload=Path("receipt-contract-payload"), source_target=None, artifact=Path("receipt-contract-payload"),
             environment={}, deadline_s=60, target_version="2", argv=("installer",), fallback_argv=(),
+            readiness_platform=None,
         )
         cases = (
             ("current", 0, False, "2", "2", "OK"),
@@ -256,8 +262,12 @@ def _check_machine_gate(source: Path) -> None:
     identity = ModuleType(f"{package_name}.machine_identity")
     reconcile = ModuleType(f"{package_name}.reconcile")
     runtime = ModuleType(f"{package_name}.update_runtime")
+    readiness = ModuleType(f"{package_name}.update_runtime_readiness")
+    readiness.INACTIVE = "SKIPPED (configuration-empty)"
+    readiness.activation_declared = lambda *_args: False
+    readiness.configuration_empty = lambda *_args: False
     modules = {
-        module.__name__: module for module in (package, config, identity, reconcile, runtime)
+        module.__name__: module for module in (package, config, identity, reconcile, runtime, readiness)
     }
     with patch.dict(sys.modules, modules), tempfile.TemporaryDirectory(
         prefix="update-machine-gate-contract-"
@@ -336,7 +346,7 @@ def _check_case(
     def detect_machine(repo, *, value=None, config=None):
         detected.append(repo)
         _expect(value == "local", f"{case}: configured machine identity was not supplied")
-        _expect(config is selected_config[0], f"{case}: target configuration was not supplied")
+        _expect(config is selected_config[-1], f"{case}: current target configuration was not supplied")
         if failure == "detect":
             raise ValueError("synthetic machine detection failure")
         return "local"
@@ -402,6 +412,12 @@ def _check_case(
         _expect(step.deadline_s == 60 and len(prepared) == 1, f"{case}: invalid installer plan")
         _expect(execute(step) == "OK" and len(invoked) == 1, f"{case}: permitted installer not reached")
         _expect(invoked[0][0] == list(step.argv), f"{case}: different installer argv executed")
+        if scope == "machine-gated":
+            expected_repo = [context if explicit_context else anchor] * 2
+            _expect(
+                detected == expected_repo and gate_reads == expected_repo,
+                f"{case}: execution did not recheck the original policy context",
+            )
     else:
         expected = (
             step.status.startswith("machine detection failed:") and step.blocked

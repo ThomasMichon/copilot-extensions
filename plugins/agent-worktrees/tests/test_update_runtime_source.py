@@ -84,6 +84,31 @@ def test_source_selection_does_not_skip_on_matching_package(selected, kind, monk
     assert str(owner / "scripts/install.sh") not in step.argv
 
 
+@pytest.mark.parametrize("kind", ["module", "registered"])
+def test_prepared_source_preserves_anchor_policy_when_invocation_directory_differs(
+    selected, kind, monkeypatch, tmp_path,
+):
+    owner, _, _, source = selected
+    invocation = tmp_path / "invocation"
+    invocation.mkdir()
+    monkeypatch.chdir(invocation)
+    step = plan(kind, owner, source)
+    assert not step.status
+    assert step.project_root == invocation.resolve()
+    assert step.gate_context is None
+    observed = []
+
+    def excluded_anchor(name, scope, context):
+        observed.append(context)
+        return context is None
+
+    monkeypatch.setattr(update_runtime, "_machine_gate_blocks", excluded_anchor)
+    monkeypatch.setattr(update_runtime, "_run_human_installer",
+                        lambda *a, **k: pytest.fail("anchor-excluded source installed"))
+    assert update_runtime._execute_runtime_step(step) == update_runtime.MACHINE_GATED_SKIP
+    assert observed == [None]
+
+
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("content", [b"{", b'{"value":"\xff"}', b"[]",
                                    b'{"service":"agent-worktrees","service":"agent-worktrees"}'])

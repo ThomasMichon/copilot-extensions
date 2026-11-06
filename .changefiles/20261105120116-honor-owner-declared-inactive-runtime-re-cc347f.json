@@ -1,0 +1,9 @@
+{
+  "comment": "Honor owner-declared inactive runtime readiness during suite updates",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

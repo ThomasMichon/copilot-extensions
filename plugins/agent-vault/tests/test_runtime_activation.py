@@ -469,6 +469,30 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     assert json.loads(result.stdout)["state"] == "configured"
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_declared_participation_reader_distinguishes_inactive_from_enabled_without_database(
+    tmp_path, enabled,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    payload = _make_fake_plugin(tmp_path, "agent-vault")
+    (project / ".agent-vault.json").write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
+    declaration = json.loads((PLUGIN / "plugin.json").read_text())["runtimeActivation"]
+    env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(payload / declaration["path"]),
+         "--cwd", str(project), "--runtime-root", str(home / ".agent-vault"), "--context", ""],
+        cwd=project, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == (0 if enabled else 2), result.stdout + result.stderr
+    value = json.loads(result.stdout)
+    assert value["module"] == declaration["module"]
+    assert value["state"] == ("configured" if enabled else "configuration-empty")
+    assert not (home / ".agent-vault").exists()
+
+
 @pytest.mark.parametrize("layout", ["retained", "application", "deployed", "mixed-owner", "service-cwd"])
 def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, layout):
     import venv

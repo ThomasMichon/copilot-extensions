@@ -4931,7 +4931,7 @@
         "tools/dependency_age.py": "f7b76d7b94eb0b44b973ad76f76a941da256e1ac0a3ed9be53e8b10cd542350b",
         "worktree-manager/src/worktree_manager/runtime_source.py": "b31589778a1d85f09db80cdef66fb2f60f9f6bf6aeaa92b3e8d6d82aee3be1bb",
         "tools/artifact_release_discovery.py": "96d96fce933c6354714ede8f92ff3b941406789210d9e797bbadbe10a28d3157",
-        "tools/update_machine_gate_contract.py": "4e937d4ed4806066cf08598864d90ccbc4d0e3008110cab0d8b91b59b2604ab5",
+        "tools/update_machine_gate_contract.py": "be6fba428de61c95d51ffe2d6f727b9c72c9a42d28ae9b68892ace3e697c691c",
         "tools/check-install-contract.py": "a435b187bc0faaa9e4beb13fa05694b5d2b7fdb211477bc39fba362d475e28a7",
         "tools/promotion_unit_tests/test_update_receipt_contract.py": "af14589c316669a93b8d20f9f99526a0f155031624a68f6ad5fdcfcbeac0179e",
         "tools/promotion_unit_tests/test_monitor_outcome_contract.py": "aeec028e93d677a3e9e6c20ee3acb980ad82a7b8fd8bd621f68753e9058bb64e",
@@ -4943,7 +4943,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/reconcile_freshness.py": "88c017962d9d03ca1ad9d2a7a4cad7351159a1327e70793854739091d6f4a9ae",
         "tools/promotion_unit_tests/test_launch_freshness.py": "ad42ff259246d16df7ad8583a486e26db5b8b5861e5a1dc498c08d60d9d112f8",
         "plugins/agent-worktrees/src/agent_worktrees/update_installer_process.py": "6cc476966f7c03b4c256926af80ab93aa2c92f7ef5bbd8818794521f7f965e77",
-        "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "0c2c0bb91dd954a290bb7477d7c30d62ad7fde622522a99d8ab06b4430c7aa0f",
+        "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "72a3aff16ac9c693e0ebd761c725ecc796c6dfb6d920e78b95eb7cb4edd16bc3",
         "tools/sweep_forbidden_labels.py": "cc848ce49e60253946d2180331ac13a66b417987014db1184973212b1a634818",
         "tools/promotion_unit_tests/test_label_cleanup.py": "5c60fa35649184a8c59ddd88ecb6a92a4963f04be808921fc68f0eeb07e1861c",
         "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py": "08ac3b2329d3adb9a21638efc3a07c3a0acd4c4dd4fa38d35f642426101dece6"
