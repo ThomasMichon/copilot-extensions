@@ -744,12 +744,17 @@ print(d["version"]); print(d["construction"]); print(d["admission"])' "$reply")"
     esac
 }
 _runtime_construction_complete() {
-    local hash="$1" reply
+    local hash="$1" reply retain=false
+    if [[ "$#" -eq 2 && "${2:-}" == --retain-helpers ]]; then
+        retain=true
+    elif [[ "$#" -ne 1 ]]; then
+        printf '%s\n' 'Unsupported construction completion arguments' >&2; return 1
+    fi
     [[ -n "${_RUNTIME_CONSTRUCTION_PID:-}" ]] || {
         printf '%s\n' 'Completion requires attached construction ownership' >&2; return 1;
     }
     [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || return 1
-    printf '{"command":"complete","payload_hash":"%s"}\n' "$hash" >&"$_RUNTIME_CONSTRUCTION_WRITE" || return 1
+    printf '{"command":"complete","payload_hash":"%s","retain_helpers":%s}\n' "$hash" "$retain" >&"$_RUNTIME_CONSTRUCTION_WRITE" || return 1
     IFS= read -r reply <&"$_RUNTIME_CONSTRUCTION_READ" || return 1
     [[ "$reply" == '{"complete": true}' ]] || return 1
     _RUNTIME_CONSTRUCTION_COMPLETE=1

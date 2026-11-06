@@ -1985,8 +1985,9 @@ completion with a later broken-pipe exception. Existing incomplete-candidate
 cleanup and completed-slot retention still own the runtime outcome; no helper
 deadline, installer replay or admission bypass is added.
 
-The attached PowerShell completion adapter accepts `-RetainHelpers` when an
-installer needs a source-independent installed launch component. It retains the
+The attached completion adapters accept `-RetainHelpers` on PowerShell and
+`--retain-helpers` on POSIX when an installer needs a source-independent
+installed launch component. They retain the
 canonical runtime companions and `runtime_launcher.py` inside
 `.runtime-bootstrap` before publishing completion and transferring to retention.
 A completed reuse verifies those exact helper bytes without writing or repairing
@@ -1994,6 +1995,10 @@ them. Missing, linked or changed helper evidence refuses completion. Bridge uses
 this boundary before its driver-owned Windows broker adoption and before
 selection or launch callbacks; removal retains the adopted action until its
 owned registration is confirmed gone.
+MCP opts in on both native paths so a fresh completed environment can resolve
+its qualified configuration owner without relying on mutable root scripts.
+Delivered configuration matching remains mandatory; absent helpers in an old
+completed slot require a new admitted construction, not an in-place code repair.
 
 Python application construction retains those helpers from the copied,
 Source-verified application's `runtime` directory, not from a plugin-only

@@ -42,6 +42,7 @@ def _ps_quote(value: str | Path) -> str:
 
 def _copy_helper(tmp_path: Path, shell: str = "bash", *, missing_core: bool = False) -> None:
     for name in (
+        "runtime_launcher.py",
         "versioned_runtime.py",
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
@@ -245,6 +246,47 @@ exit $code
     if case == "no-hash":
         assert "fingerprint unavailable" in result.stderr.lower()
     assert not (root / ".venv").exists()
+
+
+@pytest.mark.parametrize("case", ["fresh", "reuse", "missing-completed", "changed-completed",
+                                  "invalid-option"])
+def test_posix_completion_retains_helpers_only_before_immutable_completion(tmp_path, case):
+    executable = "/bin/bash" if sys.platform == "darwin" else _BASH
+    if not executable:
+        pytest.skip("Bash unavailable")
+    _copy_helper(tmp_path)
+    root = tmp_path / "runtime"
+    slot = root / "versions/1.2.3"
+    helper = slot / ".runtime-bootstrap/versioned_runtime.py"
+
+    def complete(option="--retain-helpers"):
+        script = _construction_script("bash", tmp_path, root) + f"""
+_versioned_slot_clean
+_runtime_construction_complete "$FINGERPRINT" {option}
+_runtime_construction_finish
+"""
+        return _run("bash", executable, script, tmp_path)
+
+    if case in {"reuse", "missing-completed", "changed-completed"}:
+        initial = complete("" if case == "missing-completed" else "--retain-helpers")
+        assert initial.returncode == 0, initial.stdout + initial.stderr
+        if case == "changed-completed":
+            helper.write_text("changed fixture input", encoding="utf-8")
+        before = {p.relative_to(slot): p.read_bytes() for p in slot.rglob("*") if p.is_file()}
+    result = complete("--unknown" if case == "invalid-option" else "--retain-helpers")
+    if case in {"fresh", "reuse"}:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert helper.read_bytes() == (tmp_path / "versioned_runtime.py").read_bytes()
+        assert (slot / ".runtime-bootstrap/runtime_launcher.py").is_file()
+        assert (slot / ".install-complete.json").is_file()
+    else:
+        assert result.returncode != 0
+    if case in {"reuse", "missing-completed", "changed-completed"}:
+        assert {p.relative_to(slot): p.read_bytes() for p in slot.rglob("*")
+                if p.is_file()} == before
+    if case == "invalid-option":
+        assert "Unsupported construction completion arguments" in result.stderr
+        assert not (slot / ".install-complete.json").exists()
     assert not (root / "current-version").exists()
 
 
