@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve uncertain execution-owner findings so configured machines without machines.yaml can publish guard maps.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

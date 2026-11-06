@@ -943,6 +943,53 @@ def test_inrepo_completion_keeps_optional_absence_publishable(producer, monkeypa
         assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
 
 
+@pytest.mark.parametrize("machine_source", ["unset", "global", "project", "registry-failure"])
+def test_execution_completion_preserves_guard_publication_findings(producer, monkeypatch, machine_source):
+    from agent_worktrees import config, config_acquisition, state_root
+
+    p = producer
+    original = config.load_config
+    machine = "fixture"
+    monkeypatch.setattr(state_root, "config_source_anchors", lambda cfg, **kwargs: [
+        SimpleNamespace(anchor=cfg.default_repo.anchor),
+    ])
+
+    def registry(*args, **kwargs):
+        raise FileNotFoundError("synthetic execution registry failure")
+
+    if machine_source == "registry-failure":
+        p.module.refresh(p.callers, registry_root=p.root)
+        for caller in p.callers:
+            (caller / "machines.yaml").write_text("machines: {}\n")
+        monkeypatch.setattr(config, "load_machines_yaml", registry)
+
+    def load(*args, **kwargs):
+        project = kwargs["project"]
+        caller = p.callers[("first", "second").index(project)]
+        selected = config.Config(
+            srcroot=str(caller.parent), machine=machine, platform="windows", repo_name=project,
+            repos={project: config.RepoConfig(anchor=str(caller), worktree_root=str(caller.parent / "trees"))},
+        )
+        configured = machine_source != "unset"
+        result = config_acquisition.execution_config(
+            selected, machine if configured else "",
+            {"machine": machine} if machine_source == "project" else {},
+            {"machine": machine} if machine_source in ("global", "registry-failure") else {},
+        )
+        assert result.machine == machine
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(config, "load_config", load)
+    if machine_source == "registry-failure":
+        with pytest.raises(p.module.GuardPublicationError, match="execution-registry-failed"):
+            p.module.refresh(registry_root=p.root)
+        assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+    else:
+        assert p.module.refresh(p.callers, registry_root=p.root)["published"] == 2
+        assert p.reader.read_map(p.callers[0], p.root).roots[0]["name"] == "target"
+        assert p.reader.read_map(p.callers[1], p.root).roots == []
+
+
 def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, monkeypatch):
     from agent_worktrees import repos
 
