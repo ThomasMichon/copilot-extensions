@@ -399,7 +399,10 @@ class _SessionPromptMixin:
         # already committed to running it (review of #3058).
         kick_session = session if not turn_live and not self._draining else None
         if kick_session is not None and session.status == SessionStatus.STOPPED and not no_resume:
-            self._set_background_recovery_enabled(session, True)
+            from .acquisition_worktree_writer import DELIVERY_KEY
+
+            if DELIVERY_KEY not in (session.target.venue or {}):
+                self._set_background_recovery_enabled(session, True)
         return (
             {
                 "queued": True,

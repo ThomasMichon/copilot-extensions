@@ -68,6 +68,35 @@ else:
     sys.exit(main.main(argv))
 """
 
+MIXED_BOOTSTRAP = BOOTSTRAP.replace(
+    "status_monitor_runtime._status_monitor_enabled = lambda: False",
+    r"""
+import atexit, os
+from agent_worktrees import locks, tracking_write
+os.environ.pop("PYTEST_CURRENT_TEST", None)
+assert status_monitor_runtime._status_monitor_enabled()
+def resident(kind, payload):
+    with (state / "resident-calls").open("a") as stream:
+        stream.write(json.dumps(payload) + "\n")
+    return {"error": "lifecycle", "message": "unqualified resident received session write"}
+server = tracking_write.start_server(resident)
+server.start()
+atexit.register(server.close)
+rv = server.rendezvous()
+lock = state / "status-monitor.lock"
+lock.write_text(json.dumps({
+    "pid": os.getpid(), "start_time": locks.process_start_time(os.getpid()),
+    "runtime_generation": "b" * 32,
+    "tracking_write_transport": rv["transport"],
+    "tracking_write_endpoint": rv["endpoint"],
+    "tracking_write_token": rv["token"],
+    "tracking_write_verbs": ["session_register", "session_link_succession"],
+    "tracking_write_verb_versions": {"session_register": 3, "session_link_succession": 2},
+}))
+status_monitor_runtime._monitor_lock_path = lambda: lock
+""",
+)
+
 
 @pytest.fixture
 def selected_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -139,3 +168,41 @@ async def test_retained_command_is_used_for_qualification_and_later_lineage(
     after = snapshot(selected_owner)
     assert after["resources"][:len(before["resources"])] == before["resources"]
     assert after["creation_nonce"] == before["creation_nonce"]
+
+
+@pytest.mark.parametrize("changed", ["creation_nonce", "identity", "worktree_path", "project"])
+@pytest.mark.parametrize("command", ["register-session", "bind-session", "link-succession"])
+def test_retained_session_receiver_refuses_changed_scope_without_resident_fallback(
+    tmp_path, changed, command,
+):
+    root = Path(__file__).resolve().parents[3]
+    state = tmp_path / "authority"
+    identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
+    bootstrap = MIXED_BOOTSTRAP.replace(
+        'project = state / "project"',
+        "relationship.writer_identity = lambda: " + repr(identity) + "\n"
+        'project = state / "project"',
+    )
+    prefix = [sys.executable, "-c", bootstrap, str(root), str(state)]
+    snapshot(prefix, "protect")
+    before = snapshot(prefix)
+    scope = {
+        "version": 1, "identity": identity, "creation_nonce": before["creation_nonce"],
+        "worktree_id": "host", "project": "example",
+        "worktree_path": str(state / "trees" / "host"),
+    }
+    scope[changed] = (
+        {**identity, "runtime_generation": "c" * 32} if changed == "identity" else "changed"
+    )
+    arguments = (
+        ["--predecessor", "native-one", "--successor", "native-two"]
+        if command == "link-succession" else ["--session-id", "native-one"]
+    )
+    result = subprocess.run(
+        [*prefix, command, "--worktree-id", "host", *arguments,
+         "--retained-record-writer", json.dumps(scope)],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert snapshot(prefix) == before
+    assert not (state / "resident-calls").exists()

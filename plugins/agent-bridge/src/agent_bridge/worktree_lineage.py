@@ -73,9 +73,10 @@ def _run(
     # resolver; fall back to the daemon's cwd when the dir is unknown.
     run_cwd = cwd if (cwd and os.path.isdir(cwd)) else None
     try:
-        from .acquisition_worktree_writer import require_scope
+        from .acquisition_worktree_writer import require_scope, session_write_args
 
         require_scope(args, cwd=cwd)
+        args = session_write_args(args)
         prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
         if not prefix:
             from .acquisition_worktree_writer import current

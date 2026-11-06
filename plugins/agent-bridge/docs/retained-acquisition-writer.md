@@ -30,8 +30,8 @@ effects; ordinary unpinned CLI acquisition remains supported.
 The provider resolves its own existing pinned Worktrees selection and runs
 `resource-relationship capabilities` through that exact command. The response
 must identify the expected executing serializer and its retained-relationship
-and creation-nonce preservation contract. Selected-root metadata alone does
-not qualify it.
+and creation-nonce preservation contract, plus `retained_session_writes: 1`.
+Selected-root metadata alone does not qualify it.
 
 The original request and provider-selected command commit together in the
 existing delivery-keyed acquisition journal before launch. The command remains
@@ -47,6 +47,15 @@ Later native resume and handoff recover and requalify that same command, check
 the original workspace, and use it for registration, succession and lineage
 reads. Required lineage errors are not silently treated as legacy best-effort
 success. Unpinned operations keep their existing fail-open behavior.
+
+Registration, binding and succession carry the original requirement through
+Worktrees' [qualified executing-session option](../../agent-worktrees/docs/resource-relationship.md#qualified-executing-session-writes).
+Those commands invoke their existing registered handlers in the qualified CLI,
+not a resident selected only by ordinary verb versions. The actual handler
+checks the executing build and locked workspace incarnation before mutation.
+This operation-scoped path neither disables nor qualifies the resident globally.
+An older owner without the declaration refuses before native effects; the
+requirement is never dropped on retry.
 
 Provider refresh treats that pointer as session-owned rather than provider
 metadata and preserves it across stopped-session recovery. The refreshed target
@@ -88,6 +97,9 @@ permission follows from the capability.
 Focused source tests cover request negotiation, pre-native refusal, journal
 recovery, concurrent replay and an HTTP round trip. A finite source-process
 control executes the actual Worktrees parser/serializer for registration and
-succession while retaining an existing protected claim and nonce. Its declared
+succession while retaining an existing protected claim and nonce, with a
+reachable ordinary-verb-compatible but unqualified resident. Unpinned control
+writes reach that resident; required writes never do. Changed identity, nonce,
+project and path refuse at all three receiving commands. Its declared
 build identity and native ACP transport are controlled fixtures; it is not
 installed-runtime, native Copilot or closed-cohort acceptance.

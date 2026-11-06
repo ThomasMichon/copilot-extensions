@@ -43,9 +43,10 @@ async def worktree_command(
     args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
     timeout: float = 120, owner_prefix: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    from .acquisition_worktree_writer import require_scope
+    from .acquisition_worktree_writer import require_scope, session_write_args
 
     require_scope(args, project=project)
+    args = session_write_args(args)
     try:
         prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
     except ContextRefused as exc:

@@ -114,6 +114,8 @@ async def _qualify(writer: RetainedWriter) -> None:
         and support.get("expected_creation_nonce") is True
         and support.get("expected_writer_identity") is True
         and support.get("writer_scope") == "executing-process"
+        and type(support.get("retained_session_writes")) is int
+        and support["retained_session_writes"] == 1
         and support.get("writer_identity") == expected.identity.model_dump()
         and isinstance(contract, dict)
         and contract.get("schema") == "copilot-extensions.worktree-record-writer"
@@ -179,6 +181,7 @@ def require_target(target: Any) -> None:
     if writer is None or (
         target.type != "local" or target.worktree_id != writer.request.worktree_id
         or target.cwd != writer.request.worktree_path or target.project != writer.request.project
+        or target.spawn_command or target.container or target.codespace or target.remote_acp
     ):
         raise AcquisitionRefused("worktree_writer_unconfirmed", "launch lost its original writer owner")
 
@@ -198,6 +201,19 @@ def require_scope(args: list[str], *, cwd: str | None = None, project: str | Non
             expected = request.worktree_path if flag in {"--worktree-dir", "--cwd"} else request.worktree_id
             if args[args.index(flag) + 1] != expected:
                 raise AcquisitionRefused("worktree_writer_unconfirmed", "owner operation changed workspace")
+
+
+def session_write_args(args: list[str]) -> list[str]:
+    """Require the admitted CLI itself to serialize delegated session writes."""
+    writer = current()
+    if writer is None or not args or args[0] not in {"register-session", "bind-session", "link-succession"}:
+        return args
+    request = writer.request
+    scope = {
+        **request.worktree_writer.model_dump(), "worktree_id": request.worktree_id,
+        "project": request.project, "worktree_path": request.worktree_path,
+    }
+    return [*args, "--retained-record-writer", json.dumps(scope, sort_keys=True)]
 
 
 def handoff_state(

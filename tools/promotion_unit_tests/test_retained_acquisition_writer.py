@@ -68,11 +68,13 @@ def boundary(monkeypatch):
             model_dump=lambda: identity.copy(),
         ),
         creation_nonce="original-nonce",
+        model_dump=lambda: {"version": 1, "identity": identity.copy(), "creation_nonce": "original-nonce"},
     )
     support = {
         "schema": "copilot-extensions.resource-relationship", "version": 1,
         "expected_creation_nonce": True, "expected_writer_identity": True,
         "writer_scope": "executing-process", "writer_identity": identity.copy(),
+        "retained_session_writes": 1,
         "writer_contract": {
             "schema": "copilot-extensions.worktree-record-writer",
             "version": 1, "retained_relationships": 1, "creation_nonce": 1,
@@ -130,7 +132,7 @@ def test_fresh_selection_and_recovery_reuse_original_prefix(boundary):
 
 @pytest.mark.parametrize("field", [
     "writer_identity", "writer_scope", "expected_creation_nonce",
-    "expected_writer_identity", "writer_contract",
+    "expected_writer_identity", "writer_contract", "retained_session_writes",
 ])
 def test_changed_or_missing_writer_refuses_before_context_admission(boundary, field):
     b = boundary
@@ -160,6 +162,76 @@ def test_recovery_missing_binding_never_recaptures_selection(boundary):
     assert b.calls == []
 
 
+def test_required_session_commands_carry_original_executing_scope(boundary):
+    b = boundary
+    legacy = ["register-session", "--session-id", "native-one"]
+    assert b.writer.session_write_args(legacy) is legacy
+
+    async def acquire():
+        async with b.writer.acquisition_writer(b.db, b.request):
+            for command in ("register-session", "bind-session", "link-succession"):
+                arguments = [command, "--worktree-id", b.request.worktree_id]
+                result = b.writer.session_write_args(arguments)
+                assert result[:-2] == arguments
+                assert result[-2] == "--retained-record-writer"
+                assert json.loads(result[-1]) == {
+                    **b.request.worktree_writer.model_dump(), "worktree_id": b.request.worktree_id,
+                    "project": b.request.project, "worktree_path": b.request.worktree_path,
+                }
+            read = ["head-session", "--worktree-id", b.request.worktree_id]
+            assert b.writer.session_write_args(read) is read
+
+    finish(acquire())
+    assert b.writer.current() is None
+
+
+def test_receiving_scope_checks_locked_incarnation_and_resets_after_failure(monkeypatch):
+    package = "promotion_receiving_writer"
+    root = ROOT / "plugins/agent-worktrees/src/agent_worktrees"
+    identity = {"installation_root": "/example/owner", "runtime_generation": "a" * 32}
+    for name, attributes in (
+        (package, {"__path__": [str(root)]}),
+        (package + ".resource_relationship", {
+            "valid_writer_identity": lambda value: value == identity,
+            "writer_identity": lambda: identity.copy(),
+        }),
+        (package + ".execution_spaces", {"ExecutionSpaceError": RuntimeError}),
+        (package + ".output", {"_json_error": lambda message: {"error": message}}),
+    ):
+        module = ModuleType(name)
+        module.__dict__.update(attributes)
+        monkeypatch.setitem(sys.modules, name, module)
+    name = package + ".retained_record_writer"
+    spec = importlib.util.spec_from_file_location(name, root / "retained_record_writer.py")
+    assert spec and spec.loader
+    receiver = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, receiver)
+    spec.loader.exec_module(receiver)
+    scope = {
+        "version": 1, "identity": identity, "creation_nonce": "original-nonce",
+        "worktree_id": "original", "project": "example", "worktree_path": "/example/workspace",
+    }
+    record = SimpleNamespace(
+        worktree_id="original", repo="example", worktree_path="/example/workspace",
+        creation_nonce="original-nonce",
+    )
+    args = SimpleNamespace(
+        retained_record_writer=json.dumps(scope), worktree_id="original", session_id="native-one",
+    )
+
+    @receiver.command
+    def command(_args):
+        assert receiver.active()
+        receiver.require_record(record)
+        return "written"
+
+    assert command(args) == "written"
+    assert not receiver.active()
+    record.creation_nonce = "replaced"
+    assert "incarnation changed" in command(args)["error"]
+    assert not receiver.active()
+
+
 def test_required_scope_refuses_another_workspace_and_propagates_lineage_error(boundary):
     b = boundary
 
@@ -169,6 +241,7 @@ def test_required_scope_refuses_another_workspace_and_propagates_lineage_error(b
                 type="local", worktree_id=b.request.worktree_id,
                 cwd=b.request.worktree_path, project=b.request.project,
                 venue={b.writer.DELIVERY_KEY: b.request.delivery_id},
+                spawn_command=None, container=None, codespace=None, remote_acp=None,
             )
             b.writer.require_target(target)
             with pytest.raises(Refused):

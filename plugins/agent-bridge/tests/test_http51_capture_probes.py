@@ -158,6 +158,16 @@ from test_acquisition_runtime import (
     as test_required_handoff_retries_registration_on_original_native,
     test_required_registration_failure_detaches_before_normal_send
     as test_required_registration_failure_detaches_before_normal_send,
+    test_required_queued_send_refusal_keeps_startup_recovery_dormant
+    as test_required_queued_send_refusal_keeps_startup_recovery_dormant,
+    test_required_writer_refuses_before_native_effects
+    as test_required_writer_refuses_before_native_effects,
+    test_retained_acquisition_and_later_lineage_use_actual_owner_processes
+    as test_retained_acquisition_and_later_lineage_use_actual_owner_processes,
+)
+from test_worktree_lineage_authority import (
+    test_retained_session_receiver_refuses_changed_scope_without_resident_fallback
+    as test_retained_session_receiver_refuses_changed_scope_without_resident_fallback,
 )
 
 ROOT = Path(__file__).resolve().parents[3]

@@ -194,6 +194,7 @@ def writer_rig(rig, tmp_path, monkeypatch):
                 "schema": "copilot-extensions.resource-relationship", "version": 1,
                 "expected_creation_nonce": True, "expected_writer_identity": True,
                 "writer_scope": "executing-process",
+                "retained_session_writes": 1,
                 "writer_identity": request.worktree_writer.identity.model_dump(),
                 "writer_contract": {
                     "schema": "copilot-extensions.worktree-record-writer",
@@ -282,9 +283,14 @@ async def test_required_writer_survives_stopped_resume_and_later_acquisition(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("target_type", ["ssh", "command"])
+@pytest.mark.parametrize("target_changes", [
+    {"type": "ssh"}, {"type": "command"},
+    {"spawn_command": ["example-command"]},
+    {"container": {"name": "example-container"}},
+    {"codespace": {"name": "example-codespace"}},
+])
 async def test_required_writer_refuses_provider_type_change_before_persist_or_launch(
-    writer_rig, monkeypatch, target_type,
+    writer_rig, monkeypatch, target_changes,
 ):
     from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
 
@@ -298,7 +304,7 @@ async def test_required_writer_refuses_provider_type_change_before_persist_or_la
     original = session.target
     persisted = rig.db.get_session(session.session_id)["target_json"]
     rig.manager._resolver = SimpleNamespace(resolve_async=AsyncMock(
-        return_value=SpawnTarget(type=target_type, cwd=request.worktree_path),
+        return_value=SpawnTarget(cwd=request.worktree_path, **target_changes),
     ))
     launch = AsyncMock(side_effect=AssertionError("changed target must not launch"))
     monkeypatch.setattr(core, "spawn", launch)
@@ -310,6 +316,49 @@ async def test_required_writer_refuses_provider_type_change_before_persist_or_la
     assert session.acp_session_id == first.native_session_id
     assert session.status == SessionStatus.STOPPED
     launch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_required_queued_send_refusal_keeps_startup_recovery_dormant(
+    writer_rig, monkeypatch, tmp_path,
+):
+    from agent_bridge import acquisition_worktree_writer as writer
+    from agent_bridge.session_host.host_index import HostRecord
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    session = rig.manager.get_session(first.session_id)
+    await rig.manager.stop_session(session.session_id, force=True)
+    async with writer.acquisition_writer(rig.db, request):
+        await writer.registration_pending(rig.manager, session)
+    rig.db.enqueue_prompt(session.session_id, "Original queued work", time.time())
+
+    async def unavailable(*args, **kwargs):
+        raise AcquisitionRefused("owner_pending", "original writer unavailable")
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", unavailable)
+    result = await rig.manager.submit_or_queue_prompt(session.session_id, "Later queued work")
+    assert result["queued"] is True
+    assert rig.db.count_pending_prompts(session.session_id) == 2
+    assert session.client is None and not session.background_recovery_enabled
+    assert not rig.db.get_session(session.session_id)["background_recovery_enabled"]
+    recovered = SessionManager(rig.db, session_host_state_dir=str(tmp_path / "hosts"))
+    record = HostRecord(
+        session_id=session.session_id, port=9000, host_pid=99999998,
+        child_pid=99999999, protocol_version=1,
+    )
+    recovered._host_index.register(record)
+    monkeypatch.setattr(recovered, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(recovered, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(recovered, "_live_host_records", lambda: [record])
+    attach = AsyncMock(side_effect=AssertionError("writer refusal cannot enable startup attach"))
+    monkeypatch.setattr(recovered, "_reattach_one", attach)
+    assert await recovered.reattach_session_hosts(recover_cold=False) == 0
+    attach.assert_not_awaited()
+    restored = recovered.get_session(session.session_id)
+    assert restored.acp_session_id == first.native_session_id
+    assert restored.status == SessionStatus.STOPPED and restored.client is None
+    assert rig.db.count_pending_prompts(session.session_id) == 2
 
 
 @pytest.mark.asyncio
@@ -619,7 +668,7 @@ async def test_required_handoff_retains_unknown_effect_without_replacement(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad", ["identity", "preservation", "old", "unavailable", "nonce"])
+@pytest.mark.parametrize("bad", ["identity", "preservation", "old", "unavailable", "nonce", "resident-only"])
 async def test_required_writer_refuses_before_native_effects(writer_rig, monkeypatch, bad):
     rig, request = writer_rig.rig, writer_rig.request
 
@@ -634,6 +683,8 @@ async def test_required_writer_refuses_before_native_effects(writer_rig, monkeyp
                 value["writer_contract"]["retained_relationships"] = 0
             elif bad == "old":
                 value = {}
+            elif bad == "resident-only":
+                value.pop("retained_session_writes")
         elif bad == "nonce" and args[0] == "record":
             value["worktree"]["creation_nonce"] = "recreated"
         return value
@@ -737,7 +788,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     import sys
     from agent_bridge import acquisition_worktree_writer as writer, session_lifecycle_cli as lifecycle
     from agent_bridge import worktree_lineage
-    from test_worktree_lineage_authority import BOOTSTRAP, snapshot
+    from test_worktree_lineage_authority import MIXED_BOOTSTRAP, snapshot
     from pathlib import Path
 
     state = tmp_path / "authority"
@@ -746,7 +797,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     identity_file = state / "writer-identity.json"
     identity_file.write_text(json.dumps(identity), encoding="utf-8")
-    bootstrap = BOOTSTRAP.replace('"example"', '"test-project"').replace(
+    bootstrap = MIXED_BOOTSTRAP.replace('"example"', '"test-project"').replace(
         "local/example/", "local/test-project/",
     ).replace("host", "worktree-a").replace(
         "cfg.tracking_dir = lambda:", "cfg.tracking_dir = lambda *a, **k:",
@@ -765,6 +816,13 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     protected = snapshot(prefix, "protect")
     before = snapshot(prefix)
     checkout = state / "trees" / "worktree-a"
+    assert not rig.register_session(
+        "worktree-a", "legacy-resident-probe", worktree_dir=str(checkout), owner_prefix=tuple(prefix),
+    )
+    resident_calls = (state / "resident-calls").read_text().splitlines()
+    assert len(resident_calls) == 1
+    assert json.loads(resident_calls[0])["verb"] == "session_register"
+    assert snapshot(prefix) == before
     request = req(
         version=3, worktree_path=str(checkout), worktree_writer={
             "identity": identity, "creation_nonce": before["creation_nonce"],
@@ -790,7 +848,10 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     assert [item for item in after["resources"] if item["ref"] == protected["ref"]] == before["resources"]
     calls = [json.loads(line) for line in (state / "calls").read_text().splitlines()]
     capability = next(i for i, args in enumerate(calls) if "capabilities" in args)
-    registration = next(i for i, args in enumerate(calls) if "register-session" in args)
+    registration = next(
+        i for i, args in enumerate(calls)
+        if "register-session" in args and "--retained-record-writer" in args
+    )
     assert capability < registration
     selected.side_effect = AssertionError("continuation must recover the original command")
     session = rig.manager.get_session(result.session_id)
@@ -807,6 +868,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     assert linked["head"] == successor.acp_session_id == "native-successor"
     assert linked["creation_nonce"] == before["creation_nonce"]
     assert [item for item in linked["resources"] if item["ref"] == protected["ref"]] == before["resources"]
+    assert (state / "resident-calls").read_text().splitlines() == resident_calls
     identity_file.write_text(json.dumps({**identity, "runtime_generation": "b" * 32}), encoding="utf-8")
     with pytest.raises(AcquisitionRefused, match="serializer"):
         await rig.manager.handoff_session(

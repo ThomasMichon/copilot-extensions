@@ -38,7 +38,7 @@ import dataclasses
 import logging
 from pathlib import Path
 
-from . import tracking, tracking_write
+from . import retained_record_writer, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
 
@@ -120,6 +120,7 @@ def apply_session_link_succession(args: dict) -> dict:
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
         try:
+            retained_record_writer.require_record(record)
             require_project_record_mutation(record)
         except ExecutionSpaceError as exc:
             logging.getLogger(__name__).warning(

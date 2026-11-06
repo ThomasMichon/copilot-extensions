@@ -94,7 +94,7 @@ def test_registration_preserves_explicit_key_among_shared_hostname_entries(
     project_root = tmp_path / "project"
     project_root.mkdir()
     machine_config: dict[str, object] = {
-        "repos": {"project": {"anchor": str(anchor)}},
+        "repos": {"project": {"anchor": str(anchor), "worktree_root": str(tmp_path)}},
     }
     if binding == "project":
         machine_config["machine"] = "selected-space"
