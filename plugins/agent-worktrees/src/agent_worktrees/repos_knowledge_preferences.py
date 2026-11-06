@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 
 from . import config as cfg, project_state, repos, state_root
+from .config_sources import KnowledgeBindingError
 from .repos_configuration_sources import ConfigurationError, resource_name
 
 SCHEMA = "agent-worktrees.knowledge-preference"
@@ -66,7 +67,10 @@ def resolve(project: str, harness_id: str, knowledge_id: str) -> dict:
         raise ConfigurationError("context-mismatch", "The harness identity must match the selected native project.")
     if harness_id == knowledge_id:
         raise ConfigurationError("same-repository", "Harness and knowledge must be distinct native repositories.")
-    config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+    try:
+        config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+    except KnowledgeBindingError as error:
+        raise ConfigurationError("binding-unresolved", "The explicit local binding needs owner repair.") from error
     if not isinstance(config.knowledge_repo, str):
         raise ConfigurationError("binding-unresolved", "The explicit local binding needs owner repair.")
     binding = {"status": "absent"}

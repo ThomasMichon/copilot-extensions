@@ -34,6 +34,7 @@ def native(tmp_path, monkeypatch):
         knowledge_repo="", machine="example-worker",
         default_repo=SimpleNamespace(anchor=entries["first"][repos._current_platform()]),
     )
+    loader = preferences.cfg.load_project_config
     monkeypatch.setattr(preferences.cfg, "load_project_config", lambda *args, **kwargs: config)
     calls = []
 
@@ -46,7 +47,7 @@ def native(tmp_path, monkeypatch):
     monkeypatch.setattr(repos_knowledge_configuration, "invoke", invoke)
     ids = {name: project_state.canonical_repository_id(name) for name in entries}
     return SimpleNamespace(
-        root=tmp_path, registry=registry, config=config, calls=calls, ids=ids, entries=entries,
+        root=tmp_path, registry=registry, config=config, calls=calls, ids=ids, entries=entries, loader=loader,
     )
 
 
@@ -140,6 +141,34 @@ def test_existing_binding_is_authoritative_and_unresolved_binding_is_never_absen
         assert result["status"] == ("already-bound" if binding == "shared" else "binding-preserved")
         assert result["token"] is None and result["native_preview"] is None
         assert not result["binding_changed"]
+    assert native.calls == []
+
+
+@pytest.mark.parametrize(("source", "value"), [
+    ("global", False), ("global", 0), ("machine", False), ("machine", 0),
+])
+def test_real_loader_never_converts_falsy_non_string_binding_sources_to_absence(
+    native, monkeypatch, source, value,
+):
+    monkeypatch.setattr(preferences.cfg, "load_project_config", native.loader)
+    path = preferences.cfg.global_config_path() if source == "global" else (
+        preferences.cfg.project_dir("first") / "config.yaml"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump({"knowledge_repo": value}), encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(ConfigurationError) as caught:
+        preview(native)
+    assert caught.value.code == "binding-unresolved"
+    assert path.read_bytes() == before and native.calls == []
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_real_loader_keeps_unset_native_binding_sources_compatible(native, monkeypatch, value):
+    monkeypatch.setattr(preferences.cfg, "load_project_config", native.loader)
+    path = preferences.cfg.global_config_path()
+    path.write_text(yaml.safe_dump({"knowledge_repo": value}), encoding="utf-8")
+    assert resolve(native)["status"] == "suggested"
     assert native.calls == []
 
 

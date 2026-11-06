@@ -82,7 +82,7 @@ def _owner_arguments(script: Path, project: str, name: str, operation: str, toke
 
 
 def _native_read_runner(project: str):
-    """Keep fresh owner reads in the locked worker; never dispatch write/auth verbs."""
+    """Keep fresh owner reads in the native worker; never dispatch write/auth verbs."""
     entry = Path(sysconfig.get_path("scripts")) / (
         "agent-worktrees.exe" if sys.platform == "win32" else "agent-worktrees"
     )
@@ -128,23 +128,31 @@ def _native_read_runner(project: str):
     return run
 
 
+def _run_selected_payload(project: str, name: str, operation: str, token: str, expected_script: str) -> None:
+    script = owner_script(project)
+    if str(script) != expected_script:
+        raise ConfigurationError("binding-owner-changed", "The binding owner changed; preview again.")
+    previous = sys.argv
+    try:
+        sys.argv = _owner_arguments(script, project, name, operation, token)
+        runpy.run_path(
+            str(script), run_name="__main__",
+            init_globals={"_NATIVE_BINDING_READ_RUNNER": _native_read_runner(project)},
+        )
+    finally:
+        sys.argv = previous
+
+
 def _apply_worker(project: str, name: str, token: str, expected_script: str) -> None:
     from . import repos
     from .repos_registry_transaction import registry_lock
 
     with registry_lock(repos._repos_yaml_path()):
-        script = owner_script(project)
-        if str(script) != expected_script:
-            raise ConfigurationError("binding-owner-changed", "The binding owner changed; preview again.")
-        previous = sys.argv
-        try:
-            sys.argv = _owner_arguments(script, project, name, "apply-locked", token)
-            runpy.run_path(
-                str(script), run_name="__main__",
-                init_globals={"_NATIVE_BINDING_READ_RUNNER": _native_read_runner(project)},
-            )
-        finally:
-            sys.argv = previous
+        _run_selected_payload(project, name, "apply-locked", token, expected_script)
+
+
+def _preview_worker(project: str, name: str, expected_script: str) -> None:
+    _run_selected_payload(project, name, "preview", "", expected_script)
 
 
 def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
@@ -157,13 +165,11 @@ def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
     from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
     script = owner_script(project)
-    owner_args = _owner_arguments(script, project, name, "apply-locked" if operation == "apply" else operation, token)
-    args = (
-        [sys.executable, "-B", "-m", "agent_worktrees.repos_knowledge_configuration",
-         project, name, token, str(script)]
-        if operation == "apply" else
-        [sys.executable, "-B", *owner_args]
-    )
+    _owner_arguments(script, project, name, "apply-locked" if operation == "apply" else operation, token)
+    args = [
+        sys.executable, "-B", "-m", "agent_worktrees.repos_knowledge_configuration",
+        project, name, operation, token, str(script),
+    ]
     environment = dict(os.environ)
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "COPILOT_PLUGIN_ROOT"):
         environment.pop(key, None)
@@ -221,6 +227,11 @@ def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
+    if len(sys.argv) == 5:
+        _apply_worker(*sys.argv[1:])
+    elif len(sys.argv) == 6 and sys.argv[3] == "apply":
+        _apply_worker(sys.argv[1], sys.argv[2], sys.argv[4], sys.argv[5])
+    elif len(sys.argv) == 6 and sys.argv[3] == "preview" and not sys.argv[4]:
+        _preview_worker(sys.argv[1], sys.argv[2], sys.argv[5])
+    else:
         raise SystemExit("The binding worker requires its native transaction arguments.")
-    _apply_worker(*sys.argv[1:])

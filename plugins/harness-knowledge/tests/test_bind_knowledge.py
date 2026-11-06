@@ -693,7 +693,7 @@ def test_windows_powershell_catalog_path_uses_host(monkeypatch: pytest.MonkeyPat
     if bk.os.name != "nt":
         return
     monkeypatch.setattr(
-        bk.shutil,
+        shutil,
         "which",
         lambda name: r"C:\Program Files\PowerShell\7\pwsh.exe"
         if name == "pwsh.exe"

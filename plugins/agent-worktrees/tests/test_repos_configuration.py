@@ -351,6 +351,33 @@ def test_binding_worker_refuses_a_changed_payload_before_execution(native, monke
     assert caught.value.code == "binding-owner-changed"
 
 
+def test_native_preview_worker_preserves_read_only_scope_without_a_writer_lock(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_configuration as binding, repos_registry_transaction
+
+    script = native / "qualified-preview.py"
+    script.write_text("# Native preview fixture\n", encoding="utf-8")
+    monkeypatch.setattr(binding, "owner_script", lambda _project: script)
+    monkeypatch.setattr(
+        repos_registry_transaction, "registry_lock",
+        lambda *_args, **_kwargs: pytest.fail("preview took a writer lock"),
+    )
+    previous = sys.argv
+    calls = []
+
+    def delegated(path, *, run_name, init_globals):
+        assert path == str(script) and run_name == "__main__"
+        assert sys.argv[sys.argv.index("--configuration") + 1] == "preview"
+        assert "--preview-token" not in sys.argv
+        assert callable(init_globals["_NATIVE_BINDING_READ_RUNNER"])
+        calls.append(path)
+
+    monkeypatch.setattr(binding.runpy, "run_path", delegated)
+    before = tree(native)
+    binding._preview_worker("sample", "knowledge", str(script))
+    assert calls == [str(script)] and sys.argv is previous
+    assert tree(native) == before
+
+
 def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(native, monkeypatch):
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_worktrees import repos_knowledge_configuration as binding

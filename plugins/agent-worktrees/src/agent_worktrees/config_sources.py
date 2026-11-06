@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -27,6 +28,17 @@ class ConfigSource:
     tier: str | None = field(default=None, kw_only=True, compare=False)
     directory_form: bool = field(default=False, kw_only=True, compare=False)
     state_repo: str = field(default="", kw_only=True, compare=False)
+
+
+class KnowledgeBindingError(ValueError):
+    """A binding source supplied a value that is not a repository name."""
+
+
+def knowledge_binding_value(machine: Mapping[str, object], global_values: Mapping[str, object]) -> str:
+    values = (machine.get("knowledge_repo"), global_values.get("knowledge_repo"))
+    if any(value is not None and not isinstance(value, str) for value in values):
+        raise KnowledgeBindingError("knowledge_repo must be a repository-name string or unset")
+    return next((value for value in values if isinstance(value, str) and value), "")
 
 
 def _default_anchor(config: cfg.Config) -> str | None:

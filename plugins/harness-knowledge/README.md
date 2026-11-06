@@ -76,8 +76,9 @@ including failures during legacy cleanup after the write. Plugin composition
 keeps its native delegate windowless on Windows.
 See [Repositories Configuration](../agent-worktrees/docs/repositories-configuration.md#confirmed-existing-knowledge-binding).
 
-The native worker may provide a private, read-only in-process adapter while
-holding that registration lock. It runs the existing fresh inventory and
+The native preview/apply worker may provide a private, read-only in-process adapter.
+Apply retains that registration lock; preview takes no writer lock.
+The adapter runs the existing fresh inventory and
 selected-project config/state handlers without repeated interpreter startup;
 all validation and pointer rechecks remain. Writes, authentication, composition
 and unsupported reads retain their ordinary subprocess path. Without the
@@ -111,7 +112,8 @@ agent-worktrees' single managed-overlay implementation. The agent-worktrees
 ## Development checks
 
 The `harness-knowledge` typecheck project covers the configurator scripts
-and all four test modules, without exclusions. Run
+including the extracted `binding_commands.py` adapter, and all four test modules,
+without exclusions. Run
 `python tools/typecheck.py harness-knowledge` from the repository root for
 strict Python 3.10 checks on both Linux and Windows targets; use `--prepare`
 first when the checker environment is missing. Native command and platform-lock

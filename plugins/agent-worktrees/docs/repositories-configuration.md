@@ -138,11 +138,12 @@ probes. Pointer completion is captured at the preserving writer boundary, so
 a later cleanup or observation failure still returns a nonzero incomplete
 receipt with `pointer_committed: true`.
 
-The locked worker can supply its selected payload with a private read-only
+The native worker can supply its selected payload with a private read-only
 in-process adapter for native repository inventory and this project's
 configuration/state-root handlers. Reads remain fresh and all original
 preflights/rechecks still execute; only repeated cold interpreter startup is
-removed. Native JSON uses the existing real-stdout capture seam. The adapter
+removed. Preview remains read-only without taking a writer lock; apply retains
+its registration lock through pointer commit. Native JSON uses the existing real-stdout capture seam. The adapter
 restores project/cwd/streams and does not intercept write, authentication,
 composition or another project's commands. Unrecognized calls use the existing
 subprocess path. Older payloads ignore the optional callback; a newer payload
@@ -183,6 +184,11 @@ binding is an error to repair through its owner, never absence permitting a
 shared fallback. A suppressed/absent portable suggestion needs no native
 binding call. Related venue choices retain their existing owner; this API
 does not provision or replace a local route.
+
+The native loader validates binding-bearing global and machine sources before
+default selection. Booleans, numbers and other non-string values refuse rather
+than becoming an absent binding through truthiness; null/empty retain their
+existing unset behavior. A quoted repository name retains its string identity.
 
 Where no binding exists, adoption remains an explicit separate operation:
 
