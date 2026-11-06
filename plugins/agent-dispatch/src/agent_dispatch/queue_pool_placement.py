@@ -60,6 +60,8 @@ def pool_placement_contract() -> dict[str, object]:
         "worker_decline_preparation_versions": [1],
         "worker_decline_local_closeout_versions": [1],
         "worker_decline_closeout_complete": False,
+        "worker_submission_readiness_versions": [1],
+        "worker_submission_scope": "retained-workspace-assignments",
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
 

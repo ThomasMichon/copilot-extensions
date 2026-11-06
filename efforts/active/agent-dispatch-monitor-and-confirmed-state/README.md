@@ -17,8 +17,9 @@ queue, supervisor, native-session, Worktrees or resource owners.
 The effort remains **Active**. Passing one source phase or PR is not completion.
 
 Current source credit: first-proposal guarded submission merged in #10608;
-same-owner rejected-proposal lineage merged in #10674. The ordinary whole-stack
-case still fails at missing protected assignment/preparation integration.
+same-owner rejected-proposal lineage merged in #10674. The ordinary protected
+completion consumer now integrates those shared queue owners in source;
+installed whole-stack submission and the full lifecycle remain unqualified.
 Resident-only inspection and coherent delegated lineage selection are available
 at their source boundaries. Executing-build and delegated-selection observation
 source subsequently merged in #10782. Actual running selections and the complete
@@ -82,10 +83,10 @@ admission-factory source path, merged in #11117. It retains both independent cal
 closed for invalid selections; no permissive policy is provided or installed.
 Prepared-workspace provider expansion merged in #11130, retaining the expected writer
 before the first relationship under its original nonce and request. It does
-not qualify the cohort. Working consumer source now derives the new-workspace
+not qualify the cohort. The consumer merged in #11145 and derives the new-workspace
 expectation from actual Bridge selection and retains the prepared nonce before
-the first relationship. Independent review, CI and merge of this consumer
-remain pending; no complete-cohort admission policy is supplied.
+the first relationship, reconciling pending attachment under its original
+expectation on retry. No complete-cohort admission policy is supplied.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running

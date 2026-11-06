@@ -342,6 +342,8 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
         "worker_decline_preparation_versions": [1],
         "worker_decline_local_closeout_versions": [1],
         "worker_decline_closeout_complete": False,
+        "worker_submission_readiness_versions": [1],
+        "worker_submission_scope": "retained-workspace-assignments",
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
     body = {"task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision, "driver": "cli"}
