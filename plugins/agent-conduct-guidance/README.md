@@ -117,13 +117,18 @@ validation and issue/PR publication to designated destinations. Agents should
 not ask permission to continue that work or invent one-shot consent for each
 ordinary revision or corrected command.
 
-This includes routine maintenance of an agent-owned PR: rebases and understood
-in-scope conflict resolution, verified source-attribution and `Co-authored-by`
-restoration, lossless squash-merge reconciliation, and fixing/rerunning affected
-CI checks after correction. Supported owner workflows still preserve authored
-content, other owners' work, required review/checks and explicit limits. Unknown
-outcomes, intent-changing conflicts, destructive discard, deployment, access
-changes and unrelated service repair retain their existing gates.
+An author agent keeps its context and git history, so managing its own PRs and
+the branches it created never needs an approval prompt: rebases and understood
+conflict resolution, pushing or force-pushing its own branch, regenerating
+derived artifacts, verified source-attribution and `Co-authored-by`
+restoration, lossless squash-merge reconciliation, fixing/rerunning affected CI
+checks, re-requesting review and replying to review threads. A mechanical
+rebase or conflict-only push is not a new revision of intent and counts against
+no review-round, revision or attempt cap; caps bind intent-changing revisions.
+Supported owner workflows still preserve authored content, other owners' work,
+required review/checks and explicit holds. Unknown outcomes, intent-changing
+conflicts, destructive discard, deployment, access changes and unrelated
+service repair retain their existing gates.
 
 Deployment, personal/non-source-controlled content, disclosure and external-owner
 resources require an applicable explicit effect scope. An operator may accept a

@@ -64,6 +64,8 @@ approval is not content authority.
 | A run under a cleared class fails and a reviewed fix lands | Treat the rerun as an ordinary bounded retry; refresh execution evidence instead of asking again. |
 | The same operation class would need approval a second time | Ask once for class-level pre-clearance with a bounded rerun policy, not per invocation. |
 | Operator accepts a class-level rerun policy with a run cap | The cap binds as granted scope; ask for an amendment before exceeding it. |
+| Author agent's own approved PR conflicts with its target branch | Rebase its own branch, resolve the understood conflict, regenerate derived artifacts and push without an approval prompt; required review and CI apply to the new head. |
+| A mechanical rebase or conflict-only push meets a review-round, revision or attempt cap | Do not count it against the cap; caps bind intent-changing revisions. |
 | Prior invocation may already have produced effects | Reconcile through the existing owner with the original identity; do not blindly replay. |
 | Deployment expands beyond the approved selector, owner or accepted effects | Ask only for the expanded effect scope and continue unaffected authorized work. |
 | Low-risk tooling approval is reused for a prototype that mutates personal archives | Keep content mutation gated; deployment recoverability does not authorize data effects. |
