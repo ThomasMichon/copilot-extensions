@@ -100,6 +100,12 @@ Reserve one slot before concurrent senders can act. This is a setup requirement
 for the chosen existing storage adapter, not a new lock/service implementation.
 Use bounded actionable requests to the original author, never a stream of
 impatience messages. Silence neither clears a hold nor authorizes escalation.
+Immediately before each send, re-check live state: a merged or closed PR, a
+new head or an author reply that already answers the request cancels the
+nudge, and consent already present cancels only a consent request; record the
+cancellation with its reservation. Do not repeat an identical request on
+unchanged state within its cooldown; later repeats follow the policy's maximum
+sends and stop conditions.
 
 ## Accepted transfer, not conversational inference
 
@@ -114,3 +120,11 @@ The coordinator's notification does not take the author's PR/worktree,
 reviewer's task or another service's queue. Native same-owner context rollover
 is not this transfer; retain original obligations and verify observed
 continuation or settlement through each existing owner.
+
+When a successor takes over a reviewer or coordinator scope, the successor or
+scope owner tells the predecessor through its retained handle or existing
+owner. After accepted transfer, release or retire the predecessor's task,
+claims, watches and nudges for the overlapping scope through their owners; the
+predecessor stands down there. Never leave two reviewers serving one scope or
+a superseded reviewer running untold. A refused start or an instruction to wait
+for another continuation names its owner, revisit time and default action.
