@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -18,6 +19,10 @@ update_entry_case = shared_update_entry_case
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows security/process contract")
 
 
+def _use_real_probe_python(monkeypatch):
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"])
+
+
 @pytest.mark.parametrize("project_position", ["before", "after"])
 @pytest.mark.parametrize("front", ["global", "git-sh", "git-bash"])
 @pytest.mark.parametrize("runtime_source", ["marketplace", "git"])
@@ -25,6 +30,7 @@ def test_configured_project_update_routes_before_manager_bootstrap(
     update_entry_case, native_powershell, monkeypatch, project_position, front, runtime_source,
 ):
     tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
     manager = home / ".worktree-manager"
     manager.mkdir()
     policy = (
@@ -111,6 +117,7 @@ def test_project_controller_probe_preserves_manager_fallback(
     update_entry_case, native_powershell, monkeypatch, selection,
 ):
     tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
     runtime = home / ".agent-worktrees"
     (runtime / "current-version").write_text("selected\n")
     engine = tmp / "probe.py"
@@ -152,11 +159,18 @@ def test_namespaced_payload_controller_routes_before_manager_bootstrap(
     update_entry_case, native_powershell, monkeypatch,
 ):
     tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
     payload = tmp / "payload"
     (payload / "bin").mkdir(parents=True)
     (payload / "scripts" / "installation-context").mkdir(parents=True)
     shutil.copy2(PLUGIN / "bin" / "agent-worktrees-update-entry.ps1", payload / "bin")
     shutil.copy2(PLUGIN / "scripts" / "invoke-payload-runtime.ps1", payload / "scripts")
+    shutil.copy2(PLUGIN / "scripts" / "update_controller_probe.py", payload / "scripts")
+    for name in ("shell-caller-owned.ps1", "daemon_instance_runtime.pyz"):
+        shutil.copy2(
+            PLUGIN / "scripts" / "installation-context" / name,
+            payload / "scripts" / "installation-context" / name,
+        )
     runtime = tmp / "namespaced-runtime"
     runtime.mkdir()
     context = tmp / "a" / "b" / "c" / "d" / "context.json"
@@ -225,14 +239,104 @@ def test_namespaced_payload_controller_routes_before_manager_bootstrap(
     assert routed[1][-4:] == ["--project", "sample", "update", "--force"]
 
 
+def test_controller_probe_timeout_retires_its_descendants(
+    update_entry_case, native_powershell, monkeypatch,
+):
+    tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
+    helpers = PLUGIN.parents[1] / "libs" / "agent-procutil" / "tests"
+    monkeypatch.syspath_prepend(str(helpers))
+    from caller_owned_fixture import identity
+    from test_caller_owned_native import PinnedProcess
+
+    payload = tmp / "probe-payload"
+    (payload / "bin").mkdir(parents=True)
+    scripts = payload / "scripts"
+    (scripts / "installation-context").mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees"}', encoding="utf-8")
+    shutil.copy2(PLUGIN / "bin" / "agent-worktrees.ps1", payload / "bin")
+    entry = (PLUGIN / "bin" / "agent-worktrees-update-entry.ps1").read_text(encoding="utf-8")
+    assert entry.count("-TimeoutSeconds 30") == 1
+    (payload / "bin" / "agent-worktrees-update-entry.ps1").write_text(
+        entry.replace("-TimeoutSeconds 30", "-TimeoutSeconds 5"), encoding="utf-8",
+    )
+    shutil.copy2(PLUGIN / "scripts" / "update_controller_probe.py", scripts)
+    for name in ("shell-caller-owned.ps1", "daemon_instance_runtime.pyz"):
+        shutil.copy2(
+            PLUGIN / "scripts" / "installation-context" / name,
+            scripts / "installation-context" / name,
+        )
+    runtime = home / ".agent-worktrees"
+    (runtime / "current-version").write_text("selected\n", encoding="utf-8")
+    slow = tmp / "slow-engine.py"
+    slow.write_text(
+        "import json, os, subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, os.environ['PROBE_TEST_HELPERS'])\n"
+        "from caller_owned_fixture import identity\n"
+        "child = subprocess.Popen([sys.executable, '-I', '-S', '-c', "
+        "'import time; time.sleep(30)'], creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        "root = Path(os.environ['PROBE_TEST_ROOT'])\n"
+        "pending = root / 'pending.json'\n"
+        "pending.write_text(json.dumps([identity(), identity(child.pid)]), encoding='utf-8')\n"
+        "pending.replace(root / 'ready.json')\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    command = tmp / "slow-engine.cmd"
+    command.write_text(f'@"{sys.executable}" -I -S -B "{slow}" %*\n@exit /b %ERRORLEVEL%\n')
+    (runtime / "bin" / "resolve-runtime.ps1").write_text(
+        "$AwPy = '" + str(command).replace("'", "''") + "'\n",
+    )
+    monkeypatch.setenv("PROBE_TEST_HELPERS", str(helpers))
+    monkeypatch.setenv("PROBE_TEST_ROOT", str(tmp))
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
+    process = subprocess.Popen(
+        [native_powershell, "-NoProfile", "-File", str(payload / "bin" / "agent-worktrees.ps1"),
+         "--project", "sample", "update"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+    )
+    pins = []
+    try:
+        deadline = time.monotonic() + 4
+        ready = tmp / "ready.json"
+        while not ready.is_file() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.is_file(), "the controller probe did not start its descendants"
+        pins = [PinnedProcess(row) for row in json.loads(ready.read_text(encoding="utf-8"))]
+        stdout, stderr = process.communicate(timeout=15)
+        assert process.returncode == 124, stdout + stderr
+        deadline = time.monotonic() + 3
+        while not all(pin.gone() for pin in pins) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert all(pin.gone() for pin in pins), "controller probe descendants survived timeout"
+    finally:
+        if process.poll() is None:
+            parent = PinnedProcess(identity(process.pid))
+            try:
+                parent.kill()
+            finally:
+                parent.close()
+            process.wait(timeout=5)
+        for pin in pins:
+            try:
+                pin.kill()
+            finally:
+                pin.close()
+        process.stdout.close()
+        process.stderr.close()
+
+
 @pytest.mark.parametrize("observer", ["default", "supervised"])
+@pytest.mark.parametrize("no_manager", [False, True])
 def test_native_entry_executes_real_controller_under_driver_custody(
-    update_entry_case, native_powershell, monkeypatch, observer,
+    update_entry_case, native_powershell, monkeypatch, observer, no_manager,
 ):
     from agent_procutil.owned_process import run_installation_owned
     from agent_procutil.daemon_instances import REGISTRY_ENV, daemon_test_lifecycle
 
     tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
     runtime = home / ".agent-worktrees"
     (runtime / "current-version").write_text("selected\n")
     (runtime / "bin" / "resolve-runtime.ps1").write_text(
@@ -267,9 +371,10 @@ def test_native_entry_executes_real_controller_under_driver_custody(
     entry = str(PLUGIN / "bin" / "agent-worktrees.ps1").replace("'", "''")
     harness = tmp / "real-controller-entry.ps1"
     mode = "--supervised-debug" if observer == "supervised" else ""
+    skip = "--no-manager" if no_manager else ""
     harness.write_text(
         "function Invoke-WebRequest { throw 'Manager bootstrap was started' }\n"
-        f"& '{entry}' --project sample update {mode} --force\n"
+        f"& '{entry}' --project sample update {mode} {skip} --force\n"
         "exit $LASTEXITCODE\n",
         encoding="utf-8",
     )
@@ -288,7 +393,9 @@ def test_native_entry_executes_real_controller_under_driver_custody(
         )
     assert all(item.status != "held" for item in cleanup), cleanup
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert json.loads(receipt.read_text(encoding="utf-8")) == ["--force"]
+    assert json.loads(receipt.read_text(encoding="utf-8")) == (
+        (["--no-manager"] if no_manager else []) + ["--force"]
+    )
     assert "controller completed" in result.stdout + result.stderr
 
 

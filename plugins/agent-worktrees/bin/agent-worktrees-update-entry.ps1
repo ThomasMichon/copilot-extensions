@@ -69,50 +69,46 @@ if ($_awUpdatePayload -and (
     (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.copilot-extensions\installation-mode.json'))
 )) { $_probePossible = $true }
 if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
-    $_probeArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $_awUpdateCaller)
-    if ($_updateHasProject) { $_probeArguments += @('--project', $_updateProject) }
-    $_probeArguments += @('get', 'update-controller')
-    $_start = [Diagnostics.ProcessStartInfo]::new()
-    $_start.FileName = (Get-Process -Id $PID).Path
-    $_start.WorkingDirectory = (Get-Location).Path
-    $_start.UseShellExecute = $false
-    $_start.CreateNoWindow = $true
-    $_start.RedirectStandardOutput = $true
-    $_start.RedirectStandardError = $true
-    foreach ($_name in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUAL_ENV',
-        'UV_INTERNAL__PYTHONHOME', '__PYVENV_LAUNCHER__', 'AGENT_RT_ROOT',
-        'AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP')) {
-        $_start.EnvironmentVariables.Remove($_name)
-    }
-    $_start.EnvironmentVariables['AGENT_WORKTREES_NO_SELFPROVISION'] = '1'
-    $_start.EnvironmentVariables['AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME'] = '1'
-    if ($_start.PSObject.Properties['ArgumentList']) {
-        foreach ($_part in $_probeArguments) { [void]$_start.ArgumentList.Add($_part) }
+    if ($_awUpdatePayload) {
+        $_probePayload = Split-Path -Parent (Split-Path -Parent $_awUpdateCaller)
     } else {
-        $_start.Arguments = @(foreach ($_part in $_probeArguments) {
-            $_escaped = [regex]::Replace($_part, '(\\*)"', '$1$1\"')
-            '"' + [regex]::Replace($_escaped, '(\\+)$', '$1$1') + '"'
-        }) -join ' '
-    }
-    $_process = [Diagnostics.Process]::new()
-    $_process.StartInfo = $_start
-    $_controller = ''
-    try {
-        if ($_process.Start()) {
-            $_stdout = $_process.StandardOutput.ReadToEndAsync()
-            $_stderr = $_process.StandardError.ReadToEndAsync()
-            if ($_process.WaitForExit(30000)) {
-                $_probeOutput = $_stdout.GetAwaiter().GetResult()
-                [void]$_stderr.GetAwaiter().GetResult()
-                if ($_process.ExitCode -eq 0) { $_controller = $_probeOutput.Trim() }
-            } else {
-                Stop-Process -Id $_process.Id -ErrorAction SilentlyContinue
-                $_process.WaitForExit()
-            }
+        $_probePayload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+        if (-not (Test-Path -LiteralPath (Join-Path $_probePayload 'plugin.json') -PathType Leaf)) {
+            $_probePayload = ''
+            try { $_probePayload = ([IO.File]::ReadAllText((Join-Path $_runtimeRoot 'payload-dir'))).Trim() } catch {}
         }
-    } catch {
-        $_controller = ''
-    } finally { $_process.Dispose() }
+    }
+    $_probeHelper = if ($_probePayload) {
+        Join-Path $_probePayload 'scripts\installation-context\shell-caller-owned.ps1'
+    } else { '' }
+    $_probeWorker = if ($_probePayload) {
+        Join-Path $_probePayload 'scripts\update_controller_probe.py'
+    } else { '' }
+    $_controller = ''
+    if ($_probeHelper -and (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -and
+        (Test-Path -LiteralPath $_probeWorker -PathType Leaf)) {
+        $_request = @{
+            host = (Get-Process -Id $PID).Path
+            caller = $_awUpdateCaller
+            project = $_updateProject
+            has_project = $_updateHasProject
+            cwd = (Get-Location).Path
+        }
+        $_previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $_probeOutput = @(& $_probeHelper -Worker $_probeWorker -Request $_request -TimeoutSeconds 30 2>$null)
+            $_probeRc = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $_previousEap }
+        if ($_probeRc -eq 124) {
+            [Console]::Error.WriteLine('[agent-worktrees] controller probe timed out; no update ran.')
+            if ($_awUpdateStandalone) { exit 124 }
+            $_awUpdateHandled = $true
+            $global:LASTEXITCODE = 124
+            return
+        }
+        if ($_probeRc -eq 0) { $_controller = ($_probeOutput -join "`n").Trim() }
+    }
     if ($_controller) {
         $_previousSkip = $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP
         $_previousController = $env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER

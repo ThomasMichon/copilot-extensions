@@ -29,8 +29,7 @@ def configured_script(repo) -> str:
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
-def run_project_update(args) -> int | None:
-    """Return None only when this request does not select a project controller."""
+def configured_for_update(args):
     if (
         getattr(args, "no_project_controller", False)
         or getattr(args, "phase", None)
@@ -38,14 +37,21 @@ def run_project_update(args) -> int | None:
         or not cfg.active_project()
     ):
         return None
+    repo = cfg.load_config().default_repo
+    script = configured_script(repo)
+    return (repo, script) if script else None
+
+
+def run_project_update(args) -> int | None:
+    """Return None only when this request does not select a project controller."""
     try:
-        repo = cfg.load_config().default_repo
-        script = configured_script(repo)
-    except (OSError, KeyError, ValueError) as error:
+        selected = configured_for_update(args)
+    except (OSError, KeyError, RuntimeError, ValueError) as error:
         output.err(f"Cannot resolve the project update controller: {error}")
         return 1
-    if not script:
+    if selected is None:
         return None
+    repo, script = selected
     try:
         root = Path(repo.anchor).resolve(strict=True)
         relative = Path(script)
