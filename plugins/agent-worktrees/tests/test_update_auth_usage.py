@@ -7,6 +7,7 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import update_telemetry as ut
@@ -75,6 +76,132 @@ def test_preflight_retains_availability_without_claiming_use(prepared):
     status = _auth_status()
     assert len(status["report"]) == 2
     assert status["fallback_used"] == []
+
+
+@pytest.mark.parametrize("mode", ["on", "off", "report-only"])
+def test_plugin_management_auth_stays_child_only_and_respects_mode(tmp_path, monkeypatch, mode):
+    from plugin_resolve import plugin_auth
+
+    monkeypatch.setenv("CE_UPDATE_AUTH", mode)
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "inference-value")
+    definition = {"source": {"source": "github", "repo": "example/catalog"}}
+    monkeypatch.setattr(
+        sources, "settings", lambda cwd: SimpleNamespace(marketplaces={"catalog": definition}),
+    )
+    calls = []
+
+    def environment(selected, original, cwd, **kwargs):
+        calls.append((selected, original, cwd, kwargs))
+        assert original == {}
+        return {"COPILOT_GITHUB_TOKEN": "repository-value"}
+
+    monkeypatch.setattr(plugin_auth, "plugin_management_environment", environment)
+    ticks = iter([1.0, 3.0])
+    monkeypatch.setattr(context.time, "monotonic", lambda: next(ticks))
+
+    def runner(argv, **kwargs):
+        assert kwargs["env"] == (
+            {"COPILOT_GITHUB_TOKEN": "repository-value"} if mode == "on" else {}
+        )
+        assert kwargs["timeout"] == (3 if mode == "on" else 5)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    context.run_acquisition(
+        runner, ["copilot", "plugin", "update", "sample@catalog"],
+        context=tmp_path, marketplace="catalog", env={}, timeout=5,
+    )
+    assert len(calls) == (1 if mode == "on" else 0)
+    assert context.os.environ["COPILOT_GITHUB_TOKEN"] == "inference-value"
+
+
+def test_plugin_management_auth_deadline_does_not_claim_a_launch(prepared, monkeypatch):
+    from plugin_resolve import plugin_auth
+
+    project, _ = prepared
+    monkeypatch.setattr(sources, "settings", lambda cwd: SimpleNamespace(
+        marketplaces={"copilot-extensions": {
+            "source": {"source": "github", "repo": "example/catalog"},
+        }},
+    ))
+    monkeypatch.setattr(
+        plugin_auth, "plugin_management_environment", lambda *args, **kwargs: {},
+    )
+    ticks = iter([1.0, 7.0])
+    monkeypatch.setattr(context.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(installer_run.InstallerLaunchError, match="before launch"):
+        context.run_acquisition(
+            lambda *args, **kwargs: pytest.fail("No child may launch after the deadline"),
+            ["copilot"], context=project, marketplace="copilot-extensions", timeout=5,
+        )
+    assert _auth_status()["fallback_used"] == []
+
+
+def test_anonymous_marketplace_does_not_prepare_plugin_credentials(prepared, monkeypatch):
+    project, _ = prepared
+    context._current.get().reports[project].results[0].status = "anonymous"
+    monkeypatch.setattr(
+        sources, "settings", lambda cwd: pytest.fail("Anonymous source needs no credential lookup"),
+    )
+    result = context.run_acquisition(
+        lambda *args, **kwargs: "anonymous", ["copilot"],
+        context=project, marketplace="copilot-extensions", env={},
+    )
+    assert result == "anonymous"
+
+
+@pytest.mark.parametrize("outcome", ["completed", "timeout"])
+def test_plugin_management_diagnostics_redact_the_selected_opaque_token(
+    tmp_path, monkeypatch, outcome,
+):
+    from plugin_resolve import plugin_auth
+
+    monkeypatch.setenv("CE_UPDATE_AUTH", "on")
+    monkeypatch.setattr(sources, "settings", lambda cwd: SimpleNamespace(
+        marketplaces={"catalog": {"source": {"source": "github", "repo": "example/catalog"}}},
+    ))
+    token = "opaque-repository-value"
+    monkeypatch.setattr(
+        plugin_auth, "plugin_management_environment",
+        lambda *args, **kwargs: {"COPILOT_GITHUB_TOKEN": token},
+    )
+
+    def runner(argv, **kwargs):
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, 5, output=token, stderr=token)
+        return subprocess.CompletedProcess(argv, 1, token, token)
+
+    if outcome == "timeout":
+        with pytest.raises(subprocess.TimeoutExpired) as caught:
+            context.run_acquisition(runner, ["copilot"], marketplace="catalog", context=tmp_path)
+        result = caught.value
+    else:
+        result = context.run_acquisition(
+            runner, ["copilot"], marketplace="catalog", context=tmp_path,
+        )
+    assert result.stdout == result.stderr == "[redacted]"
+
+
+@pytest.mark.parametrize("caller", ["standalone-module", "staged-self"])
+def test_standalone_payload_calls_use_plugin_management_boundary(monkeypatch, caller):
+    import shutil
+    from agent_worktrees import update_runtime, update_stage
+
+    calls = []
+
+    def acquisition(runner, argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "updated", "")
+
+    monkeypatch.setattr(context, "run_acquisition", acquisition)
+    if caller == "standalone-module":
+        monkeypatch.setattr(update_runtime, "_resolve_copilot", lambda: "copilot")
+        update_runtime._refresh_module_payload("sample")
+    else:
+        monkeypatch.setattr(shutil, "which", lambda name: "copilot")
+        assert update_stage._run_copilot_update() == (True, "updated")
+    assert len(calls) == 1
+    assert calls[0][1]["marketplace"] == "copilot-extensions"
+    assert calls[0][0][1:3] == ["plugin", "update"]
 
 
 @pytest.mark.parametrize("outcome", ["completed", "timeout", "missing"])

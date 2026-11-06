@@ -358,6 +358,42 @@ def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tm
     ]
 
 
+def test_native_installer_uses_github_auth_without_changing_the_launch_environment(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target"
+    init_checkout(target)
+    environment = {
+        **os.environ,
+        "GH_TOKEN": "repository-value",
+        "COPILOT_GITHUB_TOKEN": "inference-value",
+        "VENUE_EXPECTED_GITHUB_TOKEN": "repository-value",
+    }
+    before = dict(environment)
+    origin = {"source": {"source": "github", "repo": "example/synthetic"}}
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
+    result = prepare({
+        "repo": str(target),
+        "plugins": [{"source": "sample@remote", "enable": True, "marketplace": origin}],
+    }, environment=environment, copilot_command=command)
+    assert "sample@remote" in result
+    assert environment == before
+    assert "repository-value" not in (target / ".github" / "copilot" / "settings.local.json").read_text()
+
+
+def test_plugin_failure_redacts_the_exact_opaque_child_credential() -> None:
+    from plugin_resolve.preparation import _failure
+
+    token = "opaque-value-without-a-recognizable-prefix"
+    failure = _failure(
+        "installation", "sample@remote",
+        subprocess.CompletedProcess(["copilot", "plugin", "install"], 1, "", token),
+        environment={"COPILOT_GITHUB_TOKEN": token},
+    )
+    assert token not in str(failure)
+    assert "[redacted]" in str(failure)
+
+
 def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
     import threading

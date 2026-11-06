@@ -195,6 +195,15 @@ marketplaces; unrelated host-global plugins do not. Installer success alone is
 insufficient: each resulting payload must have the requested manifest identity.
 No user-global registration or enablement is required by the launched agent.
 
+For declared GitHub HTTPS marketplaces, native maintenance commands use
+`plugin_resolve.plugin_auth.plugin_management_environment`. It obtains the
+normal Git credential at the execution checkout, with a matching-host environment
+token fallback, and overrides authentication only in the maintenance child's
+environment. Credential lookup is bounded and non-interactive; explicit owner
+refusals are retained. The launched agent keeps its original inference
+environment and saved login. Local and non-GitHub sources are unchanged, and no
+Worktrees runtime is required.
+
 Preparation publishes native-valid subset catalogs **only for reflected local
 sources**, retaining marketplace owner metadata and each payload's version.
 Git declarations remain the original Git objects in target settings; an installed

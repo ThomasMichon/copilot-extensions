@@ -512,7 +512,7 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
             text=True,
             timeout=120,
             cwd=cwd,
-            context=cwd,
+            context=cwd, marketplace=marketplace,
             **_auth.child_environment(cwd),
         )
         if r.returncode != 0:
@@ -547,7 +547,7 @@ def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) ->
             text=True,
             timeout=120,
             cwd=cwd,
-            context=cwd,
+            context=cwd, marketplace=marketplace,
             **_auth.child_environment(cwd),
         )
     except OSError as exc:

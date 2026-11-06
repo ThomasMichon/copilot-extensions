@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -140,9 +141,12 @@ def child_environment(context: Path | None) -> dict[str, dict[str, str]]:
     return {"env": env} if env is not None else {}
 
 
-def run_acquisition(runner, *args, context: Path | None = None, repository: bool = False, **kwargs):
+def run_acquisition(
+    runner, *args, context: Path | None = None, repository: bool = False,
+    marketplace: str | None = None, **kwargs,
+):
     """Observe a launched child, not environment preparation or a failed spawn."""
-    from .installer_run import InstallerActivityError, InstallerCleanupError
+    from .installer_run import InstallerActivityError, InstallerCleanupError, InstallerLaunchError
 
     value = _current.get()
     if value is not None and repository:
@@ -157,16 +161,56 @@ def run_acquisition(runner, *args, context: Path | None = None, repository: bool
     else:
         report, overlay, required = None, None, False
 
+    if marketplace is not None and not repository:
+        started = time.monotonic()
+        try:
+            anonymous = report is not None and any(
+                item.source.id == "marketplace:" + marketplace and item.status == "anonymous"
+                for item in report.results
+            )
+            if mode() == "on" and not anonymous:
+                definition = sources.settings(context).marketplaces.get(marketplace)
+                if isinstance(definition, dict):
+                    from plugin_resolve.plugin_auth import plugin_management_environment
+
+                    base = kwargs.get("env")
+                    kwargs["env"] = plugin_management_environment(
+                        definition, os.environ if base is None else base, context or Path.cwd(),
+                        timeout=kwargs.get("timeout") if kwargs.get("timeout") is not None else 10,
+                    )
+                    if kwargs.get("timeout") is not None:
+                        remaining = kwargs["timeout"] - (time.monotonic() - started)
+                        if remaining <= 0:
+                            raise TimeoutError("Plugin management authentication deadline expired")
+                        kwargs["timeout"] = remaining
+        except (ImportError, OSError, ValueError, RuntimeError):
+            raise InstallerLaunchError(
+                "Plugin management authentication preparation failed before launch"
+            ) from None
+
     def used():
         if value is not None and report is not None and overlay is not None:
             value.record_use(report, overlay, required=required)
 
+    def redact(value):
+        if marketplace is not None and isinstance(value, str):
+            from plugin_resolve.plugin_auth import redact_plugin_credentials
+
+            return redact_plugin_credentials(value, kwargs.get("env") or {})
+        return value
+
     try:
         result = runner(*args, **kwargs)
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError,
-            InstallerCleanupError, InstallerActivityError):
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+        error.output = redact(error.output)
+        error.stderr = redact(error.stderr)
         used()
         raise
+    except (InstallerCleanupError, InstallerActivityError):
+        used()
+        raise
+    if isinstance(result, subprocess.CompletedProcess):
+        result.stdout, result.stderr = redact(result.stdout), redact(result.stderr)
     used()
     return result
 

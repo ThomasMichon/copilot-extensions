@@ -793,8 +793,10 @@ def _update_modules(
 def _refresh_module_payload(name: str) -> None:
     """Preserve the best-effort refresh contract of standalone module callers."""
     try:
-        result = subprocess.run(
+        result = _auth.run_acquisition(
+            subprocess.run,
             [_resolve_copilot() or "copilot", "plugin", "update", f"{name}@copilot-extensions"],
+            marketplace="copilot-extensions",
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
