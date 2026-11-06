@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import copy
+
+import pytest
+
+from agent_mcp import protocol as proto
 from agent_mcp.auth.base import NoneInjector
+from agent_mcp.client import CLIENT_INFO, OneShotSession
 from agent_mcp.config import parse_config
 from agent_mcp.transports.http import HttpTransport
 
@@ -14,6 +20,56 @@ def _transport(injector=None):
     received: list[dict] = []
     t.on_message(lambda m: received.append(m))
     return t, received
+
+
+@pytest.mark.parametrize("modern", [False, True])
+@pytest.mark.parametrize("metadata", ["absent", None, {}, {
+    **proto.client_meta("2027-01-01", {"name": "downstream", "version": "1"}, {"roots": {}}),
+    "progressToken": "progress-1", "example/trace": {"id": "request-1"},
+}])
+async def test_prepared_request_headers_follow_upstream_without_mutating_caller(modern, metadata):
+    cfg = parse_config({
+        "server": {"type": "http", "url": "https://example.invalid/mcp",
+                   "protocol": "modern" if modern else "legacy"},
+        "auth": {"kind": "none"}, "headers": {"X-Request-Context": "preserved"},
+    })
+    session = OneShotSession(cfg)
+    if modern:
+        session._enter_modern(proto.MODERN)
+    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "read", "arguments": {"value": 7}}}
+    if metadata != "absent":
+        request["params"]["_meta"] = copy.deepcopy(metadata)
+    original = copy.deepcopy(request)
+    prepared = session._prepare(request)
+    transport = HttpTransport(cfg, NoneInjector())
+    transport._session_id = "legacy-session"
+    headers = await transport._base_headers(prepared)
+    assert request == original
+    assert prepared["params"]["arguments"] == {"value": 7}
+    assert headers["X-Request-Context"] == "preserved"
+    meta = prepared["params"].get("_meta")
+    if modern:
+        assert headers["MCP-Protocol-Version"] == proto.MODERN
+        assert headers["Mcp-Method"] == "tools/call"
+        assert headers["Mcp-Name"] == "read"
+        assert "Mcp-Session-Id" not in headers
+        assert meta[proto.META_CLIENT_INFO] == CLIENT_INFO
+        assert meta[proto.META_CLIENT_CAPABILITIES] == {}
+    else:
+        assert "MCP-Protocol-Version" not in headers
+        assert "Mcp-Method" not in headers
+        assert "Mcp-Name" not in headers
+        assert headers["Mcp-Session-Id"] == "legacy-session"
+        assert not isinstance(meta, dict) or not any(
+            key in meta for key in (
+                proto.META_PROTOCOL_VERSION, proto.META_CLIENT_INFO,
+                proto.META_CLIENT_CAPABILITIES,
+            )
+        )
+    if isinstance(metadata, dict) and "progressToken" in metadata:
+        assert meta["progressToken"] == metadata["progressToken"]
+        assert meta["example/trace"] == metadata["example/trace"]
 
 
 async def test_sse_response_emits_parsed_objects():
