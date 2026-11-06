@@ -187,6 +187,63 @@ def test_required_session_commands_carry_original_executing_scope(boundary):
     assert b.writer.current() is None
 
 
+@pytest.mark.parametrize("operation", ["resume_session", "handoff_session"])
+@pytest.mark.parametrize("owner", [
+    "creation", "singleton", "caller", "legacy-acquisition",
+    "explicit-missing", "attempt-incomplete", "attempt-malformed",
+])
+def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch, operation, owner):
+    b = boundary
+    monkeypatch.setattr(
+        b.writer, "AcquisitionRequest",
+        SimpleNamespace(model_validate=lambda value: replace(b.request, worktree_writer=None)),
+    )
+    delivery = {
+        "creation": "creation:" + "a" * 64,
+        "singleton": "singleton-anchor:example@anchor",
+    }.get(owner, "delivery-original")
+    target = SimpleNamespace(venue={})
+    if owner == "explicit-missing":
+        target.venue[b.writer.DELIVERY_KEY] = delivery
+    elif owner == "attempt-incomplete":
+        b.rows.append({"data_json": None})
+    elif owner == "attempt-malformed":
+        b.rows.append({"data_json": "{}"})
+    elif owner == "legacy-acquisition":
+        b.rows.append({"data_json": json.dumps({"_request": {}})})
+    session = SimpleNamespace(target=target, caller_id="acquisition:" + delivery)
+    queries, effects = [], []
+
+    def read(sql, arguments):
+        queries.append((sql, arguments))
+        return b.rows
+
+    b.db.execute_read = read
+    manager = SimpleNamespace(
+        _resolve_ref=lambda ref: "original-session", _sessions={"original-session": session},
+        _db=b.db,
+    )
+
+    async def continuation(manager_arg, session_id, *, allow_recreate):
+        effects.append((manager_arg, session_id, allow_recreate))
+        return session
+
+    continuation.__name__ = operation
+    pending = b.writer.session_writer(continuation)(manager, "original-session", allow_recreate=False)
+    if owner in {"explicit-missing", "attempt-incomplete", "attempt-malformed"}:
+        with pytest.raises(Refused) as refused:
+            finish(pending)
+        assert refused.value.code == "worktree_writer_unconfirmed"
+        assert not effects
+    else:
+        assert finish(pending) is session
+        assert effects == [(manager, "original-session", False)]
+    assert len(queries) == 1 and queries[0][1] == (delivery,)
+    assert "LEFT JOIN acquisition_effects" in queries[0][0]
+    assert not b.calls
+    assert b.writer.current() is None
+
+
 @pytest.mark.parametrize("changed", [
     None, "nonce", "journal", "instance", "missing-launcher", "unreadable-record",
 ])

@@ -263,7 +263,8 @@ def session_writer(method):
     async def run(manager, session_id, *args, **kwargs):
         resolved = manager._resolve_ref(session_id) or session_id
         session = manager._sessions.get(resolved)
-        delivery = (session.target.venue or {}).get(DELIVERY_KEY) if session else None
+        retained_delivery = (session.target.venue or {}).get(DELIVERY_KEY) if session else None
+        delivery = retained_delivery
         caller = getattr(session, "caller_id", None)
         if delivery is None and isinstance(caller, str) and caller.startswith("acquisition:"):
             delivery = caller.removeprefix("acquisition:")
@@ -271,9 +272,13 @@ def session_writer(method):
             return await method(manager, session_id, *args, **kwargs)
         rows = manager._db.execute_read(
             "SELECT e.data_json FROM acquisition_attempts a "
-            "JOIN acquisition_effects e USING(delivery_id) WHERE a.delivery_id=?",
+            "LEFT JOIN acquisition_effects e USING(delivery_id) WHERE a.delivery_id=?",
             (delivery,),
         )
+        # Creation, singleton initialization and caller affinity also use this
+        # prefix. Only an explicit writer pointer or original attempt owns it.
+        if not rows and retained_delivery is None:
+            return await method(manager, session_id, *args, **kwargs)
         try:
             request = AcquisitionRequest.model_validate(json.loads(rows[0]["data_json"])["_request"])
         except (IndexError, ValueError, TypeError, KeyError) as exc:

@@ -150,6 +150,9 @@ mandatory. Unknown responses retain the same assignment and claim.
       bracketed by its active instance and unchanged journal. This observation
       neither selects a writer nor admits the resident or an unaccounted
       producer; conditional Dispatch assembly remains a separate next step.
+      That optional observation merged in #11001 with current-source HTTP,
+      process and actor-free controls. The original workspace and complete
+      installed cohort remain required before ordinary assembly.
 - [ ] Integrate ordinary preparation/advancement consumers only after their
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers
@@ -229,3 +232,81 @@ UUID alone cannot qualify their later writes.
       Bridge, resident, closed-cohort or ordinary whole-stack acceptance.
       #10976 binds every finite writer child to its committed entrypoint and
       full source closure, with no sibling-write or provenance-guard exemption.
+
+## Continuing provider-first slice: ordinary keyed creation
+
+This is an **agent-proposed implementation refinement** of the same unchecked
+delegated-writer and ordinary-integration items, not an activation decision.
+Ordinary managed ACP startup uses keyed `create` on an already prepared
+workspace, followed by exact `send` and later strict `resume`. Its owner is
+`workspace_creation` and the existing `workspace_embodiments` row, not
+`AcquisitionRuntime` or an acquisition delivery journal. The historical shared
+caller prefix does not change those owners; its compatibility repair merged
+in #11012.
+
+1. Extend the existing keyed local creation operation with an explicitly
+   negotiated optional writer requirement, using the existing request/client,
+   health capability and per-attempt cutover fences. Initially support only
+   ACP creation into an explicitly identified, already prepared local
+   worktree. Refuse an unsupported unkeyed, allocating, provider-instance,
+   remote or CLI form before allocation, native launch or prompt effects.
+   Existing unpinned creation and continuation remain supported unchanged.
+2. Accept only expected installed-writer identity and original creation nonce,
+   together with the existing exact project/workspace facts. The provider
+   selects its own retained command and qualifies its actual executing
+   serializer through the existing capability response. Never accept a caller
+   command, substitute an ordinary resident or infer support from a payload
+   version or selected-root observation.
+3. Retain the original requirement, provider-selected command and existing
+   creation facts atomically in that same keyed embodiment journal before
+   native preparation or any delegated session-record mutation. A matching
+   retry or new frontend recovers that original binding; changed requirements,
+   keys, project, path or nonce refuse. Do not retrofit an existing unpinned
+   attempt, manufacture an acquisition journal or replace the ordinary route.
+4. Carry that original owner scope through actual session preparation,
+   registration and binding, then recover it for strict native resume and
+   later lineage. Reuse shared writer-selection/qualification mechanics where
+   appropriate, but keep creation and acquisition journal custody distinct.
+   Required receiving commands use the already-qualified executing serializer
+   and locked nonce checks. Unpinned auxiliary writes retain their behavior.
+5. Preserve the same creation/native/session/first-turn history across response
+   loss, process recovery and registration failure. Never recreate the native
+   because its writer or original journal is unavailable. Any required
+   handoff must retain its original successor and seed outcome in the same
+   owning journal before effects; an unknown outcome is not permission for
+   another successor or prompt.
+6. Expose read-only requalification through the existing exact-session
+   observation owner with a separately negotiated optional form. Resolve the
+   original keyed journal, not a new selected writer; bracket the original
+   workspace/serializer reads with the unchanged journal and active Bridge
+   instance. A legacy response cannot silently satisfy required evidence.
+   This is not a ready permit or native/delivery proof.
+
+This provider slice does **not** admit the earlier first workspace relationship:
+that transaction precedes keyed Bridge creation and still requires independent
+original queue/request correlation. It also does not enumerate every producer,
+close the participating cohort or supply an ordinary coordinator writer.
+Keep ordinary governed assignment disabled until those separate gates pass.
+Installation, rollout, allocation and original native-resource holds remain.
+
+### Keyed-creation slice validation
+
+- [ ] Prove supported new/new and mixed-version refusal through the actual
+      parser/client/HTTP owner, including a cutover to an older provider;
+      omitted requirements retain legacy behavior.
+- [ ] Exercise the actual keyed creation/strict continuation and delegated
+      serializer boundaries on a record with its protected claim and original
+      nonce. An ordinary-compatible but unqualified resident cannot receive
+      required registration, binding or succession.
+- [ ] Prove same-key response-loss, concurrent replay and new-frontend recovery
+      retain the original command, workspace, native and first turn; prior
+      unpinned rows cannot acquire a new requirement.
+- [ ] Refuse changed identity/nonce/selection, missing or recreated slots and
+      incomplete journal evidence without a replacement allocation, native,
+      successor or seed. Preserve registration-pending dormancy.
+- [ ] Prove optional exact-session requalification is read-only and refuses
+      changed workspace, journal, readiness or Bridge instance, with no
+      reselection or acquisition.
+- [ ] Keep finite actor-free controls in the admitted packet and bounded
+      actual-process/transport controls in their existing integration lane.
+      Source passes do not close installed/cohort or ordinary lifecycle gates.

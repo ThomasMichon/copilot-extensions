@@ -204,6 +204,32 @@ The consumer reports ready only after this actual authenticated exchange.
 Capability, admission, publication and connection remain separate outcomes;
 none enables SSH, a provider profile, human SSO or a lifecycle effect.
 
+## Retained machine caller capability
+
+The additive `continuity-machine-caller-v1` capability supplies
+`continuity_bootstrap.machine_caller(source, harness=..., state_root=...,
+machine=..., gateway_origin=..., principal=..., audience=..., resource=...)`.
+This is the continuity owner's read-only in-process reference interface, not
+permission for a consumer to parse `machine.json` or copy its key into PEM.
+It validates the protected source/context and requested scope before reading
+the retained identity, then reuses that owner's original key/operation checks.
+A missing identity refuses without creating state or attempting enrollment.
+
+The result is the existing finite `ServiceCaller`, bound to the selected source's
+Gateway origin, CA, machine principal, audience and allowed service resource.
+It does not return serialized key/grant material or claim current remote
+admission. Each request still obtains a fresh challenge and proves the actual
+method, target and body through the existing machine profile. Current Gateway
+withdrawal/expiry still refuses. Bootstrap-grant expiry alone does not force
+rotation or reenrollment of a still-current binding.
+
+Each factory invocation revalidates the source and retained state. Like existing
+PEM callers, the constructed caller holds its selected key; changing the identity
+requires the lifetime owner to prepare a new caller, not an implicit credential
+fallback or key watcher. Existing token/PEM callers and normal outbound-only
+repository setup are unchanged. This provider expansion does not yet wire SSH
+configuration or the normal selected-role setup/installation handoff.
+
 ## Qualification and release boundary
 
 Focused controls cover real TLS caller/connector requests, changed body/query
