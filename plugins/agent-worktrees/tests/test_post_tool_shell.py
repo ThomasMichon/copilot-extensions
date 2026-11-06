@@ -617,6 +617,7 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "shell-missing-discovery", "shell-oversized", "shell-no-reply",
     "shell-assignment", "shell-literal-assignment", "shell-read-sed",
     "shell-quoted-parentheses", "batch-shell-metadata",
+    "shell-control-block", "shell-conditional", "shell-bash-assignment",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -736,7 +737,15 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
                 args = {"command": "sed -n '1,100p' file.py"}
             elif case == "quoted-parentheses":
                 args = {"command": 'Write-Output "' + "(" * 20000 + '"'}
+            elif case == "control-block":
+                args = {"command": "& { git commit -m test }"}
+            elif case == "conditional":
+                args = {"command": "if ($true) { Set-Content file value }"}
+            elif case == "bash-assignment":
+                args = {"command": 'result="$(git commit -m test)"'}
             payload.update(toolName="powershell", toolArgs=args)
+            if case == "bash-assignment":
+                payload["toolName"] = "bash"
             if case == "json-args":
                 payload["toolArgs"] = json.dumps(args)
             elif case == "raw-args":
@@ -770,7 +779,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             assert notices[0]["kind"] == (
                 "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
             )
-        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment"}
+        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment", "control-block", "conditional", "bash-assignment"}
         assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch", "shell-metadata"} else [])
         assert server.has_recent_hook_demand() is (writes or case in {
             "structured", "patch", "reads", "read", "literal-assignment", "read-sed",

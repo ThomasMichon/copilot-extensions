@@ -87,9 +87,24 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     pytest.param("$result = 'git commit -m test'", False, id="literal-assignment"),
     pytest.param('Write-Output "' + "(" * 20000 + '"', False, id="quoted-parentheses"),
     pytest.param("$(" * 1000, True, id="scan-overflow"),
+    pytest.param("& { git commit -m test }", True, id="invoked-block"),
+    pytest.param("if ($true) { Set-Content file value }", True, id="conditional"),
+    pytest.param("Write-Output '& { git commit -m test }'", False, id="literal-block"),
+    pytest.param("$result.Value = git commit -m test", True, id="member-assignment"),
+    pytest.param("$result[0] = Set-Content file value", True, id="indexed-assignment"),
 ])
 def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
     assert guard.shell_may_mutate(command, "powershell") is mutates
+
+
+@pytest.mark.parametrize("tool", ["bash", "sh"])
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param('result="$(git commit -m test)"', True, id="quoted"),
+    pytest.param("result=$(git commit -m test)", True, id="unquoted"),
+    pytest.param("result='$(git commit -m test)'", False, id="literal"),
+])
+def test_assignment_substitution_precedes_environment_normalization(tool, command, mutates):
+    assert guard.shell_may_mutate(command, tool) is mutates
 
 
 def test_native_batch_retains_session_scope_and_valid_calls():

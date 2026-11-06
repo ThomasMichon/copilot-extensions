@@ -408,7 +408,7 @@ def shell_may_mutate(command: str, tool: str) -> bool:
             try:
                 pending.extend(
                     (child, depth + 1)
-                    for child in _shell_command_substitutions(effective, tool, scan_budget=scan_budget)
+                    for child in _shell_command_substitutions(segment, tool, scan_budget=scan_budget)
                 )
             except ValueError:
                 return True
@@ -418,6 +418,13 @@ def shell_may_mutate(command: str, tool: str) -> bool:
                     effective = _effective_seg(assignment[1])
                     if effective.lstrip().startswith("$"):
                         return True
+                elif assignment is None and re.match(r"^\s*\$[^=]*=", effective):
+                    return True
+            if re.match(
+                r"^\s*(?:\.\s+)?(?:[({]|(?:if|elseif|else|foreach|for|while|until|switch|try|catch|finally|do|trap|function|filter|begin|process|end|then|case|select)\b)",
+                effective, re.IGNORECASE,
+            ):
+                return True
             if _WRITE_CMD_START.match(effective) or _literal_write_targets(effective, tool):
                 return True
             if not _GIT_START.match(effective):

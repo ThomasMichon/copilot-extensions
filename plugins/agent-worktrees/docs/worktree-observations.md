@@ -353,9 +353,13 @@ other Git subcommands are conservative mutations. Supported literal writes and
 redirections invalidate globally, retaining the original shell target scope.
 Missing commands/parser support and traversal overflow are conservative too,
 with at most 128 segments, eight nested substitution levels and a shared
-131,072-iteration substitution-scan budget per event. Quoted literal parentheses
-are not executable PowerShell grouping; assignment right-hand commands retain
-mutation detection without treating quoted data as a command. Read-only `sed`
+131,072-iteration substitution-scan budget per classification. The existing
+invalidation and wake owners can each classify; this adds no permission memo.
+Quoted literal parentheses are not executable PowerShell grouping; assignment
+right-hand commands retain mutation detection without treating quoted data as
+a command. Substitutions are examined before environment-assignment
+normalization. Unsupported executable block/control-flow and complex assignment
+shapes conservatively invalidate rather than being asserted read-only. Read-only `sed`
 does not invalidate unless it independently redirects output, while in-place
 forms remain mutations. Batch presence takes precedence over outer shell
 metadata, preserving the original native-batch request kind. Classification
