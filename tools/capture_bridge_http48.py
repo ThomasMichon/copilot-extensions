@@ -10,6 +10,7 @@ import shlex
 from pathlib import Path
 import sys
 import tempfile
+import time
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
@@ -22,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def run_probes(
     root: Path, proof: dict, vector: dict, *,
     evidence=evidence, expected_roles: frozenset[str] = frozenset(),
+    isolated_probes: frozenset[str] = frozenset(),
 ) -> dict:
     from agent_procutil.owned_process import run_caller_owned
 
@@ -30,41 +32,55 @@ def run_probes(
     # Reuse the source/entrypoint guard, including its confined request path.
     # Its historical name does not select a protocol generation or writer.
     label = f"HTTP-{evidence.GENERATION}"
+    if not isolated_probes <= evidence.PROBES.keys():
+        raise ValueError(f"{label} isolated probes escaped the declared portfolio")
+    groups = [
+        group for group in (
+            [name for name in evidence.PROBES if name in isolated_probes],
+            [name for name in evidence.PROBES if name not in isolated_probes],
+        ) if group
+    ]
     with tempfile.TemporaryDirectory(
         prefix=f"http47-capture-http{evidence.GENERATION}-", dir=parent,
     ) as temporary:
         directory = Path(temporary)
         request = directory / "request.json"
         report = directory / "observed.json"
-        junit = directory / "junit.xml"
         payload = evidence.encode({
             "root": str(root), "capture_generation": evidence.GENERATION, "source_proof": proof,
             "input_sha256": proof[evidence.INPUT]["sha256"], "report": str(report),
         })
         request.write_bytes(payload)
-        with patch.dict(os.environ, {
-            binding.REQUEST: str(request), binding.REQUEST_SHA: evidence.digest(payload),
-            "PYTEST_ADDOPTS": shlex.quote("--junitxml=" + str(junit)),
-        }):
-            result = run_caller_owned([
-                sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
-                "--test-file", Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix(),
-                "-k", " or ".join(evidence.PROBES),
-                *(["--test-timeout", "120"] if os.name == "nt" else []),
-            ], timeout=600 if os.name == "nt" else 240,
-                max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=1024 * 1024)
-        print(result.stdout, end="")
-        print(result.stderr, end="", file=sys.stderr)
-        if result.returncode or request.read_bytes() != payload:
-            raise ValueError(f"{label} bounded probes failed or request changed")
         cases: dict[str, int] = {}
-        for case in ET.parse(junit).getroot().iter("testcase"):
-            name = case.attrib.get("name", "").split("[", 1)[0]
-            if name not in evidence.PROBES or any(
-                case.find(tag) is not None for tag in ("failure", "error", "skipped")
-            ):
-                raise ValueError(f"{label} probe failed, skipped or escaped its portfolio")
-            cases[name] = cases.get(name, 0) + 1
+        deadline = time.monotonic() + (600 if os.name == "nt" else 240)
+        for index, group in enumerate(groups):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError(f"{label} aggregate probe deadline expired")
+            junit = directory / f"junit-{index}.xml"
+            print(f"{label} bounded probe group {index + 1}/{len(groups)}", flush=True)
+            with patch.dict(os.environ, {
+                binding.REQUEST: str(request), binding.REQUEST_SHA: evidence.digest(payload),
+                "PYTEST_ADDOPTS": shlex.quote("--junitxml=" + str(junit)),
+            }):
+                result = run_caller_owned([
+                    sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
+                    "--test-file", Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix(),
+                    "-k", " or ".join(group),
+                    *(["--test-timeout", "120"] if os.name == "nt" else []),
+                ], timeout=remaining, max_stdout_bytes=4 * 1024 * 1024,
+                    max_stderr_bytes=1024 * 1024)
+            print(result.stdout, end="")
+            print(result.stderr, end="", file=sys.stderr)
+            if result.returncode or request.read_bytes() != payload:
+                raise ValueError(f"{label} bounded probes failed or request changed")
+            for case in ET.parse(junit).getroot().iter("testcase"):
+                name = case.attrib.get("name", "").split("[", 1)[0]
+                if name not in group or any(
+                    case.find(tag) is not None for tag in ("failure", "error", "skipped")
+                ):
+                    raise ValueError(f"{label} probe failed, skipped or escaped its portfolio")
+                cases[name] = cases.get(name, 0) + 1
         if cases != evidence.PROBES:
             raise ValueError(f"{label} probe portfolio is incomplete or duplicated")
         receipt = binding.verify_interpreters(
@@ -72,6 +88,7 @@ def run_probes(
             required_sources=evidence.installation.required_sources(
                 evidence.safe(root, evidence.installation.ENTRY).read_bytes(),
             ),
+            expected_observers=len(groups),
         )
         if receipt["roles"] != ["observer", *sorted(expected_roles)]:
             raise ValueError(f"{label} ASGI observer scope changed")

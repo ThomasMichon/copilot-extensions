@@ -787,24 +787,43 @@ async def test_required_cli_writer_is_explicitly_unsupported_before_any_owner_ca
 async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes(rig, tmp_path, monkeypatch):
     import os
     import sys
+    from agent_procutil import direct_python
     from agent_bridge import acquisition_worktree_writer as writer, session_lifecycle_cli as lifecycle
     from agent_bridge import worktree_lineage
-    from test_worktree_lineage_authority import snapshot
+    from test_worktree_lineage_authority import snapshot as owner_command
     from pathlib import Path
 
     state = tmp_path / "authority"
     state.mkdir()
     root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins/agent-worktrees/src"))
+    for library in ("lazy-cli-dispatch", "work-coalescing-singleton", "update-telemetry"):
+        monkeypatch.syspath_prepend(str(root / "libs" / library / "src"))
+    from agent_worktrees import tracking as owner_tracking
+
+    def snapshot():
+        record = owner_tracking.load_record(state / "project/worktrees/worktree-a.yaml")
+        return {
+            "creation_nonce": record.creation_nonce,
+            "resources": [item.to_dict() for item in record.resources],
+            "head": record.resolved_head_session,
+            "sessions": [item.session_id for item in record.sessions],
+        }
+
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     identity_file = state / "writer-identity.json"
     identity_file.write_text(json.dumps(identity), encoding="utf-8")
+    interpreter, interpreter_env = direct_python(sys.executable)
+    for key, value in interpreter_env.items():
+        monkeypatch.setenv(key, value)
     prefix = [
-        sys.executable, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
+        interpreter, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
         str(root), str(state), "test-project", "worktree-a",
     ]
     from bridge_http47_runtime import REQUEST
 
     environment = lifecycle._agent_worktrees_environment()
+    environment.update(interpreter_env)
     if REQUEST in environment:
         # Reinstall only the capture guard after the real owner environment scrub.
         environment["PYTHONPATH"] = os.pathsep.join((
@@ -812,8 +831,8 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         ))
     for owner in (acquisition_authority, worktree_lineage):
         monkeypatch.setattr(owner, "_agent_worktrees_environment", lambda: environment.copy())
-    protected = snapshot(prefix, "protect")
-    before = snapshot(prefix)
+    protected = owner_command(prefix, "protect")
+    before = snapshot()
     checkout = state / "trees" / "worktree-a"
     assert not rig.register_session(
         "worktree-a", "legacy-resident-probe", worktree_dir=str(checkout), owner_prefix=tuple(prefix),
@@ -821,7 +840,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     resident_calls = (state / "resident-calls").read_text().splitlines()
     assert len(resident_calls) == 1
     assert json.loads(resident_calls[0])["verb"] == "session_register"
-    assert snapshot(prefix) == before
+    assert snapshot() == before
     request = req(
         version=3, worktree_path=str(checkout), worktree_writer={
             "identity": identity, "creation_nonce": before["creation_nonce"],
@@ -841,7 +860,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     monkeypatch.setattr(lifecycle, "_agent_worktrees_pinned_selection", selected)
     monkeypatch.setattr(lifecycle, "_agent_worktrees_selection", MagicMock(side_effect=AssertionError("dynamic owner")))
     result = await rig.runtime.acquire(request)
-    after = snapshot(prefix)
+    after = snapshot()
     assert after["head"] == result.native_session_id
     assert after["creation_nonce"] == before["creation_nonce"]
     assert [item for item in after["resources"] if item["ref"] == protected["ref"]] == before["resources"]
@@ -863,7 +882,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         result.session_id, reason="bounded test", seed=False, seed_text="Continue",
     )
     assert successor.target.venue[writer.DELIVERY_KEY] == request.delivery_id
-    linked = snapshot(prefix)
+    linked = snapshot()
     assert linked["head"] == successor.acp_session_id == "native-successor"
     assert linked["creation_nonce"] == before["creation_nonce"]
     assert [item for item in linked["resources"] if item["ref"] == protected["ref"]] == before["resources"]
@@ -879,7 +898,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     journal_before = [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")]
     observed = await rig.runtime.inspect_pending(request.delivery_id, worktree_writer=True)
     assert observed["worktree_writer_observation"]["worktree_writer"] == request.worktree_writer.model_dump()
-    assert snapshot(prefix) == linked
+    assert snapshot() == linked
     assert [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")] == journal_before
     assert (state / "resident-calls").read_text().splitlines() == resident_calls
     identity_file.write_text(json.dumps({**identity, "runtime_generation": "b" * 32}), encoding="utf-8")
@@ -889,7 +908,7 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         await rig.manager.handoff_session(
             successor.session_id, reason="changed writer", seed=False, seed_text="Continue",
         )
-    assert snapshot(prefix) == linked
+    assert snapshot() == linked
     assert selected.call_count == 1
     assert writer.current() is None
 

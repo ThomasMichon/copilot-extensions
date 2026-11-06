@@ -678,6 +678,7 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     import os
     from pathlib import Path
     import sys
+    from agent_procutil import direct_python
     from agent_bridge import local_launch_preparation, worktree_lineage
     from agent_bridge.transport import SpawnTarget
     from test_worktree_lineage_authority import snapshot
@@ -688,11 +689,15 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     identity_file = state / "writer-identity.json"
     identity_file.write_text(json.dumps(identity), encoding="utf-8")
+    interpreter, interpreter_env = direct_python(sys.executable)
+    for key, value in interpreter_env.items():
+        monkeypatch.setenv(key, value)
     prefix = (
-        sys.executable, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
+        interpreter, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
         str(root), str(state), "test-project", "worktree-a",
     )
     environment = session_lifecycle_cli._agent_worktrees_environment()
+    environment.update(interpreter_env)
     from bridge_http47_runtime import REQUEST
 
     if REQUEST in environment:

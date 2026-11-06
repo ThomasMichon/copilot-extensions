@@ -165,8 +165,6 @@ def test_unknown_or_changed_slot_never_certifies_a_build(tmp_path, monkeypatch, 
         value = {"malformed": "unknown", "oversized": "a" * 65, "non-ascii": "\u2603"}
         generation.write_text(value.get(case, "a" * 32), encoding="utf-8")
     if case.startswith("linked-"):
-        if os.name == "nt":
-            pytest.skip("symlink control requires a native POSIX host")
         if case == "linked-generation":
             target = tmp_path / "foreign-generation"
             generation.rename(target)

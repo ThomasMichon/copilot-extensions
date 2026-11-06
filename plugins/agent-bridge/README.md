@@ -59,6 +59,10 @@ The interactive extension's [retained SDK consumer](docs/retained-sdk-consumer.m
 is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
 requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
 original. Native qualification and installed adoption remain separate.
+An original headed-core launch can also select it with its private client
+declaration: delivery then uses the retained common Session Host rather than
+a competing direct SDK sender. Ordinary launches without that declaration
+keep their existing selection.
 
 Remote credential-relay admission and persisted-session reconnect use
 `timeouts.session_host_ready` (90 seconds by default) as a bounded readiness

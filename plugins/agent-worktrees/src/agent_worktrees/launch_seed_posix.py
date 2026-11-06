@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import select
@@ -145,6 +146,8 @@ def _observe(
 def execute(
     record: Path, correlation: Correlation, operation_id: str,
     command: list[str], completion_file: Path, *, backend_environment_fd: int | None = None,
+    admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
 ) -> int:
     """Keep the caller's direct child PID; never wait for the backend in Python.
 
@@ -235,7 +238,13 @@ def execute(
             if interrupt_pending:
                 raise KeyboardInterrupt
             _close_inherited_descriptors(writer)
-            os.execvpe(command[0], command, environment)
+            # Acquire after descriptor scrubbing; the kernel closes the
+            # non-inheritable lease descriptor only on successful exec.
+            with native.admission(
+                record, correlation, operation_id, admission_only=True,
+                preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            ) if admission_only else nullcontext():
+                os.execvpe(command[0], command, environment)
         except OSError:
             cleaning = True
             outcome = b"F"
@@ -260,3 +269,62 @@ def execute(
                 signal.signal(signal.SIGINT, interrupt_handler)
         if interrupt_pending:
             raise KeyboardInterrupt
+
+
+def execute_headed(
+    record: Path, correlation: Correlation, operation_id: str,
+    command: list[str], completion_file: Path, *, backend_environment_fd: int | None = None,
+    admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
+) -> int:
+    """Keep the original exec owner while the core binds its distinct native child."""
+    from agent_remote_driver.headed.caller import execute as execute_core
+
+    if os.name != "posix":
+        raise ValueError("POSIX headed execution requires a native POSIX owner")
+    selected = native._headed_command(command)
+    if selected is None:
+        return execute(
+            record, correlation, operation_id, command, completion_file,
+            backend_environment_fd=backend_environment_fd,
+            admission_only=admission_only, preserve_seed_id=preserve_seed_id,
+            native_resume_session=native_resume_session,
+        )
+    argv, session_id = selected
+    environment = (
+        _backend_environment(backend_environment_fd)
+        if backend_environment_fd is not None else os.environ.copy()
+    )
+    _owner, saved = native._load(record, correlation, operation_id)
+    if any(event["phase"] == "process-spawned" for event in saved["events"]):
+        raise ValueError("Backend spawn was already observed; do not replay it")
+    completion = _completion_file(record, completion_file)
+    attempt = record.parent / "launch-attempts" / correlation.attempt_id / operation_id
+    try:
+        def spawned(pid: int, birth: str) -> None:
+            native.spawned(record, correlation, operation_id, pid=pid, process_start_time=birth)
+
+        with native.admission(
+            record, correlation, operation_id, admission_only=True,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+        ) if admission_only else nullcontext() as check:
+            code, certain = execute_core(
+                argv, session_id=session_id, attempt_directory=attempt,
+                state_file=attempt / "headed.json", cwd=os.getcwd(), environment=environment,
+                admit=check if admission_only else lambda: native.admit(record, correlation, operation_id),
+                spawned=spawned, interactive=True,
+            )
+        if not certain:
+            try:
+                native.returned(
+                    record, correlation, operation_id, exit_code=code, receipt_uncertain=True,
+                )
+            except native._ERRORS:
+                pass
+        try:
+            os.write(completion, b"0\n" if certain else b"3\n")
+        except OSError:
+            pass
+        return code
+    finally:
+        os.close(completion)
