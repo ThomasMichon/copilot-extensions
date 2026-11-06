@@ -330,14 +330,53 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [portable-process cohort](<journal/2026/11.05 portable-process-cohort.md>)
+places three subordinate trackers under actual OPEN #5006, preserving the
+shared keeper, named Bridge local-cache cleanup workstream, five-case causal
+test disposition and native macOS live-monitor lane. Audited #5063/#5140/#7659
+are `NOT_PLANNED` tracking retirements, not implemented fixes or custody release.
+Two equal complete17:27 PST scans measure878 whole OPEN:602 creator-eligible,
+276 excluded,594 original-cohort and284 inflow. Excluded #10833 is metadata-only
+inflow; verified dispositions are922,149 above the fixed729 checkpoint.
+#9489 remains OPEN despite positive exact-head native/review/CI evidence:
+contradictory reported release ancestry requires a bounded correction before
+any completion effect. Three further coherent cohort studies are in progress.
+The campaign remains Active and all Plan/Validation checkbox states unchanged.
+
+The same [journal](<journal/2026/11.05 portable-process-cohort.md>) then audits
+#4411 under actual OPEN #5842's authorization/readiness/atomic-custody contract,
+and #3005 under actual OPEN #1419's retrofit/overlay/related-state lifecycle.
+Their distinct owners, inherited acceptance and active prototype remain;
+these are two further tracking retirements, not claim or state effects.
+Two equal complete17:36 PST scans measure875 whole OPEN:599 creator-eligible,
+276 excluded,592 original-cohort and283 inflow. External #10829 supplies no
+campaign credit. Verified dispositions are924,146 above the fixed729 target.
+
 The [unit-budget replacement adjudication](<journal/2026/11.05 unit-budget-policy-reconciliation.md>)
 supplies #6733's accepted policy-replacement alternative with actual bounded
 job/teardown/aggregate observations and current supported-contract inspection.
-It proposes the finite disposition for normal review, not a transfer into a
-Draft receiver, restored native PR jobs or a new runtime test. Four returned
-current-source studies retain #10031/#10032/#10652/#10653 OPEN at their original
-acceptance tiers; #10736 supplies only the credited drain correction.
-No new tracker credit or census is claimed before actual audited effects.
+After genuine current-head review and merge in #10828, #6733 is actually
+audited CLOSED `COMPLETED`, without a Draft receiver or restored native PR jobs.
+New inflow #10827 is independently audited `NOT_PLANNED` only after its whole
+routed-catalog/unadopted-repository contract enters actual OPEN #5839.
+Four returned current-source studies retain #10031/#10032/#10652/#10653 OPEN;
+#10736 supplies only the credited drain correction, and #6662's delivered
+diagnostics do not retire its explicitly retained unknown intermittent symptom.
+Two equal complete 17:09 PST scans measure 879 whole OPEN: 605 creator-eligible,
+274 excluded, 596 original-cohort and 283 inflow. These two campaign departures
+and unrelated #10763 are separate. Verified dispositions are 918; the fixed729
+checkpoint remains150 away and the campaign stays Active.
+
+The same [journal](<journal/2026/11.05 unit-budget-policy-reconciliation.md>)
+then audits #8566's actual retained-helper/import completion through #8581,
+current real-bootstrap controls and the existing containing-release Linux
+consumer receipt. Unobserved Windows deployment is not claimed or added as a
+Windows-only original acceptance condition. #5245 remains its already-expanded
+unfinished cohort parent; #6675's prior audited retirement is not replayed.
+After a metadata-change rejection and one complete equal-scan retry at17:15 PST,
+the whole queue is880:605 creator-eligible,275 excluded,596 original-cohort and
+284 inflow. Eligible #10829 and excluded #10830 remain metadata-only; they offset
+the one further campaign departure. Verified dispositions are919,151 above729.
 
 Six further subordinate trackers consolidate into four existing OPEN parents:
 callback cwd/failure outcomes, post-push head convergence, independent launch
