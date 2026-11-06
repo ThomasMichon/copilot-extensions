@@ -86,6 +86,7 @@ import {
   contextPressure,
   formatConfiguredThreshold,
   formatContextUsage,
+  validateThresholds,
 } from "./thresholds.mjs";
 import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnostics.mjs";
 import { createNativeContextObserver, nativePressurePrompt } from "./native-context.mjs";
@@ -1614,6 +1615,28 @@ function revalidatePendingNudge() {
   }
 }
 
+// After thresholds change (config reload, set, clear), re-arm only tiers now
+// above current usage, so they fire fresh at the new threshold instead of
+// repeating a reminder that already landed. Absolute-token tiers resolve even
+// when the window size is unknown.
+function rearmTiersAboveUsage() {
+  if (state.handoffGenerated) return;
+  let pressure;
+  try {
+    pressure = contextPressure(state.currentTokens, state.tokenLimit, currentEffectiveThresholds());
+  } catch {
+    return;
+  }
+  if (!pressure.soft) {
+    state.softReminderSent = false;
+    state.softLogShown = false;
+  }
+  if (!pressure.hard) {
+    state.hardReminderSent = false;
+    state.hardLogShown = false;
+  }
+}
+
 const INVALID_CONFIG_PREFIX = /^Invalid context-handoff config; using defaults \([^)]*\): /;
 
 // Re-reads the config layers when their files changed since the last check.
@@ -1626,7 +1649,17 @@ async function refreshHandoffConfig() {
     configRefreshInFlight = (async () => {
       try {
         const result = await configReloader.refresh();
+        let liveWindowError = null;
         if (result.changed) {
+          // The loader cannot know the live window; a mixed-unit edit may
+          // misorder there, so keep the previous config in that case.
+          try {
+            validateThresholds(result.config.thresholds, "edited config", knownTokenLimit());
+          } catch (error) {
+            liveWindowError = error.message;
+          }
+        }
+        if (result.changed && !liveWindowError) {
           handoffConfig = result.config;
           liveSettingsRevision++;
           state.thresholdWarningShown = false;
@@ -1636,12 +1669,13 @@ async function refreshHandoffConfig() {
             `mode ${result.config.mode}, native_pressure ${result.config.nativePressure}, ` +
             `thresholds ${describeThresholds(result.config.thresholds)}.`,
           );
+          rearmTiersAboveUsage();
           revalidatePendingNudge();
           retryLatestUsage();
-        } else if (result.warning) {
+        } else if (liveWindowError || result.warning) {
           session.log(
             "[Context Handoff] Ignoring the edited context-handoff config and keeping " +
-            `the previous settings: ${result.warning.replace(INVALID_CONFIG_PREFIX, "")}`,
+            `the previous settings: ${(liveWindowError ?? result.warning).replace(INVALID_CONFIG_PREFIX, "")}`,
             { level: "warning" },
           );
         }
@@ -1674,6 +1708,15 @@ function currentEffectiveThresholds() {
   return effective.thresholds;
 }
 
+function automaticHandlingStatus(override, by) {
+  if (override.paused) return `PAUSED for this session${by}`;
+  if (!automaticPressureHandlingEnabled(handoffConfig.mode)) return "disabled by config (mode: off)";
+  if (state.nativeContext && nativePressureDeferred(state.nativeContext, handoffConfig.nativePressure)) {
+    return "deferred to the host (native context selected; native_pressure: defer)";
+  }
+  return "active";
+}
+
 function pressureStatusText() {
   const override = currentOverride();
   const usage = formatContextUsage(state.currentTokens, state.tokenLimit);
@@ -1686,7 +1729,7 @@ function pressureStatusText() {
     `- Config thresholds: ${describeThresholds(handoffConfig.thresholds)}.`,
     `- Effective thresholds: ${describeThresholds(currentEffectiveThresholds())}` +
       (override.thresholds ? ` (session override${by})` : "") + ".",
-    `- Automatic pressure handling: ${override.paused ? `PAUSED for this session${by}` : "active"}.`,
+    `- Automatic pressure handling: ${automaticHandlingStatus(override, by)}.`,
     `- Context: ${usage.utilization} (${usage.tokens}).`,
   ];
   if (overrideActive(override)) {
@@ -1724,23 +1767,7 @@ async function applyPressureOverride(request, actor) {
     if (actor === ACTOR_OPERATOR) state.blockMutatingTools = false;
   }
   if ((action === "set" || action === "clear") && !state.handoffGenerated) {
-    // Re-arm only tiers still above current usage, so they fire fresh at the
-    // new threshold instead of repeating a nudge that already landed. Absolute
-    // token tiers resolve even when the window size is unknown.
-    let pressure = null;
-    try {
-      pressure = contextPressure(state.currentTokens, state.tokenLimit, currentEffectiveThresholds());
-    } catch {
-      pressure = null;
-    }
-    if (pressure && !pressure.soft) {
-      state.softReminderSent = false;
-      state.softLogShown = false;
-    }
-    if (pressure && !pressure.hard) {
-      state.hardReminderSent = false;
-      state.hardLogShown = false;
-    }
+    rearmTiersAboveUsage();
   }
   revalidatePendingNudge();
   retryLatestUsage();
