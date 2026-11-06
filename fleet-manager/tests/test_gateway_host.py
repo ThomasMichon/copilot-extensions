@@ -306,7 +306,8 @@ def test_ssh_host_preflight_protects_external_input_references_from_writers(tmp_
     selection, value, _, _ = ssh_selected(root)
     original = Path(selection[reference] if reference == "configuration" else value[reference])
     external = tmp_path / "external-input"
-    external.write_bytes(original.read_bytes())
+    with os.fdopen(create_private_file(external), "wb") as stream:
+        stream.write(original.read_bytes())
     if reference == "configuration":
         selection["configuration"] = str(external)
     else:
