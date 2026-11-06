@@ -939,6 +939,24 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Preserve real metadata activation in test-source constraints
+
+- Shared library metadata already contains platform-marked dependencies and
+  optional extras. Canonical source composition now follows the runner's
+  selected entry extras and their local dependencies, retaining target marker
+  predicates and version bounds without imposing inactive optional bounds.
+  Extra names and comparisons use normalized identities; UV still evaluates
+  marker truth for its selected target.
+- The regression uses the canonical materializer with the actual PR/Fleet and
+  Dispatch/PR/Fleet project and library metadata. Separate actual offline UV
+  cases preserve false platform predicates and reject incompatible active
+  extra or core bounds. No root-interpreter dependency was added.
+- Fifty-one focused contained Windows contracts pass with the original
+  30-second item and 300-second group bounds, clean sandbox removal, fatal
+  Python lint, scoped module-size checks and diff checks. This corrects the
+  source-preparation prerequisite; the failed fresh-account run remains
+  failure evidence, not installed acceptance or rollout.
+
 ### 2026-11-06 - Retain the released-account setup failure
 
 - The single native acceptance run

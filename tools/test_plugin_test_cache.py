@@ -154,8 +154,10 @@ def released_graph(tmp_path, monkeypatch):
         _project(project / "libs" / "shared", "shared")
         manifest = project / "pyproject.toml"
         manifest.write_text(manifest.read_text().replace(
-            'version = "1.0"', 'version = "1.0"\ndependencies = ["shared>=1"]',
-        ))
+            'version = "1.0"',
+            'version = "1.0"\ndependencies = ["shared>=1", '
+            '"shared>=999; sys_platform == \'inactive-test-platform\'"]',
+        ) + '\n[project.optional-dependencies]\nunused = ["shared>=500"]\n')
     canonical = _project(tmp_path / "libs" / "shared", "shared")
     for resource in runner.standalone_build_resources("fleet-manager", source_root=tmp_path):
         resource.mkdir(parents=True, exist_ok=True)
@@ -168,9 +170,10 @@ def released_graph(tmp_path, monkeypatch):
 def test_released_library_overrides_are_canonical_and_invalidate_cache(released_graph):
     plugin, _, canonical = released_graph
     before = runner._dep_fingerprint("agent-pull-requests")
-    assert cache_policy.canonical_test_sources(
+    overrides, _ = cache_policy.canonical_test_sources(
         "agent-pull-requests", plugin, runner.REPO,
-    ) == ({"shared": canonical.parent}, ("shared>=1",))
+    )
+    assert overrides == {"shared": canonical.parent}
     canonical.write_text("VALUE = 2\n")
     assert runner._dep_fingerprint("agent-pull-requests") != before
     (canonical.parent / "pyproject.toml").unlink()
@@ -190,7 +193,8 @@ def test_released_preparation_passes_overrides_through_normal_policy(released_gr
     def install(uv, arguments, **options):
         source = Path(arguments[arguments.index("--override") + 1])
         constraints = Path(arguments[arguments.index("--constraint") + 1])
-        assert constraints.read_text() == "shared>=1\n"
+        assert "shared>=1\n" in constraints.read_text()
+        assert "shared>=500" not in constraints.read_text()
         calls.append((source.read_text(), options))
 
     monkeypatch.setattr(runner, "run_uv_install", install)
@@ -201,15 +205,44 @@ def test_released_preparation_passes_overrides_through_normal_policy(released_gr
     assert not calls
 
 
-@pytest.mark.parametrize("requirement", ["shared[optional]>=1", "shared>=1; python_version>'3'"])
-def test_released_overrides_refuse_conditional_or_extra_library_requirements(
-    released_graph, requirement,
-):
-    plugin, _, _ = released_graph
+def test_released_constraints_follow_selected_library_extras(released_graph):
+    plugin, _, canonical = released_graph
     metadata = plugin / "pyproject.toml"
-    metadata.write_text(metadata.read_text().replace("shared>=1", requirement))
-    with pytest.raises(ValueError, match="unconditional named dependencies"):
-        cache_policy.canonical_test_sources("agent-pull-requests", plugin, runner.REPO)
+    metadata.write_text(metadata.read_text().replace("shared>=1", "shared[feature]>=1"))
+    library = canonical.parent / "pyproject.toml"
+    library.write_text(library.read_text() + (
+        '\n[project.optional-dependencies]\nfeature = ["shared>=2"]\n'
+        'unused = ["shared>=500"]\n'
+    ))
+    _, constraints = cache_policy.canonical_test_sources("agent-pull-requests", plugin, runner.REPO)
+    assert "shared>=2" in constraints
+    assert not any("shared>=500" in requirement for requirement in constraints)
+
+
+@pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
+def test_real_materialized_metadata_preserves_active_platform_constraints(tmp_path, consumer):
+    import materialize_main
+
+    source = Path(__file__).resolve().parents[1]
+    checkout = tmp_path / "release"
+    roots = cache_policy._dependency_sources(consumer, source / "plugins" / consumer, source)
+    for root in roots:
+        target = checkout / root.relative_to(source)
+        target.mkdir(parents=True, exist_ok=True)
+        if (root / "pyproject.toml").is_file():
+            shutil.copyfile(root / "pyproject.toml", target / "pyproject.toml")
+            (target / "src").mkdir(exist_ok=True)
+            (target / "src" / "fixture.py").write_text("# Metadata-only release fixture.\n")
+    log = materialize_main.materialize_uv_editable_refs(checkout, canonical_root=checkout)
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    overrides, constraints = cache_policy.canonical_test_sources(
+        consumer, checkout / "plugins" / consumer, checkout,
+    )
+    assert "agent-zdd" in overrides
+    assert any(
+        requirement.startswith("agent-zdd;") and "sys_platform" in requirement
+        for requirement in constraints
+    )
 
 
 @pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
@@ -233,6 +266,13 @@ def test_real_uv_resolves_released_duplicate_sources_with_canonical_override(
             'version = "1.0"', 'version = "1.0"\ndependencies = ["shared>=1"]',
         ))
         projects.insert(0, plugin)
+    metadata = plugin / "pyproject.toml"
+    metadata.write_text(metadata.read_text().replace("shared>=1", "shared[feature_name]>=1"))
+    library = canonical.parent / "pyproject.toml"
+    library.write_text(library.read_text().replace(
+        'version = "1.0"',
+        'version = "1.0"\ndependencies = ["shared>=1; extra == \'FEATURE_NAME\'"]',
+    ) + '\n[project.optional-dependencies]\nFEATURE_NAME = []\n')
     requirements = runner.REPO / "requirements.txt"
     requirements.write_text("".join(f"-e {project}\n" for project in projects))
     command = [
@@ -256,8 +296,12 @@ def test_real_uv_resolves_released_duplicate_sources_with_canonical_override(
     accepted = resolve()
     assert accepted.returncode == 0, accepted.stderr
     assert canonical.parent.as_uri() in accepted.stdout
-    metadata = plugin / "pyproject.toml"
-    metadata.write_text(metadata.read_text().replace("shared>=1", "shared>=2"))
+    original_library = library.read_text()
+    library.write_text(original_library.replace("shared>=1;", "shared>=2;"))
+    active_extra = resolve()
+    assert active_extra.returncode != 0, active_extra.stdout
+    library.write_text(original_library)
+    metadata.write_text(metadata.read_text().replace("shared[feature_name]>=1", "shared[feature_name]>=2"))
     incompatible = resolve()
     assert incompatible.returncode != 0, incompatible.stdout
 

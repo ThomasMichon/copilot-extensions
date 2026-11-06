@@ -9,6 +9,7 @@ import stat
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from standalone_consumers import standalone_build_resources
 if __package__:
@@ -30,22 +31,124 @@ FLEET_TEST_CONSUMERS = frozenset({
 })
 
 
-def _dependency_sources(name: str, plugin: Path, repo: Path) -> set[Path]:
-    entries = [plugin] if (plugin / "pyproject.toml").is_file() else []
-    resources: tuple[Path, ...] = ()
+def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path, tuple[str, ...]]]:
+    entries: list[tuple[Path, tuple[str, ...]]] = []
+    manifest = plugin / "pyproject.toml"
+    if manifest.is_file():
+        extras = tomllib.loads(manifest.read_text(encoding="utf-8")).get(
+            "project", {},
+        ).get("optional-dependencies", {})
+        entries.append((plugin, ("dev",) if "dev" in extras else ()))
     if name in FLEET_TEST_CONSUMERS:
-        entries.append(repo / "fleet-manager")
-        resources = standalone_build_resources("fleet-manager", source_root=repo)
+        extra = {
+            "agent-index": ("auth",), "agent-pull-requests": ("service-gateway",),
+            "agent-dispatch": ("service-gateway",), "agent-ssh": (),
+        }[name]
+        entries.append((repo / "fleet-manager", extra))
     if name == "agent-dispatch":
-        entries.append(repo / "plugins" / "agent-pull-requests")
+        entries.append((repo / "plugins" / "agent-pull-requests", ("fleet",)))
     if name == "worktree-manager":
-        entries.append(repo / "plugins" / "agent-bridge")
+        entries.append((repo / "plugins" / "agent-bridge", ()))
     if name == "payload-invocation":
-        entries.append(repo / "libs" / "update-driver")
-    roots = set(resources)
-    for entry in entries:
+        entries.append((repo / "libs" / "update-driver", ()))
+    return entries
+
+
+def _dependency_sources(name: str, plugin: Path, repo: Path) -> set[Path]:
+    roots = set(
+        standalone_build_resources("fleet-manager", source_root=repo)
+        if name in FLEET_TEST_CONSUMERS else ()
+    )
+    for entry, _ in _dependency_entries(name, plugin, repo):
         roots.update(_package_roots(entry))
     return roots
+
+
+def _bind_extra(marker: str, extra: str) -> str:
+    tokens = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|(?P<extra>\bextra\b)""")
+    matches = list(tokens.finditer(marker))
+    replacements = {}
+    for index, token in enumerate(matches):
+        if token.lastgroup != "extra":
+            continue
+        replacements[token.span()] = repr(extra)
+        literal = False
+        for offset in (-1, 1):
+            neighbor_index = index + offset
+            if not 0 <= neighbor_index < len(matches):
+                continue
+            neighbor = matches[neighbor_index]
+            left, right = (neighbor, token) if offset < 0 else (token, neighbor)
+            if not re.fullmatch(r"\s*(?:===|==|!=|~=|<=|>=|<|>|in|not\s+in)\s*",
+                                marker[left.end():right.start()]):
+                continue
+            if neighbor.lastgroup != "extra":
+                value = re.sub(r"[-_.]+", "-", neighbor[0][1:-1]).lower()
+                replacements[neighbor.span()] = repr(value)
+                literal = True
+        if not literal:
+            raise ValueError("Extra markers require a named literal comparison")
+    return tokens.sub(lambda token: replacements.get(token.span(), token[0]), marker)
+
+
+def _active_library_constraints(
+    entries: list[tuple[Path, tuple[str, ...]]], packages: dict[str, Path],
+    canonical: dict[str, Path],
+) -> tuple[str, ...]:
+    pending: list[tuple[Path, str, frozenset[str]]] = [
+        (root, extra, frozenset()) for root, extras in entries for extra in ("", *extras)
+    ]
+    seen: set[tuple[Path, str, frozenset[str]]] = set()
+    constraints: set[str] = set()
+    metadata: dict[Path, dict[str, Any]] = {}
+    while pending:
+        root, extra, inherited = pending.pop()
+        context = root, extra, inherited
+        if context in seen:
+            continue
+        seen.add(context)
+        if root not in metadata:
+            metadata[root] = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        data = metadata[root]
+        uv = data.get("tool", {}).get("uv", {})
+        if uv.get("dependency-metadata") or uv.get("extra-build-dependencies"):
+            raise ValueError("Canonical test libraries cannot replace dependency metadata")
+        project = data.get("project", {})
+        optional = {
+            re.sub(r"[-_.]+", "-", key).lower(): value
+            for key, value in project.get("optional-dependencies", {}).items()
+        }
+        requirements = [
+            *project.get("dependencies", []), *(optional.get(extra, []) if extra else []),
+        ]
+        for requirement in requirements:
+            match = re.fullmatch(
+                r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*"
+                r"(?:\[([A-Za-z0-9._,\s-]+)\])?\s*([^;]*)(?:;(.*))?", requirement,
+            )
+            if match is None:
+                raise ValueError("Test dependencies require named requirements")
+            package = re.sub(r"[-_.]+", "-", match[1]).lower()
+            specification = match[3].strip()
+            # Bind the declaring extra, but let UV evaluate markers for its selected target.
+            marker = _bind_extra((match[4] or "").strip(), extra)
+            predicates = inherited | ({marker} if marker else set())
+            if package in canonical:
+                if "@" in specification:
+                    raise ValueError("Canonical test libraries cannot replace direct source requirements")
+                constraint = package + specification
+                if predicates:
+                    constraint += "; " + " and ".join(f"({value})" for value in sorted(predicates))
+                constraints.add(constraint)
+            if package in packages:
+                extras = tuple(
+                    re.sub(r"[-_.]+", "-", value.strip()).lower()
+                    for value in (match[2] or "").split(",") if value.strip()
+                )
+                pending.extend(
+                    (packages[package], selected, frozenset(predicates)) for selected in ("", *extras)
+                )
+    return tuple(sorted(constraints))
 
 
 def canonical_test_sources(
@@ -77,38 +180,15 @@ def canonical_test_sources(
             canonical[key] = manifest.parent.resolve(strict=True)
     if missing := duplicates - canonical.keys():
         raise ValueError(f"Test dependencies have conflicting non-library sources: {sorted(missing)}")
+    packages = {key: canonical.get(key, next(iter(paths))) for key, paths in sources.items()}
     for source in canonical.values():
-        roots.update(_package_roots(source))
-    constraints: set[str] = set()
-    for root in roots:
-        manifest = root / "pyproject.toml"
-        if not manifest.is_file():
-            continue
-        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        project = data.get("project", {})
-        uv = data.get("tool", {}).get("uv", {})
-        if uv.get("dependency-metadata") or uv.get("extra-build-dependencies"):
-            raise ValueError("Canonical test libraries cannot replace dependency metadata")
-        sections = [
-            project.get("dependencies", []), data.get("build-system", {}).get("requires", []),
-            *project.get("optional-dependencies", {}).values(),
-            *data.get("dependency-groups", {}).values(),
-            *(uv.get(key, []) for key in (
-                "dev-dependencies", "constraint-dependencies", "override-dependencies",
-                "build-constraint-dependencies",
-            )),
-        ]
-        for section in sections:
-            for requirement in section:
-                if not isinstance(requirement, str):
-                    continue
-                match = re.match(r"([A-Za-z0-9][A-Za-z0-9._-]*)(.*)", requirement.strip())
-                if match is None or re.sub(r"[-_.]+", "-", match[1]).lower() not in canonical:
-                    continue
-                if any(character in match[2] for character in "[@;"):
-                    raise ValueError("Canonical test libraries require unconditional named dependencies")
-                constraints.add(requirement)
-    return canonical, tuple(sorted(constraints))
+        for root in _package_roots(source):
+            manifest = root / "pyproject.toml"
+            package = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]["name"]
+            packages.setdefault(re.sub(r"[-_.]+", "-", package).lower(), root)
+    return canonical, _active_library_constraints(
+        _dependency_entries(name, plugin, repo), packages, canonical,
+    )
 
 
 def source_resolution_arguments(name: str, plugin: Path, repo: Path, venv: Path) -> list[str]:

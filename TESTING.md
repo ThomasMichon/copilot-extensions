@@ -6352,9 +6352,11 @@ These controls require no package build, UV invocation or host runtime change.
 Released checkouts retain independent vendored library copies in each payload.
 When the runner combines same-checkout consumers, it resolves duplicate library
 identities through the repository's canonical `libs/` sources, with separate
-constraints preserving the consumers' version requirements. Those canonical
-sources participate in cache freshness. Missing or ambiguous canonical sources,
-conditional/extra library requirements and replacement dependency metadata
+constraints preserving the consumers' version requirements, platform markers
+and selected extras. Inactive optional requirements do not add constraints;
+marker truth remains with UV's selected target rather than the runner's Python.
+Those canonical sources participate in cache freshness. Missing or ambiguous
+canonical sources, direct library URLs and replacement dependency metadata
 refuse preparation rather than choosing an arbitrary copy. Development graphs
 already sharing one source keep their existing behavior. This is test-environment
 composition only: installers and independent payload closures remain unchanged.
