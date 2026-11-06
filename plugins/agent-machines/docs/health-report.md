@@ -220,7 +220,9 @@ There is no retry or network-host option.
 The actual response must identify `agent-bridge`, report `status: ok`, and
 advertise a protocol range containing the baseline health contract, generation
 1. Missing, malformed or incompatible support remains unknown/unsupported.
-Additive owner fields are tolerated but discarded. A supported response proves
+Additive owner fields are tolerated but discarded. A truncated declared body
+does not qualify, even when its received prefix is a complete JSON object.
+A supported response proves
 only `local_listener: ok`; `ready`, credential-relay flags, carrier diagnostics
 and process/host counts are not authentication, Gateway, credential or logical
 agent evidence. All other domains remain explicitly unknown with null count

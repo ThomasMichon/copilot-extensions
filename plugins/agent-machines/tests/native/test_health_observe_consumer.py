@@ -153,11 +153,24 @@ print(json.dumps(asyncio.run(owner.health(request))))
     roundtrip(tmp_path, monkeypatch, producer.stdout.encode("utf-8"))
 
 
+QUALIFYING_BODY = b'{"service":"agent-bridge","status":"ok","min_protocol_version":1,"protocol_version":52}'
+
+
 @pytest.mark.parametrize(("wire", "drip", "reason"), [
     (b"HTTP/1.1 302 Found\r\nLocation: http://192.0.2.1/\r\nContent-Length: 0\r\n\r\n", False, "unavailable"),
-    (response(b" " * health_slots.MAX_BYTES), False, "invalid"),
+    (response(QUALIFYING_BODY.ljust(health_slots.MAX_BYTES, b" ")), False, "invalid"),
     (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 20\r\n\r\n", True, "timeout"),
-], ids=["redirect", "wire-limit", "drip-deadline"])
+    (response(QUALIFYING_BODY).replace(
+        b"Content-Length: " + str(len(QUALIFYING_BODY)).encode(),
+        b"Content-Length: " + str(len(QUALIFYING_BODY) + 50).encode(),
+    ), False, "invalid"),
+    (response(QUALIFYING_BODY).replace(
+        b"Content-Length: " + str(len(QUALIFYING_BODY)).encode(),
+        b"Content-Length: 1000000000000000000000000000000",
+    ), False, "invalid"),
+    (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+     + f"{len(QUALIFYING_BODY):x}\r\n".encode() + QUALIFYING_BODY + b"\r\n", False, "unavailable"),
+], ids=["redirect", "wire-limit", "drip-deadline", "truncated-length", "huge-length", "truncated-chunks"])
 def test_native_http_refuses_redirect_overflow_and_continuous_trickle(wire, drip, reason):
     with listener(wire, drip=drip) as (port, requests):
         result = call([
@@ -173,7 +186,7 @@ def test_native_observe_closed_stdout_preserves_exit_two():
     reader, writer = os.pipe()
     os.close(reader)
     try:
-        with listener(response(b'{"service":"agent-bridge","status":"ok","min_protocol_version":1,"protocol_version":52}')) as (port, requests):
+        with listener(response(QUALIFYING_BODY)) as (port, requests):
             child = subprocess.run([
                 sys.executable, "-I", "-m", "agent_machines", "health", "observe",
                 "--bridge-port", str(port), "--publisher", "example", "--continuity", "generation",

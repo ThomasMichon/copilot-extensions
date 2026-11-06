@@ -54,6 +54,8 @@ def _read_bridge(port: int):
             if response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
                 return "unknown", "invalid"
             body = response.read(health_slots.MAX_BYTES + 1)
+            if response.length not in (None, 0):
+                return "unknown", "invalid"
         value = json.loads(
             body.decode("utf-8"), object_pairs_hook=health_slots._pairs,
             parse_constant=health_slots._nonfinite,

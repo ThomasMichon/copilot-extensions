@@ -13,6 +13,7 @@ from agent_machines.__main__ import main
 
 class Response:
     status = 200
+    length = 0
 
     def __init__(self, body):
         self.body = body
@@ -85,7 +86,7 @@ def test_normal_cli_projects_only_selected_listener_and_drops_owner_details(owne
     assert all(value["state"] == "unknown" for name, value in result["domains"].items() if name != "local_listener")
     assert result["domains"]["logical_agents"]["count"] is None
     assert result["domains"]["ssh_authenticated"]["direction"] is None
-    assert "do-not-project" not in raw and "99" not in json.dumps(result["domains"])
+    assert "do-not-project" not in raw and "live_host_count" not in raw
     assert owner.requests == [("GET", "/health", {"Connection": "close"})]
     assert owner.closed == 1
 

@@ -723,3 +723,18 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   changing its intent or existing producer/owner contracts. Linux, installed
   qualification, other domain owners, native scheduling, carrier delivery,
   enrollment and activation remain open; the parent is not complete.
+
+### 2026-11-06 - Passive listener review corrections
+- The #11163 review identified a real framing gap: a bounded HTTP read can
+  return a valid JSON prefix despite missing declared Content-Length bytes.
+  Listener proof now additionally requires no declared body remainder. Reads
+  stay bounded; a huge advertised length cannot request a huge allocation.
+- Replaced the whitespace-only overflow fixture with an otherwise qualifying
+  JSON body padded to the body limit, so only aggregate header/body wire
+  enforcement prevents success. Removed a numeric substring assertion that
+  could accidentally match an unfrozen observation timestamp.
+- The final 26-case observer packet passed without skips, including actual
+  owner-response compatibility, real truncated length/chunk and huge-length
+  controls, overflow/trickle limits, source CLI/store readback and output
+  failure. Fresh current-head review and CI remain required. No operational
+  activation or carrier effect occurred.
