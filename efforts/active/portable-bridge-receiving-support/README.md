@@ -731,3 +731,22 @@ implementation. The exact support closure follows the consumer trace and tests.
   JSON shape in 2.90 and 2.76 seconds without diagnostics. Earlier samples
   remain above; this is still insufficient for tail/baseline qualification.
   Updated-head review, CI, release, installation and live receiving remain open.
+
+### 2026-11-06 - Callback prerequisite source accepted
+
+- #10812 is verified merged at `4e63a7ca09f8c04769e8ff4c4fd2421b44eca5d0`
+  after approval with no active findings on the exact corrected head and
+  successful required CI, including the PR gate. The repository-authorized
+  self-merge exception omitted only the additional code-owner vote.
+  #10636 remains open.
+- Re-read the complete effort and retained every native/installed/external
+  gate. The source-cache prerequisite is delivered, not installed acceptance.
+  No complete receiving flow or product operation is claimed.
+- Normal source sync aborted on the squash history without changing the
+  branch. Verified all six owned paths against the actual merge, retained a
+  backup branch, and replayed only the empty post-reviewed range onto current
+  Dev. No unmerged work was discarded.
+- Next: verify the promoted launcher bytes, use the authorized normal host
+  update, then qualify the actual installed account/owner callbacks and one
+  existing receiving venue before the broader live checks. Source/runtime
+  publication never grants deployment or guest-suite upgrade authority.
