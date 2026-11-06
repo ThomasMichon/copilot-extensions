@@ -12,6 +12,29 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_pyth
     $_pythonCache = if ($_pythonCache.StartsWith('\\')) { '\\?\UNC\' + $_pythonCache.Substring(2) }
     else { '\\?\' + $_pythonCache }
 }
+$_mintedPythonCache = $_pythonCache
+# Reuse the sealed installed-<digest> cache when install evidence is valid.
+function Select-PythonCache([string]$Python) {
+    $selector = @'
+import json, os, sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1]
+    assert os.path.basename(prefix).startswith('installed-')
+except Exception:
+    prefix = sys.pycache_prefix
+print(json.dumps(prefix, ensure_ascii=True))
+'@
+    try {
+        $selected = & $Python -I -B -X "pycache_prefix=$_mintedPythonCache" -c $selector $_runtimeRoot
+        if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) { return [string]($selected | ConvertFrom-Json) }
+    } catch {}
+    return $_mintedPythonCache
+}
+function Remove-MintedPythonCache {
+    if ($_pythonCache -ne $_mintedPythonCache) { return }
+    try { [IO.Directory]::Delete($_mintedPythonCache, $true) } catch {}
+}
 $_bootTraceLogPath = Join-Path $_runtimeRoot 'logs\boot-trace.jsonl'
 
 function Get-BootTraceTimestamp {
@@ -206,10 +229,12 @@ if ($_py) {
     # (copilot-extensions#5494).
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $script:_pythonCache = Select-PythonCache $_py
     try {
     & $_py -X "pycache_prefix=$_pythonCache" -m $_module @args
     } finally {
         $ErrorActionPreference = $_previousEap
+        Remove-MintedPythonCache
     }
     exit $LASTEXITCODE
 }
@@ -304,10 +329,12 @@ if ($_provisionedPy) {
     # around just this forwarding call (copilot-extensions#5494).
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $script:_pythonCache = Select-PythonCache $_provisionedPy
     try {
     & $_provisionedPy -X "pycache_prefix=$_pythonCache" -m $_module @args
     } finally {
         $ErrorActionPreference = $_previousEap
+        Remove-MintedPythonCache
     }
     exit $LASTEXITCODE
 }

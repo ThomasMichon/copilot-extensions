@@ -1945,6 +1945,14 @@ if (Test-Path `$pidFile) {
 if (-not `$cache.StartsWith('\\?\')) {
     `$cache = if (`$cache.StartsWith('\\')) { '\\?\UNC\' + `$cache.Substring(2) } else { '\\?\' + `$cache }
 }
+# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
+try {
+    `$_selectedCache = & `$launchPy -I -B -X ('pycache_prefix=' + `$cache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" `$runtimeHome 2>`$null
+    if (`$LASTEXITCODE -eq 0 -and @(`$_selectedCache).Count -eq 1) {
+        `$_selectedCache = [string](`$_selectedCache | ConvertFrom-Json)
+        if (`$_selectedCache) { `$cache = `$_selectedCache }
+    }
+} catch {}
 `$cacheOption = '"pycache_prefix=' + `$cache + '"'
 `$proc = Start-Process -FilePath `$launchPy -ArgumentList '-X',`$cacheOption,'-m','agent_bridge','start' ``
     -WorkingDirectory `$runtimeHome ``
