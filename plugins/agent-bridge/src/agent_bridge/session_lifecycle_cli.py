@@ -270,6 +270,33 @@ def _agent_worktrees_runtime_selection(
         raise core._peer_launch.ContextRefused(f"same-cell agent-worktrees resolution failed: {error}") from error
 
 
+def _agent_worktrees_pinned_selection() -> tuple[tuple[str, ...], Path, Path]:
+    """Retain an attributable command for explicit writer qualification/use."""
+    own_root = _agent_bridge_owner_root()
+    context = _agent_bridge_installation_context()
+    try:
+        if context:
+            prefix, python = _peer_launch.pinned_launch_prefix(
+                "agent-bridge", own_root, context, "agent-worktrees",
+            )
+            root = own_root.parent / "agent-worktrees"
+        else:
+            runtime = _legacy_worktrees_runtime_prefix(own_root)
+            if runtime is None:
+                raise ValueError("completed worktree owner runtime is unavailable")
+            root = _legacy_worktrees_owner_root(own_root)
+            python = Path(runtime[0])
+            identity = _peer_launch.retained_runtime_identity(root, python, "agent_worktrees")
+            prefix = [
+                sys.executable, "-I", "-X", "utf8", "-m",
+                "agent_bridge.worktree_owner_launch", str(own_root),
+                "--pinned-runtime", str(python), "--runtime-identity", identity,
+            ]
+        return tuple(prefix), root, python
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(f"agent-worktrees pinned selection refused: {error}") from error
+
+
 def _legacy_worktrees_launch_prefix(own_root: Path) -> list[str] | None:
     selection = _legacy_worktrees_selection(own_root)
     return selection[0] if selection else None
@@ -287,8 +314,7 @@ def _legacy_worktrees_selection(
     ], Path.home() / ".agent-worktrees", Path(runtime[0]))  # marketplace-isolation: allow legacy-compatibility
 
 
-def _legacy_worktrees_runtime_prefix(own_root: Path) -> list[str] | None:
-    """Use the installed resolver, not an interactive shell's executable search."""
+def _legacy_worktrees_owner_root(own_root: Path) -> Path:
     from .install_paths import uses_legacy_install_dir
 
     if not uses_legacy_install_dir(own_root):
@@ -297,6 +323,12 @@ def _legacy_worktrees_runtime_prefix(own_root: Path) -> list[str] | None:
     tombstone = root / ".installation-ownership.json"
     if tombstone.exists() or tombstone.is_symlink():
         raise _peer_launch.ContextRefused("legacy worktree owner has installation-cell ownership")
+    return root
+
+
+def _legacy_worktrees_runtime_prefix(own_root: Path) -> list[str] | None:
+    """Use the installed resolver, not an interactive shell's executable search."""
+    root = _legacy_worktrees_owner_root(own_root)
     resolver = own_root / "scripts" / "versioned_runtime.py"
     if not resolver.is_file():
         return None

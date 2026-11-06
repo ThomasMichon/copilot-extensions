@@ -955,6 +955,39 @@ def test_retention_bootstrap_uses_the_completed_application_environment(
     assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
 
 
+@pytest.mark.parametrize("metadata", ["runtime-generation", ".install-complete.json"])
+@pytest.mark.parametrize("kind", ["missing", "oversized", "malformed", "linked", "fifo"])
+def test_retained_identity_refuses_unusable_metadata_before_launch(tmp_path, metadata, kind):
+    import runtime_launcher
+
+    if kind in {"linked", "fifo"} and os.name == "nt":
+        pytest.skip("POSIX metadata fixture")
+    slot = tmp_path / "versions" / "1.2.3"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    (bootstrap / "runtime-generation").write_text("1" * 32, encoding="ascii")
+    completion = slot / ".install-complete.json"
+    completion.write_text(json.dumps({
+        "version": slot.name, "completed_at": "2026-01-01", "pid": 0, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    path = bootstrap / metadata if metadata == "runtime-generation" else completion
+    if kind == "malformed" and metadata == ".install-complete.json":
+        pytest.skip("Completion schema admission belongs to the existing retention lease")
+    if kind == "oversized":
+        path.write_bytes(b"1" * 65537)
+    elif kind == "malformed":
+        path.write_text("not-a-generation", encoding="ascii")
+    else:
+        previous = path.with_name("original-metadata")
+        path.rename(previous)
+        if kind == "linked":
+            path.symlink_to(previous)
+        elif kind == "fifo":
+            os.mkfifo(path)
+    with pytest.raises((OSError, ValueError)):
+        runtime_launcher.runtime_identity(slot)
+
+
 def test_retention_bootstrap_preserves_the_historical_direct_slot(tmp_path):
     root = tmp_path / "runtime"
     slot = root / "versions" / "1.2.3"
