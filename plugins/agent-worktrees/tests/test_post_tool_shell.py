@@ -735,7 +735,23 @@ print(json.dumps({"additionalContext": notice} if notice else {}))
 """, encoding="utf-8")
     control = fixture["home"] / "watch-control"
     control.mkdir()
+    fixture["harness"].write_text(
+        "[IO.File]::WriteAllText([IO.Path]::Combine("
+        "$env:LATE_TEST_CONTROL, $env:LATE_TEST_ROLE + '-started'), 'ready')\n"
+        + fixture["harness"].read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    with driver.open("r+", encoding="utf-8") as stream:
+        body = stream.read()
+        stream.seek(0)
+        stream.write(
+            "import os\nfrom pathlib import Path\n"
+            "(Path(os.environ['LATE_TEST_CONTROL']) / "
+            "(os.environ['LATE_TEST_ROLE'] + '-started')).write_text('ready')\n"
+            + body
+        )
     processes = []
+    deadlines = {}
     try:
         for role in ("first", "second"):
             env = dict(
@@ -753,28 +769,32 @@ print(json.dumps({"additionalContext": notice} if notice else {}))
                 text=True, env=env, **no_window_kwargs(),
             )
             processes.append(process)
-            process.stdin.write(json.dumps(fixture["payload"]))
-            process.stdin.close()
-            process.stdin = None
-        end = time.monotonic() + 6
-        while not all((control / role).exists() for role in ("first", "second")):
-            if time.monotonic() >= end or any(process.poll() is not None for process in processes):
-                diagnostics = []
-                for role, process in zip(("first", "second"), processes):
-                    code = process.poll()
-                    if code is None:
-                        process.kill()
-                    stdout, stderr = process.communicate(timeout=10)
-                    diagnostics.append({
-                        "role": role, "ready": (control / role).exists(), "exit_before_cleanup": code,
-                        "stdout": stdout, "stderr": stderr,
-                    })
-                pytest.fail(f"both consumers must evaluate the same original watch: {diagnostics}")
-            time.sleep(0.005)
+            deadlines[process.pid] = time.monotonic() + 10
+        for suffix in ("-started", ""):
+            end = min(time.monotonic() + 6, *deadlines.values())
+            while not all((control / (role + suffix)).exists() for role in ("first", "second")):
+                if time.monotonic() >= end or any(process.poll() is not None for process in processes):
+                    diagnostics = []
+                    for role, process in zip(("first", "second"), processes):
+                        code = process.poll()
+                        if code is None:
+                            process.kill()
+                        stdout, stderr = process.communicate(timeout=10)
+                        diagnostics.append({
+                            "role": role, "ready": (control / (role + suffix)).exists(),
+                            "exit_before_cleanup": code, "stdout": stdout, "stderr": stderr,
+                        })
+                    pytest.fail(f"watch rendezvous stage {suffix or 'evaluated'}: {diagnostics}")
+                time.sleep(0.005)
+            if suffix:
+                for process in processes:
+                    process.stdin.write(json.dumps(fixture["payload"]))
+                    process.stdin.close()
+                    process.stdin = None
         (control / "go").write_text("go")
         notices = []
         for process in processes:
-            stdout, stderr = process.communicate(timeout=10)
+            stdout, stderr = process.communicate(timeout=max(0.01, deadlines[process.pid] - time.monotonic()))
             assert process.returncode == 0, stderr
             assert not stderr or stderr.startswith("entry_seconds="), stderr
             notices.append(json.loads(stdout) if stdout else {})
