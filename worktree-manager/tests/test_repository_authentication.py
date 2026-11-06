@@ -176,3 +176,40 @@ def test_cleanup_failure_retains_the_original_custody(selected, monkeypatch):
     with pytest.raises(OwnedCleanupError) as caught:
         ui.inventory("sample")
     assert caught.value is failure
+
+
+@pytest.mark.parametrize("in_process", [False, True])
+def test_list_factory_preserves_engine_override_precedence_over_handoff(
+    selected, monkeypatch, capsys, in_process,
+):
+    inherited = agent_plugin_runtime.resolve_installed_plugin_command("agent-worktrees")
+    monkeypatch.setattr(engine_client, "_INHERITED_ENGINE_COMMAND", inherited)
+    monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, "foreign-engine")
+    if in_process:
+        monkeypatch.setattr(engine_client, "_ENGINE_CMD_OVERRIDE", inherited)
+    calls = []
+    monkeypatch.setattr(ui, "run_caller_owned", lambda argv, **kwargs: (
+        calls.append(argv) or SimpleNamespace(returncode=0, stdout=json.dumps(observation()), stderr="")
+    ))
+    command = ui.configuration_pivot().list_cmd
+    arguments = [
+        "sample" if value == "{repo}" else value
+        for value in command[command.index("worktree_manager.repository_authentication") + 1:]
+    ]
+    assert ui.main(arguments) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["entries"][0]["status"] == ("observed" if in_process else "unsupported")
+    assert len(calls) == int(in_process)
+
+
+def test_invalid_forwarded_context_refuses_before_runtime_selection(selected, monkeypatch, capsys):
+    root, _, _ = selected
+    monkeypatch.setattr(
+        agent_plugin_runtime, "resolve_installed_plugin_command",
+        lambda *args, **kwargs: pytest.fail("invalid context selected a runtime"),
+    )
+    pointer = str(root / "missing-install.json")
+    assert ui.main(["--engine-context", pointer, "sample"]) == 1
+    captured = capsys.readouterr()
+    assert "context is invalid or inactive" in captured.err
+    assert pointer not in captured.err and captured.out == ""

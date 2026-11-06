@@ -145,9 +145,14 @@ def configuration_pivot():
     from .production_picker.picker_tui.pivots import parse_manifest
 
     command = [sys.executable, "-B", "-m", "worktree_manager.repository_authentication"]
-    inherited = engine_client._ENGINE_CMD_OVERRIDE or engine_client.inherited_engine_command()
+    inherited = engine_client._ENGINE_CMD_OVERRIDE
+    if inherited is None and not os.environ.get(engine_client.ENGINE_CMD_ENV, "").strip():
+        inherited = engine_client.inherited_engine_command()
     if inherited:
         command += ["--engine-argv", json.dumps(inherited)]
+    pointer = os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+    if pointer:
+        command += ["--engine-context", pointer]
     return parse_manifest({
         "schema_version": 1, "label": "Authentication", "placement": "config", "scope": "global",
         "list": [*command, "{repo}"], "summary": "{status} | Observed at: {observed_at}",
@@ -159,6 +164,7 @@ def configuration_pivot():
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--engine-argv")
+    parser.add_argument("--engine-context")
     parser.add_argument("project")
     args = parser.parse_args(argv)
     try:
@@ -171,6 +177,13 @@ def main(argv: list[str] | None = None) -> int:
             or any(not isinstance(item, str) or not item for item in engine)
         ):
             raise InspectionError("The selected engine command is invalid.")
+        if args.engine_context is not None:
+            from .installation_updates import _restore_engine_context
+
+            try:
+                _restore_engine_context(args.engine_context)
+            except ValueError as error:
+                raise InspectionError(str(error)) from None
         result = inventory(args.project, engine_argv=engine)
     except (InspectionError, engine_client.EngineError) as error:
         print(str(error), file=sys.stderr)

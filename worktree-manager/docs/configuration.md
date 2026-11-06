@@ -36,6 +36,14 @@ ignore this additive field. Older Managers do not discover a new payload pivot.
 The [native contract](../../plugins/agent-worktrees/docs/repository-authentication.md)
 owns provider scope, response meaning and compatibility details.
 
+The generic list transport deliberately removes parent-plugin identity.
+This native adapter carries the selected installation receipt separately and
+validates it through the existing Manager context-restoration owner before
+runtime resolution or invocation. It preserves Manager's engine precedence:
+an in-process choice wins, while an explicit environment command takes priority
+over an inherited engine handoff. A rejected context never falls through to a
+different legacy installation.
+
 ## Installation and Updates
 
 Configuration includes a standing **Installation & Updates** list. It combines

@@ -188,10 +188,11 @@ limitations. Manager verifies selected interpreter/module and slot-local support
 before a single native read. No new payload pivot, CLI operation, universal
 authentication schema or executable acquisition action is added.
 
-Thirty-nine native provider controls and eighteen Manager compatibility controls
-pass. Twenty-eight Configuration controls pass, including the actual production
-UI and process boundary to a private-venv fixture running the real native parser,
-registry reader and projection with only its credential/API adapter substituted.
+Thirty-nine native provider controls and twenty-one Manager compatibility controls
+pass. Twenty-nine Configuration controls pass, including the actual production
+UI and process boundary to private-venv legacy and Windows namespaced fixtures
+running the real native parser, registry reader and projection with only their
+credential/API adapter substituted.
 The journey proves hidden-section non-probing, loading/navigation, native detail
 cards, stale refresh, unavailable observations, malformed-result errors,
 originating-scope settlement, changed project and pre-invocation rollback refusal.
@@ -205,6 +206,13 @@ missing/malformed/unsupported descriptors, inspect-only older runtimes, newer
 payloads, foreign explicit commands, provider rollback and retained cleanup errors.
 Old callers keep the original standalone observation/exit semantics, and older
 Managers do not discover the new optional read.
+
+Two review findings were reproduced red before correction: the generic list
+transport strips the selected installation context, and an inherited handoff
+must not override an explicit environment command. The adapter now forwards and
+validates context through the existing Manager restoration owner and preserves
+the native engine-selection precedence. The real namespaced list process retains
+its selected context/interpreter; malformed context refuses before selection.
 
 These are contained source/fixture results, not a cold product installation,
 selected installed-runtime qualification, native performance budget, live
