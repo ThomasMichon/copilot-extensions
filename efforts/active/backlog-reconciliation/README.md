@@ -330,6 +330,17 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The same [acquisition/diagnostics journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #10887, then two further audited tracking
+retirements: #5686 under expanded OPEN #5549 and #9323 under expanded OPEN
+#9295. Complete independent Plan/Validation lanes and source/resource owners
+remain; neither is an implemented fix. The distinct finite #10737 source
+request is actually completed by merged #10738 without absorbing broader
+#3421 or adding an installed-runtime gate. Two equal complete20:39 PST scans
+measure839 whole OPEN:561 creator-eligible,278 excluded,564 original-cohort
+and275 inflow. Verified dispositions are966, still110 above fixed729.
+An external departure earns no credit; Active checkbox states stay unchanged.
+
 The [acquisition/diagnostics adjudication](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records five further audited outcomes: finite documentation and announcement
 completion, two complete startup contracts received by actual OPEN #7116,
