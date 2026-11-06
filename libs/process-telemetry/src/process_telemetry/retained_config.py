@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import stat
 from collections.abc import Callable
 from pathlib import Path
@@ -16,6 +17,7 @@ from .configured_spool import retained_directory
 
 SCHEMA = "process-telemetry.retained-configuration/v1"
 MAX_CONFIG_BYTES = 64 * 1024
+MAX_INPUT_BYTES = 256 * 1024
 
 
 class _OwnedLock(Protocol):
@@ -61,8 +63,42 @@ def _float(value: str) -> float:
     return number
 
 
+def _input_fence(inputs: list[list[str]]) -> list[dict[str, Any]]:
+    if len(inputs) > 8:
+        raise ValueError("too many configuration inputs")
+    snapshots: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for raw_path, expected in inputs:
+        path = Path(raw_path)
+        if path in seen or re.fullmatch(r"[a-f0-9]{64}", expected) is None:
+            raise ValueError("invalid or duplicate configuration input")
+        seen.add(path)
+        parents = _directory(path.parent)
+        if path.parent.resolve(strict=True) != path.parent:
+            raise ValueError("configuration input requires a canonical parent")
+        identity = _plain(path, directory=False)
+        with path.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            if (before.st_dev, before.st_ino) != identity:
+                raise ValueError("configuration input changed")
+            raw = stream.read(MAX_INPUT_BYTES + 1)
+            after = os.fstat(stream.fileno())
+        if (
+            len(raw) > MAX_INPUT_BYTES
+            or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
+            or _plain(path, directory=False) != identity
+            or hashlib.sha256(raw).hexdigest() != expected
+        ):
+            raise ValueError("configuration input changed or exceeds its read bound")
+        snapshots.append({
+            "path": str(path), "parents": parents, "identity": identity, "sha256": expected,
+        })
+    return snapshots
+
+
 def preview(
     target: Path, directory: Path, *, service: str, environment_sink: str | None,
+    inputs: list[list[str]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Read a bounded snapshot without provisioning, factories or writer locks."""
     if not target.is_absolute():
@@ -111,6 +147,7 @@ def preview(
         "namespace": namespace, "identity": identity,
         "bytes": None if raw is None else hashlib.sha256(raw).hexdigest(),
         "environment_sink": environment_sink,
+        "inputs": _input_fence(inputs or []),
     }
     token = hashlib.sha256(
         json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -131,10 +168,12 @@ def execute(
     write_atomic: Callable[[Path, dict[str, Any]], None],
 ) -> int:
     """Recheck the native target and snapshot under the producer's writer lock."""
+    write_started = False
     try:
         selected = target()
         result, updated = preview(
             selected, args.directory, service=service, environment_sink=os.environ.get(sink_env),
+            inputs=getattr(args, "if_input", None),
         )
         if args.apply:
             if result["status"] == "refused":
@@ -149,20 +188,24 @@ def execute(
                 result, updated = preview(
                     target(), args.directory, service=service,
                     environment_sink=os.environ.get(sink_env),
+                    inputs=getattr(args, "if_input", None),
                 )
                 if result["status"] == "refused" or result["confirmation"] != args.confirm:
                     raise ValueError("telemetry configuration changed; preview again")
                 lock.assert_owned()
                 if result["would_change"]:
+                    write_started = True
                     write_atomic(selected, updated)
                 result["status"] = "configured"
                 result["changed"] = result.pop("would_change")
+                result["write_outcome"] = "applied" if result["changed"] else "unchanged"
         elif args.confirm:
             raise ValueError("confirmation is only valid with --apply")
     except (ValueError, OSError, RuntimeError) as error:
         print(json.dumps({
             "schema": SCHEMA, "service": service, "status": "error",
             "reason": str(error), "activation": "not-requested",
+            "write_outcome": "unknown" if write_started else "not-applied",
         }, sort_keys=True))
         return 2
     print(json.dumps(result, sort_keys=True))
@@ -186,6 +229,10 @@ def register_commands(
     retained.add_argument("--directory", type=Path, required=True)
     retained.add_argument("--apply", action="store_true")
     retained.add_argument("--confirm", help="Exact confirmation from a current preview")
+    retained.add_argument(
+        "--if-input", nargs=2, action="append", metavar=("PATH", "SHA256"),
+        help="Require unchanged local input bytes inside the native configuration transaction",
+    )
     retained.add_argument("--json", action="store_true", help="Output is always JSON")
     retained.set_defaults(func=handler)
 
@@ -194,5 +241,6 @@ def _capabilities(_args: argparse.Namespace) -> int:
     print(json.dumps({
         "schema": SCHEMA, "operations": ["preview", "apply"],
         "configuration_only": True, "custom_sink_overwrite": False,
+        "input_fence": 1,
     }, sort_keys=True))
     return 0

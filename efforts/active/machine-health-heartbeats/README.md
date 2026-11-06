@@ -8,7 +8,8 @@
 - **Vision:** [machine heartbeats](../../../visions/telemetry/machine-heartbeats/README.md),
   [user-state carriers](../../../visions/user-state-carriers/README.md)
 - **Umbrella issue:** #10873
-- **Sub-issues:** #10881 (local report/chart consumer), #10928 (preference preview)
+- **Sub-issues:** #10881 (local report/chart consumer), #10928 (preference preview),
+  #11081 (guarded native telemetry adoption)
 
 ## Guiding Intent
 
@@ -121,6 +122,10 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   existing-repository binding through the selected owner, without automatic adoption.
 - [x] Prove explicitly confirmed Copilot scalar-floor adoption through native
   configuration, alias scope, validation and the serialized settings owner.
+- [x] Expose producer-owned retained telemetry configuration preview/apply
+  without provisioning, activation or projected-task authority bypass.
+- [ ] Prove capability-selected telemetry adoption with accepted-input
+  revalidation at the producer's write boundary, preserving custom sinks.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -520,3 +525,51 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   introduced by the configuration-only gate. Ruff and whitespace passed.
 - Fresh current-head review and CI remain required. This correction does not
   authorize runtime installation, active capture or carrier publication.
+
+### 2026-11-06 - Retained-configuration providers merged
+- #11058 merged as `48e4125655f03440a37d2f531f461a6c707f48c8`
+  after actual current-head Copilot approval with no findings, resolved
+  threads and green required CI. Source-attribution metadata passed.
+- All 20 PR-touched paths exactly matched the verified merge. The managed
+  pull-forward safely aborted on squash-history conflicts; a retained backup
+  and empty-range rebase reconciled only the proved merged history. No
+  unmerged source was discarded.
+- Completed only the producer prerequisite. Machines must select a capable
+  pinned native producer and revalidate the accepted snapshot, policy and
+  local overrides at the actual producer write boundary. A caller-only check
+  would leave a stale-authority gap.
+- The parent effort remains Active. Carrier exchange, native installed
+  qualification, health probes, scheduling and explicitly authorized
+  activation are still open. A source merge is not a release or rollout.
+
+### 2026-11-06 - Guarded telemetry adoption implemented
+- Claimed #11081 for explicitly confirmed Machines adoption through a pinned
+  same-cell producer. The producer's additive input-fence capability binds
+  exact validated policy, accepted-snapshot and optional local-override bytes
+  to its confirmation and rechecks them inside its native writer lock.
+- Custom sinks refuse without overwrite. Disabled/withdrawn contributions
+  contact no producer and do not erase adopted values. Unsupported providers
+  cannot trigger a fallback writer. Reporting remains visibly unsupported
+  for adoption; it has no native configuration field.
+- The Machines/codec packet passed 35 cases. The first fixture incorrectly
+  launched Bridge inside Machines' Python and exposed the missing Bridge-only
+  dependency; the cross-plugin packet now uses the real Dispatch parser and
+  transaction. Bridge's own prepared environment passed 29 native adoption
+  cases plus three malformed/oversize/duplicate input-fence controls.
+- Independent Machines CLI preview/apply processes reached the real Dispatch
+  configuration writer in fresh, preprovisioned roots. Only native context and
+  peer resolution were fixture-supplied; this is not immutable-slot, installed
+  selection or carrier qualification. No installer is needed for this path.
+- The shared library passed strict Python-3.10 Linux and Windows type targets
+  over 18 source files each. Install contracts, module ceilings, documentation
+  consistency, Ruff and whitespace passed.
+- Post-write acknowledgement failures preserve an unknown outcome instead of
+  claiming an untouched configuration. The final adapter/independent-process
+  packet passed ten cases without skips, including malformed native preview
+  refusal. A separate actual-write/unknown-acknowledgement control passed
+  without retrying the write. Review and required exact-source CI still gate
+  this slice.
+- These are unit/lightweight process and fresh-configuration controls, not a
+  full installer clean-room or native Linux qualification. An installed/live
+  lane is not exercised: runtime rollout and carrier/activation effects remain
+  held, and the operation itself has no external backend. The parent stays Active.
