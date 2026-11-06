@@ -427,7 +427,7 @@ def test_batch_get_refresh_returns_ordered_partial_or_total_failure(
 
 @pytest.mark.parametrize("refresh", [False, True])
 @pytest.mark.parametrize("failure", [
-    "ciphertext", "schema", "key", "entry", "field", "rotation",
+    "ciphertext", "schema", "key", "orphan-key", "entry", "field", "rotation",
     "journal-empty", "journal-candidate", "journal-operation", "journal-previous",
 ])
 def test_batch_refuses_corrupt_fernet_cache_without_replacement(
@@ -450,8 +450,10 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
         persistent._cache_file.write_bytes(b"corrupt-ciphertext")
     elif failure == "schema":
         persistent._cache_file.write_bytes(cipher.encrypt(b'{"v":1,"entries":[]}'))
-    elif failure == "key":
+    elif failure in ("key", "orphan-key"):
         persistent._key_file.write_bytes(kek.WRAP_MAGIC + b"Rmalformed-fernet-key")
+        if failure == "orphan-key":
+            persistent._cache_file.unlink()
     else:
         malformed = {
             "entry": [],
@@ -470,7 +472,7 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
         persistent._cache_file.write_bytes(cipher.encrypt(json.dumps({
             "v": 1, "entries": {"Example/one": fields, "Example/two": fields},
         }).encode()))
-    cache_before = persistent._cache_file.read_bytes()
+    cache_before = persistent._cache_file.read_bytes() if persistent._cache_file.exists() else None
     key_before = persistent._key_file.read_bytes()
     persistent = PersistentCache()
     monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
@@ -490,13 +492,76 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
     assert all(row["ok"] is False and row["value"] is None for row in results)
     assert all(row["error"].startswith("cache_protection_failed;") for row in results)
     assert captured.err == ""
-    assert persistent._cache_file.read_bytes() == cache_before
+    if cache_before is None:
+        assert not persistent._cache_file.exists()
+    else:
+        assert persistent._cache_file.read_bytes() == cache_before
     assert persistent._key_file.read_bytes() == key_before
     if failure == "key":
         with pytest.raises(ValueError):
             cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
     else:
         assert persistent.get("Example/one") is None
+
+
+def test_batch_can_populate_cache_with_valid_existing_key_only(
+    enabled_cache, monkeypatch, capsys,
+):
+    persistent = get_cache()
+    assert persistent.put("Example/one", "password", "previous")
+    key_before = persistent._key_file.read_bytes()
+    persistent._cache_file.unlink()
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: PersistentCache())
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", lambda *_args, **_kwargs: {
+        "ok": True, "value": "authoritative",
+    })
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"Example/one"}]'))
+
+    assert cli.main(["batch-get"]) == 0
+    result, = json.loads(capsys.readouterr().out)["results"]
+    assert result["value"] == "authoritative"
+    assert persistent._key_file.read_bytes() == key_before
+    assert PersistentCache().get("Example/one") == "authoritative"
+
+
+@pytest.mark.parametrize("stage", ["startup", "read"])
+@pytest.mark.parametrize("failure", ["os", "value", "timeout", "type", "attribute"])
+def test_batch_service_errors_are_not_reported_as_cache_failures(
+    enabled_cache, monkeypatch, capsys, stage, failure,
+):
+    import subprocess
+
+    error = {
+        "os": OSError("private-service-diagnostic"),
+        "value": ValueError("private-service-diagnostic"),
+        "timeout": subprocess.TimeoutExpired(["private-helper"], 5),
+        "type": TypeError("private-service-diagnostic"),
+        "attribute": AttributeError("private-service-diagnostic"),
+    }[failure]
+
+    def failed(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(cli, "ensure_service", failed if stage == "startup" else lambda: True)
+    monkeypatch.setattr(cli, "send_command", failed)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(
+        '[{"entry":"Example/one"},{"entry":"Example/two"}]',
+    ))
+
+    assert cli.main(["batch-get"]) == 1
+    captured = capsys.readouterr()
+    results = json.loads(captured.out)["results"]
+    assert [row["entry"] for row in results] == ["Example/one", "Example/two"]
+    assert all(row["ok"] is False and row["value"] is None for row in results)
+    assert all(row["source"] == "service" for row in results)
+    expected = "service_unavailable;" if stage == "startup" else "service_read_failed;"
+    assert all(row["error"].startswith(expected) for row in results)
+    assert captured.err == ""
+    assert "private-service-diagnostic" not in captured.out
+    assert "private-helper" not in captured.out
+    with pytest.raises(type(error)):
+        cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
 
 
 @pytest.mark.parametrize("refresh", [False, True])
@@ -522,6 +587,36 @@ def test_batch_preserves_valid_pending_journal_semantics(
     else:
         assert persistent.pending_replace("Example/one", "password")["candidate"] == "candidate"
         assert persistent.get("Example/one") is None
+
+
+@pytest.mark.parametrize("response", [
+    {"ok": True}, {"ok": True, "value": 42}, [],
+    {"ok": "yes", "value": "not-published"},
+])
+def test_batch_rejects_malformed_service_values_before_cache_write(
+    enabled_cache, monkeypatch, capsys, response,
+):
+    persistent = get_cache()
+    assert persistent.put("Example/retained", "password", "cached-value")
+    cache_before = persistent._cache_file.read_bytes()
+    key_before = persistent._key_file.read_bytes()
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", lambda *_args, **_kwargs: response)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(
+        '[{"entry":"Example/one"},{"entry":"Example/two"}]',
+    ))
+
+    assert cli.main(["batch-get"]) == 1
+    captured = capsys.readouterr()
+    results = json.loads(captured.out)["results"]
+    assert [row["entry"] for row in results] == ["Example/one", "Example/two"]
+    assert all(row["ok"] is False and row["value"] is None for row in results)
+    assert all(row["source"] == "service" for row in results)
+    assert all(row["error"].startswith("service_response_invalid;") for row in results)
+    assert "not-published" not in captured.out
+    assert persistent._cache_file.read_bytes() == cache_before
+    assert persistent._key_file.read_bytes() == key_before
 
 
 @pytest.mark.parametrize("refresh", [False, True])

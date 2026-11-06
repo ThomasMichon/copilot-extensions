@@ -172,6 +172,8 @@ class PersistentCache:
 
     def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
         if not self._cache_file.exists():
+            if strict and self._key_file.exists():
+                self._get_fernet(readonly=True)
             return {"v": 1, "entries": {}}
         if not self._key_file.exists():
             from .cache_dpapi import MAGIC, CacheProtectionError

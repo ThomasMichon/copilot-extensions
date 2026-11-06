@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 import os
+import subprocess
 import sys
 
 from . import config
@@ -67,7 +68,13 @@ def read_credential(args) -> CredentialRead:
             error = f"{entry} [{field}] not in cache"
         return CredentialRead(1, error=error, source="cache")
 
-    if not cli.ensure_service():
+    try:
+        ready = cli.ensure_service()
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
+        if not strict_cache:
+            raise
+        return CredentialRead(1, error="service_unavailable; vault service could not be reached")
+    if not ready:
         return CredentialRead(1, error="could not start vault service")
 
     request = {
@@ -83,7 +90,18 @@ def read_credential(args) -> CredentialRead:
     succeeded = False
     reconciliation_failed = False
     with read_lock:
-        resp = cli.send_command(request, timeout=None)
+        try:
+            resp = cli.send_command(request, timeout=None)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
+            if not strict_cache:
+                raise
+            return CredentialRead(1, error="service_read_failed; vault service request did not complete")
+        if strict_cache and resp is not None and (
+            not isinstance(resp, dict)
+            or type(resp.get("ok")) is not bool
+            or (resp["ok"] and not isinstance(resp.get("value"), str))
+        ):
+            return CredentialRead(1, error="service_response_invalid; vault service returned an invalid response")
         if resp and resp.get("ok"):
             value = resp["value"]
             succeeded = True
