@@ -5921,6 +5921,9 @@ termination aliases. Executable lookups (`command -v`/`-V`) remain harmless
 inspection, not commands to execute.
 Recognized shell state changes invalidate inherited environment or relative-directory
 scope evidence; an explicit absolute private transport can still be verified.
+Shell substitutions are inspected as nested command positions. Unresolved
+variable, home or glob expansion in a mux namespace is not private-scope proof;
+literal argument vectors do not undergo shell expansion.
 
 For real mux fixtures, use
 `plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact

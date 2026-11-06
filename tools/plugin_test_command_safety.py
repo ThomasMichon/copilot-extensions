@@ -11,7 +11,7 @@ import re
 import shlex
 import sys
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from functools import lru_cache
 
 SANDBOX_ENV = "COPILOT_EXTENSIONS_TEST_SANDBOX"
@@ -259,6 +259,37 @@ def _launcher_problem(
     )
 
 
+def _shell_substitutions(text: str, *, powershell: bool) -> Iterator[str]:
+    cursor = 0
+    while match := re.search(r"\$\(|`", text[cursor:]):
+        start = cursor + match.start()
+        if text[start] == "`":
+            end = text.find("`", start + 1) if not powershell else -1
+            cursor = start + 1 if end < 0 else end + 1
+            if end >= 0:
+                yield text[start + 1:end]
+            continue
+        index, depth, quote = start + 2, 1, ""
+        while index < len(text) and depth:
+            char = text[index]
+            if char == ("`" if powershell else "\\") and quote != "'":
+                index += 2
+                continue
+            if quote:
+                if char == quote:
+                    quote = ""
+            elif char in "\"'":
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            index += 1
+        cursor = index
+        if depth == 0:
+            yield text[start + 2:index - 1]
+
+
 def _shell_problem(
     text: str, *, cwd: str | Path | object | None = None,
     environment: Mapping[str, str] | None = None, sandbox: Path | None = None,
@@ -305,6 +336,13 @@ def _shell_problem(
         text, re.IGNORECASE,
     ):
         environment = {}
+    for nested in _shell_substitutions(text, powershell=powershell):
+        problem = _shell_problem(
+            nested, cwd=cwd, environment=environment, sandbox=sandbox,
+            check_mux_scope=check_mux_scope, powershell=powershell,
+        )
+        if problem:
+            return problem
     for segment in re.split(r"[\r\n;|&]+", text):
         if not check_mux_scope and not _SOURCE_MARKERS.search(segment):
             continue
@@ -313,6 +351,7 @@ def _shell_problem(
         segment = segment.strip()
         while match := re.match(r"^(?:(?:if|then|elif|else|while|until|do|!)(?=\s)|[({])\s*", segment):
             segment = segment[match.end():]
+        segment = re.sub(r"(?:[)}]\s*)+$", "", segment)
         try:
             parts = _tokens(segment)
         except UnsafeTestCommand:
@@ -324,6 +363,14 @@ def _shell_problem(
             pass
         for candidate in candidates:
             if candidate:
+                if check_mux_scope and re.search(
+                    r"\b(?:psmux|pmux|tmux)(?:\.exe)?\b", segment, re.IGNORECASE,
+                ) and any(
+                    flag in {"-S", "-L"} and index + 1 < len(candidate)
+                    and re.search(r"[$`%!~*?\[\]{}]", candidate[index + 1])
+                    for index, flag in enumerate(candidate)
+                ):
+                    return "cannot verify a shell-expanded mux namespace"
                 if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", candidate[0]):
                     candidate = ["env", *candidate]
                 problem = _command_problem(

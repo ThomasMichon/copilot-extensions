@@ -336,6 +336,11 @@ def test_shell_mutation_still_allows_an_explicit_absolute_private_transport(monk
     "! tmux kill-session -t fixture",
     "(tmux kill-session -t fixture)",
     "{ tmux kill-session -t fixture; }",
+    "result=$(tmux kill-session -t wt-live)",
+    "result=`tmux kill-session -t wt-live`",
+    "(kill -TERM -1)",
+    "! ( kill -TERM -1 )",
+    "if true; then (kill -TERM -1); fi",
 ])
 def test_shell_control_prefixes_cannot_hide_cleanup(tmp_path, monkeypatch, script):
     command = ["sh", "-c", script]
@@ -355,6 +360,37 @@ def test_shell_control_prefix_preserves_verified_private_mux(monkeypatch, tmp_pa
         ["sh", "-c", f"if true; then tmux {private} has-session; fi"],
         sandbox=tmp_path, environment={},
     ) is None
+
+
+@pytest.mark.parametrize("selector", ["$SOCKET", "${SOCKET}", "%SOCKET%", "!SOCKET!", "~/mux.sock", "*.sock"])
+def test_shell_namespace_expansions_cannot_qualify_literal_private_paths(
+    monkeypatch, tmp_path, selector,
+):
+    monkeypatch.setattr(safety, "os", SimpleNamespace(
+        name="posix", environ={}, path=os.path, fsdecode=os.fsdecode,
+    ))
+    command = ["sh", "-c", f'tmux -S "{selector}" kill-session -t fixture']
+    environment = {"SOCKET": str(tmp_path.parent / "foreign.sock")}
+    assert safety.command_problem(command, sandbox=tmp_path, cwd=tmp_path, environment=environment)
+    hooks = []
+    monkeypatch.setattr(safety, "_installed", False)
+    monkeypatch.setattr(safety.sys, "addaudithook", hooks.append)
+    safety.install_command_guard(tmp_path)
+    with pytest.raises(safety.UnsafeTestCommand):
+        hooks[0]("subprocess.Popen", ("sh", command, tmp_path, environment))
+    assert safety.command_problem(
+        ["tmux", "-S", str(tmp_path / "$literal.sock"), "has-session"],
+        sandbox=tmp_path, environment={},
+    ) is None
+
+
+@pytest.mark.parametrize("command", [
+    ["sh", "-c", "value=$(printf fixture); kill -TERM 123"],
+    ["sh", "-c", "value=`printf fixture`; kill -TERM 123"],
+    ["pwsh", "-Command", '$value = "$(Get-Date)"; Stop-Process -Id 123'],
+])
+def test_harmless_substitution_does_not_hide_or_ban_separate_explicit_cleanup(command, tmp_path):
+    assert safety.command_problem(command, sandbox=tmp_path, environment={}) is None
 
 
 @pytest.mark.parametrize("flag", ["-WorkingDirectory", "-wd", "-wo", "/wd"])
@@ -470,6 +506,9 @@ def test_shell_helpers_and_generated_script_literals_are_checked(tmp_path, name,
     "asyncio.create_subprocess_exec(mux, 'kill-server')",
     "asyncio.create_subprocess_exec(b'pmux.exe', b'kill-server')",
     "asyncio.create_subprocess_shell('if kill -TERM -1; then true; fi')",
+    "os.system('(kill -TERM -1)')",
+    "os.system('result=$(kill -TERM -1)')",
+    "os.system('result=`kill -TERM -1`')",
 ])
 def test_source_exec_and_spawn_signatures_use_the_actual_executable(tmp_path, body):
     source = tmp_path / "child.py"
