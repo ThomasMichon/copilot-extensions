@@ -26,6 +26,9 @@ def test_poisoned_parent_state_is_detached_before_preparation(tmp_path, monkeypa
     runner = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, runner)
     spec.loader.exec_module(runner)
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     cache = tmp_path / "test-cache"
     monkeypatch.setattr(runner, "VENV_ROOT", None)
     monkeypatch.setattr(runner, "venv_root", lambda repo: cache)
@@ -67,6 +70,9 @@ def test_user_only_uv_configuration_survives_private_preparation(tmp_path, monke
     monkeypatch.setitem(sys.modules, spec.name, runner)
     spec.loader.exec_module(runner)
     import installer_dependency_policy as policy
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     host = tmp_path / "user"
     config = host / "uv" / "uv.toml"
     config.parent.mkdir(parents=True)

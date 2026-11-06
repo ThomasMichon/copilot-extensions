@@ -206,6 +206,11 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
 
 ### Phase 3 - Session-preserving handover and independent retirement
 
+- [ ] **Separate warm-reuse follow-up under #10486:** qualify broader
+  HTTP/dynamic-auth/routed/CLI execution and per-target context/credential
+  custody before expanding sharing. Preserve actual stdio cwd semantics.
+  The bounded slice's explicit direct fallback and cold-start cost are
+  operator-selected limitations, not additional incoming gates.
 - [ ] Retain a client-owned, installation-independent stdio lifetime boundary;
   replacement payloads and shared runtime slots must not invalidate it.
 - [ ] Reattach adopted wrappers to the incoming shared runtime while preserving
@@ -1220,3 +1225,40 @@ migration already works.
   MCP desktop-gate withdrawal, historical journals and existing holds remain
   intact. Current-head CI/review, publication and acceptance remain
   coordinator-owned; full handover and prepared qualification remain open.
+
+### 2026-11-06 - Bounded fallbacks and preparation authentication capture
+
+- The operator selected landing the bounded fresh-code fix with explicit direct
+  fallbacks, tracking broader warm reuse separately. Contract and Performance
+  text now state the HTTP/dynamic-auth/routed/CLI limits and cold
+  authentication/startup/initialization costs. Actual inherited stdio cwd
+  remains significant; no nonexistent `ServerSpec.cwd` feature was invented.
+  The warm follow-up is tracked under #10486, not as a new incoming gate.
+- An offline, synthetic selected-UV experiment proved that home isolation lost
+  the default credential-store location; the existing explicit
+  `UV_CREDENTIALS_DIR` input restored lookup without restoring HOME.
+  Preparation now captures the selected tool's `uv auth dir` metadata before
+  isolation, delegating executable and environment qualification to the existing
+  dependency owner. Only the validated absolute location is retained for
+  preparation; capture never reads or copies credential contents.
+- Unknown, unsupported, malformed, failed or oversized metadata refuses before
+  installation. The owned metadata bound is **20 seconds**, including its
+  five-second cleanup reserve; stream limits are **32 KiB/16 KiB**.
+  Unconfirmed cleanup retains native custody and the preparation sandbox.
+  Explicit directory inputs must agree with qualified metadata. No global
+  installer floor, automatic tool upgrade, feed/trust fallback or broker was added.
+- Actors receive their own private auth directory, including host-state opt-ins.
+  Configured resolver/keyring settings remain with their existing owner, but
+  external keyring state is unqualified and not claimed restored.
+  Final focused qualification passed **36 tests** with verified cleanup,
+  including actual selected UV **0.11.18** default/explicit synthetic stores,
+  actor exclusion, errors and existing preparation/isolation controls.
+- Canonical installer libraries and their mirrors are unchanged; capture remains
+  in the preparation owner. Only that owner's existing admitted source binding
+  changed. The **4234/598/300** inventory/coverage/budget, MCP footprint and
+  runtime pipeline are unchanged; dependency guard **567/0** and owning
+  source/doc/contract guards passed. No full unit or MCP-native packet was
+  repeated; prior MCP-native results remain prior-head evidence.
+- Current-head review/CI, publication, release and installed acceptance remain
+  coordinator-owned. Full session handover, prepared qualification and pre-feature
+  adoption holds remain open; this slice is not whole-effort completion.

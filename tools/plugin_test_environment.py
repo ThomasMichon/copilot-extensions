@@ -9,6 +9,7 @@ does not redefine Windows special-folder APIs.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -32,6 +33,7 @@ _ROOT_ENV = {
     "AGENT_HOME": "home",
     "AGENT_SCRATCH_ROOT": "scratch",
     "PYTHONPYCACHEPREFIX": "pycache",
+    "UV_CREDENTIALS_DIR": "uv/credentials",
     "AGENT_WORKTREES_HOME": "agent-worktrees",
     "AGENT_WORKTREES_PIVOTS_DIR": "agent-worktrees/pivots",
     "AGENT_WORKTREES_PLUGINS_DIR": "agent-worktrees/plugins",
@@ -65,6 +67,7 @@ ROOT_ENV_NAMES = tuple(_ROOT_ENV)
 OPTIONAL_FILE_ENV_NAMES = tuple(_FILE_ENV)
 ALWAYS_SANDBOX_ENV_NAMES = (
     "TEMP", "TMP", "TMPDIR", "XDG_RUNTIME_DIR", "AGENT_SCRATCH_ROOT", "PYTHONPYCACHEPREFIX",
+    "UV_CREDENTIALS_DIR",
 )
 
 # Shared with coverage collection so both runners detach from the same host state.
@@ -91,11 +94,85 @@ _ALWAYS_SCRUB_NAMES = ALWAYS_SCRUB_NAMES
 _CREDENTIAL_NAMES = {"GH_TOKEN", "GITHUB_TOKEN"}
 
 
+def capture_preparation_auth(uv, environment, cwd, *, run_metadata):
+    """Capture only UV's declared auth-directory location, never its contents."""
+    import installer_dependency_policy as dependencies
+
+    error_type = dependencies.DependencyPolicyError
+    scope = {
+        "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_DATA_HOME",
+        "XDG_STATE_HOME", "UV_CREDENTIALS_DIR", "UV_PREVIEW_FEATURES",
+        "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL",
+    }
+    selected = dependencies._captured_environment({
+        key: environment[key] for key in environment
+        if (key.upper() if os.name == "nt" else key) in scope
+    })
+    explicit = selected.get("UV_CREDENTIALS_DIR")
+    requirement = (
+        "Test preparation requires selected UV supporting 'uv auth dir' metadata "
+        "and one absolute authentication-directory path; select compatible UV "
+        "or correct UV_CREDENTIALS_DIR. No installation was attempted."
+    )
+    if explicit is not None and (
+        not isinstance(explicit, str) or not explicit or not Path(explicit).is_absolute()
+        or any(ord(char) < 32 or ord(char) == 127 for char in explicit)
+    ):
+        raise error_type(requirement)
+    try:
+        result = run_metadata(
+            [dependencies._select_uv_executable(uv), "auth", "dir"], env=selected, cwd=cwd,
+            timeout=15, capture=True, binary=True, input_text=None,
+            max_stdout_bytes=32768, max_stderr_bytes=16384,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        raise error_type(requirement) from None
+    if not isinstance(result, subprocess.CompletedProcess) or (
+        type(result.returncode) is not int or result.returncode != 0
+        or not isinstance(result.stdout, bytes) or not isinstance(result.stderr, bytes)
+    ):
+        raise error_type(requirement)
+    if len(result.stdout) > 32768 or len(result.stderr) > 16384:
+        raise error_type(requirement)
+    try:
+        value = result.stdout.decode("utf-8")
+        value = value[:-2] if value.endswith("\r\n") else value[:-1] if value.endswith("\n") else value
+        if not value or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("invalid directory metadata")
+        directory = Path(value)
+        if not directory.is_absolute():
+            raise ValueError("relative directory metadata")
+        directory = directory.resolve()
+        if directory.exists() and not directory.is_dir():
+            raise ValueError("directory metadata names a file")
+        if explicit is not None and Path(explicit).resolve() != directory:
+            raise ValueError("directory metadata differs from the explicit input")
+    except (OSError, ValueError, RuntimeError):
+        raise error_type(requirement) from None
+    return {"UV_CREDENTIALS_DIR": str(directory)}
+
+
 def preparation_environment(
-    base: Mapping[str, str], sandbox: Path, project: Path,
+    base: Mapping[str, str], sandbox: Path, project: Path, *, uv: str,
 ) -> dict[str, str]:
     """Retain the dependency owner's resolver inputs before detaching host state."""
     import installer_dependency_policy as dependencies
+    from agent_procutil.owned_process import OwnedCleanupError, OwnedExecutionBudget, run_caller_owned
+
+    def metadata(argv, **options):
+        try:
+            return run_caller_owned(
+                argv, **options, budget=OwnedExecutionBudget.from_timeout(20, cleanup_reserve=5),
+            )
+        except OwnedCleanupError as exc:
+            if __package__:
+                from .plugin_test_containment import UnreapedProcessError
+            else:
+                from plugin_test_containment import UnreapedProcessError
+
+            raise UnreapedProcessError("Authentication metadata cleanup unconfirmed", job=exc.job) from exc
+
+    authentication = capture_preparation_auth(uv, base, project, run_metadata=metadata)
 
     inputs = dependencies._config_inputs([], base, project)
     configuration = {}
@@ -108,6 +185,7 @@ def preparation_environment(
             }
         configuration = dependencies._merge_config(data, configuration)
     environment = isolated_environment(base, sandbox)
+    environment.update(authentication)
     if inputs:
         retained = sandbox.resolve() / "uv.toml"
         dependencies._write_toml(retained, configuration)

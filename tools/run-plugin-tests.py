@@ -301,7 +301,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         record_owner(Path(private), REPO, retention="disposable after verified preparation cleanup")
         from plugin_test_environment import preparation_environment
 
-        environment = preparation_environment(os.environ, Path(private), _plugin_dir(name))
+        environment = preparation_environment(os.environ, Path(private), _plugin_dir(name), uv=uv)
         cache = retained / ".uv-cache"
         cache.mkdir(parents=True, exist_ok=True)
         environment["UV_CACHE_DIR"] = str(cache.resolve())

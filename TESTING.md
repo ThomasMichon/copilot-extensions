@@ -1848,6 +1848,34 @@ Preparation resolves UV configuration before redirecting user directories,
 using the dependency owner's configuration reader, precedence merge and private
 snapshot writer. Existing UV credential inputs remain available without
 restoring host service roots or changing feed admission policy.
+Preparation additionally requires the **selected UV executable** to support
+`uv auth dir`. The preparation owner uses the dependency owner's executable
+and environment qualification to capture one UTF-8 absolute
+authentication-directory path before home isolation; an explicit
+`UV_CREDENTIALS_DIR` must be absolute and agree with that metadata.
+The read-only metadata operation receives only authentication-location and
+native execution inputs, not host service/installation participants or ambient
+GitHub tokens. It has a 20-second owned bound including a five-second cleanup
+reserve, with 32 KiB stdout and 16 KiB stderr ceilings. Unconfirmed cleanup
+retains its native custody and preparation sandbox. Unsupported, missing,
+malformed or failed metadata refuses **before installation**, with an actionable
+selected-tool requirement; it never guesses UV defaults or retries authlessly.
+Select compatible UV in the invocation's existing tooling context or correct
+the explicit directory input. No OS/user tool upgrade is automatic, and this
+is a test-preparation capability contract, not a global installer version floor.
+
+Only UV preparation receives the captured location through `UV_CREDENTIALS_DIR`;
+capture never reads or copies credential contents. Actor environments reset
+that variable to their own private directory, including host-state opt-ins.
+An independently qualified private fixture may supply its own synthetic
+authentication input after isolation. Configured resolver/keyring settings
+remain within the existing dependency owner, but external keyring state is
+**unqualified**: this does not claim to restore file-backed or native keyring
+contexts. The opt-in
+`COPILOT_EXTENSIONS_UV_AUTH_QUALIFICATION=1` control in
+`tools/test_preparation_auth_context.py` uses only an offline synthetic store;
+its selected-UV result is independent native qualification, not promotion-unit
+actor admission.
 Windows Job teardown reuses procutil's pinned-member native-exit barrier.
 Zero active-process accounting alone does not prove that native exit or pending
 I/O has completed. Unconfirmed retirement retains the same Job witnesses on

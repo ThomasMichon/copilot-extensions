@@ -600,6 +600,9 @@ def test_real_group_processes_release_readonly_files_before_cleanup(
 def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
     tmp_path, monkeypatch, reinstall, cached,
 ):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugin"
     plugin.mkdir()
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
@@ -661,6 +664,9 @@ def selectable_tests(tmp_path, monkeypatch):
     ("agent-dispatch", "service-gateway"), ("agent-ssh", ""),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     plugin = tmp_path / "plugins" / name
@@ -735,6 +741,9 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
 def test_manager_bridge_is_prepared_only_by_the_test_runner(
     tmp_path, monkeypatch, bridge_fails, cached_editable,
 ):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
         monkeypatch.setenv(key, str(tmp_path / "host-state"))
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):

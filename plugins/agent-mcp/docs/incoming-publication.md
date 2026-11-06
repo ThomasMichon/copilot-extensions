@@ -86,6 +86,23 @@ assuming the installer's authority is the caller's authority. Compatible
 contexts may still pool; full per-session credential custody remains separate
 handover work. Unmanaged development retains its existing peer contract.
 
+### Performance and direct-fallback limits
+
+The operator-selected bounded slice lands fresh-code selection with explicit
+direct fallbacks; broader warm reuse is separately tracked under
+[#10486](https://github.com/ThomasMichon/copilot-extensions/issues/10486).
+HTTP, dynamic-auth, routed and CLI contexts remain intentionally outside shared
+execution. Stdio equivalence retains real process-cwd semantics: `ServerSpec`
+has no `cwd` override, and the upstream inherits the spawning process's cwd.
+Different caller/daemon cwd or credentials therefore remain meaningful
+refusals, not reasons to weaken the execution challenge.
+
+Direct fallback pays caller-side authentication, process/startup and protocol
+initialization costs rather than guaranteeing warm reuse or latency savings.
+The response still uses current selected code and cannot replay an uncertain
+mutation. Broader reuse needs its own per-target context and credential custody;
+it is not a new incoming gate, a completed handover, or whole-effort completion.
+
 Cold bridge, call, materialized-stub and catalog execution revalidate the
 launched physical slot immediately before new execution, including explicit
 `--no-serve` paths. Selection refusal is distinct from an unavailable optional
