@@ -182,6 +182,36 @@ def test_invalid_cell_context_fails_closed_after_authority_is_configured(area):
         _submit(area, context=(("COPILOT_EXTENSIONS_CONTEXT", str(area / "missing.json")),))
 
 
+def test_removed_queued_receipt_is_refused_without_stalling_unrelated_work(area):
+    root = area / "state"
+    receipt = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    change_authority("project", project="example", context=str(receipt), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    stale = _submit(
+        area, authority="project", project="example",
+        context=(("COPILOT_EXTENSIONS_CONTEXT", str(receipt)),),
+    )
+    unrelated = _submit(area, backend="other-product")
+    receipt.unlink()
+    ran = []
+    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    assert status(stale.id, root=root).exit_code == 3
+    assert "context" in status(stale.id, root=root).error
+    assert status(unrelated.id, root=root).exit_code == 0
+    assert ran == [unrelated.id]
+
+
+def test_missing_global_guard_still_fences_all_pending_work(area):
+    root = area / "state"
+    change_authority("standalone", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    request = _submit(area, authority="standalone")
+    (root / "authority.guard").unlink()
+    with pytest.raises(StateError, match="authority"):
+        drain(root=root, executor=lambda _transaction: pytest.fail("guard was ignored"))
+    assert status(request.id, root=root).state == "pending"
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows short-name aliases")
 def test_short_receipt_path_selects_the_same_cell(area):
     import ctypes

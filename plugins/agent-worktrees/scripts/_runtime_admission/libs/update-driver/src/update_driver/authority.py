@@ -260,6 +260,8 @@ def _request_scope(spec: RequestSpec, root: Path) -> str:
 
 
 def refusal(root: Path, spec: RequestSpec, *, db: sqlite3.Connection | None = None) -> str | None:
+    from . import core
+
     if not suite_request(spec):
         return None
     if db is None:
@@ -269,7 +271,14 @@ def refusal(root: Path, spec: RequestSpec, *, db: sqlite3.Connection | None = No
         )
     else:
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        selected_scope = _request_scope(spec, root) if version == SCHEMA_VERSION else ""
+        if version == SCHEMA_VERSION:
+            _from_db(root, "", db)
+            try:
+                selected_scope = _request_scope(spec, root)
+            except core.StateError:
+                return "suite update authority context is unavailable or invalid"
+        else:
+            selected_scope = ""
         selected = _from_db(root, selected_scope, db)
     if not selected.configured and spec.authority in ("", "standalone"):
         return None

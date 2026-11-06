@@ -203,6 +203,23 @@ def test_project_authority_fails_closed_if_controller_disappears(project, monkey
     ) == 1
 
 
+@pytest.mark.parametrize("parent_flags", [
+    ("--phase", "runtimes"), ("--target", "agent-bridge"), ("--no-project-controller",),
+])
+def test_partial_parent_request_cannot_claim_controller_delegation(project, parent_flags):
+    from update_driver import RequestSpec
+    from update_driver.authority import selection
+
+    request = RequestSpec("engine", parent_flags, project="example", authority="project")
+    assert project_update_controller.dispatch_update(
+        args(phase="runtimes", _controller_request=request,
+             _controller_authority=selection("project", "example")),
+        lambda _args: 0,
+        lambda _args: pytest.fail("partial parent reached Manager"),
+        lambda: pytest.fail("partial parent executed a delegated phase"),
+    ) == 1
+
+
 def test_project_authority_reaches_controller_under_real_driver_custody(project, monkeypatch, tmp_path):
     import update_driver
     from agent_worktrees import update_driver_cli
@@ -250,6 +267,70 @@ def test_project_authority_reaches_controller_under_real_driver_custody(project,
     assert update_driver.drain(root=driver_root, executor=execute) == 0
     assert update_driver.status(request.id, root=driver_root).exit_code == 0
     assert result.read_text(encoding="utf-8") == "--force"
+
+
+def test_project_controller_can_delegate_runtime_phase_under_real_custody(project, monkeypatch, tmp_path):
+    import update_driver
+    from agent_worktrees import update_driver_cli
+
+    tmp_path = tmp_path.resolve()
+    _repo, script = project
+    home, engine = tmp_path / "home", tmp_path / "engine"
+    home.mkdir()
+    driver_root = home / ".copilot-extensions" / "update-driver"
+    result = tmp_path / "delegated.txt"
+    paths = [str(Path(entry).resolve()) for entry in sys.path if entry]
+    child = (
+        "import argparse,sys\n"
+        f"sys.path[:0] = {paths!r}\n"
+        "from pathlib import Path\n"
+        "from agent_worktrees import config,update_cli,update_driver_cli\n"
+        "config.set_active_project('example')\n"
+        f"config.install_dir = lambda: Path({str(engine)!r})\n"
+        f"def phase(args): Path({str(result)!r}).write_text(args.phase, encoding='utf-8'); return 0\n"
+        "update_cli._core_helper = lambda name, local: phase if name == '_cmd_update_in_plugin' else local\n"
+        "raise SystemExit(update_driver_cli.cmd_update_request("
+        "argparse.Namespace(phase='runtimes', no_manager=True)))\n"
+    )
+    script.write_text(
+        "import os,subprocess,sys\n"
+        f"sys.path[:0] = {paths!r}\n"
+        "from pathlib import Path\n"
+        "from update_driver import borrowed_custody,participant_environment\n"
+        f"with borrowed_custody(root=Path({str(driver_root)!r})):\n"
+        f"    child = subprocess.run([sys.executable,'-I','-S','-B','-X','utf8','-c',{child!r}], "
+        "env={**os.environ,**participant_environment()},capture_output=True,text=True,encoding='utf-8',timeout=20,"
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        "    if child.returncode: print((child.stdout+child.stderr).encode('ascii','backslashreplace').decode(), file=sys.stderr)\n"
+        "    raise SystemExit(child.returncode)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(config, "install_dir", lambda: engine)
+    update_driver.change_authority(
+        "project", project="example", root=driver_root, timeout=5,
+        verify_capabilities=lambda _deadline: True,
+    )
+    request = update_driver.enqueue(
+        update_driver.RequestSpec(
+            "engine", ("--force",), project="example", cwd=str(tmp_path),
+            source=str(engine.resolve()), authority="project",
+        ),
+        runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
+        root=driver_root,
+    )
+
+    def execute(transaction):
+        with monkeypatch.context() as environment:
+            for key, value in transaction.participant_env().items():
+                environment.setenv(key, value)
+            return update_driver_cli.cmd_update_request(args(force=True))
+
+    assert update_driver.drain(root=driver_root, executor=execute) == 0
+    assert update_driver.status(request.id, root=driver_root).exit_code == 0
+    assert result.read_text(encoding="utf-8") == "runtimes"
 
 
 def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
