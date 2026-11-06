@@ -106,14 +106,7 @@ def prepared_application(tmp_path, wheel, monkeypatch, *, extras="gateway-host")
     original.mkdir()
     source, _ = project_at(original / "source")
     engine = native.source_inputs.engine
-    packages = set(engine._package_roots(PROJECT))
-    if "ssh-client" in extras.split(","):
-        from standalone_consumers import local_dependency_source
-
-        for name in ("agent-ssh", "agent-single-instance-lease"):
-            dependency = local_dependency_source(PROJECT, name, source_root=PROJECT.parent)
-            packages.update(engine._package_roots(dependency))
-    packages = sorted(packages)
+    packages = engine._package_roots(PROJECT)
     for package in packages:
         if package != PROJECT:
             shutil.copytree(
