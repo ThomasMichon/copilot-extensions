@@ -26,7 +26,9 @@ def read_credential(args) -> CredentialRead:
     field = args.field or "password"
     try:
         cache_entry = config.normalize_entry(entry, config.resolve_context().group)
-    except RuntimeError:
+    except (RuntimeError, ValueError, OSError) as exc:
+        if not isinstance(exc, RuntimeError) and not getattr(args, "strict_cache", False):
+            raise
         return CredentialRead(
             1, error="context_invalid; repair configured or pinned vault selection and retry",
             source="none",

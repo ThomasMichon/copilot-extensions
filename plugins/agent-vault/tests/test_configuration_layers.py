@@ -99,6 +99,32 @@ def test_runtime_activation_uses_existing_qualified_layers(tmp_path, monkeypatch
         configuration.runtime_enabled(str(base))
 
 
+def test_batch_reports_invalid_configuration_without_touching_cache(
+    tmp_path, monkeypatch, capsys,
+):
+    import io
+    from types import SimpleNamespace
+
+    from agent_vault import cache, cli
+
+    setup(tmp_path, monkeypatch, binding="unresolved")
+    monkeypatch.setattr(cache, "get_cache", lambda: pytest.fail("invalid context reached cache"))
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(
+        '[{"entry":"Example/one"},{"entry":"Example/two"}]',
+    ))
+
+    assert cli.main(["batch-get"]) == 1
+    captured = capsys.readouterr()
+    results = json.loads(captured.out)["results"]
+    assert [row["entry"] for row in results] == ["Example/one", "Example/two"]
+    assert all(row["ok"] is False and row["value"] is None for row in results)
+    assert all(row["source"] == "none" for row in results)
+    assert all(row["error"].startswith("context_invalid;") for row in results)
+    assert captured.err == ""
+    with pytest.raises(ConfigurationError):
+        cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
+
+
 @pytest.mark.parametrize("value", [None, "true", 1, {}, []])
 def test_runtime_activation_rejects_nonboolean_opt_in(tmp_path, monkeypatch, value):
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)

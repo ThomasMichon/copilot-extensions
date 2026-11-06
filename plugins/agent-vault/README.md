@@ -262,8 +262,11 @@ Reads reuse ordinary `get` context selection, cache and service transports.
 `--refresh` bypasses cached values and retains authoritative cache
 reconciliation; a reconciliation failure is not a successful result. Batch
 reads never enable interactive prompts. Use the existing explicit unlock
-command if required. The CLI does not create per-entry subprocesses or a new
-daemon protocol; callers may impose one deadline on the whole process.
+command if required. One credential CLI process handles the batch without
+per-entry credential CLI children or a new daemon protocol. Existing context
+qualification and transport discovery may still invoke their ordinary peer
+helpers; this is not a daemon-native batch or a claim of one total OS process.
+Callers may impose one deadline on the whole invocation and its descendants.
 
 The selected runtime advertises `batch-get-v1` through the existing
 `agent-vault invocation-contract --json` contract. Check that runtime's
