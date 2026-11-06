@@ -1569,6 +1569,10 @@ Windows CIM controls passed 86 cases, with cleanup verified in both runs.
 After reconciling the branch with current Dev and extending the same deadline
 controls to actual trickled status/header parsing plus an on-time response,
 the combined selection passed all 168 cases with verified cleanup.
+The next CI attempt exposed two admitted files whose local Windows CRLF bytes
+differed from their canonical LF Git blobs. Their source bindings now use the
+committed bytes; exact-byte verification and unit effect restrictions remain
+unchanged. No host Git configuration or unrelated source was rewritten.
 The broader historical workflow test selection still encounters the
 [previously recorded non-enrolled recipe gap](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6627995884)
 and [retired-workflow fixture failures](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6282693571).
