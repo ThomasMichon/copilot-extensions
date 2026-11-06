@@ -1421,12 +1421,13 @@ let usageRetryTimer = null;
 // Native-selected sessions defer pressure handling to the host (see
 // native-pressure.mjs): drop any queued nudge, never log threshold crossings
 // computed from a possibly inaccurate usage estimate, and say so once per
-// window. Manual entry points are unaffected.
-function deferNativePressure(revision) {
+// root context window (reset only by a context clear or successful
+// compaction, not by tool/cwd changes). Manual entry points are unaffected.
+let nativeDeferralNoticeShown = false;
+function deferNativePressure() {
   pendingNudge = null;
-  const key = `${revision}:native-pressure-deferred`;
-  if (nativeWarnings.has(key)) return;
-  nativeWarnings.add(key);
+  if (nativeDeferralNoticeShown) return;
+  nativeDeferralNoticeShown = true;
   session.log(
     "[Context Handoff] Native context management is selected; automatic " +
     "context-pressure nudges are deferred to the host (native_pressure: defer). " +
@@ -1451,7 +1452,7 @@ session.on("session.idle", async (event) => {
   if (revision !== state.windowRevision) return;
   await handoffConfigPromise;
   if (nativePressureDeferred(observation, handoffConfig.nativePressure)) {
-    deferNativePressure(revision);
+    deferNativePressure();
     return;
   }
   if (!observation.native && latestUsageEvent &&
@@ -1522,7 +1523,7 @@ async function handleUsage(event) {
   const observation = await observeNativeContext();
   if (revision !== state.windowRevision) return;
   if (nativePressureDeferred(observation, handoffConfig.nativePressure)) {
-    deferNativePressure(revision);
+    deferNativePressure();
     persistState();
     return;
   }
@@ -1561,7 +1562,7 @@ async function handleUsage(event) {
     if (state.forceTriggered || state.handoffGenerated) return;
     if (currentObservation.native) {
       if (nativePressureDeferred(currentObservation, handoffConfig.nativePressure)) {
-        deferNativePressure(revision);
+        deferNativePressure();
         persistState();
         return;
       }
@@ -1693,6 +1694,7 @@ session.on("session.compaction_complete", (event) => {
     clearTimeout(usageRetryTimer);
     usageRetryTimer = null;
     nativeWarnings.clear();
+    nativeDeferralNoticeShown = false;
     nativeObserver.invalidate();
     session.log(
       `[Context Handoff] Compaction complete. ` +
@@ -1709,6 +1711,7 @@ session.on("session.context_cleared", (event) => {
   clearTimeout(usageRetryTimer);
   usageRetryTimer = null;
   nativeWarnings.clear();
+  nativeDeferralNoticeShown = false;
   state.softReminderSent = false;
   state.hardReminderSent = false;
   state.softLogShown = false;

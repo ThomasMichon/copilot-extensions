@@ -27,6 +27,21 @@ assert.equal(pressureLogs(), 0);
 assert.doesNotMatch(session.logs.join("\n"), /Auto-generating and triggering/);
 assert.equal((await session.config.onPermissionRequest({ kind: "write" })).kind, "approve");
 
+// Non-clearing tool/cwd events within the same root window do not repeat
+// the deferral notice.
+await emit("session.tools_updated", { model: "synthetic" });
+await emit("session.usage_info", usage(830));
+await emit("session.context_changed", { cwd: process.cwd() });
+await emit("session.usage_info", usage(840));
+await emit("session.idle");
+assert.equal(session.prompts.length, 0);
+assert.equal(deferrals(), 1);
+
+// Successful compaction starts a new window, so the notice appears once more.
+await emit("session.compaction_complete", { success: true, tokensRemoved: 500, postCompactionTokens: 300 });
+await emit("session.usage_info", usage(850));
+assert.equal(deferrals(), 2);
+
 // A nudge queued while custom recovery was selected is dropped at idle once
 // native context management becomes selected.
 await emit("session.context_cleared", { messagesCleared: 8 });
@@ -36,7 +51,7 @@ await emit("session.usage_info", usage(710));
 await settings(true);
 await emit("session.idle");
 assert.equal(session.prompts.length, 0);
-assert.equal(deferrals(), 2);
+assert.equal(deferrals(), 3);
 
 // Custom (non-native) recovery keeps its existing nudges.
 await emit("session.context_cleared", { messagesCleared: 8 });
