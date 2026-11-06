@@ -3,20 +3,32 @@
 from __future__ import annotations
 
 import json
+import stat
 from contextlib import ExitStack
 
 from . import permissions, tracking
 from .checkout_reference_paths import canonical, under as _under
 
 
+def _require_plain_file(path) -> None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if (
+        not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+        or getattr(info, "st_file_attributes", 0) & 0x400
+    ):
+        raise ValueError("Copilot permission file is redirected or linked")
+
+
 def capture(source: str, destination: str) -> dict:
     captured = {}
     for kind, path in (("trust", permissions._config_path()), ("permissions", permissions._permissions_path())):
+        _require_plain_file(path)
         if not path.exists():
             captured[kind] = None
             continue
-        if path.is_symlink():
-            raise ValueError("Copilot permission file is redirected")
         _, data = permissions._read_config_jsonc(path) if kind == "trust" else (
             "", json.loads(path.read_text(encoding="utf-8")),
         )
@@ -43,6 +55,8 @@ def apply(source: str, destination: str, captured: dict) -> None:
         for _, path in selected:
             if path.parent.exists():
                 locks.enter_context(tracking._RecordLock(path, require_sidecar=True))
+        for _, path in selected:
+            _require_plain_file(path)
         for kind, path in selected:
             expected = captured[kind]
             if not path.exists():

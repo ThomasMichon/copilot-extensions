@@ -259,7 +259,7 @@ def plan(worktree_id: str, destination: str, config) -> dict:
             return {**previous, "apply": False, "recovery": False, "replayed": True}
     target = _target(record, destination, config)
     source = Path(record.worktree_path)
-    if source.absolute() != source.resolve():
+    if source.name != worktree_id or source.absolute() != source.resolve():
         raise ValueError("relocation source location is redirected or noncanonical")
     _ordinary(record, ledger, config)
     if ledger.resolve().is_relative_to(source):

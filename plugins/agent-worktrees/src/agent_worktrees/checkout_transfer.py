@@ -94,7 +94,17 @@ def _require_plain_stream(path: Path) -> None:
 
 
 def copy(source: Path, destination: Path) -> None:
+    expected, staged = manifest(source), manifest(destination)
+    if any(
+        name not in expected or (entry[2] is None) != (expected[name][2] is None)
+        for name, entry in staged.items()
+    ):
+        raise ValueError("owned copy stage contains unexpected checkout entries")
     if os.name == "nt":
+        require_safe_destination(source, destination)
+        access = _access(source)
+        if any(_access(path) != access for path in destination.rglob("*")):
+            raise ValueError("owned copy stage access changed")
         result = run_caller_owned(
             ["robocopy", str(source), str(destination), "/E", "/COPY:DATS", "/SL",
              "/DCOPY:DAT", "/XJ", "/R:0", "/W:0", "/NFL", "/NDL", "/NJH", "/NJS", "/UNICODE"],
@@ -106,7 +116,18 @@ def copy(source: Path, destination: Path) -> None:
             diagnostic = data.decode("utf-16-le" if b"\0" in data else "utf-8", errors="replace").strip()
             raise OSError(f"native checkout copy failed (robocopy {result.returncode}): {diagnostic}")
     else:
-        shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True, copy_function=shutil.copy2)
+        if any(entry[4][0] != os.getuid() for entry in staged.values()):
+            raise ValueError("owned copy stage has a foreign file owner")
+        for path in [destination, *(path for path in destination.rglob("*") if path.is_dir())]:
+            path.chmod(stat.S_IMODE(path.stat().st_mode) | stat.S_IRWXU)
+        shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True, copy_function=_retry_file)
+
+
+def _retry_file(source, destination):
+    target = Path(destination)
+    if target.exists():
+        target.unlink()
+    return shutil.copy2(source, destination)
 
 
 def require_safe_destination(source: Path, parent: Path) -> None:

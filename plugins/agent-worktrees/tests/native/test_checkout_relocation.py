@@ -126,7 +126,12 @@ def test_complete_native_move_preserves_bytes_git_identity_and_operational_permi
         tracking.save_record(fixture.record)
 
 
-def test_copy_interruption_fences_launch_and_retries_original_operation(checkout, monkeypatch):
+@pytest.mark.parametrize("readonly", [False, True])
+def test_copy_interruption_fences_launch_and_retries_original_operation(checkout, monkeypatch, readonly):
+    if readonly and os.name == "nt":
+        pytest.skip("POSIX preserved read-only-file recovery")
+    if readonly:
+        (checkout.source / "tracked.txt").chmod(0o444)
     copy = relocation.transfer.copy
     def interrupted(source, stage):
         copy(source, stage)
@@ -269,7 +274,7 @@ def test_destination_access_keeps_inherit_only_semantics(tmp_path):
     assert relocation.transfer._access(directories[0]) != relocation.transfer._access(directories[1])
 
 
-@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "source-parent-alias", "source-record-alias", "seed"])
+@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "source-parent-alias", "source-record-alias", "source-basename", "seed"])
 def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
     record = checkout.record
     if blocker == "dirty":
@@ -301,6 +306,12 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
         config_path.write_text(json.dumps({"trustedFolders": [str(alias)]}))
     elif blocker == "source-record-alias":
         record.worktree_path = str(checkout.source.parent / "sibling" / ".." / checkout.source.name)
+        tracking.save_record(record)
+    elif blocker == "source-basename":
+        renamed = checkout.source.with_name("another-basename")
+        git_ops.git("worktree", "move", str(checkout.source), str(renamed), cwd=checkout.anchor)
+        checkout.source = renamed
+        record.worktree_path = str(renamed)
         tracking.save_record(record)
     elif blocker == "seed":
         from agent_worktrees import launch_seed_state
@@ -555,6 +566,49 @@ def test_capture_modify_apply_refuses_new_nested_permission_bindings(checkout, k
     with pytest.raises(ValueError, match="nested permission bindings"):
         paths.apply(str(checkout.source), str(checkout.destination), captured)
     assert nested in (json.loads(path.read_text())["trustedFolders" if kind == "trust" else "locations"])
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink"])
+def test_apply_preserves_a_permission_file_link_created_after_capture(checkout, kind):
+    paths = relocation.permission_paths
+    captured = paths.capture(str(checkout.source), str(checkout.destination))
+    path = checkout.copilot / "config.json"
+    original = path.read_bytes()
+    external = checkout.home / "external-config.json"
+    external.write_bytes(original)
+    path.unlink()
+    try:
+        os.symlink(external, path) if kind == "symlink" else os.link(external, path)
+    except OSError as exc:
+        if kind == "symlink" and os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("native symlink creation privilege is unavailable")
+        raise
+    with pytest.raises(ValueError, match="redirected or linked"):
+        paths.apply(str(checkout.source), str(checkout.destination), captured)
+    assert path.samefile(external)
+    assert external.read_bytes() == original
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX read-only staged-directory recovery")
+def test_posix_copy_retry_preserves_readonly_files_and_directory_modes(tmp_path):
+    source, destination = tmp_path / "source", tmp_path / "stage"
+    (source / "nested").mkdir(parents=True)
+    destination.mkdir(mode=0o700)
+    file = source / "nested" / "data"
+    file.write_bytes(b"read-only preserved content")
+    file.chmod(0o444)
+    (source / "nested").chmod(0o500)
+    source.chmod(0o500)
+    before = relocation.transfer.manifest(source)
+    try:
+        relocation.transfer.copy(source, destination)
+        relocation.transfer.copy(source, destination)
+        assert relocation.transfer.manifest(source) == before
+        assert relocation.transfer.manifest(destination) == before
+    finally:
+        for root in (source, destination):
+            root.chmod(0o700)
+            (root / "nested").chmod(0o700)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native cross-volume qualification")
