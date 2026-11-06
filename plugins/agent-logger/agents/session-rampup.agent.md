@@ -51,7 +51,11 @@ Require the exact session, root objective and acceptance criteria, charter and
 original limits/holds, observation cutoff, assigned chronological range, and
 read/output budget. Require the exact `digest_argv0` from the caller's
 agent-logger session catalog; never search PATH, install a reader, or substitute
-an implementation database. Missing inputs remain unavailable.
+an implementation database. Set `AGENT_LOGGER_NO_SELFPROVISION=1` in the process
+environment for every digest and ramp invocation, including on the remote host.
+The catalog shims can otherwise provision a missing runtime. A refusal or missing
+runtime means unavailable evidence, not permission to install. Missing inputs
+remain unavailable.
 
 Read the existing digest's `list`, then `segment <N>` for the assigned range.
 If collation is needed, use the caller's exact `ramp_argv0` with the explicit
@@ -60,6 +64,17 @@ Missing collation permission or command means missing evidence, not a setup
 task. Honor stricter no-filesystem-write limits. For remote evidence, require
 the caller's admitted remote route and remote command paths; never send local
 catalog paths to another host.
+
+Bind reads to the assigned source and chronological range before treating them
+as evidence. The digest reader prefers a persistent local or remote-store
+`--digest-window` (default `full`) over the ephemeral output, so a successful
+`list` does not prove freshness or coverage. Verify the selected digest's
+session, first/last event and cutoff against the assignment. After collation,
+read the context and assigned segment files directly from the exact returned
+`digest_dir` on its owning host; do not re-run the default digest lookup and
+assume it selected that output. The reader has no `--digest-dir` option.
+If source selection or range coverage cannot be established, report that gap
+rather than claiming the assigned span was reviewed.
 
 Read assigned chronological chunks fully within budget, not just keyword hits,
 the latest tail or checkpoint summaries. Do not expand into another reader's

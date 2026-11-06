@@ -14,10 +14,14 @@ The supplied Worktrees command supports these diagnostic compositions:
 
 ```text
 <worktrees-argv> list-sessions --all-projects --json
-<worktrees-argv> list-sessions --worktree <id> --json
+<worktrees-argv> list-sessions --all-projects --worktree <id> --json
 <worktrees-argv> worktree-lineage --worktree <id> --json
 <worktrees-argv> session-lineage --session-id <id> --json
 ```
+
+Keep `--all-projects` when narrowing the roster to a worktree, or explicitly
+select its owning project with `-p <project>`. Without either, `list-sessions`
+searches only the current project and can miss a valid worktree from the roster.
 
 Use the owning runtime's documented meanings for live/head/activation fields.
 Retained active records and old metadata timestamps alone do not prove a

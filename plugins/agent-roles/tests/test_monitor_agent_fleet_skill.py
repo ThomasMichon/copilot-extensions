@@ -63,3 +63,9 @@ def test_offline_scenarios_have_distinct_evidence_and_explicit_modes() -> None:
     assert {case["mode"] for case in cases} == {
         "read-only", "steering-authorized",
     }
+
+
+def test_fabric_reader_preserves_cross_project_roster_scope() -> None:
+    text = _read(SKILL / "references" / "fabric-readers.md")
+    assert "list-sessions --all-projects --worktree <id> --json" in text
+    assert "select its owning project with `-p <project>`" in text
