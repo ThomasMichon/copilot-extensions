@@ -19,6 +19,7 @@ ROLES = {
     "cold_recovery_worker.py": "worker",
     "cold_drain_peer.py": "peer",
     "agent_bridge/session_host/__main__.py": "host",
+    "fixtures/worktree_record_owner.py": "record-writer",
 }
 
 
@@ -299,7 +300,7 @@ def verify_interpreters(
         raise ValueError("Capture required runtime source execution is incomplete")
     return {
         "policy": "every-owned-interpreter-source-and-entrypoint-v1",
-        "roles": ["observer", *(role for role in ("worker", "host", "peer") if role in expected_roles)],
+        "roles": ["observer", *(role for role in ("worker", "host", "peer", "record-writer") if role in expected_roles)],
         "verified_sources": sorted(sources),
         "scope": "contained Python fixtures; not native Copilot or Windows qualification",
     }

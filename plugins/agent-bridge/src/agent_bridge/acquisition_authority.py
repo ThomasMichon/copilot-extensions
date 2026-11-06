@@ -43,6 +43,10 @@ async def worktree_command(
     args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
     timeout: float = 120, owner_prefix: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
+    from .acquisition_worktree_writer import require_scope, session_write_args
+
+    require_scope(args, project=project)
+    args = session_write_args(args)
     try:
         prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
     except ContextRefused as exc:
@@ -231,7 +235,7 @@ async def verify_dispatch(request: AcquisitionRequest, resolver: Any) -> dict[st
         or reservation.get("state") not in {"reserving", "spawned"}
         or reservation.get("release_requested")
         or resolved.worktree_id != request.worktree_id
-        or request.version == 2 and (
+        or request.version >= 2 and (
             reservation.get("allocation_project") != request.project
             or reservation.get("worktree_path") != request.worktree_path
         )
@@ -242,10 +246,14 @@ async def verify_dispatch(request: AcquisitionRequest, resolver: Any) -> dict[st
 
 async def verify_worktree(request: AcquisitionRequest) -> tuple[dict[str, Any], str | None]:
     row = await read_worktree_record(request.worktree_id, request.project)
-    if request.version == 2 and (
+    if request.version >= 2 and (
         row.get("repo") != request.project or row.get("path") != request.worktree_path
     ):
         raise AcquisitionRefused("workspace_identity_conflict", "worktree owner changed execution identity")
+    if request.worktree_writer is not None and (
+        row.get("creation_nonce") != request.worktree_writer.creation_nonce
+    ):
+        raise AcquisitionRefused("workspace_identity_conflict", "original workspace creation nonce changed")
     if row.get("status") == "finalizing":
         raise AcquisitionRefused("transition_pending", "worktree finalization is in progress")
     if row.get("status") in {"finalized", "complete", "completed", "archived"}:

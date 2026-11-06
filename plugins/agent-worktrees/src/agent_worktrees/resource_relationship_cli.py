@@ -88,6 +88,7 @@ def cmd_resource_relationship(args) -> int:
                 "expected_writer_identity": True,
                 "resident_inspect": 1,
                 "writer_scope": "executing-process",
+                "retained_session_writes": 1,
                 "writer_contract": relationship.writer_contract(),
                 "writer_identity": relationship.writer_identity(),
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,

@@ -11,7 +11,9 @@ from typing import Any
 from .acquisition_contract import AcquisitionRequest, AcquisitionResult
 from .client import BridgeClientError
 
-from .protocol import ACQUISITION_WORKSPACE_PROTOCOL_VERSION, PLUGIN_READINESS_PROTOCOL_VERSION
+from .protocol import (
+    ACQUISITION_WORKSPACE_PROTOCOL_VERSION, PLUGIN_READINESS_PROTOCOL_VERSION,
+)
 
 ACQUISITION_PROTOCOL_VERSION = ACQUISITION_WORKSPACE_PROTOCOL_VERSION
 
@@ -22,6 +24,8 @@ def acquire(client: Any, request: AcquisitionRequest) -> AcquisitionResult:
         for field in ("caller_worktree", "caller_owner_ref", "caller_session_id")
     ) \
         else ACQUISITION_PROTOCOL_VERSION
+    if request.worktree_writer is not None:
+        required = PLUGIN_READINESS_PROTOCOL_VERSION
     if not client.daemon_supports(required):
         raise BridgeClientError(426, {
             "code": "unsupported_acquisition_protocol",
@@ -30,7 +34,13 @@ def acquire(client: Any, request: AcquisitionRequest) -> AcquisitionResult:
         })
     payload = request.model_dump(mode="json")
     payload["protocol_version"] = required
-    result = client._request("POST", "/api/v1/acquisitions", payload, request_timeout=max(240, request.verify_timeout + 240))
+    send = client._request
+    if request.worktree_writer is not None:
+        from .acquisition_worktree_writer import CAPABILITY
+        from .client_protocol_floor import protocol_floored_request
+
+        send = protocol_floored_request(client, required, capabilities={CAPABILITY: 1})
+    result = send("POST", "/api/v1/acquisitions", payload, request_timeout=max(240, request.verify_timeout + 240))
     return AcquisitionResult.model_validate(result)
 
 

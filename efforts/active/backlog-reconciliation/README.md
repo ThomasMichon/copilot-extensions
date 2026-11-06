@@ -331,6 +331,24 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #10959 completed against merged #10961 and its promised regression
+definitions, without a new installed-runtime gate. The
+[derived-state cohort](derived-state-receiving-cohort.md) records complete
+actual #10968 receipt and three `NOT_PLANNED` retirements, retaining all four
+distinct planned outcomes and source/resource duties. Complete02:30 PST
+scans measure828 whole OPEN,993 audited dispositions and99 above fixed729;
+four campaign departures, no arrivals or external departures. The campaign
+remains Active; tracking consolidation is not cleanup implementation.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed merge #10973 of the actual #1419 intake and four tracking
+retirements. Complete02:14 PST scans measure832 whole OPEN,989 audited
+dispositions and103 above fixed729; two arrivals and no departures explain
+the increase. Five further originals have bounded parallel research, while
+two new author-claimed implementation issues retain their distinct scopes.
+The campaign remains Active; no new closure or source/resource release follows.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records complete actual #1419 receiving/readback and `NOT_PLANNED` retirement
 of #2467/#2475/#3004/#5543 with every original and source/resource duty retained.
 No new parent was created: #3005's already-audited lineage identified #1419.

@@ -202,6 +202,26 @@ def test_additive_fields_do_not_override_acquisition_authority() -> None:
     assert error.value.code == "result_mismatch"
 
 
+def test_writer_requirement_is_mandatory_versioned_and_not_a_caller_command() -> None:
+    requirement = {
+        "identity": {"installation_root": "/installed-owner", "runtime_generation": "a" * 32},
+        "creation_nonce": "original-incarnation",
+    }
+    base = {"version": 3, "project": "example", "worktree_path": "/checkout"}
+    expected = request(**base, worktree_writer=requirement)
+    assert expected.worktree_writer.identity.runtime_generation == "a" * 32
+    assert "worktree_writer" not in request().model_dump()
+    for changes in (
+        {**base},
+        {"version": 2, "project": "example", "worktree_path": "/checkout", "worktree_writer": requirement},
+        {**base, "worktree_writer": {**requirement, "prefix": ["caller-command"]}},
+        {**base, "worktree_writer": {**requirement, "identity": {
+            **requirement["identity"], "runtime_generation": "unknown",
+        }}},
+    ):
+        with pytest.raises(ValidationError):
+            request(**changes)
+
 @pytest.mark.parametrize(
     "changes,code",
     [

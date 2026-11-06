@@ -784,6 +784,12 @@ def dispatch(
     lacking the verb entirely: never dialed, same-code fallback used
     instead.
     """
+    from . import retained_record_writer
+
+    if retained_record_writer.active():
+        if verb not in retained_record_writer.VERBS:
+            raise ValueError("retained record writer cannot delegate another tracking verb")
+        return run_direct(verb, args, reason="qualified executing session writer")
     payload = {"verb": verb, "args": args}
 
     def _fallback() -> dict:
