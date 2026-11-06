@@ -2711,3 +2711,22 @@ All 15 focused portfolio/source guards and touched-file basic lint pass. No
 test case, execution limit or partition changes. A new exact-source run must
 identify the original failing boundary before choosing a runtime or scheduling
 fix; elapsed time alone still does not establish a timeout class.
+
+Diagnostic checkpoint `0729368271987b49041aac97c67d3901425f1408`
+passes exact-source run `42297364665` on both native platforms. Downloaded
+reports contain the complete 53 controls per platform, with no skipped, failed
+or error cases. Linux's five actual first/repeat scenario items take 20.586,
+20.286, 20.561, 20.561 and 3.350 seconds; Windows takes 43.008, 44.894,
+48.819, 45.147 and 2.259 seconds. All original limits remain. No partition
+change was needed. The earlier failed run's missing inner evidence does not
+permit a retrospective timeout or flake classification; future failures now
+retain their runner output and per-attempt progress.
+
+This qualifies ordinary incoming-source construction and the existing reader,
+not the optional complete prepared Source/application path end to end. That
+path has focused composition/custody coverage and retains the existing
+constructor's implementation; its actual prepared-source consumer remains a
+caller-adoption validation obligation. Local cold construction cost and Windows
+historical-seed performance also remain unresolved. Source review, required CI,
+merge and release are still required; parent and installed-recovery gates stay
+open.
