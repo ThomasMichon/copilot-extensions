@@ -32,9 +32,10 @@ def _repository(directory, env, promoted):
     groups = declaration.get("groups", [declaration])
     for group in groups:
         for name in group["files"]:
-            destination = repo / group["canonicalDir"] / name
+            relative = Path(group["canonicalDir"]) / name
+            destination = repo / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(SOURCE.parent / group["canonicalDir"] / name, destination)
+            shutil.copy2(SOURCE.parent / relative, destination)
     (payload / "plugin.json").write_text(json.dumps({
         "name": "worktree-manager", "version": si.payload_version(payload),
     }))

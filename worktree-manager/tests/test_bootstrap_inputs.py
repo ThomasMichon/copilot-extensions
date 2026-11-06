@@ -224,17 +224,19 @@ def test_retention_does_not_replace_a_conflicting_snapshot_after_a_lock(inputs, 
     assert (winners[0] / "foreign").read_text() == "preserve"
 
 
-@pytest.fixture
-def preparation_assets(inputs):
+@pytest.fixture(params=[1, 2])
+def preparation_assets(inputs, request):
     helper, payload, driver = inputs
     tools = payload.parent / "tools"
     tools.mkdir()
     tool = tools / "prepare_runtime_source.py"
     tool.write_text("VALUE = 1\n", encoding="utf-8")
+    version = request.param
     (payload / "packaged-assets.json").write_text(json.dumps({
-        "schema": "copilot-extensions.packaged-assets", "version": 1,
-        "canonicalDir": "tools", "payloadDir": "scripts/runtime-source-tools",
-        "files": [tool.name],
+        "schema": "copilot-extensions.packaged-assets", "version": version,
+        "canonicalDir": "tools" if version == 1 else ".",
+        "payloadDir": "scripts/runtime-source-tools",
+        "files": [tool.name if version == 1 else "tools/" + tool.name],
     }), encoding="utf-8")
     return helper, payload, driver, tool
 
@@ -242,7 +244,8 @@ def preparation_assets(inputs):
 def test_preparation_assets_are_retained_addressed_and_rechecked(preparation_assets):
     helper, payload, driver, tool = preparation_assets
     first, _share = helper.retain(payload, driver)
-    target = Path("scripts/runtime-source-tools") / tool.name
+    declaration = json.loads((payload / "packaged-assets.json").read_text())
+    target = Path(declaration["payloadDir"]) / declaration["files"][0]
     first_target = Path(helper.engine._native_retained_path(first / target))
     assert first_target.read_bytes() == tool.read_bytes()
     assert not (payload / target).exists()
@@ -266,6 +269,8 @@ def test_grouped_preparation_assets_retain_each_declared_root(preparation_assets
         {"canonicalDir": "tools", "payloadDir": "scripts/runtime-input-provider/tools", "files": [tool.name]},
         {"canonicalDir": "libs/example", "payloadDir": "scripts/runtime-input-provider/libs/example",
          "files": [library.name]},
+        {"canonicalDir": ".", "payloadDir": "scripts/runtime-source-tools",
+         "files": ["tools/" + tool.name]},
     ]
     (payload / "packaged-assets.json").write_text(json.dumps({
         "schema": "copilot-extensions.packaged-assets", "version": 2, "groups": groups,
@@ -282,7 +287,9 @@ def test_grouped_preparation_assets_retain_each_declared_root(preparation_assets
     assert helper.retain(payload, driver)[0] != retained
 
 
-@pytest.mark.parametrize("failure", ["traversal", "absolute", "duplicate", "overlap"])
+@pytest.mark.parametrize("failure", [
+    "traversal", "absolute", "duplicate", "overlap", "case-duplicate", "case-overlap",
+])
 def test_grouped_preparation_assets_refuse_unsafe_or_overlapping_targets(
     preparation_assets, failure,
 ):
@@ -295,6 +302,10 @@ def test_grouped_preparation_assets_refuse_unsafe_or_overlapping_targets(
         group["payloadDir"] = "/outside"
     elif failure == "duplicate":
         groups.append(dict(group))
+    elif failure == "case-duplicate":
+        group["files"].append(tool.name.upper())
+    elif failure == "case-overlap":
+        groups.append({"canonicalDir": "tools", "payloadDir": "SCRIPTS", "files": ["RUNTIME-SOURCE-TOOLS"]})
     else:
         groups.append({"canonicalDir": "tools", "payloadDir": "scripts", "files": ["runtime-source-tools"]})
     (payload / "packaged-assets.json").write_text(json.dumps({
@@ -324,12 +335,14 @@ def test_preparation_asset_change_during_freezing_is_not_published(preparation_a
 def test_retention_rechecks_preparation_assets_after_a_lock(preparation_assets, monkeypatch, changed):
     helper, payload, driver, tool = preparation_assets
     rename, attempts = Path.rename, []
+    declaration = json.loads((payload / "packaged-assets.json").read_text())
+    relative = Path(declaration["payloadDir"]) / declaration["files"][0]
 
     def mutate(path, destination):
         if path.name == "inputs" and path.parent.name.startswith(".prepare-"):
             attempts.append(path)
             target = tool if changed == "source" else (
-                path / "worktree-manager" / "scripts" / "runtime-source-tools" / tool.name
+                path / "worktree-manager" / relative
             )
             target.write_text("changed after freezing\n", encoding="utf-8")
             error = PermissionError("transient publication lock")
@@ -348,15 +361,14 @@ def test_retention_rechecks_preparation_assets_after_a_lock(preparation_assets, 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended path handling")
 def test_retention_revalidates_long_windows_asset_path(preparation_assets):
     helper, payload, driver, tool = preparation_assets
-    expected = (
-        driver / "bootstrap-inputs" / ("a" * 64) / "worktree-manager" / "scripts"
-        / "runtime-source-tools" / tool.name
-    )
+    declaration = json.loads((payload / "packaged-assets.json").read_text())
+    relative = Path(declaration["payloadDir"]) / declaration["files"][0]
+    expected = driver / "bootstrap-inputs" / ("a" * 64) / "worktree-manager" / relative
     padding = max(0, 270 - len(str(expected)) - 1)
     if padding:
         driver = driver / ("x" * padding)
     retained, _share = helper.retain(payload, driver)
-    selected = retained / "scripts" / "runtime-source-tools" / tool.name
+    selected = retained / relative
     assert len(str(selected)) >= 260
     assert Path(helper.engine._native_retained_path(selected)).read_bytes() == tool.read_bytes()
 
@@ -394,4 +406,16 @@ def test_retention_rejects_source_different_from_the_admitted_payload(preparatio
     helper, payload, driver, _tool = preparation_assets
     with pytest.raises(RuntimeError, match="installation source changed before retention"):
         helper.retain(payload, driver, expected_payload_digest="a" * 64)
+    assert not driver.exists()
+
+
+@pytest.mark.parametrize("name", ["../outside", "tools/../outside", "tools//outside", "C:/outside", "tools\\outside"])
+def test_nested_preparation_assets_refuse_unsafe_members_before_retention(inputs, name):
+    helper, payload, driver = inputs
+    (payload / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2,
+        "canonicalDir": ".", "payloadDir": "scripts/runtime-source-tools", "files": [name],
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="asset name"):
+        helper.retain(payload, driver)
     assert not driver.exists()

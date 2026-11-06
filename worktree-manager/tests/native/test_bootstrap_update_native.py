@@ -456,9 +456,10 @@ def test_retained_controller_prepares_dev_source_without_its_acquisition(
     declaration = json.loads(manifest.read_text(encoding="utf-8"))
     for group in declaration.get("groups", [declaration]):
         for name in group["files"]:
-            destination = acquisition / group["canonicalDir"] / name
+            relative = Path(group["canonicalDir"]) / name
+            destination = acquisition / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(SOURCE / group["canonicalDir"] / name, destination)
+            shutil.copy2(SOURCE / relative, destination)
     _git(acquisition, "add", ".")
     _git(
         acquisition, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
