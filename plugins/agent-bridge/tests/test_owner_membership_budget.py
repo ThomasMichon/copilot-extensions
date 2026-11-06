@@ -262,11 +262,30 @@ def test_private_native_value_limit_is_enforced_without_changing_canonical_limit
 
 def test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep(tmp_db, monkeypatch):
     budget = reader.ReadBudget(max_steps=1_000_000, seconds=0.05, started=0)
-    monkeypatch.setattr(reader, "time", SimpleNamespace(monotonic=lambda: 1.0))
+    monkeypatch.setattr(reader, "time", SimpleNamespace(perf_counter=lambda: 1.0))
     with pytest.raises(ObservationError) as failed:
         reader.snapshot(tmp_db.db_path, (), budget=budget)
     assert failed.value.code == "capture-budget-exhausted" and budget.exhausted
     assert budget.steps < budget.max_steps
+
+
+@pytest.mark.parametrize("elapsed,coarse,exhausted", [
+    (0.049, 0.062, False), (0.051, 0.047, True), (0.05, 0.062, False),
+])
+def test_private_deadline_uses_precise_elapsed_time_not_coarse_ticks(
+    monkeypatch: pytest.MonkeyPatch, elapsed: float, coarse: float, exhausted: bool,
+) -> None:
+    budget = reader.ReadBudget(started=0)
+    monkeypatch.setattr(reader, "time", SimpleNamespace(
+        perf_counter=lambda: elapsed, monotonic=lambda: coarse,
+    ))
+    if exhausted:
+        with pytest.raises(ObservationError) as caught:
+            budget.check()
+        assert caught.value.code == "capture-budget-exhausted"
+    else:
+        budget.check()
+    assert budget.exhausted is exhausted and budget.steps == 0
 
 
 def test_commit_does_no_capture_and_budget_failure_cannot_fail_canonical_write(owner, monkeypatch):

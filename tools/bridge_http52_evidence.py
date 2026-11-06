@@ -71,6 +71,7 @@ EXTRA_PATHS = (
 PROBES = {
     **retained.PROBES,
     "test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep": 1,
+    "test_private_deadline_uses_precise_elapsed_time_not_coarse_ticks": 3,
     "test_unknown_owner_large_history_has_actual_private_vm_cutoff": 1,
     "test_selected_owner_capture_does_not_scan_unrelated_registries": 1,
     "test_only_writable_bootstrap_prepares_lookup_indexes": 1,

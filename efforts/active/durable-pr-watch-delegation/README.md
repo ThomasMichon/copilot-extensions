@@ -939,6 +939,25 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Land the released-checkout test-preparation repair
+
+- #10861 merged at `0c269795980dfd898dd0f1a04142ae4e63f7b767`, after
+  current-head Copilot approval, resolved feedback and green latest CI
+  `42162316695`. The source/resolver packet passed 59 focused contracts;
+  its real-metadata and materialized-input limits remain recorded below.
+- The merged parent's complete Plan, Validation and Coordination were read
+  back. No installation, credential, service/fleet or resource row becomes
+  complete from this tooling repair. The #6286 retained installed exit and
+  broader #6007/#7188 outcomes remain open.
+- Source tracking observed the merge. Pull-forward initially auto-aborted
+  while replaying the squash; read-only native landing proof and a verified
+  recovery branch permitted a zero-unpublished-commit reconciliation without
+  losing work. The larger source worktree is retained.
+- #9277 remains open for corrected released-account preparation proof.
+  Release promotion and a separately authorized qualification repeat are the
+  next stretch. No hosted rerun, local update, shared-service activation,
+  fleet rollout or unrelated resource disposition follows from the merge.
+
 ### 2026-11-06 - Keep metadata qualification valid on released checkouts
 
 - The real-metadata fixture now explicitly retains the required top-level

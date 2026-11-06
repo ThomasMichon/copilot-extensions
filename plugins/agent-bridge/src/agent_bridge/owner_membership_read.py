@@ -22,10 +22,10 @@ class ReadBudget:
     seconds: float = MAX_READ_SECONDS
     steps: int = 0
     exhausted: bool = False
-    started: float = field(default_factory=time.monotonic)
+    started: float = field(default_factory=time.perf_counter)
 
     def check(self) -> None:
-        if self.steps > self.max_steps or time.monotonic() - self.started > self.seconds:
+        if self.steps > self.max_steps or time.perf_counter() - self.started > self.seconds:
             self.exhausted = True
             raise ObservationError(
                 "capture-budget-exhausted",
