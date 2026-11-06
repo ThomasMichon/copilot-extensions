@@ -41,10 +41,10 @@ def _bounded_log_text(text: str | None, limit: int) -> str | None:
 
 async def worktree_command(
     args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
-    timeout: float = 120,
+    timeout: float = 120, owner_prefix: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     try:
-        prefix = _agent_worktrees_launch_prefix()
+        prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
     except ContextRefused as exc:
         raise AcquisitionRefused("worktrees_unavailable", str(exc)) from exc
     if not prefix:

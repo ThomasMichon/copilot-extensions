@@ -48,6 +48,28 @@ use that peer-owned Python resolver for both execution and child-free
 the native resolver's different selection. Native-only peers retain execution
 but return unknown from observation.
 
+`pinned_launch_prefix(owner, own_root, raw_context, peer)` is an opt-in
+compatibility path returning `(prefix, selected_python)`. Keep that same prefix
+for capability qualification and subsequent calls; creating a new prefix for
+each call would select again. It requires a child-free peer-owned Python
+resolver and the selected immutable slot's existing `.runtime-bootstrap`
+launcher. At execution the boundary still checks current owner/peer receipts
+and governance and rebinds the environment, but it does not consult runtime
+selectors. The slot-local launcher acquires its existing retention lease before
+site imports and refuses incomplete or unattributable completion. Missing,
+retired or redirected slots fail without selecting another runtime or replaying
+the operation. Dynamic `launch_prefix` and native-only legacy execution remain
+unchanged; no ordinary caller opts into pinning automatically.
+
+Bridge's `_agent_worktrees_pinned_selection()` retains the prefix, installation
+root and interpreter for an explicit caller. It also supports its existing
+legacy owner boundary, retaining tombstone checks without a PATH fallback.
+`worktree_command` and the lineage helpers accept the retained tuple through
+`owner_prefix`; omission preserves their existing selection behavior. Pinning
+identifies an executing build, not its capabilities or a resident daemon:
+callers still need independent writer/workspace admission and running-generation
+qualification before enabling an allocation path.
+
 This intentionally adopts Python's canonical selector semantics for same-cell
 launch: legacy `current` link recovery, parsed completion JSON, and Python's
 interpreter subpath order apply. It is not an assertion that the prior shell

@@ -340,6 +340,85 @@ def test_peer_python_observation_and_launch_share_actual_resolver(
         peer_launch.observe_peer_python(*arguments)
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypatch, nested):
+    from agent_dispatch import peer_launch
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    first = _make_live_peer(cell, "agent-worktrees", "1.0.0", nested=nested)
+    second = _make_live_peer(cell, "agent-worktrees", "2.0.0", nested=nested)
+    peer = cell / "plugins" / "agent-worktrees"
+    scripts = Path(__file__).resolve().parents[2] / "agent-worktrees" / "scripts"
+    for version in ("1.0.0", "2.0.0"):
+        slot = peer / "versions" / version
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        for source in (scripts / "runtime_launcher.py", *scripts.glob("versioned_runtime*.py")):
+            shutil.copyfile(source, bootstrap / source.name)
+        _update_receipt(slot / ".install-complete.json", lambda data: data.update(payload_hash="a" * 64))
+    monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    arguments = ("agent-dispatch", own.parent, str(own), "agent-worktrees")
+    (peer / "current-version").write_text("1.0.0", encoding="utf-8")
+    with monkeypatch.context() as child_free:
+        child_free.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("pinning launched"))
+        pinned, python = peer_launch.pinned_launch_prefix(*arguments)
+    assert python == first
+    (peer / "current-version").write_text("2.0.0", encoding="utf-8")
+    for prefix, selected in ((pinned, first), (peer_launch.launch_prefix(*arguments), second)):
+        result = subprocess.run(
+            [*prefix, "probe", 'quoted " argument', "snowman \u2603"],
+            capture_output=True, encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output["python"] == str(selected)
+        assert output["argv"] == ["probe", 'quoted " argument', "snowman \u2603"]
+        assert output["env"]["AGENT_RT_ROOT"] == str(peer)
+        assert output["env"]["COPILOT_EXTENSIONS_CONTEXT"] == str(peer / "install.json")
+    streams = subprocess.run(
+        [*pinned, "streams"], input="retained stdin\n", capture_output=True,
+        encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert (streams.returncode, streams.stdout, streams.stderr) == (
+        7, "retained stdin\n", "peer-stderr\n",
+    )
+    # An unavailable retained build must not run the newer selected build.
+    marker = peer / "versions" / "1.0.0" / ".install-complete.json"
+    original = marker.read_text(encoding="utf-8")
+    marker.write_text("{}", encoding="utf-8")
+    sentinel = tmp_path / "unexpected-execution"
+    refused = subprocess.run(
+        [*pinned, "probe"], env={**os.environ, "PEER_EXECUTION_SENTINEL": str(sentinel)},
+        capture_output=True, encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert refused.returncode != 0 and refused.stdout == ""
+    assert not sentinel.exists()
+    marker.write_text(original, encoding="utf-8")
+    # A retained slot does not bypass current receipt/activation governance.
+    _update_receipt(peer / "installation-activation.json", lambda data: data.update(state="inactive"))
+    _assert_peer_refused(pinned)
+
+
+@pytest.mark.parametrize("python_resolver", [False, True])
+def test_pinning_refuses_legacy_peer_without_retention_support(tmp_path, monkeypatch, python_resolver):
+    from agent_dispatch import peer_launch
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    _make_live_peer(cell, "agent-worktrees", "1.0.0", python_resolver=python_resolver)
+    monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("pinning launched"))
+    with pytest.raises(ValueError, match="immutable retention bootstrap|peer-owned Python resolver"):
+        peer_launch.pinned_launch_prefix("agent-dispatch", own.parent, str(own), "agent-worktrees")
+
+
 @pytest.mark.parametrize("failure", ["missing-component", "syntax", "runtime"])
 def test_peer_resolver_failures_refuse_without_repeated_initialization(
     tmp_path, monkeypatch, failure,

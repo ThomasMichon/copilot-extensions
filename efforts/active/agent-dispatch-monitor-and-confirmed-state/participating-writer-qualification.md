@@ -45,7 +45,8 @@ Session-lock files and Bridge's own database are separate storage boundaries;
 their presence is not evidence about the Worktrees record serializer.
 
 The delegated child revalidates the installation receipts and asks the selected
-peer's shipped native resolver for its actual interpreter. That interpreter
+peer's shipped Python resolver, where available, for its actual interpreter.
+Older native-only peers retain their compatibility execution path. That interpreter
 can belong to a physical `.venv` application environment inside the version
 slot, not only a historical direct-slot environment. The shared launcher now
 accepts both layouts without accepting redirected slot/environment directories.
@@ -54,10 +55,10 @@ cohort admission. Its unchanged dynamic launch prefix is still not an immutable
 build binding, and the health root alone cannot establish one.
 
 The installed candidate already publishes its build UUID inside the immutable
-slot, independently of root-wide deployment stamps. The next bounded source
-step observes that UUID for Bridge's legacy selection through the existing
-canonical resolver, with selection and metadata rechecks and no child process.
-The continuing source migration uses the peer-owned Python resolver for both
+slot, independently of root-wide deployment stamps. Bridge's source observation
+reads that UUID for legacy selection through the existing canonical resolver,
+with selection and metadata rechecks and no child process.
+The merged source migration uses the peer-owned Python resolver for both
 same-cell execution and child-free selected-interpreter observation, under the
 existing receipt/governance fences. Native-only peers remain unknown.
 This intentionally changes the native selector's differing edge cases rather
@@ -65,6 +66,17 @@ than substituting a Python observation for unchanged native execution.
 Even a known selected-slot UUID is
 not the delegated process's live serializer response or a pinned future launch.
 Independent admission must retain both distinctions before ordinary integration.
+
+The opt-in pinned-prefix source path now retains the selected immutable
+Worktrees interpreter through the existing owner/peer launch boundary and
+slot-local retention bootstrap. An explicit caller can use the exact same
+command for capability qualification and subsequent acquisition/lineage
+operations. Runtime selector movement does not silently replace that writer;
+current installation governance still applies, and a missing pinned slot
+refuses without substitution. Native-only or bootstrap-less peers remain
+supported by ordinary legacy calls but cannot satisfy this optional route.
+This is a source compatibility seam, not ordinary assembly, independent
+workspace/resident admission or running-service qualification.
 
 ## Selected admission requirements
 
@@ -118,7 +130,8 @@ mandatory. Unknown responses retain the same assignment and claim.
       owners, then construct the conditional assignment writer with real
       independent admission. A copied rendezvous, substituted direct response,
       newer payload or changed selection must not satisfy it.
-      Provider observation source is implemented; conditional admission and
+      Legacy and same-cell selected-build observation source is implemented;
+      conditional admission and
       changed-selection invalidation remain open. The provider-first optional
       executing-identity requirement is available in the existing locked
       relationship transaction; ordinary consumers and independent

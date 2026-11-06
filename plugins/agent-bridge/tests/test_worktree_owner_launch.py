@@ -161,10 +161,13 @@ def complete_slot(peer, version="1.0.0", *, interpreter=True):
 
 
 @pytest.mark.parametrize("code", [0, 7])
-def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatch, code):
+@pytest.mark.parametrize("pinned", [False, True])
+def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatch, code, pinned):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     own = tmp_path / ".agent-bridge"
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
     deploy_installed_layout(own, "powershell" if _NATIVE_WINDOWS else "bash")
     python = complete_slot(tmp_path / ".agent-worktrees", interpreter=False)
     subprocess.run(
@@ -193,15 +196,43 @@ def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatc
     }
     arguments = [str(code), "argument with spaces", "unicode-\u2603"]
     payload = "stdin with spaces and unicode-\u2603\n"
+    prefix = [
+        sys.executable, "-I", "-X", "utf8", "-m",
+        "agent_bridge.worktree_owner_launch", str(own),
+    ]
+    if pinned:
+        slot = python.parent.parent
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        for source in (PLUGIN / "scripts" / "runtime_launcher.py",
+                       *(PLUGIN / "scripts").glob("versioned_runtime*.py")):
+            shutil.copyfile(source, bootstrap / source.name)
+        marker = slot / ".install-complete.json"
+        marker.write_text(json.dumps({
+            **json.loads(marker.read_text()), "payload_hash": "a" * 64,
+        }), encoding="utf-8")
+        selected, root, selected_python = lifecycle._agent_worktrees_pinned_selection()
+        assert root == tmp_path / ".agent-worktrees"
+        assert selected_python == python
+        prefix = list(selected)
+        # The next dynamic selection is deliberately not executable.
+        complete_slot(root, "2.0.0")
     result = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-m",
-         "agent_bridge.worktree_owner_launch", str(own), *arguments],
+        [*prefix, *arguments],
         env=environment, input=payload, capture_output=True, text=True,
         encoding="utf-8", timeout=15, **no_window_kwargs(),
     )
     assert result.returncode == code, result.stderr
     assert json.loads(result.stdout) == {"argv": arguments, "stdin": payload}
     assert result.stderr == "peer stderr\n"
+
+
+def test_pinned_legacy_selection_has_no_bootstrap_or_path_fallback(installation):
+    _, peer, which = installation
+    complete_slot(peer)
+    with pytest.raises(ContextRefused, match="immutable retention bootstrap"):
+        lifecycle._agent_worktrees_pinned_selection()
+    which.assert_not_called()
 
 
 def test_completed_installed_owner_precedes_path(installation):
