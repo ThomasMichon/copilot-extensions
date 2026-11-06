@@ -4851,7 +4851,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "17f39940fe1e06dab47727c5063e15f60efd639ecb7728eeb2393cd7d5f40c7e",
         "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py": "06c1207b66a96025cebfba5e9daecdaa73942fc53c0ecd9e7551681e14c41372",
         "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "d5d73c9dd496881250dcb54b5cd56dd3dc482d4eb4cd55c08d21c97f0e95efee",
-        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "2af5685e6639d36b1895596807094a592de600615a7e8a1377330e14bdc59c6c",
+        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "dd6cd097d87144624a462a2f789336b3e0cacea4e1b00c531a78b9f0f2026506",
         "plugins/agent-worktrees/src/agent_worktrees/related_cli.py": "a207c4cfc11f6116b9e1eb37d24d04b8a0b06e8ebc1541bb4c0fb85779bed094",
         "plugins/agent-worktrees/src/agent_worktrees/repos_configuration_sources.py": "11d2f57beac5d2b734971b06491ba2852c85fc9d0dcb01c44d0946f681bc910e",
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_reader.py": "5264a28fbe56b7aa3a134409a481f8f9e29f6d94fa391b05a7f28d4afb8970df",
