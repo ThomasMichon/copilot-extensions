@@ -391,6 +391,8 @@ def install(args):
     return 17
 adapter._install = install
 adapter._foreground_install = lambda args, driver: install(args)
+import bootstrap_update
+bootstrap_update.execute = lambda args, driver, **kwargs: install(args)
 adapter._installation_custody = lambda: nullcontext(None)
 raise SystemExit(adapter.main(['--root', sys.argv[1], '--', 'update', *sys.argv[3:]]))
 """, str(root), str(marker), *(["--auto"] if automatic else [])]

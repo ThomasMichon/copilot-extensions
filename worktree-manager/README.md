@@ -719,7 +719,7 @@ Empty/whitespace-only prior selectors have no runtime to retain, but their
 existence and exact bytes remain rollback state. Target and nonblank prior slot
 names still receive canonical validation.
 
-On Windows, explicit bootstrap construction and `self-install --apply` enter
+On Windows, non-update bootstrap construction and `self-install --apply` enter
 the existing installation execution driver. A caller with a live inherited or
 scoped witness joins that owner; a cold explicit caller submits a fixed
 installation recipe and drives the same finite native executor. Neither path
@@ -728,6 +728,56 @@ failed background launch. Application arguments remain outside the bootstrap
 request. Its bounded completion receipt binds the root, source digest and
 actual installed slot; later selection by another request cannot silently
 change which runtime the bootstrap dispatches.
+
+Fresh `update` bootstrap on either platform instead submits one complete
+Manager update request: Manager construction, activation and the
+subsequent suite update remain under the same execution custody and outcome.
+The ordinary caller starts the existing finite worker and waits for that whole
+result; losing the observer does not discard accepted work. `--detach` reports
+acceptance, not completion, and `--supervised-debug` drains the same queue inline.
+No new daemon, mutation lock or foreground fallback is introduced.
+Request status, recovery and authentication inspection instead use the current
+CLI outside installation submission. Read-only queries never authorize implicit
+fence repair; explicit recovery does not enqueue a new job that would hold its
+own recovery lock. Structured results remain on stdout, separate from diagnostics.
+POSIX dispatch also waits when it owns a completion scope but deliberately
+forwards no witness. An unowned non-update
+launch retains process replacement. Source-only entries resolve their current
+controller's declared driver dependencies before either platform branch.
+
+Each update acquisition has its own staging directory. Before submission, the
+bootstrap freezes Manager and SDK inputs through the canonical source freezer.
+Unmaterialized sources also retain the Manager's declared source-preparation
+tools inside that controller, with their bytes included in snapshot identity
+and readback validation.
+The execution root and retained-input directory use the queue owner's protected
+creation helper before any source is copied; existing permissions are preserved.
+Snapshot identity is independent of request sharing: unchanged source inputs,
+assets and revision reuse retained bytes even for unshared attempts. Those
+attempts carry a current-controller-only marker in the queued invocation, not
+in selected application arguments. No pending or live-worker inputs are pruned.
+Successful callers remove only their acquisition checkout, including detached
+callers after acceptance; the worker continues from its retained inputs.
+Detached callers first launch the worker through a finite retained controller,
+so leased startup dependencies also come from retained source. This helper
+inherits the caller's containment; the existing daemon owner governs worker
+lifetime and startup acknowledgment.
+Failed callers preserve their acquisition checkout for diagnosis.
+Equivalent pending callers share a request when its immutable source and
+configured marketplace selection agree; distinct arguments or changed source
+remain separate. An active suite may still discover later marketplace inputs,
+so a new arrival queues a fresh attempt rather than joining it on the strength
+of a Manager/SDK snapshot alone. Unresolved selections do not share even
+pending work.
+Prepared installation sources remain data for the retained current bootstrap
+controller, so an older selected payload need not implement new internal flags.
+Automatic policy is rechecked against the saved request before construction.
+A caller-relative hold-file override is expanded before queue identity is
+created, and saved source configuration is checked before construction and
+immediately before publication.
+A manual update may use the existing explicit repair authorization to release
+an interrupted queue fence once; the prior failed outcome stays recorded, and
+that authorization does not certify cleanup or permit displacing a live owner.
 
 ### Local promoted installation inputs
 
@@ -905,6 +955,9 @@ a positive finite duration of at most 3,600 seconds, for example `600`. The
 durable Manager invocation captures this value, and the worker restores that
 budget rather than inheriting a later caller's setting. An absent choice clears
 the worker's ambient override. Invalid values refuse submission. The internal
+fresh-bootstrap request likewise captures and validates an applicable
+environment-selected budget before retention/submission; inspection, recovery
+and targeted commands do not inherit that suite-only setting. The internal
 Manager argument is consumed before engine handoff: no new shared execution-context
 key or engine argument is required, including for older engine participants.
 Retries still share one deadline and the same attempt ceiling; timeouts are not
@@ -2087,7 +2140,15 @@ write an Autorun entry, require an open Picker or create another scheduler.
 Unattended credential prompts are disabled; authentication failures remain
 observable. A direct Manager request retains its configured source identity
 and refuses a changed source selection at execution rather than silently
-substituting it. Credential-bearing source URLs are refused before journaling;
+substituting it. Relative filesystem sources retain their resolved inherited
+source anchor, or otherwise their submitting directory, for validation and
+acquisition. This anchor is separate from the runner's working directory.
+Relative hold-file overrides remain anchored to the actual submitting directory,
+not the source anchor.
+Bootstrap workers still run from the retained controller, so the submitting
+directory need not remain present unless it is also an explicitly required
+invocation context.
+Credential-bearing source URLs are refused before journaling;
 use the existing source credential helper.
 
 The driver keeps requests, logs and results beneath

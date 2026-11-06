@@ -166,11 +166,26 @@ def request_context() -> dict[str, str]:
     return context
 
 
+def request_source_anchor() -> str:
+    from .source_config import SOURCE_ANCHOR_ENV
+
+    anchor = os.environ.get(SOURCE_ANCHOR_ENV) or str(Path.cwd().resolve())
+    if not Path(anchor).is_absolute():
+        raise ValueError("update request source anchor must be absolute")
+    return str(Path(anchor).resolve())
+
+
 @contextmanager
 def _request_environment(context, *, killswitch_path: str | None = None, cwd: str | None = None):
+    from .source_config import SOURCE_ANCHOR_ENV
+
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
+    if cwd:
+        if not Path(cwd).is_absolute():
+            raise ValueError("update request source anchor must be absolute")
+        values[SOURCE_ANCHOR_ENV] = cwd
     if cwd is not None and values.get("WORKTREE_MANAGER_ROOT"):
         try:
             root = Path(values["WORKTREE_MANAGER_ROOT"]).expanduser()
@@ -183,7 +198,7 @@ def _request_environment(context, *, killswitch_path: str | None = None, cwd: st
             if not root.is_absolute():
                 raise ValueError("Manager root cannot resolve against request cwd")
         values["WORKTREE_MANAGER_ROOT"] = str(root)
-    keys = _CONTEXT_KEYS
+    keys = (*_CONTEXT_KEYS, SOURCE_ANCHOR_ENV)
     if killswitch_path is not None:
         keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
         if killswitch_path:
@@ -378,6 +393,9 @@ def cmd_update_request(rest: list[str]) -> int:
         context = request_context()
         _update_context_directory(context)
         cwd = Path.cwd().resolve()
+        source_anchor = request_source_anchor()
+        hold_override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
+        hold_path = os.path.abspath(os.path.expanduser(hold_override)) if hold_override else ""
         arguments = list(forwarded)
         budget = options.engine_acquisition_timeout
         if budget is None and options.target is None:
@@ -387,8 +405,9 @@ def cmd_update_request(rest: list[str]) -> int:
             arguments.extend(["--engine-acquisition-timeout", selected_budget])
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(arguments), project=project or "",
-            cwd=str(cwd), source=_source_key(), context=tuple(context.items()),
+            cwd=source_anchor, source=_source_key(), context=tuple(context.items()),
             repair=not options.auto,
+            killswitch_path=hold_path,
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(

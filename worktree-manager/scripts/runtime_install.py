@@ -360,15 +360,27 @@ def _windows_console_stream(stream: TextIO | None) -> bool:
     return bool(probe(msvcrt.get_osfhandle(stream.fileno()), ctypes.byref(mode)))
 
 
-def _dispatch_manager(command: list[str], *, handoff: dict[str, str] | None = None) -> int:
-    if os.name == "nt":
-        console = any(_windows_console_stream(stream)
-                      for stream in (sys.stdin, sys.stdout, sys.stderr))
-        process = subprocess.Popen(
-            command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
-            creationflags=0 if console else subprocess.CREATE_NO_WINDOW,
-            **({"env": {**os.environ, **handoff}} if handoff else {}),
+def _dispatch_manager(
+    command: list[str], *, handoff: dict[str, str] | None = None, wait_for_exit: bool = False,
+    cwd: str | None = None, fallback_cwd: str | None = None,
+) -> int:
+    if os.name == "nt" or handoff or wait_for_exit or cwd is not None:
+        console = os.name == "nt" and any(
+            _windows_console_stream(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)
         )
+        options = dict(
+            stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+            **({"creationflags": 0 if console else subprocess.CREATE_NO_WINDOW}
+               if os.name == "nt" else {}),
+            **({"env": {**os.environ, **handoff}} if handoff else {}),
+            **({"cwd": cwd} if cwd is not None else {}),
+        )
+        try:
+            process = subprocess.Popen(command, **options)
+        except (FileNotFoundError, NotADirectoryError):
+            if cwd is None or fallback_cwd is None or Path(cwd).is_dir():
+                raise
+            process = subprocess.Popen(command, **{**options, "cwd": fallback_cwd})
         try:
             return process.wait()
         except BaseException:
@@ -379,23 +391,22 @@ def _dispatch_manager(command: list[str], *, handoff: dict[str, str] | None = No
 
 
 def _installation_child_options() -> dict[str, object]:
-    if os.name != "nt":
-        return {}
     from update_driver import participant_environment
 
     return {"env": {**os.environ, **participant_environment()}}
 
 
 def _execution_driver(payload: Path):
-    # Resolve the declared closure in both source and materialized payloads.
+    # Source controls need application locals as well as the required execution libraries.
     required = {"agent-update-driver", "agent-single-instance-lease", "agent-procutil", "agent-zdd"}
+    roots = engine._package_roots(payload)
     packages = {
-        engine._package_name(package): package for package in engine._package_roots(payload)
+        engine._package_name(package): package for package in roots
         if engine._package_name(package) in required
     }
     if packages.keys() != required:
         raise RuntimeError("Manager bootstrap requires its complete execution-driver source closure")
-    sys.path[:0] = [str(packages[name] / "src") for name in sorted(required)]
+    sys.path[:0] = [str(package / "src") for package in roots]
     from update_driver import core
 
     return core
@@ -460,6 +471,16 @@ def _source_digest(payload: Path) -> str:
     return runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
 
 
+def _validate_update_request(args) -> None:
+    expected = getattr(args, "admitted_source", None)
+    if expected is not None:
+        from worktree_manager.update_driver_cli import _source_key, _update_context_directory
+
+        if _source_key() != expected:
+            raise RuntimeError("Manager source changed after submission; submit a new request")
+        _update_context_directory(os.environ)
+
+
 def _bootstrap_hold_path() -> str:
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
     return os.path.abspath(os.path.expanduser(override)) if override else ""
@@ -474,7 +495,7 @@ def _automatic_bootstrap_refusal(args) -> str | None:
     options, _forwarded = parse_options(command[1:])
     if not options.auto:
         return None
-    driver = _execution_driver(args.payload)
+    driver = _execution_driver(SCRIPTS.parent)
     request = driver.RequestSpec(
         "manager-bootstrap", ("update", "--auto"),
         context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
@@ -644,6 +665,7 @@ def _install(args) -> Path | int:
 
 
 def _install_payload(args, *, wheel_inputs=None, local_packages=None, application=None) -> Path | int:
+    _validate_update_request(args)
     reconcile = not args.skip_instance_reconcile
     if args.repair_update:
         from update_entry import validate_manager_ownership
@@ -657,6 +679,7 @@ def _install_payload(args, *, wheel_inputs=None, local_packages=None, applicatio
             raise RuntimeError("Manager installation source changed during construction")
         if args.repair_update:
             validate_manager_ownership(args.root, args.payload, expected=prior_commands)
+        _validate_update_request(args)
 
     # Only bootstrap installer modules are read from source. Application execution
     # happens below under the constructed interpreter and retention bootstrap.
@@ -759,21 +782,30 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
         str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
         "-m", "worktree_manager", *command,
     ]
-    if os.name != "nt":
-        return _dispatch_manager(invocation)
-    from worktree_manager.update_driver_cli import handoff_environment
+    from worktree_manager.update_driver_cli import handoff_environment, request_source_anchor
     from worktree_manager.update_python_path import finish_update
+    from update_driver import participant_environment
 
     handoff = handoff_environment(command)
+    owned_without_handoff = not handoff and bool(participant_environment())
+    selected = {
+        "cwd": request_source_anchor(), "fallback_cwd": str(args.root.resolve()),
+    } if args.update_participant else {}
     with runtime.retention_lease(args.root, slot.name):
-        result = _dispatch_manager(invocation, handoff=handoff) if handoff else _dispatch_manager(invocation)
-    return finish_update(command, result)
+        if handoff:
+            result = _dispatch_manager(invocation, handoff=handoff, **selected)
+        elif owned_without_handoff:
+            result = _dispatch_manager(invocation, wait_for_exit=True, **selected)
+        else:
+            result = _dispatch_manager(invocation, **selected)
+    return result if args.update_participant else finish_update(command, result)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path)
     parser.add_argument("--payload", type=Path, default=SCRIPTS.parent)
+    parser.add_argument("--bootstrap-attempt", help=argparse.SUPPRESS)
     parser.add_argument("--recover-adopted", type=Path)
     parser.add_argument("--describe-recovery", action="store_true")
     parser.add_argument("--repair-update", action="store_true")
@@ -782,6 +814,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--install-only", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--update-participant", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--source-digest", help=argparse.SUPPRESS)
     parser.add_argument("--skip-instance-reconcile", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
@@ -792,7 +825,8 @@ def main(argv: list[str] | None = None) -> int:
         if any((
             args.root, args.install_source, args.command, args.uninstall, args.apply,
             args.recover_adopted, args.describe_recovery, args.repair_update,
-            args.recover_for_repair, args.json, args.install_only, args.source_digest,
+            args.recover_for_repair, args.json, args.install_only, args.update_participant,
+            args.source_digest,
             args.skip_instance_reconcile,
         )):
             parser.error("Source-input discovery cannot be combined with an operation")
@@ -812,7 +846,8 @@ def main(argv: list[str] | None = None) -> int:
         if (
             args.root is None or args.recover_adopted or args.describe_recovery
             or args.repair_update or args.recover_for_repair or args.command
-            or args.install_only or args.source_digest or args.skip_instance_reconcile
+            or args.install_only or args.update_participant or args.source_digest
+            or args.skip_instance_reconcile
             or args.payload.resolve() != SCRIPTS.parent
         ):
             parser.error("--uninstall requires --root and only accepts --apply and --json")
@@ -822,7 +857,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.recover_for_repair:
         if (
             args.recover_adopted or args.describe_recovery or args.repair_update or args.command
-            or args.install_only or args.source_digest or args.skip_instance_reconcile
+            or args.install_only or args.update_participant or args.source_digest
+            or args.skip_instance_reconcile
         ):
             parser.error("Repair recovery cannot be combined with installation or application commands")
         if args.payload.resolve() != SCRIPTS.parent:
@@ -843,20 +879,35 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if args.install_only and (command or args.source_digest is None):
         parser.error("Installation participant requires a source digest and no application command")
+    if args.update_participant and (
+        args.install_only or command[:1] != ["update"] or args.source_digest is None
+        or args.recover_adopted is not None
+    ):
+        parser.error("Update participant requires a source digest and one update command")
     if args.skip_instance_reconcile and not args.install_only:
         parser.error("Instance reconciliation policy requires an installation participant")
     if args.source_digest is not None and (
-        not args.install_only or re.fullmatch("[0-9a-f]{64}", args.source_digest) is None
+        not (args.install_only or args.update_participant)
+        or re.fullmatch("[0-9a-f]{64}", args.source_digest) is None
     ):
         parser.error("Source digest requires an installation participant and a SHA-256")
     if args.repair_update and not args.install_only and command[:1] != ["update"]:
         parser.error("Bootstrap repair is only valid for update")
     os.environ.pop("__PYVENV_LAUNCHER__", None)
     os.environ["WORKTREE_MANAGER_ROOT"] = str(args.root.resolve())
-    sys.path.insert(0, str(args.payload / "src"))
+    sys.path.insert(0, str(SCRIPTS.parent / "src"))
     if not args.install_only:
         args.skip_instance_reconcile = bool(command and command[:1] not in (["update"], ["self-install"]))
+    driver = _execution_driver(SCRIPTS.parent)
     if command[:1] == ["update"]:
+        from bootstrap_update import _request_control
+        from worktree_manager.update_driver_cli import cmd_update_request, parse_options
+
+        options, forwarded = parse_options(command[1:])
+        if _request_control(options, forwarded):
+            if args.update_participant:
+                parser.error("Request inspection/recovery cannot be an installation participant")
+            return cmd_update_request(command[1:])
         from worktree_manager.runtime_source_config import configured_source, require_marketplace
 
         try:
@@ -868,22 +919,40 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as error:
             print(f"Runtime source: {error}", file=sys.stderr)
             return 1
-    refusal = _automatic_bootstrap_refusal(args)
+    refusal = None if args.update_participant else _automatic_bootstrap_refusal(args)
     if refusal is not None:
         print(refusal, file=sys.stderr)
         return 3
-    if os.name == "nt":
-        driver = _execution_driver(args.payload)
+    if os.name == "nt" or command[:1] == ["update"]:
         with _installation_custody() as custody:
             if custody is None:
-                if args.install_only:
+                if args.install_only or args.update_participant:
                     raise RuntimeError("Manager installation participant requires live driver custody")
+                if command[:1] == ["update"]:
+                    from bootstrap_update import execute
+
+                    return execute(args, driver, source_digest=_source_digest(args.payload))
                 slot = _foreground_install(args, driver)
             else:
+                if args.update_participant:
+                    from worktree_manager.update_driver_cli import _request_environment
+
+                    request = driver.status(custody.request_id, root=custody.root)
+                    with _request_environment(
+                        request.spec.context, killswitch_path=request.spec.killswitch_path,
+                        cwd=request.spec.cwd,
+                    ):
+                        args.admitted_source = request.spec.source
+                        _validate_update_request(args)
+                        refusal = _automatic_bootstrap_refusal(args)
+                        if refusal is not None:
+                            print(refusal, file=sys.stderr)
+                            return 3
+                        return _finish(args, _install(args), command)
                 slot = _install(args)
             return _finish(args, slot, command)
     else:
-        if args.install_only:
+        if args.install_only or args.update_participant:
             raise RuntimeError("Windows installation participant is unsupported on this platform")
         slot = _install(args)
     return _finish(args, slot, command)

@@ -33,6 +33,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
 DEFAULT_REPO = "https://github.com/ThomasMichon/copilot-extensions.git"
 DEFAULT_REF = "main"
 CONFIG_NAME = "config.toml"
+SOURCE_ANCHOR_ENV = "WORKTREE_MANAGER_SOURCE_ANCHOR"
 
 
 def default_root() -> Path:
@@ -78,7 +79,13 @@ def absolute_local_source(repo: str) -> str:
     """Anchor filesystem sources before acquisition changes its working directory."""
     if re.match(r"^[^/\\:]+:", repo) and not (os.name == "nt" and Path(repo).drive):
         return repo  # URLs, remote helpers and SCP-style remotes retain Git's semantics.
-    return str(Path(repo).resolve())
+    path = Path(repo)
+    if not path.is_absolute() and SOURCE_ANCHOR_ENV in os.environ:
+        anchor = Path(os.environ[SOURCE_ANCHOR_ENV])
+        path = anchor / path
+        if not anchor.is_absolute() or not path.is_absolute():
+            raise ValueError("local source resolution requires an absolute request anchor")
+    return str(path.resolve())
 
 
 def resolved_ref(root: Path | None = None) -> str:

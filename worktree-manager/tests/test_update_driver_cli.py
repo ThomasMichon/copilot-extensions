@@ -20,6 +20,7 @@ def short_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
     # Exercise queue ownership, not the platform's AF_UNIX address-length limit.
     home = tmp_path_factory.mktemp("ud") / "home"
     home.mkdir()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(home / ".worktree-manager"))
     registry = home.parent / "daemon-instances"
     cleanup = []
     with daemon_test_lifecycle(
@@ -221,6 +222,60 @@ def test_relative_source_is_anchored_before_worker_changes_directory(tmp_path, m
     identity = driver.source_identity()
     assert identity["repo"] == str(tmp_path / "selected-source")
     assert identity["ref"] == "canary"
+
+
+def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cwd(
+    tmp_path, monkeypatch,
+):
+    import update_driver
+    from worktree_manager import source_config
+
+    root, anchor, caller, worker = (tmp_path / name for name in (
+        "manager", "source-anchor", "caller", "worker",
+    ))
+    for directory in (root, anchor, caller, worker):
+        directory.mkdir()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.setenv(source_config.SOURCE_ANCHOR_ENV, str(anchor))
+    source_config.set_source(repo="selected-source", ref="dev", root=root)
+    monkeypatch.chdir(caller)
+    admitted = driver._source_key()
+    seen = {}
+
+    def enqueue(spec, *, runner):
+        seen.update(spec=spec, runner=runner)
+        return SimpleNamespace(
+            id="anchored-request", state="pending", exit_code=None, error=None,
+            log_path=tmp_path / "update.log",
+        )
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "enqueue", enqueue)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
+        ("synthetic-python", "-m", module, *args), {},
+    ))
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
+    assert driver.cmd_update_request(["--detach"]) == 0
+    spec, runner = seen["spec"], seen["runner"]
+    assert spec.cwd == str(anchor) and runner.cwd == str(caller)
+    assert spec.source == admitted
+    monkeypatch.chdir(worker)
+    monkeypatch.setenv(source_config.SOURCE_ANCHOR_ENV, str(worker))
+    with driver._request_environment(spec.context, cwd=spec.cwd):
+        assert driver._source_key() == admitted
+        assert driver.source_identity()["repo"] == str(anchor / "selected-source")
+        source_config.set_source(repo="changed-source", root=root)
+        assert driver._source_key() != admitted
+    assert driver.os.environ[source_config.SOURCE_ANCHOR_ENV] == str(worker)
+
+
+def test_installed_cli_refuses_relative_inherited_source_anchor_before_enqueue(queued, monkeypatch):
+    from worktree_manager.source_config import SOURCE_ANCHOR_ENV
+
+    seen, _request = queued
+    monkeypatch.setenv(SOURCE_ANCHOR_ENV, "relative-anchor")
+    assert driver.cmd_update_request(["--detach"]) == 1
+    assert seen == {}
 
 
 def test_credential_bearing_source_is_not_written_to_queue(tmp_path, monkeypatch):
@@ -773,7 +828,9 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
             ) for _ in range(2)
         ]
         results = [future.result() for future in futures]
-    assert [result.returncode for result in results] == [6, 6]
+    assert [result.returncode for result in results] == [6, 6], [
+        result.stderr for result in results
+    ]
     assert all("Update request " in result.stderr for result in results)
     assert all("synthetic canonical updater started" in result.stderr for result in results)
     records = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
@@ -815,6 +872,7 @@ def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
     assert result.returncode == (3 if skipped else 6), result.stderr
     request, = update_driver.status()
     assert request.spec.repair is not automatic
+    assert dict(request.spec.context)["WORKTREE_MANAGER_ROOT"] == str(short_home / ".worktree-manager")
     assert ("--auto" in request.runner.argv) is automatic
     assert "--force" not in request.runner.argv
     assert request.state == "completed" and request.exit_code == result.returncode

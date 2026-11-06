@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh retained process-utility lifecycle archives",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}

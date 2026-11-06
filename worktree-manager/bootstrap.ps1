@@ -25,6 +25,14 @@ if ($args.Count -eq 1 -and $args[0] -ceq '--describe-source-inputs') {
     exit 0
 }
 
+$BootstrapSourceAnchor = $env:WORKTREE_MANAGER_SOURCE_ANCHOR
+if (-not $BootstrapSourceAnchor) { $BootstrapSourceAnchor = (Get-Location).Path }
+if (-not [IO.Path]::IsPathRooted($BootstrapSourceAnchor) -or
+    ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+     [IO.Path]::GetPathRoot($BootstrapSourceAnchor) -match '^(?:[/\\]|[A-Za-z]:)$')) {
+    throw 'Update request source anchor must be absolute.'
+}
+
 if ($env:BOOTSTRAP_KILLSWITCH_STATE_FILE -and
     -not $env:BOOTSTRAP_KILLSWITCH_STATE_FILE.StartsWith('~')) {
     $holdPath = $env:BOOTSTRAP_KILLSWITCH_STATE_FILE
@@ -325,6 +333,8 @@ if ($SystemPythonRequested) {
     )) { throw 'System Python mode cannot be repeated or combined with bootstrap repair.' }
 }
 $RecoveryStaging = $null
+$UpdateStaging = $null
+$commandExit = $null
 if ($commandArgs.Count -and $commandArgs[0] -ceq '--recover-for-repair') {
     $installerArgs += '--recover-for-repair'
     $commandArgs = @($commandArgs | Select-Object -Skip 1)
@@ -352,12 +362,16 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--bootstrap-update') {
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
 }
+if ($commandArgs.Count -and $commandArgs[0] -ceq 'update') {
+    $UpdateStaging = Join-Path $Root ('bootstrap-acquisition\update.' + [Guid]::NewGuid().ToString('N'))
+    $Staging = Join-Path $UpdateStaging 'source'
+}
 if (-not $Repo -or $Repo.StartsWith('-') -or -not $Ref -or $Ref.StartsWith('-') -or
     $Repo -match '[\x00-\x1f\x7f]' -or $Ref -match '[\x00-\x1f\x7f]') {
     throw 'Invalid configured Git source/ref; source preserved.'
 }
 if ($Repo -notmatch '^[^/\\:]+:' -or [IO.Path]::IsPathRooted($Repo)) {
-    if (-not [IO.Path]::IsPathRooted($Repo)) { $Repo = Join-Path (Get-Location).Path $Repo }
+    if (-not [IO.Path]::IsPathRooted($Repo)) { $Repo = Join-Path $BootstrapSourceAnchor $Repo }
     $Repo = [IO.Path]::GetFullPath($Repo)
 }
 try {
@@ -404,8 +418,9 @@ if (-not $HaveGit -and -not $InstallSource) {
 }
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
-if ($InstallSource) {
-    $PayloadParent = Join-Path $InstallSource 'source'
+if ($InstallSource -and $PSScriptRoot -and
+    (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'scripts\runtime_install.py') -PathType Leaf)) {
+    $PayloadParent = Split-Path -Parent $PSScriptRoot
 } elseif ($HaveGit) {
     New-Item -ItemType Directory -Force -Path $Staging | Out-Null
     if (-not (Test-Path (Join-Path $Staging '.git'))) {
@@ -464,7 +479,9 @@ if ($InstallSource) {
 }
 
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
+$PreviousSourceAnchor = $env:WORKTREE_MANAGER_SOURCE_ANCHOR
 try {
+    $env:WORKTREE_MANAGER_SOURCE_ANCHOR = $BootstrapSourceAnchor
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     $env:PATH = Add-BootstrapPythonPath $env:PATH ([IO.Path]::GetDirectoryName($Python))
     if ($commandArgs.Count) {
@@ -474,6 +491,7 @@ try {
     }
     $commandExit = $LASTEXITCODE
 } finally {
+    $env:WORKTREE_MANAGER_SOURCE_ANCHOR = $PreviousSourceAnchor
     Pop-Location
 }
 if ($commandExit -ne 0) {
@@ -485,4 +503,8 @@ if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
 exit $commandExit
 } finally {
     if ($RecoveryStaging) { Remove-Item -LiteralPath $RecoveryStaging -Recurse -Force }
+    if ($UpdateStaging -and $commandExit -eq 0 -and
+        (Test-Path -LiteralPath $UpdateStaging)) {
+        Remove-Item -LiteralPath $UpdateStaging -Recurse -Force
+    }
 }
