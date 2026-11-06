@@ -1080,7 +1080,7 @@ def test_unattributed_native_lifecycle_ticket_is_validated_not_blindly_rejected(
 
 @pytest.mark.parametrize("mutation", (
     "none", "binding-script", "root", "plugin", "publish", "native-root",
-    "rooted-interpreter", "owner-pid", "unrelated-parent",
+    "rooted-interpreter", "owner-pid", "unrelated-parent", "msys-native", "cygdrive-native",
 ))
 def test_only_exact_live_lifecycle_owner_and_native_caller_are_controllers(
     installation: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, mutation: str,
@@ -1095,6 +1095,18 @@ def test_only_exact_live_lifecycle_owner_and_native_caller_are_controllers(
     native = ([HOST, "-NoProfile", "-File", str(payload / "scripts/install.ps1"),
                "uninstall", "-InstallDir", str(root)] if os.name == "nt" else
               [HOST, str(payload / "scripts/install.sh"), "uninstall", "--install-dir", str(root)])
+    if mutation in {"msys-native", "cygdrive-native"}:
+        if os.name != "nt":
+            pytest.skip("Windows MSYS captured argument vector")
+        prefix = "/cygdrive/" if mutation == "cygdrive-native" else "/"
+
+        def shell_path(path):
+            return prefix + path.drive[0].lower() + path.as_posix()[2:]
+
+        native = [
+            str(payload / "bash.exe"), shell_path(payload / "scripts/install.sh"),
+            "uninstall", "--install-dir", shell_path(root),
+        ]
     parent = list(native)
     owner_args = [
         sys.executable, "-I", "-S", "-B", "-X", "utf8", str(payload / "scripts/command_binding.py"),
@@ -1124,12 +1136,15 @@ def test_only_exact_live_lifecycle_owner_and_native_caller_are_controllers(
         rows = [
             {"pid": pid + (100000 if mutation == "owner-pid" else 0), "ppid": 123,
              "image": image, "command": command(owner_args), "argv": owner_args},
-            {"pid": 123, "ppid": 124, "image": HOST, "command": command(parent), "argv": parent},
+            {"pid": 123, "ppid": 124, "image": parent[0], "command": command(parent), "argv": parent},
             {"pid": 124, "ppid": 1, "image": str(root / "versions/1.0.0/python"),
              "command": "python -m agent_bridge", "argv": ["python", "-m", "agent_bridge"]},
         ]
         _, admitted = MODULE._lifecycle_controllers(rows, payload, root, "agent-bridge")
-        expected = {pid, 123} if mutation == "none" else {pid} if mutation == "unrelated-parent" else set()
+        expected = (
+            {pid, 123} if mutation in {"none", "msys-native", "cygdrive-native"}
+            else {pid} if mutation == "unrelated-parent" else set()
+        )
         assert admitted == expected
         assert 124 not in admitted, "A legacy runtime ancestor must never become a controller"
 

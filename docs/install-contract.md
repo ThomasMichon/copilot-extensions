@@ -2479,6 +2479,10 @@ caller. Each interpreter must be absolute and outside the selected removal
 root. Changed arguments, unrelated ancestry, non-Python images and deeper
 chains remain unrecognized; this is not stop authority or a general parent
 exemption.
+On Windows, the same existing MSYS/Cygdrive drive-path normalization applies
+to parsed shell command lines and captured Bash argument vectors before
+matching the exact installer and root. It does not expand shell syntax,
+accept another root or relax unknown-argument rejection.
 
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job

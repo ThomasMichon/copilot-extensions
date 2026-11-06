@@ -10,7 +10,7 @@ import shutil
 
 import pytest
 
-from agent_procutil.owned_process import run_owned
+from agent_procutil.owned_process import run_caller_owned
 
 REPO = Path(__file__).resolve().parents[4]
 SOURCE = REPO / "libs/installer-engine/installer_engine_uninstall_windows.py"
@@ -62,7 +62,10 @@ def test_native_owner_preserves_fallback_and_identity(shell, case, tmp_path):
             "@{rows=$rows;fallbackCalls=$fallbackCalls;"
             "nativeAvailable=$nativeOwnerAvailable} | ConvertTo-Json -Depth 5 -Compress",
         )
-        result = run_owned([*arguments[:-1], script], timeout=10)
+        result = run_caller_owned(
+            [*arguments[:-1], script], timeout=10,
+            max_stdout_bytes=65536, max_stderr_bytes=65536,
+        )
         captured.append(result)
         if result.returncode:
             raise RuntimeError(result.stderr)

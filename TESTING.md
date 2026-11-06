@@ -60,6 +60,9 @@ original deadlines and the explicit unrelated-consumer refusal classification.
 The manual `installation-context-acceptance.yml` `runtime_removal` selection
 also runs this packet on Windows at the dispatch SHA and requires all eleven
 controls, including the three positive entrypoints, to pass without skips.
+Native capture uses the existing caller-owned root-exit/cleanup boundary,
+with 64 KiB per stream for token probes and 8 MiB for entrypoint captures.
+The original ten-second probe and per-item entrypoint deadlines are unchanged.
 Required unit-only CI is unchanged.
 
 Worktrees' opt-in `--test-file tests/test_resident_recovery.py

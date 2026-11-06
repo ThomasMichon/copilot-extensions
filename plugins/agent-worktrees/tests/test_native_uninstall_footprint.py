@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_procutil.owned_process import run_owned
+from agent_procutil.owned_process import run_caller_owned
 from native_shell_support import admit_native_bash, bash_path
 from runtime_install_fixture import isolate_account_profile
 
@@ -53,9 +53,9 @@ def _run(arguments, home, *, env=None, input=None, timeout=60, cwd=None):
         PYTHONDONTWRITEBYTECODE="1", COPILOT_EXTENSIONS_TEST_CONTAINED="1",
     )
     environment.update(env or {})
-    return run_owned(
+    return run_caller_owned(
         arguments, cwd=home if cwd is None else cwd, env=environment, input_text=input,
-        timeout=timeout,
+        timeout=timeout, max_stdout_bytes=8 << 20, max_stderr_bytes=8 << 20,
     )
 
 
