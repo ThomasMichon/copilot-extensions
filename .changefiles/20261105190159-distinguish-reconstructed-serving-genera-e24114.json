@@ -1,0 +1,9 @@
+{
+  "comment": "Distinguish reconstructed serving generations",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

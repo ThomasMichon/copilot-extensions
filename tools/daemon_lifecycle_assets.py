@@ -34,10 +34,11 @@ def lifecycle_archive(repo: Path) -> bytes:
     )):
         raise ValueError("lifecycle source package is incomplete")
     output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    # Stored members avoid zlib-version-dependent bytes across build hosts.
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, data in sorted(members.items()):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED
             info.external_attr = 0o100644 << 16
             info.create_system = 3
             archive.writestr(info, data)

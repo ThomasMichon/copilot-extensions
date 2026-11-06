@@ -185,6 +185,24 @@ def test_lifecycle_source_archive_is_deterministic_and_contains_only_python():
         ).read_bytes().replace(b"\r\n", b"\n")
 
 
+def test_lifecycle_source_archive_is_independent_of_zlib_implementation(monkeypatch):
+    import io
+    import zipfile
+    from daemon_lifecycle_assets import lifecycle_archive
+
+    expected = lifecycle_archive(SCRIPT.parents[1])
+    original = zipfile.zlib.compressobj
+
+    def alternate(_level, *args, **kwargs):
+        return original(0, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.zlib, "compressobj", alternate)
+    content = lifecycle_archive(SCRIPT.parents[1])
+    assert content == expected
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        assert archive.read("__main__.py")
+
+
 def test_lifecycle_source_archive_requires_native_accounting_dependency(tmp_path):
     from daemon_lifecycle_assets import lifecycle_archive
 

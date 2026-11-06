@@ -1,0 +1,13 @@
+{
+  "comment": "Keep lifecycle archives reproducible across hosts",
+  "changes": [
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

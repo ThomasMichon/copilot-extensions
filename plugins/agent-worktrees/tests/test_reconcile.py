@@ -2326,6 +2326,129 @@ def test_running_version_lag_no_false_drift_on_pep440(env, monkeypatch):
     assert reconcile.running_version_lag(env.repo) == []
 
 
+def test_running_version_lag_accepts_current_reconstructed_package(env, monkeypatch):
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9+repair." + "a" * 32)
+    assert reconcile.running_version_lag(env.repo) == []
+
+
+@pytest.mark.parametrize(("selected", "stale"), [
+    ("0.4.0.dev9+repair." + "a" * 32, False),
+    ("0.4.0.dev9+repair." + "b" * 32, True),
+    (None, False),
+])
+def test_running_version_lag_compares_reconstructed_selected_slot(env, monkeypatch, selected, stale):
+    from agent_worktrees import reconcile_freshness
+
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    payload = env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9+repair." + "a" * 32)
+    observed = []
+    monkeypatch.setattr(reconcile_freshness, "_resolved_selection", lambda owner, root: (
+        observed.append((owner, root)) or selected
+    ))
+    lags = reconcile.running_version_lag(env.repo)
+    assert observed == [(payload, env.home / ".agent-bridge")]
+    assert bool(lags) is stale
+    if stale:
+        assert lags[0]["running_slot"] == "0.4.0.dev9+repair." + "a" * 32
+        assert lags[0]["installed_slot"] == selected
+        assert selected in reconcile.runtime_identity.drift_description(lags[0])
+
+
+def test_running_version_lag_resolves_the_actual_completed_slot(env, monkeypatch):
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    payload = env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    scripts = payload / "scripts"
+    for source in (REPO / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
+        shutil.copyfile(source, scripts / source.name)
+    running = "0.4.0.dev9+repair." + "a" * 32
+    selected = "0.4.0.dev9+repair." + "b" * 32
+    env.deploy_running("agent-bridge", running)
+    root = env.home / ".agent-bridge"
+    slot = root / "versions" / selected
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": selected, "completed_at": "2026-01-01", "pid": 0,
+    }), encoding="utf-8")
+    (root / "current-version").write_text(selected + "\n", encoding="utf-8")
+    lags = reconcile.running_version_lag(env.repo)
+    assert len(lags) == 1
+    assert lags[0]["running_slot"] == running
+    assert lags[0]["installed_slot"] == selected
+
+
+@pytest.mark.parametrize(("running_slot", "stale"), [
+    ("0.4.0.dev9", True),
+    ("0.4.0.dev9+repair." + "b" * 32, False),
+    (None, False),
+])
+def test_running_version_lag_needs_running_slot_evidence_for_plain_versions(
+    env, monkeypatch, running_slot, stale,
+):
+    from agent_worktrees import reconcile_freshness
+
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9")
+    marker = env.home / ".agent-bridge" / "running-version.json"
+    record = json.loads(marker.read_text(encoding="utf-8"))
+    if running_slot is not None:
+        record["runtime_slot"] = running_slot
+        marker.write_text(json.dumps(record), encoding="utf-8")
+    selected = "0.4.0.dev9+repair." + "b" * 32
+    monkeypatch.setattr(reconcile_freshness, "_resolved_selection", lambda *_args: selected)
+    lags = reconcile.running_version_lag(env.repo)
+    assert bool(lags) is stale
+    if stale:
+        assert lags[0]["running_slot"] == running_slot
+        assert lags[0]["installed_slot"] == selected
+
+
+@pytest.mark.parametrize("error", [ValueError, RuntimeError, subprocess.SubprocessError])
+def test_running_version_lag_keeps_package_drift_when_selection_is_unavailable(env, monkeypatch, error):
+    from agent_worktrees import reconcile_freshness
+
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev10", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9+repair." + "a" * 32)
+    calls = []
+
+    def unavailable(*_args):
+        calls.append(True)
+        raise error("unavailable")
+
+    monkeypatch.setattr(reconcile_freshness, "_resolved_selection", unavailable)
+    lags = reconcile.running_version_lag(env.repo)
+    assert len(lags) == 1
+    assert lags[0]["payload"] == "0.4.0-dev10"
+    assert calls == []
+
+
+@pytest.mark.parametrize("error", [ValueError, RuntimeError, subprocess.SubprocessError])
+def test_running_version_lag_treats_failed_selection_as_unknown(env, monkeypatch, error):
+    from agent_worktrees import reconcile_freshness
+
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9+repair." + "a" * 32)
+
+    def unavailable(*_args):
+        raise error("unavailable")
+
+    monkeypatch.setattr(reconcile_freshness, "_resolved_selection", unavailable)
+    assert reconcile.running_version_lag(env.repo) == []
+
+
 def test_running_version_lag_empty_without_settings(env):
     """No enabled plugins -> empty, never raises."""
     assert reconcile.running_version_lag(env.repo) == []
