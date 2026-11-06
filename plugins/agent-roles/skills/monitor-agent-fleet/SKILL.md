@@ -132,6 +132,14 @@ source, selector, hypothesis, environment and result. Do not lower a required
 test/review bar, approve a scope expansion, or label all prerequisite work waste.
 Keep broader tooling proposals separate from the worker's immediate next step.
 
+For each agent, apply the [watchdog checks](references/watchdog-checks.md):
+open questions with their default and revisit time, open obligations,
+prerequisite growth, self-raised budgets, validation weight, delivery state
+against the root, handoff fidelity and supersession. **Classify every wait as
+required, productive or waste**; only waste warrants a steer. A merge is not
+done when the root needs live behavior, and a timeout increase is not a fix
+until the work itself was measured.
+
 ## 5. Report, or steer within explicit authority
 
 In read-only mode, return recommendations and **messages sent: none**.
@@ -156,6 +164,16 @@ another message useful. If disputed, return the evidence and decision to the
 existing owner/operator; do not alternate commands between competing
 supervisors.
 
+Steer directly when the correction preserves the root and its constraints.
+Escalate to the operator only for an objective change, new access or spend, a
+destructive or deployment effect, conflicting operator instructions or an
+unsettled handoff deviation, or when a delivered steer stalls past its
+revisit time: report once with evidence, a recommended decision and its default. **The
+watchdog never asks a blocking question**; when unsure, take the least
+intrusive reversible option within the charter and record the judgment. For
+reviewer agents, defer loop rules to `review-pull-requests`' throughput and
+loop discipline rather than restating them.
+
 ## 6. Make supervision cheaper than the work it saves
 
 Start with compact status and last meaningful delta; reread deep history only
@@ -163,8 +181,9 @@ for a new target, a significant change, a suspected loop or missing context.
 Consume incremental ranges without changing another reader's cursor.
 
 For an assigned recurring watch, use the existing scheduler/event mechanism.
-Prefer expected completion/review events; choose the charter's cadence, not
-per-agent minute pollers. Preserve an explicit next observation and reason,
+Prefer expected completion/review events; choose the charter's active and
+parked cadences, not per-agent minute pollers, and observe early on the
+watchdog checks' early triggers. Healthy agents get one log line, not a message. Preserve an explicit next observation and reason,
 batch unchanged waits, and stop the owned watch when its assignment ends.
 No daemon, cron entry, automatic joining, or background service is supplied.
 
