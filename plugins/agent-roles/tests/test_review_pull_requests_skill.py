@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-SKILL = PLUGIN / "skills" / "setting-up-pr-attention-flow"
+SKILL = PLUGIN / "skills" / "review-pull-requests"
 ROOT = PLUGIN.parents[1]
 REFUSALS = (
     "Original grant",
@@ -108,9 +108,11 @@ def test_skill_frontmatter_layout_and_discoverability() -> None:
     assert f"skills/{SKILL.name}/SKILL.md" in _read(PLUGIN / "README.md")
 
 
-def test_all_links_resolve_and_every_companion_is_reachable() -> None:
+@pytest.mark.parametrize("name", ["review-pull-requests", "monitor-agent-fleet"])
+def test_all_links_resolve_and_every_companion_is_reachable(name: str) -> None:
+    skill = PLUGIN / "skills" / name
     linked: set[Path] = set()
-    documents = [SKILL / "SKILL.md", *SKILL.rglob("*.md")]
+    documents = list(skill.rglob("*.md"))
     for document in documents:
         for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", _read(document)):
             assert not target.startswith(("http:", "file:", "\\"))
@@ -121,11 +123,26 @@ def test_all_links_resolve_and_every_companion_is_reachable() -> None:
             linked.add(path)
     companions = {
         p.resolve() for folder in ("references", "assets")
-        for p in (SKILL / folder).iterdir()
+        for p in (skill / folder).iterdir()
     }
     assert companions <= linked
-    assert all("../SKILL.md" in _read(p) for p in SKILL.rglob("*.md")
+    assert all("../SKILL.md" in _read(p) for p in documents
                if p.name != "SKILL.md")
+
+
+def test_migrated_adapter_links_still_name_dispatch_owners() -> None:
+    document = SKILL / "references" / "setup-and-adapters.md"
+    links = dict(re.findall(r"\[([^\]]+)\]\(([^)]+)\)", _read(document)))
+    expected = {
+        "Dispatch configuration reference": "docs/configuration.md",
+        "Dispatch skill": "skills/agent-dispatch/SKILL.md",
+        "registrar recipe reference": "README.md",
+        "registrar discovery reference": "docs/spawn-supervisor.md",
+    }
+    for label, destination in expected.items():
+        assert (document.parent / links[label]).resolve() == (
+            ROOT / "plugins" / "agent-dispatch" / destination
+        ).resolve()
 
 
 def test_ordered_setup_and_actual_owner_limitations() -> None:
