@@ -92,18 +92,25 @@ else:
         }), encoding="utf-8")
         status_monitor_runtime._monitor_lock_path = lambda: lock
         command = argv[2:] if argv[:1] == ["--project"] else argv
-        if command[:1] == ["record"] or command[:2] == ["resource-relationship", "capabilities"]:
+        if command[:1] in (["record"], ["head-session"]) or command[:2] == ["resource-relationship", "capabilities"]:
             import argparse
-            from agent_worktrees import record_cli, resource_producer_cli
+            from importlib import import_module
 
             parser = argparse.ArgumentParser(allow_abbrev=False)
             parser.add_argument("--project", choices=(project_name,))
             sub = parser.add_subparsers(dest="command", required=True)
-            provider = record_cli if command[0] == "record" else resource_producer_cli
+            module, handler_name = {
+                "record": ("record_cli", "cmd_record"),
+                "head-session": ("session_tracking_cli", "cmd_head_session"),
+                "resource-relationship": ("resource_producer_cli", "cmd_resource_relationship"),
+            }[command[0]]
+            provider = import_module("agent_worktrees." + module)
+            if command[0] == "head-session":
+                provider._all_tracking_dirs = lambda: [records]
             provider.add_parsers(sub)
             args = parser.parse_args(argv)
             cfg.set_active_project(args.project or project_name)
-            handler = provider.cmd_record if command[0] == "record" else provider.cmd_resource_relationship
+            handler = getattr(provider, handler_name)
             sys.exit(handler(args))
         from agent_worktrees import __main__ as main, session_binding_cli, session_tracking_cli
 

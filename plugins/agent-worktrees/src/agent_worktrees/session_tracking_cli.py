@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import re
+import sys
 from pathlib import Path
 
 from . import config as cfg
@@ -517,6 +518,7 @@ def cmd_head_session(args: argparse.Namespace) -> int:
         }
         for handoff in record.pending_handoffs
     ]
+    core = sys.modules.get("agent_worktrees.__main__")
     output._json_output(
         {
             "worktree_id": record.worktree_id or raw,
@@ -528,8 +530,8 @@ def cmd_head_session(args: argparse.Namespace) -> int:
             "head_revision": transition.revision if transition is not None else 0,
             "pending_handoffs": pending,
             "controller_revision": record.controller_revision,
-            "controllers": _core()._controller_metadata(record),
-            "controller_findings": _core()._controller_findings(record),
+            "controllers": getattr(core, "_controller_metadata", tracking._controller_metadata)(record),
+            "controller_findings": getattr(core, "_controller_findings", tracking._controller_findings)(record),
         }
     )
     return 0

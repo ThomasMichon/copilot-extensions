@@ -1293,3 +1293,19 @@ log does not identify the active owner operation. Add capture-only start/end
 timestamps around the real asynchronous owner command and synchronous lineage
 command, forwarding every argument and result unchanged. This supplies named
 phase evidence for the next diagnostic instead of another blind full rerun.
+
+The timed diagnostic passes in 87.15 seconds and proves all actual interpreter
+receipts, but leaves little margin under the original 90-second item limit.
+Every repeated owner operation takes roughly three to four seconds; no single
+stuck operation appears. The read-only head handler forces the full CLI import
+only to retrieve controller projection functions already defined by tracking.
+Use those canonical functions when the CLI is absent and preserve its
+already-loaded overrides. The finite fixture composes that existing head
+parser/handler, with the original project binding and reachable resident trap;
+all session writes still traverse the full CLI.
+
+All seven focused reader controls pass in 3.39 seconds, including existing
+head-command behavior, canonical projections without importing the CLI and
+loaded overrides, with a successful 90.84-second contained runner. F/E9 and
+all 615 admitted source hashes pass. Guarded real-flow timing and the complete
+capture remain required; this is not yet a new qualification result.
