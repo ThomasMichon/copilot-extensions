@@ -108,13 +108,41 @@ outcomes are not delivered normal-setup default/confirmation wording.
 #10163's skill selection does not complete that finite onboarding UX either.
 Linked issue/effort/release claims were not independently qualified.
 
-## Relationship and next boundary
+## Relationship and initial boundary
 
 The three contracts share preserved roles and create/link choices but remain
 non-equivalent: model-facing startup admission, provider-policy safety and
-conventional-default guidance. All originals stay OPEN under their existing
-owners. Complete receiving fit and source-specific delivery are separate
+conventional-default guidance. At initial research all originals stay OPEN
+under their existing owners. Complete receiving fit and source-specific delivery are separate
 questions; no panel or discovery helper automatically absorbs them.
 
 No model launch, provider mutation, setup, authentication, installed/native
 qualification, receiver amendment, source disposition or custody change ran.
+
+## Accepted onboarding parent
+
+The later cohort-sized tracking direction expands OPEN #3004 into the actual
+create-or-bind onboarding parent. Its read-back Plan and Validation directly
+preserve the separate first-restarted-model, conventional-default and shared
+provider/landing-policy lanes above. #3030 and #4827 close `NOT_PLANNED` as
+subordinate tracking, not as implemented behavior. #3005's broader related/
+lifecycle synthesis remains independently open.
+
+#5528 also enters this parent as a distinct protection lane. After the first
+push to a NEW GitHub knowledge repository, create or verify effective active
+default-branch deletion/non-fast-forward protection, recognize equivalent
+existing policy idempotently and add no agent bypass or PR requirement.
+Preserve direct/fast-forward default writes and independently unprotected
+feature branches; inspect adopted repositories and report equivalent/missing/
+unknown protection honestly. Use scoped identity without global account
+switching. Non-GitHub implementation, tracked follow-up OR unsupported
+readiness remains a permissible explicit outcome, not a blocker for GitHub
+or a claim that every provider is protected. Actual creation/adoption/
+protection consumers retain these tests and documentation at their own tier.
+
+#5528 closes `NOT_PLANNED` only after that complete lane is published/read
+back. The parent preserves substantive original descriptions with private
+reference/example attribution removed. Original child text, assignments and
+implementation/resource custody remain unchanged; every product criterion
+stays unchecked. No live setup, binding, repository/policy change, provider
+mutation, native/model launch or destructive protection test is performed.
