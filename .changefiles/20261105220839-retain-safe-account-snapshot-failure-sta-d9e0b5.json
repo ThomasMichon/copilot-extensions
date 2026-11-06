@@ -1,0 +1,9 @@
+{
+  "comment": "Retain safe account snapshot failure stages and peer exit status, preserving routing and Windows CLI validation.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

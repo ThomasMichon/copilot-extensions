@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 import json
+import os
 import subprocess
 
 import pytest
@@ -181,22 +182,65 @@ def test_strict_snapshot_failure_is_not_confirmed_empty(monkeypatch, returncode)
             [], returncode, '{"error":"unreadable"}', "",
         ),
     )
-    with pytest.raises(gh_account.AccountInventoryError, match="could not read"):
+    with pytest.raises(
+        gh_account.AccountInventoryError, match=f"could not read.*exit status {returncode}",
+    ):
         gh_account.account_inventory()
 
 
-@pytest.mark.parametrize("error", [
-    OSError("startup failed"), subprocess.TimeoutExpired("aw", 10),
-    UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid output"),
+@pytest.mark.parametrize(("error", "reason"), [
+    (OSError("private startup detail"), "process launch failed"),
+    (subprocess.TimeoutExpired("private-command", 10, output="private output"),
+     "invocation timed out after 10 seconds"),
+    (UnicodeDecodeError("utf-8", b"\xff", 0, 1, "private output"),
+     "output decoding failed"),
+    (subprocess.SubprocessError("private process detail"), "subprocess failed"),
 ])
-def test_snapshot_process_failure_is_not_confirmed_empty(monkeypatch, error):
+def test_snapshot_process_failure_is_not_confirmed_empty(monkeypatch, error, reason):
     monkeypatch.setattr(gh_account.worktrees, "explicit_context", lambda: False)
     monkeypatch.setattr(gh_account, "_agent_worktrees_bin", lambda: "aw")
     monkeypatch.setattr(
         gh_account.subprocess, "run", MagicMock(side_effect=error),
     )
-    with pytest.raises(gh_account.AccountInventoryError, match="unavailable"):
+    with pytest.raises(gh_account.AccountInventoryError, match="unavailable") as caught:
         gh_account.account_inventory()
+    assert reason in str(caught.value)
+    assert "private" not in str(caught.value)
+    assert caught.value.__cause__ is error
+
+
+def test_snapshot_failed_process_reaches_cli_without_echoing_output(monkeypatch, tmp_path, capsys):
+    from agent_codespaces import __main__ as cli, resolver
+
+    peer = tmp_path / ("snapshot-peer.cmd" if os.name == "nt" else "snapshot-peer")
+    peer.write_text(
+        "@echo off\n"
+        "echo private snapshot output\n"
+        "echo private snapshot stderr 1>&2\n"
+        "exit /b 7\n"
+        if os.name == "nt" else
+        "#!/bin/sh\n"
+        "printf 'private snapshot output\\n'\n"
+        "printf 'private snapshot stderr\\n' >&2\n"
+        "exit 7\n",
+        encoding="utf-8",
+    )
+    if os.name != "nt":
+        peer.chmod(0o700)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(gh_account, "_agent_worktrees_bin", lambda: str(peer))
+
+    async def unavailable(self):
+        gh_account.account_inventory()
+        pytest.fail("failed snapshot was accepted as an empty inventory")
+
+    monkeypatch.setattr(resolver.CodespaceResolver, "list_specs", unavailable)
+    assert cli.main(["namespace-list"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "exit status 7" in captured.err
+    assert "private snapshot" not in captured.err
+    assert str(peer) not in captured.err
 
 
 def test_each_discovery_refreshes_bulk_routing_once(monkeypatch):

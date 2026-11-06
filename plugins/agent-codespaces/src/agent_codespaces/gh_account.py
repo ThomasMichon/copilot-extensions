@@ -315,8 +315,16 @@ def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         if strict:
+            if isinstance(exc, subprocess.TimeoutExpired):
+                reason = "invocation timed out after 10 seconds"
+            elif isinstance(exc, UnicodeError):
+                reason = "output decoding failed"
+            elif isinstance(exc, OSError):
+                reason = "process launch failed"
+            else:
+                reason = "subprocess failed"
             raise AccountInventoryError(
-                "agent-worktrees account resolution snapshot is unavailable",
+                f"agent-worktrees account resolution snapshot is unavailable: {reason}",
             ) from exc
         if explicit:
             raise worktrees.ContextRefused(
@@ -343,7 +351,10 @@ def _account_inventory() -> AccountInventory:
     if result is None:
         return AccountInventory()
     if result.returncode != 0:
-        raise AccountInventoryError("agent-worktrees could not read its account resolution snapshot")
+        raise AccountInventoryError(
+            "agent-worktrees could not read its account resolution snapshot "
+            f"(exit status {result.returncode})",
+        )
     try:
         data = json.loads(result.stdout)
     except (ValueError, TypeError) as exc:
