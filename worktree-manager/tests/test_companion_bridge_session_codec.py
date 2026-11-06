@@ -205,7 +205,11 @@ def test_represented_project_is_not_borrowed_and_federated_relationship_is_not_a
     semantic.source.update(registry="represented", project=None, transport="represented-sdk")
     semantic.log.append("subagent_started", {"agent_id": "helper"})
     codec = SessionCodec("example", "selected", OWNER, selected, "fixture-generation")
-    assert codec.decode(semantic.frame())["source"]["project"] is None
+    frame = codec.decode(semantic.frame())
+    assert frame["source"]["project"] is None
+    event, = codec.events(frame, codec.token(frame, 1))
+    assert event.actor.reported_state is None
+    assert "Current execution and concurrency unknown" in event.details
     selected.update(registry="relationship", member_id="relationship:relation",
                     relationship_id="relation", uncertain_remote_outcome=True,
                     relationship_qualification="unknown", incarnation={"relationship_id": "relation"})
@@ -392,6 +396,52 @@ def test_actual_reported_agents_have_distinct_stable_lanes_without_inferred_pare
     assert {event.ref: window.lane(event) for event in snapshot.events} == lanes
 
 
+def test_actual_acp_activity_reports_do_not_become_current_concurrency(semantic) -> None:
+    from acp.schema import ToolCallProgress, ToolCallStart
+    from agent_bridge.acp_client import AcpClient
+
+    client = AcpClient(on_event=semantic.log.append)
+    client._acp_session_id = "native-session"
+    for agent in ("helper-a", "helper-b"):
+        client._subagent_attr.handle_raw_event({
+            "sessionId": "native-session", "type": "subagent.started", "agentId": agent,
+            "data": {"agentDisplayName": "Inspect source", "toolCallId": "launch-" + agent},
+        })
+        client._handle_session_update(ToolCallStart(
+            session_update="tool_call", tool_call_id="tool-" + agent, title="Read source",
+            field_meta={"github.com/copilot": {"agentId": agent}},
+        ))
+    client._handle_session_update(ToolCallProgress(
+        session_update="tool_call_update", tool_call_id="tool-helper-a", status="completed",
+    ))
+    client._subagent_attr.handle_raw_event({
+        "sessionId": "native-session", "type": "subagent.completed", "agentId": "helper-a",
+        "data": {},
+    })
+    assert semantic.log.active_tool_call()["tool_call_id"] == "tool-helper-b"
+
+    codec, window = semantic.codec(), TimelineWindow()
+    frame = codec.decode(semantic.frame(tool_statistics=True), tool_statistics=True)
+    token = codec.token(frame, 1)
+    snapshot = codec.snapshot(frame, token)
+    assert frame["tool_statistics"]["start_occurrences"] == 2
+    assert frame["coverage"] == "partial" and frame["retained"]["complete"] is False
+    assert [event.kind.value for event in snapshot.events].count("contribution-reported") == 3
+    assert all(event.actor.reported_state is None for event in snapshot.events)
+    assert all(not event.relations for event in snapshot.events)
+    assert window.bind(token).applied and window.apply_snapshot(snapshot).applied
+    layout = TimelineLayout()
+    for event in snapshot.events:
+        assert window.toggle_expansion(event.ref).applied
+    layout.rebuild(window, 100)
+    assert all(
+        "Current execution and concurrency unknown" in block.detail_text
+        for block in layout.blocks
+    )
+    assert snapshot.events[-1].summary == "Reported agent completion"
+    assert len({window.lane(event) for event in snapshot.events}) == 2
+
+
 @pytest.mark.parametrize("kind,details", [
     ("subagent_started", {"agent_display_name": "A name without identity"}),
     ("subagent_completed", {"agent_id": ""}),
@@ -411,6 +461,7 @@ def test_absent_invalid_or_unqualified_actor_metadata_stays_with_reporter(
     assert event.actor.actor_id == "bridge-session:child"
     assert event.actor.label == "child" and event.actor.reported_state is None
     assert frame["coverage"] == "partial" and frame["current_requests"] == "unknown"
+    assert "Current execution and concurrency unknown" in event.details
 
 
 @pytest.mark.parametrize("size", [(100, 32), (48, 24)])

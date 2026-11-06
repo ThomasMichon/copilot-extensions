@@ -332,7 +332,8 @@ class SessionCodec:
             occurred = stamp(item["occurred_at"], nullable=True)
             detail = (
                 f"Native {item['native_kind']}; partial retained event; current requests and "
-                "answerability unknown. Reported linkage is not custody."
+                "answerability unknown. Reported linkage is not custody. "
+                "Current execution and concurrency unknown."
             )
             if item["kind"] == "compaction":
                 detail += " Pre-context classification unknown; active pre-window capacity is unqualified."
