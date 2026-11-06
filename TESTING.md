@@ -2562,6 +2562,11 @@ JSON. After the publisher closes, replacement and a complete new read succeed.
 This does not claim that `MoveFileEx` can replace a still-open destination.
 Only a missing publication is deferred. Access, sharing and malformed-JSON
 errors remain failures; there is no permission-error retry or deadline reset.
+The blocked attention-refresh controls wait for the actual successor observation
+and single-flight completion, not `wait_for_complete()` over the intentionally
+cancelled predecessor worker. They still release and observe the late old read
+and assert it cannot replace the new head or its idle result. This avoids a
+test-only `WorkerCancelled` race without changing production cancellation.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that
