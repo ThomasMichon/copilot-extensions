@@ -83,8 +83,42 @@ def test_inline_journal_latest_first(tmp_path: Path) -> None:
     digest = digest_mod.build_digest(_write(tmp_path / "effort"), journal_limit=1)
 
     journal = digest["journal"]
-    assert journal["inline_total"] == 2
-    assert [e["title"] for e in journal["inline_latest"]] == ["2026-11-03 — Progress"]
+    assert journal["entries_total"] == 2
+    assert [e["title"] for e in journal["latest"]] == ["2026-11-03 — Progress"]
+
+
+def test_mixed_order_journal_sorted_by_date(tmp_path: Path) -> None:
+    text = (
+        "# E\n\n## Journal\n\n"
+        "### 2026-10-30 — Prepended\n\n### 2026-11-03 — Late A\n\n"
+        "### 2026-11-03 — Late B\n\n### 2026-11-01 — Middle\n\n"
+        "### 2026-10-28 — Oldest\n"
+    )
+    digest = digest_mod.build_digest(_write(tmp_path / "effort", text), journal_limit=3)
+
+    # Newest-first document order is kept for same-date entries.
+    assert [e["title"] for e in digest["journal"]["latest"]] == [
+        "2026-11-03 — Late A",
+        "2026-11-03 — Late B",
+        "2026-11-01 — Middle",
+    ]
+
+
+def test_journal_md_sidecar_entries_located(tmp_path: Path) -> None:
+    folder = tmp_path / "effort"
+    _write(folder, "# E\n\n## Journal\n\nSee [journal.md](journal.md).\n\n### 2026-07-13 — Inline\n")
+    (folder / "journal.md").write_text(
+        "# Journal - e\n\n## 2026-09-16 — Sidecar newest\n\n### detail\n\n## 2026-08-01 — Older\n",
+        encoding="utf-8",
+    )
+
+    journal = digest_mod.build_digest(folder, journal_limit=2)["journal"]
+
+    assert journal["entries_total"] == 3
+    assert [(e["file"], e["line"], e["title"]) for e in journal["latest"]] == [
+        ("journal.md", 3, "2026-09-16 — Sidecar newest"),
+        ("journal.md", 7, "2026-08-01 — Older"),
+    ]
 
 
 def test_split_journal_files_latest_first(tmp_path: Path) -> None:
@@ -97,7 +131,7 @@ def test_split_journal_files_latest_first(tmp_path: Path) -> None:
 
     journal = digest_mod.build_digest(folder, journal_limit=1)["journal"]
 
-    assert journal["inline_total"] == 0
+    assert journal["entries_total"] == 0
     assert journal["files_total"] == 2
     assert [e["file"] for e in journal["files_latest"]] == ["journal/2026/11.02 b.md"]
 

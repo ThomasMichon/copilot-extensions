@@ -130,35 +130,59 @@ def open_items(sections: list[Section]) -> list[dict]:
     return items
 
 
-def _looks_newest_first(titles: list[str]) -> bool:
-    dates = [m.group(0) for m in (DATE.search(t) for t in titles) if m]
-    return len(dates) >= 2 and dates[0] > dates[-1]
+def _entry_date(title: str) -> str:
+    match = DATE.search(title)
+    return match.group(0) if match else ""
+
+
+def _newest_first(entries: list[dict]) -> list[dict]:
+    """Order entries newest first by their dated titles.
+
+    The document's overall direction (prepended or appended) orders entries
+    that share a date or carry none; undated entries follow dated ones.
+    """
+    dates = [d for d in (_entry_date(e["title"]) for e in entries) if d]
+    ordered = entries if len(dates) >= 2 and dates[0] > dates[-1] else entries[::-1]
+    return sorted(ordered, key=lambda e: _entry_date(e["title"]), reverse=True)
+
+
+def _sidecar_entries(path: Path, rel: str) -> list[dict]:
+    """Top-level entries of an extracted ``journal.md`` sidecar."""
+    sections = parse_sections(path.read_text(encoding="utf-8"))
+    nested = any(s.area == JOURNAL_SECTION and s.area_depth == 0 for s in sections)
+    depth = 1 if nested else 0
+    return [
+        {"file": rel, "line": s.start, "title": s.title, "bytes": s.size}
+        for s in sections
+        if s.level >= 2 and s.area_depth == depth and (not nested or s.area == JOURNAL_SECTION)
+    ]
 
 
 def journal_entries(readme: Path, sections: list[Section], limit: int) -> dict:
-    """Latest inline journal entries and dated files under ``journal/``."""
-    inline = [
-        {"line": s.start, "title": s.title, "bytes": s.size}
+    """Latest journal entries (README inline and ``journal.md``) and ``journal/`` files."""
+    entries = [
+        {"file": readme.name, "line": s.start, "title": s.title, "bytes": s.size}
         for s in sections
         if s.area == JOURNAL_SECTION and s.area_depth == 1
     ]
+    sidecar = readme.parent / "journal.md"
+    if sidecar.is_file() and sidecar != readme:
+        entries += _sidecar_entries(sidecar, sidecar.name)
     files: list[dict] = []
     journal_dir = readme.parent / "journal"
     if journal_dir.is_dir():
         for path in journal_dir.rglob("*.md"):
-            files.append(
-                {"file": path.relative_to(readme.parent).as_posix(), "bytes": path.stat().st_size}
-            )
+            rel = path.relative_to(readme.parent).as_posix()
+            files.append({"file": rel, "title": rel, "bytes": path.stat().st_size})
         files.sort(key=lambda entry: entry["file"])
-    if _looks_newest_first([entry["title"] for entry in inline]):
-        latest_inline = inline[:limit]
-    else:
-        latest_inline = inline[len(inline) - limit:][::-1] if limit else []
+    latest_files = [
+        {"file": e["file"], "bytes": e["bytes"]} for e in _newest_first(files)[:limit]
+    ]
     return {
-        "inline_total": len(inline),
-        "inline_latest": latest_inline,
+        "entries_total": len(entries),
+        "latest": _newest_first(entries)[:limit],
         "files_total": len(files),
-        "files_latest": files[len(files) - limit:][::-1] if limit else [],
+        "files_latest": latest_files,
     }
 
 
@@ -267,8 +291,10 @@ def render(digest: dict) -> str:
             out.append(f"[{group}]")
         out.append(f"L{item['line']}\t{item['text']}")
     journal = digest["journal"]
-    out += ["", f"## Latest journal (inline {journal['inline_total']}, files {journal['files_total']})"]
-    out += [f"L{e['line']}\t{_kb(e['bytes'])}\t{e['title']}" for e in journal["inline_latest"]]
+    out += ["", f"## Latest journal (entries {journal['entries_total']}, files {journal['files_total']})"]
+    out += [
+        f"{e['file']}:L{e['line']}\t{_kb(e['bytes'])}\t{e['title']}" for e in journal["latest"]
+    ]
     out += [f"{_kb(e['bytes'])}\t{e['file']}" for e in journal["files_latest"]]
     since = digest.get("since")
     if since:
