@@ -1,7 +1,7 @@
 ---
-name: setting-up-pr-attention-flow
+name: review-pull-requests
 description: >
-  Sets up sustained pull-request attention with configurable independent
+  Charters the sustained pull-request reviewer role: configurable independent
   review lanes, retained per-PR follow-ups, repository-specific verdict and
   merge policies, and agent-to-agent communication through existing owners.
   Not a single code review, contributor sign-off, backlog bulk closure or
@@ -10,9 +10,10 @@ description: >
   - 'set up sustained PR attention'
   - 'configure independent PR review lanes'
   - 'set up a continuous PR review flow'
+  - 'charter a pull-request reviewer role'
 ---
 
-# Setting Up PR Attention Flow
+# Review Pull Requests (Sustained Role)
 
 Prepare an operator-authorized, repository-owned setup contract, then verify
 the available adapters before starting it. This is guidance, not an executable
@@ -21,9 +22,10 @@ change branch policy or repair another owner's queue.
 
 ## Existing owners
 
-This skill lives in agent-dispatch because it composes task/recipe lifecycle
-guidance with sustained attention, not because Dispatch is mandatory. Native
-Task or Bridge adapters remain valid; a role charter need not live in a recipe.
+This skill lives in agent-roles because it charters a sustained role over
+existing owners, not because Dispatch is mandatory. Dispatch task/recipe
+lifecycle, native Task or Bridge adapters all remain valid; a role charter need
+not live in a recipe.
 Resolve [guidance sources](references/setup-and-adapters.md#resolve-guidance-through-its-owners)
 before binding roles or treating custom guidance as authority.
 

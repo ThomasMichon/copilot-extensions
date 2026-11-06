@@ -455,6 +455,14 @@
       "level": "pending"
     },
     {
+      "name": "agent-roles",
+      "include": [
+        "plugins/agent-roles"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
       "name": "agent-ssh",
       "include": [
         "plugins/agent-ssh"
