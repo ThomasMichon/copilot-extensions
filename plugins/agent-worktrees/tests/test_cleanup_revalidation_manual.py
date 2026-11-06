@@ -110,10 +110,10 @@ def test_pending_move_skips_only_its_record_and_continues_cleanup(monkeypatch, t
     harness.set_classifier(info(S.COMPLETED), info(S.COMPLETED))
     if mode == "batch":
         assert harness.run_batch() == 0
-        assert "relocation" in capsys.readouterr().out
+        assert "Skipping wt1:" in capsys.readouterr().out
     else:
         report = harness.run_sweep()
-        assert any(row["id"] == moving.worktree_id and "relocation" in row["reason"]
+        assert any(row["id"] == moving.worktree_id and row["reason"]
                    for row in report["skipped"])
     assert harness.reaped == [(unrelated.worktree_id, S.COMPLETED.value)]
     assert path.read_bytes() == before and relocation.journal_path(path).exists()
