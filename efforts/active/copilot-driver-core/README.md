@@ -1344,3 +1344,12 @@ limit, 600-second Windows aggregate deadline, complete portfolio and all
 source/interpreter/receipt checks remain unchanged. This is a declared
 per-case budget adjustment, not evidence that the earlier 90-second contract
 passed and not authorization for installed or fleet effects.
+
+The full capture at the approved-budget source publishes no outputs: both
+actual-owner cases fail at the separate, unchanged production lineage command
+timeout of ten seconds. Acquisition reaches `note-handoff`; keyed creation
+cannot complete its legacy-resident probe. After the contained runner exits,
+an aggregate host sample reports 98% CPU utilization with memory and disk
+headroom. Preserve the production limit and wait for execution capacity before
+one further bounded attempt. This is a pending qualification gate, not a pass,
+an accepted flake, or permission to bypass source evidence, review or CI.
