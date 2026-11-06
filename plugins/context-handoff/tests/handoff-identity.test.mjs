@@ -227,6 +227,32 @@ test("actual task consumption retains both identities and retry cannot relabel t
   });
 });
 
+test("resumed task retry after an uncertain consume never attributes the later activation", () => {
+  fixture(({ binding, metadata, request, activation }) => {
+    binding("predecessor");
+    binding("consumer");
+    const meta = metadata();
+    request(meta, "task-example", "agent-dispatch");
+    const payload = encodeHandoffPayload("brief", meta);
+    const options = { readPayload: () => payload, promoteHead: () => {} };
+    const first = consumeDispatchHandoffTask("/source", "task-example", "consumer", true, {
+      ...options, consumeTask: () => { throw new Error("possibly consumed before failure"); },
+    });
+    assert.equal(first.ok, false);
+    binding("consumer", { sessionActivation: {
+      ...activation, ordinal: 4, sourceIdentity: "native:resumed",
+    } });
+    const retry = consumeDispatchHandoffTask("/source", "task-example", "consumer", true, {
+      ...options, consumeTask: () => payload,
+    });
+    assert.equal(retry.ok, true);
+    assert.equal(retry.checkpointState.steps.taskConsumed, true);
+    assert.equal(retry.checkpointState.consumerIdentity, null);
+    assert.equal(JSON.parse(readFileSync(retry.checkpoint)).consumerIdentity, null);
+    assert.equal(readSessionStateHandoff("predecessor").record.consumerIdentity, null);
+  });
+});
+
 test("a legacy completed task checkpoint remains unqualified on same-session replay", () => {
   fixture(({ binding, metadata, stateDir }) => {
     const meta = metadata();

@@ -2626,6 +2626,7 @@ export function consumeDispatchHandoffTask(
       : checkpoint.payload || before.text || "",
   };
   if (!checkpoint.steps?.taskConsumed) {
+    const firstConsumeAttempt = checkpoint.steps?.consumeAttempted === false;
     checkpointStep(checkpoint, "consumeAttempted");
     try {
       const consumed = consumeTask(cwd, taskId, deferComplete);
@@ -2634,7 +2635,8 @@ export function consumeDispatchHandoffTask(
       if (fromConsume.metadata) decoded.metadata = fromConsume.metadata;
       checkpoint.payload = decoded.text;
       checkpoint.metadata = decoded.metadata;
-      checkpoint.consumerIdentity = captureHandoffIdentity(sid, decoded.metadata?.worktree);
+      checkpoint.consumerIdentity = firstConsumeAttempt
+        ? captureHandoffIdentity(sid, decoded.metadata?.worktree) : null;
       checkpointStep(checkpoint, "taskConsumed");
     } catch (error) {
       const predecessorSessionId = decoded.metadata?.sessionId || checkpoint.predecessorSession || null;

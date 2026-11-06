@@ -169,7 +169,9 @@ persisted with successful consumption before best-effort head promotion, so a
 failed promotion does not erase the consume observation. Same-session delivery
 replay retains the original identity, including unknown legacy evidence; it
 never substitutes a resumed activation or upgrades a historical receipt from
-today's mutable binding. These snapshots grant no authority and do not compare
+today's mutable binding. A successful task retry after an earlier uncertain
+attempt records `consumerIdentity: null`, because the earlier attempt may have
+consumed the task before failing. These snapshots grant no authority and do not compare
 against the current durable head or Picker resume choice. That passive reader
 and its optional Companion display remain separate work.
 
