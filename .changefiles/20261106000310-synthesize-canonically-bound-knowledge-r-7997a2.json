@@ -1,0 +1,9 @@
+{
+  "comment": "Synthesize canonically bound knowledge related entries with aligned-only read policy and no topology writes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

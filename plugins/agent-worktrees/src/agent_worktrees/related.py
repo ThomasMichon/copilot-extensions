@@ -233,6 +233,7 @@ class RelatedEntry:
     # the loader so canonical, legacy, and marketplace-overlay entries each keep
     # their own doc root without callers needing to know which committed path won.
     doc_root: str | None = field(default=None, compare=False)
+    bound_state_root: bool = field(default=False, compare=False, repr=False)
 
 
 @dataclass
@@ -559,6 +560,13 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
     Only non-empty fields are emitted, keeping committed files minimal and
     review-friendly (matching ``repos.write_registry``).
     """
+    if any(entry.bound_state_root for entry in cfg.related.values()):
+        from configuration_layers import ConfigurationError
+
+        raise ConfigurationError(
+            "Cannot persist a synthesized bound knowledge relationship; "
+            "edit the authored related sources instead."
+        )
     path = related_path(anchor)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -743,24 +751,29 @@ class _ConfigContributionAnchor(str):
     """Path marker preserving harness/knowledge config-source identity."""
 
     source_layer: str
+    state_repo: str
 
     def __new__(
         cls, value: str, source_layer: str, *, directory_form=False, source_tier=None,
+        state_repo="",
     ) -> "_ConfigContributionAnchor":
         marker = super().__new__(cls, value)
         marker.source_layer = source_layer
         marker.directory_form = directory_form
         marker.source_tier = source_tier
+        marker.state_repo = state_repo
         return marker
 
 
 def config_contribution_anchor(
     anchor: str | Path, source_layer: str, *, directory_form=False, source_tier=None,
+    state_repo="",
 ) -> str:
     """Tag one repository config anchor with its stable public source layer."""
     layer = source_layer if source_layer in {"harness", "machine", "knowledge"} else "repository"
     return _ConfigContributionAnchor(
         str(anchor), layer, directory_form=directory_form, source_tier=source_tier,
+        state_repo=state_repo,
     )
 
 
@@ -779,6 +792,17 @@ def entry_provenance(entry: RelatedEntry) -> dict[str, str]:
     if entry.origin_layer in {"harness", "machine", "knowledge", "repository"}:
         return {"layer": entry.origin_layer}
     return {"layer": "unknown"}
+
+
+def state_root_policy(entry: RelatedEntry) -> dict[str, str | bool] | None:
+    if not entry.bound_state_root:
+        return None
+    return {
+        "source": "knowledge_repo",
+        "anchor_writable": False,
+        "write_workspace": "aligned-knowledge-worktree",
+        "lifecycle": "native-harness-pair",
+    }
 
 
 def public_doc(entry: RelatedEntry) -> str:
@@ -906,6 +930,13 @@ def upsert_related(anchor: str | Path, entry: RelatedEntry) -> RelatedConfig:
     preserving existing values otherwise -- so callers can update one field
     without clobbering the rest.
     """
+    if entry.bound_state_root:
+        from configuration_layers import ConfigurationError
+
+        raise ConfigurationError(
+            "Cannot persist a synthesized bound knowledge relationship; "
+            "edit the authored related sources instead."
+        )
     cfg = read_related(anchor)
     existing = cfg.related.get(entry.name)
     if existing is None:
@@ -1197,6 +1228,15 @@ def scaffold_doc(
     ``force`` is set.
     """
     path = doc_abs_path(anchor, entry)
+    if entry.bound_state_root:
+        if path.is_file() and not force:
+            return (path, False)
+        from configuration_layers import ConfigurationError
+
+        raise ConfigurationError(
+            "The bound knowledge relationship is synthesized; no "
+            "narrative is scaffolded into its registered anchor."
+        )
     if path.exists() and not force:
         return (path, False)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1343,6 +1383,25 @@ def build_resolution(
 
     res = Resolution(name=name, locus_kind=kind, target_machine=target,
                      delegate_via=entry.delegate)
+
+    if entry.bound_state_root:
+        res.editing_model = "paired-knowledge-worktree"
+        res.steps = [
+            "Inspect the current harness/knowledge pair with "
+            "`agent-worktrees state-root --pair --json`.",
+            "Write personal state only in the validated aligned knowledge "
+            "worktree, never the registered anchor.",
+            "If no valid sibling exists, obtain or repair it through the "
+            "supported harness lifecycle before writing; unavailable repair "
+            "is a blocker, not permission to use another checkout.",
+            "Preserve native pairing, live/unknown ownership and finalization "
+            "claims; this read-only plan neither allocates nor releases them.",
+        ]
+        res.notes = [
+            "The registry path identifies the bound repository, not a writable "
+            "state workspace or a standalone knowledge-agent launch target."
+        ]
+        return res
 
     # Local editing model from the global registry class.  A ``worktree`` repo
     # adopted as a ``base_repo`` (enlistment monorepo) is edited in the anchor

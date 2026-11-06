@@ -1589,6 +1589,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                 anchors.extend(
                     related.config_contribution_anchor(
                         source.anchor, source.origin,
+                        state_repo=getattr(source, "state_repo", ""),
                         **({
                             "directory_form": getattr(source, "directory_form", False),
                             "source_tier": getattr(source, "tier", None),
