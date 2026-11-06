@@ -1,0 +1,9 @@
+{
+  "comment": "Evaluate Windows read-event reminders in shell using guarded binding and published worktree facts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

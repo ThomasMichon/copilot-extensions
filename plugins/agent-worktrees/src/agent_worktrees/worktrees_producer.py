@@ -63,5 +63,15 @@ def _publish_active_project(runtime, project: str, *, observe_records=None) -> i
         from . import delegate_cli
 
         delegate_cli.annotate_delegate_graph(rows, current_only=True)
-        runtime.publish(project, rows, observed_at=observed_at)
+        runtime.publish(
+            project, rows, observed_at=observed_at,
+            record_heads={
+                record.worktree_id: {
+                    "creation_nonce": record.creation_nonce,
+                    "workspace": record.worktree_path,
+                    "head_session": record.resolved_head_session,
+                }
+                for record in records
+            },
+        )
     return len(rows)
