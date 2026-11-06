@@ -259,14 +259,19 @@ def _peer_python(context: dict[str, Any], environment: dict[str, str]) -> Path:
         raise ValueError(f"{context['pluginId']}: no completed runtime resolved")
     python = Path(result.stdout)
     versions = Path(context["versionsRoot"])
+    environment_root = python.parent.parent
+    slot = environment_root.parent if environment_root.name == ".venv" else environment_root
+    expected_environment = versions.resolve() / slot.name
+    if environment_root.name == ".venv":
+        expected_environment /= ".venv"
     # Constrain the resolver's answer to this peer, but do NOT dereference the
     # interpreter leaf: ordinary POSIX venvs symlink it to their base Python.
     if (
         not python.is_absolute() or not python.is_file()
         or python.parent.name not in {"bin", "Scripts"}
         or python.name not in {"python", "python.exe"}
-        or python.parent.parent.parent != versions
-        or python.parent.resolve().parent.parent != versions.resolve()
+        or slot.parent != versions
+        or python.parent.resolve() != expected_environment / python.parent.name
     ):
         raise ValueError(f"{context['pluginId']}: resolver escaped its version slots")
     return python

@@ -330,6 +330,21 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+Eight further subordinate trackers consolidate into eight existing OPEN
+parents for Proactor resource settlement, observed-check supersession,
+producer/receipt convergence, install/adopt choices, first-touch test
+containment, managed entry, per-owner compatibility and Picker-channel
+lifetime. The exact native, source, resource and independent-open conditions
+remain; the campaign performs no implementation or live repair.
+Two equal complete nine-page scans at 16:08 PST measure 890 whole OPEN,
+616 creator-eligible, 274 excluded, 602 original-cohort and 288 inflow.
+Eight audited departures, no arrivals and no external departures explain
+the change from 898. Verified dispositions are 908; the fixed 729 whole-queue
+checkpoint remains 161 away. The
+[dated journal](journal/2026/11.05%20cohort-parent-luna-reconciliation.md)
+records the preceding reviewed delivery and each requirement-preserving
+intake. Product acceptance stays unchecked and the campaign remains Active.
+
 Fourteen further subordinate trackers consolidate into eleven existing OPEN
 parents, with complete original/refined requirements and distinct unfinished
 lanes: live registry reload, paired/removal recovery, task observation and

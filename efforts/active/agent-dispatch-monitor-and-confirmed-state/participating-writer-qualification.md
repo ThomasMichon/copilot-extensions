@@ -44,6 +44,15 @@ and matched independently.
 Session-lock files and Bridge's own database are separate storage boundaries;
 their presence is not evidence about the Worktrees record serializer.
 
+The delegated child revalidates the installation receipts and asks the selected
+peer's shipped native resolver for its actual interpreter. That interpreter
+can belong to a physical `.venv` application environment inside the version
+slot, not only a historical direct-slot environment. The shared launcher now
+accepts both layouts without accepting redirected slot/environment directories.
+This repairs execution selection; it adds no executing-build observation or
+cohort admission. Its unchanged dynamic launch prefix is still not an immutable
+build binding, and the health root alone cannot establish one.
+
 ## Selected admission requirements
 
 The assembling owner must identify the actual participating writers for the
@@ -102,7 +111,9 @@ mandatory. Unknown responses retain the same assignment and claim.
       relationship transaction; ordinary consumers and independent
       admission are not yet assembled. The explicit Dispatch adapter now
       conditionally carries that guard and presents the selected identity
-      to its admission callback; real cohort assembly remains open.
+      to its admission callback; real cohort assembly, Bridge's delegated
+      executing-writer qualification and changed-selection invalidation remain
+      open before ordinary preparation or advancement.
 - [ ] Integrate ordinary preparation/advancement consumers only after their
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers

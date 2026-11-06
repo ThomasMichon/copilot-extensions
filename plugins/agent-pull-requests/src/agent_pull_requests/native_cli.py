@@ -11,7 +11,7 @@ import sys
 import time
 
 from .native_command import run_command
-from .watch_provider import command_path, fetch_snapshot
+from .watch_provider import NATIVE_SNAPSHOT_TIMEOUT, command_path, fetch_snapshot
 
 
 def validate_selector(value: str) -> str:
@@ -93,7 +93,7 @@ def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
     while True:
         snapshot = fetch_snapshot(
             args.repo, args.number, args.worktrees_command, prefix=prefix,
-            runner=lambda argv: run_command(argv, timeout=20.0),
+            runner=lambda argv: run_command(argv, timeout=NATIVE_SNAPSHOT_TIMEOUT),
         )
         payload = dict(snapshot.native_snapshot)
         if not waiting:

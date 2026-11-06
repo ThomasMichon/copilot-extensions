@@ -15,6 +15,7 @@ from .native_command import run_command
 
 NATIVE_SNAPSHOTS = "native_snapshots/v1"
 CONTINUOUS_NOTIFICATIONS = "continuous_notifications/v1"
+NATIVE_SNAPSHOT_TIMEOUT = 60.0
 _MAX_SNAPSHOT_BYTES = 1_048_576
 _FINGERPRINTS = ("votes", "approvals", "discussions", "policies", "gates")
 
@@ -31,7 +32,7 @@ def target_id(snapshot: PRSnapshot) -> str:
 
 
 def _run_native(argv: list[str]) -> subprocess.CompletedProcess:
-    return run_command(argv, timeout=20.0)
+    return run_command(argv, timeout=NATIVE_SNAPSHOT_TIMEOUT)
 
 
 def command_path(value: object) -> str:
