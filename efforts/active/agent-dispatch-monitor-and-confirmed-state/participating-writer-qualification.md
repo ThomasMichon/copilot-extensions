@@ -57,8 +57,12 @@ The installed candidate already publishes its build UUID inside the immutable
 slot, independently of root-wide deployment stamps. The next bounded source
 step observes that UUID for Bridge's legacy selection through the existing
 canonical resolver, with selection and metadata rechecks and no child process.
-The same-cell native launcher still has no child-free selected-interpreter
-observation, so that path remains unknown. Even a known selected-slot UUID is
+The continuing source migration uses the peer-owned Python resolver for both
+same-cell execution and child-free selected-interpreter observation, under the
+existing receipt/governance fences. Native-only peers remain unknown.
+This intentionally changes the native selector's differing edge cases rather
+than substituting a Python observation for unchanged native execution.
+Even a known selected-slot UUID is
 not the delegated process's live serializer response or a pinned future launch.
 Independent admission must retain both distinctions before ordinary integration.
 

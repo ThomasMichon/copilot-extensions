@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { DEFAULT_THRESHOLDS, validateThresholds } from "./thresholds.mjs";
 import { DEFAULT_HANDOFF_MODE, validateHandoffMode } from "./mode.mjs";
+import { DEFAULT_NATIVE_PRESSURE, validateNativePressure } from "./native-pressure.mjs";
 
 export const CONFIG_RELATIVE_PATH = join(".context-handoff", "config.yaml");
 // Payload-only plugins in this repo commonly keep user-global configuration in
@@ -78,6 +79,7 @@ const THRESHOLD_TIERS = Object.freeze(["soft", "hard", "force"]);
 export function parseContextHandoffConfig(text, source = CONFIG_RELATIVE_PATH) {
   const configuredThresholds = {};
   let configuredMode;
+  let configuredNativePressure;
   let inThresholds = false;
   let sawThresholds = false;
   let sawSetting = false;
@@ -99,6 +101,17 @@ export function parseContextHandoffConfig(text, source = CONFIG_RELATIVE_PATH) {
       sawSetting = true;
       continue;
     }
+    const nativePressureMatch = rawLine.match(/^native_pressure:\s*(\S+)\s*(?:#.*)?$/);
+    if (nativePressureMatch) {
+      if (configuredNativePressure != null) {
+        throw new Error(`${source}:${lineNumber}: duplicate native_pressure`);
+      }
+      configuredNativePressure = validateNativePressure(
+        nativePressureMatch[1], `${source}:${lineNumber}`,
+      );
+      sawSetting = true;
+      continue;
+    }
     if (/^thresholds:\s*(?:#.*)?$/.test(rawLine)) {
       if (sawThresholds) {
         throw new Error(`${source}:${lineNumber}: duplicate thresholds block`);
@@ -114,7 +127,7 @@ export function parseContextHandoffConfig(text, source = CONFIG_RELATIVE_PATH) {
     );
     if (!inThresholds || !match) {
       throw new Error(
-        `${source}:${lineNumber}: expected top-level mode or thresholds block entries ` +
+        `${source}:${lineNumber}: expected top-level mode, native_pressure, or thresholds block entries ` +
         "(soft_percent|hard_percent|force_percent|soft_tokens|hard_tokens|force_tokens)",
       );
     }
@@ -127,12 +140,15 @@ export function parseContextHandoffConfig(text, source = CONFIG_RELATIVE_PATH) {
   }
 
   if (!sawSetting) {
-    throw new Error(`${source}: missing mode or thresholds block`);
+    throw new Error(`${source}: missing mode, native_pressure, or thresholds block`);
   }
 
   const result = {};
   if (configuredMode != null) {
     result.mode = configuredMode;
+  }
+  if (configuredNativePressure != null) {
+    result.nativePressure = configuredNativePressure;
   }
   if (Object.keys(configuredThresholds).length) {
     result.thresholds = configuredThresholds;
@@ -219,6 +235,7 @@ async function loadConfigLayerAsync(configPath) {
 export function defaultConfig(configPath = null) {
   return {
     mode: DEFAULT_HANDOFF_MODE,
+    nativePressure: DEFAULT_NATIVE_PRESSURE,
     thresholds: DEFAULT_THRESHOLDS,
     configPath,
     warning: null,
@@ -249,8 +266,13 @@ export function loadContextHandoffConfig(startDir, options = {}) {
       repoConfig?.mode ?? userConfig?.mode ?? DEFAULT_HANDOFF_MODE,
       repoConfig?.path || userConfig?.path || CONFIG_RELATIVE_PATH,
     );
+    const nativePressure = validateNativePressure(
+      repoConfig?.nativePressure ?? userConfig?.nativePressure ?? DEFAULT_NATIVE_PRESSURE,
+      repoConfig?.path || userConfig?.path || CONFIG_RELATIVE_PATH,
+    );
     return {
       mode,
+      nativePressure,
       thresholds,
       configPath: repoConfig?.path || userConfig?.path || null,
       warning: null,
@@ -258,6 +280,7 @@ export function loadContextHandoffConfig(startDir, options = {}) {
   } catch (error) {
     return {
       mode: DEFAULT_HANDOFF_MODE,
+      nativePressure: DEFAULT_NATIVE_PRESSURE,
       thresholds: DEFAULT_THRESHOLDS,
       configPath,
       warning:
@@ -303,8 +326,13 @@ export async function loadContextHandoffConfigAsync(startDir, options = {}) {
       repoConfig?.mode ?? userConfig?.mode ?? DEFAULT_HANDOFF_MODE,
       repoConfig?.path || userConfig?.path || CONFIG_RELATIVE_PATH,
     );
+    const nativePressure = validateNativePressure(
+      repoConfig?.nativePressure ?? userConfig?.nativePressure ?? DEFAULT_NATIVE_PRESSURE,
+      repoConfig?.path || userConfig?.path || CONFIG_RELATIVE_PATH,
+    );
     return {
       mode,
+      nativePressure,
       thresholds,
       configPath: repoConfig?.path || userConfig?.path || null,
       warning: null,
@@ -312,6 +340,7 @@ export async function loadContextHandoffConfigAsync(startDir, options = {}) {
   } catch (error) {
     return {
       mode: DEFAULT_HANDOFF_MODE,
+      nativePressure: DEFAULT_NATIVE_PRESSURE,
       thresholds: DEFAULT_THRESHOLDS,
       configPath,
       warning:

@@ -473,6 +473,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 - [ ] Implement a compact topology presentation for phases, sub-agents,
       bridges, downstream worktrees, open PRs and accumulated tool-call stats,
       using the same sources as other companion clients.
+      The [owner-qualified PR-state realization](sidecar-pr-state.md) proposes
+      an optional exact-association, explicit passive point-read using the
+      existing snapshot owner. Claims alone remain unknown PR-state evidence;
+      full live topology and every native/installed gate remain open.
 - [x] Implement explicit CLI/summary pane switching with attention indicators
       that preserve the live CLI and its answer boundary.
       Source merged in #8881 and #8941; installed/native-client attention
@@ -630,6 +634,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Validation Plan
 
+- [x] Step 7 finite activity-evidence distinction: actual ACP callback reports,
+      owner-qualified start occurrences and canonical resource claims retain
+      separate meanings; missing/represented attribution does not imply a
+      running count or parent edge. #10915 qualifies 133 isolated controls and
+      explicit unknown execution/concurrency in expanded Evidence. Current
+      execution remains unqualified; complete source coverage and original
+      parent gates remain open.
+
 - [x] Step 7 finite membership deadline precision: reject true elapsed and VM
       exhaustion without coarse Windows tick-driven early expiry. #10907
       qualifies three fail-before decisions, unchanged writer/read fences,
@@ -709,6 +721,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       The 156-test packet includes real process shutdown and target-cwd isolation.
 - [ ] Purpose-first: contract tests for graph identities, reported phases,
       agent/bridge/worktree/PR relationships and authoritative tool totals.
+      The [PR-state proposal's validation](sidecar-pr-state.md#validation-plan)
+      preserves distinct claim/record/provider facts and unchanged action gates.
 - [ ] Purpose-first: prove actual CLI/summary switches preserve the original
       session/process/pane and surface question/idle attention without answers.
 - [ ] Purpose-first: qualify two-line status and real mode-switch key dispatch on
