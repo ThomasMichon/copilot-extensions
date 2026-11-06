@@ -92,6 +92,12 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   confirmed apply uses the existing settings merge. Native defaults, live
   values and enforce constraints retain precedence. No requirement YAML,
   resource/module execution, binding or running-session delivery is implied.
+- **Guarded retained-telemetry defaults.** `preferences telemetry` projects
+  accepted capture choices and uses a capable pinned native producer for
+  explicit configuration-only preview/apply. Exact accepted/policy/local inputs
+  are checked again by that producer before writing. Custom sinks survive;
+  withdrawal does not disable capture. Reporting has no adoption field yet.
+  See [the telemetry preference contract](docs/portable-preferences.md#confirmed-retained-telemetry-defaults).
 - **Bounded local telemetry reports.** `health report` projects explicit local
   typed telemetry into 168 UTC-hour buckets and an optional static chart,
   preserving unknown coverage. It starts no collector or periodic job and never

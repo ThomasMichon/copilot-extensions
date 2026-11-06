@@ -166,6 +166,63 @@ def test_fresh_copilot_cli_refuses_absent_native_owner_without_bootstrap(tmp_pat
     assert sorted(path.name for path in state.iterdir()) == ["accepted.json", "policy.json"]
 
 
+def test_separate_cli_processes_adopt_through_real_dispatch_with_fixture_resolved_context(tmp_path):
+    state = _policy(tmp_path / "receiver", "example-receiver")
+    (state / "policy.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences.policy", "version": 1,
+        "publisher": "example-publisher", "participant": "example-receiver", "domains": ["telemetry"],
+    }), encoding="utf-8")
+    (state / "accepted.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences", "version": 1,
+        "publisher": "example-publisher", "revision": 1, "parent": None,
+        "domains": {"telemetry": {"capture": "retained-local"}},
+    }), encoding="utf-8")
+    native, directory = tmp_path / "native", tmp_path / "spool"
+    native.mkdir()
+    (directory / "retained").mkdir(parents=True)
+    source = Path(__file__).resolve().parents[3] / "agent-dispatch" / "src"
+    script = """
+import sys
+from agent_machines import __main__ as cli, configuration, preference_telemetry
+source, root = sys.argv[1:3]
+configuration.owner_report = lambda path: {
+    'schema': 'agent-worktrees.configuration', 'version': 1,
+    'context': {'repository_id': 'repo-example', 'execution_machine': 'example-worker',
+                'installation_cell': 'example-cell', 'binding': 'unbound', 'base_root': root},
+    'repository_machine_root': root,
+}
+preference_telemetry._prefix = lambda producer: [
+    sys.executable, '-c',
+    "import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); runpy.run_module('agent_dispatch',run_name='__main__')",
+    source,
+]
+sys.exit(cli.main(sys.argv[3:]))
+"""
+    environment = dict(os.environ, AGENT_DISPATCH_INSTALL_DIR=str(native))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_RT_ROOT", "AGENT_DISPATCH_TELEMETRY_SINK"):
+        environment.pop(key, None)
+    arguments = [
+        "preferences", "telemetry", "--state-dir", str(state), "--producer", "agent-dispatch",
+        "--directory", str(directory),
+    ]
+
+    def call(extra):
+        return subprocess.run(
+            [sys.executable, "-c", script, str(source), str(tmp_path), *arguments, *extra],
+            env=environment, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+
+    target = native / "telemetry.json"
+    preview = call([])
+    assert preview.returncode == 0, preview.stderr
+    assert not target.exists()
+    receipt = call(["--apply", "--expect", json.loads(preview.stdout)["preview_token"]])
+    assert receipt.returncode == 0, receipt.stderr
+    assert json.loads(receipt.stdout)["configuration_applied"]
+    assert json.loads(target.read_bytes()) == {"retained_spool": {"directory": str(directory)}}
+    assert list((directory / "retained").iterdir()) == []
+
+
 def test_native_settings_writers_serialize_shared_target_and_refuse_stale_live_state(tmp_path):
     child_script = """
 import json,sys,time
