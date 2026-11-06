@@ -947,6 +947,17 @@ An open undrained pipe must not starve supervision. A slow draining pipe
 separately proves acknowledged native writes renew the delivery allowance after
 installer exit. Legacy log/observer failures occur only after owned writers have
 settled; native relays retain original byte channels and explicit error receipts.
+Dispatch's opt-in `tests/native/test_construction_completion.py` packet joins
+its actual PowerShell completion functions to the shipped construction-session
+helper. Run `python tools/run-plugin-tests.py agent-dispatch --test-file
+tests/native/test_construction_completion.py --allow-explicit-tiers` on Windows.
+PowerShell 5.1 and 7 each accept a synthetic packaged pywin32 path hook without
+executing it, reject missing or modified bootstrap inputs with the original child
+diagnostic, and confirm helper exit and preserved prior slot, selector,
+configuration and deployment metadata. The complete retained helper bundle is
+required, just as in the actual caller. This is a completion-boundary check,
+not package-feed, full installer, selected Dispatch CLI or affected-host recovery
+qualification; no runtime or service is installed.
 The MCP retirement packet adds native Windows controls for one birth-checked
 incomplete-census refresh, completed processes and retained live-unknown/identity
 refusals. An actual native parent exits during either ownership inspection or

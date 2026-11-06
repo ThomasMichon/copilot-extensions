@@ -1633,3 +1633,43 @@ unconfirmed under #10651; this different source/controller run passing is
 not same-SHA transient proof or an infrastructure-fix claim. Next select the
 next owned/reproducible priority case from this matrix without lifting any
 installed-host or deployment boundary.
+
+### 2026-11-06 - U3 native Dispatch completion boundary qualified
+
+The existing #9623 pywin32 bootstrap allowance and #9878 completion diagnostics
+are retained rather than rewritten. The bounded source reservation is
+[comment 6675005238](https://github.com/ThomasMichon/copilot-extensions/issues/10377#issuecomment-6675005238).
+The new opt-in Dispatch packet extracts its actual native admission/completion
+callers and invokes the real shipped construction-session helper, including
+Dispatch's retained-helper publication before completion. It does not execute
+the whole installer or substitute a successful completion reply.
+
+All six Windows PowerShell 5.1/7 controls pass in 47.09 seconds
+(128.95 seconds including preparation and cleanup) on the source based at
+`aea7ecc6e9d4ba862d94cca0c20efb45b8b1a6a7`. A synthetic packaged
+`pywin32.pth` completes without executing its bootstrap. Missing bootstrap
+and modified executable-hook inputs retain the original child error and
+nonzero result, discard only the owned incomplete candidate, and leave the
+prior slot, current-version selector, configuration and deployment metadata
+unchanged. Each actual helper exits and the attached session settles.
+
+The initial fixture depended on undeclared psutil and failed collection; it
+now uses native PowerShell PID observation without adding a dependency.
+A second fixture omitted the required retained `runtime_launcher.py` and
+failed all six controls with that actual child diagnostic. Copying the
+complete canonical six-file bundle fixes only the fixture. Neither failed
+result is reclassified as a pass; no production deadline, policy or helper
+is changed.
+
+The completion core, runtime/publication helper and source-runtime PowerShell
+body match observed Main, but the complete Dev/Main bundles differ. The new
+packet is not claimed as execution of identical released bytes, package-feed
+qualification, selected Dispatch CLI recovery or a complete ordinary update.
+#7305 retains that installed-consumer scope. U13/#10652 implementation is
+already carried by #10754 and contributor #10810; this source unit does not
+compete with either. Focused Ruff, all thirteen install contracts, twenty-three
+plugin documentation consistency, headless-launch checks and whitespace pass.
+The enforced type-check portfolio passes all forty admitted projects for both
+declared platform profiles; that is static checking, not native Linux execution.
+Review, required CI and merge of this test-only slice remain; the parent
+Plan/Validation and all deployment boundaries stay open.
