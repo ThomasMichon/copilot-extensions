@@ -527,6 +527,7 @@ def test_malformed_ledger_returns_structured_cli_refusal(checkout, monkeypatch, 
         def interrupted(*args):
             raise OSError("injected copy interruption")
         with monkeypatch.context() as injection:
+            injection.setattr(relocation, "_stopped", lambda *args: None)
             injection.setattr(relocation.transfer, "copy", interrupted)
             with pytest.raises(OSError, match="injected"):
                 _move(checkout)
