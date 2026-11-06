@@ -1,6 +1,7 @@
 import argparse
 import copy
 import json
+from pathlib import Path
 import pytest
 import yaml
 from configuration_layers import ConfigurationError
@@ -151,6 +152,288 @@ def test_actual_absent_owner_leaves_native_defaults_without_bootstrap(tmp_path, 
     monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
     assert configuration.prepare_defaults([], "explicit-logical-selector") == []
     assert list(tmp_path.iterdir()) == []
+
+
+def portable(tmp_path, monkeypatch):
+    from agent_machines import preferences
+
+    base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    write(base, "native", {"logLevel": "native-only"}, extra={
+        "resources": [{"type": "file", "path": "$HOME/not-applied", "content": "protected"}],
+    })
+    state = tmp_path / "accepted-state"
+    state.mkdir()
+    policy = {
+        "schema": "agent-machines.preferences.policy", "version": 1,
+        "publisher": "example-publisher", "participant": "example-receiver", "domains": ["copilot"],
+    }
+    accepted = {
+        "schema": preferences.SCHEMA, "version": 1, "publisher": "example-publisher",
+        "revision": 1, "parent": None,
+        "domains": {"copilot": {"model": "shared-model", "effortLevel": "low"}},
+        "machines": {"logical-worker": {"copilot": {"model": "machine-model", "effortLevel": "high"}}},
+    }
+    (state / "policy.json").write_text(json.dumps(policy), encoding="utf-8")
+    (state / "accepted.json").write_text(json.dumps(accepted), encoding="utf-8")
+    target = home / ".copilot" / "settings.json"
+    return base, home, report, state, accepted, target
+
+
+def test_portable_floor_normal_cli_preview_apply_and_withdrawal(tmp_path, monkeypatch, capsys):
+    from agent_machines import preferences
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    local = tmp_path / "local.json"
+    local.write_text(json.dumps({
+        "schema": preferences.LOCAL_SCHEMA, "version": 1, "machine": "logical-worker",
+        "domains": {"copilot": {"model": "local-model"}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(reconcile, "restore", lambda *_args, **_kwargs: pytest.fail("unscoped restore"))
+    args = ["preferences", "copilot", "--state-dir", str(state), "--local-overrides", str(local)]
+    assert cli.main(args) == 0
+    proposed = json.loads(capsys.readouterr().out)
+    assert proposed["floors"] == {"model": "local-model", "effortLevel": "high"}
+    assert proposed["provenance"]["model"] == "local-machine"
+    assert proposed["provenance"]["effortLevel"] == "named-machine"
+    assert proposed["scope"]["machine"] == "logical-worker"
+    assert not target.exists() and not (state / "exchange.lock").exists()
+    assert cli.main([*args, "--apply", "--expect", proposed["preview_token"]]) == 0
+    assert json.loads(capsys.readouterr().out)["configuration_applied"]
+    assert json.loads(target.read_text()) == {"model": "local-model", "effortLevel": "high"}
+    assert not (home / "not-applied").exists()
+    accepted["domains"], accepted["machines"] = {}, {}
+    (state / "accepted.json").write_text(json.dumps(accepted), encoding="utf-8")
+    assert cli.main(["preferences", "copilot", "--state-dir", str(state)]) == 0
+    withdrawn = json.loads(capsys.readouterr().out)
+    assert withdrawn["floors"] == {} and withdrawn["changes"] == []
+    assert json.loads(target.read_text())["model"] == "local-model"
+
+
+def test_portable_floors_retain_live_native_defaults_and_enforce(tmp_path, monkeypatch):
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    target.parent.mkdir()
+    target.write_text(json.dumps({"model": "live-model", "unmanaged": {"kept": True}}), encoding="utf-8")
+    native = write(base, "native-model", {"effortLevel": "medium"})
+    proposed = adopt(state)
+    assert proposed["overridden"] == ["effortLevel", "model"]
+    assert proposed["changes"] == [{"key": "effortLevel", "before": None, "after": "medium"}]
+    native["manage"]["copilot.settings"]["disposition"] = "enforce"
+    native["manage"]["copilot.settings"]["values"] = {"model": "enforced-model"}
+    path = base / ".copilot-extensions" / "agent-machines" / "all" / "native-model.yaml"
+    path.write_text(yaml.safe_dump(native), encoding="utf-8")
+    proposed = adopt(state)
+    adopt(state, apply=True, expected=proposed["preview_token"])
+    assert json.loads(target.read_text()) == {
+        "model": "enforced-model", "effortLevel": "high", "unmanaged": {"kept": True},
+    }
+
+
+def test_portable_confirmation_is_stable_across_scalar_field_iteration(tmp_path, monkeypatch):
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    write(base, "native-defaults", {"model": "native-model", "effortLevel": "medium"})
+    monkeypatch.setattr(configuration, "FIELDS", ("model", "effortLevel"))
+    proposed = adopt(state)
+    monkeypatch.setattr(configuration, "FIELDS", ("effortLevel", "model"))
+    assert adopt(state)["preview_token"] == proposed["preview_token"]
+    adopt(state, apply=True, expected=proposed["preview_token"])
+    assert json.loads(target.read_text()) == {"model": "native-model", "effortLevel": "medium"}
+
+
+@pytest.mark.parametrize("change", ["accepted", "local", "native", "live", "context", "policy"])
+def test_portable_apply_refuses_changed_preview_inputs(tmp_path, monkeypatch, change):
+    from agent_machines import preferences
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    local = tmp_path / "local.json"
+    local.write_text(json.dumps({
+        "schema": preferences.LOCAL_SCHEMA, "version": 1, "machine": "logical-worker", "domains": {},
+    }), encoding="utf-8")
+    proposed = adopt(state, local=local)
+    if change == "accepted":
+        accepted["revision"], accepted["parent"] = 2, 1
+        (state / "accepted.json").write_text(json.dumps(accepted), encoding="utf-8")
+    elif change == "local":
+        local.write_text(local.read_text().replace('"domains": {}', '"domains": {"copilot": {"model": "changed"}}'))
+    elif change == "native":
+        write(base, "changed", {"model": "changed-native"})
+    elif change == "live":
+        target.parent.mkdir()
+        target.write_text('{"unmanaged":true}', encoding="utf-8")
+    elif change == "context":
+        report["context"]["installation_cell"] = "changed-cell"
+    else:
+        policy = json.loads((state / "policy.json").read_text())
+        policy["participant"] = "changed-participant"
+        (state / "policy.json").write_text(json.dumps(policy), encoding="utf-8")
+    before = target.read_bytes() if target.exists() else None
+    with pytest.raises(preferences.PreferenceError, match="preview-changed"):
+        adopt(state, local=local, apply=True, expected=proposed["preview_token"])
+    assert (target.read_bytes() if target.exists() else None) == before
+
+
+def test_portable_apply_rechecks_at_native_settings_write(tmp_path, monkeypatch):
+    from agent_machines import preferences
+    from agent_machines.preference_copilot import adopt
+    from agent_machines.surfaces import settings
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    proposed = adopt(state)
+    original = settings.apply
+
+    def changed(*args, **kwargs):
+        if not kwargs.get("dry_run", True):
+            report["context"]["execution_machine"] = "changed-worker"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(settings, "apply", changed)
+    with pytest.raises(preferences.PreferenceError, match="preview-changed"):
+        adopt(state, apply=True, expected=proposed["preview_token"])
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("invalid", ["{", "[]", '{"model":"first","model":"second"}'])
+def test_portable_apply_never_repairs_invalid_live_settings(tmp_path, monkeypatch, invalid):
+    from agent_machines import preferences
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    target.parent.mkdir()
+    target.write_text(invalid, encoding="utf-8")
+    with pytest.raises(preferences.PreferenceError, match="native-settings-unavailable"):
+        adopt(state)
+    assert target.read_text() == invalid
+
+
+@pytest.mark.parametrize(("missing", "reason"), [
+    ("context", "native-context-unavailable"), ("accepted", "input-unavailable"),
+    ("policy", "domain-not-permitted"),
+])
+def test_portable_requires_accepted_policy_and_native_context(tmp_path, monkeypatch, missing, reason):
+    from agent_machines import preferences
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    if missing == "context":
+        monkeypatch.setattr(configuration, "owner_report", lambda _root: None)
+    elif missing == "accepted":
+        (state / "accepted.json").unlink()
+    else:
+        policy = json.loads((state / "policy.json").read_text())
+        policy["domains"] = ["repositories"]
+        (state / "policy.json").write_text(json.dumps(policy), encoding="utf-8")
+    with pytest.raises(preferences.PreferenceError, match=reason):
+        adopt(state)
+    assert not target.exists()
+
+
+def test_portable_conflicting_native_enforce_still_refuses(tmp_path, monkeypatch):
+    from agent_machines import preferences
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    for model in ("first", "second"):
+        native = write(base, model, {"model": model})
+        native["manage"]["copilot.settings"]["disposition"] = "enforce"
+        path = base / ".copilot-extensions" / "agent-machines" / "all" / f"{model}.yaml"
+        path.write_text(yaml.safe_dump(native), encoding="utf-8")
+    with pytest.raises(preferences.PreferenceError, match="native-validation-failed"):
+        adopt(state)
+    assert not target.exists()
+
+
+def test_portable_cli_sanitizes_native_owner_refusal(tmp_path, monkeypatch, capsys):
+    from agent_machines._peer_launch import ContextRefused
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+
+    def refused(_root):
+        raise ContextRefused("private native owner detail")
+
+    monkeypatch.setattr(configuration, "owner_report", refused)
+    assert cli.main(["preferences", "copilot", "--state-dir", str(state)]) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "ok": False, "error": "native-configuration-unavailable",
+    }
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("source", ["user", "repository-machine"])
+def test_portable_empty_native_union_refuses_instead_of_skipping_machine_defaults(
+    tmp_path, monkeypatch, source,
+):
+    from agent_machines import preferences
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    (base / ".copilot-extensions" / "agent-machines" / "all" / "native.yaml").unlink()
+    if source == "user":
+        path = discover.user_package_root() / "all" / "native-machine.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(yaml.safe_dump({
+            "schema_version": 4, "package": "native-machine",
+            "manage": {"copilot.settings": {
+                "disposition": "ensure-present", "values": {"model": "native-machine"},
+            }},
+        }), encoding="utf-8")
+    else:
+        write(Path(report["repository_machine_root"]), "native-machine", {
+            "model": "native-machine",
+        })
+    with pytest.raises(preferences.PreferenceError, match="native-defaults-unavailable"):
+        adopt(state)
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("source", ["gate", "directory", "overlay"])
+@pytest.mark.parametrize("guest", [False, True])
+def test_portable_retains_alias_gated_native_enforce_without_host_guest_leak(
+    tmp_path, monkeypatch, source, guest,
+):
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    (base / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "logical-worker": {
+            "hostname": "physical-example", "ssh": {"environments": [
+                {"name": "windows", "alias": "native-profile"},
+                {"name": "wsl", "alias": "guest-profile"},
+            ]},
+        },
+    }}), encoding="utf-8")
+    alias, foreign = ("guest-profile", "native-profile") if guest else ("native-profile", "guest-profile")
+    if guest:
+        report["context"]["execution_machine"] = "logical-worker-wsl"
+    native = write(base, "alias-enforce", {"model": "alias-enforced"})
+    spec = native["manage"]["copilot.settings"]
+    spec["disposition"] = "enforce"
+    path = base / ".copilot-extensions" / "agent-machines" / "all" / "alias-enforce.yaml"
+    if source == "gate":
+        native["gate"] = [alias]
+    elif source == "directory":
+        path.unlink()
+        path = path.parent.parent / "machines" / alias / path.name
+        path.parent.mkdir(parents=True)
+    else:
+        spec["values"] = {"model": "base-enforced"}
+        native["per-machine"] = {alias: {"manage": {
+            "copilot.settings": {"values": {"model": "alias-enforced"}},
+        }}}
+    path.write_text(yaml.safe_dump(native), encoding="utf-8")
+    wrong = write(base, "foreign-enforce", {"model": "wrong-space"}, extra={"gate": [foreign]})
+    wrong["manage"]["copilot.settings"]["disposition"] = "enforce"
+    (base / ".copilot-extensions" / "agent-machines" / "all" / "foreign-enforce.yaml").write_text(
+        yaml.safe_dump(wrong), encoding="utf-8",
+    )
+    proposed = adopt(state)
+    adopt(state, apply=True, expected=proposed["preview_token"])
+    assert json.loads(target.read_text())["model"] == "alias-enforced"
 
 
 def test_independent_cells_keep_default_provenance_and_recompute_native_plan(tmp_path, monkeypatch):
