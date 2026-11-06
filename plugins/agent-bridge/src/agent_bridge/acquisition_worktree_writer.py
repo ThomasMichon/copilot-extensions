@@ -98,7 +98,7 @@ def _prefix(binding: object) -> tuple[str, ...]:
     return tuple(binding["prefix"])
 
 
-async def _qualify(writer: RetainedWriter) -> None:
+async def _qualify(writer: RetainedWriter) -> dict:
     from .acquisition_authority import worktree_command
 
     expected = writer.request.worktree_writer
@@ -128,6 +128,7 @@ async def _qualify(writer: RetainedWriter) -> None:
             "worktree_writer_incompatible",
             "retained executing Worktrees serializer does not satisfy the original requirement",
         )
+    return support
 
 
 @contextlib.asynccontextmanager

@@ -39,6 +39,8 @@ class Request:
     worktree_path: str = "/example/workspace"
     project: str = "example"
     task_id: str = "task-original"
+    task_generation: int = 1
+    reservation_key: str = "reservation-original"
     target: str = "local"
     mode: str = "acp"
 
@@ -182,6 +184,65 @@ def test_required_session_commands_carry_original_executing_scope(boundary):
             assert b.writer.session_write_args(read) is read
 
     finish(acquire())
+    assert b.writer.current() is None
+
+
+@pytest.mark.parametrize("changed", [None, "nonce", "journal", "instance"])
+def test_original_writer_inspection_rechecks_owner_without_selection(boundary, monkeypatch, changed):
+    b = boundary
+    contract = sys.modules[f"{PACKAGE}.acquisition_contract"]
+    monkeypatch.setattr(contract, "AcquisitionRequest", SimpleNamespace(model_validate=lambda data: b.request))
+    slot = {"role": "active", "pid": 17, "active": {"pid": 17, "generation": 1}}
+    for name, attributes in (
+        ("config", {"config_dir": lambda: Path("/example/bridge")}),
+        ("self_retire", {"slot_descriptor": lambda root: slot}),
+    ):
+        module = ModuleType(f"{PACKAGE}.{name}")
+        module.__dict__.update(attributes)
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    original = {
+        "worktree_id": b.request.worktree_id, "state": "pending",
+        "request_digest": b.request.delivery_id, "stage": "prepared",
+        "data_json": json.dumps({
+            "_request": b.request.delivery_id,
+            "_worktree_writer": {"version": 1, "prefix": list(b.prefix)},
+        }),
+    }
+    b.rows.append(original.copy())
+    authority = sys.modules[f"{PACKAGE}.acquisition_authority"]
+
+    async def record(worktree_id, project, *, command):
+        assert worktree_id == b.request.worktree_id and project == b.request.project
+        assert command.keywords == {"owner_prefix": b.prefix}
+        if changed == "journal":
+            b.rows[0]["stage"] = "launching"
+        elif changed == "instance":
+            slot["active"]["generation"] = 2
+        return {
+            "repo": project, "path": b.request.worktree_path,
+            "creation_nonce": "replaced" if changed == "nonce" else "original-nonce",
+        }
+
+    monkeypatch.setattr(authority, "read_worktree_record", record, raising=False)
+    name = f"{PACKAGE}.acquisition_writer_inspection"
+    spec = importlib.util.spec_from_file_location(
+        name, ROOT / "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py",
+    )
+    assert spec and spec.loader
+    inspection = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, inspection)
+    spec.loader.exec_module(inspection)
+    pending = inspection.inspect_writer(b.db, b.request.delivery_id, original)
+    if changed:
+        with pytest.raises(Refused):
+            finish(pending)
+    else:
+        observed = finish(pending)
+        assert observed["worktree_writer"] == b.request.worktree_writer.model_dump()
+        assert observed["bridge_instance"]["generation"] == 1
+        assert observed["reservation_key"] == b.request.reservation_key
+        assert b.rows == [original]
+    assert [call[0] for call in b.calls] == ["qualify"]
     assert b.writer.current() is None
 
 

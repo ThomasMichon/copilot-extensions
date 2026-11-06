@@ -86,6 +86,10 @@ def register(subparsers: Any) -> None:
     parser.set_defaults(func=command)
     inspect = subparsers.add_parser("acquisition-inspect", help="Read durable bridge acquisition identity")
     inspect.add_argument("delivery_id")
+    inspect.add_argument(
+        "--worktree-writer", action="store_true",
+        help="Observe the original journal's executing writer and workspace without acquiring",
+    )
     inspect.set_defaults(func=inspect_command)
     readiness = subparsers.add_parser(
         "acquisition-readiness", help="Prove daemon support for current acquisition safety",
@@ -107,6 +111,35 @@ def inspect_command(args: argparse.Namespace) -> None:
     if not client.daemon_supports(ACQUISITION_PROTOCOL_VERSION):
         raise BridgeClientError(426, "acquisition inspection unsupported")
     from urllib.parse import quote
-    print(json.dumps(client._request(
-        "GET", f"/api/v1/acquisitions/{quote(args.delivery_id, safe='')}",
-    )))
+
+    path = f"/api/v1/acquisitions/{quote(args.delivery_id, safe='')}"
+    send = client._request
+    if getattr(args, "worktree_writer", False):
+        from .acquisition_writer_inspection import CAPABILITY
+        from .client_protocol_floor import protocol_floored_request
+
+        send = protocol_floored_request(
+            client, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={CAPABILITY: 1},
+        )
+        path += "?worktree_writer=true"
+    result = send("GET", path)
+    if getattr(args, "worktree_writer", False):
+        from .acquisition_contract import WorktreeWriterRequirement
+        from .acquisition_writer_inspection import SCHEMA
+
+        observed = result.get("worktree_writer_observation") if isinstance(result, dict) else None
+        if not (
+            isinstance(observed, dict) and observed.get("schema") == SCHEMA
+            and type(observed.get("version")) is int and observed["version"] == 1
+            and observed.get("delivery_id") == args.delivery_id == result.get("delivery_id")
+            and observed.get("worktree_id") == result.get("worktree_id")
+            and observed.get("writer_scope") == "executing-process"
+            and type(observed.get("retained_session_writes")) is int
+            and observed["retained_session_writes"] == 1
+        ):
+            raise BridgeClientError(502, "original acquisition writer observation is unconfirmed")
+        try:
+            WorktreeWriterRequirement.model_validate(observed.get("worktree_writer"))
+        except ValueError as exc:
+            raise BridgeClientError(502, "original acquisition writer requirement is unconfirmed") from exc
+    print(json.dumps(result))

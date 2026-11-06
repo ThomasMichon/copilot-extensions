@@ -169,8 +169,18 @@ from test_worktree_lineage_authority import (
     test_retained_session_receiver_refuses_changed_scope_without_resident_fallback
     as test_retained_session_receiver_refuses_changed_scope_without_resident_fallback,
 )
+from test_acquisition_writer_inspection import (
+    rig as _inspection_fixture,
+    test_cli_negotiates_and_round_trips_optional_inspection_through_http as _inspect_cli_http,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
+inspection_rig = _inspection_fixture
+
+
+@pytest.mark.parametrize("supported", ["current", "prior", "rollback"])
+def test_retained_writer_inspection_cli_http(inspection_rig, monkeypatch, capsys, supported):
+    _inspect_cli_http(inspection_rig, monkeypatch, capsys, supported)
 
 
 def _membership_transcript_clock(monkeypatch):
@@ -215,6 +225,9 @@ def test_http51_capture_actual_observations(
     observed["worktree_record_delegation"] = health["capabilities"]["worktree_record_delegation"]
     observed["retained_acquisition_worktree_writer"] = (
         health["capabilities"]["retained_acquisition_worktree_writer"]
+    )
+    observed["retained_acquisition_writer_inspection"] = (
+        health["capabilities"]["retained_acquisition_writer_inspection"]
     )
     assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)

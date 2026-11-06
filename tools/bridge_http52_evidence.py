@@ -36,7 +36,7 @@ AFFECTED = (
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
-        "acquisition_worktree_writer.py", "acquisition_authority.py",
+        "acquisition_worktree_writer.py", "acquisition_writer_inspection.py", "acquisition_authority.py",
         "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
         "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
         "routes/acquisitions.py", "session_handoff.py", "session_resume.py",
@@ -65,6 +65,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_portable_mux_joined.py",
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
     "plugins/agent-bridge/tests/test_acquisition_runtime.py",
+    "plugins/agent-bridge/tests/test_acquisition_writer_inspection.py",
     "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
     "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
@@ -133,6 +134,7 @@ PROBES = {
     "test_required_writer_refuses_before_native_effects": 6,
     "test_retained_acquisition_and_later_lineage_use_actual_owner_processes": 1,
     "test_retained_session_receiver_refuses_changed_scope_without_resident_fallback": 12,
+    "test_retained_writer_inspection_cli_http": 3,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
@@ -142,6 +144,7 @@ CAPABILITY_VERSIONS = {
     "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,
     "worktree_record_delegation": 1,
     "retained_acquisition_worktree_writer": 1,
+    "retained_acquisition_writer_inspection": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

@@ -34,6 +34,10 @@ the shared same-cell execution/observation migration subsequently merged in
 support, changed-selection enforcement and cohort admission stay open.
 Opt-in original-build delegated invocation subsequently merged in #10944;
 that source prerequisite does not qualify the actual participating cohort.
+Opt-in acquisition/continuation retention and qualified executing-session writes
+subsequently merged in #10976. Required registration, binding and succession now
+stay in the qualified serializer rather than an ordinary-version-only resident.
+This is bounded source credit, not admission of the actual installed cohort.
 Next, bind generation-aware independent admission to those writers and qualify
 ordinary submission consumers,
 then post-stop same-native recovery and the complete running

@@ -19,15 +19,20 @@ class RequestEnvelope(AcquisitionRequest):
 
 
 @router.get("/{delivery_id}")
-async def inspect_acquisition(delivery_id: str, request: Request) -> dict:
+async def inspect_acquisition(
+    delivery_id: str, request: Request, worktree_writer: bool = False,
+) -> dict:
     state = request.app.state
     runtime = getattr(state, "acquisition_runtime", None) or AcquisitionRuntime(
         state.session_manager, state.resolver, state.db, state,
     )
     try:
+        if worktree_writer:
+            return await runtime.inspect_pending(delivery_id, worktree_writer=True)
         return await runtime.inspect_pending(delivery_id)
     except AcquisitionRefused as exc:
-        raise HTTPException(404, detail={"code": exc.code, "message": str(exc)}) from exc
+        status = 409 if worktree_writer and exc.code != "acquisition_not_found" else 404
+        raise HTTPException(status, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 @router.post("", response_model=AcquisitionResult)
