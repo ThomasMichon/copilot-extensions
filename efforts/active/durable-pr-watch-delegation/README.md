@@ -314,7 +314,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   capacity, restart, unavailable evidence and old/new compatibility without
   weakening B2/B3 or closing broader attention/provider/installed acceptance.
   The finite explicit v6/capture-v2 storage prerequisite merged in #10972.
-  Protected proof commits and negotiated v6 reads remain separate exits.
+  Protected original-readback proof commits merged in #10977; negotiated v6
+  reads remain a separate exit.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -952,6 +953,26 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Retain actual protected original-readback proof
+
+- #10977 actually merged as `add3727398a5425701b48e106596e6a6ecf32925`
+  after exact-head Copilot approval, no open findings and all required CI green.
+  The source worktree reconciled through its normal completion path.
+- The existing protected owner now commits each v6 capture's own body-free
+  original-readback proof after confirmed native outcomes and fresh pinned
+  readback. Older and same-frontier operations cannot borrow another proof,
+  regress current handled provenance or reset age. Original B3 echo coverage
+  remains distinct, and v5 behavior is preserved.
+- The coupled packet passes 218 cases; the subsequently added same-frontier
+  regression passes separately. Both bounded executions verified cleanup.
+  Fatal lint, module/docs/install contracts and the admitted strict service
+  Linux/win32 targets pass; native, installed and live-provider proof is not
+  inferred.
+- Re-read the full current Plan and Validation Plan; the parent remains Active.
+  Continue the separately negotiated v6 reader. Full B3/A2 and broader
+  provider/retention/CLI/Dispatch/installed/shadow acceptance remain open.
+  No deployment, live feedback or resource reassignment occurred.
 
 ### 2026-11-06 - Land historical readback storage without activating consumers
 
