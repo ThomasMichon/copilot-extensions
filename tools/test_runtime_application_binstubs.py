@@ -148,7 +148,10 @@ def test_install_transaction_before_start_failure_restores_prior_state(
     assert starts == []
     assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
     assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
-    assert {path.name: path.read_bytes() for path in fixture.global_bin.glob("*")} == previous
+    assert {
+        path.name: path.read_bytes() for path in fixture.global_bin.glob("*")
+        if path.name != ".publication-leases"
+    } == previous
     assert not (fixture.slot / "install-success.json").exists()
 
 
@@ -215,7 +218,7 @@ def test_install_replacement_preserves_launcher_changed_during_setup(
         runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
     assert len(calls) == 1
     assert command.read_bytes() == b"concurrent replacement\n"
-    assert list(fixture.global_bin.iterdir()) == [command]
+    assert [path for path in fixture.global_bin.iterdir() if path.name != ".publication-leases"] == [command]
     assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
     assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
     assert not (fixture.slot / "install-success.json").exists()
@@ -395,6 +398,90 @@ def test_failed_update_recovers_before_another_installer_can_commit(
     assert (fixture.root / "last-known-good").read_text().strip() == winner
     assert all((fixture.global_bin / name).read_bytes() == text.encode("utf-8")
                for name, text in commands.items())
+
+
+def test_shared_launchers_serialize_recovery_across_distinct_installation_roots(
+    install_transaction, monkeypatch, tmp_path,
+):
+    fixture = install_transaction
+    commands = global_binstubs(
+        fixture.record["name"], fixture.record["root_environment"],
+        fixture.record["default_directory"], root=fixture.root,
+    )
+    fixture.global_bin.mkdir()
+    for name in commands:
+        (fixture.global_bin / name).write_bytes(b"old shared launcher\n")
+    other = tmp_path / "other" / "versions" / "3.0"
+    (other / ".venv").mkdir(parents=True)
+    (other / ".venv/pyvenv.cfg").write_text("fixture", encoding="utf-8")
+    record = {**fixture.record, "start": []}
+    (other / "application.json").write_text(json.dumps(record), encoding="utf-8")
+    program = """
+import contextlib,json,pathlib,sys
+library,runtime_library,slot,commands=map(pathlib.Path,sys.argv[1:])
+sys.path[:0]=[str(library),str(runtime_library)]
+import runtime_application_install as app
+import versioned_runtime as runtime
+from runtime_application_binstubs import global_binstubs
+from types import SimpleNamespace
+sys.prefix=str(slot/'.venv')
+runtime.is_complete=lambda *a,**k:True
+@contextlib.contextmanager
+def qualified(*a,**k):
+    yield runtime,lambda:None
+app._qualified=qualified
+app._load=lambda *a:SimpleNamespace(global_binstubs=global_binstubs)
+app._run=lambda *a:None
+lease=runtime._publication_lease
+@contextlib.contextmanager
+def entered(root):
+    with lease(root):
+        print('contending',flush=True)
+        yield
+runtime._publication_lease=entered
+print(json.dumps(app.install(slot,stage=False,global_bin=commands)),flush=True)
+"""
+    children = []
+    write = runtime_application_install._write
+
+    def fail_after_competitor_enters(path, content):
+        if path.name.endswith(".ps1"):
+            raise RuntimeError("launcher refused")
+        if not children:
+            child = subprocess.Popen(
+                [sys.executable, "-I", "-B", "-c", program,
+                 str(Path(runtime_application_install.__file__).parent),
+                 str(Path(engine.runtime.__file__).parent), str(other),
+                 str(fixture.global_bin)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            children.append(child)
+            assert child.stdout.readline().strip() == "contending", child.communicate(timeout=5)
+            with pytest.raises(subprocess.TimeoutExpired):
+                child.wait(timeout=1)
+        write(path, content)
+
+    monkeypatch.setattr(runtime_application_install, "_write", fail_after_competitor_enters)
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: None)
+    try:
+        with pytest.raises(RuntimeError, match="launcher refused"):
+            runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+        child, = children
+        output, error = child.communicate(timeout=10)
+        assert child.returncode == 0, output + error
+        assert json.loads(output)["state"] == "installed"
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=5)
+    expected = global_binstubs(
+        record["name"], record["root_environment"], record["default_directory"], root=other.parent.parent,
+    )
+    assert all((fixture.global_bin / name).read_bytes() == text.encode("utf-8")
+               for name, text in expected.items())
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
 
 
 def test_install_without_start_commits_one_update_after_unlocked_verification(

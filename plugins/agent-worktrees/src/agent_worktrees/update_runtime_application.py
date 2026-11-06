@@ -93,6 +93,8 @@ def selected_version(root: Path, component: str) -> str | None:
     """Observe an application selector, without asserting completion or serving health."""
     try:
         selected = _selector(root, "current-version")
+        if selected == "dev" or re.fullmatch(r"dev-(?:[0-9a-f]{32}|[0-9a-f]{64})", selected):
+            return None
         if re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", selected) is None:
             raise ValueError("Invalid selected application version")
         path = _member(root, "versions/" + selected + "/application.json")

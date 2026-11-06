@@ -16,8 +16,15 @@ from promotion_complete_source import (
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES, decode_json
 
 
+def git_environment(**overrides: str) -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+    return {**environment, **overrides}
+
+
 def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
-    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env = git_environment()
     result = subprocess.run(
         ["git", "--no-replace-objects", *args], cwd=repo, env=env, input=data,
         capture_output=True, timeout=30,
@@ -28,11 +35,20 @@ def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
     return result.stdout
 
 
+def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    return result.returncode == 0
+
+
 def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
     """Read whether a changefile was already present at the previous Dev boundary."""
     result = subprocess.run(
         ["git", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
-        cwd=str(repo), capture_output=True, text=True,
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     return result.returncode == 0

@@ -108,6 +108,35 @@ def test_local_composition_keeps_main_versions_and_changefiles_on_source(
     assert official["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev1")
 
 
+@pytest.mark.parametrize("selectors", [False, True])
+def test_local_composition_does_not_follow_or_mutate_a_foreign_caller_index(
+    repo, tmp_path, monkeypatch, selectors,
+):
+    _runtime(repo)
+    seed = _commit(repo, "initial runtime")
+    _change(repo, "local-change")
+    source = _commit(repo, "local source")
+    foreign = tmp_path / "foreign"
+    _git(["init", "-q", str(foreign)], repo)
+    (foreign / "sentinel.txt").write_text("foreign index and worktree\n", encoding="utf-8")
+    foreign_head = _commit(foreign, "foreign source")
+    index = foreign / ".git/index"
+    before = index.read_bytes(), index.stat().st_mtime_ns
+    own_index = (repo / ".git/index").read_bytes()
+    with monkeypatch.context() as environment:
+        environment.setenv("GIT_INDEX_FILE", str(index))
+        if selectors:
+            environment.setenv("GIT_DIR", str(foreign / ".git"))
+            environment.setenv("GIT_COMMON_DIR", str(foreign / ".git"))
+            environment.setenv("GIT_WORK_TREE", str(foreign))
+        composed = local_runtime_promotion.compose(repo, source_commit=source, main_seed=seed)
+    assert composed.source_commit == source and composed.main_seed == seed
+    assert (index.read_bytes(), index.stat().st_mtime_ns) == before
+    assert (repo / ".git/index").read_bytes() == own_index
+    assert _git(["rev-parse", "HEAD"], foreign) == foreign_head
+    assert _git(["status", "--porcelain"], foreign) == ""
+
+
 @pytest.mark.parametrize("eligible", [True, False, None])
 def test_composition_changefile_workers_require_caller_context_admission(
     repo: Path, monkeypatch: pytest.MonkeyPatch, eligible: bool | None,
