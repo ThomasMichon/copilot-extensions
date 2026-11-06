@@ -939,6 +939,18 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Keep metadata qualification valid on released checkouts
+
+- The real-metadata fixture now explicitly retains the required top-level
+  canonical library closure as well as each consumer's embedded closure.
+  Canonical materialization may legitimately do nothing when its input is
+  already released; that no-op is accepted without dropping canonical data.
+- Both PR/Fleet and Dispatch/PR/Fleet are exercised from checkout-form and
+  already-materialized inputs. The corrected focused packet passes 59
+  contained Windows contracts with clean sandbox removal, unchanged bounds,
+  fatal lint and diff checks. Production composition code is unchanged by
+  this fixture correction; native installed acceptance remains open.
+
 ### 2026-11-06 - Refuse conditional source replacement
 
 - Dependency requirement predicates and source-mapping selectors have

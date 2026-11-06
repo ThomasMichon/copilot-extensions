@@ -3,6 +3,7 @@ from pathlib import Path, PureWindowsPath
 import os
 import shutil
 import subprocess
+import tomllib
 from types import SimpleNamespace
 
 import pytest
@@ -243,13 +244,19 @@ def test_released_composition_refuses_source_activation_selectors(released_graph
     assert not (runner.REPO / "uncreated-venv").exists()
 
 
-@pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
-def test_real_materialized_metadata_preserves_active_platform_constraints(tmp_path, consumer):
-    import materialize_main
-
-    source = Path(__file__).resolve().parents[1]
-    checkout = tmp_path / "release"
+def _copy_metadata_checkout(source, checkout, consumer):
     roots = cache_policy._dependency_sources(consumer, source / "plugins" / consumer, source)
+    names = set()
+    for root in roots:
+        manifest = root / "pyproject.toml"
+        if manifest.is_file():
+            name = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("name")
+            if isinstance(name, str):
+                names.add(name)
+    for manifest in (source / "libs").glob("*/pyproject.toml"):
+        name = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("name")
+        if name in names:
+            roots.update(cache_policy._package_roots(manifest.parent))
     for root in roots:
         target = checkout / root.relative_to(source)
         target.mkdir(parents=True, exist_ok=True)
@@ -257,8 +264,26 @@ def test_real_materialized_metadata_preserves_active_platform_constraints(tmp_pa
             shutil.copyfile(root / "pyproject.toml", target / "pyproject.toml")
             (target / "src").mkdir(exist_ok=True)
             (target / "src" / "fixture.py").write_text("# Metadata-only release fixture.\n")
+
+
+@pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
+@pytest.mark.parametrize("source_layout", ["checkout", "materialized"])
+def test_real_materialized_metadata_preserves_active_platform_constraints(
+    tmp_path, consumer, source_layout,
+):
+    import materialize_main
+
+    source = Path(__file__).resolve().parents[1]
+    if source_layout == "materialized":
+        snapshot = tmp_path / "input"
+        _copy_metadata_checkout(source, snapshot, consumer)
+        log = materialize_main.materialize_uv_editable_refs(snapshot, canonical_root=snapshot)
+        assert not any(line.startswith("SKIP") for line in log), log
+        source = snapshot
+    checkout = tmp_path / "release"
+    _copy_metadata_checkout(source, checkout, consumer)
     log = materialize_main.materialize_uv_editable_refs(checkout, canonical_root=checkout)
-    assert log and not any(line.startswith("SKIP") for line in log), log
+    assert not any(line.startswith("SKIP") for line in log), log
     overrides, constraints = cache_policy.canonical_test_sources(
         consumer, checkout / "plugins" / consumer, checkout,
     )
