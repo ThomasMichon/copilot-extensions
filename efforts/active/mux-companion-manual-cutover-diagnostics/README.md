@@ -602,6 +602,11 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       with writable-bootstrap owner indexes and current native lookup/client
       qualification. The same readback retains passive old-store behavior,
       the original budgets and the unexplained one-row cold timeout.
+      #10901 adds paired elapsed-clock diagnostics and reproduces a separate
+      CPython 3.12 Windows deadline-quantization defect in the unchanged budget.
+      Its 129-case native packet and two lookup controls pass with zero test
+      skips; the historical cold-read cause remains unproven. The precise-clock
+      source correction follows without changing the 50 ms/VM limits.
       #10855 qualifies the supported strict owner-codec boundaries and
       rejects contradictory membership replay without imposing contiguous
       owner-local sequence numbers. Its 242 source controls do not complete
