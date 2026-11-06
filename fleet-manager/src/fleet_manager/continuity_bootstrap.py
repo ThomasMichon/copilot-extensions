@@ -16,18 +16,19 @@ import aiohttp
 from joserfc.jwk import ECKey
 
 from . import planning
-from .gateway_service_caller import _read
+from .gateway_service_caller import ServiceCaller, _read
 from .gateway_service_channel import TransportError, check, origin, shape, unpack
 from .gateway_service_connector import verified_tls
 from .gateway_service_context import fields
 from .gateway_enrollment import enrollment_scope
 from .machine_identity import PROFILE, machine_headers, make_machine_proof
-from .private_state import create_private_file, private_directory, read_private_file
+from .private_state import create_private_file, private_directory, read_private_file, validate_private_directory
 from .operations import OperationIntent
 from .runtime_identity import _text, _time
 
 PROVIDER = "local-projection-v1"
 CAPABILITY = "delegated-machine-enrollment-v1"
+MACHINE_CALLER_CAPABILITY = "continuity-machine-caller-v1"
 
 
 def _projection(path: Path, harness: str) -> dict:
@@ -75,7 +76,7 @@ def _state(root: Path, projection: dict, *, apply: bool) -> dict | None:
               and not getattr(info, "st_file_attributes", 0) & 0x400,
               "continuity-state-indirection")
     if root.exists():
-        private_directory(root)
+        validate_private_directory(root)
     if path.exists():
         value = fields(planning.decode(read_private_file(path, 16384)), {
             "version", "source_digest", "private_key", "request"})
@@ -136,9 +137,7 @@ def _state(root: Path, projection: dict, *, apply: bool) -> dict | None:
     return value
 
 
-async def bootstrap(source: Path, *, harness: str, state_root: Path,
-                    apply: bool) -> dict[str, str]:
-    """No provider login, sync, SSH, installation, retries or lifecycle changes."""
+def _locations(source: Path, state_root: Path) -> None:
     check(source.is_absolute() and state_root.is_absolute()
           and ".." not in state_root.parts and "session-state" not in state_root.parts,
           "invalid-continuity-state-root")
@@ -146,6 +145,36 @@ async def bootstrap(source: Path, *, harness: str, state_root: Path,
           and state_root not in source.parents, "continuity-state-source-overlap")
     for parent in (state_root, *state_root.parents):
         check(not (parent / ".git").exists(), "continuity-state-in-repository")
+
+
+def machine_caller(
+    source: Path, *, harness: str, state_root: Path, machine: str,
+    gateway_origin: str, principal: str, audience: str, resource: str,
+) -> ServiceCaller:
+    """Bind the existing retained identity to one finite caller; never enroll or export."""
+    _locations(source, state_root)
+    projection = _projection(source, harness)
+    scope = projection["delegation"]["scope"]
+    check(
+        scope["machine"] == machine and origin(scope["destination"]) == origin(gateway_origin)
+        and scope["principal"] == principal and projection["audience"] == audience
+        and resource in scope["slots"], "continuity-caller-scope-mismatch",
+    )
+    retained = _state(state_root, projection, apply=False)
+    check(retained is not None, "continuity-machine-identity-unavailable")
+    key = ECKey.import_key(retained["private_key"])
+    check(key.as_dict(private=False).get("crv") == "P-256", "invalid-continuity-key")
+    return ServiceCaller(
+        gateway_origin=scope["destination"], proof_key=key,
+        gateway_ca=projection["gateway_ca"], machine_principal=scope["principal"],
+        machine_audience=projection["audience"], machine_resource=resource,
+    )
+
+
+async def bootstrap(source: Path, *, harness: str, state_root: Path,
+                    apply: bool) -> dict[str, str]:
+    """No provider login, sync, SSH, installation, retries or lifecycle changes."""
+    _locations(source, state_root)
     projection = await asyncio.to_thread(_projection, source, harness)
     scope = projection["delegation"]["scope"]
     gateway = origin(scope["destination"])

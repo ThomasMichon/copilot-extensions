@@ -1,0 +1,9 @@
+{
+  "comment": "Expose a read-only continuity-owned machine caller without exporting keys or reenrolling",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
