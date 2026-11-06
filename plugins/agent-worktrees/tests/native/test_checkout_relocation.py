@@ -50,8 +50,8 @@ def _fixture_home(tmp_path, request):
 def checkout(tmp_path, monkeypatch, request):
     from plugin_test_command_safety import private_mux_args
 
-    tmp_path = _fixture_home(tmp_path, request)
     mux_args = private_mux_args(tmp_path)
+    tmp_path = _fixture_home(tmp_path, request)
     run = subprocess.run
     def private_mux_run(argv, *args, **kwargs):
         if isinstance(argv, (list, tuple)) and argv and Path(argv[0]).stem.casefold() in {"tmux", "psmux"}:
