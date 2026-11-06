@@ -138,7 +138,9 @@ def _verified_profile_wheels(
                 parts = member.split("/")
                 if len(parts) > 2 and parts[0].endswith(".data") and parts[1] in {"purelib", "platlib"}:
                     member = "/".join(parts[2:])
-                key = member.casefold() if record["target"]["environment"]["os_name"] == "nt" else member
+                environment = record["target"]["environment"]
+                case_insensitive = environment["os_name"] == "nt" or environment["sys_platform"] == "darwin"
+                key = member.casefold() if case_insensitive else member
                 parents = []
                 parent = key
                 while "/" in parent:

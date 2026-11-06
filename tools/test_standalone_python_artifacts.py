@@ -408,8 +408,8 @@ def test_trusted_manager_setup_accepts_git_line_endings_but_not_changed_body(
         )["project"]["version"] == "1.0"
 
 
-def _build(tmp_path, monkeypatch, component):
-    source = _source(tmp_path, component)
+def _build(tmp_path, monkeypatch, component, *, embedded=False):
+    source = _embedded_source(tmp_path)[0] if embedded else _source(tmp_path, component)
     monkeypatch.setattr(builder, "REPO", tmp_path)
     monkeypatch.setattr(builder, "LIBS_DIR", tmp_path / "libs")
 
@@ -462,6 +462,29 @@ def test_standalone_build_bundle_candidate_roundtrip(tmp_path, monkeypatch, comp
         candidate_root=tmp_path, projects=artifacts.candidate_projects(tmp_path),
     ) == index
     assert publisher.artifact_label(entry) == f"standalone-{component}"
+
+
+def test_embedded_manager_build_bundle_candidate_roundtrip(tmp_path, monkeypatch):
+    _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, "worktree-manager", embedded=True)
+    assert manifest["build_resources"][-1] == "libs/agent-procutil"
+    assert len(manifest["wheels"]) == 1
+    output = tmp_path / "bundles"
+    output.mkdir()
+    entry = artifacts.bundle_wheels(manifest, wheels, output)
+    assert artifacts.validate_bundle(
+        output / entry["filename"], entry, candidate_root=tmp_path,
+    ) == manifest
+
+
+@pytest.mark.parametrize("resource", [
+    "libs/unknown", "libs/../foreign", "foreign/agent-procutil", "libs/versioned-runtime",
+])
+def test_embedded_manager_resource_closure_refuses_substitution(tmp_path, monkeypatch, resource):
+    _source_dir, _wheels, manifest = _build(tmp_path, monkeypatch, "worktree-manager", embedded=True)
+    manifest["build_resources"][-1] = resource
+    with pytest.raises(artifacts.PromotionArtifactError, match="resource closure"):
+        artifacts.validate_manifest(manifest)
+        artifacts.validate_source_binding(manifest, tmp_path)
 
 
 @pytest.mark.parametrize("mutation", ["unknown", "plugin-alias", "resource-omission", "duplicate-source"])

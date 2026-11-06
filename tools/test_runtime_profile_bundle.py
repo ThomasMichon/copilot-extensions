@@ -127,6 +127,7 @@ def test_existing_output_is_never_replaced(tmp_path, inputs):
     (True, True, False, "ordinary"), (True, True, True, "ordinary"),
     (False, True, False, "ordinary"), (True, False, False, "ordinary"),
     (True, True, False, "windows-case"), (True, True, False, "purelib"),
+    (True, True, False, "darwin-case"), (True, True, True, "darwin-case"),
     (True, True, False, "file-parent"), (True, True, True, "file-parent"),
     (True, True, False, "windows-parent"), (True, True, True, "windows-parent"),
     (True, True, False, "purelib-parent"), (True, True, True, "purelib-parent"),
@@ -140,6 +141,10 @@ def test_manager_embedded_file_ownership_is_checked_before_transport(
         record["target"]["environment"].update(
             os_name="nt", sys_platform="win32", platform_system="Windows",
         )
+    elif layout.startswith("darwin"):
+        record["target"]["environment"].update(
+            os_name="posix", sys_platform="darwin", platform_system="Darwin",
+        )
     names = ["copilot_extensions_worktree_manager", *(["agent_procutil"] if separate else [])]
     paths = {}
     record["roots"] = []
@@ -150,6 +155,7 @@ def test_manager_embedded_file_ownership_is_checked_before_transport(
         member = {
             "ordinary": "agent_procutil/__init__.py",
             "windows-case": "Agent_Procutil/__init__.py",
+            "darwin-case": "Agent_Procutil/__init__.py",
             "purelib": f"{name}-1.0.data/purelib/agent_procutil/__init__.py",
             "file-parent": "agent_procutil",
             "windows-parent": "Agent_Procutil",
