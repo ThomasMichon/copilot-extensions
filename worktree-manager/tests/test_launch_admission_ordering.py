@@ -206,15 +206,20 @@ def test_owner_fixture_preserves_python_code_stdio_arguments_and_exit(
     assert json.loads(result.stdout) == {"args": arguments, "input": "fixture stdin\n"}
 
 
-def test_resume_owner_fixture_imports_session_shell_in_isolated_python(tmp_path: Path) -> None:
-    from native.test_resume_pane_startup import OWNER as resume_owner
-
+def test_manager_core_imports_survive_retained_preparation(tmp_path: Path) -> None:
     env, target, _logs = _fixture(tmp_path)
-    env["TEST_SOURCE_ROOT"] = str(ROOT)
-    owner = tmp_path / "owner.py"
-    owner.write_text(resume_owner, encoding="utf-8")
+    code = (
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path[:0] = sys.argv[1:]\n"
+        "import work_coalescing_singleton as core\n"
+        "assert Path(core.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())\n"
+        "from agent_worktrees.session_shell import main\n"
+        "sys.argv = ['session_shell', '--help']\n"
+        "raise SystemExit(main())\n"
+    )
     result = subprocess.run(
-        [sys.executable, "-I", str(owner), "-I", "-m", "agent_worktrees.session_shell", "--help"],
+        [sys.executable, "-I", "-c", code, str(ROOT / "plugins/agent-worktrees/src"),
+         str(ROOT / "libs/repository-policy/src")],
         cwd=target, env=env, text=True, capture_output=True, check=False, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
