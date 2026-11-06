@@ -868,7 +868,23 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
     assert linked["creation_nonce"] == before["creation_nonce"]
     assert [item for item in linked["resources"] if item["ref"] == protected["ref"]] == before["resources"]
     assert (state / "resident-calls").read_text().splitlines() == resident_calls
+    from agent_bridge import acquisition_writer_inspection
+    from zdd import routing
+
+    bridge_root = state / "bridge"
+    monkeypatch.setattr(acquisition_writer_inspection, "config_dir", lambda: bridge_root)
+    routing.publish_active(
+        bridge_root, bind="127.0.0.1", port=12345, pid=os.getpid(), version="fixture",
+    )
+    journal_before = [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")]
+    observed = await rig.runtime.inspect_pending(request.delivery_id, worktree_writer=True)
+    assert observed["worktree_writer_observation"]["worktree_writer"] == request.worktree_writer.model_dump()
+    assert snapshot(prefix) == linked
+    assert [dict(row) for row in rig.db.execute_read("SELECT * FROM acquisition_effects")] == journal_before
+    assert (state / "resident-calls").read_text().splitlines() == resident_calls
     identity_file.write_text(json.dumps({**identity, "runtime_generation": "b" * 32}), encoding="utf-8")
+    with pytest.raises(AcquisitionRefused, match="serializer"):
+        await rig.runtime.inspect_pending(request.delivery_id, worktree_writer=True)
     with pytest.raises(AcquisitionRefused, match="serializer"):
         await rig.manager.handoff_session(
             successor.session_id, reason="changed writer", seed=False, seed_text="Continue",

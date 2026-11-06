@@ -126,8 +126,10 @@ mandatory. Unknown responses retain the same assignment and claim.
       its supported legacy behavior and installation isolation. Exercise real
       delegated registration/succession against a record with an existing
       protected claim and nonce, including incompatible selected writers.
-      Source selection/preservation controls are implemented; actual
-      generation-bound selection and incompatible-writer admission remain open.
+      Source selection/preservation and opt-in retained execution merged in
+      #10976, including qualification of the actual receiving session serializer.
+      Actual installed generation-bound selection and incompatible-writer
+      admission remain open.
 - [ ] Expose the minimum generation-bound evidence through the participating
       owners, then construct the conditional assignment writer with real
       independent admission. A copied rendezvous, substituted direct response,
@@ -139,9 +141,15 @@ mandatory. Unknown responses retain the same assignment and claim.
       relationship transaction; ordinary consumers and independent
       admission are not yet assembled. The explicit Dispatch adapter now
       conditionally carries that guard and presents the selected identity
-      to its admission callback; real cohort assembly, Bridge's delegated
-      executing-writer qualification and changed-selection invalidation remain
-      open before ordinary preparation or advancement.
+      to its admission callback. Opt-in Bridge delegated executing-writer source
+      qualification merged in #10976; real installed cohort assembly and
+      changed-selection invalidation remain open before ordinary preparation
+      or advancement.
+      The next provider-first refinement uses Bridge's existing exact-delivery
+      inspection to requalify the original journal's command and workspace,
+      bracketed by its active instance and unchanged journal. This observation
+      neither selects a writer nor admits the resident or an unaccounted
+      producer; conditional Dispatch assembly remains a separate next step.
 - [ ] Integrate ordinary preparation/advancement consumers only after their
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers
@@ -159,10 +167,11 @@ updates a runtime, retires another writer or authorizes cleanup.
 ## Continuing provider-first slice: retained acquisition execution
 
 This is an **agent-proposed implementation refinement** of the unchecked
-delegated-writer item above, not a replacement acceptance gate. The retained
-prefix is currently available to explicit in-process callers; ordinary Bridge
-acquisition and later lineage still select dynamically. A health-selected root
-and UUID therefore cannot qualify those later writes.
+delegated-writer item above, not a replacement acceptance gate. Its opt-in
+provider/consumer source merged in #10976; unpinned acquisition and lineage
+retain their dynamic-selection behavior. The original workspace and actual
+installed participating cohort remain unqualified. A health-selected root and
+UUID alone cannot qualify their later writes.
 
 1. Expand the existing acquisition provider with an explicitly negotiated,
    opt-in installed-writer requirement. Older request versions and ordinary
@@ -200,17 +209,23 @@ and UUID therefore cannot qualify those later writes.
 - [ ] Compatible installed writer: actual retained command capabilities precede
       delegated registration/succession; the protected claim and original
       creation nonce survive through the existing acquisition workflow.
-- [ ] Prior/unknown/incompatible writer and unsupported request: refuse before
+- [x] Prior/unknown/incompatible writer and unsupported request: refuse before
       owner writes or native effects; baseline request versions still work.
+      Bounded source contract controls passed in #10976; this is not an
+      installed-provider or closed-cohort observation.
 - [ ] Runtime selector movement: later calls use the originally qualified
       build, not the newly selected interpreter. Changed completion, same-path
       recreation and governance refusal remain pre-import failures.
-- [ ] Lost response, concurrent replay and process recovery: preserve the
+- [x] Lost response, concurrent replay and process recovery: preserve the
       original journal/native/request binding or report unresolved custody,
       with no replacement allocation, conversation or dropped requirement.
+      Source journal, new-manager recovery and controlled-transport cases
+      passed in #10976. Actual native recovery acceptance remains open.
 - [ ] Native continuation and later lineage retain the same writer requirement;
       changed workspace nonce, owner or executing build cannot be adopted.
-- [ ] Exercise actual process/delegation boundaries in the bounded integration
+- [x] Exercise actual process/delegation boundaries in the bounded integration
       lane and retain focused contract units in the existing required packet.
       Source controls do not stand in for the separately required running
       Bridge, resident, closed-cohort or ordinary whole-stack acceptance.
+      #10976 binds every finite writer child to its committed entrypoint and
+      full source closure, with no sibling-write or provenance-guard exemption.

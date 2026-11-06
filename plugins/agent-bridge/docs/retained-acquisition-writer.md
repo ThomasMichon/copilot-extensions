@@ -86,6 +86,29 @@ does not veto an authorized installer replacement or preserve a second registry.
 
 ## Qualification boundary
 
+The optional `retained_acquisition_writer_inspection: 1` health capability
+adds `acquisition-inspect <delivery-id> --worktree-writer`, using the existing
+`GET /api/v1/acquisitions/{delivery_id}?worktree_writer=true`. The CLI
+negotiates that capability on each transport attempt. Without the option,
+inspection retains its previous response and performs no writer probes.
+
+The required form reopens only that delivery's original journal binding.
+It never selects a replacement command, retrofits a legacy acquisition,
+acquires a native, delivers a prompt or repairs a record. It requalifies the
+retained executing serializer and reads the original workspace through that
+same command. Changed project, path or creation nonce refuses. The journal
+and active Bridge instance must still match after those reads; unknown,
+passive, draining or unready owners do not yield successful evidence.
+
+The additive `worktree_writer_observation` contains schema
+`copilot-extensions.acquisition-worktree-writer`, version 1, the original
+delivery/reservation/task/workspace fields, the retained `worktree_writer`
+requirement, live serializer contract and active Bridge instance
+(installation root, PID and routing generation). It exposes no command or
+environment. Missing acquisitions retain their 404; an unqualified writer
+inspection returns 409. This is a fresh read-only observation, not a durable
+ready permit, native-liveness proof or successful-delivery assertion.
+
 This capability qualifies Bridge's delegated writer route, **not** the resident
 serializer or every other producer of the shared Worktrees record. Existing
 relationship transactions retain their own effect-side expected-nonce/writer
