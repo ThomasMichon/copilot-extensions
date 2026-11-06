@@ -900,7 +900,16 @@ class _SessionStartMixin:
             log.warning("Session %s not launched: %s", session_id, exc)
         except Exception as exc:
             await _cleanup_failed_process_launch()
-            self._mark_session_failed(session, trigger="start_exception")
+            from .acquisition_worktree_writer import current
+
+            if current() is not None and session.acp_session_id:
+                session.status = SessionStatus.STOPPED
+                self._db.update_session_status(session_id, SessionStatus.STOPPED.value, time.time())
+                session.event_log.append("session_state_changed", {
+                    "status": SessionStatus.STOPPED.value, "reason": "native_registration_pending",
+                })
+            else:
+                self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
         finally:

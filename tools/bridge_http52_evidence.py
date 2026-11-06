@@ -117,6 +117,9 @@ PROBES = {
     "test_required_writer_survives_stopped_resume_and_later_acquisition": 2,
     "test_required_handoff_retry_reuses_original_successor_after_lineage_failure": 4,
     "test_required_handoff_retains_unknown_effect_without_replacement": 2,
+    "test_required_writer_refuses_provider_type_change_before_persist_or_launch": 2,
+    "test_required_writer_resume_exhaustion_cannot_recreate": 1,
+    "test_required_handoff_retries_registration_on_original_native": 2,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {

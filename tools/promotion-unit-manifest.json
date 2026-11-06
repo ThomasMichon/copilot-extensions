@@ -4520,7 +4520,7 @@
         "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py": "30ca48f63ea5b71d0e4148875da8d7a16963193f208a105ac74da4ddfd13674f",
         "plugins/agent-bridge/src/agent_bridge/service_start_cli.py": "e8732b9f97bca55977aff4df469164bba1cc806f424571b5057058671bbc6c38",
         "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "378675547ea7045eb1d6c1183506c3663b05b39517107073f8f579fb29d4d4f4",
-        "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "0b3b2a765d26ad004f434e3d790424a18bad76a62245b930d3a66188e0282330",
+        "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "08f739066ed0656d5c7a7b3166827be571c5fa70986abdb80aeaf14e71ab9703",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py": "426be01f0b41ab85f9de5289aeaa9c5305bad9d2eb07bc1e4e9b4616a1aead85",
         "plugins/agent-bridge/src/agent_bridge/session_status.py": "96e8aec0a62cc68c7db7215d6a575c4ad772ce4a96c5def00b18cc1103f3b335",
         "plugins/agent-bridge/src/agent_bridge/singleton_anchor.py": "15b2ce0dc947dbc9e47c3f0de23d43ec91974b2a5898d034cd5bcbce305c12f8",

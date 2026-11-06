@@ -131,6 +131,7 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
 
     monkeypatch.setattr(SessionManager, "_connect_via_session_host", host_connect)
     monkeypatch.setattr(core, "AcpClient", lambda **kw: mock_acp_client)
+    mock_acp_client.stderr_tail.return_value = ""
     proc = MagicMock()
     proc.proc.pid = 99999999
     proc.proc.returncode = None
@@ -278,6 +279,128 @@ async def test_required_writer_survives_stopped_resume_and_later_acquisition(
     assert later.session_id == first.session_id and later.native_session_id == first.native_session_id
     assert len(rig.manager.list_sessions()) == 1
     assert writer_rig.selected.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_type", ["ssh", "command"])
+async def test_required_writer_refuses_provider_type_change_before_persist_or_launch(
+    writer_rig, monkeypatch, target_type,
+):
+    from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    session = rig.manager.get_session(first.session_id)
+    await rig.manager.stop_session(session.session_id, force=True)
+    session.target.venue["provider"] = {"fixture": True}
+    session.target.venue[REQUEST_OVERRIDES_KEY].update(env={}, copilot_args=[])
+    rig.db.update_session_target(session.session_id, session.target.to_json(), session.target.cwd)
+    original = session.target
+    persisted = rig.db.get_session(session.session_id)["target_json"]
+    rig.manager._resolver = SimpleNamespace(resolve_async=AsyncMock(
+        return_value=SpawnTarget(type=target_type, cwd=request.worktree_path),
+    ))
+    launch = AsyncMock(side_effect=AssertionError("changed target must not launch"))
+    monkeypatch.setattr(core, "spawn", launch)
+    monkeypatch.setattr(rig.manager, "_resume_via_new_remote_host", launch)
+    with pytest.raises(AcquisitionRefused, match="original writer owner"):
+        await rig.manager.resume_session(session.session_id, drain=False)
+    assert session.target is original
+    assert rig.db.get_session(session.session_id)["target_json"] == persisted
+    assert session.acp_session_id == first.native_session_id
+    assert session.status == SessionStatus.STOPPED
+    launch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_required_writer_resume_exhaustion_cannot_recreate(writer_rig, monkeypatch):
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    session = rig.manager.get_session(first.session_id)
+    await rig.manager.stop_session(session.session_id, force=True)
+    monkeypatch.setattr(rig.client, "load_session", AsyncMock(side_effect=RuntimeError("load refused")))
+    new_count = rig.client.new_session.await_count
+    with pytest.raises(RuntimeError, match="load refused"):
+        await rig.manager.resume_session(session.session_id, drain=False, allow_recreate=True)
+    assert rig.client.load_session.await_count == core._MAX_RESUME_ROUNDS
+    assert rig.client.new_session.await_count == new_count
+    assert session.acp_session_id == first.native_session_id
+    assert rig.db.get_session(session.session_id)["acp_session_id"] == first.native_session_id
+    assert session.status == SessionStatus.STOPPED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reattach", [False, True])
+async def test_required_handoff_retries_registration_on_original_native(
+    writer_rig, monkeypatch, reattach,
+):
+    from agent_bridge import acquisition_worktree_writer as writer, worktree_lineage
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    predecessor = rig.manager.get_session(first.session_id)
+    predecessor.status = SessionStatus.IDLE
+    rig.client.acp_session_id = "native-successor"
+    start = AsyncMock(wraps=rig.manager.start_session)
+    monkeypatch.setattr(rig.manager, "start_session", start)
+    seed = AsyncMock(return_value=0)
+    monkeypatch.setattr(rig.manager, "submit_prompt", seed)
+    registrations = []
+
+    def register(worktree_id, native, **kwargs):
+        registrations.append((native, writer.current().prefix))
+        if len(registrations) <= 2:
+            raise AcquisitionRefused("owner_pending", "registration unavailable")
+        return True
+
+    monkeypatch.setattr(worktree_lineage, "register_session", register)
+    linked = []
+
+    def link(*args, **kwargs):
+        assert registrations[-1][0] == "native-successor"
+        assert len(registrations) == 3
+        linked.append(args[2])
+
+    monkeypatch.setattr(worktree_lineage, "link_succession", link)
+    for name in ("note_handoff", "session_role", "history_digest"):
+        monkeypatch.setattr(worktree_lineage, name, lambda *a, **k: None)
+    options = {"reason": "fixture", "seed_text": "Original continuation"}
+    with pytest.raises(RuntimeError, match="successor.*failed to start"):
+        await rig.manager.handoff_session(predecessor.session_id, **options)
+    successor = next(s for s in rig.manager.list_sessions() if s is not predecessor)
+    assert successor.status == SessionStatus.STOPPED
+    assert successor.acp_session_id == "native-successor"
+    assert rig.db.get_session(successor.session_id)["status"] == "stopped"
+    assert rig.db.get_session(successor.session_id)["acp_session_id"] == "native-successor"
+    assert not linked and not seed.await_count
+
+    async def reattach_host(session):
+        session.client = rig.client
+        session.status = SessionStatus.IDLE
+        return True
+
+    monkeypatch.setattr(rig.manager, "_try_reattach_live_host", AsyncMock(
+        side_effect=reattach_host if reattach else None, return_value=False,
+    ))
+    writer_rig.selected.side_effect = AssertionError("original writer cannot be reselected")
+    new_count = rig.client.new_session.await_count
+    # A failed registration retry still cannot link or replace the successor.
+    if not reattach:
+        # Registration is retried once per load attempt by the existing ladder.
+        monkeypatch.setattr(core, "_MAX_RESUME_ROUNDS", 1)
+        from agent_bridge import session_resume
+        monkeypatch.setattr(session_resume, "_MAX_RESUME_ROUNDS", 1)
+    with pytest.raises(AcquisitionRefused, match="registration unavailable"):
+        await rig.manager.handoff_session(predecessor.session_id, **options)
+    assert successor.status == SessionStatus.STOPPED
+    assert not linked and not seed.await_count
+    resumed = await rig.manager.handoff_session(predecessor.session_id, **options)
+    assert resumed is successor and resumed.acp_session_id == "native-successor"
+    assert successor.target.venue[writer.DELIVERY_KEY] == request.delivery_id
+    assert start.await_count == 1 and len(rig.manager.list_sessions()) == 2
+    assert rig.client.new_session.await_count == new_count
+    assert linked == ["native-successor"] and seed.await_count == 1
+    assert registrations == [("native-successor", ("retained-owner", "original-build"))] * 3
 
 
 @pytest.mark.asyncio

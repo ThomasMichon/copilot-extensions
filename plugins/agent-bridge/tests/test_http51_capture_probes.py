@@ -150,6 +150,12 @@ from test_acquisition_runtime import (
     as test_required_handoff_retry_reuses_original_successor_after_lineage_failure,
     test_required_handoff_retains_unknown_effect_without_replacement
     as test_required_handoff_retains_unknown_effect_without_replacement,
+    test_required_writer_refuses_provider_type_change_before_persist_or_launch
+    as test_required_writer_refuses_provider_type_change_before_persist_or_launch,
+    test_required_writer_resume_exhaustion_cannot_recreate
+    as test_required_writer_resume_exhaustion_cannot_recreate,
+    test_required_handoff_retries_registration_on_original_native
+    as test_required_handoff_retries_registration_on_original_native,
 )
 
 ROOT = Path(__file__).resolve().parents[3]

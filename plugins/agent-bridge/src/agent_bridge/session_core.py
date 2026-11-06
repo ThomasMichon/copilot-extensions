@@ -343,7 +343,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 },
             },
         )
+        from .acquisition_worktree_writer import require_target
         from .provider_creation import assert_resume_placement
+
+        require_target(refreshed)
         assert_resume_placement(self._db, session.session_id, persisted, refreshed)
         session.target = refreshed
         self._db.update_session_target(

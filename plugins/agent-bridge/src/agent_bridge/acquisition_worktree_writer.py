@@ -277,6 +277,8 @@ def session_writer(method):
             from .acquisition_authority import verify_worktree
 
             await verify_worktree(request)
+            if method.__name__ == "resume_session":
+                kwargs["allow_recreate"] = False
             return await method(manager, session_id, *args, **kwargs)
     return run
 
