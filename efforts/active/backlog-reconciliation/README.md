@@ -331,6 +331,25 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #2882's finite completed vision reconciliation and #2914's complete
+fallback-transaction intake under existing OPEN #2709. The corrected
+campaign-supplied assignee guard is not an original owner hold; actual
+source/resource custody remains. Public-neutral incident requirements and
+eight direct Plan/Validation rows preserve the unresolved cause and safe
+recovery without republishing private case values. Complete06:55 PST scans
+measure819 whole OPEN,1003 effective audited dispositions and90 above729.
+The campaign remains Active; no runtime or native incident repair is claimed.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed #11014 delivery, complete actual #5799 receiving readback
+and #433's separate `NOT_PLANNED` tracking retirement. Its three wording
+residuals remain unchecked; the primary documentation participant stays
+released and future material execution unassigned. Complete06:41 PST scans
+measure821 whole OPEN,1001 effective audited dispositions and92 above729.
+Twenty-four next eligible originals have independent bounded Luna studies;
+no new implementation, native/installed proof or custody release is inferred.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records the bounded #433 wording family proposed directly in the existing
 Active materials inventory under OPEN #5799. Three exact residual statements,
 the original quick plugin scan, credited #561 CLI repair and behavior/API/task
