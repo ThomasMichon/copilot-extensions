@@ -256,6 +256,35 @@ def test_env_launcher_split_string_and_cwd_are_inspected(monkeypatch, tmp_path):
     ) is None
 
 
+@pytest.mark.parametrize("value", [
+    r"kill\_-TERM\_-1",
+    r"kill\n-TERM\n-1",
+    "kill\v-TERM\v-1",
+    "kill\f-TERM\f-1",
+    "tmux -S ${SOCKET} kill-session -t fixture",
+])
+@pytest.mark.parametrize("form", ["separate", "attached", "long"])
+def test_gnu_env_split_extensions_are_refused_instead_of_misparsed(
+    monkeypatch, tmp_path, value, form,
+):
+    monkeypatch.setattr(safety, "os", SimpleNamespace(
+        name="posix", environ={}, path=os.path, fsdecode=os.fsdecode,
+    ))
+    options = (
+        ["-S", value] if form == "separate"
+        else ["-S" + value] if form == "attached" else ["--split-string=" + value]
+    )
+    command = ["env", *options]
+    environment = {"SOCKET": str(tmp_path.parent / "foreign.sock")}
+    assert safety.command_problem(command, sandbox=tmp_path, cwd=tmp_path, environment=environment)
+    hooks = []
+    monkeypatch.setattr(safety, "_installed", False)
+    monkeypatch.setattr(safety.sys, "addaudithook", hooks.append)
+    safety.install_command_guard(tmp_path)
+    with pytest.raises(safety.UnsafeTestCommand):
+        hooks[0]("subprocess.Popen", ("env", command, tmp_path, environment))
+
+
 @pytest.mark.parametrize("command", [
     ["env", "tmux", "kill-session", "-t", "fixture"],
     ["env", "-S", "bash -lc 'pkill -f fixture'"],
@@ -527,6 +556,8 @@ def test_shell_helpers_and_generated_script_literals_are_checked(tmp_path, name,
     "os.system('(kill -TERM -1)')",
     "os.system('result=$(kill -TERM -1)')",
     "os.system('result=`kill -TERM -1`')",
+    r"subprocess.run(['env', '-S', r'kill\_-TERM\_-1'])",
+    "subprocess.run(['env', '-S', 'tmux -S ${SOCKET} kill-session -t fixture'])",
 ])
 def test_source_exec_and_spawn_signatures_use_the_actual_executable(tmp_path, body):
     source = tmp_path / "child.py"

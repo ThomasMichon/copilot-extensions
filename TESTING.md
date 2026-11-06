@@ -5928,6 +5928,9 @@ Quoted data is not a command group; unquoted parentheses and braces are
 inspected as nested command positions. SSH options and destinations are
 separated from the remote command, and explicit local/proxy command options
 are inspected independently.
+The supported `env -S` subset excludes GNU-specific expansions and escape
+sequences that a shell tokenizer cannot safely interpret. Prefer an explicit
+argument vector instead of relying on those additional parsing rules.
 
 For real mux fixtures, use
 `plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact

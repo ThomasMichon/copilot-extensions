@@ -253,6 +253,14 @@ def _launcher_problem(
                 elif cwd is not _UNKNOWN_CWD:
                     cwd = (Path(os.fsdecode(cwd)) if cwd is not None else Path.cwd()) / path
             elif name == "env" and option in {"-S", "--split-string"}:
+                quote = ""
+                for position, char in enumerate(value):
+                    if char in "$\v\f" or char == "\\" and (
+                        quote != "'" or value[position + 1:position + 2] in {"'", "\\"}
+                    ):
+                        return "cannot verify GNU env split-string expansion or escape semantics"
+                    if char in "\"'" and (not quote or char == quote):
+                        quote = "" if quote else char
                 try:
                     nested[index:index] = shlex.split(value)
                 except ValueError:
