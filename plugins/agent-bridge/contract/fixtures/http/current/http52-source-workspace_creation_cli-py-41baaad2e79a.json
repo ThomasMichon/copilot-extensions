@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http52-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-source-workspace_creation_cli-py-41baaad2e79a.json",
-    "sha256": "6b4904e68f9335999bd9d135d20a60e1ea48cda7ac0cd2cd7fa34a47ee5d9913"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http52-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
-    "sha256": "8804d8fdfa585a1830a06f2820007f9cf3a3a2a493f3847ff16f831068079264"
+    "sha256": "cf51d8e44285a2dbf0318ba8b708d95bda3a9adde90c7fdea10990acc86bc054"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "0216ba8567f7cae5c0eec74584af0324b5c2302d",
+    "commit": "8c3e5e96ab5bc26a224c3de881266bbf19edbb68",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
-    "source_git_blob": "e34368a3bc620f55c3d0e97032ccf8c1e117c9f3",
-    "source_sha256": "0ccd7487c5b9e661a45ebcfb8859fb9994eeb4672c26f1beb8b2f97fe821925f"
+    "source_git_blob": "bca4ff74146b7e35b18fdc2cd04387a69a6facb7",
+    "source_sha256": "e3e44fcbeefc2ef827c15ad808bd8a5978de690e887b7240baf2a280c21bfc58"
   }
 }

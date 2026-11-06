@@ -153,6 +153,10 @@ mandatory. Unknown responses retain the same assignment and claim.
       That optional observation merged in #11001 with current-source HTTP,
       process and actor-free controls. The original workspace and complete
       installed cohort remain required before ordinary assembly.
+      Queue-owned original-request revalidation merged in #11034: each external
+      relationship call now rereads the durable queue, explicit authority, exact
+      audited worker and complete original request. This source seam does not
+      qualify the actual CLI/resident/Bridge participant set or close the cohort.
 - [ ] Integrate ordinary preparation/advancement consumers only after their
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers

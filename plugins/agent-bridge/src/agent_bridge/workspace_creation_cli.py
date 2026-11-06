@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
+from typing import Any
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -12,18 +15,51 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--creation-key", help="opaque logical creation identity; exact local workspace/session retries retain the original result")
     parser.add_argument("--provider-instance", action="store_true",
                         help="keyed native creation on an exact provider-exec instance, without a worktree")
+    parser.add_argument("--worktree-writer-file", metavar="PATH",
+                        help="required retained writer JSON for keyed creation in a prepared local worktree; - reads stdin")
 
 
-def validate_arguments(args: argparse.Namespace) -> None:
+def validate_arguments(args: argparse.Namespace) -> dict[str, Any] | None:
     if getattr(args, "provider_instance", False) and getattr(args, "creation_key", None) is None:
         print("[FAIL] --provider-instance requires --creation-key.", file=sys.stderr)
         sys.exit(2)
     if getattr(args, "creation_key", None) is not None and getattr(args, "cli", False):
         print("[FAIL] --creation-key is not supported by CLI-mode venue creation.", file=sys.stderr)
         sys.exit(2)
+    path = getattr(args, "worktree_writer_file", None)
+    if path is None:
+        return None
+    from .remote_acp_config import is_remote_address
+
+    if (
+        not getattr(args, "creation_key", None) or not getattr(args, "worktree_id", None)
+        or getattr(args, "cli", False) or getattr(args, "provider_instance", False)
+        or getattr(args, "target_dir", None) is not None
+        or is_remote_address(getattr(args, "target", ""))
+        or path == "-" and (
+            getattr(args, "prompt", None) == "-" or getattr(args, "prompt_file", None) == "-"
+        )
+    ):
+        print(
+            "[FAIL] --worktree-writer-file requires keyed creation in a prepared local "
+            "ACP worktree and cannot share prompt stdin.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    from .acquisition_contract import WorktreeWriterRequirement
+
+    try:
+        text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+        return WorktreeWriterRequirement.model_validate(json.loads(text)).model_dump()
+    except (OSError, UnicodeError, ValueError, TypeError):
+        print("[FAIL] --worktree-writer-file must contain a valid writer requirement.", file=sys.stderr)
+        sys.exit(2)
 
 
-def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
+def create(
+    args: argparse.Namespace, client: Any, *, caller_id: str | None,
+    worktree_writer: dict[str, Any] | None = None,
+) -> None:
     from . import __main__ as core
     from .client import BridgeClientError
     from .protocol import PROVIDER_CREATION_PROTOCOL_VERSION, WORKSPACE_CREATION_PROTOCOL_VERSION
@@ -53,6 +89,7 @@ def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
         creation_key=args.creation_key, creation_prompt=prompt,
         provider_instance=provider_instance,
         request_timeout=core._startup_request_timeout(),
+        **({"worktree_writer": worktree_writer} if worktree_writer is not None else {}),
     )
     creation = result.get("creation")
     if not isinstance(creation, dict) or creation.get("status") != "complete":
