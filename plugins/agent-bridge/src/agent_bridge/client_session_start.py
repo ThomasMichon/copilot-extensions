@@ -9,6 +9,41 @@ from .client_worktree_restart import _Base
 
 
 class SessionStartClientMixin(_Base):
+    def resume_session(
+        self, session_id: str, *, request_timeout: float | None = None,
+        worktree_writer: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from .startup_observation import current
+
+        send = self._request
+        body = ()
+        if worktree_writer is not None:
+            from .acquisition_contract import WorktreeWriterRequirement
+            from .client_protocol_floor import protocol_floored_request
+            from .creation_worktree_writer import RESUME_CAPABILITY
+            from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+            body = ({"worktree_writer": WorktreeWriterRequirement.model_validate(
+                worktree_writer,
+            ).model_dump()},)
+            send = protocol_floored_request(
+                self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={RESUME_CAPABILITY: 1},
+            )
+        observation = current()
+        if observation is not None and not observation.clock.ready:
+            return observation.request(
+                self, session_id,
+                lambda: send(
+                    "POST", f"/api/v1/sessions/{session_id}/resume", *body,
+                    request_timeout=observation.clock.process_remaining(),
+                    allow_retry=False,
+                ) or {},
+            )
+        return send(
+            "POST", f"/api/v1/sessions/{session_id}/resume", *body,
+            request_timeout=request_timeout,
+        ) or {}
+
     def start_session(
         self,
         *,

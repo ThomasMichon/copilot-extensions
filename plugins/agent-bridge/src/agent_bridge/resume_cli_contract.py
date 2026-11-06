@@ -61,7 +61,7 @@ def cli_contracts() -> dict[str, Any]:
             },
             "agent-bridge.resume": {
                 "version": 1,
-                "capabilities": ["exact-worktree-target"],
+                "capabilities": ["exact-worktree-target", "keyed-worktree-writer"],
             },
             "bridge-session-current-requests-v1": {
                 "version": 1, "capabilities": ["observe-session-current-requests"],

@@ -80,6 +80,7 @@ def run_resume(
     strict: bool = False,
     cli: bool = False,
     worktree_only: bool = False,
+    worktree_writer: dict[str, Any] | None = None,
 ) -> None:
     """Implementation of ``agent-bridge resume`` with singleton fallback.
 
@@ -130,6 +131,9 @@ def run_resume(
             )
         raise SystemExit(1)
 
+    if worktree_writer is not None and (worktree_only or reclaim or cli or not strict):
+        _fail("Required writer resume needs a strict exact ACP session target")
+
     if worktree_only:
         from .resume_cli_contract import confirmed_resume, exact_worktree_id
 
@@ -171,7 +175,18 @@ def run_resume(
             result = client.resume_session(
                 target,
                 request_timeout=startup_request_timeout(resume=True),
+                **({"worktree_writer": worktree_writer} if worktree_writer is not None else {}),
             )
+            if worktree_writer is not None and (
+                result.get("session_id") != target
+                or not isinstance(result.get("acp_session_id"), str)
+                or not result["acp_session_id"].strip()
+                or result.get("durable_session_id") != result["acp_session_id"]
+            ):
+                _fail(
+                    "Required writer resume returned unproven session/native identity; not replayed",
+                    reason="resume_response_unconfirmed",
+                )
             status = result.get("status", "")
             if as_json:
                 json_out({
@@ -184,7 +199,7 @@ def run_resume(
                 print(f"[OK] Session {target} resumed ({status})")
             return
         except BridgeClientError as exc:
-            if exc.status != 404:
+            if exc.status != 404 or worktree_writer is not None:
                 _fail(f"Could not resume session {target}: {exc.detail}")
 
     attempts: list[tuple[str, str, str]] = [("Worktree", target, target)]

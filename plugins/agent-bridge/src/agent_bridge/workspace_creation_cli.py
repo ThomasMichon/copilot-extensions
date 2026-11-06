@@ -46,6 +46,10 @@ def validate_arguments(args: argparse.Namespace) -> dict[str, Any] | None:
             file=sys.stderr,
         )
         sys.exit(2)
+    return read_writer_requirement(path)
+
+
+def read_writer_requirement(path: str) -> dict[str, Any]:
     from .acquisition_contract import WorktreeWriterRequirement
 
     try:
