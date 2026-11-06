@@ -597,3 +597,12 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   retaining `1` for known refusals. Three focused actual-producer CLI controls
   passed for missing retained storage, custom-sink preservation and an unknown
   post-write acknowledgement; the last still performs exactly one write.
+- The next review found that a fenced input could itself name the native
+  configuration output. Both producers now reject input paths or file
+  identities overlapping their target or writer lock before issuing
+  confirmation. A real Machines local-override/Dispatch-target collision
+  preserves every input byte without creating a lock. That case and three
+  existing changed-input controls passed; Bridge passed five native overlap
+  and locked-input controls. Strict Python-3.10 library typing passed both
+  Linux and Windows targets over 18 files each. These add no installed-runtime
+  or carrier qualification.

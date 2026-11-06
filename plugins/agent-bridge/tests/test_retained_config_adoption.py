@@ -249,6 +249,23 @@ def test_invalid_input_fence_never_creates_configuration(configuration, tmp_path
     assert not target.exists() and not target.with_suffix(".json.lock").exists()
 
 
+@pytest.mark.parametrize("selected", ["target", "lock"])
+def test_fenced_input_cannot_be_native_output(configuration, capsys, selected):
+    target, directory = configuration
+    lock = target.with_name(target.name + ".lock")
+    source = target if selected == "target" else lock
+    source.write_bytes(b'{"read_only":true}\n')
+    original = source.read_bytes()
+    inputs = [[str(source), hashlib.sha256(original).hexdigest()]]
+    for apply in (False, True):
+        code, result = invoke(capsys, directory, inputs=inputs, apply=apply, confirm="0" * 64 if apply else None)
+        assert code == 2 and result["status"] == "error"
+        assert result["write_outcome"] == "not-applied"
+        assert "overlaps native output" in result["reason"]
+        assert source.read_bytes() == original
+        assert not (lock if selected == "target" else target).exists()
+
+
 def test_linked_target_is_not_followed(configuration, tmp_path, capsys):
     target, directory = configuration
     other = tmp_path / "foreign.json"

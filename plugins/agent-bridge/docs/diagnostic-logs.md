@@ -244,7 +244,9 @@ The additive `input_fence: 1` capability admits repeated
 of at most 256 KiB each are read. Exact bytes, file and directory identities
 enter the confirmation and are rechecked under the producer lock before its
 write. No input is executed or modified. A consumer must discover this capability
-on its selected runtime before using the option; the original v1 declaration
+on its selected runtime before using the option. Inputs that name or alias the
+native configuration target or its writer lock refuse before confirmation or
+lock acquisition. The original v1 declaration
 without it does not support guarded adoption. This is a local write-boundary
 check, not a transaction spanning independent input writers.
 

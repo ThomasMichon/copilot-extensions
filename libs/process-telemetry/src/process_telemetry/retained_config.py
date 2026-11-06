@@ -63,7 +63,7 @@ def _float(value: str) -> float:
     return number
 
 
-def _input_fence(inputs: list[list[str]]) -> list[dict[str, Any]]:
+def _input_fence(inputs: list[list[str]], *, target: Path) -> list[dict[str, Any]]:
     if len(inputs) > 8:
         raise ValueError("too many configuration inputs")
     snapshots: list[dict[str, Any]] = []
@@ -77,6 +77,11 @@ def _input_fence(inputs: list[list[str]]) -> list[dict[str, Any]]:
         if path.parent.resolve(strict=True) != path.parent:
             raise ValueError("configuration input requires a canonical parent")
         identity = _plain(path, directory=False)
+        if any(
+            path == output or output.exists() and path.samefile(output)
+            for output in (target, target.with_name(target.name + ".lock"))
+        ):
+            raise ValueError("configuration input overlaps native output")
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
             if (before.st_dev, before.st_ino) != identity:
@@ -147,7 +152,7 @@ def preview(
         "namespace": namespace, "identity": identity,
         "bytes": None if raw is None else hashlib.sha256(raw).hexdigest(),
         "environment_sink": environment_sink,
-        "inputs": _input_fence(inputs or []),
+        "inputs": _input_fence(inputs or [], target=target),
     }
     token = hashlib.sha256(
         json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")

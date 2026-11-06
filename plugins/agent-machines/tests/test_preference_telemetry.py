@@ -207,6 +207,22 @@ def test_cli_distinguishes_invalid_request_from_preservation_refusal(
     assert not target.with_suffix(".json.lock").exists()
 
 
+def test_local_override_cannot_be_the_native_configuration_target(configured):
+    state, target, directory = configured
+    original = json.dumps({
+        "schema": "agent-machines.preferences.local", "version": 1,
+        "machine": "example-worker", "domains": {},
+    }).encode("utf-8")
+    target.write_bytes(original)
+    arguments = dict(producer="agent-dispatch", directory=directory, local=target)
+    preview = adapter.adopt(state, **arguments)
+    assert preview["status"] == "error" and not preview["eligible"]
+    assert "overlaps native output" in preview["native"]["reason"]
+    result = adapter.adopt(state, apply=True, expected=preview["preview_token"], **arguments)
+    assert not result["configuration_applied"]
+    assert target.read_bytes() == original and not target.with_suffix(".json.lock").exists()
+
+
 @pytest.mark.parametrize("changed", ["policy.json", "accepted.json", "local.json"])
 def test_parent_check_cannot_authorize_changed_inputs_at_producer(configured, tmp_path, monkeypatch, changed):
     state, target, directory = configured

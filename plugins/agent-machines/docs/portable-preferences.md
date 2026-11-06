@@ -337,6 +337,7 @@ accepted revision, scope, policy and local choices. Digests come from the same
 bounded reads that supplied the validated values, not a second file read.
 Exact policy, accepted-snapshot and optional local-override bytes are passed
 as data-only input fences and rechecked inside the producer's transaction.
+Inputs cannot name or alias the native configuration target or its writer lock.
 Changed inputs require another preview. This does not claim a cross-file
 transaction against arbitrary external editors.
 
