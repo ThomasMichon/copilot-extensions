@@ -330,6 +330,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [reclamation receiving proposal](../continuous-worktree-reclamation/cohort-contracts.md)
+now carries complete per-original Plan/Validation work and #6620's retained
+trusted-folder lifecycle. #1488/#1666/#1918/#3114/#4101 remain open pending
+their actual owner-acceptance/mapping gates; #6060 remains a separate semantic
+effort with independent pilot/schedule authority. The collection effort stays
+Draft and no implementation or retirement is inferred from this plan.
+This amendment adds no disposition credit or new census; the last complete
+count remains 890 whole OPEN, 161 above the fixed 729 checkpoint.
+
 Eight further subordinate trackers consolidate into eight existing OPEN
 parents for Proactor resource settlement, observed-check supersession,
 producer/receipt convergence, install/adopt choices, first-touch test

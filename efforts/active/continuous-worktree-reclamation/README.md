@@ -38,6 +38,11 @@ changing retention, a host rollout or re-enabling any paused producer.
   `worktree-conclusion-tidier` (#6060) retains semantic objective review;
   #6471/#6542 retains held-housekeeping recovery and pair progress.
   Do not replace or independently implement those slices.
+- **Proposed receiving contracts:** [cohort contracts](cohort-contracts.md)
+  records each original Plan/Validation obligation and its owner-acceptance
+  gate. This is planning intake only, not an accepted custody transfer.
+  #1488/#1666/#1918/#3114/#4101 remain open until their respective gates pass;
+  #6060 remains a separate semantic-tidier effort.
 
 ## Context
 
@@ -96,6 +101,15 @@ not additional operator requirements or authorization to execute them.
 
 _Agent-recommended execution plan; not yet authorized._
 
+- [ ] Resolve the per-original owner mappings and scope acceptance in
+  [cohort contracts](cohort-contracts.md#ownership-and-retirement-gates)
+  before any tracker retirement; do not infer acceptance from this proposal.
+- [ ] Implement the separately owned task-terminal, claimant-liveness,
+  per-attempt, inbound-claim and objective-first classification workstreams
+  against their [complete contracts](cohort-contracts.md#workstream-plan).
+  Preserve their independent acceptance and existing custodians.
+- [ ] Preserve the [trusted-folder lifecycle](cohort-contracts.md#trusted-folder-lifecycle)
+  across finalization, supported reopen and confirmed safe removal.
 - [ ] Capture the controlled baseline and structural counters in
   [performance](performance.md); identify the measured dominant costs before
   selecting optimizations or revising numeric targets.
@@ -160,6 +174,10 @@ _Agent-recommended execution plan; not yet authorized._
 
 Future runtime validation is planned, not claimed by this documentation change.
 
+- [ ] Satisfy every per-original case in the
+  [cohort validation matrix](cohort-contracts.md#validation-plan), including
+  the independent owner-acceptance gates; source, native, installed and live
+  proof remain distinct from documentary intake.
 - [ ] Unit: one eligibility interpretation for manual/automatic paths; all hold
   classes, grace boundaries and policy/authority isolation preserve the workspace.
 - [ ] Native integration: real Git worktrees and daemon requests across several
@@ -219,3 +237,16 @@ implementation clearly gated. It does not mean any Phase 2-5 work is complete.
   and requires a controlled, service-safe reproduction before a runtime fix.
 - The planning claim ends at proposal publication. Phase 2-5 implementation,
   activation and rollout remain unassigned and unauthorized under #6620.
+
+### 2026-11-05 - Explicit receiving-contract proposal
+
+- Added self-contained per-original Plan/Validation contracts for #1488,
+  #1666, #1918, #3114 and #4101, plus #6620's retained trusted-folder lifecycle.
+  All source trackers remain open; the proposal neither accepts another
+  owner's custody nor claims implementation.
+- Retained #3114's specific terminal-custodian acceptance and named general
+  ground-layer mapping gate, #1918's assigned per-attempt boundary and
+  #4101's documentation-only claim. Runtime ownership remains unresolved.
+- Kept #6060's semantic design/pilot/schedule separate from collection and
+  #6471/#6542 held-housekeeping recovery. Draft status, Phase 2 baseline
+  first, separately authorized execution and rollout remain unchanged.
