@@ -425,9 +425,10 @@ def test_batch_get_refresh_returns_ordered_partial_or_total_failure(
         assert persistent.get("Example/one", "password") == "fresh"
 
 
-@pytest.mark.parametrize("failure", ["ciphertext", "schema", "key"])
+@pytest.mark.parametrize("refresh", [False, True])
+@pytest.mark.parametrize("failure", ["ciphertext", "schema", "key", "entry", "field", "rotation"])
 def test_batch_refuses_corrupt_fernet_cache_without_replacement(
-    enabled_cache, monkeypatch, capsys, failure,
+    enabled_cache, monkeypatch, capsys, failure, refresh,
 ):
     from cryptography.fernet import Fernet
 
@@ -446,8 +447,17 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
         persistent._cache_file.write_bytes(b"corrupt-ciphertext")
     elif failure == "schema":
         persistent._cache_file.write_bytes(cipher.encrypt(b'{"v":1,"entries":[]}'))
-    else:
+    elif failure == "key":
         persistent._key_file.write_bytes(kek.WRAP_MAGIC + b"Rmalformed-fernet-key")
+    else:
+        fields = {
+            "entry": [],
+            "field": {"password": None},
+            "rotation": {"password": {"rotation": "invalid"}},
+        }[failure]
+        persistent._cache_file.write_bytes(cipher.encrypt(json.dumps({
+            "v": 1, "entries": {"Example/one": fields, "Example/two": fields},
+        }).encode()))
     cache_before = persistent._cache_file.read_bytes()
     key_before = persistent._key_file.read_bytes()
     persistent = PersistentCache()
@@ -461,7 +471,7 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
     ]
     monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(requests)))
 
-    assert cli.main(["batch-get"]) == 1
+    assert cli.main(["batch-get", *(["--refresh"] if refresh else [])]) == 1
     captured = capsys.readouterr()
     results = json.loads(captured.out)["results"]
     assert [row["entry"] for row in results] == [row["entry"] for row in requests]
@@ -475,6 +485,34 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
             cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
     else:
         assert persistent.get("Example/one") is None
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+def test_batch_does_not_replace_cache_corrupted_during_service_read(
+    enabled_cache, monkeypatch, capsys, refresh,
+):
+    persistent = get_cache()
+    assert persistent.put("Example/retained", "password", "cached-value")
+    key_before = persistent._key_file.read_bytes()
+
+    def send(*_args, **_kwargs):
+        persistent._cache_file.write_bytes(b"corrupted-during-read")
+        return {"ok": True, "value": "not-published"}
+
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", send)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"Example/new"}]'))
+
+    assert cli.main(["batch-get", *(["--refresh"] if refresh else [])]) == 1
+    captured = capsys.readouterr()
+    result, = json.loads(captured.out)["results"]
+    assert result["ok"] is False
+    assert result["value"] is None
+    assert "could not be reconciled" in result["error"]
+    assert "not-published" not in captured.out + captured.err
+    assert persistent._cache_file.read_bytes() == b"corrupted-during-read"
+    assert persistent._key_file.read_bytes() == key_before
 
 
 @pytest.mark.parametrize("value,ok", [("cached-value", True), (42, False)])
@@ -512,7 +550,7 @@ def test_batch_get_does_not_publish_unreconciled_refresh_value(
 ):
     persistent = get_cache()
     monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
-    monkeypatch.setattr(persistent, "reconcile_authoritative", lambda *_args: False)
+    monkeypatch.setattr(persistent, "reconcile_authoritative", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(cli, "ensure_service", lambda: True)
     monkeypatch.setattr(cli, "send_command", lambda *_args, **_kw: {
         "ok": True, "value": "not-published",

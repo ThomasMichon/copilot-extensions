@@ -36,9 +36,10 @@ def read_credential(args) -> CredentialRead:
     max_cache_age = getattr(args, "max_cache_age", None)
     cache = get_cache()
     pinned = config.PINNED_CONTEXT_ENV in os.environ
-    readonly_cache = pinned or getattr(args, "strict_cache", False)
+    strict_cache = getattr(args, "strict_cache", False)
+    readonly_cache = pinned or strict_cache
 
-    if cache.enabled and not refresh:
+    if cache.enabled and (not refresh or strict_cache):
         try:
             cached = cache.get(
                 cache_entry,
@@ -54,7 +55,7 @@ def read_credential(args) -> CredentialRead:
                 1, error="cache_read_failed; selected protected cache could not be read",
                 source="cache",
             )
-        if cached is not None:
+        if cached is not None and not refresh:
             return CredentialRead(0, value=cached, source="cache")
     if cache_only:
         if pinned:
@@ -92,11 +93,15 @@ def read_credential(args) -> CredentialRead:
                         field,
                         value,
                         int(generation) if generation is not None else None,
+                        **({"strict": True} if strict_cache else {}),
                     )
-                elif generation is None:
-                    cache.put(cache_entry, field, value)
                 else:
-                    cache.put(cache_entry, field, value, int(generation))
+                    cached_ok = cache.put(
+                        cache_entry, field, value,
+                        *(() if generation is None else (int(generation),)),
+                        **({"strict": True} if strict_cache else {}),
+                    )
+                    reconciliation_failed = strict_cache and not cached_ok
     if reconciliation_failed:
         return CredentialRead(
             2, error="credential was read, but the persistent cache could not be reconciled",
