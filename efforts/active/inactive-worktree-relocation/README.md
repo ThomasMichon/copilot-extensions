@@ -397,3 +397,35 @@ adopter pilot feedback gates subsequent widening.
 - The old baseline-capture hold is resolved. Fresh review/required CI and any
   concrete remaining source findings still gate merge; release, activation,
   actual migration and broader inactive support remain separately open.
+
+### 2026-11-06 — Current contract capture and post-sync qualification
+- Pulled the owned PR onto current `dev` with a durable pre-sync backup.
+  Upstream expanded the Bridge source registry to include the Worktrees writer.
+  Its current semantic-owner rule requires fresh HTTP-52 capture, even though
+  the relocation addition is only a resident-lock capability advertisement.
+  Did not weaken that owner rule or alter historical evidence to silence CI.
+- Used the canonical source-only capture lane at
+  `e5ff19e01e7cc900cfd642459b1f2bcb8f86a83b`:
+  [run 42287539825](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42287539825).
+  All **252 controlled cases**, independent no-write verification, immutable
+  historical guards and the contract guard passed. Materialized only its 140
+  source-bound current outputs through the canonical publication owner.
+  Local validation passed **2 contracts / 1051 fixtures**; HTTP generations,
+  capability floors and HTTP-51/earlier historical evidence are unchanged.
+- Post-sync source controls passed: **44 native**, **44 affected creation**,
+  **143 execution-space**, **27 paired-carve**, **50 writer** and **11 Bridge
+  owner-record consumer** controls. Native skips remain explicit; no installed
+  or adopter qualification is inferred.
+- The extra external-volume roundtrip completed its first transfer, then hit
+  the runner's 30-second item limit during return-leg process inspection. The
+  external synthetic copy was retained, but runner teardown retired the
+  original primary Git/journal. Preserved its diagnostic/payload evidence and
+  did not silently delete or replay the failed external fixture.
+- Corrected the rig: external qualification now requires an explicitly enrolled
+  persistent primary home, retaining Git/record/journal beyond runner teardown.
+  The combined roundtrip has a focused 120-second budget; production probes
+  are unchanged. Its fixture-lifetime and unchanged native CLI packet passed
+  **3 controls** without creating a fresh external fixture.
+- Retained external-fixture disposition and the corrected real-volume retry
+  remain an explicit owner gate. Source review/CI/merge, actual runtime
+  selection, adopter pilot and broader inactive support are still separate.
