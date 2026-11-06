@@ -9,10 +9,10 @@ This is the shared implementation map, not a deployment approval or a second
 effort. Keep progress here and contracts in the linked guide. Update a row when
 claiming work, after qualification, after merge and after release; do not mark
 an app converted from wheel production or a callback declaration alone.
-This refresh records bounded Linux CodeSpaces, base-profile Containers and
-base-profile SSH CLI controls and credits the previously recorded Windows
-releases and CLI qualification. Evidence remains
-source-, profile- and platform-specific; it does not requalify later binaries
+This refresh records bounded Linux CodeSpaces, base-profile Containers,
+base-profile SSH CLI and separate Dispatch plugin/standalone controls, and
+credits the previously recorded Windows releases and CLI qualification.
+Evidence remains source-, profile- and platform-specific; it does not requalify later binaries
 or establish whole-app acceptance.
 
 ## Request capture
@@ -131,8 +131,9 @@ qualification from #10462, released in #10862, as scoped in their rows below.
 Bridge/MCP startup #10054 is merged; their remaining app/lifecycle acceptance
 stays with the existing owners. CodeSpaces #10311, Containers #10347 and
 Dispatch's plugin/standalone slice #10345 also have recorded bounded Windows
-releases. The additional CodeSpaces and base-profile Containers Linux controls below use
-their own explicit Main snapshot, not an inferred qualification of current Dev.
+releases. The additional CodeSpaces, base-profile Containers/SSH CLI and
+Dispatch Linux controls below use their own explicit Main snapshots, not an
+inferred qualification of current Dev.
 There is no new portfolio-wide conversion count here: release, installed
 operation, full target conformance and host/fleet rollout are different claims.
 Neither bundle publication nor these app slices establish every platform,
@@ -144,11 +145,11 @@ whole-toolset atomicity or the complete stage contract.
 | [agent-worktrees](../../../plugins/agent-worktrees/README.md) | Same bounded released pair; historical command-owner restoration and installed-wheel consumer admission included. Full adopted-system/status-monitor transition remains separate. | Verify actual worktree/registry operations and monitor continuity for the claimed integration/platform; do not rebuild the first pair to begin another app. |
 | [agent-bridge](../../../plugins/agent-bridge/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. Its bounded Windows witness passed staging, first touch/reuse, pre-publication failure, Host/ACP upgrade and rollback, retained data, caller-Job closure and native exits. These historical candidate checks do not qualify subsequent changes, an installed Copilot agent or the whole app. | Existing owners retain native POSIX, fresh-OS clean-room, full credential-relay/provider and broader legacy-adoption acceptance. Coordinate through #10054/#7028 and their follow-ups; do not repeat the completed Windows witness as unfinished work or open a competing repair PR. |
 | [agent-mcp](../../../plugins/agent-mcp/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. All 15 bounded Windows phases passed, including three-shell first touch, same-generation reuse, denied publication with exact recovery/retry, forward/reverse replacement, caller-Job survival and native exits. These historical candidate checks do not qualify subsequent changes or complete authoritative-replacement/whole-app acceptance. | Existing owners retain native POSIX, fresh-OS and broader legacy-adoption acceptance. Keep SQLite fixture-upstream checks distinct from a product DB claim. The [parent Plan](README.md) tracks the unchecked authoritative-replacement adoption delta under existing #10054/#7028/#9716/#10377 owners: #10652 incoming completion, #6389 fresh serving convergence and #10653 protected retirement. Unknown outgoing cleanup is separately deferred; #10486 full reattachment remains required separate work, not an incoming gate. This refresh claims no additional runtime fix or qualification. |
-| [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Bounded modern user-mode application slice #10345 released on Main `a48e41419190fe43ef006a8ef6dfa08e134785b6`. Historical Windows generated cold/restart/handoff, authenticated readiness, held synthetic claims/reservations/data and native cleanup passed; this is not whole-SDK or later-binary qualification. | Existing owners retain native POSIX, flat/nonprofile and native-service-owned supervisor transitions, distinct-source and complete authoritative-replacement acceptance. Preserve candidate admission and unfinished-work custody; do not repeat the completed Windows slice as missing. |
+| [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Bounded modern user-mode application slice #10345 released on Main `a48e41419190fe43ef006a8ef6dfa08e134785b6`. Historical Windows cold/restart/handoff and held-state/native cleanup remain credited. The separate Linux x86_64 witness below uses explicit Main `0dbbdd374e1af0b6443c84cead45102333855da3`: actual stage/cold/reuse, authenticated coordinator readiness, logical work preservation and source-concealed reads. Neither record establishes whole-SDK, later-binary or whole-app qualification. | Existing owners retain configured-supervisor, flat/nonprofile and native-service-owned transitions, distinct-source/reverse/recovery and complete authoritative-replacement acceptance. Preserve candidate admission and unfinished-work custody; #9026 fixed first-use recipes and #9673 guarded conversation replacement remain separate work. |
 | [agent-codespaces](../../../plugins/agent-codespaces/README.md) | #10311 released bounded Windows application/provider work on Main `27aab5a3262cc331c0d73564a8a59dfd20fced01`, including historical A/B/A Owner/replacement and both provider-install orders. The separate Linux x86_64 CLI/provider controls below pass on explicit Main `1a83c1d250ae8093a47afab1107c3ebb9553a53e`, with Connection Owner disabled. Neither record qualifies every newer SDK or the whole app. | Existing owners retain Linux daemon lifecycle, source-change/reverse/failure integration, healthy foreign-provider collision coverage on Linux, other architectures, pristine OS, live backend/forwards and rollout. Keep stage-only environment preparation separate from full candidate readiness. |
 | [agent-containers](../../../plugins/agent-containers/README.md) | #10347 released bounded configuration/provider callbacks on Main `f85bd817958a3ead2ba69182ad01f76bb11e4076`, with historical Windows installed front doors, both discovery orders, repeat and original-manifest preservation. The separate Linux x86_64 base-profile CLI/provider controls below pass on explicit Main `1a83c1d250ae8093a47afab1107c3ebb9553a53e`; neither record qualifies later binaries or the whole app. | Existing owners retain provider-exec/Paramiko, other platforms/architectures, pristine OS, source-change/reverse/retry, broader legacy/replacement and live credentialed fleet/backend acceptance. Preserve profile and foreign-container custody; callbacks do not borrow containers, query fleets or start a resident. |
 | [agent-ssh](../../../plugins/agent-ssh/README.md) | Bounded copied-application CLI slice #10462 released in #10862, with historical native Windows cold/reuse and installed source-qualified commands. Separate Linux x86_64 BASE CLI controls below pass on explicit Main `c08449f9a3494a51afe882a37557f6749c005c2b`: stage, genuinely unstaged cold installation, reuse and source-concealed installed reads. This is neither later-binary/whole-app qualification nor the SSH Manager library or remote SSH service. | Preserve installed commands/resources and configuration. Existing owners retain distinct-source update/reverse/recovery, other platforms/architectures, pristine OS, real operator connections/forwards, broader legacy/adoption and full target conformance. Keep #10954 participant composition/writer admission and #8821 snapshot delivery separate; no service or library acceptance is inferred from this CLI witness. |
-| [agent-dispatch-service](../../../services/dispatch/README.md) | Separate standalone root exercised explicitly by #10345, released with the plugin slice. Its historical Windows generated cold/handoff front doors, Source-unavailable version/authenticated health and held-state/native cleanup passed; plugin evidence alone is not its qualification. | Retain its own installed entry and dependency boundary. Native POSIX, native-service supervision, complete source-change/recovery and authoritative-replacement adoption remain separate under the existing owners; no competing coordinator. |
+| [agent-dispatch-service](../../../services/dispatch/README.md) | Separate standalone root exercised explicitly by #10345, released with the plugin slice; its historical Windows cold/handoff, Source-unavailable reads and held-state/native cleanup remain credited. The Linux witness below independently exercises its own copied application and installed wrapper/dependency boundary at the same explicit Main pin as the plugin, not by inference from plugin results. | Retain its own installed entry and dependency boundary. Configured/native-service supervision, broader platform and source-change/reverse/recovery integration, full authoritative-replacement adoption and rollout remain separate under existing owners; no competing coordinator. |
 | [agent-ssh-service](../../../services/ssh/README.md) | Bounded installed startup/fenced-transfer slice #10462 released in #10862. Native Windows copied-app cold/reuse, lost-prepare reply/retry, successor readiness and outgoing self-exit passed with fixture state preserved. Installed-wheel regression also covers the stale-writer notification gap. Separate Linux/Windows service CI passed; that is not immutable Linux app adoption. | Preserve enrollment, signatures/roles, connections and native relay custody. Keep immutable Linux app adoption, live operator Gateway/SSH integration, desktop-focus observation, broader recovery and rollout open. Incoming readiness/current selection and outgoing retirement remain distinct; this bounded witness does not establish complete authoritative replacement. |
 | [agent-pull-requests](../../../plugins/agent-pull-requests/README.md) | Retained source/native work; app-level new-flow release open. | Qualify installed commands and supported cache/service discovery, without publishing reviews or changing PRs as an install side effect. |
 | [agent-pull-requests-service](../../../services/pr/README.md) | Separate standalone service; bounded retained witnesses do not establish whole-app acceptance. | Prove service readiness and durable request/cache continuity, ownership-safe update/rollback and independent client skew. |
@@ -353,6 +354,71 @@ Distinct-source update/reverse/recovery, other roles/platforms/architectures,
 broader legacy/adoption, real operator Gateway/SSH integration and full
 authoritative-replacement conformance remain open under #7028 and their
 existing owners. This evidence does not take over #10954 or #8821.
+
+### Bounded Dispatch Linux plugin and standalone record
+
+The two independent application roots use explicit released Main
+`0dbbdd374e1af0b6443c84cead45102333855da3`, tree
+`44dab0808db63ebe92b2ae9d54cc43d930857052`, on Linux x86_64 /
+CPython 3.12.11 in a fresh container from a pinned, preprovisioned image.
+This is not a pristine OS or current-Dev qualification. Canonical source/profile
+preparation takes 51.103 seconds separately. Both profiles select no extras;
+the plugin closure contains 30 distributions and the standalone 31, with 18
+registry wheels each. Both declarations retain no setup callback and the real
+`__source-start` callback; this is not a service-disabled CLI substitute.
+The optional supervisor is unconfigured and no live tasks are processed.
+
+| Actual generated control | Plugin | Standalone | Boundary checked |
+|--------------------------|--------|------------|------------------|
+| Separate fresh `install --stage` root | 0.257 s | 0.267 s | Environment only; all seven protected active-state scopes unchanged |
+| Fresh **unstaged** normal `install` root | 4.905 s | 4.331 s | Copied inputs have no environment/completion; real selected coordinator readiness |
+| Repeat normal `install` in that same root | 2.709 s | 2.038 s | Same native process/birth, endpoint, configuration and observed held work |
+
+The 300-second install and 60-second readiness bounds are unchanged.
+Readiness is authenticated and bound to the actual selected source/profile,
+physical interpreter, native identity and active route. The standalone
+`agent-dispatch-service` entry delegates to its installed Dispatch dependency;
+it does not duplicate that implementation or depend on plugin registration.
+All 1,185 plugin and 1,192 standalone non-RECORD runtime wheel members match
+both captured input bytes and actual installed footprints.
+
+Actual global, slot and module version/health/list reads succeed with the
+original source, inputs, profiles, runner and cache paths concealed; baked-root
+global commands also work without the root override. The corrected read phase
+executes 28 commands in 29.547 seconds, including four expected HTTP 401 results.
+All source paths are restored. Constructor-after-concealment is not tested.
+Full immutable slot snapshots, configuration, fixture home, foreign state,
+routes and complete observed held-task/reservation/event records remain exact.
+Reuse refreshes success-record metadata without changing its content.
+
+Two original fixture failures remain retained, not retroactively passed.
+The first adds unsupported `--json` to the already-JSON `list` command.
+Correcting that spelling does not replay installation. The subsequent
+physical-state assertion is overbroad: independent offline comparison proves
+all 130 schema objects, 42 tables, columns and 14 complete rows unchanged in
+each database, with `ok` integrity results. Only database header counters
+change; observation helpers invoke a migration-capable constructor whose
+index rebuild corresponds to that signature. Exclusive statement-level SQL
+causality was not captured. Each log retains its exact prefix and appends
+18 GET access records. Bounded logical-work preservation is accepted, not
+physical database/log immutability or a fully green original fixture report.
+
+All 1,754 prepared regular input files preserve captured bytes and archive
+metadata; whole acquisition-checkout pre/post bytes were not captured.
+Execution is network-disconnected, non-root, capability-dropped, read-only
+outside private temporary storage and resource-bounded, without host binds,
+socket access or credentials. Original/corrected/native-cleanup archives are
+exported before shutdown, fully read back and retained with matching hashes.
+Both original coordinators exit through their installed stop owner with
+kernel pidfd observations before normal container removal; independent parent
+verification confirms exact container absence and venue-resource settlement.
+
+This is a bounded install/readiness/read witness under #7028, not a new
+runtime release, host installation or rollout. Configured-supervisor,
+native-service-owned, flat/nonprofile, distinct-source/reverse/recovery,
+broader platform/pristine-OS/live-backend and complete authoritative-replacement
+acceptance remain with existing owners, including the separate #9026 and
+#9673 work. Neither this record nor the published bundles complete the parent.
 
 ## Contributing from another agent or operator
 
