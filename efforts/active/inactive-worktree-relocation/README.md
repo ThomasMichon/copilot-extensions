@@ -375,3 +375,25 @@ adopter pilot feedback gates subsequent widening.
 - The first-flow runtime/real-volume proof remains retained. The source
   worktree, umbrella and broader effort remain Active; no rollout or real
   retained-worktree move is implied.
+
+### 2026-11-06 — Bounded test prerequisite resolved
+- Applied the admitted test-only correction: the concurrent doctor stores its
+  parent report through the existing interceptor, while child emissions still
+  reach the real embodiment receipt capture. No production output code changed.
+  Every lifecycle, waiting/spawn, seed, concurrency and result assertion remains;
+  seed redaction and single parent-report emission are explicitly asserted.
+- The isolated previously failing control passed. Its affected continuation
+  packet passed **44 controls**, including all subsequent creation-repair
+  assertions, without skipping or waiving the original baseline failure.
+- Grounded the unpublished JSON concern at the execution-space fence:
+  relocation refusal now retains the existing `ExecutionSpaceError` contract
+  instead of leaking raw `ValueError`/`OSError` past structured callers.
+  Actual interrupted-move and execution-space controls passed **144 controls**
+  with one explicit POSIX skip. Refreshed only that admitted source digest;
+  unit node/effect/coverage inventory is unchanged.
+- Requested the exact unpublished permission-lockout scenario rather than
+  treating its summary as clearance. Initial restrictive-directory/metadata
+  admission and non-private destination refusal remain explicit v1 boundaries.
+- The old baseline-capture hold is resolved. Fresh review/required CI and any
+  concrete remaining source findings still gate merge; release, activation,
+  actual migration and broader inactive support remain separately open.
