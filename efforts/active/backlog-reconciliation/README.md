@@ -330,6 +330,30 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [knowledge-pair receiving proposal](knowledge-pair-receiving-cohort.md)
+preserves four separately owned tracks and complete focused original records;
+actual recipient creation/readback still precedes any tracking retirement.
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #3872 completed against both matched implementations and its promised
+focused assertions, with assignment and custody unchanged. Complete00:40 PST
+scans measure829 whole OPEN and985 audited dispositions,100 above fixed729;
+four arrivals offset that one completion. The campaign remains Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records complete knowledge/account research of eight originals. A finite
+four-track knowledge receiving proposal and #3872 finite-case adjudication
+continue without a same-cause or unperformed-research closure bar. Actual merged
+#10908 corrects the historical snapshot boundary for #3004 without closing
+its first-restarted-model or separate provider/policy acceptance. No new
+retirement, receiver, owner transfer or campaign completion is claimed.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #10941 and a complete00:04 PST census still
+measuring826 whole OPEN,984 verified dispositions and97 above fixed729.
+Eight freshly qualified originals are assigned to independent knowledge-binding
+and account-selection research; no receiving or completion judgment follows
+from those assignments. The campaign and every original gate remain Active.
+
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records reviewed merge #10936 and complete actual #5898 receiving/readback
 before #7962's audited `NOT_PLANNED` tracking retirement. Its pending
