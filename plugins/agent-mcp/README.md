@@ -1500,7 +1500,7 @@ answers `call`/`list` requests over a local IPC socket (default handle
   `--no-serve` / `AGENT_MCP_NO_SERVE=1`; point elsewhere with
   `AGENT_MCP_SERVE_SOCKET`.
 - **Warm pool** — sessions open lazily on first use, are reused, serialized
-  per-bridge for single-server configurations, evicted after `--idle-timeout`
+  per caller repository/configuration source for single-server configurations, evicted after `--idle-timeout`
   (default 300s), and reopened if the upstream dies. Routed calls to distinct
   targets run concurrently; active entry leases prevent eviction or config
   replacement from closing connections while calls are in flight.
@@ -1514,6 +1514,32 @@ answers `call`/`list` requests over a local IPC socket (default handle
 - **No secrets held** — each warm session fetches credentials through the
   bridge's own auth injector at open time; per-bridge sessions preserve identity
   separation.
+
+#### Caller configuration context
+
+The resident data protocol's `configuration_context` contract is version **1**,
+independent of the package version. The running daemon advertises support as
+`configuration_context: 1` in its existing authenticated data-plane `ping`.
+Before `call`, `list` or `attach`, current clients check that reply on the same
+connection, then send a context containing `version`, the absolute caller `root`,
+and the exact `bridge` reference used by the operation. Relative configuration
+paths and directory-marketplace discovery use that root.
+
+The root is a selection, **not authority**: the resident configuration consumer
+independently queries its qualified configuration owner for that repository and
+retains installation-cell checks, provenance and owner refusals. It does not
+accept copied owner reports, change the daemon cwd, or mutate shared environment
+variables. Warm entries are separated by caller root and resolved source.
+
+Providers advertise this additive support before clients use it. A current
+client talking to a legacy, unsupported or malformed provider falls back to the
+existing direct bridge before sending a tool call or attach. Upgraded providers
+explicitly refuse contextless or mismatched bridge operations before upstream
+effects; old clients retain their direct path (`call --no-serve` or the default
+stdio forwarder's existing refusal fallback). A legacy contextless resident
+request is not silently composed against the daemon's data directory. This
+compatibility/direct path remains supported across provider rollback; no old
+wire form is reinterpreted as a qualified request.
 
 ```sh
 agent-mcp serve &                       # start the daemon (e.g. per session/host)

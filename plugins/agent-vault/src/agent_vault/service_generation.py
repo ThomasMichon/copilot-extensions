@@ -117,7 +117,7 @@ def endpoint_health(endpoint: Endpoint | None) -> dict | None:
     if endpoint is None or endpoint.installation_id != installation_id():
         return None
     expected_pid = endpoint.pid
-    request = {"action": "ping"}
+    request = {"action": "ping", "health_only": True}
     if endpoint.transport == "pipe":
         endpoint = next((item for item in endpoint.alt if item.transport == "tcp"), None)
         if endpoint is None:

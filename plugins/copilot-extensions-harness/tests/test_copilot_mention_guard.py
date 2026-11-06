@@ -12,8 +12,37 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, cast
 
 import pytest
+
+if TYPE_CHECKING:
+    import copilot_mention_guard as guard_source
+
+    class GuardModule(Protocol):
+        DECISION_BUDGET_SECONDS: float
+        sys: ModuleType
+        time: ModuleType
+
+        def main(self) -> int: ...
+        def run_guard(self, *, wrapped: bool = False) -> int: ...
+        def target_repo_from_manifest(self, plugin_root: Path, deadline: float | None = None) -> str | None: ...
+        def current_repo_candidates(self, cwd: str | None = None, *, deadline: float | None = None) -> list[str]: ...
+        def current_repo_matches(
+            self, target: str, cwd: str | None = None, *, deadline: float | None = None,
+        ) -> bool: ...
+        def adopting_harness(self, cwd: str | None, deadline: float) -> bool: ...
+        def command_publishes_copilot_mention(
+            self, command: str, *, statements: list[list[str]] | None = None,
+            deadline: float | None = None, cwd: str | None = None,
+        ) -> str | None: ...
+        def _read_bounded(
+            self, path: str, limit: int = 200_000, *, deadline: float | None = None,
+            errors: str = "replace", cwd: str | None = None,
+        ) -> str | None: ...
+
+    _guard_contract: GuardModule = guard_source
 
 PLUGIN = Path(__file__).resolve().parents[1]
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -25,17 +54,17 @@ LEGACY_POWERSHELL_LOOKUP = (
 )
 
 
-def _load_guard():
+def _load_guard() -> GuardModule:
     path = PLUGIN / "scripts" / "copilot-mention-guard.py"
     spec = importlib.util.spec_from_file_location("copilot_mention_guard", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module
+    return cast("GuardModule", module)
 
 
-def _enable_harness(root):
+def _enable_harness(root: Path) -> None:
     settings = root / ".github" / "copilot" / "settings.json"
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(json.dumps({"enabledPlugins": {
@@ -44,7 +73,7 @@ def _enable_harness(root):
 
 
 @pytest.fixture
-def adopted_harness(tmp_path, monkeypatch):
+def adopted_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _enable_harness(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("COPILOT_PROJECT_DIR", str(tmp_path))
@@ -403,7 +432,7 @@ def test_current_repo_reads_the_git_remote(tmp_path: Path) -> None:
     assert guard.current_repo_matches("someorg/other-repo", str(tmp_path)) is False
 
 
-def test_current_repo_empty_outside_any_git_repo(tmp_path: Path, monkeypatch) -> None:
+def test_current_repo_empty_outside_any_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     guard = _load_guard()
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     assert guard.current_repo_candidates(str(tmp_path)) == []
@@ -449,7 +478,7 @@ def test_hook_is_a_noop_outside_the_target_repo(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("adopted", [False, True])
-def test_hook_denies_inside_the_target_repo(tmp_path, adopted) -> None:
+def test_hook_denies_inside_the_target_repo(tmp_path: Path, adopted: bool) -> None:
     """End-to-end: run from a real checkout of this plugin's own target
     repo (this repo itself), the guard must fire."""
     payload = json.dumps({
@@ -483,13 +512,15 @@ def test_hook_denies_inside_the_target_repo(tmp_path, adopted) -> None:
     "gh pr view 1",
     "env GH_TOKEN=x command gh issue list",
 ])
-def test_irrelevant_hook_has_no_discovery_or_body_io(monkeypatch, capsys, command):
+def test_irrelevant_hook_has_no_discovery_or_body_io(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], command: str,
+) -> None:
     guard = _load_guard()
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
         "toolName": "powershell", "toolArgs": {"command": command},
     })))
 
-    def unexpected(*args, **kwargs):
+    def unexpected(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("irrelevant command performed discovery or body IO")
 
     monkeypatch.setattr(subprocess, "run", unexpected)
@@ -499,11 +530,13 @@ def test_irrelevant_hook_has_no_discovery_or_body_io(monkeypatch, capsys, comman
     assert capsys.readouterr().out == ""
 
 
-def test_irrelevant_entry_does_not_import_subprocess(monkeypatch, capsys):
+def test_irrelevant_entry_does_not_import_subprocess(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     real_import = builtins.__import__
     imports = []
 
-    def track_import(name, *args, **kwargs):
+    def track_import(name: str, *args: Any, **kwargs: Any) -> ModuleType:
         imports.append(name)
         return real_import(name, *args, **kwargs)
 
@@ -517,18 +550,18 @@ def test_irrelevant_entry_does_not_import_subprocess(monkeypatch, capsys):
     assert "subprocess" not in imports
 
 
-def test_deferred_import_is_charged_to_remaining_decision_budget(monkeypatch):
+def test_deferred_import_is_charged_to_remaining_decision_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     guard = _load_guard()
     real_import = builtins.__import__
     clock = [10.0]
     timeouts = []
 
-    def slow_import(name, *args, **kwargs):
+    def slow_import(name: str, *args: Any, **kwargs: Any) -> ModuleType:
         if name == "subprocess":
             clock[0] += 0.25
         return real_import(name, *args, **kwargs)
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         timeouts.append(kwargs["timeout"])
         return subprocess.CompletedProcess(argv, 0, "")
 
@@ -548,8 +581,9 @@ def test_deferred_import_is_charged_to_remaining_decision_budget(monkeypatch):
 ])
 @pytest.mark.parametrize("scoped", [True, False])
 def test_relevance_preserves_unknown_body_and_repository_scope(
-    monkeypatch, capsys, command, scoped, adopted_harness,
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    command: str, scoped: bool, adopted_harness: Path,
+) -> None:
     guard = _load_guard()
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
         "toolName": "bash", "toolArgs": {"command": command},
@@ -563,12 +597,12 @@ def test_relevance_preserves_unknown_body_and_repository_scope(
         assert json.loads(output)["permissionDecision"] == "deny"
 
 
-def test_remote_discovery_is_one_process_with_remaining_budget(monkeypatch):
+def test_remote_discovery_is_one_process_with_remaining_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     guard = _load_guard()
     calls = []
     monkeypatch.setattr(guard.time, "monotonic", lambda: 10.25)
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         lines = [
             f"remote{i}\thttps://github.com/o/r{i}.git (fetch) [blob:none]\n"
@@ -586,7 +620,9 @@ def test_remote_discovery_is_one_process_with_remaining_budget(monkeypatch):
     assert len(calls) == 1
 
 
-def test_expired_scope_budget_does_not_read_body(monkeypatch, capsys, adopted_harness):
+def test_expired_scope_budget_does_not_read_body(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], adopted_harness: Path,
+) -> None:
     guard = _load_guard()
     clock = [0.0]
     monkeypatch.setattr(guard.time, "monotonic", lambda: clock[0])
@@ -596,7 +632,7 @@ def test_expired_scope_budget_does_not_read_body(monkeypatch, capsys, adopted_ha
     })))
     monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
 
-    def matches(*args, deadline=None):
+    def matches(*args: object, deadline: float | None = None) -> bool:
         assert deadline == guard.DECISION_BUDGET_SECONDS
         clock[0] = deadline
         return True
@@ -610,18 +646,18 @@ def test_expired_scope_budget_does_not_read_body(monkeypatch, capsys, adopted_ha
     assert json.loads(capsys.readouterr().out)["permissionDecision"] == "deny"
 
 
-def test_git_timeout_reaps_the_actual_child(monkeypatch):
+def test_git_timeout_reaps_the_actual_child(monkeypatch: pytest.MonkeyPatch) -> None:
     guard = _load_guard()
     real_run = subprocess.run
     real_popen = subprocess.Popen
     children = []
 
-    def popen(*args, **kwargs):
+    def popen(*args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
         child = real_popen(*args, **kwargs)
         children.append(child)
         return child
 
-    def slow_git(argv, **kwargs):
+    def slow_git(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
         return real_run([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", popen)
@@ -633,14 +669,14 @@ def test_git_timeout_reaps_the_actual_child(monkeypatch):
     assert children[0].poll() is not None
 
 
-def test_body_read_wait_consumes_only_remaining_deadline(monkeypatch):
+def test_body_read_wait_consumes_only_remaining_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
     guard = _load_guard()
     release = threading.Event()
     finished = threading.Event()
 
-    def blocked_open(*args, **kwargs):
+    def blocked_open(*args: object, **kwargs: object) -> NoReturn:
         try:
             release.wait(5)
             raise OSError("fixture read unavailable")
@@ -657,10 +693,10 @@ def test_body_read_wait_consumes_only_remaining_deadline(monkeypatch):
         assert finished.wait(2)
 
 
-def test_repo_probe_preserves_fetch_url_rewrites_and_ignores_push_urls(tmp_path):
+def test_repo_probe_preserves_fetch_url_rewrites_and_ignores_push_urls(tmp_path: Path) -> None:
     guard = _load_guard()
 
-    def git(*args):
+    def git(*args: str) -> None:
         subprocess.run(["git", *args], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
 
     git("init", "-q")
@@ -673,7 +709,10 @@ def test_repo_probe_preserves_fetch_url_rewrites_and_ignores_push_urls(tmp_path)
     assert guard.current_repo_candidates(str(tmp_path)) == ["example/target"]
 
 
-def test_local_relevance_preserves_file_input_without_literal_mention(tmp_path, monkeypatch, capsys, adopted_harness):
+def test_local_relevance_preserves_file_input_without_literal_mention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    adopted_harness: Path,
+) -> None:
     guard = _load_guard()
     body = tmp_path / "body.txt"
     body.write_text("@copilot review", encoding="utf-8")
@@ -693,7 +732,9 @@ def test_local_relevance_preserves_file_input_without_literal_mention(tmp_path, 
     "shell_startup", "shell_irrelevant", "shell_relevant",
     "shell_legacy-irrelevant", "shell_legacy-relevant",
 ])
-def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
+def test_native_hook_process_counts_and_latency(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str,
+) -> None:
     """Observe real CLI boundaries without executing the proposed gh command."""
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
     _enable_harness(tmp_path)
@@ -706,7 +747,7 @@ def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
             )
     script = PLUGIN / "scripts" / "copilot-mention-guard.py"
     audited = (
-        "import atexit,json,runpy,sys; calls=[];"
+        "import atexit,json,runpy,sys; calls: list[object]=[];"
         "sys.addaudithook(lambda event,args: calls.append(args[1]) "
         "if event=='subprocess.Popen' else None);"
         "atexit.register(lambda: print(json.dumps(calls),file=sys.stderr));"
@@ -763,7 +804,7 @@ def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
         print("\nmention-guard native measurement: " + json.dumps(metrics, sort_keys=True))
 
 
-def test_hook_exits_with_blocked_file_reader(tmp_path):
+def test_hook_exits_with_blocked_file_reader(tmp_path: Path) -> None:
     _enable_harness(tmp_path)
     script = PLUGIN / "scripts" / "copilot-mention-guard.py"
     wrapper = """
@@ -773,7 +814,7 @@ scope = guard["main"].__globals__
 scope["target_repo_from_manifest"] = lambda *a: "o/r"
 scope["current_repo_matches"] = lambda *a, **kw: True
 scope["adopting_harness"] = lambda *a, **kw: True
-def blocked_open(*a, **kw):
+def blocked_open(*a: object, **kw: object) -> None:
     time.sleep(30)
 scope["open"] = blocked_open
 raise SystemExit(guard["main"]())
@@ -798,7 +839,9 @@ raise SystemExit(guard["main"]())
     (["bin/py.cmd"], "bin/py.cmd"),
     ([], None),
 ])
-def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(tmp_path, names, expected):
+def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(
+    tmp_path: Path, names: list[str], expected: str | None,
+) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell")
     if os.name != "nt" or not shell:
         pytest.skip("Windows application resolver contract")
@@ -823,7 +866,10 @@ def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(tmp_path
         assert result.stdout.strip() == (str(tmp_path / expected) if expected else "")
 
 
-def test_hot_killswitch_restores_mention_guard(tmp_path, monkeypatch, capsys, adopted_harness):
+def test_hot_killswitch_restores_mention_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    adopted_harness: Path,
+) -> None:
     guard = _load_guard()
     state = tmp_path / "pretool.json"
     monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(state))
@@ -840,21 +886,23 @@ def test_hot_killswitch_restores_mention_guard(tmp_path, monkeypatch, capsys, ad
         assert output == "" if active else json.loads(output)["permissionDecision"] == "deny"
 
 
-def test_active_killswitch_returns_before_reading_input(tmp_path, monkeypatch):
+def test_active_killswitch_returns_before_reading_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     guard = _load_guard()
     state = tmp_path / "pretool.json"
     state.write_text('{"active": true}', encoding="utf-8")
     monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(state))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     class Unreadable:
-        def read(self, *args):
+        def read(self, *args: object) -> NoReturn:
             pytest.fail("active switch reached guard input")
     monkeypatch.setattr(guard.sys, "stdin", Unreadable())
     assert guard.main() == 0
 
 
 @pytest.mark.parametrize("adoption", ["missing", "disabled", "malformed", "enabled", "local-disabled"])
-def test_only_project_adopters_reach_repository_policy(tmp_path, monkeypatch, capsys, adoption):
+def test_only_project_adopters_reach_repository_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], adoption: str,
+) -> None:
     guard = _load_guard()
     settings = tmp_path / ".github" / "copilot" / "settings.json"
     settings.parent.mkdir(parents=True)
@@ -887,7 +935,7 @@ def test_only_project_adopters_reach_repository_policy(tmp_path, monkeypatch, ca
         assert json.loads(output)["permissionDecision"] == "deny"
 
 
-def test_adoption_stops_at_nested_repository_boundary(tmp_path):
+def test_adoption_stops_at_nested_repository_boundary(tmp_path: Path) -> None:
     guard = _load_guard()
     _enable_harness(tmp_path)
     nested = tmp_path / "nested"
@@ -896,9 +944,11 @@ def test_adoption_stops_at_nested_repository_boundary(tmp_path):
     assert guard.adopting_harness(str(tmp_path / "child"), time.monotonic() + 1)
 
 
-def test_unexpected_guard_failure_is_a_successful_noop(monkeypatch, capsys):
+def test_unexpected_guard_failure_is_a_successful_noop(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     guard = _load_guard()
-    def failure():
+    def failure() -> NoReturn:
         raise RuntimeError("private exception details")
     monkeypatch.setattr(guard, "main", failure)
     assert guard.run_guard() == 0
@@ -910,7 +960,9 @@ def test_unexpected_guard_failure_is_a_successful_noop(monkeypatch, capsys):
 
 @pytest.mark.parametrize("failure", ["missing", "crash", "caught"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh", "bash"])
-def test_shipped_wrapper_fails_open_on_unavailable_guard(tmp_path, failure, native_shell):
+def test_shipped_wrapper_fails_open_on_unavailable_guard(
+    tmp_path: Path, failure: str, native_shell: str,
+) -> None:
     shell = shutil.which(native_shell)
     if shell is None:
         pytest.skip(f"{native_shell} is unavailable")
@@ -925,7 +977,7 @@ def test_shipped_wrapper_fails_open_on_unavailable_guard(tmp_path, failure, nati
         source = str(PLUGIN / "scripts" / "copilot-mention-guard.py")
         (payload / "scripts" / "copilot-mention-guard.py").write_text(
             "import runpy,sys\nns=runpy.run_path(" + repr(source) + ")\n"
-            + "def fail(): raise RuntimeError('private exception details')\n"
+            + "def fail() -> None: raise RuntimeError('private exception details')\n"
             + "ns['run_guard'].__globals__['main']=fail\n"
             + "raise SystemExit(ns['run_guard'](**({'wrapped':True} if '--wrapped' in sys.argv else {})))\n", encoding="utf-8")
     hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]
@@ -944,7 +996,7 @@ def test_shipped_wrapper_fails_open_on_unavailable_guard(tmp_path, failure, nati
     assert "private exception details" not in result.stderr
 
 
-def test_plugin_process_directory_is_not_session_adoption(tmp_path, monkeypatch):
+def test_plugin_process_directory_is_not_session_adoption(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     guard = _load_guard()
     _enable_harness(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -955,7 +1007,9 @@ def test_plugin_process_directory_is_not_session_adoption(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("nested_adopted", [False, True])
-def test_explicit_tool_directory_precedes_project_fallback(tmp_path, monkeypatch, capsys, nested_adopted):
+def test_explicit_tool_directory_precedes_project_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], nested_adopted: bool,
+) -> None:
     guard = _load_guard()
     _enable_harness(tmp_path)
     nested = tmp_path / "nested"
@@ -964,7 +1018,7 @@ def test_explicit_tool_directory_precedes_project_fallback(tmp_path, monkeypatch
         _enable_harness(nested)
     monkeypatch.setenv("COPILOT_PROJECT_DIR", str(tmp_path))
     inspected = []
-    def matches(target, cwd, **kwargs):
+    def matches(target: str, cwd: str | None, **kwargs: object) -> bool:
         inspected.append(cwd)
         return True
     monkeypatch.setattr(guard, "current_repo_matches", matches)
@@ -985,7 +1039,10 @@ def test_explicit_tool_directory_precedes_project_fallback(tmp_path, monkeypatch
     "--input body.json", "--input=body.json",
 ])
 @pytest.mark.parametrize("mention_in_workspace", [False, True])
-def test_relative_body_reads_use_resolved_workspace(tmp_path, monkeypatch, capsys, body_args, mention_in_workspace):
+def test_relative_body_reads_use_resolved_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    body_args: str, mention_in_workspace: bool,
+) -> None:
     guard = _load_guard()
     workspace = tmp_path / "workspace"
     process = tmp_path / "process"
@@ -1011,7 +1068,7 @@ def test_relative_body_reads_use_resolved_workspace(tmp_path, monkeypatch, capsy
 
 
 @pytest.mark.parametrize("target_adopted", [False, True])
-def test_linked_workspace_uses_physical_repository_boundary(tmp_path, target_adopted):
+def test_linked_workspace_uses_physical_repository_boundary(tmp_path: Path, target_adopted: bool) -> None:
     guard = _load_guard()
     outer = tmp_path / "outer"
     _enable_harness(outer)

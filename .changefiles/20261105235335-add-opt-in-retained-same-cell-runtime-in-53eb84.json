@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in retained same-cell runtime invocation through existing slot bootstraps while preserving dynamic routing and installation governance.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

@@ -9,7 +9,7 @@
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
 - **Current slice:** Integrate the Copilot Extensions Harness consumer (#10362) with the delivered checker-only guard-alias prerequisite (#10638 / #10866), retaining full-composed-consumer-qualification under #9807 / #10362 as unmet. Versioned Runtime (#10331), canonical Payload Invocation (#10371), actual consumer aliases, emitted copies and remaining interpreter/native gates stay independently pending. Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
-- **Checker-only follow-up:** #10638 is delivered by merged #10866; this is a prerequisite, not Harness, Versioned Runtime or Payload Invocation admission.
+- **Checker-only follow-up:** #10638 is delivered by merged #10866; #10938 adds emitted-program visibility/binding completeness. Both are prerequisites, not Harness, Versioned Runtime or Payload Invocation admission. The immediate next action is full-composed-consumer qualification under #10362, not a strict admission inferred from either checker merge.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -149,6 +149,7 @@ rewrite.
 - [x] Persist additional interpreter qualification versions through the existing local/source/candidate checker, preserving the minimum target and default behavior (#10400 / merged #10553); Versioned Runtime's own qualification remains #10331.
 - [x] Deliver ordinary real-import-root resolution with source-frozen custody and native `MYPYPATH` separator guards (#10400 / merged #10553), without admitting its pending consumers.
 - [x] Deliver the faithful checker-only guard-module alias/source-view prerequisite (#10638 / merged #10866); preserve separate consumer, emitted/copy and native qualification.
+- [x] Deliver bounded emitted-program checker visibility and binding completeness (#10938), without counting pending Harness targets as strict admission.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
 
 ### Phase 3 - Shared-library ratchet
@@ -215,14 +216,14 @@ rewrite.
 - [ ] Reconcile tracker rows and file totals with the authoritative manifest
   and inventory; local proposals and canonical-library locks must not imply
   complete consumer/copy enforcement. The 2026-11-06 snapshot reconciles all
-  69 declared projects, including the zero-physical-file pending vendored-library
+  71 declared projects, including the zero-physical-file pending vendored-library
   project; this recurring and final portfolio gate remains open.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
 - [ ] Composition and generated-copy controls reject omitted/reordered/changed fragments or stale source correspondence; no empty result can certify coverage.
 - [ ] **full-composed-consumer-qualification** (#9807 / #10362): preserve this
-  unmet consumer gate independently of the merged checker-only #10866 prerequisite.
+  unmet consumer gate independently of the merged checker-only #10866 and #10938 prerequisites.
   Prove the actual composed consumer, immutable 64-root boundary, copied/emitted
   helpers, native behavior and full frozen-candidate/promotion qualification.
   A passing development packet or focused source/frozen controls is not this
@@ -2866,3 +2867,80 @@ composition prerequisites, and review/validation rules.
   Versioned Runtime (#10331), Payload Invocation (#10371), the full composed
   consumer objective and every original unfinished portfolio gate remain open.
   This effort and #9807 stay Active; source delivery is not release or rollout.
+
+### 2026-11-06 - Emitted-program checker prerequisite reconciled after #10938
+
+- Provider-confirmed #10938 merged as
+  `baddb10f709649756a2ff1f1cfeb961057be54ef` at 09:23:49 UTC, from published
+  head `c3fac7dc5b4cf63038b046c618cd70b05ea8030d`. The current Copilot
+  COMMENT review (5798063039), all six resolved threads and normal managed
+  role-scoped merge were reported by the delivery owner; no CI bypass was used.
+  The canonical Plan and Validation Plan were reread after merge: this delivers
+  bounded checker visibility/binding completeness, not strict consumer admission.
+- Four positive analysis cells took 87.545 seconds: the strict checker checks
+  four physical files/four targets; the independently pending Harness checks
+  17 physical files plus 18 supplemental programs (35 targets), each for
+  Python 3.10/Linux and 3.10/win32. The pending command exits 1 and is not an
+  admission pass. The 18 actual emitted programs retain identical bytes, paths
+  and source ranges against the earlier actual baseline; its 21 inputs remain
+  unchanged. Lexical binding is limited to unique same-suite/ancestor-prior
+  assignments and source-origin construction guarantees; deeper nested children
+  are refused and non-Name binders remain guarded.
+- Local evidence reported 46 focused plus five pure controls passing (51 total),
+  six impacted components passing, and an actual MyPy negative in 14.8 seconds.
+  These are not hosted CI or native evidence. The normal 45-negative cleanup
+  attempt still timed out and is unqualified; the earlier 44 quarantine objects
+  remain protected, with no replay waiver or removal. Actual native/POSIX,
+  full frozen-candidate, emitted-copy and full consumer qualification are not
+  claimed by these local packets.
+- Independently downloaded the actual hosted artifact **13490816434** from
+  run **42192875462**, attempt 1, job **127808910057**. Its original 1,516,012-byte
+  archive matches provider SHA-256
+  `43690edf32243b3af01b8415ba1866d42ac26f6a6cd63a2d6b66ade0a5fdf833`;
+  the provider reports it unexpired and bound to the published head. Only the
+  three JSON data members were read; no archive code, SDK, tests or emitted
+  programs were executed. The repository's data-only packet verifier passes
+  against the manifest read from actual CI-bound Git source
+  `364b451ff5ac36299d537837b75c3deb0aa7e88a`: **4,226 nodes**, each with setup,
+  call and teardown (12,678 phase reports), no effects, **251/251** declared
+  positive-coverage files and **598** independently hashed source inputs.
+  Recorded execution is 71.758823401 seconds within the unchanged 300-second
+  packet bound. Packet digest:
+  `f06ccc7ec73469f436c88abb8c7a9c4a6134cf1db2e58fa782999db552689f8a`.
+- Comparing the actual final merged Git blobs with those CI-bound inputs finds
+  three differences: `libs/peer-launch/peer_launch.py`,
+  `plugins/agent-bridge/src/agent_bridge/_peer_launch.py` and
+  `plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py`.
+  The retained proof records both hashes for each delta. This proves the
+  CI-bound packet, **not whole-final-merge equivalence**. Original archive,
+  protocol, Git blob data, capacity/cleanup receipts and retention index remain
+  locally retained; earlier protected evidence is neither reused nor removed.
+- Fresh normal owner-managed Dev sync preserves upstream work and reconciles
+  **every one of 71 manifest rows** at
+  `91ce5da3e2971c4f3a7520b2627b34fac1f8a8da`: **40/71 strict projects
+  (56.3%)**, **400/8,424 physical Python files (4.7%)**, **31 pending**, zero
+  basic and zero unclassified. Seventy projects own physical paths, with the
+  zero-file vendored-library project still pending. The 40/69, 400/8,355,
+  8,363-file and 8,411-file observations are different historical snapshots,
+  not competing admission claims. No new strict project or file is credited.
+- Independent pending all-Python lanes remain visible: Installer Engine
+  (#10931, 28 physical files) reported a local host-options cohort with
+  448 strict/124 basic diagnostics on the first 3.10/Linux cell and 14 passes,
+  zero skips (index
+  `9b51ad8708f19cfd1f98acf280204d451b19e8b15e0dd758e1d5fdbb3c174359`).
+  Efforts (#10955, 36 physical files) reported 105 IO diagnostics, all in tests,
+  none in production, on the first 3.10/Linux cell, plus 19 passes and one
+  Tier-3 skip (index
+  `6188a95b5f81ae8521114e6187d47f6ba683d3c5b6b5f8bc19f9ab4b14fd61c3`).
+  Actual missing-provider refusal needs `--allow-explicit-tiers` and was not
+  exercised. Both win32 cells short-circuited without running; further source
+  changes remain unqualified. These are local preparation, not merged
+  admissions or additions to strict coverage.
+- Next remains #10362's complete composed consumer: immutable 64-root boundary,
+  actual aliases, native/emitted-copy and full frozen-candidate/promotion proof.
+  #10331, #10371 and all independent pending projects retain their own gates.
+  The root objective is every first-party Python path strictly qualified,
+  zero pending/basic/unqualified scopes, final local/CI/release parity and
+  explicit resolution of every Plan/Validation item before Done. #9807 and
+  this effort remain **Active**; no archive, finalization, release or rollout
+  is authorized by this reconciliation.

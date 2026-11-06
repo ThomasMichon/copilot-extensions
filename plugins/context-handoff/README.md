@@ -1020,6 +1020,37 @@ deferred until then. Invalid config produces a visible warning and uses the
 55% / 70% / 79% defaults. If the runtime does not report a window size,
 percent-based tiers remain unknown, while absolute-token tiers still work.
 
+### Live control within a session
+
+Edits to either config layer take effect mid-session: the extension re-reads
+the layers whenever their size or modification time changes (checked on each
+usage update, idle boundary, and pressure command) and logs the reloaded
+settings. An invalid edit is reported once and the previous settings stay in
+effect until the file is fixed.
+
+For a change that should last only for the current session, never touching
+any config file, the operator can use `/handoff-pressure`:
+
+| Command | Effect |
+|---------|--------|
+| `/handoff-pressure` or `/handoff-pressure status` | Show config path, config vs. effective thresholds, pause state, and current utilization |
+| `/handoff-pressure pause` | Suppress every automatic tier (soft/hard nudges and the force-tier auto-handoff) for this session; also lifts an active force-tier tool block |
+| `/handoff-pressure resume` | Re-enable automatic handling |
+| `/handoff-pressure set soft=60 hard=150k force=78%` | Override any subset of tiers; a bare number or `%` is a percent, `k`/`t`/`tokens` are tokens. Unnamed tiers keep following config |
+| `/handoff-pressure clear` | Drop the session override entirely |
+
+The override is stored in this session's own state folder
+(`context-handoff-override.json`) so it survives an extension reload. If a
+later config reload makes it invalid (for example a misordered tier), the
+extension warns and falls back to the config thresholds.
+
+The agent has a matching `handoff_pressure` tool, intended only for when the
+operator asks it to quiet nudges. It can only make automatic handling *less*
+frequent: `status`, `pause`, or `set` with thresholds no lower than the
+current effective ones. Lowering, `resume`, and `clear` are operator-only, and
+every agent change is logged visibly. Manual handoff tools are unaffected by
+any override.
+
 ## CLI parity test isolation
 
 The unavailable-Worktrees cases in `tests/cli-parity.test.mjs` execute the real

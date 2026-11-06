@@ -73,6 +73,56 @@ def launch_prefix(owner: str, own_root: Path, raw_context: str, peer: str) -> li
     ]
 
 
+def _retention_launcher(root: Path, python: Path, module: str) -> Path:
+    python = _checked_python({"pluginId": module, "versionsRoot": str(root / "versions")}, python)
+    environment = python.parent.parent
+    slot = environment.parent if environment.name == ".venv" else environment
+    bootstrap = slot / ".runtime-bootstrap"
+    launcher = bootstrap / "runtime_launcher.py"
+    if (
+        slot.name == "dev" or slot.is_symlink() or bootstrap.is_symlink() or launcher.is_symlink()
+        or bootstrap.resolve() != slot.resolve() / bootstrap.name
+        or not launcher.is_file()
+    ):
+        raise ValueError(f"{module}: selected runtime has no immutable retention bootstrap")
+    primitive = _load_primitive(launcher, "_selected_runtime_launcher")
+    if not callable(getattr(primitive, "runtime_identity", None)):
+        raise ValueError(f"{module}: selected retention bootstrap has no build identity support")
+    return launcher
+
+
+def retained_runtime_identity(root: Path, python: Path, module: str) -> str:
+    launcher = _retention_launcher(root, python, module)
+    primitive = _load_primitive(launcher, "_selected_runtime_identity")
+    return cast(str, primitive.runtime_identity(launcher.parent.parent))
+
+
+def retained_runtime_prefix(
+    root: Path, python: Path, module: str, *, runtime_identity: str,
+) -> list[str]:
+    """Carry the original identity to the selected bootstrap, never recapture it."""
+    launcher = _retention_launcher(root, python, module)
+    return [
+        str(python), "-I", "-S", "-B", "-X", "utf8", str(launcher),
+        "--runtime-identity", runtime_identity, "-m", module,
+    ]
+
+
+def pinned_launch_prefix(
+    owner: str, own_root: Path, raw_context: str, peer: str,
+) -> tuple[list[str], Path]:
+    """Select once; callers retain this prefix for qualification and later calls."""
+    context, _environment, python = _resolve_peer(
+        owner, own_root, raw_context, peer, allow_native=False,
+    )
+    if python is None:
+        raise ValueError(f"{peer}: pinning requires the peer-owned Python resolver")
+    identity = retained_runtime_identity(Path(context["pluginRoot"]), python, PEERS[peer])
+    prefix = launch_prefix(owner, own_root, raw_context, peer)
+    prefix[6:6] = ["--pinned-runtime", str(python), "--runtime-identity", identity]
+    return prefix, python
+
+
 def _load_primitive(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -368,6 +418,7 @@ def validate_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, An
 
 def _resolve_peer(
     owner: str, own_root: Path, raw_context: str, plugin: str, *, allow_native: bool,
+    pinned_python: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, str], Path | None]:
     if plugin not in PEERS:
         raise ValueError(f"Unsupported peer: {plugin}")
@@ -389,7 +440,7 @@ def _resolve_peer(
     if validated != peer:
         raise ValueError("Peer installation changed during validation")
     before = _governance(peer_primitive, peer, durable, environment)
-    python = (
+    python = _checked_python(peer, pinned_python) if pinned_python is not None else (
         _peer_python(peer, environment) if allow_native else _peer_python_inprocess(peer)
     )
     if (
@@ -399,7 +450,7 @@ def _resolve_peer(
         or _governance(peer_primitive, peer, durable, environment) != before
     ):
         raise ValueError("Installation governance changed during peer resolution")
-    if not allow_native and _peer_python_inprocess(peer) != python:
+    if pinned_python is None and not allow_native and _peer_python_inprocess(peer) != python:
         raise ValueError("Peer runtime selection changed during observation")
     return peer, environment, python
 
@@ -413,14 +464,23 @@ def observe_peer_python(
 
 def launch(
     owner: str, own_root: Path, raw_context: str, plugin: str, argv: list[str],
+    *, pinned_python: Path | None = None, runtime_identity: str | None = None,
 ) -> int:
     """Validate both owners, delegate peer governance/resolution, then launch."""
-    _peer, environment, python = _resolve_peer(
-        owner, own_root, raw_context, plugin, allow_native=True,
+    peer, environment, python = _resolve_peer(
+        owner, own_root, raw_context, plugin, allow_native=True, pinned_python=pinned_python,
     )
     if python is None:
         raise ValueError(f"{plugin}: no completed runtime resolved")
-    command = [str(python), "-I", "-B", "-X", "utf8", "-m", PEERS[plugin], *argv]
+    prefix = (
+        retained_runtime_prefix(
+            Path(peer["pluginRoot"]), python, PEERS[plugin],
+            runtime_identity=runtime_identity or "",
+        )
+        if pinned_python is not None
+        else [str(python), "-I", "-B", "-X", "utf8", "-m", PEERS[plugin]]
+    )
+    command = [*prefix, *argv]
     if os.name != "nt":
         os.execve(python, command, environment)
     # Keep inherited stdio and process-tree ownership, not a detached child.
@@ -433,9 +493,21 @@ def launch(
 
 def main() -> int:
     try:
-        if len(sys.argv) < 5:
+        arguments = sys.argv[1:]
+        pinned_python = None
+        runtime_identity = None
+        if arguments[:1] == ["--pinned-runtime"]:
+            if len(arguments) < 8 or arguments[2] != "--runtime-identity":
+                raise ValueError("Expected pinned runtime, original build identity, owner, context, and peer")
+            pinned_python = Path(arguments[1])
+            runtime_identity = arguments[3]
+            arguments = arguments[4:]
+        if len(arguments) < 4:
             raise ValueError("Expected owner, owner root, explicit context, and peer")
-        return launch(sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5:])
+        return launch(
+            arguments[0], Path(arguments[1]), arguments[2], arguments[3], arguments[4:],
+            pinned_python=pinned_python, runtime_identity=runtime_identity,
+        )
     except (OSError, ValueError, ImportError, subprocess.SubprocessError) as error:
         print(f"peer launch refused: {error}", file=sys.stderr)
         return 126

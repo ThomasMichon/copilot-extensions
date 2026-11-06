@@ -115,6 +115,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   first-class harness-to-knowledge defaults and machine-local override/adoption.
 - [x] Prove strict explicit-snapshot preview and machine-local mapping selection
   through the normal CLI, without native adoption or carrier effects.
+- [x] Prove policy-governed explicit local acceptance/publication, offline
+  watermarks, withdrawal and changed-preview refusal without carrier enrollment.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -241,3 +243,30 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   consistency, effort structure and whitespace passed. The subprocess used
   fresh isolated state, but no installed runtime, Linux native lane, binding
   transaction or live carrier was exercised.
+
+### 2026-11-06 - Read-only preference consumer merged
+- #10933 merged as `4b5efce814772df02d88de580d8075155c76c15a` after the reviewed
+  decoder correction, a current-head clean Comment with no open code findings,
+  the required CLI contract assessment and green required CI.
+- The added overlong-integer normal-CLI regression passed with all 28 affected
+  tests; the earlier combined packet passed 40. Native identity/adoption and
+  carrier effects were not added to this read-only source slice.
+- Reconciled the confirmed squash merge without dropping any source content.
+  #10928 remains open for acceptance/exchange follow-through. Next is explicit
+  local accepted-state/publication and native-owner mapping resolution, not
+  activation. Release, installed adoption, OneDrive publication and peer receipt
+  remain distinct, unproved gates; this effort stays Active.
+
+### 2026-11-06 - Explicit local exchange implemented
+- Added separate local acceptance and publication-intent watermarks under an
+  explicit participant/publisher/domain policy. Both operations preview first,
+  recheck confirmed inputs under the native local writer lock and replace
+  complete snapshots atomically. No native configuration or binding is applied.
+- The contained Windows packet passed 68 focused preference/exchange/CLI cases.
+  Final offline-directory and hardlink-alias controls passed with all 29
+  exchange cases. Three fresh-process native tests passed, including a complete
+  publisher-to-receiver/offline flow and two real concurrent writers refusing
+  the stale preview. Ruff F/E9 and install contracts passed.
+- This proves explicit local files, not a synchronized provider. No installed
+  runtime, Linux native lane, real carrier, native owner adoption, enrollment
+  or activation was exercised. Those validation and Phase 4/5 gates stay open.

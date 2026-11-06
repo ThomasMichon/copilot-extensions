@@ -161,10 +161,13 @@ def complete_slot(peer, version="1.0.0", *, interpreter=True):
 
 
 @pytest.mark.parametrize("code", [0, 7])
-def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatch, code):
+@pytest.mark.parametrize("pinned", [False, True])
+def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatch, code, pinned):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     own = tmp_path / ".agent-bridge"
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
     deploy_installed_layout(own, "powershell" if _NATIVE_WINDOWS else "bash")
     python = complete_slot(tmp_path / ".agent-worktrees", interpreter=False)
     subprocess.run(
@@ -193,15 +196,87 @@ def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatc
     }
     arguments = [str(code), "argument with spaces", "unicode-\u2603"]
     payload = "stdin with spaces and unicode-\u2603\n"
+    prefix = [
+        sys.executable, "-I", "-X", "utf8", "-m",
+        "agent_bridge.worktree_owner_launch", str(own),
+    ]
+    if pinned:
+        slot = python.parent.parent
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        for source in (PLUGIN / "scripts" / "runtime_launcher.py",
+                       *(PLUGIN / "scripts").glob("versioned_runtime*.py")):
+            shutil.copyfile(source, bootstrap / source.name)
+        (bootstrap / "runtime-generation").write_text("1" * 32, encoding="ascii")
+        marker = slot / ".install-complete.json"
+        marker.write_text(json.dumps({
+            **json.loads(marker.read_text()), "payload_hash": "a" * 64,
+        }), encoding="utf-8")
+        selected, root, selected_python = lifecycle._agent_worktrees_pinned_selection()
+        assert root == tmp_path / ".agent-worktrees"
+        assert selected_python == python
+        prefix = list(selected)
+        # The next dynamic selection is deliberately not executable.
+        complete_slot(root, "2.0.0")
     result = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-m",
-         "agent_bridge.worktree_owner_launch", str(own), *arguments],
+        [*prefix, *arguments],
         env=environment, input=payload, capture_output=True, text=True,
         encoding="utf-8", timeout=15, **no_window_kwargs(),
     )
     assert result.returncode == code, result.stderr
     assert json.loads(result.stdout) == {"argv": arguments, "stdin": payload}
     assert result.stderr == "peer stderr\n"
+    if pinned:
+        (package.parent / "_virtualenv.pth").write_text("import _virtualenv\n", encoding="utf-8")
+        (package.parent / "_virtualenv.py").write_text(
+            "import os\nfrom pathlib import Path\n"
+            "Path(os.environ['SITE_EXECUTION_SENTINEL']).write_text('site executed')\n",
+            encoding="utf-8",
+        )
+        positive = tmp_path / "expected-site-execution"
+        admitted = subprocess.run(
+            [*prefix, *arguments],
+            env={**environment, "SITE_EXECUTION_SENTINEL": str(positive)},
+            input=payload, capture_output=True, text=True, encoding="utf-8",
+            timeout=15, **no_window_kwargs(),
+        )
+        assert admitted.returncode == code, admitted.stderr
+        assert positive.read_text() == "site executed"
+        generation = bootstrap / "runtime-generation"
+        original = marker.read_text(encoding="utf-8")
+        for mutation in ("generation", "completion", "recreated-slot"):
+            if mutation == "generation":
+                generation.write_text("2" * 32, encoding="ascii")
+            elif mutation == "completion":
+                marker.write_text(json.dumps({
+                    **json.loads(original), "completed_at": "2026-02-01",
+                }), encoding="utf-8")
+            else:
+                previous = slot.with_name("original-slot-evidence")
+                slot.rename(previous)
+                shutil.copytree(previous, slot, symlinks=True)
+                generation.write_text("3" * 32, encoding="ascii")
+            sentinel = tmp_path / f"unexpected-site-{mutation}"
+            refused = subprocess.run(
+                [*prefix, *arguments],
+                env={**environment, "SITE_EXECUTION_SENTINEL": str(sentinel)},
+                input=payload, capture_output=True, text=True, encoding="utf-8",
+                timeout=15, **no_window_kwargs(),
+            )
+            assert refused.returncode != 0 and refused.stdout == "", refused.stderr
+            assert "build identity changed" in refused.stderr
+            assert not sentinel.exists()
+            if mutation != "recreated-slot":
+                generation.write_text("1" * 32, encoding="ascii")
+                marker.write_text(original, encoding="utf-8")
+
+
+def test_pinned_legacy_selection_has_no_bootstrap_or_path_fallback(installation):
+    _, peer, which = installation
+    complete_slot(peer)
+    with pytest.raises(ContextRefused, match="immutable retention bootstrap"):
+        lifecycle._agent_worktrees_pinned_selection()
+    which.assert_not_called()
 
 
 def test_completed_installed_owner_precedes_path(installation):

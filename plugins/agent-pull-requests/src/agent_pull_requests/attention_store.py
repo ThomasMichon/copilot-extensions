@@ -29,7 +29,7 @@ class AttentionStore:
 
         def adopt(document: dict) -> dict:
             lifecycle_checkpoint()
-            if document["version"] in (4, 5):
+            if document["version"] in (4, 5, 6):
                 if document["capacities"]["attention_bytes"] != attention_bytes:
                     raise ValueError("attention capacity differs from adopted layout")
                 return {"status": "already_adopted", "version": document["version"]}
@@ -50,7 +50,7 @@ class AttentionStore:
         self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
     ) -> dict:
         def read(document: dict) -> dict:
-            if document["version"] not in (4, 5):
+            if document["version"] not in (4, 5, 6):
                 raise ReplayStoreInvalid("attention requires explicit owner adoption")
             return AttentionState(document["attention"]).snapshot()
 

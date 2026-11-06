@@ -152,12 +152,12 @@ requirements are not supplied by these files.
 
 The ordinary PowerShell entry loads the library in the same shell.
 For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
-prepared-event bound and without an outstanding late-guidance watch, evaluation
+prepared-event bound, including outstanding late-guidance watches, evaluation
 has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
-Other tools, installation cells, oversized events and late-guidance watches
+Other tools, installation cells and oversized events
 keep their original entry and behavior; the prepared-event bound must not
-consume mutation or watched events. This is not the complete shell-only transition.
+consume mutation events. This is not the complete shell-only transition.
 
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's
@@ -197,7 +197,65 @@ Derived paths reject reparse components. Registered-entry tests use the real
 membership, binding and current-row publishers, with interpreter/resident
 traps, and distinguish hook-entry time from shell-process startup.
 These isolated source controls do not establish installed, ACP/model,
-POSIX, complete mutation/late-guidance or whole-hook throughput acceptance.
+POSIX, complete mutation or whole-hook throughput acceptance.
+
+After prepared admission, late-guidance notification is independent of the
+binding locator and current-row files. It consumes only the original session
+watch (8 KiB), request (256 KiB) and publication revision (4 KiB), with depth-8
+decoding and the same canonical local-path restriction. Pending requests retain
+their watch unless the native process probe establishes that the recorded PID
+is absent/exited. Inaccessible, malformed, out-of-range or live/reused process
+identities remain unknown; this probe does not establish incarnation ownership.
+Terminal requests must complete at or after the watch's start. Partial/failure,
+possible changes and later publication revisions retain the original fallback,
+repair, restart/new-context and no-model-admission wording.
+
+Windows shell and retained Python consumers atomically rename an eligible watch
+to a unique same-directory consumption path. Only the winner with the evaluated
+snapshot emits a notice. The entire claim/check/restore transaction shares a
+bounded byte-range guard at `local-guidance-watch.json.lock`, waiting at most
+100 ms. Contention skips consumption without replay; the stable guard file is
+not removed. This prevents an overlapping stale claimant's restored old watch
+from being mistaken for a new publication. A replacement is restored without overwriting a newer
+watch; a superseded claimed snapshot is removed. Failed restoration without a
+replacement preserves the claimed file rather than discarding it. This is
+best-effort advisory consumption, not durable delivery or a new preparation
+store; interruption after consumption can still lose a notice. A notice skips
+disposition accounting, even when enabled; reminder opt-out never suppresses
+late guidance, and independent bind advice still runs when its own facts exist.
+
+#### Optional read demand
+
+After prepared admission, the shell can send a separate `readHookDemand`
+notification through the existing hook TCP endpoint. The running receiver
+advertises `read-hook-demand-v1` in `hook_capabilities` and its process-local
+`hook_generation` through the same bounded discovery record. This support is
+independent of advisory-row availability, reminder opt-out and late guidance.
+It is currently selected only for legacy native Windows prepared read events.
+
+The version-1 notification contains only `version`, `kind`, `token`,
+`hook_generation` and `deadline`; it carries no tool arguments, session content
+or mutation targets. It is at most 2 KiB, newline terminated, and uses one
+loopback connection with a combined 50 ms connect/write wait. The shell
+disposes that connection without reading any response. Missing, malformed,
+wrong-installation or old discovery skips the optional send. A connection or
+write failure has unknown acceptance and is not retried, replayed through
+another endpoint or replaced by Python. Provider rollback therefore retains
+the shell-safe advisory baseline, not a blocking compatibility call.
+
+Only the advertised process generation can accept the notice. The receiver
+rechecks its own admission and the monitor's live published/non-draining state,
+requires a finite unexpired deadline at most one second ahead, and records the
+original 120-second recent-tool idle grace. It does not invoke policy,
+advisory accounting, mutation invalidation, a sweep wake or lifecycle startup.
+Admission and renewal take the monitor's existing state lock before the handler
+lock, serializing them with the final idle-check/drain transition. A contended
+receiver waits at most 50 ms, then skips the optional renewal without replay.
+The existing active-handler drain accounting and all other idle predicates
+remain in force. A sent notice is not an acknowledgement, durable delivery,
+fresh-status observation, permission or readiness proof. A missed notice may
+allow ordinary idle expiry; this operation does not recover an absent resident.
+Old callers retain their original request/response semantics with new receivers.
 
 ### Prepared Windows membership reuse
 

@@ -1,20 +1,21 @@
 """Real Windows Resume-plan consumer; engine resolution and Copilot are fixtures."""
 
-from contextlib import ExitStack
 import json
 import os
 import shutil
 import subprocess
+import sys
 import time
+from contextlib import ExitStack
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
+import yaml
 from _manager_process_fixture import boundary_runtime
 from test_launch_admission_ordering import _fixture
 from test_pane_args_file import PWSH, WRAPPER, _test_env
 from test_pane_startup import _copied_setup
-
 
 pytestmark = [
     pytest.mark.skipif(os.name != "nt", reason="Native Windows PSMux consumer"),
@@ -35,8 +36,12 @@ if args[:1] == ["-c"]:
     raise SystemExit(result.returncode)
 if args[:3] == ["-I", "-m", "agent_worktrees.session_shell"]:
     source = Path(os.environ["TEST_SOURCE_ROOT"])
+    runtime_lib = Path(os.environ["AGENT_RT_ROOT"]) / "lib"
     sys.path[:0] = [str(source / "plugins/agent-worktrees/src"),
-                    str(source / "libs/repository-policy/src")]
+                    str(source / "libs/repository-policy/src"), str(runtime_lib)]
+    import work_coalescing_singleton
+    if not Path(work_coalescing_singleton.__file__).resolve().is_relative_to(runtime_lib.resolve()):
+        raise SystemExit("Resume fixture dependency resolved outside its runtime")
     from agent_worktrees.session_shell import main
     sys.argv = ["session_shell", *args[3:]]
     raise SystemExit(main())
@@ -77,6 +82,11 @@ def _wait_for(check, label, consoles):
 def _resume_fixture(root, shared_env, manager_bin, index):
     root.mkdir()
     env, target, _ = _fixture(root)
+    shutil.copytree(
+        ROOT / "libs/work-coalescing-singleton/src/work_coalescing_singleton",
+        root / "runtime/lib/work_coalescing_singleton",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     # Keep only declared OS variables and this fixture's explicit routing inputs.
     env = {
         **shared_env,
@@ -148,6 +158,52 @@ def _resume_fixture(root, shared_env, manager_bin, index):
     }
 
 
+@pytest.mark.parametrize("use_fixture_dependency", [False, True])
+def test_resume_fixture_supplies_the_session_shell_dependency(tmp_path, use_fixture_dependency):
+    env = _test_env(tmp_path)
+    launch = _resume_fixture(tmp_path / "launch", env, tmp_path / "manager-bin", 0)
+    runtime_lib = Path(launch["env"]["AGENT_RT_ROOT"]) / "lib"
+    source_dependencies = sorted(
+        str(path) for path in (ROOT / "libs").glob("*/src")
+        if path.parent.name != "work-coalescing-singleton"
+    )
+    if not use_fixture_dependency:
+        (runtime_lib / "work_coalescing_singleton").rename(tmp_path / "detached-dependency")
+        source_dependencies.append(str(ROOT / "libs/work-coalescing-singleton/src"))
+    bootstrap = """
+import importlib.util, runpy, sys
+from pathlib import Path
+package = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location(
+    "yaml", package / "__init__.py", submodule_search_locations=[str(package)])
+module = importlib.util.module_from_spec(spec)
+sys.modules["yaml"] = module
+spec.loader.exec_module(module)
+owner, runtime = sys.argv[2:4]
+sys.path[:0] = sys.argv[3:]
+sys.argv = [owner, "-I", "-m", "agent_worktrees.session_shell", "--help"]
+try:
+    runpy.run_path(owner, run_name="__main__")
+except SystemExit as error:
+    if error.code not in (0, None):
+        raise
+import work_coalescing_singleton
+assert Path(work_coalescing_singleton.__file__).resolve().is_relative_to(Path(runtime).resolve())
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", bootstrap,
+         str(Path(yaml.__file__).parent), str(launch["root"] / "owner.py"), str(runtime_lib),
+         *source_dependencies],
+        cwd=launch["target"], env=launch["env"], capture_output=True, text=True, timeout=20, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if use_fixture_dependency:
+        assert result.returncode == 0, result.stdout + result.stderr
+    else:
+        assert result.returncode != 0
+        assert "Resume fixture dependency resolved outside its runtime" in result.stderr
+
+
 @pytest.mark.parametrize("prewarm", [False, True])
 def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_path, prewarm):
     from _terminal_console_fixture import Console
@@ -170,7 +226,7 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
     def mux(*args):
         return subprocess.run(
             [psmux, *args], env=env, cwd=env["USERPROFILE"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, check=False,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
 

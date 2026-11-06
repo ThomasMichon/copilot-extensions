@@ -3,21 +3,15 @@
 from __future__ import annotations
 
 import os
+import typing as _typing
 from pathlib import Path
 
 import pytest
 
-try:
+# Static consumers share one identity; runtime imports retain both entry modes.
+if _typing.TYPE_CHECKING:
     from coverage_guided_selection.auditability import MARKER, declaration
-except ModuleNotFoundError:
-    from tools.coverage_guided_selection.auditability import MARKER, declaration
-
-try:
     from plugin_test_command_safety import install_command_guard
-except ModuleNotFoundError:
-    from tools.plugin_test_command_safety import install_command_guard
-
-try:
     from plugin_test_containment import (
         ALLOW_HOST_STATE_ENV,
         ALWAYS_SANDBOX_ENV_NAMES,
@@ -26,15 +20,35 @@ try:
         ROOT_ENV_NAMES,
         SANDBOX_ENV,
     )
-except ModuleNotFoundError:
-    from tools.plugin_test_containment import (
-        ALLOW_HOST_STATE_ENV,
-        ALWAYS_SANDBOX_ENV_NAMES,
-        CONTAINED_ENV,
-        OPTIONAL_FILE_ENV_NAMES,
-        ROOT_ENV_NAMES,
-        SANDBOX_ENV,
-    )
+else:
+    try:
+        from coverage_guided_selection.auditability import MARKER, declaration
+    except ModuleNotFoundError:
+        from tools.coverage_guided_selection.auditability import MARKER, declaration
+
+    try:
+        from plugin_test_command_safety import install_command_guard
+    except ModuleNotFoundError:
+        from tools.plugin_test_command_safety import install_command_guard
+
+    try:
+        from plugin_test_containment import (
+            ALLOW_HOST_STATE_ENV,
+            ALWAYS_SANDBOX_ENV_NAMES,
+            CONTAINED_ENV,
+            OPTIONAL_FILE_ENV_NAMES,
+            ROOT_ENV_NAMES,
+            SANDBOX_ENV,
+        )
+    except ModuleNotFoundError:
+        from tools.plugin_test_containment import (
+            ALLOW_HOST_STATE_ENV,
+            ALWAYS_SANDBOX_ENV_NAMES,
+            CONTAINED_ENV,
+            OPTIONAL_FILE_ENV_NAMES,
+            ROOT_ENV_NAMES,
+            SANDBOX_ENV,
+        )
 
 _TIERS = {"T0", "T1", "T2", "T3", "T4"}
 _EFFECTS = {

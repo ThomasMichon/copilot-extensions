@@ -6,14 +6,14 @@ import argparse
 import json
 import os
 import re
-import subprocess
+import subprocess as subprocess
 import sys
-import time
+import time as time
 from dataclasses import dataclass
 from pathlib import Path
 
 from maintainer_pr_completion_github import (
-    EvidenceUnavailable, GitHubEvidence, obj, sha, text,
+    EvidenceUnavailable as EvidenceUnavailable, GitHubEvidence, obj, sha, text,
 )
 from maintainer_pr_completion_policy import CompletionPolicy, CompletionSnapshot, decide
 

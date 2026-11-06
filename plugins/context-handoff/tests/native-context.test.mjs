@@ -170,3 +170,7 @@ test("real extension event path suppresses force and resets only root windows", 
 test("native-selected sessions defer automatic pressure nudges to the host by default", async () => {
   await runExtensionFixture("native-defer-extension.mjs", "mode: auto\n");
 });
+
+test("live config reload re-arms tiers, rejects live-window misordering, and reports status", async () => {
+  await runExtensionFixture("live-control-extension.mjs", "mode: auto\nnative_pressure: nudge\n");
+});

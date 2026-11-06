@@ -34,7 +34,7 @@ class ConversationStore:
 
         def adopt(document: dict) -> dict:
             lifecycle_checkpoint()
-            if document["version"] in (3, 4, 5):
+            if document["version"] in (3, 4, 5, 6):
                 if document["capacities"]["conversation_bytes"] != conversation_bytes:
                     raise ValueError("conversation capacity differs from adopted layout")
                 return {"status": "already_adopted", "version": document["version"]}
@@ -54,11 +54,11 @@ class ConversationStore:
         expires_at: int,
         checkpoint: Callable[[], None] | None = None,
         persist: bool,
-        versions: tuple[int, ...] = (3, 4, 5),
+        versions: tuple[int, ...] = (3, 4, 5, 6),
     ) -> dict:
         def execute(document: dict) -> dict:
             if document["version"] not in versions:
-                if document["version"] in (4, 5):
+                if document["version"] in (4, 5, 6):
                     raise ReplayStoreInvalid("conversation serving contract unavailable for adopted owner layout")
                 raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
             journal = ConversationJournal(document["conversations"])
@@ -140,9 +140,9 @@ class ConversationStore:
         from .workspace_conversation import conversation_key, observation_interval, project_generation
 
         def observe(document: dict) -> dict:
-            if document["version"] not in (3, 4, 5):
+            if document["version"] not in (3, 4, 5, 6):
                 raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
-            if attention is not None and document["version"] not in (4, 5):
+            if attention is not None and document["version"] not in (4, 5, 6):
                 raise ReplayStoreInvalid("attention requires explicit owner adoption")
             journal = ConversationJournal(document["conversations"])
             key = conversation_key(generation["scope"], self.owner.namespace)

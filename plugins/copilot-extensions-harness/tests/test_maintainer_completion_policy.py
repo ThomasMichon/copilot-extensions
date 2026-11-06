@@ -7,6 +7,7 @@ import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -15,7 +16,11 @@ SPEC = importlib.util.spec_from_file_location(
     "maintainer_pr_completion_policy", ROOT / "tools" / "maintainer_pr_completion_policy.py",
 )
 assert SPEC is not None and SPEC.loader is not None
-policy = importlib.util.module_from_spec(SPEC)
+if TYPE_CHECKING:
+    import maintainer_pr_completion_policy as policy
+    __all__ = ["CONFIG", "EPOCH", "HEAD", "policy", "ready"]
+else:
+    policy = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = policy
 SPEC.loader.exec_module(policy)
 
@@ -60,7 +65,7 @@ def test_required_update_rebases_instead_of_merging_with_stale_evidence() -> Non
     ("invited_collaborator", False), ("root_codeowner", False),
 ])
 def test_consent_never_expands_scope_or_overrides_holds(field: str, value: object) -> None:
-    assert policy.decide(replace(ready(), **{field: value}), CONFIG).action == "skip"
+    assert policy.decide(replace(ready(), **cast(dict[str, Any], {field: value})), CONFIG).action == "skip"
 
 
 @pytest.mark.parametrize("field,value", [
@@ -71,7 +76,7 @@ def test_consent_never_expands_scope_or_overrides_holds(field: str, value: objec
 def test_unknown_or_unsuccessful_evidence_does_not_authorize_action(
     field: str, value: object,
 ) -> None:
-    assert policy.decide(replace(ready(), **{field: value}), CONFIG).action == "wait"
+    assert policy.decide(replace(ready(), **cast(dict[str, Any], {field: value})), CONFIG).action == "wait"
 
 
 @pytest.mark.parametrize("changes", [
@@ -91,7 +96,7 @@ def test_current_approval_cannot_hide_negative_incomplete_or_wrong_epoch_review(
     changes: dict[str, object],
 ) -> None:
     snapshot = ready()
-    snapshot = replace(snapshot, reviews=replace(snapshot.reviews, **changes))
+    snapshot = replace(snapshot, reviews=replace(snapshot.reviews, **cast(dict[str, Any], changes)))
     assert policy.decide(snapshot, CONFIG).action == "wait"
 
 

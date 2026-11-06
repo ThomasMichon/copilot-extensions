@@ -1,0 +1,9 @@
+{
+  "comment": "Consume Windows read-event late-guidance notices in shell with one-time snapshot-preserving watch claims.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

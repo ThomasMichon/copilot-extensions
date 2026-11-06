@@ -512,7 +512,8 @@
       "import_roots": [
         "tools",
         "plugins/copilot-extensions-harness/scripts",
-        "plugins/customizing-copilot/skills/reviewing-customizations/scripts"
+        "plugins/customizing-copilot/skills/reviewing-customizations/scripts",
+        "libs/agent-procutil/src"
       ]
     },
     {

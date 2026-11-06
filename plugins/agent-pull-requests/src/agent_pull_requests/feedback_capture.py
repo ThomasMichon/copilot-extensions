@@ -8,9 +8,12 @@ from dataclasses import asdict
 from .attention import Candidate, Cursor, Interest, PRKey
 from .attention_state import MAX_INTERESTS, _object
 from .review_intent import MAX_OPERATIONS, encoded, identifier, text
+from .review_workspace import _digest
 
 PROTOCOL = "agent-pull-requests.feedback-captures/v1"
+READBACK_PROTOCOL = "agent-pull-requests.feedback-captures/v2"
 MAX_CAPTURE_BYTES = 64 * 1024
+MAX_READBACK_BYTES = 64 * 1024
 
 
 def _validate_capture(value: dict) -> str:
@@ -48,19 +51,33 @@ def _validate_capture(value: dict) -> str:
 class FeedbackCaptures:
     """Strict detached records; capture admission stays with the protected owner."""
 
-    def __init__(self, state: dict | None = None) -> None:
+    def __init__(self, state: dict | None = None, *, protocol: str = PROTOCOL) -> None:
+        if protocol not in (PROTOCOL, READBACK_PROTOCOL):
+            raise ValueError("unsupported feedback capture protocol")
+        self.protocol = protocol
         self.records: list[dict] = []
         if state is None:
             return
         try:
             _object(state, {"protocol", "records"})
-            if state["protocol"] != PROTOCOL or not isinstance(state["records"], list):
+            if state["protocol"] != protocol or not isinstance(state["records"], list):
                 raise ValueError
             if len(state["records"]) > MAX_OPERATIONS:
                 raise ValueError
             seen = set()
             for record in state["records"]:
-                identity = _validate_capture(record)
+                original = record
+                if protocol == READBACK_PROTOCOL:
+                    if not isinstance(record, dict) or "readback" not in record:
+                        raise ValueError
+                    original = {name: value for name, value in record.items() if name != "readback"}
+                    proof = record["readback"]
+                    if proof is not None:
+                        _object(proof, {"capture_id", "receipt_refs"})
+                        identifier(proof["capture_id"])
+                        if not isinstance(proof["receipt_refs"], list) or len(encoded(proof)) > MAX_READBACK_BYTES:
+                            raise ValueError
+                identity = _validate_capture(original)
                 if identity in seen:
                     raise ValueError
                 seen.add(identity)
@@ -86,6 +103,30 @@ class FeedbackCaptures:
                 or capture["candidate"]["head"] != intent["revision"]["head_sha"]
             ):
                 raise ValueError("feedback capture differs from its original review intent")
+            if self.protocol == READBACK_PROTOCOL and capture["readback"] is not None:
+                original = {name: value for name, value in capture.items() if name != "readback"}
+                if (
+                    any(row["state"] != "confirmed" for row in operation["actions"])
+                    or any(row["kind"] == "verdict" for row in intent["actions"])
+                    or capture["readback"] != {
+                        "capture_id": _digest(original),
+                        "receipt_refs": [
+                            {"action_id": row["id"], "attempt_id": row["attempt_id"],
+                             "receipt_id": _digest(row["receipt"])}
+                            for row in operation["actions"]
+                        ],
+                    }
+                ):
+                    raise ValueError("readback proof differs from its original confirmed operation")
+
+    def capture_bytes(self) -> int:
+        records = self.records
+        if self.protocol == READBACK_PROTOCOL:
+            records = [{name: value for name, value in row.items() if name != "readback"} for row in records]
+        return len(encoded({"protocol": self.protocol, "records": records}))
+
+    def readback_reservation(self) -> int:
+        return len(self.records) * (MAX_READBACK_BYTES + 32) + 1024
 
     def snapshot(self) -> dict:
-        return copy.deepcopy({"protocol": PROTOCOL, "records": self.records})
+        return copy.deepcopy({"protocol": self.protocol, "records": self.records})

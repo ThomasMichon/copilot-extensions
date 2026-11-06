@@ -64,6 +64,7 @@ from .ipc import (
     serve_socket_if_available,
 )
 from .session import BridgeSession
+from .request_context import CONTEXT_VERSION, request_root
 
 
 def _control_token_path(config_dir: str | Path, pid: int) -> Path:
@@ -430,7 +431,7 @@ class Server:
         self._touch()  # any op is host activity; reset the idle self-evict clock
         if op == "ping":
             return {"ok": True, "pong": True, "sessions": self.pool.size,
-                    "attached": self._attached}
+                    "attached": self._attached, "configuration_context": CONTEXT_VERSION}
         if op == "shutdown":
             return {"ok": True}
         if op in ("call", "list"):
@@ -438,10 +439,11 @@ class Server:
             if not bridge:
                 return {"ok": False, "error": "missing 'bridge'"}
             try:
-                cfg = load_config(bridge)
+                root = request_root(req)
+                cfg = load_config(bridge, repository_root=root)
             except Exception as exc:
                 return {"ok": False, "error": f"config: {exc}"}
-            key = str(bridge)
+            key = json.dumps([str(root), str(cfg.source_path)])
             try:
                 if op == "list":
                     tools = await self.pool.list(key, cfg)
@@ -490,7 +492,7 @@ class Server:
             await self._send(writer, {"ok": False, "error": "missing 'bridge'"})
             return
         try:
-            cfg = load_config(bridge)
+            cfg = load_config(bridge, repository_root=request_root(req))
         except Exception as exc:
             await self._send(writer, {"ok": False, "error": f"config: {exc}"})
             return

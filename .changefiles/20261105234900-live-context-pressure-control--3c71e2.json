@@ -1,0 +1,9 @@
+{
+  "comment": "Live context-pressure control: config edits reload mid-session, and a session-only override (/handoff-pressure command; agent handoff_pressure tool limited to pause/raise) can pause or retune thresholds without touching config.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}

@@ -4754,6 +4754,12 @@ so collection continues to match the exact admitted node inventory.
 
 Packet input readers use bounded chunks while retaining the original byte cap
 and overflow sentinel; a tiny file must not allocate the full evidence limit.
+`test_hook_demand.py` exercises the original IPC handler with in-memory streams:
+completed tool replies and capability-qualified send-only read demand preserve
+the same monotonic idle grace. Generation, admission, malformed and expired
+notifications cannot renew it or invoke policy. Actual sockets, the final
+idle-check/drain interleaving and Windows shell delivery remain in the explicit
+Worktrees consumer packet, not this actor-free inventory.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
 once per test session, then execute that code in fresh per-case module globals.
 They do not share module state, results, provider observations or qualification
@@ -5881,6 +5887,15 @@ the declared metadata of its embedded first-party libraries. Other plugin
 test environments remain editable; Manager's separate Bridge test dependency
 also remains editable. The cache distinguishes this preparation mode from
 an older editable Manager environment, without changing runtime installations.
+
+The actor-free `tests/test_resident_configuration.py` selection executes the
+native configuration consumer and qualified owner-report reader with a synthetic
+peer transport. It compares direct and resident call/attach loading from a
+neutral daemon directory, concurrent repository/source isolation, relative and
+directory-marketplace declarations, missing/mismatched context refusal, and
+pre-effect direct fallback against legacy or invalid capability replies.
+It does not qualify an installed daemon, native desktop behavior or session
+handover. Existing transport/lifecycle tests remain separately selectable.
 
 Agent MCP's focused home-binding lane is:
 

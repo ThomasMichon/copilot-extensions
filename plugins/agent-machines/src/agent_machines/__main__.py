@@ -12,6 +12,7 @@ Verbs:
 * ``fleet-update`` -- run the unattended daily worktree-manager update sweep
 * ``health report`` -- summarize explicit local telemetry without activating a service
 * ``preferences preview`` -- inspect explicit portable defaults without applying them
+* ``preferences accept`` / ``publish`` -- preview/token-check explicit local snapshot exchange
 * ``installation-repair`` -- observe or explicitly repair selected enabled owner modules
 * ``git-config rollback`` -- preview or explicitly reverse a recorded global-file transaction
 * ``bootstrap-killswitch`` -- pause/resume every plugin's sessionStart

@@ -16,9 +16,10 @@ from agent_pull_requests.attention import Interest
 from agent_pull_requests.attention_acquisition import AttentionInputs
 from agent_pull_requests.attention_store import AttentionStore
 from agent_pull_requests.conversation_store import ConversationStore
-from agent_pull_requests.feedback_capture import FeedbackCaptures, PROTOCOL
+from agent_pull_requests.feedback_capture import FeedbackCaptures, MAX_READBACK_BYTES, PROTOCOL, READBACK_PROTOCOL
 from agent_pull_requests.feedback_capture_store import FeedbackCaptureStore
 from agent_pull_requests.review_executor import execute_review
+from agent_pull_requests.review_workspace import _digest
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayStore, ReplayStoreInvalid
 from agent_pull_requests.watch_storage import StateCommitUncertain
@@ -242,3 +243,233 @@ def test_capture_count_and_bytes_refuse_without_eviction(
     monkeypatch.setattr(module, "MAX_CAPTURE_BYTES", 1)
     with pytest.raises(ValueError, match="persisted feedback"):
         FeedbackCaptures({"protocol": PROTOCOL, "records": [capture]})
+
+
+@pytest.mark.parametrize("environment", [False, True], indirect=True)
+def test_readback_expansion_preserves_null_history_and_all_owner_writes(capture_owner: tuple) -> None:
+    store, selected, generation, attachment, backend, expires, capture = capture_owner
+    captures = FeedbackCaptureStore(store)
+    captures.adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    seed_capture(store, capture, expires)
+    before = json.loads(store.path.read_bytes())
+    assert captures.adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires) == {
+        "status": "adopted", "version": 6,
+    }
+    expanded = {**capture, "readback": None}
+    expected = {"protocol": READBACK_PROTOCOL, "records": [expanded]}
+    assert captures.snapshot(expires_at=expires) == expected
+    after = json.loads(store.path.read_bytes())
+    for field in ("replay", "reviews", "conversations", "attention"):
+        assert after[field] == before[field]
+    assert after["capacities"] == {
+        **before["capacities"], "feedback_readback_bytes": 8 * 1024 * 1024,
+    }
+    unchanged = store.path.read_bytes()
+    with pytest.raises(ValueError, match="persisted feedback"):
+        FeedbackCaptures(expected)
+    with pytest.raises(ReplayStoreInvalid, match="serving contract unavailable"):
+        ConversationStore(store).capabilities(expires_at=expires)
+    from agent_pull_requests.review_feedback import FeedbackInputs
+    refused = execute_review(
+        store, selected, generation, attachment, context_factory=backend.context,
+        checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
+        feedback=FeedbackInputs(generation["id"], (Interest("maintainer", True, "consumer-a"),), 600),
+    )
+    assert refused["feedback"] == {"status": "unavailable", "reason": "capture_layout_unavailable"}
+    assert store.path.read_bytes() == unchanged
+    assert not backend.calls
+    restarted = ReplayStore(store.root, store.namespace, clock=store.clock, service_identity=store.service_identity)
+    for adopter in (restarted.adopt_review_operations, ConversationStore(restarted).adopt,
+                    AttentionStore(restarted).adopt, FeedbackCaptureStore(restarted).adopt,
+                    FeedbackCaptureStore(restarted).adopt_readback):
+        assert adopter(lifecycle_checkpoint=lambda: None, expires_at=expires) == {
+            "status": "already_adopted", "version": 6,
+        }
+    assert ConversationStore(restarted).observe_workspace(generation, expires_at=expires)["status"] == "unchanged"
+    assert AttentionStore(restarted).snapshot(expires_at=expires) == before["attention"]
+    scope = ConsumerScope("consumer-a", "account-a", "example/project")
+    restarted.execute(scope, "register", {
+        "request_id": "readback-history", "issued_at": time.time() - 20, "number": 7,
+        "until": ("merged",), "deadline_at": time.time() - 1,
+    }, expires_at=expires)
+    assert restarted.execute(scope, "pending", {}, expires_at=expires)["events"][0]["timed_out"]
+    result = execute_review(
+        restarted, selected, generation, attachment, context_factory=backend.context,
+        checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
+    )
+    assert result["status"] == "complete"
+    assert FeedbackCaptureStore(restarted).snapshot(expires_at=expires) == expected
+
+
+@pytest.mark.parametrize("replaced", [False, True])
+def test_readback_adoption_uncertainty_reconciles_without_backfill(
+    capture_owner: tuple, monkeypatch: pytest.MonkeyPatch, replaced: bool,
+) -> None:
+    import agent_pull_requests.watch_replay_store as module
+
+    store, _, _, _, _, expires, capture = capture_owner
+    captures = FeedbackCaptureStore(store)
+    captures.adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    seed_capture(store, capture, expires)
+    write = module._atomic_write_json
+
+    def fail(path: Path, document: dict) -> None:
+        if replaced:
+            write(path, document)
+            raise StateCommitUncertain("synthetic readback adoption response loss")
+        raise OSError("synthetic pre-replacement failure")
+
+    monkeypatch.setattr(module, "_atomic_write_json", fail)
+    with pytest.raises(StateCommitUncertain if replaced else OSError):
+        captures.adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    monkeypatch.setattr(module, "_atomic_write_json", write)
+    result = captures.adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    assert result["status"] == ("already_adopted" if replaced else "adopted")
+    assert captures.snapshot(expires_at=expires)["records"] == [{**capture, "readback": None}]
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="capacity differs"):
+        captures.adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires, readback_bytes=2048)
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["checkpoint", "capacity", "total_capacity"])
+def test_readback_adoption_refusal_preserves_bytes(capture_owner: tuple, failure: str) -> None:
+    store, _, _, _, _, expires, capture = capture_owner
+    captures = FeedbackCaptureStore(store)
+    captures.adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    seed_capture(store, capture, expires)
+    before = store.path.read_bytes()
+    calls = []
+
+    def lifecycle() -> None:
+        calls.append(True)
+        if failure == "checkpoint" and len(calls) == 2:
+            raise PermissionError("synthetic readback lifecycle withdrawal")
+
+    with pytest.raises((PermissionError, ReplayStoreInvalid)):
+        captures.adopt_readback(
+            lifecycle_checkpoint=lifecycle, expires_at=expires,
+            readback_bytes=1024 if failure == "capacity" else 256 * 1024 * 1024
+            if failure == "total_capacity" else 8 * 1024 * 1024,
+        )
+    assert store.path.read_bytes() == before
+
+
+def test_readback_capacity_is_reserved_before_new_native_attempt(capture_owner: tuple) -> None:
+    store, selected, _, _, _, expires, capture = capture_owner
+    captures = FeedbackCaptureStore(store)
+    captures.adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    seed_capture(store, capture, expires)
+    captures.adopt_readback(
+        lifecycle_checkpoint=lambda: None, expires_at=expires, readback_bytes=MAX_READBACK_BYTES + 32 + 1024,
+    )
+    other = copy.deepcopy(selected)
+    other["operation_id"] = "second-reserved-operation"
+    admitted = store.admit_review(other, expires_at=expires)["operation"]
+    second = {**capture, "operation_id": other["operation_id"], "intent_id": admitted["intent_id"], "readback": None}
+    before = store.path.read_bytes()
+    with pytest.raises(ReplayStoreInvalid, match="readback exceeds"):
+        seed_capture(store, second, expires)
+    assert store.path.read_bytes() == before
+    assert all(row["state"] == "unattempted" for row in admitted["actions"])
+
+
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_readback_adoption_never_implicitly_expands_prior_owners(environment: tuple, version: int) -> None:
+    store = environment[0]
+    expires = int(time.time()) + 600
+    if version >= 3:
+        ConversationStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    if version == 4:
+        AttentionStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    before = store.path.read_bytes()
+    with pytest.raises(ReplayStoreInvalid, match="capture adoption first"):
+        FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    assert store.path.read_bytes() == before
+
+
+@pytest.fixture
+def readback_owner(capture_owner: tuple) -> tuple:
+    store, selected, generation, attachment, backend, expires, capture = capture_owner
+    selected["operation_id"] = "confirmed-comment-operation"
+    selected["actions"] = selected["actions"][:1]
+    admitted = store.admit_review(selected, expires_at=expires)["operation"]
+    capture = {**capture, "operation_id": selected["operation_id"], "intent_id": admitted["intent_id"]}
+    assert execute_review(
+        store, selected, generation, attachment, context_factory=backend.context,
+        checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
+    )["status"] == "complete"
+    owner = FeedbackCaptureStore(store)
+    owner.adopt(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    seed_capture(store, capture, expires)
+    owner.adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    operation = store.inspect_review(selected["operation_id"], selected["scope"], expires_at=expires)
+    proof = {
+        "capture_id": _digest(capture),
+        "receipt_refs": [
+            {"action_id": row["id"], "attempt_id": row["attempt_id"], "receipt_id": _digest(row["receipt"])}
+            for row in operation["actions"]
+        ],
+    }
+    # Synthetic retained data validates binding, not successful protected readback.
+    store._review_transaction(
+        lambda document: document["feedback_captures"]["records"][0].update(readback=proof),
+        expires_at=expires,
+    )
+    return store, selected, expires, proof
+
+
+def test_original_readback_binding_survives_restart_and_later_review_writes(readback_owner: tuple) -> None:
+    store, selected, expires, proof = readback_owner
+    owner = FeedbackCaptureStore(store)
+    expected = owner.snapshot(expires_at=expires)
+    assert expected["records"][0]["readback"] == proof
+    later = copy.deepcopy(selected)
+    later["operation_id"] = "later-operation-same-capture-position"
+    store.admit_review(later, expires_at=expires)
+    store.begin_review_action(later["operation_id"], later["scope"], later["actions"][0]["id"], expires_at=expires)
+    restarted = ReplayStore(store.root, store.namespace, clock=store.clock)
+    assert FeedbackCaptureStore(restarted).snapshot(expires_at=expires) == expected
+    assert not json.loads(store.path.read_bytes())["attention"]["records"][0]["handled"]
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda document: document["feedback_captures"].update(protocol=PROTOCOL),
+    lambda document: document["feedback_captures"]["records"][0].pop("readback"),
+    lambda document: document["feedback_captures"]["records"][0].update(readback={}),
+    lambda document: document["feedback_captures"]["records"][0]["readback"].update(capture_id="f" * 64),
+    lambda document: document["feedback_captures"]["records"][0]["interests"][0].update(consumer="other-consumer"),
+    lambda document: document["feedback_captures"]["records"][0]["readback"]["receipt_refs"][0].update(
+        action_id="another-action",
+    ),
+    lambda document: document["feedback_captures"]["records"][0]["readback"]["receipt_refs"][0].update(
+        attempt_id="another-attempt",
+    ),
+    lambda document: document["feedback_captures"]["records"][0]["readback"]["receipt_refs"][0].update(
+        receipt_id="f" * 64,
+    ),
+    lambda document: document["feedback_captures"]["records"][0]["readback"].update(body="not-metadata"),
+    lambda document: document["reviews"][-1]["actions"][0].update(state="unknown"),
+    lambda document: document["feedback_captures"]["records"][0].update(operation_id="missing-operation"),
+    lambda document: document["capacities"].pop("feedback_readback_bytes"),
+])
+def test_foreign_or_corrupt_readback_refuses_all_owner_paths_without_replacement(
+    readback_owner: tuple, mutation: Callable[[dict], object],
+) -> None:
+    store, selected, expires, _ = readback_owner
+    document = json.loads(store.path.read_bytes())
+    mutation(document)
+    raw = json.dumps(document).encode()
+    store.path.write_bytes(raw)
+    for operation in (
+        lambda: FeedbackCaptureStore(store).snapshot(expires_at=expires),
+        lambda: FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires),
+        lambda: ConversationStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=expires),
+        lambda: AttentionStore(store).snapshot(expires_at=expires),
+        lambda: store.inspect_review(selected["operation_id"], selected["scope"], expires_at=expires),
+        lambda: store.execute(ConsumerScope("consumer-a", "account-a", "example/project"),
+                              "pending", {}, expires_at=expires),
+    ):
+        with pytest.raises(ReplayStoreInvalid):
+            operation()
+        assert store.path.read_bytes() == raw
