@@ -1050,20 +1050,20 @@
       "sha256": "384db58f73e074bd41800ff189c68fbd6a8a4487537c4a678b5d3cef525eacf4"
     },
     "libs/installer-engine/installer_engine_uninstall.py": {
-      "blob": "0f456ed804fec2f597e8855dcb43e67124be6fbc",
-      "sha256": "104460c79075b3fb55b8f09a0234eef28fec80a39772f091acc253b781482b20"
+      "blob": "20e71d9f9a0512acc69985cf5659f43f4507cc79",
+      "sha256": "1ad43deb1ed0510d1353d9288686596d2b3b111e1410d2b2befdacc2d426914c"
     },
     "libs/installer-engine/installer_engine_uninstall_controllers.py": {
-      "blob": "86a20541aaf51eaf30ca5925b8555fd124735dd3",
-      "sha256": "8d0bc2b8d50d1497a4e7916140782d059334978adf70da4aa47660f7d79b93d6"
+      "blob": "eb8f0fe3b0fc80b8ae83ed51f789f16d673cfc18",
+      "sha256": "9685d0cea78401c6090874d2b91874a0e79af2411757f00fe57650f1a1060e33"
     },
     "libs/installer-engine/installer_engine_uninstall_darwin.py": {
       "blob": "368e71665b99a0d676f023d99a64d479f0148443",
       "sha256": "398c02398ba4857a0a9e21a74a182baa54b22c504cb26aee71ac9ec384dbf95f"
     },
     "libs/installer-engine/installer_engine_uninstall_windows.py": {
-      "blob": "155e2a47044e8cc0f87e41ce838634e09b97e9eb",
-      "sha256": "03387fa7fe6dbb31cd6f04436e4de9d6ee120df02faee6a3cf3690302b6676b0"
+      "blob": "a575d54ee6bc2c33987a6256146a01ac62db6745",
+      "sha256": "5809573930bf181c545cda03f90a69ce259a7bbd9374656ee485bb2a2eb32957"
     },
     "libs/installer-engine/installer_feed_policy.py": {
       "blob": "e96bf08998cfb6cdea0ae5004a4398b21dff4615",
@@ -1778,8 +1778,8 @@
       "sha256": "55d50b75d31d09b450b01aafaa8f26c80d6882c89eddecbea97c851e6c860843"
     },
     "plugins/agent-bridge/contract/README.md": {
-      "blob": "e7f91c30d2c236e4752202fb4a55a8817dab90f1",
-      "sha256": "90a1f5c0065f0dc55eb20eec00436fa110efdb358d5a36da99e00e5a9c5d3a8f"
+      "blob": "a780c2e2586d419a1bff0637bfcb627c0d26e553",
+      "sha256": "ff111dbee1ed1c74f53bde3aaf736bd7c11759646f98a6a26fe03f4fdac552f9"
     },
     "plugins/agent-bridge/contract/inputs/http47/capture-cases.json": {
       "blob": "758c89a061c301140849ee6be7d12aadf35e2294",
@@ -2106,8 +2106,8 @@
       "sha256": "ccb78980645608954399a1a54675f284b533f240b1ea4fc35251067f5d595e64"
     },
     "plugins/agent-bridge/src/agent_bridge/_peer_launch.py": {
-      "blob": "6cb62b3e6e9cd41d9058ab58151f65bda742a9fb",
-      "sha256": "17bd91ed13c0147745b295bfdba70f6f859aa59e4559bfafabb321e7d84d57b7"
+      "blob": "4504b75e2ff2a2afe81810501c6c49209d3974bc",
+      "sha256": "a5b3e519ee655b8e75c342f32a38717183b346d0801163f55c9403fc0ad099e5"
     },
     "plugins/agent-bridge/src/agent_bridge/acp_activation.py": {
       "blob": "9059b65200359476bbbe818850cc2fd65d07237b",
@@ -3826,8 +3826,8 @@
       "sha256": "b71a8efb342f00ae8067c4fe951841589e8253081bb29a07a107653b5d016cf9"
     },
     "plugins/agent-codespaces/src/agent_codespaces/_peer_launch.py": {
-      "blob": "6cb62b3e6e9cd41d9058ab58151f65bda742a9fb",
-      "sha256": "17bd91ed13c0147745b295bfdba70f6f859aa59e4559bfafabb321e7d84d57b7"
+      "blob": "4504b75e2ff2a2afe81810501c6c49209d3974bc",
+      "sha256": "a5b3e519ee655b8e75c342f32a38717183b346d0801163f55c9403fc0ad099e5"
     },
     "plugins/agent-codespaces/src/agent_codespaces/_ssh_retry.py": {
       "blob": "a6effc169e8b542e8196eea0088f33c24d0a49c9",
@@ -4292,6 +4292,10 @@
     "tools/bridge_http51_evidence.py": {
       "blob": "04380ec88a6fcb0729ab64146a2d9d5549fa7a08",
       "sha256": "dfa4ca4be6fc6efa115cdee2d7b7a7c848f44a27fcb373a791b19997220debc0"
+    },
+    "tools/bridge_http52_artifact.py": {
+      "blob": "bc5dc489f09c40194cd1ab1cb5b77874b0ca57d6",
+      "sha256": "e62546031a08a16e6bc4cc8cf0b352591608fa7c104e9f6311daf29882624468"
     },
     "tools/bridge_http52_evidence.py": {
       "blob": "e5dab9a75e4387b609e85660bf65a866dee1c3c3",
@@ -5358,16 +5362,16 @@
       "sha256": "cf47492588fd9fd878eb4bdcc80ebdeb05d7483782c5e77e3a043074814de721"
     },
     "tools/test_immutable_runtime_workflow.py": {
-      "blob": "f7750aabb44c27afa8a858b49d606adf9e77abe0",
-      "sha256": "ec9465cf5f63580f13fc4867bebff7ba71e326119e16a7004e7c9fd03aef7159"
+      "blob": "1279f6133a7669d4b9bf64a43f8ed2b5fb164a3d",
+      "sha256": "3270463a76780c7c4ac1454357cb61c99b575c39ac32a0b78945ce765cc5262d"
     },
     "tools/test_install_contract_guard.py": {
       "blob": "db5e3b04c1b28e660b0c8d68e3766de45bfab6f5",
       "sha256": "deed0f52458e44ab05e6ff3450a8b179e76f598ef2fe7c016758cb7f1255c948"
     },
     "tools/test_installation_context_ci_scope.py": {
-      "blob": "7a14f606f7cfe68937976e7ac6c9fc5b1d03e487",
-      "sha256": "1a459827c96eff5f23c154a1cdf2197bf211f5c2cdb5f87eb14c3499ed9f3482"
+      "blob": "9ae4e86f0b22c1a888befe4d33af6127a459ba92",
+      "sha256": "8b5ec2cfebf901022fe4420c4913eeb0199e156ea3c8ab821b271c8ffa22671c"
     },
     "tools/test_installation_context_packaging.py": {
       "blob": "e154cd885167ec7645b1fd8e3a27caa4a92e2f72",
@@ -5406,8 +5410,8 @@
       "sha256": "4507e0d00765373803c8570f950ed0136481d53465083376954be26e556d9eb8"
     },
     "tools/test_installer_engine_uninstall.py": {
-      "blob": "56da7c50766aa0b22e824007413ebe2157b03767",
-      "sha256": "88fa90864460e64016dc00b6b413931cece215ab7207dcb38372025889fe60d5"
+      "blob": "ee60610673a8f184bcbf069796c97ff56912c0cc",
+      "sha256": "efa8d6fd1c7f73358004c5f028060bdfe6c4a1a2351cf827ac0fdae4860a8ab2"
     },
     "tools/test_installer_engine_uninstall_darwin.py": {
       "blob": "2cf202e5b6eaa31531776c8b794553c059c4f6e4",
@@ -5786,8 +5790,8 @@
       "sha256": "693dfbdd3c1abd3fbbc113eb837331bbcc9a7c8d25f89d8a8ae847058baa9c18"
     },
     "tools/test_runtime_removal_workflow.py": {
-      "blob": "ff01b1066a26a17ca2dd0c284567a26f766ad85b",
-      "sha256": "e0c2ec6a1725752175803f14c38483e01f3f8879da148c67d38b86f117ba62b5"
+      "blob": "d3087d6539efab8bce5fc9a5005e0c6defc270d5",
+      "sha256": "9b7dcc4dba2b61f31c57f3b602b1072b8506f162a37c9e16647444e7ef062483"
     },
     "tools/test_runtime_source_authentication.py": {
       "blob": "88b785da16e8bb88e39bf9a3a823441dc0e9d8dc",
@@ -5994,7 +5998,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "b4833c05cbef52a77b28387108bcc1bb135b3d63773eef274b7b6e1f8c291f6d",
+  "execution_closure_sha256": "baf68cd6296132fdcece170e35c18c972914a7beb23f032f49207b4617e2cdd9",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -6072,7 +6076,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "7721df06c65a1d216e7487fe4cf94421045cc864",
+    "commit": "094edc5443b0c42cb2a3b52272cc1043b845ad8c",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
