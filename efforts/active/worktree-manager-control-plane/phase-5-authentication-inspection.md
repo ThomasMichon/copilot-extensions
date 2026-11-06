@@ -204,22 +204,20 @@ originating-scope settlement, changed project and pre-invocation rollback refusa
 Registry and credential-sentinel bytes are unchanged. One unrelated existing
 opt-in native-owner test is skipped; it supplies no evidence here.
 
-The journey exposed and now covers a single-scope summary path that previously
-omitted pending/stale metadata. The shared shell retains cached rows and their
+Single-scope Configuration summaries include pending/stale metadata.
+The shared shell retains cached rows and their
 identity while displaying that metadata. Compatibility controls separately cover
 missing/malformed/unsupported descriptors, inspect-only older runtimes, newer
 payloads, foreign explicit commands, provider rollback and retained cleanup errors.
 Old callers keep the original standalone observation/exit semantics, and older
 Managers do not discover the new optional read.
 
-Two review findings were reproduced red before correction: the generic list
-transport strips the selected installation context, and an inherited handoff
-must not override an explicit environment command. The adapter now forwards and
+The generic list transport strips parent-plugin identity. The adapter forwards and
 validates context through the existing Manager restoration owner and preserves
-the native engine-selection precedence. The real namespaced list process retains
+the native engine-selection precedence, including explicit environment commands
+over inherited handoffs. The real namespaced list process retains
 its selected context/interpreter; malformed context refuses before selection.
-An additional explicit-JSON-null handoff regression was also demonstrated red
-and corrected: supplied malformed commands refuse before selection, while an
+Supplied malformed commands, including JSON null, refuse before selection, while an
 omitted argument retains ordinary engine resolution.
 
 These are contained source/fixture results, not a cold product installation,
