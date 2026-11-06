@@ -206,3 +206,29 @@ The R1 and R2 completion boxes remain open pending independent current-head
 review, required checks, actual merge and immediate whole-parent readback.
 No rollout, real daemon wake, live Mux binding, model/data or head/baton
 operation was performed.
+
+### 2026-11-06 - R1 evidence-boundary corrections
+
+The first current-head review of #10935 identified six concrete gaps: duplicate
+YAML keys could erase record/registry evidence, endpoint formatting could
+reselect an ambient host rather than retain the fetch's actual host, supported
+whitespace-padded bindings could be rejected, and compact JSON size checks or
+unbounded identity fields could exceed the emitted body limit.
+
+Record decoding now uses the existing strict duplicate-rejecting YAML owner;
+passive repository lookup uses strict registry acquisition. Each real provider
+retains its selected endpoint in the snapshot, including GitHub's distinct
+selected-credential mode. The formatter no longer selects an endpoint.
+Association binding normalizes only surrounding API whitespace, preserving the
+configured text separately. Both output checks reuse the actual versioned,
+indented stdout serialization, and metadata overflow produces a small unavailable
+response without exposing or truncating another identity.
+
+The expanded source packet passed 581 controls without skips, with verified
+cleanup. Four unrelated publication-factory fixture failures are explicitly
+deselected under existing open tracker #10408; no unfiltered provider-suite pass
+is claimed and no unrelated publication behavior was changed. The new controls
+exercise actual duplicate-key files, fetch construction with synthetic native
+responses and emitted stdout rather than mocking beyond those boundaries.
+R1 still awaits independent review of the revised head, required checks and
+actual merge/readback; R2 and every original parent acceptance remain open.

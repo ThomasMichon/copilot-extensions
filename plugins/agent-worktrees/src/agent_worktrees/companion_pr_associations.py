@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import stat
 import time
@@ -11,9 +10,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import config as cfg
-from . import pr_config, providers, tracking
+from . import output, pr_config, providers, tracking
 from .config_cache import ConfigCacheSession
 from .inrepo_config_source import resolution_budget
+from .strict_yaml import load_strict_yaml_document
 
 CONTRACT = "companion-pr-observations-v1"
 VERSION = 1
@@ -63,7 +63,7 @@ def _read(path: Path, selected: tracking.WorktreeRecord) -> tuple[dict, tuple]:
         raise ValueError("record-byte-budget")
     if _signature(path) != before:
         raise ValueError("record-changed")
-    data = tracking._yaml_safe_load(raw.decode("utf-8"))
+    data = load_strict_yaml_document(raw.decode("utf-8"), label="PR association record")
     if not isinstance(data, dict):
         raise ValueError("invalid-record")
     if (
@@ -141,14 +141,17 @@ def _binding(config, entry: dict) -> dict:
         return {"available": False, "reason": "provider-mismatch"}
     if pr.repository and pr.repository != entry["repo"]:
         return {"available": False, "reason": "repository-mismatch"}
-    if not _text(pr.api_base) or (pr.provider != "github" and not pr.api_base):
+    if not isinstance(pr.api_base, str) or len(pr.api_base) > TEXT_LIMIT:
+        return {"available": False, "reason": "endpoint-unavailable"}
+    api_base = pr.api_base.strip()
+    if not _text(api_base) or (pr.provider != "github" and not api_base):
         return {"available": False, "reason": "endpoint-unavailable"}
     configured = urlsplit(
-        pr.api_base if "://" in pr.api_base else f"//{pr.api_base}",
+        api_base if "://" in api_base else f"//{api_base}",
     )
     if configured.username or configured.password or configured.query or configured.fragment:
         return {"available": False, "reason": "endpoint-unavailable"}
-    endpoint = providers.get_provider(pr.provider).authority_endpoint(pr.api_base)
+    endpoint = providers.get_provider(pr.provider).authority_endpoint(api_base)
     if not _text(endpoint) or not endpoint:
         return {"available": False, "reason": "endpoint-unavailable"}
     if not _url_matches(entry["url"], pr.provider, endpoint, entry["repo"], entry["number"]):
@@ -206,6 +209,11 @@ def extend_bundle(
     bundle: dict, project: str, path: Path, selected: tracking.WorktreeRecord
 ) -> dict:
     """Add a current association fact without recomputing or modifying cached facts."""
+    if any(not _text(field) for field in (project, selected.worktree_id, selected.creation_nonce)):
+        return {
+            "companion_pr_observations": declaration(),
+            "availability": {"status": "unavailable", "reason": "association-metadata-overflow"},
+        }
     value = {
         "schema": "agent-worktrees.pr-associations",
         "version": VERSION,
@@ -247,12 +255,6 @@ def extend_bundle(
         if _signature(path) != signature:
             raise ValueError("record-changed")
         value.update(available=True, complete=omitted == 0, associations=entries, omitted=omitted)
-        result = {
-            **bundle,
-            "facts": {**bundle.get("facts", {}), "pr_associations": {"value": value}},
-        }
-        if len(json.dumps(result, ensure_ascii=True).encode("ascii")) + 128 > MAX_BYTES:
-            raise ValueError("association-byte-budget")
     except Exception as exc:
         value.update(
             available=False,
@@ -276,18 +278,32 @@ def extend_bundle(
             }
             else "association-read-unavailable",
         )
-    result = {
-        **bundle,
-        "facts": {
-            **bundle.get("facts", {}),
-            "pr_associations": {
-                "value": value,
-                "confirmed": value["available"],
-                "observed_at": time.time(),
+    observed_at = time.time()
+
+    def response():
+        return {
+            **bundle,
+            "facts": {
+                **bundle.get("facts", {}),
+                "pr_associations": {
+                    "value": value,
+                    "confirmed": value["available"],
+                    "observed_at": observed_at,
+                },
             },
-        },
-    }
-    if len(json.dumps(result, ensure_ascii=True).encode("ascii")) > MAX_BYTES:
+        }
+
+    result = response()
+    if len(output.json_output_text(result).encode("utf-8")) > MAX_BYTES:
+        value.update(
+            available=False,
+            complete=False,
+            associations=[],
+            omitted=0,
+            reason="association-byte-budget",
+        )
+        result = response()
+    if len(output.json_output_text(result).encode("utf-8")) > MAX_BYTES:
         return {
             "project": project,
             "worktree_id": selected.worktree_id,

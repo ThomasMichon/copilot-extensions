@@ -102,7 +102,7 @@ def resolve_repo_config_for_slug(
             active_remote = ""
     else:
         try:
-            entries = repos_mod.list_repos()
+            entries = repos_mod.list_repos(strict=True)
         except Exception:
             return ForeignRepoResolution(None, error="Repository registry unavailable")
         matches = [

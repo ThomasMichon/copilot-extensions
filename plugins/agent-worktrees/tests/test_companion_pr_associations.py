@@ -54,6 +54,7 @@ def source(monkeypatch, tmp_path):
     record = _record()
     path = tmp_path / "sample-work.yaml"
     config_calls = []
+    real_list_repos = repos.list_repos
 
     def load(**kwargs):
         config_calls.append(kwargs)
@@ -74,7 +75,7 @@ def source(monkeypatch, tmp_path):
             "target": {"provider": "github", "repository": "example/repository"},
         },
     )
-    monkeypatch.setattr(repos, "list_repos", lambda: [])
+    monkeypatch.setattr(repos, "list_repos", lambda **kwargs: [])
     monkeypatch.setenv("GH_HOST", "github.com")
     monkeypatch.setattr(git_ops, "git", lambda *a, **k: pytest.fail("Unexpected Git observation"))
     from agent_worktrees import providers
@@ -107,7 +108,13 @@ def source(monkeypatch, tmp_path):
             assert len(json.dumps(result).encode("ascii")) <= owner.MAX_BYTES
         return result["facts"]["pr_associations"]["value"]
 
-    return SimpleNamespace(read=read, path=path, record=record, loads=config_calls)
+    return SimpleNamespace(
+        read=read,
+        path=path,
+        record=record,
+        loads=config_calls,
+        real_list_repos=real_list_repos,
+    )
 
 
 def test_canonical_list_is_not_claim_state_and_empty_needs_no_configuration(source):
@@ -211,7 +218,7 @@ def test_ambiguous_registered_target_is_not_guessed(source, monkeypatch):
     monkeypatch.setattr(
         repos,
         "list_repos",
-        lambda: [
+        lambda **kwargs: [
             SimpleNamespace(name=name, remote="https://github.com/example/repository.git")
             for name in ("first", "second")
         ],
@@ -237,7 +244,7 @@ def test_registered_remote_uses_own_binding_without_git(source, monkeypatch):
     monkeypatch.setattr(
         repos,
         "list_repos",
-        lambda: [
+        lambda **kwargs: [
             SimpleNamespace(name="sample", remote="https://github.com/example/repository.git"),
         ],
     )
@@ -370,13 +377,13 @@ def test_non_github_endpoint_is_explicit_and_bound(source, monkeypatch, provider
 def test_snapshot_retains_effective_endpoint_and_separate_provider_state(monkeypatch):
     monkeypatch.setenv("GH_HOST", "enterprise.example")
     value = pr_snapshot_payload.snapshot_payload(
-        PRSnapshot(pr_state="open", merged=False, head_sha="a" * 40),
+        PRSnapshot(pr_state="open", merged=False, head_sha="a" * 40, endpoint="observed.example"),
         "example/repository",
         7,
         "github",
         "",
     )
-    assert value["endpoint"] == "enterprise.example" and value["api_base"] == ""
+    assert value["endpoint"] == "observed.example" and value["api_base"] == ""
     assert value["pr_state"] == "open" and value["merged"] is False
 
 
@@ -496,3 +503,194 @@ print(json.dumps({"worktree_id": args.worktree_id, "facts": {}}))
     )
     assert rejected.returncode == 2 and "unrecognized arguments" in rejected.stderr
     assert settled == [True, True]
+
+
+@pytest.mark.parametrize("duplicate", ["ledger", "association"])
+def test_duplicate_yaml_keys_are_unavailable_not_complete_empty(source, duplicate):
+    raw = yaml.safe_dump({**asdict(source.record), "prs": [_pr()]})
+    if duplicate == "ledger":
+        raw += "prs: []\n"
+    else:
+        assert "  provider: github\n" in raw
+        raw = raw.replace("  provider: github\n", "  provider: github\n  provider: gitea\n")
+    source.path.write_text(raw)
+    before = source.path.read_bytes()
+    result = owner.extend_bundle(
+        {"project": "sample", "worktree_id": "sample-work"},
+        "sample",
+        source.path,
+        source.record,
+    )["facts"]["pr_associations"]["value"]
+    assert not result["available"] and not result["complete"]
+    assert source.path.read_bytes() == before and source.loads == []
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "repos: [\n",
+        "repos:\n  target:\n    remote: https://github.com/other/repository.git\n    remote: https://github.com/example/repository.git\n",
+        "repos:\n  target:\n    remote: https://github.com/other/repository.git\nrepos: {}\n",
+    ],
+)
+def test_file_backed_registry_failure_cannot_fall_through_to_related_binding(
+    source, monkeypatch, raw
+):
+    registry = source.path.parent / "repos.yaml"
+    registry.write_text(raw)
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: registry)
+    monkeypatch.setattr(repos, "list_repos", source.real_list_repos)
+    entry = source.read([_pr()])["associations"][0]
+    assert entry["binding"] == {"available": False, "reason": "target-binding-unavailable"}
+    assert registry.read_text() == raw
+
+
+def test_actual_indented_stdout_budget_includes_core_formatting(source, capfd):
+    from agent_worktrees import output
+
+    source.path.write_text(yaml.safe_dump({**asdict(source.record), "prs": []}))
+    core = {
+        "project": "sample",
+        "worktree_id": "sample-work",
+        "facts": {"claims": {"value": {"resources": ["x"] * 70000}, "confirmed": True}},
+    }
+    before = copy.deepcopy(core)
+    assert len(json.dumps(core).encode()) < owner.MAX_BYTES
+    assert len(output.json_output_text(core).encode()) > owner.MAX_BYTES
+    result = owner.extend_bundle(core, "sample", source.path, source.record)
+    output._json_output(result)
+    emitted = capfd.readouterr().out
+    assert len(emitted.encode("utf-8")) <= owner.MAX_BYTES
+    assert json.loads(emitted)["availability"]["reason"] == "association-byte-budget"
+    assert core == before
+
+
+def test_identity_metadata_overflow_is_bounded_without_truncating_subject(source, capfd):
+    from agent_worktrees import output
+
+    source.record.creation_nonce = "\u00e9" * 200000
+    raw = yaml.safe_dump({**asdict(source.record), "prs": []}, allow_unicode=True)
+    assert len(raw.encode("utf-8")) < owner.MAX_BYTES
+    source.path.write_text(raw)
+    result = owner.extend_bundle(
+        {"project": "sample", "worktree_id": "sample-work"},
+        "sample",
+        source.path,
+        source.record,
+    )
+    output._json_output(result)
+    emitted = capfd.readouterr().out
+    assert len(emitted.encode("utf-8")) <= owner.MAX_BYTES
+    assert json.loads(emitted)["availability"]["reason"] == "association-metadata-overflow"
+    assert "creation_nonce" not in emitted and "worktree_id" not in emitted
+    assert source.path.read_text() == raw
+
+
+@pytest.mark.parametrize("selected_credentials", [False, True])
+def test_snapshot_endpoint_is_captured_by_actual_fetch_not_formatting_environment(
+    monkeypatch,
+    selected_credentials,
+):
+    from agent_worktrees import pr_watch
+    from agent_worktrees.providers import github
+    from test_pr_observation_credentials import Source, github_transport
+
+    monkeypatch.setenv("GH_HOST", "ambient.example")
+    if selected_credentials:
+        calls = github_transport(monkeypatch)
+    else:
+        import subprocess
+
+        calls = []
+
+        def run(argv, *, env):
+            calls.append((argv, env))
+            value = (
+                {"state": "open", "head": {}, "base": {}} if argv[-1].endswith("/pulls/7") else []
+            )
+            return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+        monkeypatch.setattr(github, "run_cli", run)
+    kwargs = (
+        {"credential_source": Source()} if selected_credentials else {"token": "synthetic-control"}
+    )
+    snapshot = pr_watch.build_fetch(
+        config.PRConfig(provider="github"),
+        "owner/repository",
+        7,
+        **kwargs,
+    )()
+    monkeypatch.setenv("GH_HOST", "changed.example")
+    wire = pr_snapshot_payload.snapshot_payload(snapshot, "owner/repository", 7, "github", "")
+    expected = "github.com" if selected_credentials else "ambient.example"
+    assert wire["endpoint"] == expected
+    assert all(argv[argv.index("--hostname") + 1] == expected for argv, env in calls)
+
+
+@pytest.mark.parametrize(
+    "provider,endpoint,url",
+    [
+        ("gitea", "https://forge.example", "https://forge.example/example/repository/pulls/7"),
+        (
+            "azure-devops",
+            "https://dev.azure.com/example",
+            "https://dev.azure.com/example/example/_git/repository/pullrequest/7",
+        ),
+    ],
+)
+@pytest.mark.parametrize("padding", [" ", "\t", "\n"])
+def test_whitespace_binding_matches_actual_provider_fetch(
+    source, monkeypatch, provider, endpoint, url, padding
+):
+    import subprocess
+    from agent_worktrees import pr_watch
+    from agent_worktrees.providers import azure_devops, gitea
+
+    padded = padding + endpoint + padding
+    monkeypatch.setattr(
+        config,
+        "_control_plane_related_pr_map",
+        lambda: {
+            "target": {
+                "provider": provider,
+                "repository": "example/repository",
+                "api_base": padded,
+            },
+        },
+    )
+    binding = source.read([_pr(provider=provider, url=url)])["associations"][0]["binding"]
+    assert (
+        binding["available"] and binding["endpoint"] == endpoint and binding["api_base"] == padded
+    )
+    prcfg = config._parse_pr(
+        {
+            "provider": provider,
+            "api_base": padded,
+            "observation": {"enabled": False},
+        }
+    )
+    if provider == "gitea":
+
+        def curl(self, method, target, token, **kwargs):
+            value = (
+                {"state": "open", "head": {}, "base": {}} if target.endswith("/pulls/7") else []
+            )
+            return 200, json.dumps(value)
+
+        monkeypatch.setattr(gitea.GiteaProvider, "_curl", curl)
+    else:
+        monkeypatch.setattr(
+            azure_devops,
+            "run_cli",
+            lambda argv, **kwargs: subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps({"status": "active", "lastMergeSourceCommit": {}}),
+                "",
+            ),
+        )
+    snapshot = pr_watch.build_fetch(prcfg, "example/repository", 7, token="synthetic-control")()
+    wire = pr_snapshot_payload.snapshot_payload(
+        snapshot, "example/repository", 7, provider, padded
+    )
+    assert wire["endpoint"] == binding["endpoint"]

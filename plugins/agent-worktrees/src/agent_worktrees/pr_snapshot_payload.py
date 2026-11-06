@@ -10,12 +10,10 @@ from .pr_snapshot import PRSnapshot
 
 
 def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str, api_base: str) -> dict:
-    from .providers import get_provider
-
     return {
         "schema": "agent-worktrees.pr-snapshot", "version": 1,
         "provider": provider, "api_base": api_base, "repo": repo, "pr": number,
-        "endpoint": get_provider(provider).authority_endpoint(api_base),
+        "endpoint": snapshot.endpoint,
         "pr_state": snapshot.pr_state, "merged": snapshot.merged,
         "head_sha": snapshot.head_sha, "base_ref": snapshot.base_ref,
         "base_sha": (

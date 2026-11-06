@@ -132,11 +132,19 @@ current/frozen-prior parser processes. It covers canonical empty versus
 unknown/omitted evidence, scope/incarnation/reassignment, typed record state,
 shared fresh configuration acquisition, independent cached core facts,
 three-provider bindings and unchanged strict parsing. The existing passive
-snapshot supplies a separate effective endpoint; no test acquires credentials,
-contacts a forge or starts a real resident. Cleanup remains caller-owned and
+snapshot supplies a separate effective endpoint; no test acquires real credentials,
+contacts a real forge or starts a real resident. Cleanup remains caller-owned and
 verified. This is isolated source/process qualification, not installed/native
 performance, UI point-read or full live topology acceptance. Required unit-only
 CI is unchanged.
+The focused endpoint regression extension also selects
+`tests/test_pr_observation_credentials.py`, `tests/test_pr_observation.py` and
+`tests/test_providers.py` for actual provider construction over synthetic native
+responses. Duplicate-key private YAML/registry, whitespace-normalized bindings,
+fetch-captured host selection and actual emitted stdout budgets are covered.
+The four publication-fixture gaps tracked in #10408 remain separately scoped;
+their explicit exclusion does not establish an unfiltered provider-suite pass
+or weaken required CI.
 
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py

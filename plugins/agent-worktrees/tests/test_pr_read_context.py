@@ -44,9 +44,7 @@ def test_front_door_threads_read_from_neutral_cwd(monkeypatch, tmp_path, capsys)
     monkeypatch.setattr(pr_read_context, "load_read_config", lambda path=None: object())
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                         lambda *args: pr_config.ForeignRepoResolution(repo, "target"))
-    monkeypatch.setattr(providers, "get_provider", lambda name: SimpleNamespace(
-        authority_endpoint=lambda api_base: api_base.rstrip("/"),
-    ))
+    monkeypatch.setattr(providers, "get_provider", lambda name: object())
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: None)
     monkeypatch.setattr(pr_thread_report, "thread_report",
                         lambda *args, **kwargs: {"supported": True, "threads": []})
@@ -154,9 +152,7 @@ def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, ca
     monkeypatch.setattr(pr_config, "_resolve_repo_remote", lambda *args: "")
     monkeypatch.setattr(repos, "list_repos", lambda: [])
     monkeypatch.setattr(pr_watch, "build_fetch", fetch)
-    monkeypatch.setattr(providers, "get_provider", lambda name: SimpleNamespace(
-        authority_endpoint=lambda api_base: api_base.rstrip("/"),
-    ))
+    monkeypatch.setattr(providers, "get_provider", lambda name: object())
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: None)
 
     def threads(*args, api_base="", **kwargs):

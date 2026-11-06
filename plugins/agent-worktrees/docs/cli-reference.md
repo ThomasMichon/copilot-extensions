@@ -64,10 +64,15 @@ Binding availability means that target can be selected for the existing read;
 it is not authorization, provider reachability or observation freshness.
 
 Discovery projects at most 24 associations, with explicit omissions, within
-the existing 1 MiB body budget. One invocation shares one fresh configuration
+the existing 1 MiB body budget, measured using the actual versioned, indented
+stdout envelope and newline. One invocation shares one fresh configuration
 acquisition scope. It performs no credential/forge read, Git remote discovery,
 Git fetch, service startup or canonical write of its own; the status command's
 existing Git/liveness/bootstrap behavior is unchanged.
+Duplicate YAML keys in record evidence and malformed or duplicate-key registry
+sources remain unavailable; they cannot overwrite earlier evidence into an
+empty success or silently select a related fallback. Hosting inputs use the
+same surrounding-whitespace normalization as the existing snapshot fetch.
 The record is reread and checked against the selected worktree incarnation and
 again after binding resolution. Changed, malformed, oversized or legacy
 incarnation evidence remains unavailable, not an empty success.
@@ -80,6 +85,9 @@ body budget, the optional response reports `availability.status: unavailable`
 with reason `association-byte-budget`, without replaying the oversized core.
 The original cache is unchanged; consumers retain independently obtained views
 rather than treating this bounded failure as an empty core.
+Oversized or malformed subject metadata instead yields the bounded
+`association-metadata-overflow` availability reason without reproducing or
+truncating the identity into another subject.
 
 Claims and recorded `open`, `merged`, `closed` or other lifecycle state do not
 establish current provider state, acceptance or claim release. This operation
