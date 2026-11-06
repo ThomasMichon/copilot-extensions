@@ -119,6 +119,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   watermarks, withdrawal and changed-preview refusal without carrier enrollment.
 - [x] Prove native canonical mapping resolution and explicitly confirmed
   existing-repository binding through the selected owner, without automatic adoption.
+- [x] Prove explicitly confirmed Copilot scalar-floor adoption through native
+  configuration, alias scope, validation and the serialized settings owner.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -416,3 +418,105 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   validation and the real settings writer, with fixture-resolved context only.
   This does not qualify an installed owner or carrier. Review and exact-source
   CI remain required; the parent effort stays Active.
+
+### 2026-11-06 - Copilot scalar owner merged
+- #11037 merged as `c9554dc850856fb118a6396c978c80dd86d19b4f` after current-head
+  Copilot approval with no findings, resolved threads and green required CI.
+  The final hash-order controls passed without skips; the earlier focused
+  correction packet preserved native precedence and unmanaged state.
+- Completed only the explicit Copilot scalar-owner checkpoint. Empty native
+  requirement unions remain unsupported with a visible refusal. The other
+  domain owners, selected-carrier exchange and native/installed qualification
+  remain open; release and running adoption are not inferred from this merge.
+- Next is owner-controlled configuration-only adoption for retained telemetry,
+  preserving preprovisioned exclusive namespaces and custom sink declarations.
+  Maintenance and venue preferences retain their existing effect owners.
+  Health probes, scheduling and live carrier qualification remain Phase 5;
+  no carrier write, enrollment, update or service activation is authorized here.
+
+### 2026-11-06 - Native retained-configuration provider
+- Claimed #11050 for the producer-owned configuration prerequisite. Bridge and
+  Dispatch now expose v1 runtime support, bounded preview and confirmed atomic
+  apply over their native targets. The dependency-free shared planner receives
+  the existing operation-lock and strict configuration writer from each owner.
+- Preview creates nothing. Apply rechecks current bytes, paths, namespace and
+  environment sink under custody, preserves custom/legacy modes and unrelated
+  fields, and starts no factory, buffer, coordinator or service.
+- The Windows Bridge packet passed 40 cases; its one invalid cross-platform
+  fixture was corrected to use a native absolute path and the three preservation
+  controls passed. Dispatch passed 31 offline-adoption/retention/legacy cases.
+  Both real normal CLI processes exercised preview then confirmed apply in
+  fresh isolated configuration roots. Existing retained-loader behavior passed.
+  The final adoption packets passed 21 Bridge and three Dispatch cases without
+  skips, including strict nonfinite-number refusal and the imported parser.
+  Ruff, install contract, module caps, documentation/runbook checks and
+  whitespace passed. Review and exact-source CI remain required before merge.
+- Unit and lightweight end-to-end lanes use actual native parser/configuration
+  and lock/write owners. Fresh roots prove first configuration without bootstrap
+  or service activation. An installed/live external lane is not exercised: this
+  operation has no external backend, and installed/carrier/activation effects
+  remain independently held. Source-only Windows evidence does not qualify
+  Linux/macOS native execution or any deployed producer.
+- Only providers expand in this slice. Machines must later discover support
+  from its selected producer executable before adoption; unsupported or
+  rolled-back providers retain a visible pre-effect refusal, never a fallback
+  writer. The parent preference/carrier and health-engine gates remain open.
+
+### 2026-11-06 - Provider review corrections
+- #11058's first current-head review identified two real prerequisite gaps:
+  payload launchers could provision a missing runtime, and byte-based JSON
+  decoding accepted encodings the native UTF-8 loaders reject.
+- Both producers' Bash/PowerShell runtime gates now resolve telemetry commands
+  read-only and refuse missing runtimes before installation. Existing ordinary
+  first-use behavior remains unchanged. Strict UTF-8 decoding refuses BOM and
+  UTF-16/32 input even when retained settings otherwise match.
+- Bridge's corrected packet passed 11 cases with six unavailable native POSIX
+  skips, including actual payload refusal in legacy/namespaced roots, existing
+  observer behavior, encoding refusal and normal confirmed adoption. Dispatch
+  passed three actual PowerShell payload controls with three POSIX skips.
+  Fixture corrections exclude PowerShell-owned startup caches from plugin
+  state assertions and do not invoke Windows' WSL launcher as native Bash.
+- The first CI unit lane passed; its strict type gate rejected three missing
+  generic parameters in the new shared API. Added precise callback/lock/parser
+  annotations; the admitted library passes Python-3.10 Linux and Windows type
+  targets (18 source files each). This is portable type evidence, not native
+  Linux execution. Ruff, install and documentation checks remain green.
+- Review and exact-source CI must pass after publishing these corrections.
+  No live configuration, runtime installation, service activation or carrier
+  publication was performed.
+
+### 2026-11-06 - Projected task authority preserved
+- The second provider review found that Dispatch's early telemetry route
+  bypassed task-only admission. It now uses the same projected-environment
+  guard as the adjacent local namespaces and falls through to native admission.
+- Nine focused Windows controls passed, including empty projected-field
+  admission and a real CLI apply using a valid preview token with projected
+  task credentials. Native admission refused the command before any
+  configuration, lock or spool write.
+- The Bridge contract failure was stale CLI source inventory. Comparison
+  with the captured HTTP-52 source shows only offline telemetry registration
+  in the parser. Its current execution closure still binds the exact captured
+  CLI, so non-semantic inventory refresh was not admissible. Telemetry now
+  registers through the existing configuration registrar, preserving the
+  imported parser's behavior and restoring the wire-bound CLI bytes.
+  Historical inventory, fixtures and provenance remain unchanged.
+- The Bridge adoption/configuration packet passed 107 cases with one platform
+  skip; the immutable contract checker passed two contracts and 1,051 fixtures.
+  Ruff and whitespace passed.
+- Required current-head CI and review still gate this provider slice.
+  Machines adoption, carrier exchange, probes, scheduling and activation
+  remain open; no installed or running qualification is inferred.
+
+### 2026-11-06 - Task-prefixed cold launch remains passive
+- Current-head CI passed, but the next review identified a further launcher
+  gap: explicit task-worker root options hid the telemetry namespace from
+  the cold-start scanner, allowing provisioning before native admission.
+- Both Dispatch runtime gates now consume all five task-worker value options
+  and their equals forms before classifying telemetry. Payload controls assert
+  missing-runtime refusal without installation or configuration-state changes.
+- Seven focused Windows controls passed, including ordinary warm-runtime
+  availability; five native POSIX cases remain skipped on this host. The
+  existing warm-runtime fixture now locates the conditional resolver assignment
+  introduced by the configuration-only gate. Ruff and whitespace passed.
+- Fresh current-head review and CI remain required. This correction does not
+  authorize runtime installation, active capture or carrier publication.

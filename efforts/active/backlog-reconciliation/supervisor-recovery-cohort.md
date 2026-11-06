@@ -87,3 +87,20 @@ claim, checkout, process, lock, materialized spec or consumer responsibility.
 See [Backlog Reconciliation](README.md) for the campaign's continuing gate and
 the [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>) for intake
 and subsequent reviewed delivery or tracking disposition.
+
+## Reviewed delivery and separate tracking disposition
+
+#11060 merged as `73ffe9a0e496d0473382280b0b4dfdb40d4041d6` after
+current-head Copilot approval, nine complete successful pre-merge contexts
+and zero review threads. All four reviewed/merged/current document blobs
+matched, and this complete 89-line published intake was read back. The
+bounded documentation suite passed 133 tests; the 24-plugin guard passed,
+with supervised cleanup verified. Only the publication child finalized,
+retaining its checkout; the campaign Plan and Validation remain Active.
+
+Then #6186 retired NOT_PLANNED under independently OPEN #6185, audit 243.
+The actual whole current parent, original child title/body/assignment and
+old discussion were rechecked; all SR/SRV technical acceptance and actual
+implementation, source and resource duties remain. No fix is declared.
+Two identical complete nine-page scans measure 803 whole OPEN, 74 above
+fixed 729: this one campaign departure is outweighed by two eligible arrivals.
