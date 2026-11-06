@@ -816,7 +816,7 @@ def _validate_contract(
                     )
     elif contract_id == "agent-bridge.session-host-wire":
         constants = _integer_constants(
-            REPO / "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+            REPO / "libs/copilot-driver-core/src/agent_remote_driver/session_host/protocol.py",
             errors,
             f"{label}.production_constants",
         )

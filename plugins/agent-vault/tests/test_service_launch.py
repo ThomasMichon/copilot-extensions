@@ -349,6 +349,7 @@ def test_service_launch_captures_qualified_discovery_before_changing_cwd(tmp_pat
 def test_service_snapshot_preserves_relative_selected_config_and_unicode_caller(tmp_path, monkeypatch):
     root = tmp_path / "configuration-\u03bb"
     root.mkdir()
+    monkeypatch.chdir(root)
     monkeypatch.setattr(configuration, "owner_report", lambda root: None)
     monkeypatch.setenv(config.CONFIG_ENV, "selected.json")
     assert configuration.service_configuration_snapshot(str(root)) == {
@@ -357,15 +358,18 @@ def test_service_snapshot_preserves_relative_selected_config_and_unicode_caller(
 
 
 def test_bound_service_uses_persisted_nondefault_activation_file(tmp_path, monkeypatch):
-    caller, state = tmp_path / "caller", tmp_path / "state"
+    caller, discovery, state = (tmp_path / name for name in ("caller", "discovery", "state"))
     caller.mkdir()
+    discovery.mkdir()
     state.mkdir()
     selected = caller / "selected.json"
     selected.write_text('{"enabled":true}', encoding="utf-8")
     monkeypatch.setattr(configuration, "owner_report", lambda root: None)
     monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
     monkeypatch.setenv(config.CONFIG_ENV, "selected.json")
-    snapshot = configuration.service_configuration_snapshot(str(caller))
+    monkeypatch.chdir(caller)
+    snapshot = configuration.service_configuration_snapshot(str(discovery))
+    assert snapshot == {"root": str(discovery), "config": str(selected)}
     monkeypatch.setenv(config.CONFIG_ENV, snapshot["config"])
     config.bind_service_configuration(snapshot["root"])
     monkeypatch.chdir(state)

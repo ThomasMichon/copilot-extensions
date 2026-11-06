@@ -27,16 +27,35 @@ REPO = Path(__file__).resolve().parents[1]
 CONTRACT = "plugins/agent-bridge/contract/"
 CURRENT = CONTRACT + "fixtures/session-host/current/"
 REGISTRY = CONTRACT + "registry.json"
-FILES = ("wrapper-authority-v1.json", "wrapper-exec.json", "wrapper-consent.json")
+FILES = (
+    "wrapper-authority-v1.json", "wrapper-exec.json", "wrapper-consent.json",
+    "messages.json", "wrapper-settings-reader.json",
+)
 SOURCES = (
-    "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
-    "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
-    "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+    "libs/copilot-driver-core/src/agent_remote_driver/preference_attestation.py",
+    "libs/copilot-driver-core/src/agent_remote_driver/preference_exec.py",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/preference_spawn.py",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_host/protocol.py",
+    "libs/copilot-driver-core/src/agent_remote_driver/session_preferences.py",
 )
 
 
+def relocated_vector(commit: str, vector: dict, source: str) -> dict:
+    """Rebind only the two fixed, byte-identical source moves, not their payloads."""
+    legacy = {
+        SOURCES[3]: "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+        SOURCES[4]: "plugins/agent-bridge/src/agent_bridge/session_preferences.py",
+    }
+    captured = vector["captured_from"]
+    if (source not in legacy or captured["source_path"] not in (source, legacy[source])
+            or captured["source_git_blob"] != evidence.git_blob(commit, source)
+            or captured["source_sha256"] != evidence.git_file_sha256(commit, source)):
+        raise ValueError("source-only relocation requires identical captured blob and SHA-256")
+    return copy.deepcopy(vector)
+
+
 def committed(commit: str, path: str) -> str:
-    result = evidence.git("show", f"{commit}:{path}")
+    result = evidence.git("show", f"{commit}:{path}", "--")
     if result.returncode:
         raise ValueError(f"committed capture input unavailable: {path}")
     return result.stdout
@@ -153,7 +172,9 @@ def capture(commit: str) -> dict[str, str]:
     for path in (*SOURCES, "plugins/agent-bridge/plugin.json"):
         unchanged(commit, path)
     sys.path[:0] = [
-        str(REPO / "plugins/agent-bridge/src"), str(REPO / "libs/agent-procutil/src"),
+        str(REPO / "plugins/agent-bridge/src"),
+        str(REPO / "libs/copilot-driver-core/src"),
+        str(REPO / "libs/agent-procutil/src"),
     ]
     a = importlib.import_module("agent_bridge.preference_attestation")
     input_paths = list(SOURCES)
@@ -171,7 +192,11 @@ def capture(commit: str) -> dict[str, str]:
     )
     registry = copy.deepcopy(snapshot.materialized)
     vectors = [json.loads(committed(commit, CURRENT + name)) for name in FILES]
-    authority, execution, consent = vectors
+    authority, execution, consent = vectors[:3]
+    vectors[3:] = [
+        relocated_vector(commit, vector, source)
+        for vector, source in zip(vectors[3:], SOURCES[3:], strict=True)
+    ]
     frame, status, executed = producer_probe(a, terminal, authority, b"\x01")
     refused, refused_status, refused_exec = producer_probe(a, terminal, authority, b"")
     if status != 0 or not executed or refused_status != 78 or refused_exec:
@@ -224,7 +249,7 @@ def capture(commit: str) -> dict[str, str]:
     consent.update(
         component_digest=a.component_digest(), authority_modules=list(a.AUTHORITY_MODULES),
         ordering=order,
-        release_metadata_normalized="agent_bridge._FALLBACK_VERSION and legacy agent_bridge.__version__",
+        release_metadata_normalized="agent_remote_driver._FALLBACK_VERSION and agent_remote_driver.__version__",
     )
     contract = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.session-host-wire")
     version = evidence.plugin_version_at(commit)
@@ -246,15 +271,18 @@ def capture(commit: str) -> dict[str, str]:
             key: value for key, value in metadata.items()
             if key not in {"source_sha256", "protocol_generation"}
         }
-        provenance.update(
-            generation=generation,
-            capture_method=(
+        method = (
+            "Committed-source capture_bridge_current_authority.py: source-only "
+            "relocation of the existing current fixture; canonical source Git blob "
+            "and SHA-256 equal the prior capture, with every non-provenance payload "
+            "field unchanged; no new runtime observation."
+        ) if name in FILES[3:] else (
                 "Committed-source capture_bridge_current_authority.py: real terminal "
                 "settings reader, receipt emitter/verifier and Host consent/refusal "
                 "ordering with deterministic synthetic execution-space inputs; "
                 "normalize only standalone root-module release labels."
-            ),
         )
+        provenance.update(generation=generation, capture_method=method)
         if provenance not in contract["provenance"]:
             contract["provenance"].append(provenance)
     output.update({
@@ -270,7 +298,7 @@ def output_paths(output: dict[str, str]) -> dict[str, Path]:
     """Preflight every output and ancestor before reading or writing payloads."""
     allowed = {REGISTRY, *(CURRENT + name for name in FILES)}
     if not allowed.issubset(output):
-        raise ValueError("capture output set must contain only the four approved files")
+        raise ValueError("capture output set must contain only the six approved files")
     # Fixed packet ownership is unchanged; additional outputs must be verified
     # provenance members of the proposed complete index, never caller paths.
     chunks = set()
@@ -281,7 +309,7 @@ def output_paths(output: dict[str, str]) -> dict[str, Path]:
         )
         chunks = set(metadata.inputs) - {REGISTRY}
         if set(output) - chunks != allowed:
-            raise ValueError("capture output set must contain only the four approved files and provenance")
+            raise ValueError("capture output set must contain only the six approved files and provenance")
     root = REPO.resolve(strict=True)
     paths = {}
     identities = {}
@@ -354,7 +382,7 @@ def main() -> int:
     except (ValueError, OSError) as exc:
         print(f"capture-bridge-current-authority: {exc}", file=sys.stderr)
         return 1
-    print(f"capture-bridge-current-authority: OK (3 current vectors; source {args.source_commit})")
+    print(f"capture-bridge-current-authority: OK (3 current vectors, 2 source-only relocations; source {args.source_commit})")
     return 0
 
 

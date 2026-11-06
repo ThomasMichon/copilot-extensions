@@ -28,6 +28,53 @@ def contract() -> dict:
     ))
 
 
+def _configuration(result: dict) -> dict:
+    selection = result["selection"]
+    details = (
+        f"Target: {result['target']['resource']}\n"
+        f"Installation: {result['target']['installation']}\n"
+        f"Machine: {result['target']['machine']}\n"
+        f"Registry revision: {result['registry_revision']}\n"
+        f"Observed at: {result['observed_at']}\n"
+        f"Host: {selection['host'] or '(unavailable)'}\n"
+        f"Repository: {selection['repository'] or '(unsupported)'}\n"
+        f"Configured account: {selection['account'] or '(not selected)'} "
+        f"({selection['account_source']})\n"
+        f"Observation: {result['status']}\n"
+        "Read only: no sign-in, credential write, global account switch or provisioning.\n"
+        "Git transport, GCM, write permission, CodeSpaces, MCP and Copilot are not observed.\n"
+        "This point-in-time result does not admit a first task or complete authentication setup."
+    )
+    failure = result.get("failure")
+    if failure:
+        details += "\nFailure: " + json.dumps(failure, sort_keys=True)
+    if result["status"] == "selection-required":
+        details += "\nConfigure the repository account through the native repository owner, then refresh."
+    elif result["status"] == "unsupported":
+        details += "\nThis inspection supports github.com only; other credential owners remain usable."
+    elif result["status"] == "unavailable":
+        details += "\nInspect the named native credential/access stage, then refresh; no sign-in action is provided."
+    rows = [
+        {
+            "id": key, "title": title, "status": result[field]["status"],
+            "subtitle": selection["repository"] or "(unsupported repository)",
+            "card": {"title": title, "body": details},
+        }
+        for key, title, field in (
+            ("credential", "Selected GitHub CLI credential", "credential"),
+            ("identity", "Selected account identity", "identity"),
+            ("repository", "Repository metadata read", "repository_access"),
+        )
+    ]
+    return {
+        **result,
+        "configuration": {
+            "entries": rows,
+            "summary": {"status": result["status"], "observed_at": result["observed_at"]},
+        },
+    }
+
+
 def inspect_repository(project: str, name: str) -> dict:
     project, name = resource_name(project), resource_name(name)
     registry = repos.read_registry(strict=True)
@@ -61,9 +108,9 @@ def inspect_repository(project: str, name: str) -> dict:
         "status": "unsupported",
     }
     if not slug or host != "github.com":
-        return result
+        return _configuration(result)
     if not login:
-        return {**result, "status": "selection-required"}
+        return _configuration({**result, "status": "selection-required"})
     from .github_credentials import CredentialObservationError, inspect_github_account
 
     try:
@@ -72,7 +119,7 @@ def inspect_repository(project: str, name: str) -> dict:
         observation = {
             "status": "unavailable", "failure": {"stage": exc.stage, "code": exc.code},
         }
-    return {**result, **observation}
+    return _configuration({**result, **observation})
 
 
 def command(argv: list[str]) -> int:

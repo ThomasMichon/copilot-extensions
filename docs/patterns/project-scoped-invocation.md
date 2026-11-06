@@ -129,3 +129,8 @@ one keeps *where* an agent runs from changing how it is reached; this one keeps
   verbs retain an explicit `--all-projects` cross-project view.
 - **Realized (dispatcher):** per-project `<repo>` binstubs dispatch the core
   agent-* layers on Windows and POSIX while preserving legacy worktree verbs.
+- **Realized (Vault):** `<repo> vault ...` supplies the resolved native
+  `--configuration-root` while preserving the caller directory and environment
+  path semantics. Strict native parsing accepts the required context or refuses
+  an unsupported provider before command dispatch; there is no CWD fallback.
+  The scope is an explicit argument, not an ambient project-identity variable.

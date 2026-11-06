@@ -42,7 +42,14 @@ def test_acquisition_launch_unselected_host_keeps_requested_reap_timeouts(tmp_pa
         stdout=io.BytesIO(b"expected test exit"), pid=os.getpid(),
         poll=lambda: 1, returncode=1,
     ))
-    monkeypatch.setattr(launcher.subprocess, "Popen", popen)
+    original_popen = launcher.subprocess.Popen
+    monkeypatch.setattr(
+        launcher.subprocess, "Popen",
+        lambda argv, *args, **kwargs: (
+            original_popen(argv, *args, **kwargs) if "--support-json" in argv
+            else popen(argv, *args, **kwargs)
+        ),
+    )
     with pytest.raises(RuntimeError, match="exited early"):
         launcher.launch_session_host(
             [sys.executable, "-c", "pass"], state_dir=tmp_path,
@@ -112,6 +119,38 @@ def test_acquisition_launch_final_host_is_once_and_keeps_unknown(local_launch):
     with pytest.raises(RuntimeCustodyError, match="held"):
         rig.owner.begin_host()
     assert AcquisitionJournal(rig.db).read_launch(rig.original)["stage"] == "starting"
+
+
+@pytest.mark.parametrize("change", ["none", "epoch", "argv", "session", "environment", "host"])
+def test_original_host_live_channel_rechecks_exact_journal_and_execution(local_launch, change):
+    rig = local_launch
+    argv = [sys.executable, "-c", "pass"]
+    context = rig.owner.child_context(argv, rig.target.cwd)
+    rig.owner.begin_host()
+    rig.owner.retain_process(SimpleNamespace(pid=os.getpid(), poll=lambda: None), "fixture-state", "")
+    request = {
+        "host_pid": os.getpid(), "parent_pid": os.getpid(),
+        "argv": argv, "cwd": rig.target.cwd, "session_id": rig.session.session_id,
+        "environment": {"AGENT_BRIDGE_SESSION_ID": rig.session.session_id},
+    }
+    if change == "epoch":
+        close(rig.db, rig.identity, rig.producer)
+    elif change == "argv":
+        request["argv"] = [*argv, "changed"]
+    elif change == "session":
+        request["session_id"] = "different-session"
+    elif change == "environment":
+        request["environment"]["AGENT_BRIDGE_SESSION_ID"] = "different-session"
+    elif change == "host":
+        request["host_pid"] += 1
+    before = rig.db.runtime_epoch(rig.identity)
+    if change == "none":
+        rig.owner.admit_host_child(context, request)
+    else:
+        with pytest.raises(RuntimeCustodyError):
+            rig.owner.admit_host_child(context, request)
+    assert rig.db.runtime_epoch(rig.identity) == before
+    assert rig.owner.read_launch()["result"] is None
 
 
 @pytest.mark.asyncio

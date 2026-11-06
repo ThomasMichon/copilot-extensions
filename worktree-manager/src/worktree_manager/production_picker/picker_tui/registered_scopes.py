@@ -54,10 +54,15 @@ def aggregate(runtime, pivot, scopes, *, annotate=True):
     summaries = {}
     for scope in scopes:
         state, entries, error = runtime.get(scope)
+        pending_read = getattr(runtime, "read_pending", None)
+        refreshing = (
+            getattr(pivot, "placement", "left") == "config" and state == "ready" and entries
+            and pending_read is not None and pending_read(scope)
+        )
         snapshots.append({"scope": scope, "state": state, "error": error})
         if state == "error":
             failures.append(f"{scope or 'provider'}: {error or 'read failed'}")
-        elif state in {"idle", "loading"}:
+        elif state in {"idle", "loading"} or refreshing:
             pending.append(scope or "provider")
         for entry in entries:
             if any(str(key).startswith("_manager_") for key in entry):
@@ -80,7 +85,8 @@ def aggregate(runtime, pivot, scopes, *, annotate=True):
             status.append("read failures: " + "; ".join(failures))
         if len(scopes) > 1 or rows:
             summary.update(
-                banner_text=f"{len(rows)} available/cached row(s); " + " · ".join(status),
+                banner_text=f"{len(rows)} available/cached row(s); " + " · ".join(status)
+                + ("; prior observations stale" if rows and pending else ""),
                 banner_level="warn" if failures else "info",
             )
     if not scopes:
@@ -108,7 +114,7 @@ def snapshot(engine, pivot):
 def summary(engine, pivot):
     scopes = request_scopes(engine, pivot)
     runtime = engine._pivot_runtime(pivot)
-    if len(scopes) == 1:
+    if len(scopes) == 1 and getattr(pivot, "placement", "left") != "config":
         getter = getattr(runtime, "get_summary", None)
         return getter(scopes[0]) if getter is not None else {}
     return aggregate(runtime, pivot, scopes)[3]

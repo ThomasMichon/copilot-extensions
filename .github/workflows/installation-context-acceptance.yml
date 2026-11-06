@@ -1214,6 +1214,10 @@ jobs:
         id: chat-python
         with:
           python-version: ${{ matrix.python }}
+      - name: Python 3.11 runner bootstrap
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Independent artifacts and native Chat acceptance
         env:

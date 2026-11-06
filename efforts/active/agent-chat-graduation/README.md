@@ -181,10 +181,13 @@ requirements.
   core, independent cursor and stable-request semantics with synthetic tests.
 - [x] Package a dependency-light installed client with no source checkout,
   sibling venv or Copilot requirement for its actual command.
-- [ ] Provide selected-client identity/catalog and explicit setup through the
+- [x] Provide selected-client identity/catalog and explicit setup through the
   existing lifecycle primitives before plugin/harness adoption. The service
   writer owns this integration; connection and adopter code must not fork
   an installer or infer selection from PATH.
+  #8696 qualifies explicit manual-client source/role selection and retained
+  installed invocation on native Linux/Windows. It does not authenticate a
+  release feed or provide service/native adoption.
 - [x] Package an independently operable hosted service with no source checkout,
   sibling venv or Copilot plugin requirement.
   The foreground `service` artifact merged in #7361; #7266 subsequently
@@ -260,9 +263,12 @@ requirements.
   qualify source-removed client invocation, exact bootstrap health and immutable
   reuse on native Linux/Windows Python3.10/3.11. #8531 completes this internal
   construction boundary, not selection, command publication or removal.
-- [ ] Implement selected manual-client setup and preserving removal through
+- [x] Implement selected manual-client setup and preserving removal through
   supported canonical custody, then qualify independently installed invocation.
   Do not turn the existing local wheel catalog into release-selection authority.
+  #8696 merged after corrected-head approval, required CI and the complete
+  486-node native portfolio on Linux/Windows Python3.10/3.11. The setup bootstrap
+  requires Python3.11; the separate Python3.10 floor refusal is explicitly tested.
 - [ ] Integrate the existing service lifecycle owner's stable-launcher,
   health/cutover and recovery binding; no second Chat supervisor, installer
   engine, command ledger or prerequisite Fleet deployment.
@@ -354,12 +360,14 @@ requirements.
   not this native portfolio.
 - [x] **Installed client:** flush-before-cursor-CAS and crash-released reader
   locks through the actual installed command, not just the callable core.
-- [ ] **Installed boundary:** fresh and repeat installation, actual console/
+- [x] **Installed boundary:** fresh and repeat installation, actual console/
   payload invocation, no source fallback, compatible previous selection and
   source-independent operation after the fixture checkout is unavailable.
-  #8531 qualifies independently constructed client slots and retained invocation
-  on both native platforms; selected-installation publication, different-code
-  update/recovery and preserving removal remain open.
+  #8531 qualifies independently constructed client slots and retained invocation.
+  #8696 adds selected manual-client publication, different-code update,
+  interrupted publication/recovery/removal, source-removed setup-module/catalog
+  invocation and preserving removal on both native platforms. This is the manual
+  client boundary; governed service lifecycle and native adoption remain open.
 - [ ] **Real consumer:** authenticated service plus two genuine existing
   participants exchange one stable-ID message and consume its exact body;
   scans and waits do not advance semantic reading.
@@ -463,7 +471,7 @@ an independent SDK version or live native qualification.
 | Recipient inbox and eligible sources | The client accepts explicit actor/channel controls; Bridge `inspect_live_inbox` projects direct-message receipts | No examined client API supplies authoritative Chat recipient/source assignment. The client/service writer coordinates that versioned assignment and its isolation/rebind errors with the existing local service/Bridge owner. A direct-message receipt projection is not this API. |
 | Shared notification intake | Bounded Chat `scan` v1; Bridge remote-event multiplexing and protocol13 `remote/events` | Remote runtime events do not subscribe to the conversation store. The service writer and existing host/Bridge owner must publish the Chat-feed registration, generation, finite callback, cancellation and quiescence binding. No per-session Python helper or continuous Node polling is an acceptable substitute. |
 | Native admission and completion | SDK `session.send`, primary final-ID semantics and optional `originatingMessageId`; bounded queue/event-log observations | Exact own primary correlation is usable. Unknown or non-primary admission remains held until its native host supplies authoritative reconciliation; queue absence, unrelated idle and expired history do not supply it. |
-| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with nine checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
+| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed resource catalog and explicit selected manual-client setup from #8696 | The connection writer can expose the supported inert/manual surface. Governed service setup, release-feed evidence and native adoption remain open; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
 | Resident cost | The native host's ordinary extension process is the baseline | Existing service/host multiplexing owns shared listening. Measure increasing recipients, bounded callback time/bytes, zero quiet/self/irrelevant/reconnect-only model turns and exact deregistration separately from that baseline. |
 
 Repository API homes are `services/chat/src/agent_chat_service/`,
@@ -482,6 +490,143 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-11-06 - Recover image qualification and repair unit admission
+
+- Candidate `6e00cf558a27a93f99b774493251a08154143009` received
+  approval5796163288 with all three findings resolved. Its required4174-node
+  unit packet passed with coverage in91.479s. Native run42168646392 completed
+  all four504-node cells: Linux3.10/3.11 full504 passed in47.13/46.41s;
+  Windows3.10/3.11 full502+2 declared skips in89.80/134.68s. Both lanes
+  reported complete execution and membership
+  `d7c9a1d07d02e82c27590e01308946bf9769b7bc3fe7669e905a59752a98d823`.
+  The fresh image also passed against its recorded merge candidate.
+- Required source guards still refused unclassified Docker lifecycle directives
+  and finite dispatch before `_run`'s admission. Classify the image's resident
+  entrypoint/command and finite health probe through the existing census and
+  service owner, and dispatch finite modes before entering the daemon-only
+  function. The unchanged daemon guard and both finite-mode regressions pass;
+  current-head CI and review remain required.
+- Retained-only startup now validates all current tables and required columns
+  before schema bootstrap can write. Missing event, membership or collaboration
+  tables and a renamed stable-request column refuse without changing database
+  bytes; ordinary local creation retains its prior additive behavior.
+  Every disposable container receives a unique name and cleanup custody before
+  launch, including root-volume preparation and refusal/initialization probes.
+  Timeout controls require forced removal of the exact attempted containers.
+- Native run42167211692 passed both Python3.11 platforms but its Python3.10
+  cells failed before preparation: the runner's cache helper needs `tomllib`.
+  Bootstrap the runner with Python3.11 while `UV_PYTHON` still selects the
+  declared3.10/3.11 test interpreter. Do not remove the3.10 cells or change
+  test budgets. Separate focused packets passed13 retained-schema/finite/
+  membership controls and9 image-cleanup/workflow controls. The combined
+  portfolio now contains504 nodes; refreshed native qualification is pending.
+- Fresh image run42166902613 reached the image step after acceptance but
+  refused its obsolete repository-local tooling path. Resolve the prepared
+  interpreter through the standalone runner's existing `default_python`
+  function, preserving its external-scratch ownership rather than introducing
+  another cache location. All26 image/template contracts pass in3.47s;
+  actual image execution remains required after this correction.
+- Corrected candidate `10b7379e0bc5779437e02a604badb2e262e64648`
+  passed native Windows acceptance422+2 declared POSIX skips in115.52s
+  under180s, and full498+the same skips in367.58s under600s.
+  Both500-node maps report complete execution and membership
+  `526c150a6fb387a76745a1e89d7a2b07986e4c3238b054e956483fcaa87ede68`.
+  The independent image/template packet passed25 cases in3.08s. Fresh hosted
+  native/image execution, required CI and current-head review remain open.
+- Reconcile the candidate with current Dev without dropping its daemon-instance
+  custody or four additional construction-resource parameters. The offline
+  image now includes the service's process-utility wheel and a private
+  disposable registry for its numeric user. Health and initialization do not
+  admit daemon instances; two new regressions preserve that finite boundary.
+  The combined portfolio contains500 nodes with unchanged qualification limits.
+- Initial rebased Windows acceptance completed in132.39 seconds with420 passes,
+  two declared POSIX skips and two failures: the installed catalog had the
+  current28 resources while its assertion still required26. Retain the failed
+  observation and require both new construction resources explicitly before
+  final qualification. No source/resource assertion or test case is removed.
+- Recovered completed native run40140118467 for candidate
+  `529246714bcbf6a401ec0b7203b9bb023ad115c5`. All four Linux/Windows
+  Python3.10/3.11 cells passed acceptance and the complete494-node portfolio
+  under the unchanged180s/600s limits. Linux ran494 cases without skips;
+  Windows ran492 with the same two declared POSIX skips. Acceptance took
+  25.95-65.84 seconds and complete execution46.63-111.59 seconds.
+- Container run40140084901 passed against its recorded merge candidate
+  `af044445d869eeac6ad494be3c79112f2438681e`, containing that source head.
+  The actual Linux/amd64 image exercised initialization/refusal, independent
+  participants, writer exclusion, graceful shutdown and retained restart.
+  Startup/restart/shutdown took5.093/5.100/0.248 seconds under the declared
+  disposable fixture limits. This is not release admission, Gateway or Komodo
+  qualification.
+- Required unit CI refused before execution because the changed retained-store
+  source still had its previous admission hash. Refresh only that source hash;
+  preserve every admitted node, coverage target, effect guard and300s budget.
+  Current required CI and review remain open; recovered native/image passes
+  do not waive them. The parent effort remains Active with its broader service,
+  private-composition, lifecycle and adoption obligations unchanged.
+
+### 2026-10-24 - Independent container-image candidate and host bindings
+
+- Added the Chat-owned offline wheel-only recipe and synthetic host
+  configuration under `services/chat/container`. It runs one foreground
+  non-root application with no exposed backend port, read-only configuration
+  and key inputs, separate disposable endpoints and retained conversation
+  storage. No Gateway connector, manager executor or second supervisor is
+  introduced.
+- Ordinary image startup requires an existing matching store. First creation
+  is explicit and empty-directory-only; missing, empty, mismatched or
+  redirected retained storage refuses without creating replacement history.
+  The canonical writer lease remains with retained data, not the disposable
+  run directory. Application health is authenticated over the canonical
+  endpoint and does not open a second database connection.
+- Local focused qualification passed 47 host/installed-artifact/inventory
+  tests, including an actual delayed-response health deadline. The existing
+  full Windows/Python 3.11 portfolio passed 490 tests plus its two declared
+  POSIX skips in 453.42 seconds before the final two refusal parameter cases
+  were added; those cases passed in the focused packet. The final inventory
+  contains 494 nodes. Recipe and existing template contracts passed 25 tests.
+  Local acceptance attempts exceeded the unchanged 180-second cap; this is
+  not a passing acceptance result.
+- Added the focused Linux Docker qualification lane for the actual
+  source-free image, explicit initialization, health, two local participants,
+  singleton refusal, SIGTERM and retained restart/deduplication. The pinned
+  Python base and resource bounds are disposable qualification fixtures,
+  not release admission or measured production capacity. Its execution and
+  the final native matrix remain pending for this candidate.
+- Parent status and all image-release/private-composition/Komodo/Gateway/
+  cross-host fencing/lifecycle/adoption obligations remain open. No private
+  configuration, release activation, production resource or running service
+  was changed.
+
+### 2026-10-24 - Selected manual-client setup reviewed, qualified and merged
+
+- #8696 merged as `1b2e67ce76e2853d9c70e95f3c8dc6d65cb80ae6`
+  after approval5640170231 of exact head
+  `b9978f2b9d043f8d5172205631148ca68d560163`, complete review-body
+  assessment, both resolved threads and all required green checks. Managed
+  completion used only the configured Maintainer exception to an additional
+  CODEOWNER vote; no CI bypass or unresolved finding was waived.
+- [Native run40135813390](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40135813390)
+  completed all four Linux/Windows Python3.10/3.11 cells at that exact head.
+  Every acceptance/full lane executed the same complete486-node inventory,
+  hash `90f16dd3ca9936096022efa19bea4fbaa8743a240eee7ea72e1d233691429899`.
+  Linux3.10 acceptance421/full486 passed in33.87s/42.79s; Linux3.11 in32.18s/54.51s.
+  Windows3.10 acceptance419/full484 passed with2 POSIX-only skips in53.32s/77.01s;
+  Windows3.11 in65.88s/122.09s. Limits remain180s/600s; no case, assertion or
+  skip-policy waiver. Positive selected construction runs on3.11;3.10 explicitly
+  qualifies its separate setup-bootstrap refusal and ordinary client support.
+- Both review defects are closed by the shared slot-admission boundary and
+  private publication inputs. The native3.11 POSIX lifecycle runs under
+  isolated `umask002`; installed invocation, actual interruption/recovery,
+  preserving removal and foreign-replacement protection remain qualified.
+- Re-read the full Plan and Validation Plan after merge. Closed only selected
+  manual-client identity/setup and its installed boundary. Service supervision,
+  Manager discovery, recipient assignment/shared listening/native admission,
+  container image/private composition/Komodo effects, migration and actual
+  authorized adoption remain open. The effort and #7238 remain Active.
+- Next slice: bind the Chat service/container realization to existing lifecycle
+  and deployment owners, preserving their implementation boundaries. A source
+  merge is not a release, running rollout or private deployment.
 
 ### 2026-10-24 - Selected setup review corrections
 

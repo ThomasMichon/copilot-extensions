@@ -113,7 +113,7 @@ observe traversal, exercise real readable file/directory links and retain
 script read failures. Enumeration failure is tested in both scan modes.
 Seven scan cases plus the actual complete-guard retention consumer passed,
 eight tests with no skips on native Windows and exactly two workers. The
-standalone real guard also passed for 13 runtime plugins; combined time was
+standalone real guard also passed for 13 then-current runtime plugins; combined time was
 33.83 seconds including preparation/cleanup, with unchanged item deadline,
 diagnostic bound and containment caps. Ruff and diff checks passed.
 

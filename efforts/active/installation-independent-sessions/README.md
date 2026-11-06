@@ -2645,7 +2645,7 @@ Cache release and installed-batch evidence do not qualify the containing unified
 - Fixed seven encountered cold-seed test fixtures to answer the current
   hosting-admission contract before modeling an older seed interface. No
   production hosting policy was weakened. Install-contract validation passed
-  for all 13 runtime plugins.
+  for all 13 then-current runtime plugins.
 - The default-off, exact-SHA Windows acceptance job includes the two focused
   overlap cases without expanding required unit CI. Draft #9320 published
   head `f1f097ccfaa5aef7fed72746d39eff3a382ae8a0`; Windows run `40605886719`,

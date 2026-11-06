@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+import os
 from typing import TYPE_CHECKING, Any, Protocol
 
 from zdd.diagnostics import process_start_time
@@ -129,6 +130,26 @@ class LocalLaunchOwner(ABC):
         self._host_process, self._host_pid = proc, proc.pid
         self._host_birth = process_start_time(proc.pid)
         self._state_file, self._nonce = state_file, nonce
+
+    def admit_host_child(self, context: str, request: dict[str, Any]) -> None:
+        """Answer only the retained Host's live pre-exec check, including late readiness."""
+        from .local_host_admission import require_child_admission
+
+        if (
+            self._host_process is None or self._host_process.poll() is not None
+            or request["host_pid"] != self._host_pid or request["parent_pid"] != os.getpid()
+            or not self._host_birth or process_start_time(self._host_pid) != self._host_birth
+        ):
+            raise RuntimeCustodyError("Original local startup Host changed")
+        require_child_admission(
+            context, cwd=request["cwd"], session_id=request["session_id"],
+            argv=request["argv"], parent_pid=os.getpid(),
+        )
+        require_child_admission(
+            context, cwd=request["cwd"],
+            session_id=request["environment"].get("AGENT_BRIDGE_SESSION_ID", ""),
+            parent_pid=os.getpid(),
+        )
 
     def retain_host(self, host: Any) -> None:
         self._host, self._child_pid = host, host.child_pid

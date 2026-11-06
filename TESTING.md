@@ -2543,6 +2543,29 @@ contract; they are not shell qualification. Use the isolated Linux integration
 fixture for native evidence and full-plugin first-turn validation separately.
 No required unit-only CI packet is expanded by this on-demand integration file.
 
+## Chat container image qualification
+
+`chat-container-qualification.yml` runs a disposable Linux Docker proof for
+Chat-path pull requests, or manually with an immutable `candidate_ref` and an
+explicit digest-pinned `python_base`. The checked-in default is a seasoned
+qualification fixture, not an admitted release base. The source SHA and actual
+image/base/platform are recorded; no image is pushed or deployment selected.
+
+After the existing standalone runner prepares its declared tooling, the lane
+runs `tools/qualify_chat_container.py --python-base <digest-pinned-base>` from
+that prepared interpreter. It constructs a dedicated offline wheel/lock context,
+starts non-root with read-only application content and explicit fixture limits,
+then exercises retained-only startup refusal, explicit storage creation,
+authenticated health, independent participants, competing-writer refusal,
+SIGTERM and retained restart/deduplication. Resources have unique fixture names
+and are removed on exit.
+
+Native Python tests and `tools/test_chat_container_image.py` cover host and
+recipe contracts but do not substitute for this image proof. The lane does not
+qualify Gateway connectivity, Komodo application, cross-host storage fencing,
+production capacity or release admission. See
+[`services/chat/container/README.md`](services/chat/container/README.md).
+
 ## Optional historical Bridge source proof
 
 The manual `installation-context-full.yml` portfolio `bridge-contracts`
@@ -2691,6 +2714,16 @@ change the 50 ms/VM budgets or make a failed read pass. Other runs remain
 unprofiled unless explicitly selected. Portable controls preserve one call
 and exact result/exception identity in both modes. Profiled timings include
 instrumentation and are diagnostic evidence, not native performance acceptance.
+The same optional boundary brackets each original private budget's creation and
+checks with `perf_counter`, reports both elapsed-clock implementations/resolutions,
+and retains at most eight budgets with their last check, unchanged limits and VM
+steps. `elapsed_min_ms`/`elapsed_max_ms` bracket the check's elapsed instant;
+`monotonic_after_ms` is a separately sampled post-check deadline-clock delta.
+Instrumentation still counts toward the original deadline. A native Windows
+control compares both clocks around sixteen bounded delayed checks, distinguishing
+an observed early refusal from true elapsed exhaustion or a non-reproduction.
+This is a clock hypothesis control, not proof of a historical failure's cause,
+a CPU-clock substitution, a retry, or a production budget change.
 The fixture's state reader also opens its Windows handle with read/write/delete
 sharing, matching atomic publication rather than temporarily denying its
 publisher's DELETE access. A native control holds the publisher's DELETE-access

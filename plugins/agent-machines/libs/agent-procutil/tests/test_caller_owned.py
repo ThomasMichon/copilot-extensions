@@ -144,6 +144,24 @@ def test_caller_owned_uses_explicit_child_context_without_mutating_caller(tmp_pa
     assert os.environ.get("CALLER_OWNED_CONTEXT_FIXTURE") is None
 
 
+@native_execution
+def test_installation_owned_uses_explicit_child_context_without_mutating_caller(tmp_path):
+    cwd = Path.cwd()
+    environment = {**os.environ, "INSTALLATION_CONTEXT_FIXTURE": "selected"}
+    before = dict(environment)
+    result = ownership.run_installation_owned(
+        [sys.executable, "-I", "-c",
+         "import json,os;print(json.dumps([os.getcwd(),"
+         "os.environ['INSTALLATION_CONTEXT_FIXTURE']]))"],
+        cwd=tmp_path, env=environment, timeout=5, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == [str(tmp_path), "selected"]
+    assert Path.cwd() == cwd
+    assert environment == before
+    assert os.environ.get("INSTALLATION_CONTEXT_FIXTURE") is None
+
+
 def test_windows_explicit_environment_is_unicode_sorted_and_double_terminated():
     from agent_procutil._windows_caller_owned import _environment_block
 

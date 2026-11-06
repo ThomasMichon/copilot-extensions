@@ -11,7 +11,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SOURCE))
-from configuration_context import ready_owner_prefix  # noqa: E402
+from configuration_context import (  # noqa: E402
+    RepositoryContextRequired,
+    read_owner_context,
+    ready_owner_prefix,
+)
 from configuration_layers import ConfigurationError  # noqa: E402
 
 
@@ -50,6 +54,43 @@ def test_readiness_failure_never_becomes_optional_absence(tmp_path: Path) -> Non
         ready_owner_prefix(tmp_path, "agent_worktrees", resolver=refuse)
     with pytest.raises(ConfigurationError, match="relative interpreter"):
         ready_owner_prefix(tmp_path, "agent_worktrees", resolver=lambda root: Path("python"))
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_missing_repository_has_actionable_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: str,
+) -> None:
+    import subprocess
+
+    output = {"stdout": b"", "stderr": b""}
+    output[stream] = (
+        b"Could not resolve a project for 'state-root'. "
+        b"private-owner-detail-that-must-not-be-echoed"
+    )
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, **output),
+    )
+    with pytest.raises(RepositoryContextRequired, match="Repository context is missing") as error:
+        read_owner_context(["qualified-owner"], tmp_path)
+    assert "<repo> <subject>" in str(error.value)
+    assert "private-owner-detail" not in str(error.value)
+
+
+def test_other_owner_refusals_do_not_claim_repository_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 126, b"", b"binding is unresolved",
+        ),
+    )
+    with pytest.raises(ConfigurationError, match="refused the selected context") as error:
+        read_owner_context(["qualified-owner"], tmp_path)
+    assert not isinstance(error.value, RepositoryContextRequired)
 
 
 def test_standalone_payloads_ship_the_same_canonical_reader() -> None:

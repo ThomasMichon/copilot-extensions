@@ -6,10 +6,11 @@ not a replacement effort or a new head authority. Coordination remains
 [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
 Plan #10865 merged as `5c8cf8466cbaca830af80ebe7347efad83d3111f`.
 The source captures optional identity in the existing binding and consumption
-records. The passive comparison reader is source-qualified; the Companion
-consumer remains unimplemented. H1 merged in #10870 as
+records. The passive comparison reader and optional Companion consumer are
+source-qualified. H1 merged in #10870 as
 `0c51500c9284d4aeaaa6b4706ef969c8c49b4111`; H2 merged in #10884 as
-`23780cb6d5fa0b1d3147408ee8d0012b322b061b`.
+`23780cb6d5fa0b1d3147408ee8d0012b322b061b`; H3 merged in #10893 as
+`81b5a7d52efed11afde83d0f89f49b90509cc204`.
 
 ## Intent and existing evidence
 
@@ -118,15 +119,15 @@ distinction; a durable-head match alone cannot promise the same resume target.
 
 ### H3 - Optional Companion consumer
 
-- [ ] Read the declared optional contract through the existing cancellable,
+- [x] Read the declared optional contract through the existing cancellable,
       selected-engine process boundary, off the UI/render path at opening and
       explicit Refresh. Publish only to the same current selection/generation.
       No new periodic poller, daemon or persistence is needed.
-- [ ] Show the comparison in Recovery beside previous/new lineage, including
+- [x] Show the comparison in Recovery beside previous/new lineage, including
       expected consumer, durable head, read-time Picker choice and a short
       uncertainty reason. Detailed source identity stays secondary. Reopening
       derives the result again from the owners, not from an earlier popup.
-- [ ] Preserve Summary, Claims, Timeline, input/focus, popup dismissal and all
+- [x] Preserve Summary, Claims, Timeline, input/focus, popup dismissal and all
       existing optional-source behavior when this feature is unsupported or
       fails. Detection never repairs head, consumes/creates a baton, launches or
       switches a session, retires a process, files a report or supplies input.
@@ -178,16 +179,20 @@ latency; unit duration is not native input-ready performance.
       acquire mutation ownership, wake a daemon, fetch Git or invoke handoff,
       head, process or input actions. Oversized or interrupted reads remain
       unavailable, not absence or an older successful comparison.
-- [ ] H2/H3: exercise the actual parser/process and Manager codec boundaries for
+- [x] H2/H3: exercise the actual parser/process and Manager codec boundaries for
       new/new, old caller/new provider, new caller/old provider and supported
       rollback. Unknown CLI syntax remains strict; optional additive JSON is not
       support proof.
       H2's real parser/dispatch, actual consume writers and passive declaration
-      controls pass; the conditional Manager consumer remains the next slice.
-- [ ] H3: real Textual controls verify Refresh and reopen, separate previous/new
+      controls pass. H3's actual process/codec controls retain the declaring
+      runtime across activation/rollback and preserve the old row-only API.
+- [x] H3: real Textual controls verify Refresh and reopen, separate previous/new
       lineage and comparison, narrow/literal rendering, partial errors,
       selection replacement, late-result fencing and blocked-read dismissal with
       verified owned cleanup. A mismatch issues no repair/report/cutover/input.
+      #10893 qualifies 200 isolated controls with no skips, including an exact
+      native Linux blocked-child exit witness. This is not installed or
+      Windows/macOS qualification.
 - [ ] Record containing-source, release and selected installed/manual/native
       evidence separately. The original direct-human Cut over and classic
       clear/paste-seed live tests remain under their existing owners and

@@ -210,7 +210,7 @@ cutover is activated by the reviewed documentation.
 
 ### 2026-10-21 - Initial census and installed-launch boundary
 
-- The initial read-only census identifies thirteen runtime plugins, standalone
+- The initial read-only census identifies thirteen then-current runtime plugins, standalone
   Manager and index-engine environments, and selected index server, engine and
   optional MCP closures. Shared libraries are construction inputs, not
   automatically separate environments.

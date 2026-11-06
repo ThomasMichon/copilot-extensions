@@ -25,7 +25,7 @@ SCHEMA = (
 )
 SOURCE = "plugins/agent-bridge/src/agent_bridge/protocol.py"
 FIXTURE = "plugins/agent-bridge/contract/fixtures/http/current/health.json"
-HOST_SOURCE = "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py"
+HOST_SOURCE = "libs/copilot-driver-core/src/agent_remote_driver/session_host/protocol.py"
 HOST_FIXTURE = (
     "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json"
 )

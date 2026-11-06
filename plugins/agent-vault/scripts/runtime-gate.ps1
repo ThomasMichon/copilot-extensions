@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 # Installation driver contract: vault-first-use-v1
+# Configuration root contract: vault-context-v1
 $env:PYTHONUTF8 = '1'
 Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
@@ -21,6 +22,60 @@ if ($location.Provider.Name -ne 'FileSystem') {
     exit 126
 }
 $project = $location.ProviderPath
+$invocationDirectory = $project
+$hasConfigurationRoot = $false
+$commandArguments = [Collections.Generic.List[string]]::new()
+for ($index = 0; $index -lt $forwardArgs.Count; $index++) {
+    $argument = [string]$forwardArgs[$index]
+    if ($argument -ceq '--') {
+        for ($remaining = $index; $remaining -lt $forwardArgs.Count; $remaining++) {
+            $commandArguments.Add([string]$forwardArgs[$remaining])
+        }
+        break
+    }
+    $selectedRoot = $null
+    if ($argument -ceq '--configuration-root') {
+        if ($index + 1 -ge $forwardArgs.Count) {
+            [Console]::Error.WriteLine('[agent-vault] --configuration-root requires a directory.')
+            exit 2
+        }
+        $index++
+        $selectedRoot = [string]$forwardArgs[$index]
+    } elseif ($argument.StartsWith('--configuration-root=', [StringComparison]::Ordinal)) {
+        $selectedRoot = $argument.Substring('--configuration-root='.Length)
+    }
+    if ($null -ne $selectedRoot) {
+        if ($hasConfigurationRoot) {
+            [Console]::Error.WriteLine('[agent-vault] --configuration-root may be supplied only once.')
+            exit 2
+        }
+        $validRoot = $false
+        try {
+            $selectedPathRoot = [IO.Path]::GetPathRoot($selectedRoot)
+            $validRoot = [IO.Path]::IsPathRooted($selectedRoot) -and
+                [string]::Equals(
+                    $selectedPathRoot,
+                    [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($selectedRoot)),
+                    [StringComparison]::OrdinalIgnoreCase
+                ) -and
+                (Test-Path -LiteralPath $selectedRoot -PathType Container)
+        } catch { }
+        if (-not $validRoot) {
+            [Console]::Error.WriteLine('[agent-vault] --configuration-root must name an existing absolute directory.')
+            exit 2
+        }
+        $project = $selectedRoot
+        $hasConfigurationRoot = $true
+    } else {
+        $commandArguments.Add($argument)
+    }
+}
+if ($hasConfigurationRoot) {
+    if ($env:_AGENT_WORKTREES_VAULT_RUNTIME_GUARD -ceq '1') {
+        Remove-Item Env:AGENT_VAULT_NO_SELFPROVISION -ErrorAction SilentlyContinue
+    }
+    Remove-Item Env:_AGENT_WORKTREES_VAULT_RUNTIME_GUARD -ErrorAction SilentlyContinue
+}
 $scriptDir = Join-Path $payloadRoot 'scripts'
 $modeRunner = Join-Path $scriptDir 'installation-context\installation-context.ps1'
 $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
@@ -237,20 +292,33 @@ function Invoke-Runtime {
 }
 
 $runtimePython = Resolve-RuntimePython
+if ($commandArguments.Count -gt 0 -and $commandArguments[0] -ceq 'invocation-contract') {
+    if ($commandArguments.Count -ne 2 -or $commandArguments[1] -cne '--json') {
+        [Console]::Error.WriteLine('[agent-vault] usage: invocation-contract --json')
+        exit 2
+    }
+    if ($runtimePython) { Invoke-Runtime -Python $runtimePython }
+    [Console]::Out.WriteLine('{"schema":"agent-vault.invocation","version":1,"capabilities":[],"runtime_prepared":false}')
+    exit 0
+}
 if (-not (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT)) {
     try {
         . (Join-Path $scriptDir 'runtime-activation.ps1')
-        $activation = Get-VaultRuntimeActivation -Project $project -RuntimeRoot $runtimeRoot -Context $context -Python $runtimePython
+        $activation = Get-VaultRuntimeActivation -Project $project -InvocationDirectory $invocationDirectory -RuntimeRoot $runtimeRoot -Context $context -Python $runtimePython -RetainNativeSelector
     } catch {
-        [Console]::Error.WriteLine('[agent-vault] activation configuration could not be resolved; correct its configuration, binding or payload.')
+        if ($_.Exception.Data['VaultRepositoryContextMissing']) {
+            [Console]::Error.WriteLine("[agent-vault] repository context is missing. Run from an adopted repository or use '<repo> vault unlock' from any directory.")
+        } else {
+            [Console]::Error.WriteLine('[agent-vault] activation configuration could not be resolved; correct its configuration, binding or payload.')
+        }
         exit 3
     }
     if ($activation.state -ceq 'configuration-empty') {
-        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installer-readiness') {
+        if ($commandArguments.Count -gt 0 -and $commandArguments[0] -ceq 'installer-readiness') {
             $activation | ConvertTo-Json -Compress
             exit 0
         }
-        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('stop', 'lock')) {
+        if ($commandArguments.Count -gt 0 -and $commandArguments[0] -in @('stop', 'lock')) {
             $env:AGENT_VAULT_NO_SELFPROVISION = '1'
         } else {
             [Console]::Error.WriteLine($activation.detail)
@@ -262,10 +330,10 @@ if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
 }
 if (
-    $forwardArgs.Count -ge 2 -and $forwardArgs -contains '--require-running' -and
+    $commandArguments.Count -ge 2 -and $commandArguments -contains '--require-running' -and
     (
-        ($forwardArgs[0] -eq 'identity-key' -and $forwardArgs[1] -eq 'setup') -or
-        ($forwardArgs[0] -eq 'ssh-key' -and $forwardArgs[1] -in @('prepare', 'install'))
+        ($commandArguments[0] -eq 'identity-key' -and $commandArguments[1] -eq 'setup') -or
+        ($commandArguments[0] -eq 'ssh-key' -and $commandArguments[1] -in @('prepare', 'install'))
     )
 ) {
     [Console]::Out.WriteLine(
@@ -335,6 +403,10 @@ if (-not (Test-Path -LiteralPath $firstUse -PathType Leaf)) {
     exit 126
 }
 $executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
+$nativeSelector = $activation.PSObject.Properties['native_configuration_file']
+if ($nativeSelector) {
+    $env:AGENT_VAULT_CONFIG = [string]$nativeSelector.Value
+}
 [Console]::Error.WriteLine(
     "[agent-vault] submitting first-use provisioning to the installation driver: $executionRoot"
 )
