@@ -689,7 +689,7 @@ case "$COMMAND" in
         exec "$AGENT_RT_PY" -I -X utf8 -m agent_index "$@"
         ;;
     installer-readiness)
-        if [ -n "${AGENT_RT_PY:-}" ]; then exec "$AGENT_RT_PY" -I -X utf8 -m agent_index "$@"; fi
+        if [ -n "${AGENT_RT_PY:-}" ]; then exec "$AGENT_RT_PY" -I -B -X utf8 -m agent_index "$@"; fi
         if [ -z "$ROLE" ]; then
             _emit_readiness configuration-empty 'No indexer is designated for the current repository.'
             exit 0

@@ -1374,6 +1374,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         "corpus:\n  sources:\n    - name: git:test\n",
         encoding="utf-8",
     )
+    _configure_repository_role(repository, env, "host")
     captured = tmp_path / f"repo-context-{shell}-{command}.json"
     runtime_source = (
         "import json, os, sys\n"

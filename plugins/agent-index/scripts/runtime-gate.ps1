@@ -880,7 +880,9 @@ function Invoke-AgentIndexRuntime {
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -I -X utf8 -m agent_index @InvocationArgs
+        $pythonOptions = @('-I', '-X', 'utf8')
+        if ($Command -eq 'installer-readiness') { $pythonOptions += '-B' }
+        & $Python @pythonOptions -m agent_index @InvocationArgs
     } finally {
         $ErrorActionPreference = $previousPreference
     }

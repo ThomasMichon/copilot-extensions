@@ -662,7 +662,7 @@ function Test-RuntimeOrigin {
         Set-Location -LiteralPath $Slot
         [IO.Directory]::SetCurrentDirectory($Slot)
         $originOutput = @(
-            & $Python -I -X utf8 -c (
+            & $Python -I -B -X utf8 -c (
                 'from pathlib import Path; import agent_index; ' +
                 'print(Path(agent_index.__file__).resolve())'
             ) 2>$null
@@ -1427,7 +1427,7 @@ function Test-IndexVenv {
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg') -PathType Leaf)) { return $false }
     $result = Invoke-NativeCapture {
-        & $Python -I -c 'import sys; print(sys.prefix); print(int(sys.prefix != sys.base_prefix))'
+        & $Python -I -B -c 'import sys; print(sys.prefix); print(int(sys.prefix != sys.base_prefix))'
     }
     $lines = @($result.Output -split '\r?\n')
     if ($result.ExitCode -ne 0 -or $lines.Count -ne 2 -or $lines[1] -ne '1') { return $false }
@@ -1477,13 +1477,13 @@ function Test-IndexServerVenv {
     param([string]$Dir, [string]$Python)
     if (-not (Test-IndexVenv -Dir $Dir -Python $Python)) { return $false }
     $health = Invoke-NativeCapture {
-        & $Python -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server'
+        & $Python -I -B -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server'
     }
     if ($health.ExitCode -ne 0) {
         Write-Warn "Server venv failed host dependency health validation: $($health.Output)"
         return $false
     }
-    $cliHealth = Invoke-NativeCapture { & $Python -I -m agent_index --help }
+    $cliHealth = Invoke-NativeCapture { & $Python -I -B -m agent_index --help }
     if ($cliHealth.ExitCode -ne 0) {
         Write-Warn "Server venv failed CLI health validation: $($cliHealth.Output)"
         return $false
@@ -1751,7 +1751,7 @@ function Install-Runtime {
         $ErrorActionPreference = 'Continue'
         $slotOk = Test-RuntimeOrigin -Python $VenvPython -Slot $VenvDir
         if ($slotOk) {
-            $cliHealth = Invoke-NativeCapture { & $VenvPython -I -m agent_index --help }
+            $cliHealth = Invoke-NativeCapture { & $VenvPython -I -B -m agent_index --help }
             $slotOk = $cliHealth.ExitCode -eq 0
             if (-not $slotOk) { Write-Warn "Runtime CLI failed health validation: $($cliHealth.Output)" }
         }

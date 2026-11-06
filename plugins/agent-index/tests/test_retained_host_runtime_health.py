@@ -103,6 +103,12 @@ def test_retained_host_health_gates_publication(
     token = f"retained {corruption} corruption"
     if corruption != "none":
         damaged.write_text(f"raise ImportError({token!r})\n", encoding="utf-8")
+    for cache in candidate.rglob("__pycache__"):
+        shutil.rmtree(cache)
+    candidate_before = {
+        path.relative_to(candidate): path.read_bytes()
+        for path in candidate.rglob("*") if path.is_file()
+    }
     previous_payload = tmp_path / "previous-payload"
     previous_payload.mkdir()
     (root / "payload-dir").write_text(str(previous_payload), encoding="utf-8")
@@ -238,3 +244,7 @@ _ensure_runtime
         manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
         assert manifest["runtime_source"] == identity.document()
     assert (candidate / ".install-complete.json").read_bytes() == completion
+    assert {
+        path.relative_to(candidate): path.read_bytes()
+        for path in candidate.rglob("*") if path.is_file()
+    } == candidate_before

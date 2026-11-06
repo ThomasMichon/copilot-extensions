@@ -1084,7 +1084,7 @@ _runtime_origin_under() {
     [[ -x "$py" && -d "$slot" ]] || return 1
     origin="$(
         cd "$slot" &&
-        "$py" -I -X utf8 -c \
+        "$py" -I -B -X utf8 -c \
             'from pathlib import Path; import agent_index; print(Path(agent_index.__file__).resolve())'
     2>/dev/null)" || return 1
     [[ -n "$origin" && -f "$origin" ]] || return 1
@@ -1251,7 +1251,7 @@ do_stamp() {
 _test_index_venv() {
     local dir="$1" python="$2" output prefix expected actual
     [[ -x "$python" && -f "$dir/pyvenv.cfg" ]] || return 1
-    output="$("$python" -I -c 'import os, sys; print(os.path.abspath(sys.prefix)); print(int(sys.prefix != sys.base_prefix))' 2>/dev/null)" || return 1
+    output="$("$python" -I -B -c 'import os, sys; print(os.path.abspath(sys.prefix)); print(int(sys.prefix != sys.base_prefix))' 2>/dev/null)" || return 1
     [[ "$output" == *$'\n'* && "${output#*$'\n'}" == 1 ]] || return 1
     prefix="${output%%$'\n'*}"
     [[ "$prefix" == /* ]] || return 1
@@ -1285,8 +1285,8 @@ _new_index_venv() {
 _test_index_server_venv() {
     local dir="$1" python="$2"
     _test_index_venv "$dir" "$python" &&
-        "$python" -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' &&
-        "$python" -I -m agent_index --help >/dev/null &&
+        "$python" -I -B -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' &&
+        "$python" -I -B -m agent_index --help >/dev/null &&
         _runtime_origin_under "$python" "$dir"
 }
 
@@ -1627,7 +1627,7 @@ _ensure_runtime() {
         prev_version="$(_versioned_current)"
         if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON" ||
             ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR" ||
-            ! "$VENV_PYTHON" -I -m agent_index --help >/dev/null; then
+            ! "$VENV_PYTHON" -I -B -m agent_index --help >/dev/null; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi

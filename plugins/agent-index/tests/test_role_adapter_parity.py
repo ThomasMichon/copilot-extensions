@@ -87,6 +87,11 @@ def test_payload_readiness_relays_native_adapter_without_provisioning(
         f"'module':'agent-index/runtime','state':{state!r},'detail':'native adapter'}}))\n"
         f"raise SystemExit({exit_code})\n"
     ))
+    slot = runtime.parent.parent
+    before = {
+        path.relative_to(slot): path.read_bytes()
+        for path in slot.rglob("*") if path.is_file()
+    }
     env["TEST_PYTHON"] = runtime.as_posix() if shell == "bash" else str(runtime)
     result = _run(shell, script, env, "installer-readiness")
     assert result.returncode == exit_code, result.stdout + result.stderr
@@ -94,6 +99,10 @@ def test_payload_readiness_relays_native_adapter_without_provisioning(
     assert observed["state"] == state
     assert observed["detail"] == "native adapter"
     assert not Path(env["AGENT_INDEX_HOME"]).exists()
+    assert {
+        path.relative_to(slot): path.read_bytes()
+        for path in slot.rglob("*") if path.is_file()
+    } == before
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
