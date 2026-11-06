@@ -226,8 +226,11 @@ def test_standalone_prepared_updates_acquire_separate_controllers(snapshot, tmp_
     if shell == "ps1":
         command += ["-NoProfile", "-NonInteractive", "-File"]
     command += [str(bootstrap), "--install-source", str(snapshot), "update"]
+    profile = tmp_path / "profile"
+    profile.mkdir()
     environment = {
         **os.environ, "WORKTREE_MANAGER_ROOT": str(root),
+        "HOME": str(profile), "USERPROFILE": str(profile),
         "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
         "FIXTURE_CONTROLLER_SOURCE": str(repo), "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
