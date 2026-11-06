@@ -9,7 +9,7 @@
   [user-state carriers](../../../visions/user-state-carriers/README.md)
 - **Umbrella issue:** #10873
 - **Sub-issues:** #10881 (local report/chart consumer), #10928 (preference preview),
-  #11081 (guarded native telemetry adoption)
+  #11081 (guarded native telemetry adoption), #11119 (local hourly health store)
 
 ## Guiding Intent
 
@@ -124,7 +124,7 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   configuration, alias scope, validation and the serialized settings owner.
 - [x] Expose producer-owned retained telemetry configuration preview/apply
   without provisioning, activation or projected-task authority bypass.
-- [ ] Prove capability-selected telemetry adoption with accepted-input
+- [x] Prove capability-selected telemetry adoption with accepted-input
   revalidation at the producer's write boundary, preserving custom sinks.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
@@ -135,6 +135,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   operation and safe withdrawal before any adopted application.
 
 ### Phase 5 - Hourly health engine and carrier qualification
+- [ ] Prove explicit typed observation -> local hourly slot -> age-qualified
+  reader through the normal CLI (#11119), without claiming probe execution.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
@@ -606,3 +608,70 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   and locked-input controls. Strict Python-3.10 library typing passed both
   Linux and Windows targets over 18 files each. These add no installed-runtime
   or carrier qualification.
+
+### 2026-11-06 - Guarded adoption merged; local health follow-up
+- #11094 merged as `55bdbdbdd8c57064e7de296d60975b0e8d6e4ccb`
+  after actual current-head Copilot approval, resolved findings and required
+  green CI. This closes only the guarded source-adoption checkbox in Phase 4.
+  Release availability, installed operation, capture and carrier receipt remain
+  separate and unproved; no runtime update or activation occurred.
+- Pull-forward aborted on squash-history conflicts. The complete published
+  slice matched the merge commit, with no unmerged source delta; a retained
+  backup allowed non-destructive reconciliation to the confirmed upstream tree.
+- Claimed #11119 for the next complete source-only local flow: strict typed
+  observation input, atomic 168-hour slots and an age-qualified reader through
+  the normal Machines CLI. Probe collection, native scheduling and carrier
+  enrollment/publication remain outside that slice and open in the parent.
+
+### 2026-11-06 - Explicit local hourly store implemented
+- #11119 now has an explicit `health record` preview/confirmed apply and
+  `health inspect` consumer. A strict separate policy selects publisher
+  continuity; the health parser never consumes preferences or executes probes.
+- The bounded closed observation vocabulary separates listeners, SSH transport
+  and authenticated direction, Gateway, authorization, credential readiness and
+  logical agents. Unknown counts remain null; supplied evidence is visibly
+  unverified. No arbitrary errors, paths, process inventory or credentials enter
+  stored records.
+- Complete flushed records occupy 168 absolute-hour slots. Native local writer
+  exclusion and exact policy/input/slot-byte confirmation preserve revisions,
+  missed parents, future timestamps, publisher mismatch and delayed weekly
+  replicas. Reader gaps and old domain proof remain unknown/stale, not uptime.
+- The first combined run passed the existing report cases and functional store
+  controls, but pytest's generated oversized-byte case ID exceeded Windows'
+  environment-variable limit. Short explicit IDs fixed the fixture without
+  lowering the 64 KiB bound. The final store/independent-process CLI packet
+  passed 23 cases; six additional hardlink/path and reader expiry/foreign/future
+  controls passed. No cases skipped.
+- Post-publication write or lock-release acknowledgement failures keep an
+  unknown outcome and never retry. Fresh preprovisioned temporary stores prove
+  the real module CLI -> atomic slot -> independent reader flow, not installed
+  selection, native probe execution, full installer clean-room or Linux native
+  scheduling. Those lanes and carrier/activation effects remain open.
+- Review, exact-source CI and source merge still gate this implementation.
+  The parent remains Active; no runtime update, schedule or carrier was activated.
+- Number decoding now rejects floating-point input and oversized integer
+  strings before conversion, so a malformed stored slot cannot trip Python's
+  integer-conversion limit and fail the reader. The exact-source bounded-input
+  and normal CLI selection passed eight cases, including independent processes.
+- Reader policy/namespace revalidation and the final independent CLI flow
+  passed two focused cases. Ruff, documentation consistency, install contracts
+  and whitespace checks passed; the Machines patch changefile is included.
+
+### 2026-11-06 - Local store review corrections
+- The #11139 review found three valid gaps: a response-output failure could
+  misreport a committed slot as unapplied, a required input disappearing
+  between validation and read could escape bounded refusal, and synthesized
+  unknown domains omitted their nullable count/direction fields.
+- Apply-output failures now retain an unknown acknowledgement; required-file
+  disappearance raises a bounded error while optional vanished slots stay
+  missing. Synthesized domains share the explicit unknown observation shape.
+- Eight focused controls passed initially. An additional real buffered
+  closed-pipe CLI control then exposed Python's shutdown flush replacing
+  exit 2 with 120 after the correct unknown acknowledgement. Only the CLI's
+  own failed stdout descriptor is redirected to prevent that second failure;
+  embedded caller streams remain untouched.
+- The final nine-case packet passed without skips, including actual committed
+  storage plus a closed native stdout pipe, in-memory write/flush failures,
+  required/optional file races and the independent empty-domain CLI roundtrip.
+  Ruff and whitespace passed. Fresh review and exact-head CI still gate this
+  correction. No probe, schedule, carrier or running-service effect occurred.

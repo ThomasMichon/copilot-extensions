@@ -1,0 +1,9 @@
+{
+  "comment": "Store and inspect bounded local hourly health observations without probes or carrier effects",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
