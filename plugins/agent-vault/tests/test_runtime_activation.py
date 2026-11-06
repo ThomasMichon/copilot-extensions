@@ -303,19 +303,14 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
     assert not (installed.parents[1] / "scripts").exists()
 
 
-def test_cold_namespaced_capture_preserves_both_runtime_slots(tmp_path):
+@pytest.mark.parametrize("layout", ["namespaced", "legacy"])
+def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path, layout):
     import venv
     import configuration_context
     import configuration_layers
     from .test_identity_payload_gate import load_module
 
-    home, payload, runtime, _identity, context = prepare_payload(tmp_path, "namespaced")
-    primitive = load_module(
-        payload / "scripts" / "installation-context" / "installation_context.py",
-        "cold_capture_installation",
-    )
-    own = json.loads(Path(context).read_text(encoding="utf-8"))
-    namespace = json.loads(Path(own["namespaceReceipt"]).read_text(encoding="utf-8"))
+    home, payload, runtime, _identity, context = prepare_payload(tmp_path, layout)
     peer_payload = payload.parent / "agent-worktrees"
     (peer_payload / "scripts").mkdir(parents=True)
     source_peer = PLUGIN.parent / "agent-worktrees"
@@ -326,24 +321,32 @@ def test_cold_namespaced_capture_preserves_both_runtime_slots(tmp_path):
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
         shutil.copyfile(source_peer / "scripts" / name, peer_payload / "scripts" / name)
     shutil.copyfile(source_peer / "plugin.json", peer_payload / "plugin.json")
-    environment = {"HOME": str(home), "USERPROFILE": str(home)}
-    stamped = primitive.stamp_context(
-        payload_version="1.0.0", payload_origin="installed",
-        expected_namespace_generation=namespace["generation"], expected_install_generation=0,
-        payload_root=peer_payload, plugin_id="agent-worktrees", environment=environment,
-        copilot_home=home / ".copilot", durable_home=home / ".copilot-extensions",
-    )
-    primitive.compare_and_swap_activation(
-        context=stamped["installReceipt"], expected_marketplace_id=stamped["marketplaceId"],
-        expected_plugin_id="agent-worktrees",
-        expected_namespace_generation=stamped["namespaceGeneration"],
-        expected_install_generation=stamped["generation"], expected_activation_generation=0,
-        activation_mode="namespaced", activation_state="active", legacy_disposition="absent",
-        legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
-        legacy_root=home / ".agent-worktrees", environment=environment,
-        durable_home=home / ".copilot-extensions",
-    )
-    peer = Path(stamped["pluginRoot"])
+    peer = home / ".agent-worktrees"
+    if context:
+        primitive = load_module(
+            payload / "scripts" / "installation-context" / "installation_context.py",
+            "cold_capture_installation",
+        )
+        own = json.loads(Path(context).read_text(encoding="utf-8"))
+        namespace = json.loads(Path(own["namespaceReceipt"]).read_text(encoding="utf-8"))
+        environment = {"HOME": str(home), "USERPROFILE": str(home)}
+        stamped = primitive.stamp_context(
+            payload_version="1.0.0", payload_origin="installed",
+            expected_namespace_generation=namespace["generation"], expected_install_generation=0,
+            payload_root=peer_payload, plugin_id="agent-worktrees", environment=environment,
+            copilot_home=home / ".copilot", durable_home=home / ".copilot-extensions",
+        )
+        primitive.compare_and_swap_activation(
+            context=stamped["installReceipt"], expected_marketplace_id=stamped["marketplaceId"],
+            expected_plugin_id="agent-worktrees",
+            expected_namespace_generation=stamped["namespaceGeneration"],
+            expected_install_generation=stamped["generation"], expected_activation_generation=0,
+            activation_mode="namespaced", activation_state="active", legacy_disposition="absent",
+            legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+            legacy_root=home / ".agent-worktrees", environment=environment,
+            durable_home=home / ".copilot-extensions",
+        )
+        peer = Path(stamped["pluginRoot"])
     slots = {}
     for name, owner in (("agent_vault", runtime), ("agent_worktrees", peer)):
         slot = owner / "versions" / "1.0.0"
@@ -355,6 +358,11 @@ def test_cold_namespaced_capture_preserves_both_runtime_slots(tmp_path):
         package = site / name
         package.mkdir()
         if name == "agent_vault":
+            if not context:
+                bootstrap = slot / ".runtime-bootstrap"
+                bootstrap.mkdir()
+                for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
+                    shutil.copyfile(source, bootstrap / source.name)
             for filename in ("__init__.py", "config.py", "configuration.py",
                              "configuration_scope.py", "_peer_launch.py"):
                 shutil.copyfile(PLUGIN / "src" / name / filename, package / filename)
@@ -371,7 +379,8 @@ def test_cold_namespaced_capture_preserves_both_runtime_slots(tmp_path):
                 "schema": "agent-worktrees.configuration", "version": 1,
                 "context": {
                     "repository_id": "cold-capture", "execution_machine": "fixture",
-                    "installation_cell": str(peer.parent.parent), "binding": "unbound",
+                    "installation_cell": str(peer.parent.parent) if context else "legacy",
+                    "binding": "unbound",
                     "base_root": str(tmp_path),
                 },
             }

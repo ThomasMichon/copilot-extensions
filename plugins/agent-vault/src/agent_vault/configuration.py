@@ -82,7 +82,7 @@ def _legacy_report(root: Path) -> dict | None:
     if not prefix:
         return None
     return read_owner_context(
-        [prefix[0], "-I", "-X", "utf8", *prefix[1:]], root,
+        [prefix[0], "-I", "-B", "-X", "utf8", *prefix[1:]], root,
         environment=environment,
     )
 

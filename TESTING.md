@@ -9086,3 +9086,10 @@ Manager's existing `tests/test_manager_engine_adapter.py` packet checks that
 source-qualified preparation copies the original pinned payload, not the
 dependency resolver's rewritten build manifests. Fresh runtime acceptance
 continues to verify the installed payload's original source identity.
+
+The existing `installation-context-full.yml` `vault-activation` portfolio runs
+the focused Vault launcher and cold configuration-capture regressions on both
+Linux and Windows, retaining source-pinned JUnit artifacts. The stock runner
+owns fixture admission, private runtime slots and cleanup. These integration
+results are separate from the required unit-only PR packet; platform skips
+are not native coverage or installed-service acceptance.
