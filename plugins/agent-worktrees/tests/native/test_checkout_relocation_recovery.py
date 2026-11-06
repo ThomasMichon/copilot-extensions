@@ -1,5 +1,9 @@
 """Metadata checkpoints must never outrun their durable owned effects."""
 
+import json
+import subprocess
+from types import SimpleNamespace
+
 import pytest
 
 from agent_worktrees import checkout_relocation as relocation
@@ -42,3 +46,21 @@ def test_permission_write_access_is_rechecked_under_its_owner_lock(checkout, kin
         assert path.read_bytes() == before
     finally:
         path.chmod(0o644)
+
+
+def test_expired_git_probe_is_a_structured_refusal_without_move_custody(checkout, monkeypatch, capsys):
+    from agent_worktrees import worktree_ops_cli as cli
+
+    def expired(*args):
+        raise subprocess.TimeoutExpired(["git", "rev-parse"], 10)
+    monkeypatch.setattr(cli.cfg, "load_config", lambda: checkout.config)
+    monkeypatch.setattr(relocation, "_git", expired)
+    args = SimpleNamespace(
+        capabilities=False, worktree_id=checkout.record.worktree_id,
+        destination=str(checkout.destination), apply=False, abort=False,
+    )
+    assert cli.cmd_move(args) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["complete"] is False and "timed out" in result["error"]
+    assert not state.journal_path(checkout.record.yaml_path).exists()
+    assert checkout.source.exists() and not checkout.destination.exists()

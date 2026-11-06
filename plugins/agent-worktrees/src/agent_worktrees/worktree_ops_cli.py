@@ -286,7 +286,7 @@ def cmd_move(args: argparse.Namespace) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     except (
-        ValueError, OSError, RuntimeError, git_ops.GitError, YAMLError,
+        ValueError, OSError, RuntimeError, git_ops.GitError, YAMLError, subprocess.TimeoutExpired,
         checkout_relocation.execution_spaces.ExecutionSpaceError,
     ) as exc:
         print(json.dumps({"schema": checkout_relocation.SCHEMA, "error": str(exc), "complete": False}))
