@@ -4392,6 +4392,8 @@ def test_execution_acquisition_original_selection_is_observed_without_replay(
     )
     assert any(o.stage == "config-owner" and o.source == "execution-machine"
                for o in report.observations)
+    if not selected:
+        assert {f.reason for f in owned[-1].findings} == {"owner-coverage-unavailable"}
     assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
 
 
