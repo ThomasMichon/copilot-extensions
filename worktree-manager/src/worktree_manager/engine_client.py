@@ -16,6 +16,7 @@ from pathlib import Path
 from worktree_identity import parse_machine_identity
 
 from . import agent_plugin_runtime, picker_review
+from .engine_sessions import list_worktree_session_snapshot as list_worktree_session_snapshot
 from .engine_posix_process import EngineCleanupError as EngineCleanupError
 from .worktree_rows_contract import (
     _int_field as _int_field,
@@ -922,11 +923,7 @@ def list_worktree_sessions(
     runner=None,
 ) -> list[dict]:
     """Return one worktree's registered sessions through the provider CLI."""
-    obj = run_json(
-        project,
-        ["list-sessions", "--worktree", worktree_id, "--json"],
-        runner=runner,
-    )
+    obj = list_worktree_session_snapshot(project, worktree_id, runner=runner)
     rows = obj.get("sessions")
     if not isinstance(rows, list):
         return []

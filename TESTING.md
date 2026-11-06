@@ -83,6 +83,18 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+Manager's opt-in `--test-file tests/test_companion_head_observation.py
+--test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
+--allow-explicit-tiers` packet checks optional expected-head declaration/codec
+admission, actual private Worktrees file/task receipt reads through the selected
+process, independent durable/Picker facts and old-caller/new-provider compatibility.
+Real Textual controls cover Refresh/reopen, narrow rendering, separately retained
+lineage, source failures, rollback and late-selection fencing. A native Linux
+pidfd witnesses exact blocked optional-child exit on Escape; other-platform
+skips are not native coverage. These are isolated source/process controls, not
+installed, native performance or the original live manual-cutover acceptance.
+The required unit-only packet is unchanged.
+
 Worktrees' opt-in `--test-file tests/test_handoff_head_observation.py --test-file
 tests/test_lazy_dispatch.py --test-file tests/test_session_lifecycle.py
 --allow-explicit-tiers` packet checks the passive expected-consumer comparison

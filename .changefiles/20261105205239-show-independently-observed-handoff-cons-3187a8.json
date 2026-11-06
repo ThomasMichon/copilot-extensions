@@ -1,0 +1,13 @@
+{
+  "comment": "Show independently observed handoff consumers and sampled head targets in Companion Recovery",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
