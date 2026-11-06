@@ -177,12 +177,13 @@ seam with process-filtered USER32 hooks and an initial owned-thread window query
 It never calls `EnumWindows` or samples global foreground state. It retains
 duplicates of the launch owner's process/thread handles, derives process birth
 from the held object, and admits the subscription/message-pump barrier before
-resume. The caller must invoke `finish()` after root exit while its original
+resume.
 The pinned initial thread must remain live and retain its native identity across
 the query. As documented by
 [EnumThreadWindows](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumthreadwindows),
 FALSE with no callbacks is a valid empty result; callback errors, partial
-enumeration and changed/expired native thread identity still refuse qualification. The caller must invoke `finish()` after root exit while its original
+enumeration and changed/expired native thread identity still refuse qualification.
+The caller must invoke `finish()` after root exit while its original
 Job is still queryable, then settle the original owner's resources normally.
 Finishing retains the hooks and pump for a full delivery-ceiling interval after
 confirmed root exit, within the original execution budget; insufficient budget,
