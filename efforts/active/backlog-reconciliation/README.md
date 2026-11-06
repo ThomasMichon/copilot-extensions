@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [authenticated board-waiter cohort](board-waiter-receiving-cohort.md)
+proposes complete direct #5410 intake under existing OPEN #5452, preserving
+actual-header regressions and both delegated/relay consumers as independent
+unchecked lanes. Reviewed planning, actual parent delivery and whole current
+readback precede any separate tracking retirement; no implementation or
+source/resource custody transfer follows.
+
 The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
 independently verifies eighteen PR records and twenty-four source identities.
 It distinguishes a delivered staging-lease repair, one satisfied WSL-fixture
@@ -2806,6 +2813,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [board-waiter receiving matrix](board-waiter-receiving-cohort.md)
+preserves the author's withdrawn universal claim, complete affected-module
+audit, actual constructed-header assertions and both nonlocal consumers.
+Source facts and reviewed plans are not authentication, test execution,
+actual receiving delivery or technical completion.
 
 The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
 keeps actual provider checks distinct from reported tests, source definitions,
