@@ -17,7 +17,7 @@ from agent_procutil import no_window_kwargs
 from test_companion_bridge_codec import OWNER
 from test_companion_bridge_session_source import semantic_peer as semantic_peer
 from test_companion_joined_tmux import source_entrypoint
-from test_companion_joined_psmux import live_reader_pids
+from test_companion_joined_psmux import live_reader_pids, owner_commands_settled
 from worktree_manager import agenda_transport, companion_bridge_source, mux_companion
 
 
@@ -100,6 +100,26 @@ def test_native_reader_selection_includes_actual_agenda_command_and_rejects_reus
         pid_alive=lambda pid: pid != 6, process_start_time=lambda pid: 100 + pid,
     )
     assert live_reader_pids(trace, requests, locks) == {1, 2, 3}
+
+
+@pytest.mark.parametrize("pinned_birth,exited,pid_alive,current_birth,settled", [
+    (100, True, True, "100", True),
+    (100, False, True, "100", False),
+    (200, True, True, "100", False),
+    (None, False, False, None, True),
+    (None, False, True, None, False),
+    (None, False, True, "200", True),
+])
+def test_native_owner_exit_uses_retained_matching_handle_not_pid_existence(
+    tmp_path: Path, pinned_birth: int | None, exited: bool, pid_alive: bool,
+    current_birth: str | None, settled: bool,
+) -> None:
+    trace = tmp_path / "children.jsonl"
+    trace.write_text(json.dumps({"pid": 7, "birth": "100", "argv": ["agenda-feed"]}) + "\n")
+    client = SimpleNamespace(birth=lambda _handle: pinned_birth, exited=lambda _handle: exited)
+    locks = SimpleNamespace(pid_alive=lambda _pid: pid_alive, process_start_time=lambda _pid: current_birth)
+    pinned = {7: 42} if pinned_birth is not None else {}
+    assert owner_commands_settled(trace, locks, client, pinned) is settled
 
 
 def test_private_bridge_membership_cli_completes_before_client_composition(

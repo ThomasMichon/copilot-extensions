@@ -2486,6 +2486,16 @@ was unmet. A phase-specific diagnostic now reports retained observer/reader
 handles, live birth-qualified owner commands and Bridge subscription counts
 without querying a dead pane. The unchanged cleanup assertions and 15-second
 deadline remain the acceptance gate.
+The diagnostic run confirms the observer and all three retained reader handles
+are signaled and Bridge has no subscribers or held connections, while the
+PID-existence-only owner check still sees the two exited source commands.
+Windows retains process objects while another process holds their handles.
+The native exit check now uses a matching retained handle's signaled state;
+unretained commands still require disappearance or a known changed birth,
+and unknown birth stays unsettled. All source commands, readers and observer
+must still exit before further input is sent to the original CLI. The same
+run's separate 50 ms membership-seed setup failure is retained under #8811,
+not waived or hidden by this exit-check correction.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

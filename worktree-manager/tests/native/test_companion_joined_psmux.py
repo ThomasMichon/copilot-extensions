@@ -47,6 +47,21 @@ def live_reader_pids(trace: Path, requests: list[dict[str, Any]], locks: Any) ->
     }
 
 
+def owner_commands_settled(trace: Path, locks: Any, client: Any, pinned: dict[int, Any]) -> bool:
+    for child in map(json.loads, trace.read_text(encoding="utf-8").splitlines()):
+        pid, birth = child["pid"], str(child["birth"])
+        handle = pinned.get(pid)
+        if handle is not None and str(client.birth(handle)) == birth:
+            if not client.exited(handle):
+                return False
+            continue
+        if locks.pid_alive(pid):
+            current = locks.process_start_time(pid)
+            if current is None or str(current) == birth:
+                return False
+    return True
+
+
 def test_native_windows_three_owner_history_live_and_same_cli(
     semantic_peer: dict[str, Any], actual_waiters: Callable[[str], Awaitable[dict[str, Any]]],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -255,15 +270,19 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                 wait_for(lambda: mux("display-message", "-p", "-t", session, "#{pane_id}") == cli)
                 wait_for(lambda: client.exited(observer_handle)
                          and all(client.exited(handle) for handle in readers)
-                         and peer["settled"]() and semantic_peer["session"].subscriber_count == 0,
+                         and owner_commands_settled(peer["trace"], locks, client, pinned)
+                         and semantic_peer["session"].subscriber_count == 0,
                          describe=lambda: {
                              "phase": "reader-and-observer-exit",
                              "observer_exited": client.exited(observer_handle),
                              "readers_exited": {
                                  reader: client.exited(pinned[reader]) for reader in sorted(reader_pids)
                              },
-                             "owner_commands_settled": peer["settled"](),
-                             "live_owner_commands": [
+                             "owner_commands_settled": owner_commands_settled(
+                                 peer["trace"], locks, client, pinned,
+                             ),
+                             "pid_existence_only_settled": peer["settled"](),
+                             "pid_present_owner_commands": [
                                  child for child in map(json.loads, peer["trace"].read_text().splitlines())
                                  if locks.pid_alive(child["pid"])
                                  and locks.process_start_time(child["pid"]) == child["birth"]
