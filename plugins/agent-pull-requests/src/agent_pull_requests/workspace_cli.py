@@ -16,6 +16,8 @@ from .workspace_tools import COMMANDS, WorkspaceTools, WorkspaceToolUnavailable
 def add_parser(commands):
     workspace = commands.add_parser("workspace", allow_abbrev=False,
                                     help="Workspace source tools; an actual owner binding is required.")
+    workspace.add_argument("--client-profile", metavar="NAME",
+                           help="Already adopted read-only service-client profile; not a path or authority grant.")
     subcommands = workspace.add_subparsers(dest="workspace_command", required=True)
     for command in COMMANDS:
         parser = subcommands.add_parser(command, allow_abbrev=False)
@@ -25,6 +27,9 @@ def add_parser(commands):
 
 
 def run(args, host=None):
+    if getattr(args, "client_profile", None) is not None:
+        from .workspace_observer import run as observe
+        return observe(args, host=host)
     try:
         request = {}
         if args.workspace_command != "capabilities":
