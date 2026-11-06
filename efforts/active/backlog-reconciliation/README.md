@@ -331,6 +331,24 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records two further finite source/test completions: #8862 through merged
+#8867 and #9095 through merged #9098. Inspected original clauses, retained
+current source/test bindings, exact-head approval and complete successful
+checks support both audited dispositions without installed or cleanup effects.
+Four other originals remain OPEN at their actual finite residuals.
+Two equal complete21:30 PST scans measure832 whole OPEN:553 creator-eligible,
+279 excluded,561 original-cohort and271 inflow. Verified dispositions are975,
+still103 above fixed729; original Plan/Validation states remain unchanged.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed merge #10896 and the later finite #9412 source completion
+through actual #9416. Verified dispositions are973; the latest complete
+whole census remains the dated21:11 PST835-open reading, not an inferred
+new total. #9732 retains its explicitly requested real subscription evidence
+after credited source/status progress. Three further finite-source studies
+run; new #10894 keeps its existing OPEN repair claim and no competing fix.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 now audits six further outcomes: #10316, #9679 and #9561 are finite source
 completions; #7206 is tracking-subsumed under OPEN #63, and #5990/#6692
 under OPEN #4130 after full direct receipt and whole body/discussion readback.
