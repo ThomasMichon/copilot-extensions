@@ -10,6 +10,11 @@ posting, including after daemon cutover. Request versions 1 and 2 retain
 their existing syntax and behavior; an older provider cannot accept version
 3 while silently ignoring its required fields.
 
+Each fenced attempt pins its health check and mutation to the same endpoint,
+even when the startup event observer concurrently follows a replacement daemon.
+A safely retryable refusal starts a new attempt with a fresh qualification;
+an ambiguously delivered mutation is not replayed.
+
 Version 3 requires the existing exact `project` and `worktree_path`, plus
 `worktree_writer`:
 
