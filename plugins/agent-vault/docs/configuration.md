@@ -21,6 +21,39 @@ Missing files contribute nothing. Strict readers refuse malformed-present JSON,
 non-object documents and invalid known fields rather than using defaults.
 Non-strict legacy reads tolerate malformed configuration as empty.
 
+## Windows scheduling is separate from activation
+
+The **global native settings file** (selected above) accepts
+`"windows_scheduled_task": "preserve"`, `"enabled"` or `"absent"`. This is
+machine deployment policy, not a portable `.agent-vault.json` preference.
+
+`preserve` is the new default: install/update/first-use never create a missing
+task and do not rewrite existing/custom registrations. `enabled` explicitly
+provisions the logon task through the existing installer. `absent` removes
+only a validated task owned by this installation; foreign/ambiguous tasks and
+removal failures refuse rather than purge. The selection persists across updates.
+Task-query permission/CIM failures or an unavailable ScheduledTasks module also
+refuse retirement rather than report absence. Default `preserve` still works
+without that module.
+
+Run `scripts\install.ps1 schedule` after changing the setting to reconcile task
+policy alone. With `absent`, no daemon is stopped or started, no runtime/state
+is deleted, and nothing else is enabled.
+Task-only absence reads retained configuration without requiring an interpreter,
+even when the incoming payload's version has not been built. Task-only opt-in
+resolves the selected installed runtime instead of assuming the incoming slot.
+Normal install/update still prepare
+the native launcher and ensure the selected service generation independently
+of task registration. Without a task, `agent-vault start` retains the existing
+on-demand user-mode startup path.
+
+An existing disabled task keeps its independent startup hold: it is not
+re-enabled or bypassed by installer startup, and `absent` refuses to retire it until that intent is
+deliberately cleared. Runtime `enabled`, maintenance inhibition and `-NoService`
+remain independent; do not use client-only `-NoService` to select task absence.
+No administrative account, Task Scheduler registration or substitute supervisor
+is required by the default scheduling policy.
+
 ## Runtime activation
 
 `enabled` is an optional strict boolean, default **false**. Plugin enablement
