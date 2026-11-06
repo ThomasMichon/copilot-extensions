@@ -15,6 +15,7 @@ from repository_policy import AgentHostingError
 from .session_preferences import client_preferences
 from .cold_outages import admitted_recovery, guarded_resume, recovery_admission
 from .models import SessionStatus
+from .acquisition_worktree_writer import session_writer
 from .owned_workspace import (
     can_resume_allocation, prepare_session as prepare_owned_workspace, retains_allocation,
 )
@@ -114,6 +115,7 @@ class _SessionResumeMixin:
         self._sessions[session_id] = session
         return session
 
+    @session_writer
     async def resume_session(
         self,
         session_id: str,

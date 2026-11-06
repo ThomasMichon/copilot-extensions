@@ -10,6 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from .models import SessionStatus
+from .acquisition_worktree_writer import lineage_errors, session_writer
 from .session_manager import DaemonDrainingError, Session, _workspace_key, log
 
 if TYPE_CHECKING:
@@ -258,6 +259,7 @@ class _SessionHandoffMixin:
         return text
 
     @_exclude_native_enrollment
+    @session_writer
     async def handoff_session(
         self,
         session_id: str,
@@ -443,11 +445,11 @@ class _SessionHandoffMixin:
             from . import worktree_lineage
             # The successor's own start_session already registered it into the
             # ground layer (4a, synchronous), so link-succession finds it tracked.
-            with contextlib.suppress(Exception):
+            with lineage_errors():
                 worktree_lineage.link_succession(
                     gl_worktree, pred_acp, succ_acp, worktree_dir=gl_dir,
                 )
-            with contextlib.suppress(Exception):
+            with lineage_errors():
                 worktree_lineage.note_handoff(
                     gl_worktree, pred_acp, title=(reason or "context-pressure"),
                     worktree_dir=gl_dir,
@@ -480,7 +482,7 @@ class _SessionHandoffMixin:
         if seed:
             if gl_local and gl_worktree and succ_acp:
                 from . import worktree_lineage
-                with contextlib.suppress(Exception):
+                with lineage_errors():
                     role = worktree_lineage.session_role(
                         gl_worktree, succ_acp, worktree_dir=gl_dir,
                     )

@@ -73,8 +73,16 @@ def _run(
     # resolver; fall back to the daemon's cwd when the dir is unknown.
     run_cwd = cwd if (cwd and os.path.isdir(cwd)) else None
     try:
+        from .acquisition_worktree_writer import require_scope
+
+        require_scope(args, cwd=cwd)
         prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
         if not prefix:
+            from .acquisition_worktree_writer import current
+            from .acquisition_contract import AcquisitionRefused
+
+            if current() is not None:
+                raise AcquisitionRefused("worktree_writer_unconfirmed", "retained lineage owner is unavailable")
             log.debug("agent-worktrees owner unavailable -- lineage operation skipped")
             return None
         proc = subprocess.run(  # noqa: S603 -- selected owner command prefix
@@ -88,9 +96,18 @@ def _run(
             cwd=run_cwd,
         )
     except Exception as exc:  # broad by design -- fail-open contract
+        from .acquisition_worktree_writer import current
+
+        if current() is not None:
+            raise
         log.warning("agent-worktrees %s failed: %s", args[0] if args else "?", exc)
         return None
     if proc.returncode != 0:
+        from .acquisition_worktree_writer import current
+        from .acquisition_contract import AcquisitionRefused
+
+        if current() is not None:
+            raise AcquisitionRefused("worktree_writer_unconfirmed", "retained lineage owner refused")
         log.debug(
             "agent-worktrees %s exited %s: %s",
             args[0] if args else "?", proc.returncode, (proc.stderr or "").strip()[:200],
@@ -216,6 +233,10 @@ def session_role(
     try:
         doc = json.loads(proc.stdout or "{}")
     except (ValueError, TypeError):
+        from .acquisition_worktree_writer import current
+
+        if current() is not None:
+            raise
         return None
     return doc if isinstance(doc, dict) else None
 

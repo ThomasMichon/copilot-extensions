@@ -140,6 +140,11 @@ from test_worktree_writer_observation import (
     test_same_cell_health_rechecks_peer_selection_without_launch
     as test_same_cell_health_rechecks_peer_selection_without_launch,
 )
+from test_acquisition_runtime import (
+    rig as rig, writer_rig as writer_rig,
+    test_required_writer_round_trips_through_the_existing_http_owner
+    as test_required_writer_round_trips_through_the_existing_http_owner,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -184,6 +189,9 @@ def test_http51_capture_actual_observations(
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
     observed["worktree_record_delegation"] = health["capabilities"]["worktree_record_delegation"]
+    observed["retained_acquisition_worktree_writer"] = (
+        health["capabilities"]["retained_acquisition_worktree_writer"]
+    )
     assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)

@@ -36,6 +36,11 @@ AFFECTED = (
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
+        "acquisition_worktree_writer.py", "acquisition_authority.py",
+        "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
+        "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
+        "routes/acquisitions.py", "session_handoff.py", "session_resume.py",
+        "session_start.py", "worktree_head.py", "worktree_lineage.py",
         "_peer_launch.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
@@ -54,6 +59,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_receiving_bundle.py",
     "plugins/agent-bridge/tests/test_portable_mux_joined.py",
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
+    "plugins/agent-bridge/tests/test_acquisition_runtime.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
@@ -107,6 +113,7 @@ PROBES = {
     "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
     "test_unknown_or_changed_slot_never_certifies_a_build": 10,
     "test_same_cell_health_rechecks_peer_selection_without_launch": 11,
+    "test_required_writer_round_trips_through_the_existing_http_owner": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
@@ -115,6 +122,7 @@ CAPABILITY_VERSIONS = {
     "bridge-session-tool-statistics-v1": 1,
     "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,
     "worktree_record_delegation": 1,
+    "retained_acquisition_worktree_writer": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

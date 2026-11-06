@@ -131,6 +131,9 @@ class _SessionStartMixin:
         from .hosting_policy import require_target_hosting
 
         await require_target_hosting(target)
+        from .acquisition_worktree_writer import require_target
+
+        require_target(target)
         core = _core()
         # Per-session copilot args: append to the resolved target's args for
         # THIS spawn only (a fresh target copy so a shared/cached AgentConfig
@@ -809,7 +812,9 @@ class _SessionStartMixin:
             # its own machine. Best-effort / fail-open: never breaks a launch.
             if acquisition_launch is None and target.type == "local" and target.worktree_id and acp_sid:
                 from . import worktree_lineage
-                with contextlib.suppress(Exception):
+                from .acquisition_worktree_writer import lineage_errors
+
+                with lineage_errors():
                     worktree_lineage.register_session(
                         target.worktree_id, acp_sid, pid=session.pid,
                         worktree_dir=target.cwd,
