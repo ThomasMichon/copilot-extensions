@@ -1693,3 +1693,66 @@ No released script is rewritten or package acquired. A separate default run
 skips all six T3 controls in 0.59 seconds (21.84 with preparation/cleanup).
 This strengthens the bounded completion proof; it still does not activate a
 Dispatch CLI or establish #7305's whole installed-update outcome.
+
+#10851 merges as `0fbbdf2882b09ba312dd62cb9df8131257d6c735` after current-head
+approval and successful required CI. Normal release #10871 then merges at
+03:42:57 UTC as `cd8b58d272f6d5b3e9899aedcb7dcbd8fa6a3aa1`, admitting Dev
+`b58884ecedd5f3b27b8dc1c12161a7a8a8c23f0b`. That source contains #10851 and
+the released native-test Git blob matches the merged one. Run `42155377340`
+passes every actual release gate. This settles the test-payload release
+observation, not an installed update or new production correction.
+
+### 2026-11-06 - U9 remaining Windows lifecycle controls
+
+The bounded continuation is reserved in
+[comment 6676519194](https://github.com/ThomasMichon/copilot-extensions/issues/10377#issuecomment-6676519194).
+It extends the existing native recovery module rather than duplicating the
+released repair implementation. `install -Force` must recover a selected
+incomplete slot into a usable distinct generation and reuse that healthy
+generation on repeat, preserving the original incomplete slot and configuration.
+Both `install` and direct `provision` must return nonzero for actual venv or
+package failure and publish neither a current selection nor a deployment
+manifest. Marketplace uninstall now follows actual venv construction and an
+invocation through the generated command instead of testing only a stamp.
+It removes the selected runtime, selector and binstubs while retaining
+configuration, unknown state and the original marketplace entry/manifest.
+
+Seven controls pass through the standard contained Windows runner, based at
+`07e4932be0`, in four bounded selections: forced repair/repeat, 1 pass in
+132.22 seconds; venv failures, 2 in 44.68; package failures, 3 in 228.48; and
+constructed marketplace uninstall, 1 in 156.71. Including preparation and
+verified cleanup, the respective runs take 149.81, 63.06, 244.31 and 248.61
+seconds. The 120-second native calls, 180-second item, 300-second group and
+ordinary process/memory/storage limits remain unchanged.
+
+The initial combined selection exceeds its 300-second group limit; it is not
+a pass. The first isolated uninstall exceeds the item limit. A phase-timed
+diagnostic then exposes the fixture's missing real external Python: construction's
+CMD wrapper is not sufficient for uninstall's existing interpreter admission.
+The fixture now additionally exposes its actual external base interpreter only
+to uninstall. Replacing the newly added full-payload tree hash with precise
+entry/manifest byte checks also removes about 38 seconds of unrelated hashing.
+Temporary diagnostic output is removed; no production admission, census,
+deadline, service or cleanup behavior changes.
+
+UV package delivery supplies a synthetic CLI inside the real temporary venv;
+host scheduled-task effects are guarded. These are native installer/selector
+and removal consumers, not real package acquisition, live Connection Owner,
+whole-suite update, a consuming harness's clean-room scenario or affected-host
+rollout. Existing U8/U9 and #10448 results retain their original scope.
+Current-head review, required CI, merge and containing release of this
+test-only slice remain outstanding; the parent Plan/Validation Plan stays open.
+
+PR #10889's first head `79b3ca9789` receives a genuine approval, but CI
+`42163624170` fails its Bridge source-coverage guard: the historical HTTP-52
+closure blob for `tools/bridge_http52_artifact.py` is unavailable in the fresh
+checkout. Evidence preparation lists only HTTP-47 through HTTP-51. A focused
+regression first fails because HTTP-52's distinct checkpoint is never prepared.
+Adding that packet to the existing exact-commit preparation fixes this source
+prerequisite without changing the validator or recapturing evidence.
+All 58 preparation controls then pass in 48.70 seconds through the existing
+bounded containment owner, including native unreferenced-tree controls.
+An initial full local invocation instead hits four Git filename-length errors
+under its overly long ad hoc scratch prefix; switching to the runner's canonical
+compact roots fixes the invocation, not the tests or Git policy.
+The revised head still needs its own review and full required CI.

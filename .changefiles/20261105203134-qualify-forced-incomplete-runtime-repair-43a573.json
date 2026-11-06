@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify forced incomplete-runtime repair, provision failure exits and installed marketplace payload removal with preserved user state.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

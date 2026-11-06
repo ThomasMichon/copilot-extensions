@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the HTTP-52 historical capture checkpoint before local-only Bridge contract validation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
