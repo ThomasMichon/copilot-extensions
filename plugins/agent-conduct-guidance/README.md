@@ -136,7 +136,13 @@ changes in an existing effort, charter or checkpoint.
 Record upfront approvals and one-time answers immediately; carry references,
 exclusions and current changes through checkpoints/handoffs. A copied record,
 receipt, plan or model summary does not grant permission. Current applicability,
-explicit pins, use limits, holds and revocation remain binding. The procedure
+explicit pins, use limits, holds and revocation remain binding. A revision pin
+or single-attempt limit is explicit when the operator stated it or chose it
+over an offered broader option; one an agent put in its only approving option
+is its proposal. Caps in an accepted class-level rerun policy bind.
+Agents read a grant by its stated operation class, treat a rerun after a
+reviewed fix as an ordinary bounded retry, and turn a repeated ask for one
+class into a single class-level pre-clearance request. The procedure
 works without a runtime, broker or companion plugin; it does not certify model
 compliance or replace execution-owner enforcement.
 

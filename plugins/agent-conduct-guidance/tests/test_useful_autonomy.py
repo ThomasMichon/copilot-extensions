@@ -82,6 +82,11 @@ def test_skill_and_record_are_discoverable_without_a_runtime():
     "reconcile unknown prior effects",
     '"Pause here" is not an alternative',
     "not automatic tool approval",
+    "not its narrowest past invocation",
+    "a failure followed by a reviewed fix is such a retry",
+    "accepted rerun caps",
+    "a pin or one-shot limit in the agent's only approving option is its proposal",
+    "seek class-level pre-clearance",
 ])
 def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
     assert clause in " ".join(_TEMPLATE.read_text().split())
@@ -111,6 +116,25 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
     (
         "Original approval evidence is missing or unreadable",
         "Name the affected gap, use bounded evidence recovery and continue other authorized work.",
+    ),
+    (
+        "Agent wrote a single attempt or revision pin into its own question and the operator "
+        "chose the only approving option",
+        "Record it as an agent-proposed precaution, not an operator pin; reuse the granted class "
+        "within its effects.",
+    ),
+    (
+        "A run under a cleared class fails and a reviewed fix lands",
+        "Treat the rerun as an ordinary bounded retry; refresh execution evidence instead of "
+        "asking again.",
+    ),
+    (
+        "The same operation class would need approval a second time",
+        "Ask once for class-level pre-clearance with a bounded rerun policy, not per invocation.",
+    ),
+    (
+        "Operator accepts a class-level rerun policy with a run cap",
+        "The cap binds as granted scope; ask for an amendment before exceeding it.",
     ),
 ])
 def test_record_preserves_explicit_decision_cases(situation, required):
@@ -142,3 +166,16 @@ def test_blocking_question_follows_decision_preparation_not_presence_polling():
         "not a daemon, approval renewal",
     ):
         assert clause in packet.lower()
+
+
+def test_skill_checks_recorded_grants_and_limit_origin_before_asking():
+    skill = " ".join(_SKILL.read_text().split())
+    for clause in (
+        "Before asking for approval of an operation, run this self-check",
+        "Classify each recorded revision pin or one-shot limit by origin",
+        "Accepted rerun caps, budgets and deadlines bind as granted scope",
+        "only agent-proposed limits stand in the way",
+        "Offer narrower one-shot or revision-pinned options only as clearly labeled alternatives",
+        "Worked example: repeated qualification runs",
+    ):
+        assert clause in skill
