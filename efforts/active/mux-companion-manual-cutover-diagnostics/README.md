@@ -332,9 +332,9 @@ https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321
 - The [independent expected-head source sequence](expected-head-observation.md)
   realizes P3/P4 through the existing owner receipts and an optional passive
   comparison. Plan #10865 is merged; #10870 captures optional original/consumer
-  identity in source. The passive comparison reader and Companion consumer remain
-  unimplemented. Legacy identity stays unknown and all original clauses below
-  remain unchanged.
+  identity in source. #10884 supplies the passive independent comparison reader;
+  the Companion consumer remains unimplemented. Legacy identity stays unknown
+  and all original clauses below remain unchanged.
 
 - [ ] P1. Retain all original four steps and earned source delivery: scoped vision,
   explicit one-call context-handoff force option, one-worktree on-demand existing
@@ -624,6 +624,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Validation Plan
 
+- [x] Independent expected-head H2 passive provider: 171 isolated source
+      controls qualify actual consume receipts, raw activation and delivery
+      ordering, distinct durable/Picker facts, bounded no-wake reads and
+      explicit unknown/error outcomes. #10884 merged after exact-head
+      independent approval and every required green check; the complete root
+      and five linked contracts were read immediately afterward. H3 and all
+      original manual/head/native gates remain open.
+
 - [x] Independent expected-head H1 identity capture in existing owner records:
       36 actual binding and 147 handoff/CLI controls preserve exact optional
       identity, unknown outcomes, legacy replay and deduplicated original
@@ -741,6 +749,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Optional expected-head Recovery consumer](journal/2026/11.05-companion-expected-head-display.md)
 - [2026-11-05 - Passive independent expected-head provider](journal/2026/11.05-companion-expected-head-reader.md)
 - [2026-11-05 - Original handoff and consumer identity capture](journal/2026/11.05-companion-expected-head-identity.md)
 - [2026-11-05 - Reviewed independent expected-head source sequence](journal/2026/11.05-companion-expected-head-plan.md)

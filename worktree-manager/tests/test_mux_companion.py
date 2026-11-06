@@ -198,7 +198,7 @@ def test_load_current_worktree_degrades_when_sessions_unavailable(monkeypatch):
     def _raise(*args, **kwargs):
         raise ec.EngineError("boom")
 
-    monkeypatch.setattr(ec, "list_worktree_sessions", _raise)
+    monkeypatch.setattr(ec, "list_worktree_session_snapshot", _raise)
 
     data = companion._load_current_worktree("/w")
 
@@ -212,7 +212,7 @@ def test_load_current_worktree_fetches_sessions_when_tracked(monkeypatch):
     monkeypatch.setattr(ec, "current_worktree_status", lambda **k: payload)
     session_rows = [{"id": "s1", "is_head": True}]
     monkeypatch.setattr(
-        ec, "list_worktree_sessions", lambda *a, **k: session_rows
+        ec, "list_worktree_session_snapshot", lambda *a, **k: {"sessions": session_rows}
     )
 
     data = companion._load_current_worktree("/w")
@@ -227,8 +227,8 @@ def test_load_current_worktree_skips_sessions_when_untracked(monkeypatch):
     monkeypatch.setattr(ec, "current_worktree_status", lambda **k: payload)
     calls = []
     monkeypatch.setattr(
-        ec, "list_worktree_sessions",
-        lambda *a, **k: calls.append(1) or [],
+        ec, "list_worktree_session_snapshot",
+        lambda *a, **k: calls.append(1) or {"sessions": []},
     )
 
     data = companion._load_current_worktree("/w")
@@ -242,7 +242,7 @@ def test_load_current_worktree_includes_pending_handoff(monkeypatch):
     lookup, and its result surfaces on the loaded data."""
     payload = {"version": 1, "id": "wt-ab12", "path": "/w", "state": "wip"}
     monkeypatch.setattr(ec, "current_worktree_status", lambda **k: payload)
-    monkeypatch.setattr(ec, "list_worktree_sessions", lambda *a, **k: [])
+    monkeypatch.setattr(ec, "list_worktree_session_snapshot", lambda *a, **k: {"sessions": []})
     seen = {}
 
     def _fake_pending(project, worktree_path, **kwargs):
@@ -261,7 +261,7 @@ def test_load_current_worktree_includes_pending_handoff(monkeypatch):
 def test_load_current_worktree_degrades_when_pending_handoff_unavailable(monkeypatch):
     payload = {"version": 1, "id": "wt-ab12", "path": "/w", "state": "wip"}
     monkeypatch.setattr(ec, "current_worktree_status", lambda **k: payload)
-    monkeypatch.setattr(ec, "list_worktree_sessions", lambda *a, **k: [])
+    monkeypatch.setattr(ec, "list_worktree_session_snapshot", lambda *a, **k: {"sessions": []})
 
     def _raise(*a, **k):
         raise ec.EngineError("boom")
@@ -398,7 +398,9 @@ def test_end_to_end_cut_over_button_press_updates_the_live_view(monkeypatch):
             {"id": "new-sess", "is_head": True, "state": "active"},
         ]
 
-    monkeypatch.setattr(ec, "list_worktree_sessions", _fake_sessions)
+    monkeypatch.setattr(
+        ec, "list_worktree_session_snapshot", lambda *a, **k: {"sessions": _fake_sessions()},
+    )
     pending_calls = {"n": 0}
 
     def _fake_pending(*a, **k):
@@ -481,8 +483,8 @@ def test_confirmed_empty_claims_are_distinct_from_unavailable():
 def test_load_bundle_failure_preserves_status_and_recovery(monkeypatch):
     monkeypatch.setattr(ec, "current_worktree_status",
                         lambda **k: {"id": "wt-ab12", "state": "wip"})
-    monkeypatch.setattr(ec, "list_worktree_sessions",
-                        lambda *a, **k: [{"id": "old", "is_head": True}])
+    monkeypatch.setattr(ec, "list_worktree_session_snapshot",
+                        lambda *a, **k: {"sessions": [{"id": "old", "is_head": True}]})
 
     def fail(*a, **k):
         raise ec.EngineError("older engine has no status bundle")
@@ -505,7 +507,7 @@ def test_textual_summary_default_claims_and_recovery_tabs(monkeypatch, size):
 
     monkeypatch.setattr(ec, "current_worktree_status",
                         lambda **k: {"id": "wt-ab12", "state": "wip"})
-    monkeypatch.setattr(ec, "list_worktree_sessions", lambda *a, **k: [])
+    monkeypatch.setattr(ec, "list_worktree_session_snapshot", lambda *a, **k: {"sessions": []})
 
     async def run():
         app = companion.MuxCompanionApp(cwd="/w")
