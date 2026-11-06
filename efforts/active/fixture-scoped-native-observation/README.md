@@ -250,3 +250,21 @@ proposal neither reintroduces an MCP gate nor authorizes the held extension.
   source binding, inventory, coverage target or 300-second packet budget changed.
 - Native GUI, debugger, calibration, rollout and publication remain unauthorized
   for this worker; no such effects were executed.
+
+### 2026-11-06 - Retain interrupted pre-ident observer startup
+
+- Reused the pipe-worker owner's proven-precreation-refusal rule rather than
+  treating a missing Python thread identifier as proof that no worker exists.
+  Unknown start interruption retains the exact attempted worker and native pins.
+- Added started/completed events around the existing observer pump. Native root
+  failure settlement still happens first; observer cleanup waits for completion
+  and joins only within the original cleanup deadline. Missing completion retains
+  unconfirmed observer custody and never releases pins or qualifies evidence.
+- Two composed pre-ident interruption controls failed before correction. The
+  targeted refusal/interruption controls then passed, followed by 70 affected
+  synthetic SDK controls with no skips and verified cleanup. Each pre-ident
+  worker is released and joined by its test finalizer; no native fixture ran.
+- The dedicated native case was collected only. No required-packet inventory,
+  source binding, coverage target, 300-second budget or runtime package source
+  changed. Native execution, debugger, calibration and publication remain held
+  for the delegated worker; coordinator publication ownership is unchanged.

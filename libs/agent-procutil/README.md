@@ -223,6 +223,11 @@ Failed startup admission signals stop and returns immediately to the native
 owner; it does not join the observer while the root is still suspended. The
 outer context performs potentially blocking observer teardown only after the
 native owner's failure settlement, within the original cleanup deadline.
+Interrupted thread start retains the attempted worker even before its Python
+`ident` exists. The existing pipe-worker owner's proven-precreation-refusal rule
+is the only discard path. Observer pins remain held until the worker's completion
+event and bounded join confirm settlement; unknown startup cannot become closed
+or qualified evidence.
 Failure logging and evidence capture never wait for the observer lock. If a
 stalled callback owns that lock, evidence is explicitly unknown and unqualified,
 with no invented empty raw stream; the original error and live observer retain

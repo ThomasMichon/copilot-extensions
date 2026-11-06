@@ -406,17 +406,13 @@ def test_root_mode_refuses_unbounded_or_truncated_native_process_filter(pid):
     assert not api.filters
 
 
-def test_pump_thread_start_failure_releases_pins_on_outer_context_cleanup(root, monkeypatch):
+def test_proven_precreation_thread_refusal_releases_pins_on_outer_context_cleanup(root, monkeypatch):
     observer, api, _, _, _ = root
-
-    class RefusedThread:
-        ident = None
-
-        def start(self):
-            raise RuntimeError("thread creation refused")
-
-    monkeypatch.setattr(scoped.threading, "Thread", lambda **kwargs: RefusedThread())
-    with pytest.raises(RuntimeError, match="thread creation refused"):
+    original_thread = threading.Thread
+    monkeypatch.setattr(
+        scoped.threading, "Thread", lambda **kwargs: original_thread.__new__(original_thread),
+    )
+    with pytest.raises(RuntimeError, match="__init__.*not called"):
         with observer:
             admit(root)
     assert observer.thread is None
@@ -821,3 +817,89 @@ def test_native_fixture_finally_preserves_nonexpired_retirement_sequence(monkeyp
     monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: 100))
     module._retire_scoped_fixture(process, job, 110, None)
     assert calls == [("retire", job, 10), ("wait", 10), ("close",)]
+
+
+@pytest.mark.parametrize("release_after_retirement", [True, False])
+def test_preident_start_interruption_retains_worker_and_pins_until_confirmed_completion(
+    root, launch, monkeypatch, release_after_retirement,
+):
+    from agent_procutil import _windows_caller_owned as native
+
+    observer, api, _, _, _ = root
+    entered, release = threading.Event(), threading.Event()
+    workers, order = [], []
+    primary = KeyboardInterrupt("start interrupted after native worker creation")
+    original_thread = threading.Thread
+    monkeypatch.setattr(native, "time", time)
+
+    def factory(**kwargs):
+        worker = original_thread(**kwargs)
+        original_set_ident = worker._set_ident
+
+        def preident():
+            entered.set()
+            assert release.wait(2), "owned pre-ident worker was not released"
+            original_set_ident()
+
+        worker._set_ident = preident
+        workers.append(worker)
+        return worker
+
+    start_name = (
+        "_start_joinable_thread" if hasattr(threading, "_start_joinable_thread")
+        else "_start_new_thread"
+    )
+    original_start = getattr(threading, start_name)
+
+    def interrupted(*args, **kwargs):
+        original_start(*args, **kwargs)
+        assert entered.wait(1)
+        raise primary
+
+    retire = native.JobHandle.terminate_and_wait
+
+    def retirement(job, timeout):
+        assert workers[0].ident is None
+        assert observer.thread is workers[0]
+        assert not observer.pins_closed and "close-process-pin" not in api.calls
+        order.append("root-retirement")
+        result = retire(job, timeout)
+        if release_after_retirement:
+            release.set()
+        return result
+
+    monkeypatch.setattr(scoped.threading, "Thread", factory)
+    monkeypatch.setattr(threading, start_name, interrupted)
+    monkeypatch.setattr(native.JobHandle, "terminate_and_wait", retirement)
+    start = time.monotonic()
+    cleanup = start + .35
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            with observer:
+                native.spawn(
+                    ["fixture.exe"], before_resume=observer.admit,
+                    command_deadline=start + .15, cleanup_deadline=cleanup,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+        assert caught.value is primary and order == ["root-retirement"]
+        assert observer.job.closed and observer.process._handle is None
+        assert observer.thread is workers[0]
+        if release_after_retirement:
+            assert observer.pins_closed
+            assert observer.worker_started.is_set() and observer.worker_completed.is_set()
+            assert not observer.thread.is_alive()
+        else:
+            assert time.monotonic() <= cleanup + .15
+            assert workers[0].ident is None and not observer.pins_closed
+            assert not observer.worker_started.is_set() and not observer.worker_completed.is_set()
+            assert "close-process-pin" not in api.calls and ("close", 802) not in api.calls
+            assert primary.scoped_observer is observer
+            assert isinstance(primary.scoped_observer_cleanup_error, scoped.ScopedCleanupError)
+            assert primary.scoped_observer_evidence["qualified"] is False
+            assert primary.scoped_observer_evidence["passed"] is False
+    finally:
+        release.set()
+        for worker in workers:
+            assert worker._started.wait(1)
+            worker.join(1)
+            assert not worker.is_alive()

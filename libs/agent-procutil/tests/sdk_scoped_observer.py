@@ -64,6 +64,8 @@ class ScopedObserver:
         self.sealed = False
         self.stop = threading.Event()
         self.ready = threading.Event()
+        self.worker_started = threading.Event()
+        self.worker_completed = threading.Event()
         self.thread: threading.Thread | None = None
         self.lock = threading.RLock()
         self.pins_closed = False
@@ -173,11 +175,13 @@ class ScopedObserver:
             ):
                 raise ObservationBlocked("native root/thread/Job ownership is incomplete")
             self.started = time.monotonic()
-            self.thread = threading.Thread(target=self._run, name="sdk-scoped-observer")
+            self.thread = threading.Thread(target=self._run_worker, name="sdk-scoped-observer")
             try:
                 self.thread.start()
-            except BaseException:
-                if self.thread.ident is None:
+            except BaseException as error:
+                from agent_procutil.owned_process import _pipe_worker_definitely_unstarted
+
+                if _pipe_worker_definitely_unstarted(self.thread, self.worker_started, error):
                     self.thread = None
                 raise
             if not self.ready.wait(max(0, deadline - time.monotonic())):
@@ -235,6 +239,13 @@ class ScopedObserver:
                 })
         except BaseException as error:
             self.fail(error)
+
+    def _run_worker(self) -> None:
+        self.worker_started.set()
+        try:
+            self._run()
+        finally:
+            self.worker_completed.set()
 
     def _run(self) -> None:
         hooks = None
@@ -333,6 +344,8 @@ class ScopedObserver:
                 self.fail(self._admission_error)
             self.stop.set()
             if self.thread is not None:
+                if not self.worker_completed.wait(max(0, self.cleanup_deadline - time.monotonic())):
+                    raise ObservationBlocked("scoped worker startup or completion is unconfirmed")
                 self.thread.join(max(0, self.cleanup_deadline - time.monotonic()))
                 if self.thread.is_alive():
                     raise ObservationBlocked("scoped pump cleanup is unconfirmed")
