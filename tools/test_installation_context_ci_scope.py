@@ -90,7 +90,12 @@ def test_registration_inspection_portfolio_requires_complete_native_evidence(
             "test_native_namespace_selection_and_invalid_context_do_not_use_legacy_state",
         ] if step_id == "readers" else [
             "test_closed_source_retains_native_inputs_and_application_through_reader",
-            "test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state",
+            *(
+                "test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state[" + scenario + "]"
+                for scenario in (
+                    "alias-disabled", "alias-enabled", "fresh", "ambiguous", "preparation-failure",
+                )
+            ),
         ]
     )
     tools = tmp_path / "tools"

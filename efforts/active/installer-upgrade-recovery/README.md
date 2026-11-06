@@ -2672,3 +2672,19 @@ admission and no skipped/failed evidence. It does not expand required-unit CI
 or add a matrix. Native qualification, complete U18 controls, source review,
 required CI, merge/release and caller adoption remain open. Local cold-source
 construction cost is an unresolved measured boundary, not a flake waiver.
+
+Published checkpoint `41930e203d3da562d0475b39e5edcf60b81b6df9`
+passes exact-source run `42290204186` on both hosted native platforms. Each
+downloaded artifact contains all 49 expected controls with zero skipped,
+failed or error cases: 39 existing-reader controls, nine incoming composition
+controls and one real incoming constructor/reader case. The latter takes
+21.660 seconds on Linux and 20.988 seconds on Windows, preserving the broken
+predecessor and canonical disabled exposure. This is native source-consumer
+evidence, not a local performance pass, installation or completed U18.
+
+The next checkpoint expands the real entry to both exposure choices, genuinely
+fresh native state, ambiguity and an actually unusable incoming UV executable.
+Every case runs twice and preserves existing file bytes, native identities and
+modification times, plus temporary-control cleanup. Its source-pinned native
+result is still required; no first-checkpoint evidence is relabeled for that
+expanded corpus. Item, child, group, plugin and hosted-job limits remain unchanged.

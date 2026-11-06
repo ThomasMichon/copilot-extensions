@@ -16,8 +16,11 @@ import yaml
 
 from runtime_install_fixture import isolate_account_profile, run_native_installer
 @pytest.mark.timeout(300)
+@pytest.mark.parametrize("scenario", [
+    "alias-disabled", "alias-enabled", "fresh", "ambiguous", "preparation-failure",
+])
 def test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state(
-    tmp_path,
+    tmp_path, scenario,
 ):
     uv = shutil.which("uv")
     assert uv, "native construction requires the selected UV tool"
@@ -43,18 +46,22 @@ def test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state(
     (old / "unusable-runtime").write_bytes(b"never execute or repair")
     (root / "current-version").write_bytes(b"0.0.1\n")
     (root / "deploy-manifest.json").write_bytes(b"historical malformed owner\n")
-    (root / "repos.yaml").write_text(yaml.safe_dump({"repos": {
-        "custom-control": {
-            "class": "worktree", "agent": False,
+    if scenario != "fresh":
+        rows = {"custom-control": {
+            "class": "worktree", "agent": scenario == "alias-enabled",
             "windows" if os.name == "nt" else "linux": str(anchor),
-        },
-    }}), encoding="utf-8")
-    (root / "projects.yaml").write_text(yaml.safe_dump({
-        "schema_version": 2, "projects": {"custom-control": {"expose_agent": True}},
-    }), encoding="utf-8")
+        }}
+        if scenario == "ambiguous":
+            rows["another-control"] = dict(rows["custom-control"])
+        (root / "repos.yaml").write_text(yaml.safe_dump({"repos": rows}), encoding="utf-8")
+        (root / "projects.yaml").write_text(yaml.safe_dump({
+            "schema_version": 2, "projects": {
+                "custom-control": {"expose_agent": scenario != "alias-enabled"},
+            },
+        }), encoding="utf-8")
     (home / "knowledge-binding.yaml").write_bytes(b"knowledge_repo: retained\n")
     before = {
-        path.relative_to(home): path.read_bytes()
+        path.relative_to(home): (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
         for path in home.rglob("*") if path.is_file()
     }
     environment = {
@@ -72,26 +79,42 @@ def test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state(
         COPILOT_EXTENSIONS_TEST_CONTAINED="1", AGENT_WORKTREES_STATUS_MONITOR="0",
         PYTHONDONTWRITEBYTECODE="1",
     )
+    if scenario == "preparation-failure":
+        rejected_tool = tmp_path / ("rejected-uv.exe" if os.name == "nt" else "rejected-uv")
+        rejected_tool.write_bytes(b"not an executable UV tool\n")
+        rejected_tool.chmod(0o700)
+        uv = str(rejected_tool)
     entry = [
         sys.executable, "-I", "-B", str(payload / "scripts" / "inspect_registration.py"),
         "--anchor", str(anchor), "--default-name", "control", "--uv", uv,
     ]
-    started = time.monotonic()
-    print("Incoming registration inspection: construct and read (180 seconds)", flush=True)
-    try:
-        result = run_native_installer(entry, env=environment, timeout=180)
-    except subprocess.TimeoutExpired as error:
-        pytest.fail(
-            f"Incoming construction/read timed out after {time.monotonic() - started:.3f}s:\n"
-            f"{error.stdout or ''}\n{error.stderr or ''}",
-        )
-    assert result.returncode == 0, result.stdout + result.stderr
-    data = json.loads(result.stdout)
-    assert data["contract"] == "copilot-extensions.project-registration-inspection"
-    assert data["contract_version"] == 1 and data["registered"] is True
-    assert data["project"] == "custom-control" and data["agent"] is False
-    assert {
-        path.relative_to(home): path.read_bytes()
-        for path in home.rglob("*") if path.is_file()
-    } == before
-    assert not list(temporary.glob("worktrees-registration-inspection-*"))
+    for attempt in ("first", "repeat"):
+        started = time.monotonic()
+        print(f"Incoming registration inspection: {scenario}/{attempt} (180 seconds)", flush=True)
+        try:
+            result = run_native_installer(entry, env=environment, timeout=180)
+        except subprocess.TimeoutExpired as error:
+            pytest.fail(
+                f"Incoming construction/read timed out after {time.monotonic() - started:.3f}s:\n"
+                f"{error.stdout or ''}\n{error.stderr or ''}",
+            )
+        expected = 1 if scenario == "preparation-failure" else 2 if scenario == "ambiguous" else 0
+        assert result.returncode == expected, result.stdout + result.stderr
+        if scenario == "preparation-failure":
+            assert not result.stdout.strip()
+            assert "Registration inspection preparation failed:" in result.stderr
+        else:
+            data = json.loads(result.stdout)
+            assert data["contract"] == "copilot-extensions.project-registration-inspection"
+            assert data["contract_version"] == 1
+            if scenario == "ambiguous":
+                assert data["status"] == "failed" and data["code"] == "ambiguous-anchor"
+            else:
+                assert data["registered"] is (scenario != "fresh")
+                assert data["project"] == ("control" if scenario == "fresh" else "custom-control")
+                assert data["agent"] is (scenario in ("fresh", "alias-enabled"))
+        assert {
+            path.relative_to(home): (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+            for path in home.rglob("*") if path.is_file()
+        } == before
+        assert not list(temporary.glob("worktrees-registration-inspection-*"))

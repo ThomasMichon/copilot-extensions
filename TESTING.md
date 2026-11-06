@@ -9422,8 +9422,10 @@ inventory remains a separate old-caller control. Configuration bytes stay
 unchanged; no actual registration, installer, service or authentication provider
 is started. Hosted jobs require both native consumer cases and refuse skipped
 or failed evidence. A separate incoming step requires real cold construction
-and the existing reader with an unusable selected predecessor, preserving its
-registry, selector, malformed owner and binding bytes. This uses the ordinary
+and the existing reader with an unusable selected predecessor. Both exposure
+choices, a fresh default, ambiguity and an actually unusable incoming UV tool
+run twice, preserving registry, selector, malformed owner and binding bytes.
+This uses the ordinary
 constructor and owned-child cleanup, not installation or service startup.
 The native test retains its 180-second child and 300-second item limits;
 the original reader packet remains separate. These checks do not qualify
