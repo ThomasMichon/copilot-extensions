@@ -190,6 +190,7 @@ def prepare(root: Path, selection: dict) -> tuple[object, object]:
             host_state, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
             authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,
         )
+        startup_digest(selection, configuration=config)
         prepare_ssh(config)
         return config, None
     from .gateway_enrollment import EnrollmentPolicy
@@ -280,13 +281,13 @@ def selection_digest(selection: dict) -> str:
     return digest(selection)
 
 
-def startup_digest(selection: dict, *, listener=None) -> str:
+def startup_digest(selection: dict, *, listener=None, configuration=None) -> str:
     from .gateway_service_listener import read_bounded
 
     if selection["role"] == "ssh-client":
         from .credential_references import read_credential_reference
 
-        config = ssh_configuration(selection).to_dict()
+        config = (configuration if configuration is not None else ssh_configuration(selection)).to_dict()
         return digest({
             "configuration": config,
             "references": {

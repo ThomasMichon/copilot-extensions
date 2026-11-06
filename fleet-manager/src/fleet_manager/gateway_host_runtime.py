@@ -190,7 +190,11 @@ async def _run_ssh(root, nonce, slot, selection):
     initial = asyncio.create_task(converged.wait())
     control = None
     try:
-        await asyncio.wait({consumer, initial}, return_when=asyncio.FIRST_COMPLETED)
+        while not consumer.done() and not initial.done():
+            await asyncio.wait({consumer, initial}, timeout=.5, return_when=asyncio.FIRST_COMPLETED)
+            if host.selected_version(root) != slot.name:
+                stopping.set()
+                return
         if consumer.done():
             await consumer
             raise PlanError("SSH host ended before directory convergence")

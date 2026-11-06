@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -291,6 +291,19 @@ def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_pa
     assert not Path(value["config_d"]).exists()
 
 
+@pytest.mark.parametrize("reference", ["identity_file", "public_key_file", "gateway_ca"])
+def test_ssh_host_preflight_reads_all_fingerprinted_references_before_lifetime_state(tmp_path, reference):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    value[reference] = str(root / "absent-reference")
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises((OSError, ValueError)):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
 def test_ssh_host_refuses_config_replacement_during_preparation_before_consumer(tmp_path, monkeypatch):
     from fleet_manager import ssh_machine
 
@@ -324,6 +337,62 @@ def test_ssh_host_refuses_config_replacement_during_preparation_before_consumer(
     assert not (root / host.STATE / host.RUNTIME).exists()
     assert not Path(value["state_dir"]).exists()
     assert not Path(value["config_d"]).exists()
+
+
+def test_unconverged_ssh_host_releases_consumer_and_retention_on_deselection(tmp_path, monkeypatch):
+    from fleet_manager import ssh_machine
+    from fleet_manager.ssh_directory import SSHDirectoryClient
+    from test_ssh_machine import reached
+
+    root = tmp_path / "i"
+    _, value, _, _ = ssh_selected(root)
+    private_directory(root / host.STATE)
+    slot = root / "versions" / "fixture-generation"
+    slot.mkdir(parents=True)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    retained = {"released": False}
+
+    @contextmanager
+    def custody(_root):
+        try:
+            yield slot
+        finally:
+            retained["released"] = True
+
+    monkeypatch.setattr(host, "runtime_custody", custody)
+    nonce = "4" * 32
+    host.write_private(root / host.STATE / gateway_host_start.PENDING, {
+        "generation": slot.name, "token": nonce,
+    })
+
+    async def exercise():
+        entered, settled = asyncio.Event(), asyncio.Event()
+
+        async def wait(*_args, **_kwargs):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                settled.set()
+
+        monkeypatch.setattr(SSHDirectoryClient, "wait", wait)
+        task = asyncio.create_task(gateway_host_runtime.run(root, nonce))
+        try:
+            await reached(entered.is_set, task)
+            assert not retained["released"]
+            (root / "current-version").write_text("successor", encoding="utf-8")
+            await asyncio.wait_for(task, 5)
+            assert settled.is_set() and retained["released"]
+            assert not (root / host.STATE / host.RUNTIME).exists()
+            lease = ssh_machine._lease(Path(value["state_dir"]))
+            lease.acquire()
+            lease.release()
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("denied", [False, True])

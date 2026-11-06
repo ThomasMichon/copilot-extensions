@@ -305,6 +305,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
     from aiohttp import web
     from cryptography.hazmat.primitives import serialization
     from fleet_manager.gateway_service_connector import ServiceConnector
+    from fleet_manager import gateway_host_start
     from fleet_manager.machine_identity import PROFILE
     from gateway_service_transport_fixtures import Rig
     from test_gateway_host import ssh_selected
@@ -373,6 +374,10 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(result.stdout)
 
+    async def preserved_owner(pid):
+        observed = await asyncio.to_thread(gateway_host_start.inspect, root, selection)
+        assert observed["pid"] == pid and observed["ready"] and observed["selected"]
+
     async def handle(request):
         assert request.method == "GET" and request.path == "/directory"
         assert await request.read() == b""
@@ -429,7 +434,17 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
                 assert (root / "current-version").read_text().strip() == first.name
                 assert (root / "last-known-good").read_text().strip() == first.name
                 host.write_private(Path(selection["configuration"]), value)
-                assert (await status(first))["pid"] == initial["pid"]
+                await preserved_owner(initial["pid"])
+            for reference in ("identity_file", "public_key_file", "gateway_ca"):
+                host.write_private(Path(selection["configuration"]), value | {
+                    reference: str(root / "absent-reference"),
+                })
+                failed = await invoke(updated_slot, "install")
+                assert failed.returncode != 0
+                assert (root / "current-version").read_text().strip() == first.name
+                assert (root / "last-known-good").read_text().strip() == first.name
+                host.write_private(Path(selection["configuration"]), value)
+                await preserved_owner(initial["pid"])
             host.write_private(Path(selection["configuration"]), value | {
                 "proof_key_file": str(root / "absent-proof.pem"),
             })

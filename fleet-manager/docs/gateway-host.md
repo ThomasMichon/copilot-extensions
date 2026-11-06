@@ -81,6 +81,9 @@ separate. No enrollment, credential acquisition or materialization occurs.
 Host lifecycle state is also excluded from all direct and derived writer
 destinations. Token-mode preflight reads and validates the current bounded UTF-8
 token without retaining it; later admissions still reread the provider reference.
+Every fingerprinted policy, identity, public-key, proof-key and CA reference is
+read during setup preflight, before the incoming selection can replace a healthy
+owner.
 Capability output additively advertises both host configuration versions and
 each role's required extras. Older strict v1 host readers refuse v2; rollback
 must not translate it into Gateway serving or foreground-only success.
@@ -110,6 +113,9 @@ reports the last applied directory revision; it does not assert a continuously
 connected remote channel. Authentication or local writer failure ends the
 consumer and closes control. Stop and repeated cancellation settle that original
 watch and its local lease before releasing the installed runtime retention.
+Generation selection is checked while waiting for the first snapshot too;
+an unconverged superseded host settles its watch and releases both holdings
+without waiting indefinitely for Gateway recovery.
 An unchanged install reuses the same ready owner. Key, local policy, target-login
 identity, CA or configuration changes invalidate reuse; token renewal stays with
 the existing per-admission reference reader and is not a host restart trigger.
