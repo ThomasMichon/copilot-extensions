@@ -39,7 +39,9 @@ def test_existing_cache_without_key_is_not_rekeyed(monkeypatch, tmp_path):
     assert not (tmp_path / "credential-cache.key").exists()
 
 
-@pytest.mark.parametrize("failure", ["missing-key", "protection-error", "wrapped-key"])
+@pytest.mark.parametrize("failure", [
+    "missing-key", "protection-error", "wrapped-key", "unavailable-wrapping",
+])
 def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
     monkeypatch, tmp_path, capsys, failure,
 ):
@@ -53,9 +55,17 @@ def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
     cache_file.write_bytes(b"fixture-ciphertext")
     cache = PersistentCache()
     key = kek.WRAP_MAGIC + b"Xfixture-key" if failure == "wrapped-key" else b"fixture-key"
+    if failure == "unavailable-wrapping":
+        key = kek.WRAP_MAGIC + b"Dfixture-key"
+        monkeypatch.setattr(cache_module, "IS_WINDOWS", False)
+
+        def unavailable(*_args):
+            raise AttributeError("private-wrapping-backend-diagnostic")
+
+        monkeypatch.setattr(kek, "_dpapi", unavailable)
     if failure != "missing-key":
         key_file.write_bytes(key)
-    if failure == "wrapped-key":
+    if failure in ("wrapped-key", "unavailable-wrapping"):
         module = ModuleType("cryptography.fernet")
         module.Fernet = lambda _key: pytest.fail("invalid wrapping reached encryption")
         monkeypatch.setitem(sys.modules, "cryptography.fernet", module)
@@ -88,6 +98,7 @@ def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
     assert all(row["source"] == "cache" for row in results)
     assert all(row["error"].startswith("cache_protection_failed;") for row in results)
     assert "private-protection-diagnostic" not in captured.out
+    assert "private-wrapping-backend-diagnostic" not in captured.out
     assert "unknown wrap scheme" not in captured.out
     assert captured.err == ""
     assert cache_file.read_bytes() == b"fixture-ciphertext"
@@ -95,7 +106,10 @@ def test_batch_cache_protection_failure_preserves_order_and_legacy_get(
         assert not key_file.exists()
     else:
         assert key_file.read_bytes() == key
-    expected_error = kek.KekError if failure == "wrapped-key" else CacheProtectionError
+    expected_error = {
+        "wrapped-key": kek.KekError,
+        "unavailable-wrapping": AttributeError,
+    }.get(failure, CacheProtectionError)
     with pytest.raises(expected_error):
         cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
 

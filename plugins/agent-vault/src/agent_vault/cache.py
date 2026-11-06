@@ -142,6 +142,8 @@ class PersistentCache:
         if self._key_file.exists():
             blob = self._key_file.read_bytes()
             if kek.is_wrapped(blob):
+                if readonly and not IS_WINDOWS and blob.startswith(kek.WRAP_MAGIC + b"D"):
+                    raise CacheProtectionError("cache key requires an unavailable Windows wrapping backend")
                 key = kek.unwrap_bytes(blob)
             else:
                 # Legacy plaintext key file -> migrate to a wrapped (DPAPI on
