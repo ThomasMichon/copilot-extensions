@@ -589,6 +589,8 @@ async def run_host(
     child is held after an unexpected disconnect before the host lets it go (0
     disables -- an active child then lives until its own stop).
     """
+    if lifetime_policy not in {"acp", "legacy"}:
+        raise ValueError("Unsupported Session Host lifetime policy")
     _require_receiving_policy(cwd, policy_context)
     if ws_port is not None and (lifetime_policy != "acp" or not 0 <= ws_port <= 65535):
         raise ValueError("WebSocket requires ACP lifetime and a valid loopback port")
@@ -811,13 +813,16 @@ def _require_receiving_policy(cwd: str | None, context: str | None) -> None:
 
 def main(
     argv: list[str] | None = None, *, run: Callable[..., Any] = run_host,
+    legacy: bool = False,
 ) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    lifetime_policies = ("legacy",) if legacy else ("acp", "legacy")
     if argv == ["--support-json"]:
         from importlib.util import find_spec
 
         websocket_available = (
-            find_spec("agent_remote_driver.session_host.ws_transport") is not None
+            not legacy
+            and find_spec("agent_remote_driver.session_host.ws_transport") is not None
             and find_spec("websockets") is not None
         )
         print(json.dumps({
@@ -826,7 +831,7 @@ def main(
             "modes": ["headless"],
             "transports": ["tcp-frame"] + (["acp.v1"] if websocket_available else []),
             "protocol_version": proto.PROTOCOL_VERSION,
-            "lifetime_policies": ["acp", "legacy"],
+            "lifetime_policies": list(lifetime_policies),
             "startup_admission": ["live-owner-v1"],
             "automatic_idle_retirement": {
                 "availability": "unavailable",
@@ -854,10 +859,15 @@ def main(
     ap.add_argument("--active-reap-seconds", type=float, default=0.0)
     ap.add_argument("--local-birth-evidence", action="store_true")
     ap.add_argument("--repository-policy-context", default=None)
-    ap.add_argument("--lifetime-policy", choices=("acp", "legacy"), default="acp")
+    ap.add_argument(
+        "--lifetime-policy", choices=lifetime_policies,
+        default="legacy" if legacy else "acp",
+    )
     ap.add_argument("child", nargs=argparse.REMAINDER,
                     help="child command after `--` (e.g. -- copilot --acp --stdio)")
     args = ap.parse_args(argv)
+    if legacy and args.ws_port is not None:
+        ap.error("WebSocket is unsupported by the legacy entrypoint")
 
     child_argv = args.child
     if child_argv and child_argv[0] == "--":

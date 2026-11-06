@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 import zipfile
 
 from agent_procutil import no_window_kwargs
@@ -79,6 +79,66 @@ def test_receiving_archive_publication_stays_on_the_selected_filesystem(tmp_path
     assert build_session_host_bundle(destination) == (archive, digest)
     assert len(publications) == 1
     assert list(destination.iterdir()) == [archive]
+
+
+def test_legacy_receiving_artifact_declares_and_enforces_only_legacy_support(tmp_path):
+    archive, _ = build_session_host_bundle(tmp_path / "legacy", legacy=True)
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", str(archive), "--support-json"],
+        capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    support = json.loads(result.stdout)
+    assert support["transports"] == ["tcp-frame"]
+    assert support["lifetime_policies"] == ["legacy"]
+    marker = tmp_path / "must-not-start"
+    for options in (["--lifetime-policy", "acp"], ["--ws-port", "0"]):
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", str(archive), *options, "--",
+             sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+            capture_output=True, timeout=5, **no_window_kwargs(),
+        )
+        assert result.returncode == 2 and not marker.exists()
+
+
+def test_legacy_entrypoint_defaults_to_its_declared_lifetime(monkeypatch, capsys):
+    assert legacy_launcher.main(["--support-json"]) == 0
+    declaration = json.loads(capsys.readouterr().out)
+    assert declaration["transports"] == ["tcp-frame"]
+    assert declaration["lifetime_policies"] == ["legacy"]
+    execution = AsyncMock()
+    monkeypatch.setattr(legacy_launcher, "run_host", execution)
+    assert legacy_launcher.main(["--", "inert-fixture"]) == 0
+    execution.assert_awaited_once()
+    assert execution.call_args.kwargs["lifetime_policy"] == "legacy"
+    assert execution.call_args.kwargs["ws_port"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsupported", [{"lifetime_policy": "acp"}, {"ws_port": 0}])
+async def test_legacy_api_refuses_unsupported_execution_before_policy_or_spawn(
+    monkeypatch, unsupported,
+):
+    policy = Mock(side_effect=AssertionError("must refuse before policy execution"))
+    execution = AsyncMock(side_effect=AssertionError("must not start Host"))
+    monkeypatch.setattr(legacy_launcher, "require_path_hosting", policy)
+    monkeypatch.setattr(launcher, "run_host", execution)
+    with pytest.raises(ValueError, match="legacy|WebSocket"):
+        await legacy_launcher.run_host(["must-not-start"], **unsupported)
+    policy.assert_not_called()
+    execution.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_core_api_refuses_unknown_lifetime_before_policy_or_spawn(monkeypatch):
+    policy = Mock(side_effect=AssertionError("must refuse before policy execution"))
+    spawn = AsyncMock(side_effect=AssertionError("must not create child"))
+    monkeypatch.setattr(launcher, "_require_receiving_policy", policy)
+    monkeypatch.setattr(launcher, "_spawn_child", spawn)
+    with pytest.raises(ValueError, match="Unsupported Session Host lifetime"):
+        await launcher.run_host(["must-not-start"], lifetime_policy="unknown")
+    policy.assert_not_called()
+    spawn.assert_not_awaited()
 
 
 def test_relocated_core_support_and_preference_closure_without_bridge(tmp_path):

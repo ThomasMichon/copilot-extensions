@@ -48,6 +48,9 @@ structured pending-work evidence is qualified; a legacy boolean status does
 not establish an empty task, agent or schedule set. Explicit legacy receiving
 adapters preserve the old disconnect contract and refuse unsupported original
 local startup custody. No installed or retained session is migrated.
+The legacy receiving entrypoint advertises only legacy lifetime and TCP.
+An explicit ACP lifetime or WebSocket request refuses before launch rather
+than being silently reinterpreted as legacy execution.
 
 ## SDK extension
 

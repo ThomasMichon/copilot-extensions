@@ -31,6 +31,8 @@ WS closure is observed independently of RPC writes. A backpressured write
 cannot keep its TCP controller attached after disconnect. Shutdown bounds the
 drain and TCP close, then releases the controller without stopping Copilot or
 retrying an uncertain inbound RPC.
+Initial HELLO and replay writes use the same controller cleanup scope, so a
+disconnect during startup output cannot reserve an abandoned controller.
 
 Ordinary ACP WS has no resumable application receipt. The adapter acknowledges
 Host output after handing it to WebSocket, not after the remote application

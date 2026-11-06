@@ -533,3 +533,27 @@ That exact failure is already owned by #10894 and included in #10888. Added the
 downstream PR/run evidence there rather than duplicate its fix or relax the
 local-only contract proof. Pull forward the reviewed correction when merged;
 #10863 still needs updated publication, passing exact-head review and green CI.
+
+### 2026-11-06 - Initial-output cleanup and truthful legacy selection
+
+Pulled forward the merged HTTP-52 preparation correction from #10888 without
+changing Driver implementation bytes. Required CI then passed on the rebased
+head. The new review found two further lifecycle edge cases rather than a CI
+failure: controller cancellation before the initial HELLO/replay cleanup scope,
+and the legacy entrypoint advertising ACP lifetime that it silently replaced.
+
+HELLO, initial replay and normal reads now share the same controller cleanup
+scope. Two actual wire-send controls block HELLO or replay, disconnect, then
+prove that a new controller can attach, the child remains alive and the original
+unacknowledged frame is still replayable. The legacy artifact now advertises
+only TCP and legacy lifetime, defaults to that policy and refuses explicit ACP
+or WS before execution. The direct legacy API enforces the same boundary;
+unknown core lifetime selections also refuse before policy or child effects.
+No legacy request is silently coerced to another execution policy.
+
+All 39 core/transport controls pass in 46.55 seconds. Native Copilot continuity
+passes again in 12.14 seconds with the unchanged RPC deadlines and exact
+fixture cleanup. F/E9 lint passes. The current authority vectors need an
+exact-commit refresh for these staged-source changes, followed by updated
+publication, exact-head review and required CI. Desktop visibility, headed
+convergence and the rest of the parent validation remain open.

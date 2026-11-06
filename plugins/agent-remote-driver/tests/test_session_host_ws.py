@@ -14,6 +14,7 @@ from agent_remote_driver.session_host.host import SessionHost
 from agent_remote_driver.session_host.ws_transport import WebSocketTransport
 from agent_remote_driver.session_host import launcher
 from agent_remote_driver.session_host import ws_transport
+from agent_remote_driver.session_host import protocol
 
 
 class _Child:
@@ -348,3 +349,43 @@ async def test_ws_handles_pre311_asyncio_timeout_class(broker, monkeypatch, oper
             await websocket.close(drain=True)
     await _released(host)
     assert child.returncode is None and not websocket._handlers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_type", [protocol.MsgType.HELLO, protocol.MsgType.FRAME])
+async def test_disconnect_during_initial_output_releases_controller_and_retains_replay(
+    broker, monkeypatch, blocked_type,
+):
+    child, host, tcp, _ = broker
+    frame = b'{"jsonrpc":"2.0","id":9,"result":{}}\n'
+    child.stdout.feed_data(frame)
+    while host.max_seq != 1:
+        await asyncio.sleep(0.005)
+    blocked = asyncio.Event()
+    send = protocol.write_message
+
+    async def backpressured(writer, kind, payload=b""):
+        if kind == blocked_type and not blocked.is_set():
+            blocked.set()
+            await asyncio.Future()
+        return await send(writer, kind, payload)
+
+    monkeypatch.setattr(protocol, "write_message", backpressured)
+    first = await SessionHostClient.connect(port=tcp)
+    try:
+        await protocol.write_message(
+            first._writer, protocol.MsgType.ATTACH, protocol.pack_attach(0, b"fixture-tcp"),
+        )
+        await asyncio.wait_for(blocked.wait(), 2)
+    finally:
+        await first.close()
+    await _released(host)
+    assert child.returncode is None and host.ack_cursor == 0
+    restored = await SessionHostClient.connect(port=tcp)
+    try:
+        hello = await restored.attach(nonce=b"fixture-tcp")
+        assert hello.max_seq == 1
+        assert await asyncio.wait_for(anext(restored.frames()), 2) == (1, frame)
+        await restored.ack(1)
+    finally:
+        await restored.close()

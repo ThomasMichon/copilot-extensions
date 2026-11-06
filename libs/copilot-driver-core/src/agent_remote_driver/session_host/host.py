@@ -352,21 +352,18 @@ class SessionHost:
 
     async def _serve_front(self, front: _Front) -> None:
         reader, writer = front.reader, front.writer
-        await self._safe_send(
-            front, proto.MsgType.HELLO,
-            proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0)
-            + (json.dumps(self._preference_receipt).encode("utf-8")[:MAX_RECEIPT_BYTES]
-               if self._preference_receipt is not None else b""),
-        )
-        # Replay every buffered frame before the terminal liveness marker. The
-        # client ends iteration on LIVENESS(dead), so sending it first would
-        # silently discard the child's final unacknowledged output on reattach.
-        await self._flush_front(front)
-        if self._child_done.is_set():
-            await self._safe_send(front, proto.MsgType.LIVENESS,
-                                  proto.pack_liveness(False, self._child_exit or 0))
-
         try:
+            await self._safe_send(
+                front, proto.MsgType.HELLO,
+                proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0)
+                + (json.dumps(self._preference_receipt).encode("utf-8")[:MAX_RECEIPT_BYTES]
+                   if self._preference_receipt is not None else b""),
+            )
+            # Buffered frames must precede the terminal liveness marker.
+            await self._flush_front(front)
+            if self._child_done.is_set():
+                await self._safe_send(front, proto.MsgType.LIVENESS,
+                                      proto.pack_liveness(False, self._child_exit or 0))
             while not self._closing and not front.closed:
                 msg = await proto.read_message(reader)
                 if msg is None or front.closed or self._front is not front:
