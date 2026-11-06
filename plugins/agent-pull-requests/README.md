@@ -202,8 +202,11 @@ pending auto-completion is not reported as a completed merge. `--auto`,
 than silently overriding repository policy. Use the central consent workflow
 for a target whose profile does not allow `--now`.
 
-Each read has a 20-second deadline; each mutation has a 90-second deadline and
-bounded output. A lost mutation response is uncertain: reconcile with native
+Each native snapshot read has a 60-second deadline; capability probes retain
+their 20-second deadline and mutations retain a 90-second deadline and bounded
+output. The polling timeout does not cancel an in-flight snapshot: that read
+finishes or reaches its own deadline before wait reports its latest result.
+A lost mutation response is uncertain: reconcile with native
 status before retrying, never retry through the GitHub path. On Windows,
 PowerShell command arguments travel as JSON data over stdin. PowerShell 7.3
 or newer with standard native argument passing is required through the final
@@ -211,7 +214,8 @@ Python invocation, preserving empty arguments, multiline bodies and quotes.
 Older PowerShell hosts and batch command shims are refused before the target
 command executes; use the catalog's PowerShell command or a validated same-cell
 native peer. An empty selector is invalid, never a request for GitHub fallback.
-Native watch snapshots use this same command adapter and 20-second read budget.
+Native watch snapshots use this same command adapter and shared 60-second read
+budget. A longer deadline does not make incomplete policy evidence complete.
 
 ## Acknowledged watch callbacks (opt-in)
 

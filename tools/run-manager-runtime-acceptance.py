@@ -1,4 +1,4 @@
-"""Cold Manager acceptance under the existing 300-second native group boundary.
+"""Cold Manager acceptance under independently contained native group boundaries.
 
 Prepare real installed candidates before pytest's unchanged 30-second item
 checks, then execute those checks through the canonical plugin runner.
@@ -65,6 +65,12 @@ def main() -> int:
         assertions = [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
                       "--test-file", "tests/native/" + filename]
         groups = (
+            [("source constructions and assertions", [
+                *[[*prepare_command, "--prepare-step", step]
+                  for step in ("release", "qualified", "source", "repair")],
+                assertions,
+            ])]
+            if args.contract == "source" else
             [("archived-fixture preparation", [prepare_command]),
              ("normal-update consumer", [
                  [str(python), "-I", "-B", str(native), "--exercise", str(sandbox)],
@@ -80,10 +86,11 @@ def main() -> int:
             if args.contract == "uninstall" else
             [("construction and assertions", [prepare_command, assertions])]
         )
+        group_seconds = 1800 if args.contract == "source" else 300
         for label, commands in groups:
             started = time.monotonic()
             for command in commands:
-                remaining = 300 - (time.monotonic() - started)
+                remaining = group_seconds - (time.monotonic() - started)
                 if remaining <= 0:
                     return 124
                 print(f"Manager native acceptance ({label}): running", flush=True)
