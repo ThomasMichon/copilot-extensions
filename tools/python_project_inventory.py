@@ -36,7 +36,9 @@ def contained_path(path: Path, root: Path) -> Path:
     return resolved
 
 
-def runtime_roots(root: Path, catalog: dict) -> dict[str, list[tuple[str, str, frozenset[str]]]]:
+def runtime_roots(
+    root: Path, catalog: dict, *, root_names: tuple[str, ...] | None = None,
+) -> dict[str, list[tuple[str, str, frozenset[str]]]]:
     """Share the root/extra/condition selection with the release-lock input owner."""
     groups = {name: [] for name in ("core", "index-service", "index-engine")}
     special = {
@@ -58,4 +60,16 @@ def runtime_roots(root: Path, catalog: dict) -> dict[str, list[tuple[str, str, f
         for extra in extras:
             conditions = frozenset({PORTABLE_EXTRA}) if group == "core" else frozenset()
             groups[group].append((name, extra, conditions))
+    if root_names is not None:
+        available = {name for roots in groups.values() for name, _extra, _conditions in roots}
+        if (
+            not isinstance(root_names, (tuple, list)) or not root_names
+            or any(not isinstance(name, str) or name not in available for name in root_names)
+            or len(set(root_names)) != len(root_names)
+        ):
+            raise ValueError("root_names must select unique canonical runtime roots")
+        groups = {
+            group: [entry for entry in roots if entry[0] in root_names]
+            for group, roots in groups.items()
+        }
     return groups

@@ -120,6 +120,15 @@ virtual environment is not a relocatable artifact.
 These are target requirements, not claims that current Manager artifacts or all
 host entry points already implement them.
 
+Manager's embedded wheel uses a separate application environment. The existing
+retained-wheel profile verifier rejects actual payload-file collisions involving
+Manager before construction, without changing other application profiles.
+Consolidated-core selection and its requirement
+to retain every first-party wheel are unchanged; incompatible coinstallation
+refuses instead of omitting or relabeling required inputs. Unbundled historical
+artifacts without overlapping payloads retain the existing checks. This admission
+does not establish installed readiness, serving or rollout.
+
 Runtime installation and communication compatibility are separate contracts.
 For a new or changed CLI/service boundary, apply
 [service-contract-evolution](patterns/service-contract-evolution.md): publish
@@ -1414,6 +1423,18 @@ installers are not dependencies of that repair.
 The fresh Manager then repairs the core through its
 supported, source-policy/ownership-admitted installer before running its normal
 whole-suite `update` orchestration, without fetching a second Manager source.
+Fresh update bootstrap admits that entire operation as one durable request,
+retaining immutable Manager/SDK inputs before the existing finite worker starts.
+Equivalent pending inputs and options may coalesce; active arrivals retain a
+fresh later attempt because the suite can still discover moving marketplace
+targets. Waiting observes the suite's final result rather than Manager
+construction alone.
+Prepared older source payloads remain installation inputs to the current
+retained controller, not an assumption that they implement its private flags.
+The same participant custody and saved automatic-policy scope span construction
+and subsequent orchestration. Manual fence repair uses the existing explicit
+authorization and preserves prior failure history without claiming native
+cleanup settlement or overriding a live custodian.
 For an admitted partial shared installation, Manager requests the native
 update's private missing-runtime opt-in instead of running separate provision
 and update lifecycles. The opt-in requires an explicit legacy root and an

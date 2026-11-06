@@ -638,7 +638,20 @@ def validate_manifest(manifest: dict) -> None:
                     source_root, source_root=Path("."),
                 )
             ]
-            if manifest.get("build_resources") != expected_resources:
+            resources = manifest.get("build_resources")
+            embedded_resources = (
+                manifest["component"] == "worktree-manager"
+                and isinstance(resources, list)
+                and resources[:len(expected_resources)] == expected_resources
+                and len(resources) > len(expected_resources)
+                and all(
+                    isinstance(path, str)
+                    and re.fullmatch(r"(?:worktree-manager/)?libs/[a-z0-9]+(?:-[a-z0-9]+)*", path)
+                    for path in resources
+                )
+                and len(resources) == len(set(resources))
+            )
+            if resources != expected_resources and not embedded_resources:
                 raise PromotionArtifactError("invalid manifest build resource closure")
         for wheel in manifest["wheels"]:
             info = parse_wheel_filename(Path(wheel["filename"]))

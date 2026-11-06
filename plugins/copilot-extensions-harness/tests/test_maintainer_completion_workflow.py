@@ -5,8 +5,41 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
+
+if TYPE_CHECKING:
+    import subprocess as subprocess_types
+    import maintainer_pr_completion as controller_source
+    import maintainer_pr_completion_github as evidence_source
+
+    class ControllerModule(Protocol):
+        CONFIG: Path
+        CONFLICT_MARKER: str
+        Settings: type[controller_source.Settings]
+        EvidenceUnavailable: type[evidence_source.EvidenceUnavailable]
+        MutationUncertain: type[controller_source.MutationUncertain]
+        subprocess: ModuleType
+        time: ModuleType
+
+        def settings(self, path: Path = ...) -> controller_source.Settings: ...
+        def main(self) -> int: ...
+        def invoke(self, argv: list[str]) -> subprocess_types.CompletedProcess[str]: ...
+        def candidates(self, client: evidence_source.GitHubEvidence, number: int | None, consent_label: str) -> list[int]: ...
+        def reconcile(
+            self, client: evidence_source.GitHubEvidence, number: int, config: controller_source.Settings, *, apply: bool,
+        ) -> dict[str, Any]: ...
+
+    _controller_contract: ControllerModule = controller_source
+
+    class PagesClient(Protocol):
+        repository: str
+        def pages(self, endpoint: str) -> list[dict[str, Any]]: ...
+
+    def _verify_real_pages(client: evidence_source.GitHubEvidence) -> PagesClient:
+        return client
 
 ROOT = Path(__file__).resolve().parents[3]
 EXPECTED_WORKFLOW = """\
@@ -73,9 +106,19 @@ def test_entire_staged_workflow_has_only_the_reviewed_read_only_disabled_shape()
 
 
 @pytest.fixture
-def controller(monkeypatch):
+def controller(monkeypatch: pytest.MonkeyPatch) -> ControllerModule:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    return importlib.import_module("maintainer_pr_completion")
+    return cast("ControllerModule", importlib.import_module("maintainer_pr_completion"))
+
+
+def test_controller_reexports_preserve_original_objects(controller: ControllerModule) -> None:
+    import subprocess
+    import time
+    from maintainer_pr_completion_github import EvidenceUnavailable
+
+    assert controller.subprocess is subprocess
+    assert controller.time is time
+    assert controller.EvidenceUnavailable is EvidenceUnavailable
 
 
 @pytest.mark.parametrize("changes", [
@@ -84,7 +127,7 @@ def controller(monkeypatch):
     {"app_slug": "not an app"}, {"hold_labels": [""]}, {"unexpected": "field"},
 ])
 def test_configuration_changes_cannot_silently_authorize_a_writer(
-    controller, tmp_path, changes,
+    controller: ControllerModule, tmp_path: Path, changes: dict[str, Any],
 ) -> None:
     original = json.loads(controller.CONFIG.read_text(encoding="utf-8"))
     path = tmp_path / "config.json"
@@ -93,32 +136,36 @@ def test_configuration_changes_cannot_silently_authorize_a_writer(
         controller.settings(path)
 
 
-def test_targeted_recovery_is_not_an_unbounded_sweep(controller) -> None:
-    assert controller.candidates(None, 7, "auto-merge") == [7]
+def test_targeted_recovery_is_not_an_unbounded_sweep(controller: ControllerModule) -> None:
+    assert controller.candidates(cast("evidence_source.GitHubEvidence", None), 7, "auto-merge") == [7]
     with pytest.raises(controller.EvidenceUnavailable):
-        controller.candidates(None, 0, "auto-merge")
+        controller.candidates(cast("evidence_source.GitHubEvidence", None), 0, "auto-merge")
 
 
-def test_discovery_filters_by_consent_but_requires_complete_pagination(controller) -> None:
+def test_discovery_filters_by_consent_but_requires_complete_pagination(controller: ControllerModule) -> None:
     class Client:
         repository = "example/project"
 
-        def pages(self, endpoint):
+        def pages(self, endpoint: str) -> list[dict[str, Any]]:
             return [
                 {"number": 1, "labels": []},
                 {"number": 2, "labels": [{"name": "AUTO-MERGE"}]},
             ]
 
-    assert controller.candidates(Client(), None, "auto-merge") == [2]
+    if TYPE_CHECKING:
+        _checked_pages: PagesClient = Client()
+    assert controller.candidates(cast("evidence_source.GitHubEvidence", Client()), None, "auto-merge") == [2]
 
 
-def test_catch_up_refuses_to_hide_overflow_behind_the_first_page(controller) -> None:
+def test_catch_up_refuses_to_hide_overflow_behind_the_first_page(controller: ControllerModule) -> None:
     class Client:
         repository = "example/project"
 
-        def pages(self, endpoint):
+        def pages(self, endpoint: str) -> list[dict[str, Any]]:
             return [{"number": value, "labels": [{"name": "auto-merge"}]}
                     for value in range(1, 102)]
 
     with pytest.raises(controller.EvidenceUnavailable, match="targeted manual recovery"):
-        controller.candidates(Client(), None, "auto-merge")
+        if TYPE_CHECKING:
+            _checked_pages: PagesClient = Client()
+        controller.candidates(cast("evidence_source.GitHubEvidence", Client()), None, "auto-merge")

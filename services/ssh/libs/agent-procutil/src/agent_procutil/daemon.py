@@ -104,6 +104,7 @@ def spawn_daemon(
     display: str | None = None,
     stderr_log_path: str | os.PathLike[str] | None = None,
     instance=None,
+    python_bootstrap_root: str | os.PathLike[str] | None = None,
 ) -> subprocess.Popen | WindowsDaemonProcess:
     """Launch a windowless resident daemon from an explicit durable cwd.
 
@@ -117,6 +118,8 @@ def spawn_daemon(
     activated. ``contained_fallback`` explicitly accepts the caller's shorter
     lifetime after a settled refusal. POSIX uses a new session; durable Linux
     launches also leave a systemd caller's cleanup unit through a user scope.
+    ``python_bootstrap_root`` selects an explicitly retained agent_procutil
+    source root for leased Python admission, rather than the launcher's copy.
     """
     creation = [False]
     try:
@@ -125,7 +128,7 @@ def spawn_daemon(
             console_children=console_children, breakaway=breakaway,
             contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
             display=display, stderr_log_path=stderr_log_path, instance=instance,
-            _creation=creation,
+            python_bootstrap_root=python_bootstrap_root, _creation=creation,
         )
     except BaseException as error:
         if not creation[0]:
@@ -149,6 +152,7 @@ def _spawn_daemon(
     display: str | None,
     stderr_log_path: str | os.PathLike[str] | None,
     instance,
+    python_bootstrap_root: str | os.PathLike[str] | None = None,
     _creation: list[bool],
 ) -> subprocess.Popen | WindowsDaemonProcess:
     import agent_procutil as pu
@@ -183,7 +187,9 @@ def _spawn_daemon(
         instance is not None and (instance.lease is not None or instance.lifecycle == "finite-worker")
     ) or _test_context(child_env) is not None:
         from ._daemon_instance_child import leased_python_command
-        command, python_environment = leased_python_command(command)
+        command, python_environment = leased_python_command(
+            command, bootstrap_root=python_bootstrap_root,
+        )
         child_env.update(python_environment)
     else:
         from ._daemon_instance_child import normalize_python_command

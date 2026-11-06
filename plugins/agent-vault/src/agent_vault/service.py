@@ -544,12 +544,33 @@ class VaultService:
             return {"ok": False, "error": "service_transition", "retryable": True}
         return self._handle_admitted_request(request, peer, transport)
 
+    def _generation_health(self) -> dict:
+        return {
+            "ok": True,
+            "pid": os.getpid(),
+            "version": _PROCESS_VERSION,
+            "runtime_generation": PROCESS_GENERATION,
+            "generation_protocol": PROTOCOL,
+            "accepting_work": self._runtime_can_work,
+            "auth_handoff_versions": supported_versions(),
+            "auth_handoff_receiver": (
+                self._generation.handoff_advertisement()
+                if getattr(self, "_generation", None) is not None else None
+            ),
+            "auth_handoff": (
+                self._generation.handoff_result
+                if getattr(self, "_generation", None) is not None else "not-requested"
+            ),
+        }
+
     def _handle_admitted_request(self, request: dict, peer: str = "?",
                                  transport: str = "unknown") -> dict:
         """Dispatch work whose lifecycle admission was decided by the server."""
         self.keepalive()
-        self._check_password_ttl()
         action = request.get("action")
+        if action == "ping" and request.get("health_only") is True:
+            return self._generation_health()
+        self._check_password_ttl()
         client = request.get("_client", "")
         kpdb = request.get("kpdb") or resolve_kpdb(required=False)
         group = request.get("group")
@@ -582,21 +603,7 @@ class VaultService:
 
         if action == "ping":
             return {
-                "ok": True,
-                "pid": os.getpid(),
-                "version": _PROCESS_VERSION,
-                "runtime_generation": PROCESS_GENERATION,
-                "generation_protocol": PROTOCOL,
-                "accepting_work": self._runtime_can_work,
-                "auth_handoff_versions": supported_versions(),
-                "auth_handoff_receiver": (
-                    self._generation.handoff_advertisement()
-                    if getattr(self, "_generation", None) is not None else None
-                ),
-                "auth_handoff": (
-                    self._generation.handoff_result
-                    if getattr(self, "_generation", None) is not None else "not-requested"
-                ),
+                **self._generation_health(),
                 "ttl": self.ttl,
                 "cached": len(self.cache),
                 "cli": self.cli.status(kpdb or None),

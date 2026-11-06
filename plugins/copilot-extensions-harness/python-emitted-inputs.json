@@ -1,0 +1,791 @@
+{
+  "version": 1,
+  "members": [
+    {
+      "path": "plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py",
+      "sha256": [
+        "29165b6fd362e7c04df14ce1074a01b9a414de0d3a6aef8d847dacde0dc6d914",
+        "7ed16b22ea54e48019649ee10c762c68c4e4d67861814782593713971c8843f2"
+      ],
+      "structure": "9819da46f371691fc927bc0d8be495d2d9d9139240df0fb1278f7d88f08ed158"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/scripts/pretool_killswitch.py",
+      "sha256": [
+        "21d47f7a41fb7a354706e328be06e62c6addc9e6c950a3357b87e1658768a757",
+        "3df9093f21f075e734dcc3f37e8a8118aea5b30f4e0104b67573d168203fd760"
+      ],
+      "structure": "43580b694fd00a7d17d704a280513984714feb8c6db53262ad0cdd51cb56ded0"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/scripts/reviewer_source.py",
+      "sha256": [
+        "0ff1c7be3e472ca14b4ff90751949d870b0d7c1755429dd021f0032a92f427ac",
+        "708934267df7189835e648768a34330a19250b6ad0b3f7e7edfb699cacfc03e4"
+      ],
+      "structure": "cd765ccea9a567a989f9f181e709ea8429fdf59c8668e9bc99619d34a8a076cb"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_contribution_boundary_hook.py",
+      "sha256": [
+        "41a70d5d32249a2e05859ec1a9bc924e12068d4e45719881eb5454934d4691c7",
+        "a804ac9bcd0e4d7fc0c76e2ed23ba9ca631acc96e9dd23675ba25618c09b5463"
+      ],
+      "structure": "ae8587b154af97afc6d990bf000ab4e07468093dbfe694950ea17c095a0437de"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_contribution_boundary_projection.py",
+      "sha256": [
+        "0a2d094a3b2fa768dfc168a7d7b940b4f7aa83ea082e81b47a0ab455f2d066ce",
+        "d05000af7cbea8eacdbcf37d728e90f60742c49edd0ab9ccaaafc6a3e6d62fa7"
+      ],
+      "structure": "3091801612daffb177bb43482ee3ba6687ab78e27924ca1a33be276c9693e07d"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "sha256": [
+        "66f49cf57e0f7702fee4d7550e156109f67a305551f8fa3fd65ad4351f20a98e",
+        "caa9ce083535029b6e98539f41c11ff2325ecbded258c4746b0d7dd21de69100"
+      ],
+      "structure": "6d295a84f9f39a53d8db6cc5ac762e55c3ab3bab864fb05e0f0de428335a1bde"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_cross_repo_debug_tracking_projection.py",
+      "sha256": [
+        "5d80eaabcf4ae5ded16e25d2e82fff80b9a8c2d9e743865cc9c3e6acca420cce",
+        "93defb50c3cd5033ce492be2f4bdb69d7b4fe8c5f6c4baafbffef7ba39fe20fe"
+      ],
+      "structure": "4f424da6a48bc144cb24b8b3a59fe50bed4b46c24c5d79e033d5193a5b1c24b1"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_evidence.py",
+      "sha256": [
+        "71a9d282b2379e6555a95fc17d702ee35e30c5f604a1d071e2f98b08161806b2",
+        "d4c6904826c7b1bca299b9f080ac235531ad77ea91802de02f287c7018bb84d0"
+      ],
+      "structure": "b1c8cbd25157fa27bd76deba0f0e7ccf236486db7acf7697c0d06af6bdc90ad9"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_native.py",
+      "sha256": [
+        "44e29de624ef6548ef5bba700abcb99d9810dbf5f373243d29d93d4865102a5a",
+        "ee33a5bb5b8ad79011a0b3ddd0e90c1c49fff6920b52fee76fe6800974268380"
+      ],
+      "structure": "13301306445f653dcf5f1b8fa7c3eb68f647683234bbd476da002f30c95cef96"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_policy.py",
+      "sha256": [
+        "5c9e8e3686b9c79e9106f66cef834d4ad27cf3f0a36ffe41a7cc3af28ebed044",
+        "7b4c3e06eb383ef2899fb405adeb8219f0af2dbc5a0363a13edf16e0b8d0f428"
+      ],
+      "structure": "2759bb34fe0144d2829866e892d662f93323eecbd08b421639458a2c83ca94af"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_workflow.py",
+      "sha256": [
+        "76fa6f21273bfba45e4d49927dee91280961fdd7cb8cea5c93c5e5330786de19",
+        "cd0ff850e326caabf740c401bb7d68e4a44eebcd0e87037a5a55112fd3bc25ca"
+      ],
+      "structure": "9f6e2928121978240e48ea9e9072ed5afa0db0993e9b7a5bb7f7fbd0cba934a8"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_writer.py",
+      "sha256": [
+        "6ec8641b9c5d469a61609f34517f7dbeae31c562c46ec572f4a70d03e1f218c0",
+        "cd0ada2aa29efd7a25ee46dce82e5057d32abf7977b50cc99ba94d7e4e57dba9"
+      ],
+      "structure": "e30c2f6494eeaf55c8fa0587352bb9f44bc3ee445c6e8737bbd53397bcab85cc"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_related_provenance.py",
+      "sha256": [
+        "3cc0b76afe56896400c404f16fefec57158dc3596d74487ca930ed366682dd50",
+        "87effbaf6e96cf9d809de0cffae156e06e3c00d5284267edc148dad4c28b5fa2"
+      ],
+      "structure": "231df82177844f379605fad2056c9abaf6075210a2bd794289f271ac0667447c"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_reviewer_source.py",
+      "sha256": [
+        "7657dfdedac50d21bfbfa7e0c4e9a5a172fd9b5ce76b15a832f9a38be5b7e993",
+        "e81acc9a6e4e8b5145ea0dda9f264d53bd889ed575b3a6fb6af092433229ce89"
+      ],
+      "structure": "4fddf6e55ce0682a319f0955a5c72a47e7809d612ae669f03af093ac7e98223c"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_session_context_declarations.py",
+      "sha256": [
+        "7b9bfa769ff9ba77db8f6cef97afc4384ab1e827a6074a1d171554d35c1a24ae",
+        "9182e3e40387caae21a20d8bd08dfadbb5afb4b3c98037056a56664cd8021647"
+      ],
+      "structure": "59e3239248b3e4af5b9f255c94977b7c81ea6e5072a1448de1d230b62e11b0af"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "sha256": [
+        "a85ee1ef68b6f7b1210acbee5940770a5ac11f1b440dddd112acd46d2e44dff5",
+        "d01ec22a319b1a481aacb63bd11d534b775025d3ca82014674e01ccb8c4960dd"
+      ],
+      "structure": "9eac3a8d9b261295cf1e6b5e32749d36c78ed15fab8e3e2ad991a970617fef43"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_validate_and_promote_projection.py",
+      "sha256": [
+        "222c62850e341a0755adce71148164a4f64f311894a1eb6d371b2a032ade3524",
+        "6aea249674ecf5cea9259dfd21b4e4d1e1156d2c62c25ed328e38b886a6a0867"
+      ],
+      "structure": "a2a2871e22513800d0cf143e2d63836c04650284dd678461aa15aec7a4436d7d"
+    }
+  ],
+  "assets": [
+    {
+      "path": "plugins/copilot-extensions-harness/hooks.json",
+      "sha256": [
+        "6d9ff3e9886bdaca55449cf63b4f5e9711cc6d28c1722ea57ab3ea802790f857",
+        "8594e720069ed992b8fa33602bf880128b2b9f3ed78a822e8ffff0f526caf2bb"
+      ],
+      "structure": [
+        "6d9ff3e9886bdaca55449cf63b4f5e9711cc6d28c1722ea57ab3ea802790f857",
+        "8594e720069ed992b8fa33602bf880128b2b9f3ed78a822e8ffff0f526caf2bb"
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/scripts/emit-contribution-boundary.ps1",
+      "sha256": [
+        "21752e1d17f4c05ae03fdb636903817e2d7f1cb8a30fbfaf5c567c20d6d64230",
+        "b639da956baa40912eca18b026870d264fde15255cad3808484835c9f28e9c6f"
+      ],
+      "structure": [
+        "21752e1d17f4c05ae03fdb636903817e2d7f1cb8a30fbfaf5c567c20d6d64230",
+        "b639da956baa40912eca18b026870d264fde15255cad3808484835c9f28e9c6f"
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/scripts/emit-contribution-boundary.sh",
+      "sha256": [
+        "ca7fdc62cf3070210774f1ef3c6180490229724f25b004807032677de77421e1",
+        "dc6d0768b35c891aff09ecfc9d684a21667f87e0db53d672ec14b15a31064be1"
+      ],
+      "structure": [
+        "ca7fdc62cf3070210774f1ef3c6180490229724f25b004807032677de77421e1",
+        "dc6d0768b35c891aff09ecfc9d684a21667f87e0db53d672ec14b15a31064be1"
+      ]
+    }
+  ],
+  "programs": [
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_git_timeout_reaps_the_actual_child",
+      "selector": "python-c",
+      "index": 0,
+      "expression": "61c7dfffcc054302839657870c78a1a1d33b8bfde3bfb200bb173e9e9483d836",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "git-timeout",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          661,
+          24,
+          661,
+          77
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_native_hook_process_counts_and_latency",
+      "selector": "assignment:audited",
+      "index": 0,
+      "expression": "81a6f2795805e8af058b4629a974815ce0f0506c80cef895664f611e83db67b6",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "audit-hook-observation",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          777,
+          15,
+          777,
+          92
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_hook_exits_with_blocked_file_reader",
+      "selector": "assignment:wrapper",
+      "index": 0,
+      "expression": "8fa0616875d51b6350fd77f061aea6a16beb7dfc075e9bae4e346671765b5c07",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "blocked-reader",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          824,
+          8,
+          824,
+          52
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
+      "selector": "write-text",
+      "index": 0,
+      "expression": "3b7275053a1b16a6f05df2309b948b25f834c6f3e17771b7501a29647874185d",
+      "origins": {},
+      "transport": "windows-write-text-utf8-epoch",
+      "role": "crash-negative",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          974,
+          8,
+          975,
+          99
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
+      "selector": "write-text",
+      "index": 1,
+      "expression": "7fa23d75e295a03400f2d552c7c2c95b89f0f5973e7714ba8e53403667a4b008",
+      "origins": {
+        "source": "str(PLUGIN / 'scripts' / 'copilot-mention-guard.py')"
+      },
+      "transport": "windows-write-text-utf8-epoch",
+      "role": "caught-negative",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          978,
+          8,
+          982,
+          127
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_run_contained_returns_child_exit_code_and_preserves_output",
+      "selector": "python-c",
+      "index": 0,
+      "expression": "8f0302ac51e8ac82c7bf6d0d124587737884627dcd2d38dd32b01d0c50ed210c",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "exit-seven",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          96,
+          8,
+          96,
+          79
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_timeout_reaps_recursive_descendant",
+      "selector": "assignment:script",
+      "index": 0,
+      "expression": "38850e7bc775a5d08d00a4ef56ef14fa809f09c79354820cd505d6420b150836",
+      "origins": {
+        "pid_file": "tmp_path / 'descendant.pid'"
+      },
+      "transport": "unicode-python-c",
+      "role": "recursive-parent",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          117,
+          8,
+          117,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_timeout_reaps_descendant_requesting_detachment",
+      "selector": "assignment:script",
+      "index": 0,
+      "expression": "3d09ea4893a641da68ef1c38a61b7028880e244f3d2d2c1c7ce5269b2f658678",
+      "origins": {
+        "pid_file": "tmp_path / 'detached-descendant.pid'",
+        "procutil_src": "REPO / 'libs' / 'agent-procutil' / 'src'"
+      },
+      "transport": "unicode-python-c",
+      "role": "detached-parent",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          153,
+          8,
+          153,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_temp_budget_stops_tree",
+      "selector": "assignment:script",
+      "index": 0,
+      "expression": "0ed9e5c024dca3ec75f790bf57853e1b704ec7eaad7ad73263fc816ed72d71ba",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "temp-budget",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          183,
+          8,
+          183,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_process_budget_stops_tree",
+      "selector": "assignment:script",
+      "index": 0,
+      "expression": "3f506db24f1488335a8f54fdd2a7e3c56f391d7c71b7069ca688322ed07f7b93",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "process-budget",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          208,
+          8,
+          208,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_memory_budget_stops_tree",
+      "selector": "assignment:script",
+      "index": 0,
+      "expression": "800b518b8cbcea5717cd7971a7890beeb87e074e7c4edd2f661b10f3b96d22bd",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "memory-budget",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          228,
+          8,
+          228,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_injected_pytest_policy_loads_and_enforces_declarations",
+      "selector": "write-text",
+      "index": 0,
+      "expression": "e278e0791a23a24b2f571173ad55301178c7223a2088177e4f02992c8856b774",
+      "origins": {},
+      "transport": "windows-write-text-utf8-epoch",
+      "role": "invalid-policy-epoch",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          260,
+          4,
+          266,
+          5
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_injected_pytest_policy_loads_and_enforces_declarations",
+      "selector": "write-text",
+      "index": 1,
+      "expression": "ae6cf9bcf9490ce32dcfb748e6675cdcc130cfbc9ce3325e7fbe5e7589840b19",
+      "origins": {},
+      "transport": "windows-write-text-utf8-epoch",
+      "role": "valid-policy-epoch",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          286,
+          4,
+          291,
+          5
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_timeout_reaps_recursive_descendant",
+      "selector": "nested:script",
+      "index": 0,
+      "expression": "38850e7bc775a5d08d00a4ef56ef14fa809f09c79354820cd505d6420b150836",
+      "origins": {
+        "pid_file": "tmp_path / 'descendant.pid'"
+      },
+      "transport": "nested-parent-constant",
+      "role": "nested-recursive",
+      "classification": "static-parent-constant-relation-only",
+      "sites": [
+        [
+          117,
+          8,
+          117,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_timeout_reaps_descendant_requesting_detachment",
+      "selector": "nested:script",
+      "index": 0,
+      "expression": "3d09ea4893a641da68ef1c38a61b7028880e244f3d2d2c1c7ce5269b2f658678",
+      "origins": {
+        "pid_file": "tmp_path / 'detached-descendant.pid'",
+        "procutil_src": "REPO / 'libs' / 'agent-procutil' / 'src'"
+      },
+      "transport": "nested-parent-constant",
+      "role": "nested-detached",
+      "classification": "static-parent-constant-relation-only",
+      "sites": [
+        [
+          153,
+          8,
+          153,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
+      "function": "test_process_budget_stops_tree",
+      "selector": "nested:script",
+      "index": 0,
+      "expression": "3f506db24f1488335a8f54fdd2a7e3c56f391d7c71b7069ca688322ed07f7b93",
+      "origins": {},
+      "transport": "nested-parent-constant",
+      "role": "nested-process",
+      "classification": "static-parent-constant-relation-only",
+      "sites": [
+        [
+          208,
+          8,
+          208,
+          38
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_native_hook_process_counts_and_latency",
+      "selector": "startup",
+      "index": 0,
+      "expression": "6bbd25b89add6f65ab4698b8fb99db9b8fb12e7a5f96f79fc726e2976c8807d4",
+      "origins": {},
+      "transport": "unicode-python-c",
+      "role": "startup",
+      "classification": "portable-parameterized-source-not-native-input",
+      "sites": [
+        [
+          777,
+          15,
+          777,
+          92
+        ]
+      ]
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/scripts/emit-contribution-boundary.sh",
+      "function": "quoted-heredoc",
+      "selector": "quoted-heredoc",
+      "index": 0,
+      "expression": "977958f46a75392609a11832dc703bb7299e19e1c6514db75d905fe7a9b1151f",
+      "origins": {},
+      "transport": "quoted-shell-utf8",
+      "role": "quoted-shell",
+      "classification": "static-shell-body-unobserved",
+      "sites": []
+    }
+  ],
+  "data_writes": [
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "_enable_harness",
+      "site": [
+        70,
+        4,
+        72,
+        26
+      ],
+      "structure": "c666b392fce5d1c5c9eb38eaf031044bb48cca9aa5abdaeaeadf120f62158b42"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_body_file_with_mention_is_denied",
+      "site": [
+        130,
+        4,
+        130,
+        81
+      ],
+      "structure": "a7d28bfd035220bf2e91a730335f7c4e6efa602d313647ab4469fb3b43e1b0c6"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_body_file_equals_form_with_mention_is_denied",
+      "site": [
+        141,
+        4,
+        141,
+        81
+      ],
+      "structure": "a7d28bfd035220bf2e91a730335f7c4e6efa602d313647ab4469fb3b43e1b0c6"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_api_input_file_with_mention_is_denied",
+      "site": [
+        216,
+        4,
+        216,
+        71
+      ],
+      "structure": "8331083521dc06f889c3ea1cf6b71b8663d3328678f17f0e13020f517c2a35c4"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_api_input_file_without_mention_is_allowed",
+      "site": [
+        224,
+        4,
+        224,
+        75
+      ],
+      "structure": "cedb00f6fd1baab5ccfd253ab6efc9ce2671c261c5510183216a0dba75e59c50"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_api_input_equals_form_with_mention_is_denied",
+      "site": [
+        232,
+        4,
+        232,
+        71
+      ],
+      "structure": "8331083521dc06f889c3ea1cf6b71b8663d3328678f17f0e13020f517c2a35c4"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_api_input_unparseable_json_is_denied_fail_closed",
+      "site": [
+        246,
+        4,
+        246,
+        58
+      ],
+      "structure": "0088763a6f0dbc4c1dd6d182338cec52cdd895474c8a874ca1591b6a19c17b23"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_readable_body_file_is_still_scanned_normally",
+      "site": [
+        322,
+        4,
+        322,
+        67
+      ],
+      "structure": "d031408425197c2866cdf3daf1baaaf5fb96d3755a1e75dde7b6a2a31586eeb9"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_oversized_body_file_is_denied_fail_closed",
+      "site": [
+        336,
+        4,
+        336,
+        51
+      ],
+      "structure": "21d1963a38b9631d03f4a6e70f5b38a266b707ee7da22c5fb829ff9b0b881175"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_api_long_field_form_file_ref_is_scanned",
+      "site": [
+        358,
+        4,
+        358,
+        61
+      ],
+      "structure": "fb412d154ea0e172d502c6510a404242a706566938d9b787914002eb928ec23a"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_target_repo_survives_a_git_suffix",
+      "site": [
+        404,
+        4,
+        407,
+        5
+      ],
+      "structure": "701a5f3d94b4b17a6189afe5dfda5b4da83a07a11eb69f3ee114188a227755de"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_target_repo_allows_a_dot_in_the_repo_name",
+      "site": [
+        416,
+        4,
+        419,
+        5
+      ],
+      "structure": "8841ec469af1abbbbd216af2d7fc3094381b3a88990c3d35012b6e432d8f813a"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_local_relevance_preserves_file_input_without_literal_mention",
+      "site": [
+        718,
+        4,
+        718,
+        56
+      ],
+      "structure": "d13593d5b8d9c004a3d9237cede02e9598768e68d09b2518f88408a19f4d23b5"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_active_killswitch_returns_before_reading_input",
+      "site": [
+        892,
+        4,
+        892,
+        58
+      ],
+      "structure": "0323fd78bd2a7504564a10f542b2ccfd6767f5f49c70acc4b64beb118a02e744"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_only_project_adopters_reach_repository_policy",
+      "site": [
+        921,
+        4,
+        921,
+        107
+      ],
+      "structure": "1ab1d0fc71374dbd9f43fd411847806971f2afef77cb80890f444f9fa550cfef"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_powershell_lookup_preserves_selection_without_cmdlet_pipelines",
+      "site": [
+        851,
+        8,
+        851,
+        69
+      ],
+      "structure": "b64706cbcd24107bf0d10cbd2e69816cb1fc406289ab970f94a28d003837acda"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_hot_killswitch_restores_mention_guard",
+      "site": [
+        882,
+        8,
+        882,
+        74
+      ],
+      "structure": "28fa5ac54160039cf335eea3010505e858a9587dcc2b5c6bf8c32906da0d11c0"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_only_project_adopters_reach_repository_policy",
+      "site": [
+        916,
+        8,
+        917,
+        89
+      ],
+      "structure": "0739ab3ce92409fce13f61873c8ce43e895900a731effd3d5184265b933d3c08"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_relative_body_reads_use_resolved_workspace",
+      "site": [
+        1054,
+        8,
+        1054,
+        67
+      ],
+      "structure": "a7fddb122132ab776a79d247fdece1d10d61bc46f6d899d0500b8329296b6fc2"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_relative_body_reads_use_resolved_workspace",
+      "site": [
+        1055,
+        8,
+        1055,
+        90
+      ],
+      "structure": "686cb78f1f5c0055cbd6a8bf6aa3c86f67d3fe4041730e9950c75b5092b77fc8"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_only_project_adopters_reach_repository_policy",
+      "site": [
+        912,
+        8,
+        912,
+        105
+      ],
+      "structure": "3b6e0592d01d1996014aa6e0b5ca943ffd93ffdfbb8437bf82b917e4b8e5ef7c"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
+      "function": "test_only_project_adopters_reach_repository_policy",
+      "site": [
+        914,
+        8,
+        914,
+        32
+      ],
+      "structure": "3580ad4b278940382cd2074bd4be3814ab03f602de0e9ebfe3b273abc542fe37"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_workflow.py",
+      "function": "test_configuration_changes_cannot_silently_authorize_a_writer",
+      "site": [
+        134,
+        4,
+        134,
+        74
+      ],
+      "structure": "692d2ba2a3f62fe06041c1c81fcd82ff7cffc2bfaa69816fabdc765825d15fcf"
+    },
+    {
+      "path": "plugins/copilot-extensions-harness/tests/test_reviewer_source.py",
+      "function": "_policy",
+      "site": [
+        24,
+        4,
+        24,
+        61
+      ],
+      "structure": "0956346e99f14cc40c9fca044923e236aa91ee1aca67fd5fbbce331e99ea2496"
+    }
+  ]
+}

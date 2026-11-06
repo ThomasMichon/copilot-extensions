@@ -307,6 +307,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   and the negotiated CLI/client/Gateway path. Complete B3/A2, historical
   per-operation readback, normal-host/provider/installed serving and the remaining
   parent acceptance stay open.
+- [x] Review and land [B4 historical original-position readback](captured-attention-feedback.md#b4---historical-original-position-readback-proof)
+  before changing the strict owner layout or executing behavior (#10970).
+- [ ] Deliver B4's finite existing-owner storage, protected proof and negotiated
+  read-consumer leaves; qualify overlapping operations, original identity,
+  capacity, restart, unavailable evidence and old/new compatibility without
+  weakening B2/B3 or closing broader attention/provider/installed acceptance.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -944,6 +950,20 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Review historical original-position readback before implementation
+
+- #10970 actually merged as `5f27d56d2d8c532cbbffc79691b8f082cc23cc7c`
+  after exact-head Copilot approval, no open findings and all required CI green.
+  The source worktree reconciled through its normal completion path.
+- B4 preserves immutable captures and native receipts under the existing owner,
+  separates historical protected readback from the current handled frontier
+  and B3 echo, and requires explicit storage expansion before protected and
+  negotiated consumer integration. No runtime behavior was claimed by the plan.
+- Re-read the current full Plan and Validation Plan; the parent remains Active.
+  Continue the first bounded storage leaf, then protected proof and the actual
+  reader. Complete B3/A2, provider/retention/CLI/Dispatch, installed serving and
+  shadow acceptance remain open; no deployment or production effects occurred.
 
 ### 2026-11-06 - Land the optional retained attention consumer source
 

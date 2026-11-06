@@ -1,0 +1,98 @@
+name: Whole bootstrap update native acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/bootstrap-update-native-acceptance.yml
+      - libs/installer-engine/installer_engine.py
+      - worktree-manager/bootstrap.ps1
+      - worktree-manager/bootstrap.sh
+      - worktree-manager/scripts/bootstrap_inputs.py
+      - worktree-manager/scripts/bootstrap_update.py
+      - worktree-manager/scripts/runtime_install.py
+      - worktree-manager/src/worktree_manager/update_driver_cli.py
+      - worktree-manager/tests/native/test_bootstrap_update_native.py
+      - worktree-manager/tests/test_update_python_path.py
+      - worktree-manager/tests/test_bootstrap_dispatch.py
+      - worktree-manager/tests/test_install_source.py
+      - worktree-manager/tests/test_bootstrap_inputs.py
+      - worktree-manager/tests/test_bootstrap_update.py
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap-update-linux:
+    name: Whole bootstrap update (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: &bootstrap-update-env
+      UV_PYTHON: "3.12"
+      QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps: &bootstrap-update-steps
+      - &bootstrap-update-checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - &bootstrap-update-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - &bootstrap-update-uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - &bootstrap-update-source
+        name: Record exact qualification source
+        run: >-
+          python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['QUALIFICATION_SHA']; print('source='+actual)"
+      - name: Qualify whole-operation joins, waiter loss and prepared-source compatibility
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/native/test_bootstrap_update_native.py
+          --test-file tests/test_update_python_path.py
+          --test-file tests/test_bootstrap_dispatch.py
+          --test-file tests/test_install_source.py
+          --test-file tests/test_bootstrap_inputs.py
+          --test-file tests/test_bootstrap_update.py --allow-explicit-tiers
+          -k "not full_declared_repository_inputs_reach_immutable_retention and
+          (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and
+          (not test_install_source or standalone_prepared_updates) and
+          (not test_bootstrap_inputs or first_touch_retention or unresolved_source_selection or
+          prepared_source_retains_only) and
+          (not test_bootstrap_update.py or observer_modes_share)"
+
+  bootstrap-update-windows:
+    name: Whole bootstrap update (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: *bootstrap-update-steps
+
+  bootstrap-retention-linux:
+    name: Declared source retention (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: &bootstrap-retention-steps
+      - *bootstrap-update-checkout
+      - *bootstrap-update-python
+      - *bootstrap-update-uv
+      - *bootstrap-update-source
+      - name: Measure and verify the complete declared Manager and SDK source closure
+        env:
+          PYTEST_ADDOPTS: "-rP --durations=1"
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers
+          -k "full_declared_repository_inputs_reach_immutable_retention"
+
+  bootstrap-retention-windows:
+    name: Declared source retention (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps: *bootstrap-retention-steps

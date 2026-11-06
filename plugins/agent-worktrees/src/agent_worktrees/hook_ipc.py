@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import secrets
 import socket
@@ -15,6 +16,7 @@ from pathlib import Path
 Decision = Callable[[str, dict, float], dict]
 _READ_TIMEOUT_S = 1.0
 _RECENT_HOOK_DEMAND_S = 120.0
+READ_DEMAND_CAPABILITY = "read-hook-demand-v1"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
 ]
@@ -85,6 +87,11 @@ class _Handler(socketserver.StreamRequestHandler):
             ):
                 return
             kind = str(request.get("kind") or "")
+            if kind == "readHookDemand":
+                owner = self.server.owner
+                if owner is not None and len(raw) <= 2048 and raw.endswith(b"\n"):
+                    owner._on_read_demand(request)
+                return
             payload = request.get("payload")
             deadline = float(request.get("deadline") or 0)
             payload_valid = isinstance(payload, dict)
@@ -107,7 +114,7 @@ class _Handler(socketserver.StreamRequestHandler):
                     time.sleep(delay_s)
             response = {
                 "version": 1,
-                "capabilities": list(_CAPABILITIES),
+                "capabilities": self.server.owner.capabilities(),
                 "result": result,
             }
             self.wfile.write(
@@ -135,7 +142,10 @@ class _Handler(socketserver.StreamRequestHandler):
 class HookIpcServer:
     """Dynamic-port, loopback-only server advertised through rendezvous files."""
 
-    def __init__(self, decide: Decision):
+    def __init__(
+        self, decide: Decision, *, read_demand_admitted: Callable[[], bool] | None = None,
+        read_demand_lock=None,
+    ):
         self.token = secrets.token_urlsafe(32)
         self.generation = secrets.token_hex(16)
         self.server = _Server(
@@ -151,6 +161,8 @@ class HookIpcServer:
         self._active_handlers_lock = threading.Lock()
         self._clock = time.monotonic
         self._last_completed_hook: float | None = None
+        self._read_demand_admitted = read_demand_admitted
+        self._read_demand_lock = read_demand_lock if read_demand_lock is not None else threading.RLock()
 
     def start(self) -> None:
         self.thread.start()
@@ -162,8 +174,14 @@ class HookIpcServer:
             "hook_endpoint": f"{host}:{port}",
             "hook_token": self.token,
             "hook_generation": self.generation,
-            "hook_capabilities": list(_CAPABILITIES),
+            "hook_capabilities": self.capabilities(),
         }
+
+    def capabilities(self) -> list[str]:
+        return [
+            *_CAPABILITIES,
+            *([READ_DEMAND_CAPABILITY] if self._read_demand_admitted is not None else []),
+        ]
 
     def close(self) -> None:
         self.server.shutdown()
@@ -180,16 +198,44 @@ class HookIpcServer:
         afterward gets the structured ``reason`` rejection. Actual socket
         teardown remains :meth:`close`'s job.
         """
-        self.server.admission_closed = True
-        self.server.admission_closed_reason = reason
+        with self._active_handlers_lock:
+            self.server.admission_closed = True
+            self.server.admission_closed_reason = reason
 
     def open_admission(self) -> None:
         """Reverse of :meth:`close_admission` for an already-live, not-yet-
         ``close()``-d server -- see
         ``work_coalescing_singleton.server.CoalescingServer.open_admission``.
         """
-        self.server.admission_closed = False
-        self.server.admission_closed_reason = None
+        with self._active_handlers_lock:
+            self.server.admission_closed = False
+            self.server.admission_closed_reason = None
+
+    def _on_read_demand(self, request: dict) -> None:
+        if (
+            set(request) != {"version", "token", "kind", "hook_generation", "deadline"}
+            or type(request.get("version")) is not int
+            or request.get("hook_generation") != self.generation
+            or type(request.get("deadline")) not in (int, float)
+        ):
+            return
+        deadline = request["deadline"]
+        if not math.isfinite(deadline) or not 0 < deadline - time.time() <= 1.0:
+            return
+        if not self._read_demand_lock.acquire(timeout=0.05):
+            return
+        try:
+            with self._active_handlers_lock:
+                if (
+                    self.server.admission_closed
+                    or deadline <= time.time()
+                    or self._read_demand_admitted is None
+                    or not self._read_demand_admitted()
+                ):
+                    return
+                self._last_completed_hook = self._clock()
+        finally:
+            self._read_demand_lock.release()
 
     def _on_request_accepted(self) -> None:
         with self._active_handlers_lock:

@@ -25,6 +25,7 @@ from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
 from tools.typecheck_source_views import (  # noqa: E402
     GUARD_ENTRY, GUARD_MODULE, INSTALLATION_ENTRY, SourceView, SourceViewError,
     _write_view, guard_alias_view, installation_view,
+    HARNESS_PREFIX, HarnessProgramView, harness_emitted_inputs, harness_emitted_views,
 )
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
@@ -269,6 +270,7 @@ class _SourceViews:
     sources: dict[Path, tuple[tuple[int, int], bytes]] = field(default_factory=dict)
     outputs: dict[Path, tuple[tuple[int, int], bytes]] = field(default_factory=dict)
     guard_search: tuple[str, ...] = ()
+    procutil_search: tuple[str, ...] = ()
 
     def _parents(self, directory: Path, *, create: bool = False) -> None:
         current = Path(directory.anchor)
@@ -321,6 +323,24 @@ class _SourceViews:
         identity = _write_view(path, content)
         self.outputs[path] = identity, content
 
+    def add_harness(self, paths: tuple[str, ...]) -> tuple[SourceView, ...]:
+        self._parents(self.stage, create=True)
+        self._membership()
+        inputs, _programs = harness_emitted_inputs(self.root, paths)
+        for relative, content in inputs:
+            source = self.root / relative
+            self._parents(source.parent)
+            identity = _import_identity(source)
+            if source.read_bytes() != content or _import_identity(source) != identity:
+                raise SourceViewError("Harness input changed during capture")
+            self.sources[source] = identity, content
+        emitted = harness_emitted_views(self.root, paths, self.stage)
+        self.views.extend(emitted)
+        for view in emitted:
+            self.outputs[view.output] = view.identity, view.content
+        self.verify()
+        return emitted
+
     def _guard_providers(self) -> None:
         allowed = {
             view.output for view in self.views
@@ -355,6 +375,8 @@ class _SourceViews:
 
     def verify(self) -> None:
         self.verify_inputs()
+        if self.procutil_search:
+            _harness_procutil_provider(self.root, list(self.procutil_search))
         for output, (identity, content) in self.outputs.items():
             if _import_identity(output) != identity:
                 raise TypecheckError(f"Checker output identity changed: {output}")
@@ -362,7 +384,13 @@ class _SourceViews:
                 raise SourceViewError("Checker output changed during type checking")
         self._membership()
         self._guard_providers()
+        harness_bindings: set[tuple[object, ...]] = set()
         for view in self.views:
+            if isinstance(view, HarnessProgramView):
+                binding = (view.members, view.assets, view.inputs)
+                if binding in harness_bindings:
+                    continue
+                harness_bindings.add(binding)
             view.verify(self.root)
 
     def cleanup(self) -> None:
@@ -530,6 +558,32 @@ def prepare(root: Path, project: Project) -> None:
         lease.release()
 
 
+def _harness_procutil_provider(root: Path, imports: list[str]) -> Path:
+    expected = root / "libs" / "agent-procutil" / "src" / "agent_procutil"
+    for entry in imports:
+        directory = Path(entry)
+        candidates = [
+            directory / name for name in
+            ("agent_procutil", "agent_procutil.py", "agent_procutil.pyi", "agent_procutil-stubs")
+            if (directory / name).exists() or (directory / name).is_symlink()
+        ]
+        if not candidates:
+            continue
+        _import_identity(directory, directory=True)
+        if any(
+            candidate.suffix == ".pyi" or candidate.name.endswith("-stubs")
+            or (candidate.is_dir() and (candidate / "__init__.pyi").exists())
+            for candidate in candidates
+        ):
+            raise TypecheckError("Harness emitted imports cannot use a winning agent_procutil stub")
+        if candidates != [expected]:
+            raise TypecheckError("Harness emitted imports require the winning candidate-local agent_procutil provider")
+        _import_identity(expected, directory=True)
+        _import_identity(expected / "__init__.py")
+        return expected
+    raise TypecheckError("Harness emitted imports lack their canonical agent_procutil provider")
+
+
 def check_project(
     root: Path, project: Project, files: tuple[str, ...], *,
     all_paths: tuple[str, ...], strict: bool = False,
@@ -574,6 +628,15 @@ def check_project(
                     f"{project.name}: guard alias requires its complete owned physical binding"
                 )
             views.guard_search = tuple(ordered_imports)
+        supplemental = 0
+        if guard and HARNESS_PREFIX.rstrip("/") in project.include:
+            if "libs/agent-procutil/src" not in project.import_roots:
+                raise TypecheckError("Harness emitted imports require the declared ordinary procutil root")
+            _harness_procutil_provider(root, ordered_imports)
+            views.procutil_search = tuple(ordered_imports)
+            emitted = views.add_harness(all_paths)
+            supplemental = len(emitted)
+            files = (*files, *(str(view.output) for view in emitted))
             views.verify()
         env = {
             key: value for key, value in os.environ.items()
@@ -602,6 +665,8 @@ def check_project(
             if str(view.output.parent) not in ordered_imports:
                 ordered_imports.insert(0, str(view.output.parent))
             views.guard_search = tuple(ordered_imports)
+            if supplemental:
+                views.procutil_search = tuple(ordered_imports)
         if (project.import_roots or guard) and any(os.pathsep in entry for entry in ordered_imports):
             raise TypecheckError("Import search paths contain the native path-list separator")
         env["MYPYPATH"] = os.pathsep.join(ordered_imports)
@@ -637,6 +702,8 @@ def check_project(
                     if import_inputs is not None:
                         import_inputs.verify(root)
             print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
+            if supplemental:
+                print(f"Supplemental portable emitted programs: {supplemental}; no native execution qualification")
             print(views.diagnostics(result.stdout), end="")
             print(views.diagnostics(result.stderr), end="", file=sys.stderr)
             if result.returncode:

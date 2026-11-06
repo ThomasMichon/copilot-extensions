@@ -111,7 +111,10 @@ creation, not an implicit permission migration or a read-only status side effect
   explicitly set `coalesce_running=True`: equivalent active arrivals then
   follow the same request, output and outcome, including a nonzero result.
   A moving ref or identical update arguments alone do not establish that target;
-  Manager and engine retain the default later execution for active arrivals.
+  Installed Manager and engine requests retain the default later execution for
+  active arrivals. Fresh Manager bootstrap also keeps later active arrivals
+  separate: its retained Manager/SDK inputs do not pin every marketplace target
+  discovered by the following suite update.
   Distinct inputs/options stay separate, and completed requests never debounce
   a new attempt. This does not yet resolve a central desired target, order
   versions, or bound worker-launch fan-out. The opt-in changes no journal schema.
@@ -120,10 +123,15 @@ creation, not an implicit permission migration or a read-only status side effect
 - `status(request_id=None, *, root=None)` reads one Request or a tuple.
   Missing state is empty; status does not mkdir, initialize, repair, or recover
   a database. Unknown schema and malformed records fail explicitly.
-- `ensure_worker(worker_argv, *, root=None, cwd=None, env=None, startup_timeout=15)` invokes
+- `ensure_worker(worker_argv, *, root=None, cwd=None, env=None, startup_timeout=15,
+  python_bootstrap_root=None)` invokes
   `agent_procutil.spawn_daemon(console_children=True, breakaway=True,
   contained_fallback=False)`. Spawn failure is recorded on pending requests
   and raises `SpawnError`; it never falls back to foreground execution.
+  Source-only adapters may pass the retained `agent_procutil` source root as
+  `python_bootstrap_root`, so leased admission cannot preload dependencies from
+  a disposable acquisition. Omission preserves the caller's package. Both paths
+  return the original process handle and keep the same startup/lease policy.
   A bounded startup receipt proves that the entrypoint reached the shared
   queue and validated native boot identity (possibly waiting on its lock),
   not that an update has completed. That immutable boot identity is captured

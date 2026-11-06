@@ -10,6 +10,7 @@
 - **Related issues:** #9716, #10377
 - **Realization defects:** #10652 (incoming completion gate), #6389 (fresh serving convergence), #10653 (unsafe forced cutover)
 - **Native observation prerequisite:** #10925 (fixture-scoped desktop evidence)
+- **Resident configuration correction:** #10951 (qualified caller context)
 
 ## Guiding Intent
 
@@ -48,6 +49,7 @@ source-qualification prerequisite, not a new runtime incoming-readiness gate.
 | lopsided-gasket | Existing handover implementation and focused qualification | Managed implementation worktree |
 | patient-spanner | Incoming/retirement architecture and acceptance amendment | Managed documentation worktree |
 | soldered-ratchet | Fixture-scoped observer contract and SDK qualification prerequisite | Managed source worktree |
+| squeaky-crank | Bounded #10951 resident configuration-context implementation | Managed source worktree; coordinator owns publication and rollout |
 | Session-path evidence | Read-only client, host and upstream-state analysis | Coordinator delegation |
 | Activation evidence | Read-only installer, selection and retirement analysis | Coordinator delegation |
 | Keeper evidence | Read-only existing lifecycle/transport primitive analysis | Coordinator delegation |
@@ -70,6 +72,9 @@ source-qualification prerequisite, not a new runtime incoming-readiness gate.
   from lopsided-gasket's MCP implementation. Review this contract before SDK
   implementation; preserve both branches' journals and existing resource owners
   when integrating. No duplicate observer framework or implementation writer.
+- squeaky-crank owns only the #10951 configuration-context correction, tests and
+  local commit. It does not own publication, release, rollout, observer effects,
+  incoming-installer convergence or session-handover implementation.
 
 ## Context
 
@@ -155,6 +160,14 @@ named tracked objective before the whole effort is Done.
   independently. Completing this slice does not complete the handover feature
   or the effort.
 
+### Resident configuration-context correction
+
+- [ ] Correct #10951: transport the caller's configuration root and bridge
+  binding to the resident consumer, independently resolve the qualified owner,
+  and preserve direct/resident preference parity without process-global cwd or
+  environment changes. Refuse missing/mismatched context and isolate concurrent
+  callers; unsupported peers retain a pre-effect direct fallback.
+
 ### Phase 3 - Session-preserving handover and independent retirement
 
 - [ ] Retain a client-owned, installation-independent stdio lifetime boundary;
@@ -238,6 +251,10 @@ gate, or claim that a scoped observer already exists.
   unfinished handover, unavailable outgoing census/provenance or occupied old
   control home; verify every applicable current selection and actual fresh
   execution of the incoming generation through its owned namespace.
+- [x] #10951 source configuration-consumer controls cover a neutral daemon cwd,
+  direct/resident parity, missing/mismatched context, concurrent repository
+  separation and mixed-version pre-effect fallback. Source qualification is not
+  released or installed-consumer acceptance.
 - [ ] Pair with genuine incoming source-admission, authentication, build,
   permission, I/O and health failures that prevent incoming completion.
   Necessary durable-state compatibility and conflicting-work protection remain
@@ -329,3 +346,25 @@ migration already works.
   claimed; review, source qualification and actual generated-CMD acceptance
   remain open. Incoming publication, full handover and installed acceptance
   retain their original completion gates.
+
+### 2026-11-06 - Qualified resident configuration slice
+
+- Claimed #10951 as a bounded correction within Phase 2. The resident data
+  directory is not the caller's repository. The correction carries a versioned
+  caller-root/bridge selection while the native consumer independently reads its
+  existing qualified configuration owner, cell matching and provenance.
+- Added authenticated data-plane capability discovery before bridge operations;
+  unsupported peers take the existing direct path before upstream effects.
+  Missing/mismatched context is refused, directory-marketplace discovery uses
+  the caller selection, and warm entries are separated by root/resolved source.
+  No global cwd/environment mutation, copied authority or new process owner.
+- Source qualification passed 200 focused tests, with 9 existing platform
+  skips, through the bounded runner; cleanup was verified. The packet
+  includes the real configuration consumer, concurrent repository separation,
+  call/attach loading and actual CLI-parser fallback. Lint, install-contract,
+  module-size, version and generated-source consistency checks passed.
+- This closes the configuration-consumer source-control item only.
+  squeaky-crank owns the local commit; the coordinator retains publication,
+  review, release and authorized installed-consumer qualification. No rollout,
+  observer effect or native calibration occurred. #10951's delivery, incoming
+  publication, full handover and the whole-effort gate remain open.

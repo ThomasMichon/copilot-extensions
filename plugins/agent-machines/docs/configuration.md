@@ -10,9 +10,10 @@ requirement packages are configuration**, with native desired-state authority,
 resource admission and package discovery. They are not interchangeable ordinary
 JSON preference overlays.
 
-The separate [portable preference preview](portable-preferences.md) reads
+The separate [portable preference exchange](portable-preferences.md) reads
 explicit typed snapshots, including harness-to-knowledge mapping suggestions.
-It does not add a package source, persist acceptance or invoke native adoption.
+Its `preview` is read-only; explicit `accept` / `publish` transactions persist
+local snapshots only. They do not add a package source or invoke native adoption.
 
 ## Canonical sources
 

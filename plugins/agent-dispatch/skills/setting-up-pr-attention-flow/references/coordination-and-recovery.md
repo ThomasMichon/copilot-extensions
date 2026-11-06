@@ -55,6 +55,19 @@ work; a known instability threshold is not a usable capacity allowance. Do not
 equate retained Task handles with independent process capacity or terminate
 another owner's sessions to meet a target.
 
+Keep the configured eligibility population and priority order separate from
+concurrency. A large backlog does not authorize narrowing its union of intake
+signals or inventing a different ordering. Track acquiring inputs, active
+analysis, publication/readback, returned-awaiting-integration, suspended and
+held work separately. A reserved identifier or returned handle is not an active
+reviewer. These are reporting distinctions, not new required runtime fields.
+
+Consume returned results and refill eligible vacancies in the same coordination
+pass where capacity and the original grant permit. Preserve actual resource
+limits and unresolved-effect custody: a returned result alone neither releases
+a claim nor permits replay of an uncertain write. Supporting dashboard or tool
+work blocks independent reviews only where a concrete dependency exists.
+
 Unrelated PRs get independent fresh contexts. A genuine PR update returns to
 the original reviewer through its retained context/actual task and naturally
 returned handle. Suspension releases active execution capacity while preserving

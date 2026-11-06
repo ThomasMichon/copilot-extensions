@@ -8,6 +8,7 @@ import json
 import subprocess
 from datetime import timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
 
@@ -15,18 +16,27 @@ from test_maintainer_completion_policy import EPOCH, HEAD
 
 ROOT = Path(__file__).resolve().parents[3]
 
+if TYPE_CHECKING:
+    import maintainer_pr_completion_github as evidence_source
+
+    class EvidenceModule(Protocol):
+        EvidenceUnavailable: type[evidence_source.EvidenceUnavailable]
+        GitHubEvidence: type[evidence_source.GitHubEvidence]
+
+    _evidence_contract: EvidenceModule = evidence_source
+
 
 @pytest.fixture
-def evidence(monkeypatch):
+def evidence(monkeypatch: pytest.MonkeyPatch) -> EvidenceModule:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    return importlib.import_module("maintainer_pr_completion_github")
+    return cast("EvidenceModule", importlib.import_module("maintainer_pr_completion_github"))
 
 
-def response(argv, payload):
+def response(argv: list[str], payload: object) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
 
 
-def review(**changes):
+def review(**changes: Any) -> dict[str, Any]:
     return {
         "id": 1, "state": "APPROVED", "commit_id": HEAD,
         "user": {"login": "copilot-pull-request-reviewer[bot]", "type": "Bot"},
@@ -34,7 +44,7 @@ def review(**changes):
     }
 
 
-def test_complete_paginated_reviews_preserve_a_human_veto(evidence):
+def test_complete_paginated_reviews_preserve_a_human_veto(evidence: EvidenceModule) -> None:
     first = [review(id=index + 1, user={"login": f"reviewer-{index}", "type": "User"})
              for index in range(100)]
     later = [
@@ -43,7 +53,7 @@ def test_complete_paginated_reviews_preserve_a_human_veto(evidence):
     ]
     calls = []
 
-    def invoke(argv):
+    def invoke(argv: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return response(argv, later if "page=2" in argv[2] else first)
 
@@ -56,7 +66,7 @@ def test_complete_paginated_reviews_preserve_a_human_veto(evidence):
 
 
 @pytest.mark.parametrize("state", ["COMMENTED", "DISMISSED"])
-def test_later_copilot_disposition_cannot_reuse_an_older_approval(evidence, state):
+def test_later_copilot_disposition_cannot_reuse_an_older_approval(evidence: EvidenceModule, state: str) -> None:
     rows = [review(), review(id=2, state=state, submitted_at="2026-01-01T00:00:02Z")]
     client = evidence.GitHubEvidence("example/project", lambda argv: response(argv, rows))
     assert client.reviews(7, "author", EPOCH).copilot_state == state
@@ -68,7 +78,9 @@ def test_later_copilot_disposition_cannot_reuse_an_older_approval(evidence, stat
     {"id": True}, {"id": 0}, {"state": "UNRECOGNIZED"},
     {"submitted_at": "2026-01-01T00:00:01"}, {"commit_id": "short"},
 ])
-def test_malformed_review_evidence_never_becomes_an_empty_veto_set(evidence, changes):
+def test_malformed_review_evidence_never_becomes_an_empty_veto_set(
+    evidence: EvidenceModule, changes: dict[str, Any],
+) -> None:
     rows = [review(**changes)]
     client = evidence.GitHubEvidence("example/project", lambda argv: response(argv, rows))
     with pytest.raises(evidence.EvidenceUnavailable):
@@ -76,7 +88,7 @@ def test_malformed_review_evidence_never_becomes_an_empty_veto_set(evidence, cha
     assert not client.write_attempted
 
 
-def test_malformed_later_review_page_is_not_hidden_by_the_first_page(evidence):
+def test_malformed_later_review_page_is_not_hidden_by_the_first_page(evidence: EvidenceModule) -> None:
     first = [review(id=index + 1) for index in range(100)]
     client = evidence.GitHubEvidence("example/project", lambda argv: response(
         argv, [review(id=101, state="CHANGES_REQUESTED", user=None)]
@@ -87,10 +99,10 @@ def test_malformed_later_review_page_is_not_hidden_by_the_first_page(evidence):
     assert not client.write_attempted
 
 
-def test_reopen_and_retarget_epochs_are_paginated_and_monotonic(evidence):
+def test_reopen_and_retarget_epochs_are_paginated_and_monotonic(evidence: EvidenceModule) -> None:
     calls = []
 
-    def invoke(argv):
+    def invoke(argv: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         second = "cursor=next" in argv
         nodes = [{"__typename": "BaseRefChangedEvent" if second else "ReopenedEvent",
@@ -114,17 +126,17 @@ def test_reopen_and_retarget_epochs_are_paginated_and_monotonic(evidence):
         "nodes": None, "pageInfo": {"hasNextPage": False},
     }}}}},
 ])
-def test_unknown_epoch_history_is_not_treated_as_creation_only(evidence, payload):
+def test_unknown_epoch_history_is_not_treated_as_creation_only(evidence: EvidenceModule, payload: object) -> None:
     client = evidence.GitHubEvidence("example/project", lambda argv: response(argv, payload))
     with pytest.raises(evidence.EvidenceUnavailable):
         client.epoch(7, EPOCH.isoformat())
 
 
-def test_membership_uses_an_invitation_and_the_pinned_base_root_roster(evidence):
+def test_membership_uses_an_invitation_and_the_pinned_base_root_roster(evidence: EvidenceModule) -> None:
     calls = []
     content = "* @old-owner\n# comment\n* @maintainer @another\n"
 
-    def invoke(argv):
+    def invoke(argv: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if "/collaborators/" in argv[2]:
             return subprocess.CompletedProcess(argv, 0, "", "")
@@ -140,7 +152,9 @@ def test_membership_uses_an_invitation_and_the_pinned_base_root_roster(evidence)
 
 
 @pytest.mark.parametrize("failure,expected", [("HTTP 404", (False, False)), ("HTTP 403", None)])
-def test_invitation_unknown_is_not_permission(evidence, failure, expected):
+def test_invitation_unknown_is_not_permission(
+    evidence: EvidenceModule, failure: str, expected: tuple[bool, bool] | None,
+) -> None:
     client = evidence.GitHubEvidence("example/project", lambda argv: (
         subprocess.CompletedProcess(argv, 1, "", failure)
     ))
@@ -151,22 +165,28 @@ def test_invitation_unknown_is_not_permission(evidence, failure, expected):
         assert client.membership("maintainer", HEAD) == expected
 
 
-def test_page_budget_fails_explicitly_instead_of_truncating(evidence, monkeypatch):
+def test_page_budget_fails_explicitly_instead_of_truncating(
+    evidence: EvidenceModule, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = []
     monkeypatch.setattr(evidence, "MAX_PAGES", 2)
-    client = evidence.GitHubEvidence("example/project", lambda argv: (
-        calls.append(argv) or response(argv, [{"id": value} for value in range(100)])
-    ))
+    def invoke(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return response(argv, [{"id": value} for value in range(100)])
+
+    client = evidence.GitHubEvidence("example/project", invoke)
     with pytest.raises(evidence.EvidenceUnavailable, match="pagination limit"):
         client.pages("repos/example/project/pulls")
     assert len(calls) == 2
 
 
 @pytest.mark.parametrize("strict,behind,expected", [(False, 3, False), (True, 0, False), (True, 2, True)])
-def test_only_required_up_to_date_policy_requests_a_rebase(evidence, strict, behind, expected):
+def test_only_required_up_to_date_policy_requests_a_rebase(
+    evidence: EvidenceModule, strict: bool, behind: int, expected: bool,
+) -> None:
     calls = []
 
-    def invoke(argv):
+    def invoke(argv: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if argv[2] == "graphql":
             return response(argv, {"data": {"repository": {"ref": {
@@ -189,10 +209,10 @@ class GitHubSnapshotFixture:
     """Documented wire shapes, exercising the actual shared CI/review helpers."""
 
     def __init__(self) -> None:
-        self.calls = []
+        self.calls: list[list[str]] = []
         self.base = "b" * 40
         repo = {"id": 42, "full_name": "example/project"}
-        self.pr = {
+        self.pr: dict[str, Any] = {
             "number": 7, "node_id": "PR_example", "state": "open", "draft": False,
             "title": "Ready change", "labels": [{"name": "auto-merge"}],
             "user": {"login": "maintainer", "type": "User"},
@@ -213,7 +233,7 @@ class GitHubSnapshotFixture:
         self.invited = True
         self.rebase = True
 
-    def invoke(self, argv):
+    def invoke(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
         self.calls.append(argv)
         if argv[:3] == ["gh", "pr", "checks"]:
             return response(argv, self.checks)
@@ -261,7 +281,7 @@ class GitHubSnapshotFixture:
         raise AssertionError(f"Unexpected evidence request: {argv}")
 
 
-def test_full_snapshot_uses_real_shared_required_check_and_review_policy(evidence):
+def test_full_snapshot_uses_real_shared_required_check_and_review_policy(evidence: EvidenceModule) -> None:
     from test_maintainer_completion_policy import CONFIG, policy
 
     fixture = GitHubSnapshotFixture()
@@ -280,8 +300,8 @@ def test_full_snapshot_uses_real_shared_required_check_and_review_policy(evidenc
     {"status": "queued"}, {"conclusion": "failure"},
 ])
 def test_actual_required_check_verifier_cannot_accept_wrong_or_unsuccessful_source(
-    evidence, changes,
-):
+    evidence: EvidenceModule, changes: dict[str, Any],
+) -> None:
     from test_maintainer_completion_policy import CONFIG, policy
 
     fixture = GitHubSnapshotFixture()
@@ -295,7 +315,9 @@ def test_actual_required_check_verifier_cannot_accept_wrong_or_unsuccessful_sour
     {"labels": []}, {"draft": True}, {"base": {"ref": "main"}},
     {"head": {"repo": {"id": 99, "full_name": "outside/project"}}},
 ])
-def test_scope_exclusions_stop_before_expensive_or_privileged_evidence(evidence, changes):
+def test_scope_exclusions_stop_before_expensive_or_privileged_evidence(
+    evidence: EvidenceModule, changes: dict[str, Any],
+) -> None:
     from test_maintainer_completion_policy import CONFIG, policy
 
     fixture = GitHubSnapshotFixture()
@@ -309,7 +331,7 @@ def test_scope_exclusions_stop_before_expensive_or_privileged_evidence(evidence,
     assert len(fixture.calls) == 1
 
 
-def test_stale_pr_base_metadata_does_not_reuse_an_obsolete_roster_or_ci_policy(evidence):
+def test_stale_pr_base_metadata_does_not_reuse_an_obsolete_roster_or_ci_policy(evidence: EvidenceModule) -> None:
     from test_maintainer_completion_policy import CONFIG
 
     fixture = GitHubSnapshotFixture()
@@ -320,7 +342,7 @@ def test_stale_pr_base_metadata_does_not_reuse_an_obsolete_roster_or_ci_policy(e
     assert len(fixture.calls) == 2 and not client.write_attempted
 
 
-def test_uninvited_author_stops_before_review_or_required_ci_reads(evidence):
+def test_uninvited_author_stops_before_review_or_required_ci_reads(evidence: EvidenceModule) -> None:
     from test_maintainer_completion_policy import CONFIG, policy
 
     fixture = GitHubSnapshotFixture()

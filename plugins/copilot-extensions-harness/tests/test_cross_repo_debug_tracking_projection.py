@@ -14,7 +14,7 @@ _DECLARATION = _PLUGIN / "instruction-projections.json"
 _TEMPLATE = _PLUGIN / "instructions" / "cross-repo-debug-tracking.instructions.md"
 
 
-def test_projection_declaration_shape():
+def test_projection_declaration_shape() -> None:
     declaration = json.loads(_DECLARATION.read_text(encoding="utf-8"))
     assert declaration["schema"] == "copilot-extensions.instruction-projections"
     by_id = {p["id"]: p for p in declaration["projections"] if isinstance(p, dict)}
@@ -31,7 +31,7 @@ def test_projection_declaration_shape():
     assert projection["legacyMarkers"] == []
 
 
-def test_template_is_reviewable_static_fallback():
+def test_template_is_reviewable_static_fallback() -> None:
     content = _TEMPLATE.read_text(encoding="utf-8")
     assert content.startswith('---\napplyTo: "**"\n---\n')
     assert "copilot-extensions-harness@" in content
@@ -49,7 +49,7 @@ def test_template_is_reviewable_static_fallback():
         assert forbidden not in content
 
 
-def test_postmerge_guidance_waits_for_promotion_and_local_update():
+def test_postmerge_guidance_waits_for_promotion_and_local_update() -> None:
     content = " ".join(_TEMPLATE.read_text(encoding="utf-8").split())
     assert "merge to `dev` does not make the change live" in content
     assert "promote it to `main`" in content
@@ -67,7 +67,7 @@ def test_postmerge_guidance_waits_for_promotion_and_local_update():
     assert "checked-in projection refresh" not in content
 
 
-def test_contribution_rollout_preserves_authorization_and_running_state_proof():
+def test_contribution_rollout_preserves_authorization_and_running_state_proof() -> None:
     path = _PLUGIN / "skills" / "contributing-to-copilot-extensions" / "SKILL.md"
     step = path.read_text(encoding="utf-8").split("8. **", 1)[1].split("\n##", 1)[0]
     normalized = " ".join(step.split())
@@ -86,7 +86,7 @@ def test_contribution_rollout_preserves_authorization_and_running_state_proof():
     assert "Manual instruction sync is not required" in normalized
 
 
-def test_cross_linking_preserves_public_traceability_without_private_publication():
+def test_cross_linking_preserves_public_traceability_without_private_publication() -> None:
     content = " ".join(_TEMPLATE.read_text(encoding="utf-8").split())
     assert "cross-links in both directions only when both trackers and artifacts are public" in content
     assert "private downstream tracker may link to public upstream work" in content

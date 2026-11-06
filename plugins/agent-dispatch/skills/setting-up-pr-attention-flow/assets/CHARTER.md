@@ -80,6 +80,8 @@ Record actual adapter results and unknowns, not hypothetical success.
 - [ ] Complete paginated initial/final census; partial results remain unknown.
 - [ ] Positive concurrency target, prompt refill/authorized expansion, genuine
   work/capacity shortage and no overlapping same-PR reviewer.
+- [ ] Intake population and priority order stay independent of lane capacity;
+  returned handles are not active reviewers, and unresolved effects retain custody.
 - [ ] Missing original grant/task binding cannot become fabricated authorization.
 - [ ] Missing required consent/provider precondition blocks its affected effect;
   providers without server fencing use the documented non-atomic fallback.

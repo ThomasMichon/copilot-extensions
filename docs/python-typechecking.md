@@ -480,6 +480,27 @@ extend the adapter to other hyphenated modules.
 
 ## Exact-candidate release enforcement
 
+The pending Harness project additionally declares its fixed emitted Python
+inputs in `plugins/copilot-extensions-harness/python-emitted-inputs.json`.
+Within each verification pass, emitted views with identical member, asset and
+input-byte bindings share one binding verification. Every generated output's
+identity and bytes remain independently checked; nothing is cached across passes.
+Its normal checker counts physical inputs separately from supplemental programs.
+The pure AST adapter recognizes only declared literals, concatenations and
+validated fixture conversions; it never imports or runs a producer.
+Named inputs require one prior assignment in the same statement suite or a
+dominating ancestor suite. Parameters, ambiguous rebindings and assignments
+from another branch are refused; fixture origins obey the same construction-time
+rule. Nested programs are limited to one declared decoded child, with deeper
+Python producers refused rather than silently left inside an unchecked string.
+Portable parameter strings are typing witnesses, not captured native paths.
+Diagnostics identify the original expression range rather than inventing a
+column mapping through concatenated strings. Generated-file epochs, nested
+parent constants and the quoted shell body retain separate roles.
+Source, structural, member and executable-asset drift refuses qualification.
+These checks do not qualify native execution, shell behavior, physical
+relocation, shipped copies or the full composed-consumer/promotion gate.
+
 The source controller prepares and checks MyPy from the imported frozen
 candidate before emitting its unit evidence. The same candidate-local front
 door, pinned lock and project policies apply; checking Dev or recomposing a

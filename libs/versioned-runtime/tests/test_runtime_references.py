@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -53,6 +54,33 @@ os._exit(23)
     assert runtime.gc(root) == ["new"]
     replace(root, [], expected=["old"])
     assert runtime.gc(root) == ["old"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("operation", ["discard", "gc"])
+@pytest.mark.parametrize("extended_root", [False, True])
+def test_owned_cleanup_removes_long_descendants(tmp_path, operation, extended_root):
+    root = tmp_path / "runtime"
+    if extended_root:
+        root = Path("\\\\?\\" + str(root))
+    slot = root / "versions" / "candidate"
+    slot.mkdir(parents=True)
+    value = str(slot.resolve())
+    native_slot = Path(value if value.startswith("\\\\?\\") else "\\\\?\\" + value)
+    deep = native_slot / ("a" * 120) / ("b" * 120)
+    deep.mkdir(parents=True)
+    (deep / "payload").write_bytes(b"fixture")
+    assert len(str(deep)) > 260
+    try:
+        if operation == "discard":
+            with runtime.construction_lease(root, "candidate"):
+                assert runtime.discard_failed_candidate(root, "candidate")
+        else:
+            assert runtime.gc(root, min_age_days=0) == ["candidate"]
+        assert not slot.exists()
+    finally:
+        if native_slot.exists():
+            shutil.rmtree(native_slot)
 
 
 def test_update_is_owner_scoped_and_compare_bound(tmp_path):

@@ -4543,8 +4543,10 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
     assert list(checks)[-1] == blocker and checks[blocker] is False
 
 
-@pytest.mark.parametrize("kind", ["preToolUse", "postToolUse"])
-def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind):
+@pytest.mark.parametrize("kind,idle_gap", [
+    ("preToolUse", False), ("postToolUse", False), ("readHookDemand", False), ("readHookDemand", True),
+])
+def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind, idle_gap):
     from zdd import lifecycle
 
     from agent_worktrees import hook_ipc, monitor_roots, self_retire, status_monitor_cutover as smc
@@ -4553,6 +4555,9 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
 
     clock = {"now": 0.0, "advanced": 0}
     sweeps, servers, replies = [], [], []
+    gap = {"guard": False, "injected": False}
+    entered, finished = threading.Event(), threading.Event()
+    late_callers = []
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
@@ -4569,8 +4574,11 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     monkeypatch.setattr(m.list_cache, "recent_demand_projects", lambda: set())
     monkeypatch.setattr(retirements.ResidentRetirements, "refresh",
                         lambda self, **kwargs: setattr(self, "pending", False))
-    monkeypatch.setattr(MonitorHandover, "idle_guard",
-                        lambda *a: types.SimpleNamespace(release=lambda: None))
+    def idle_guard(*args):
+        gap["guard"] = True
+        return types.SimpleNamespace(release=lambda: gap.update(guard=False))
+
+    monkeypatch.setattr(MonitorHandover, "idle_guard", idle_guard)
     monkeypatch.setattr(m, "_resident_hook_decision", lambda *a, **k: {})
 
     class Policy:
@@ -4590,18 +4598,29 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     endpoint = tmp_path / "hook-endpoint.json"
 
     def dial(server):
-        replies.append(hook_ipc.send_best_effort(
-            kind, {"toolName": "edit" if kind == "preToolUse" else "view"},
-            lock_path=endpoint,
-        ))
+        if kind == "readHookDemand":
+            import socket
+
+            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+                conn.sendall(json.dumps({
+                    "version": 1, "token": server.token, "kind": kind,
+                    "hook_generation": server.generation, "deadline": time.time() + 1,
+                }).encode() + b"\n")
+                assert conn.recv(1) == b""
+            replies.append(server.has_recent_hook_demand())
+        else:
+            replies.append(hook_ipc.send_best_effort(
+                kind, {"toolName": "edit" if kind == "preToolUse" else "view"},
+                lock_path=endpoint,
+            ))
         deadline = time.monotonic() + 2
         while server.active_handler_count():
             assert time.monotonic() < deadline, "hook response did not settle"
             time.sleep(.005)
 
     class Server(hook_ipc.HookIpcServer):
-        def __init__(self, decide):
-            super().__init__(decide)
+        def __init__(self, decide, **kwargs):
+            super().__init__(decide, **kwargs)
             self._clock = lambda: clock["now"]
             servers.append(self)
 
@@ -4609,6 +4628,26 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
             super().start()
             endpoint.write_text(json.dumps(self.rendezvous()), encoding="utf-8")
             dial(self)
+
+        def _on_read_demand(self, request):
+            if gap["injected"]:
+                entered.set()
+            try:
+                super()._on_read_demand(request)
+            finally:
+                if gap["injected"]:
+                    finished.set()
+
+        def has_recent_hook_demand(self):
+            recent = super().has_recent_hook_demand()
+            if idle_gap and gap["guard"] and not recent and not gap["injected"]:
+                gap["injected"] = True
+                caller = threading.Thread(target=dial, args=(self,))
+                late_callers.append(caller)
+                caller.start()
+                assert entered.wait(2), "notice did not reach the final-check gap"
+                assert finished.wait(2), "notice did not settle within the receiver bound"
+            return recent
 
     monkeypatch.setattr(hook_ipc, "HookIpcServer", Server)
 
@@ -4649,8 +4688,14 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
             time.sleep(.005)
 
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
-    assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
-    assert replies == [True, True]
+    try:
+        assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
+    finally:
+        for caller in late_callers:
+            caller.join(timeout=2)
+            assert not caller.is_alive()
+    assert replies == ([True, True, False] if idle_gap else [True, True])
+    assert gap["injected"] is idle_gap
     assert sweeps == list(range(0, 271, 30))
     exits = [event for event in lifecycle.read_events(tmp_path / "routing")
              if event["action"] == "monitor-exit"]

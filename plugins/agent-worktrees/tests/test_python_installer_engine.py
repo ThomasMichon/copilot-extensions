@@ -213,6 +213,35 @@ def test_freeze_closes_transitive_external_paths_without_editing_source(engine, 
     assert engine.freeze_inputs(plugin, tmp_path / "changed").payload_hash != frozen.payload_hash
 
 
+def test_freeze_retains_multiple_applications_and_their_shared_closure(engine, tmp_path):
+    root = tmp_path / "repo"
+    shared = _package(root / "libs" / "shared", "shared")
+    manager = _package(
+        root / "worktree-manager", "manager",
+        '[tool.uv.sources]\nshared = {path = "../libs/shared"}\n',
+    )
+    sdk = _package(
+        root / "plugins" / "engine", "engine",
+        '[tool.uv.sources]\nshared = {path = "../../libs/shared"}\n',
+    )
+    first = engine.freeze_inputs(manager, tmp_path / "first", additional_plugins=(sdk,))
+    assert first.plugin == tmp_path / "first" / "worktree-manager"
+    assert len(first.packages) == 3
+    assert (tmp_path / "first" / "plugins" / "engine" / "src" / "module.py").is_file()
+    (sdk / "src" / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    second = engine.freeze_inputs(manager, tmp_path / "second", additional_plugins=(sdk,))
+    assert second.payload_hash != first.payload_hash
+    assert (shared / "src" / "module.py").read_text() == "VALUE = 1\n"
+
+
+def test_freeze_refuses_missing_additional_application_before_creating_destination(engine, tmp_path):
+    plugin = _package(tmp_path / "plugin", "plugin")
+    destination = tmp_path / "frozen"
+    with pytest.raises((OSError, ValueError)):
+        engine.freeze_inputs(plugin, destination, additional_plugins=(tmp_path / "missing",))
+    assert not destination.exists()
+
+
 @pytest.mark.parametrize("extras", [
     ["server"], "server", ("",), ("server,store",), ("../server",),
     ("server", "SERVER"), ("unknown",),

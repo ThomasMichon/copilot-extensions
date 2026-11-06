@@ -31,6 +31,9 @@ def api(monkeypatch):
     owner._active_handlers_lock = threading.Lock()
     owner._last_completed_hook = None
     owner._clock = lambda: clock["mono"]
+    owner.generation = "a" * 32
+    owner._read_demand_admitted = None
+    owner._read_demand_lock = threading.RLock()
 
     def dispatch(change=None):
         request = {
@@ -41,6 +44,7 @@ def api(monkeypatch):
             token="expected", decide=lambda *a: {"additionalContext": "handled"},
             owner=owner, admission_closed=False, admission_closed_reason=None,
         )
+        owner.server = server
         handler = module._Handler.__new__(module._Handler)
         handler.request = SimpleNamespace(settimeout=lambda value: None)
         handler.wfile = io.BytesIO()
@@ -64,6 +68,39 @@ def test_completed_hook_response_retains_demand_until_monotonic_expiry(api, kind
     assert api.owner.has_recent_hook_demand()
     api.clock.update(wall=-1000000.0, mono=119.0)
     assert api.owner.has_recent_hook_demand()
+    api.clock["mono"] = 120.0
+    assert not api.owner.has_recent_hook_demand()
+
+
+@pytest.mark.parametrize("case", [
+    "current", "generation", "closed", "revoked", "legacy", "deadline", "extra", "version",
+])
+def test_send_only_read_demand_keeps_original_admission_and_expiry(api, case):
+    def change(request, server, handler):
+        request.clear()
+        request.update(
+            version=1, token="expected", kind="readHookDemand",
+            hook_generation=api.owner.generation, deadline=101.0,
+        )
+        api.owner._read_demand_admitted = lambda: True
+        server.decide = lambda *_a: pytest.fail("read demand invoked policy")
+        if case == "generation":
+            request["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.admission_closed = True
+        elif case == "revoked":
+            api.owner._read_demand_admitted = lambda: False
+        elif case == "legacy":
+            api.owner._read_demand_admitted = None
+        elif case == "deadline":
+            request["deadline"] = float("nan")
+        elif case == "extra":
+            request["payload"] = {"toolName": "edit"}
+        elif case == "version":
+            request["version"] = True
+
+    assert api.dispatch(change) is None
+    assert api.owner.has_recent_hook_demand() is (case == "current")
     api.clock["mono"] = 120.0
     assert not api.owner.has_recent_hook_demand()
 
