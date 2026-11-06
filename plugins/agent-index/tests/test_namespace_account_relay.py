@@ -221,6 +221,20 @@ def test_lease_client_bounds_duration_and_rejects_invalid_evidence(monkeypatch, 
     assert requests[1][1] == 18
 
 
+@pytest.mark.parametrize("clock_name", ["wall", "monotonic_value"])
+def test_observed_clock_rollback_invalidates_even_above_the_initial_reading(monkeypatch, clock_name):
+    clock = SimpleNamespace(wall=1020.0, monotonic_value=70.0)
+    monkeypatch.setattr(relay, "time", SimpleNamespace(
+        time=lambda: clock.wall, monotonic=lambda: clock.monotonic_value,
+    ))
+    lease = relay.SourceLease("synthetic-token", "c" * 32, 1000, 1060, 1000, 50, 60)
+    assert lease.remaining_seconds() == 40
+    setattr(clock, clock_name, getattr(clock, clock_name) - 5)
+    assert lease.remaining_seconds() == 0
+    setattr(clock, clock_name, getattr(clock, clock_name) + 10)
+    assert lease.remaining_seconds() == 0
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or os.environ.get("AGENT_INDEX_TEST_NAMESPACE_RELAY") != "1",
     reason="explicit Linux Unix-socket integration lane",

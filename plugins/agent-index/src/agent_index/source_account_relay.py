@@ -23,18 +23,22 @@ class SourceLease:
     lease_id: str
     lease_issued_at: float
     lease_expires_at: float
-    _received_at: float = field(repr=False)
+    _last_wall: float = field(repr=False)
     _received_monotonic: float = field(repr=False)
     _budget: float = field(repr=False)
     _expired: bool = field(default=False, init=False, repr=False)
+    _last_elapsed: float = field(default=0.0, init=False, repr=False)
 
     def remaining_seconds(self) -> float:
         now = time.time()
         elapsed = time.monotonic() - self._received_monotonic
         remaining = min(self.lease_expires_at - now, self._budget - elapsed)
-        if now < self._received_at or elapsed < 0 or remaining <= 0:
+        if now < self._last_wall or elapsed < self._last_elapsed or remaining <= 0:
             self._expired = True
+        self._last_wall = now
+        self._last_elapsed = elapsed
         return 0.0 if self._expired else remaining
+
 
 def _reference(path, limit=65536):
     path = Path(path)
