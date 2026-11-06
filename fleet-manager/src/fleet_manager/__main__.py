@@ -70,6 +70,13 @@ def main(argv=None):
     bootstrap_parser.add_argument("--harness", required=True)
     bootstrap_parser.add_argument("--state-root", type=Path, required=True)
     bootstrap_parser.add_argument("--apply", action="store_true")
+    ssh_setup = commands.add_parser(
+        "ssh-setup", help="Prepare explicitly selected SSH host inputs; never construct or install")
+    ssh_setup.add_argument("--request", type=Path, required=True)
+    ssh_setup.add_argument("--source", type=Path, required=True)
+    ssh_setup.add_argument("--harness", required=True)
+    ssh_setup.add_argument("--state-root", type=Path, required=True)
+    ssh_setup.add_argument("--apply", action="store_true")
     credential = commands.add_parser(
         "credential", help="Acquire one typed forge credential; secret JSON is for a captured pipe only",
     )
@@ -155,13 +162,14 @@ def main(argv=None):
         except Exception:
             print("fleet-manager: selected Gateway hosting control failed", file=sys.stderr)
             return 1
-    if args.command in ("capabilities", "bootstrap"):
+    if args.command in ("capabilities", "bootstrap", "ssh-setup"):
         try:
             import asyncio
             from .continuity_bootstrap import (
                 CAPABILITY, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY, PROVIDER, bootstrap,
             )
             from .gateway_service_channel import TransportError
+            from .ssh_setup import CAPABILITY as SSH_SETUP_CAPABILITY
         except ImportError:
             print("fleet-manager: continuity bootstrap requires the service-gateway extra",
                   file=sys.stderr)
@@ -171,15 +179,29 @@ def main(argv=None):
                 result = {"schema": "fleet-manager.capabilities", "version": 1,
                           "capabilities": [
                               CAPABILITY, PROVIDER, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY,
+                              SSH_SETUP_CAPABILITY,
                           ]}
+            elif args.command == "ssh-setup":
+                from .ssh_setup import run as setup_ssh
+
+                result = setup_ssh(
+                    args.request.expanduser().absolute(), source=args.source.expanduser().absolute(),
+                    harness=args.harness, state_root=args.state_root.expanduser().absolute(),
+                    apply=args.apply,
+                )
             else:
                 result = asyncio.run(bootstrap(
                     args.source.expanduser().absolute(), harness=args.harness,
                     state_root=args.state_root.expanduser().absolute(), apply=args.apply))
             print(canonical(result).decode("utf-8"))
             return 0
+        except ImportError:
+            print("fleet-manager: selected continuity runtime closure is unavailable", file=sys.stderr)
+            return 1
         except (TransportError, PlanError, OSError, ValueError, KeyError, TypeError) as exc:
-            code = exc.code if isinstance(exc, TransportError) else "continuity-bootstrap-refused"
+            code = exc.code if isinstance(exc, TransportError) else (
+                "continuity-ssh-setup-refused" if args.command == "ssh-setup" else "continuity-bootstrap-refused"
+            )
             print("fleet-manager: " + code, file=sys.stderr)
             return 1
     if args.command == "credential":

@@ -1785,6 +1785,41 @@ jobs:
     timeout-minutes: 6
     steps: *gateway-continuity-application-steps
 
+  gateway-normal-setup-linux:
+    if: ${{ inputs.pr_artifacts }}
+    needs: gateway-continuity-application-linux
+    name: Normal selected SSH setup (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env: &gateway-normal-setup-env
+      UV_PYTHON: "3.12"
+    steps: &gateway-normal-setup-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare the declared engine dependency support
+        run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Normal Manager and engine SSH setup
+        env:
+          COPILOT_EXTENSIONS_SSH_SETUP_NATIVE: "1"
+          PYTEST_ADDOPTS: >-
+            -vv --durations=20
+            -k "test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
+
+  gateway-normal-setup-windows:
+    if: ${{ inputs.pr_artifacts }}
+    needs: gateway-continuity-application-windows
+    name: Normal selected SSH setup (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    env: *gateway-normal-setup-env
+    steps: *gateway-normal-setup-steps
+
   gateway-role-tunnels:
     if: ${{ inputs.pr_artifacts }}
     name: Pinned Gateway image and role tunnels (Linux)

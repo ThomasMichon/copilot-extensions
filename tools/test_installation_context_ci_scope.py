@@ -110,8 +110,18 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert shlex.split(followthrough[0]["run"]) == [
         "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
     ]
+    normal = workflow["jobs"]["gateway-normal-setup-" + platform]
+    assert normal["timeout-minutes"] == 6
+    assert normal["needs"] == "gateway-continuity-application-" + platform
+    normal_steps = [step for step in normal["steps"] if "run" in step]
+    assert [shlex.split(step["run"]) for step in normal_steps] == [
+        ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
+    ]
+    assert not any(step.get("continue-on-error") for step in normal_steps)
+    assert normal_steps[1]["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"
     expressions = []
-    for step in steps + followthrough:
+    for step in steps + followthrough + [normal_steps[1]]:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(
@@ -120,6 +130,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "or test_ssh_machine or test_machine_identity or test_credential_references"
         " or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
         " or test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
+        " or test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
     )
     nodes = {
         path.name + "::" + node.name
@@ -144,7 +155,14 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop",
     }
     assert groups[2].isdisjoint(groups[0] | groups[1])
-    assert groups[0] | groups[1] | groups[2] == selected(original)
+    assert groups[3] == {
+        node for node in nodes if node.startswith("test_ssh_setup.py::")
+    } | {
+        "test_repository_ssh_setup_installed.py::"
+        "test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop",
+    }
+    assert groups[3].isdisjoint(groups[0] | groups[1] | groups[2])
+    assert groups[0] | groups[1] | groups[2] | groups[3] == selected(original)
     assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
     assert (
         "test_continuity_bootstrap.py::"

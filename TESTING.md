@@ -529,6 +529,19 @@ preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
 
+Its further dependent normal-setup jobs prepare the engine's declared test
+dependencies, then run `test_ssh_setup.py` and the whole
+`test_repository_ssh_setup_installed.py` sequence under the same180-second
+runner/six-minute job limits. The latter builds the engine wheel with its
+packaged Source API and drives the actual Manager/engine handoff into synthetic
+TLS enrollment and the complete Source application installer, repeat,
+wrong-scope preservation, selected update and exact native stop. The Manager
+and engine dependency support remain fixtures; this is not complete installed
+product-cohort, provider, fresh-adopter or rollout proof. These jobs are
+sequenced after the retained explicit continuity cases, not parallel replacement
+coverage. Local helper/ordering controls and a packaged-API refusal probe do
+not substitute for their actual native outcomes.
+
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
 --allow-explicit-tiers` packet checks complete verified contributor provenance,

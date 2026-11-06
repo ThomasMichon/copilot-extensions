@@ -42,7 +42,7 @@ inert; first complete authenticated local convergence gates SSH readiness.
 Neither source delivery nor the installed synthetic fixture is a containing
 release, provider setup, real SSH route or adopter receipt.
 
-The remaining setup gap is concrete at the #10954 merge: normal
+The setup gap was concrete at the #10954 merge: normal
 `repository_continuity.run` invokes the selected Fleet SDK and stops after
 authenticated outbound access. It does not choose an SSH participant or
 construct its configuration. The enrollment owner's private `machine.json`
@@ -50,6 +50,14 @@ retains a JWK and original operation, whereas the delivered SSH configuration
 v2 consumes an externally provisioned private P-256 PEM reference. That
 private record is not an advertised credential interface. Copying its key
 into another PEM or teaching SSH to parse it would bypass its owner.
+
+Provider expansion #11009 and explicit consumer migration #11023 now expose
+the owner's caller/public revision and SSH v3 references. The
+[normal opt-in setup consumer](../../../plugins/agent-worktrees/docs/repository-setup.md#explicit-selected-ssh-setup)
+joins that reference to the complete prepared Source application contract,
+preserving old outbound-only declarations. Its actual installed-process
+qualification, complete product cohort and release/adopter outcomes remain
+separate gates; this plan is not their completion record.
 
 Reuse `install_source.project_inputs` / `install_application` and the selected
 complete application profile through their existing owner; do not extend the

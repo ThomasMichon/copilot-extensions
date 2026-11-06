@@ -15,12 +15,15 @@ from . import repository_setup as protocol
 CAPABILITY = "delegated-machine-enrollment-v1"
 
 
-def _invoke(arguments: list[str]) -> dict:
+def _invoke(
+    arguments: list[str], *, python: Path | None = None,
+    environment: dict[str, str] | None = None, timeout: int = 30,
+) -> dict:
     try:
         completed = run_caller_owned(
-            [sys.executable, "-I", "-m", "fleet_manager", *arguments],
-            timeout=30, max_stdout_bytes=16384, max_stderr_bytes=16384,
-            env=protocol._environment(attended=False))
+            [str(python) if python is not None else sys.executable, "-I", "-m", "fleet_manager", *arguments],
+            timeout=timeout, max_stdout_bytes=16384, max_stderr_bytes=16384,
+            env=protocol._environment(attended=False) | (environment or {}))
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):
         raise protocol.SetupError(
             "Continuity runtime execution is unsupported, refused or unsettled; retained state was preserved."
@@ -61,6 +64,20 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
             or not all(isinstance(item, str) for item in capability["capabilities"])
             or not {CAPABILITY, context.provider} <= set(capability["capabilities"])):
         raise protocol.SetupError("Installed Fleet executable does not support this selected context.")
+    ssh_arguments, description = None, None
+    if context.ssh_setup is not None:
+        from . import repository_ssh_setup as ssh_setup
+
+        if not {ssh_setup.CAPABILITY, "continuity-machine-reference-v1"} <= set(capability["capabilities"]):
+            raise protocol.SetupError("Installed Fleet executable lacks selected SSH setup support.")
+        ssh_arguments = [
+            "ssh-setup", "--request", str(Path(context.ssh_setup).expanduser()),
+            "--source", str(Path(context.source).expanduser()),
+            "--harness", context.name, "--state-root", str(_state_root(setup, name)),
+        ]
+        description = ssh_setup._description(_invoke(ssh_arguments))
+        with ssh_setup.selected_inputs(description):
+            setup.verify()
     command = [
         "bootstrap", "--source", str(Path(context.source).expanduser()),
         "--harness", context.name, "--state-root", str(_state_root(setup, name)),
@@ -77,5 +94,7 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
     setup.verify()
     if result != {"status": "ready", "stage": "connected"}:
         raise protocol.SetupError("Selected context has not established authenticated outbound access.")
+    if ssh_arguments is not None:
+        return ssh_setup.run(setup, context, ssh_arguments, description, apply=apply)
     return protocol.Outcome(
         "ready", "Selected context has authenticated outbound Gateway access; SSH/lifecycle not changed.")

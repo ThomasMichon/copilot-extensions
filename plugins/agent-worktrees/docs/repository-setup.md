@@ -161,6 +161,54 @@ retain that outcome rather than retrying without selection. The repository
 script's request/result protocol below remains version one: continuity is
 engine/Fleet-owned orchestration, not a new responsibility hidden in that script.
 
+### Explicit selected SSH setup
+
+Declaration version `3` retains version-two entrypoints and contexts, adding
+one required `ssh_setup` field to each context. `null` retains outbound-only
+behavior. An absolute/home-relative private request reference explicitly selects
+the [Fleet-owned SSH setup contract](../../../fleet-manager/docs/continuity-bootstrap.md#normal-selected-ssh-setup).
+Inspection validates the reference without opening it. Older strict readers
+refuse version three; never retry as version two or drop the selected role.
+
+```json
+{
+  "version": 3,
+  "entrypoints": {"posix": {"runtime": "bash", "script": "setup-manager.sh"}},
+  "contexts": {
+    "harness-a": {
+      "provider": "local-projection-v1",
+      "source": "~/.config/example/continuity.json",
+      "ssh_setup": "~/.config/example/ssh-setup.json"
+    }
+  }
+}
+```
+
+The selected engine first requires the actual Fleet executable's
+`continuity-ssh-setup-v1` and `continuity-machine-reference-v1` capabilities.
+Public scope/configuration and the exact complete prepared Source/profile
+are checked before bootstrap enrollment. The engine consumes its own packaged
+`prepared-application-install` v1 implementation, not a configurable module,
+ambient installer command, editable checkout or the client-only constructor.
+The profile must contain both `gateway-host` and `ssh-client`.
+
+After the original bootstrap owner establishes outbound access, Fleet prepares
+the v3 reference configuration and the existing Source application installer
+owns construction/activation. Actual selected host status, including authenticated
+directory convergence and its current input fence, establishes readiness.
+An unchanged ready participant avoids installation. Unknown launch state,
+changed/foreign configuration, changed request/profile or unavailable support
+refuses without another identity or an automatic credential fallback.
+
+This path needs the selected engine's existing Fleet SDK and complete native
+Source inputs, plus the installer's existing UV prerequisite. It does not acquire
+a provider, prepare a missing source/profile, authorize a grant or migrate
+operator configuration. Generated host configuration is created or reused,
+never overwritten; a different configuration needs its owner's reconciliation.
+The repository script request/result protocol and ordinary client-only setup
+remain unchanged. Source qualification is not release, live enrollment or
+fresh-adopter acceptance.
+
 PowerShell receives `-RequestFile <path>`; Bash receives
 `--request-file <path>`. The selected runtime must already be available.
 Execution uses the selected checkout as cwd with inherited stdio. No command

@@ -7,6 +7,8 @@ from pathlib import Path
 import subprocess
 import sys
 import shutil
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +49,142 @@ def test_context_is_revision_bound_and_source_is_not_opened_on_inspection(source
 def test_context_cannot_invent_provider_or_source_defaults(source: Path, value: dict) -> None:
     with pytest.raises(setup.SetupError):
         context_source(source, value)
+
+
+def test_selected_ssh_setup_is_explicit_revision_bound_and_old_forms_stay_outbound(source, tmp_path):
+    context = {"provider": "local-projection-v1", "source": str(tmp_path / "projection.json")}
+    legacy = context_source(source, context)
+    assert continuity.selected(legacy, "harness-a").ssh_setup is None
+    path = source / setup.DECLARATION
+    declaration = json.loads(path.read_text())
+    declaration["version"] = 3
+    declaration["contexts"]["harness-a"]["ssh_setup"] = str(tmp_path / "ssh-setup.json")
+    path.write_text(json.dumps(declaration))
+    commit(source)
+    current = setup.inspect(source, URL)
+    assert continuity.selected(current, "harness-a").ssh_setup == str(tmp_path / "ssh-setup.json")
+    assert not (tmp_path / "ssh-setup.json").exists()
+    declaration["contexts"]["harness-a"]["ssh_setup"] = "relative"
+    path.write_text(json.dumps(declaration))
+    commit(source)
+    with pytest.raises(setup.SetupError, match="SSH setup"):
+        setup.inspect(source, URL)
+
+
+def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(source, tmp_path, monkeypatch):
+    context_source(source, {
+        "provider": "local-projection-v1", "source": str(tmp_path / "projection.json"),
+    })
+    path = source / setup.DECLARATION
+    declaration = json.loads(path.read_text())
+    declaration["version"] = 3
+    declaration["contexts"]["harness-a"]["ssh_setup"] = str(tmp_path / "absent.json")
+    path.write_text(json.dumps(declaration))
+    commit(source)
+    calls = []
+
+    def runtime(arguments):
+        calls.append(arguments)
+        assert arguments == ["capabilities"]
+        return {"schema": "fleet-manager.capabilities", "version": 1,
+                "capabilities": [continuity.CAPABILITY, "local-projection-v1"]}
+
+    monkeypatch.setattr(continuity, "_invoke", runtime)
+    with pytest.raises(setup.SetupError, match="lacks selected SSH"):
+        continuity.run(setup.inspect(source, URL), "harness-a", apply=True)
+    assert calls == [["capabilities"]]
+
+
+@pytest.mark.parametrize("failure", [None, "profile", "changed-request"])
+def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
+    source, tmp_path, monkeypatch, failure,
+):
+    from agent_worktrees import repository_ssh_setup as ssh_setup
+
+    context_source(source, {
+        "provider": "local-projection-v1", "source": str(tmp_path / "projection.json"),
+    })
+    path = source / setup.DECLARATION
+    declaration = json.loads(path.read_text())
+    declaration["version"] = 3
+    declaration["contexts"]["harness-a"]["ssh_setup"] = str(tmp_path / "request.json")
+    path.write_text(json.dumps(declaration))
+    commit(source)
+    selected_setup = setup.inspect(source, URL)
+    events = []
+    identity = SimpleNamespace(source_commit="a" * 40, source_tree="b" * 40)
+    selection = {
+        "source_commit": identity.source_commit, "source_tree": identity.source_tree,
+        "runtime_version": "0.1.0.profile.abc", "payload_hash": "c" * 64,
+    }
+    description = {
+        "schema": "fleet-manager.continuity-ssh-setup", "version": 1,
+        "snapshot": str(tmp_path / "snapshot"), "root": str(tmp_path / "installation"),
+        "selection": selection, "request_digest": "d" * 64, "host": {},
+    }
+    project = SimpleNamespace(identity=identity, project={"application": "application"}, payload=tmp_path)
+
+    @contextmanager
+    def inputs(*_args):
+        events.append("source-admission")
+        yield project, object()
+
+    def install(*_args, **options):
+        assert options["expected_version"] == selection["runtime_version"]
+        assert options["expected_hash"] == selection["payload_hash"]
+        events.append("install")
+        return {"state": "installed"}
+
+    owner = SimpleNamespace(
+        project_inputs=inputs,
+        native_selection=lambda *_args: {
+            "runtime_version": selection["runtime_version"], "payload_hash": selection["payload_hash"],
+            "extras": ["gateway-host"] if failure == "profile" else ["gateway-host", "ssh-client"],
+        },
+        application_inputs=lambda *_args: {"prepared": True},
+        _member=lambda *_args: tmp_path,
+        _read=lambda *_args: {
+            "construction": {"prepared": True}, "name": "fleet-manager", "module": "fleet_manager",
+            "setup": ["__source-setup"], "start": ["__source-start"],
+        },
+        install_application=install,
+    )
+    monkeypatch.setattr(ssh_setup, "_installer", lambda: owner)
+    monkeypatch.setattr(ssh_setup, "status", lambda *_args: "install" in events)
+    monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
+
+    def runtime(arguments):
+        if arguments == ["capabilities"]:
+            return {"schema": "fleet-manager.capabilities", "version": 1, "capabilities": [
+                continuity.CAPABILITY, "local-projection-v1", ssh_setup.CAPABILITY,
+                "continuity-machine-reference-v1",
+            ]}
+        if arguments[0] == "ssh-setup":
+            events.append("prepare" if "--apply" in arguments else "inspect")
+            return description | ({"request_digest": "changed"} if (
+                failure == "changed-request" and "--apply" in arguments
+            ) else {})
+        assert arguments[0] == "bootstrap"
+        events.append("bootstrap")
+        return {"status": "ready", "stage": "connected"}
+
+    monkeypatch.setattr(continuity, "_invoke", runtime)
+    if failure is not None:
+        with pytest.raises(setup.SetupError):
+            continuity.run(selected_setup, "harness-a", apply=True)
+        assert "install" not in events
+        if failure == "profile":
+            assert "bootstrap" not in events
+    else:
+        result = continuity.run(selected_setup, "harness-a", apply=True)
+        assert result.status == "ready" and "converged" in result.message
+        assert events.index("source-admission") < events.index("bootstrap")
+        assert events.index("bootstrap") < events.index("prepare") < events.index("install")
+        assert events.count("install") == 1
+        events.clear()
+        monkeypatch.setattr(ssh_setup, "status", lambda *_args: True)
+        assert continuity.run(selected_setup, "harness-a", apply=False).status == "ready"
+        assert "prepare" not in events and "install" not in events
 
 
 def test_consumer_selects_its_engine_interpreter_with_bounded_native_custody(monkeypatch) -> None:
