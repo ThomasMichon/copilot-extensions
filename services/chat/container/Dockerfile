@@ -5,10 +5,10 @@ RUN python -I -c "import os,re; assert re.fullmatch(r'[^@]+@sha256:[0-9a-f]{64}'
 COPY wheels/ /tmp/chat-wheels/
 COPY requirements.lock /tmp/chat-requirements.lock
 RUN python -I -m pip install --no-index --find-links=/tmp/chat-wheels --only-binary=:all: --require-hashes --no-cache-dir -r /tmp/chat-requirements.lock \
-    && python -I -c "import agent_chat_service.hosting,single_instance_lease,endpoint_rendezvous" \
+    && python -I -c "import agent_chat_service.hosting,agent_procutil.daemon_instances,single_instance_lease,endpoint_rendezvous" \
     && rm -rf /tmp/chat-wheels /tmp/chat-requirements.lock
 USER 65532:65532
-ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1
+ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1 COPILOT_EXTENSIONS_DAEMON_REGISTRY=/tmp/chat-instances
 WORKDIR /tmp
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=2 \

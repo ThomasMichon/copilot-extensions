@@ -17,6 +17,7 @@ def test_recipe_has_only_offline_wheel_inputs_and_foreground_nonroot_host():
     assert "--no-index --find-links=" in recipe
     assert "--only-binary=:all: --require-hashes" in recipe
     assert "USER 65532:65532" in recipe
+    assert "COPILOT_EXTENSIONS_DAEMON_REGISTRY=/tmp/chat-instances" in recipe
     assert "STOPSIGNAL SIGTERM" in recipe
     assert '"--require-existing-storage"' in recipe and '"--health"' in recipe
     assert '"--run-dir", "/tmp/chat-run"' in recipe
@@ -26,14 +27,14 @@ def test_recipe_has_only_offline_wheel_inputs_and_foreground_nonroot_host():
     assert config["data_dir"] == "/data" and config["token_file"] == "/run/secrets/chat-domain"
 
 
-def test_dedicated_context_contains_only_three_hashed_wheels_and_recipe(tmp_path, monkeypatch):
+def test_dedicated_context_contains_only_service_closure_wheels_and_recipe(tmp_path, monkeypatch):
     built = []
 
     def build(argv, *, cwd, timeout):
         wheels = Path(argv[-1])
         name = {
             "chat": "agent-chat-service", "single-instance-lease": "agent-single-instance-lease",
-            "endpoint-rendezvous": "agent-endpoint-rendezvous",
+            "endpoint-rendezvous": "agent-endpoint-rendezvous", "agent-procutil": "agent-procutil",
         }[cwd.name]
         path = wheels / (name.replace("-", "_") + "-1.0-py3-none-any.whl")
         with zipfile.ZipFile(path, "w") as archive:
@@ -47,8 +48,9 @@ def test_dedicated_context_contains_only_three_hashed_wheels_and_recipe(tmp_path
         "wheels", "requirements.lock", "Dockerfile",
     }
     lock = (context / "requirements.lock").read_text(encoding="utf-8")
-    assert len(lock.splitlines()) == 3
+    assert len(lock.splitlines()) == 4
     assert "agent-chat-service[service]==1.0" in lock
+    assert "agent-procutil==1.0" in lock
     for wheel in built:
         assert "--hash=sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest() in lock
 

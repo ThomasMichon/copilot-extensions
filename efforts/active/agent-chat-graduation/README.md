@@ -493,6 +493,17 @@ shared-multiplex contracts above.
 
 ### 2026-11-06 - Recover image qualification and repair unit admission
 
+- Reconcile the candidate with current Dev without dropping its daemon-instance
+  custody or four additional construction-resource parameters. The offline
+  image now includes the service's process-utility wheel and a private
+  disposable registry for its numeric user. Health and initialization do not
+  admit daemon instances; two new regressions preserve that finite boundary.
+  The combined portfolio contains500 nodes with unchanged qualification limits.
+- Initial rebased Windows acceptance completed in132.39 seconds with420 passes,
+  two declared POSIX skips and two failures: the installed catalog had the
+  current28 resources while its assertion still required26. Retain the failed
+  observation and require both new construction resources explicitly before
+  final qualification. No source/resource assertion or test case is removed.
 - Recovered completed native run40140118467 for candidate
   `529246714bcbf6a401ec0b7203b9bb023ad115c5`. All four Linux/Windows
   Python3.10/3.11 cells passed acceptance and the complete494-node portfolio

@@ -28,6 +28,10 @@ The key must be readable by that UID, with no group/other POSIX access.
 Mount separately provisioned, owner-private retained storage at `/data`.
 Provision its ownership and `0700` mode explicitly; the image does not
 chown, create or adopt a replacement volume on ordinary startup.
+The existing process utility's instance registry uses `/tmp/chat-instances`,
+separate from retained conversations; numeric image users need no host account
+or writable application directory. Health and storage initialization remain
+finite commands and do not register another service instance.
 
 First creation is a distinct explicit operation against an **empty** retained
 directory. With the same image, configuration and retained mount selected by

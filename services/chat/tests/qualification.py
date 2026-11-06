@@ -130,6 +130,7 @@ test_local_endpoint_refusal_is_bounded_without_network_or_fallback
 test_local_endpoint_real_unix_client_uses_the_published_host
 """,
     "test_hosting.py": """
+test_finite_host_modes_do_not_admit_a_daemon_instance
 test_explicit_storage_initialization_and_separate_run_state
 test_retained_storage_refuses_replacement_without_creating_history
 test_authenticated_health_probes_serving_identity_and_drain_without_store_open
@@ -256,6 +257,7 @@ PARAMETER_COUNTS.update({
     "test_distribution.py::test_source_independent_wheel": 2,
     "test_hosting.py::test_absolute_ingress_deadline_retires_slow_input_and_releases_admission": 2,
     "test_hosting.py::test_configuration_refuses_without_echoing_values": 7,
+    "test_hosting.py::test_finite_host_modes_do_not_admit_a_daemon_instance": 2,
     "test_hosting.py::test_held_wait_drain_and_health_keep_independent_requests_responsive": 2,
     "test_hosting.py::test_members_page_controls_are_validated_before_lookup": 6,
     "test_hosting.py::test_request_framing_and_duplicate_auth_refuse_before_dispatch": 5,

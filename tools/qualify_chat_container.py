@@ -59,10 +59,13 @@ def wheel_context(root):
     )
     for relative in (
         "services/chat", "libs/versioned-runtime", "libs/installer-engine",
-        "libs/single-instance-lease", "libs/endpoint-rendezvous",
+        "libs/agent-procutil", "libs/single-instance-lease", "libs/endpoint-rendezvous",
     ):
         shutil.copytree(ROOT / relative, source / relative, ignore=ignore)
-    for relative in ("services/chat", "libs/single-instance-lease", "libs/endpoint-rendezvous"):
+    for relative in (
+        "services/chat", "libs/agent-procutil",
+        "libs/single-instance-lease", "libs/endpoint-rendezvous",
+    ):
         run([
             sys.executable, "-I", "-c",
             "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
@@ -78,7 +81,7 @@ def wheel_context(root):
         lines.append(
             f"{name}{extra}=={version} --hash=sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
         )
-    assert len(lines) == 3
+    assert len(lines) == 4
     (context / "requirements.lock").write_text("\n".join(lines) + "\n", encoding="utf-8")
     shutil.copyfile(ROOT / "services/chat/container/Dockerfile", context / "Dockerfile")
     shutil.rmtree(source)

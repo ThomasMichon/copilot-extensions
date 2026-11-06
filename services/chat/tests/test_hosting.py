@@ -124,6 +124,22 @@ def test_real_singleton_refuses_second_host_before_store_open(tmp_path):
         assert rpc(host, {"op": "members", "channel": "room"})[0] == 404
 
 
+@pytest.mark.parametrize("mode", ["health", "initialize-storage"])
+def test_finite_host_modes_do_not_admit_a_daemon_instance(tmp_path, monkeypatch, mode):
+    from agent_procutil import daemon_instances
+
+    config = configuration(tmp_path)
+    path = tmp_path / "host.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(
+        daemon_instances, "admit_daemon_instance",
+        lambda *_a, **_k: pytest.fail("finite command admitted a daemon"),
+    )
+    monkeypatch.setattr(hosting, "initialize_storage", lambda _config: {"initialized": True})
+    monkeypatch.setattr(hosting, "probe_health", lambda _config, _run: {"healthy": True})
+    assert hosting.main(["--config", str(path), "--" + mode]) == 0
+
+
 def test_explicit_storage_initialization_and_separate_run_state(tmp_path):
     config = configuration(tmp_path)
     data = Path(config["data_dir"])
