@@ -211,7 +211,7 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
-    "test_hosting.py::test_retained_storage_refuses_replacement_without_creating_history": 6,
+    "test_hosting.py::test_retained_storage_refuses_replacement_without_creating_history": 10,
     "test_setup.py::test_same_bytes_foreign_replacement_is_never_withdrawn": 3,
     "test_setup.py::test_failure_retains_old_selection_and_explicitly_settles_recovery": 2,
     "test_setup.py::test_persisted_context_must_match_the_journaled_baseline": 3,

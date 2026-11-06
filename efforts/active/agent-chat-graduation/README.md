@@ -493,6 +493,20 @@ shared-multiplex contracts above.
 
 ### 2026-11-06 - Recover image qualification and repair unit admission
 
+- Retained-only startup now validates all current tables and required columns
+  before schema bootstrap can write. Missing event, membership or collaboration
+  tables and a renamed stable-request column refuse without changing database
+  bytes; ordinary local creation retains its prior additive behavior.
+  Every disposable container receives a unique name and cleanup custody before
+  launch, including root-volume preparation and refusal/initialization probes.
+  Timeout controls require forced removal of the exact attempted containers.
+- Native run42167211692 passed both Python3.11 platforms but its Python3.10
+  cells failed before preparation: the runner's cache helper needs `tomllib`.
+  Bootstrap the runner with Python3.11 while `UV_PYTHON` still selects the
+  declared3.10/3.11 test interpreter. Do not remove the3.10 cells or change
+  test budgets. Separate focused packets passed13 retained-schema/finite/
+  membership controls and9 image-cleanup/workflow controls. The combined
+  portfolio now contains504 nodes; refreshed native qualification is pending.
 - Fresh image run42166902613 reached the image step after acceptance but
   refused its obsolete repository-local tooling path. Resolve the prepared
   interpreter through the standalone runner's existing `default_python`

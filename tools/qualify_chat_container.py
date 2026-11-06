@@ -99,6 +99,12 @@ def qualify(base):
     identity = "chat-qualification-" + uuid.uuid4().hex
     image, volume, container = identity + ":candidate", identity + "-data", identity + "-host"
     owned = []
+
+    def container_run(arguments, *, name=None, **kwargs):
+        name = name or identity + "-" + uuid.uuid4().hex[:8]
+        owned.append(("container", name))
+        return run([docker, "run", "--name", name, *arguments], **kwargs)
+
     with tempfile.TemporaryDirectory(prefix="chat-container-qualification-") as temporary:
         root = Path(temporary)
         config, secret = root / "config", root / "secret"
@@ -119,8 +125,8 @@ def qualify(base):
             assert built["Config"]["User"] == "65532:65532"
             assert not built["Config"].get("ExposedPorts")
             assert not built["Config"].get("Volumes")
-            run([docker, "volume", "create", volume])
             owned.append(("volume", volume))
+            run([docker, "volume", "create", volume])
             mounts = [
                 "--mount", f"type=volume,src={volume},dst=/data",
                 "--mount", f"type=bind,src={config},dst=/run/config,readonly",
@@ -133,22 +139,21 @@ def qualify(base):
                 "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m,mode=1777",
             ]
             # Only the explicit fixture-volume preparation runs as root.
-            run([docker, "run", "--rm", "--network=none", "--user=0:0", "--entrypoint=python",
+            container_run(["--rm", "--network=none", "--user=0:0", "--entrypoint=python",
                  "--mount", f"type=volume,src={volume},dst=/data",
                  "--mount", f"type=bind,src={secret},dst=/fixture-secret", image, "-I", "-c",
                  "import os; os.chown('/data',65532,65532); os.chmod('/data',0o700); "
                  "os.chown('/fixture-secret/chat-domain',65532,65532)"])
-            missing = run([docker, "run", "--rm", *limits, *mounts, image],
-                          check=False, timeout=15)
+            missing = container_run(["--rm", *limits, *mounts, image],
+                                    check=False, timeout=15)
             assert missing.returncode == 1 and '"error"' in missing.stderr
-            run([docker, "run", "--rm", *limits, *mounts, image, *CONFIG,
-                 "--initialize-storage"])
-            repeated = run([docker, "run", "--rm", *limits, *mounts, image, *CONFIG,
-                            "--initialize-storage"], check=False)
+            container_run(["--rm", *limits, *mounts, image, *CONFIG, "--initialize-storage"])
+            repeated = container_run(
+                ["--rm", *limits, *mounts, image, *CONFIG, "--initialize-storage"], check=False,
+            )
             assert repeated.returncode == 1 and "host_storage_not_empty" in repeated.stderr
-            run([docker, "run", "--detach", "--name", container, "--stop-timeout=10",
-                 *limits, *mounts, image])
-            owned.append(("container", container))
+            container_run(["--detach", "--stop-timeout=10", *limits, *mounts, image],
+                          name=container)
 
             def inspect():
                 return json.loads(run([docker, "inspect", container]).stdout)[0]
@@ -184,8 +189,8 @@ def qualify(base):
             ])
             event = posted[2]["event"]
             assert posted[3]["messages"] == [event]
-            competing = run([docker, "run", "--rm", *limits, *mounts, image],
-                            check=False, timeout=15)
+            competing = container_run(["--rm", *limits, *mounts, image],
+                                      check=False, timeout=15)
             assert competing.returncode == 1 and "host_already_running" in competing.stderr
             shutdown = time.monotonic()
             run([docker, "stop", container], timeout=15)

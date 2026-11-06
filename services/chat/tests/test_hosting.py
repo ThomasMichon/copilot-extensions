@@ -165,7 +165,10 @@ def test_explicit_storage_initialization_and_separate_run_state(tmp_path):
     assert (data / "chat.sqlite3").is_file()
 
 
-@pytest.mark.parametrize("damage", ["missing", "empty", "identity", "schema", "epoch", "redirect"])
+@pytest.mark.parametrize("damage", [
+    "missing", "empty", "identity", "schema", "epoch", "redirect",
+    "events", "memberships", "collaborations", "event-column",
+])
 def test_retained_storage_refuses_replacement_without_creating_history(
     tmp_path, monkeypatch, damage,
 ):
@@ -180,9 +183,14 @@ def test_retained_storage_refuses_replacement_without_creating_history(
         elif damage != "redirect":
             import sqlite3
             with sqlite3.connect(database) as connection:
-                connection.execute("UPDATE settings SET value=? WHERE key=?",
-                                   ("foreign", {"identity": "installation_id", "schema": "schema",
-                                                "epoch": "log_epoch"}[damage]))
+                if damage in {"events", "memberships", "collaborations"}:
+                    connection.execute(f"DROP TABLE {damage}")
+                elif damage == "event-column":
+                    connection.execute("ALTER TABLE events RENAME COLUMN request_id TO missing_id")
+                else:
+                    connection.execute("UPDATE settings SET value=? WHERE key=?",
+                                       ("foreign", {"identity": "installation_id", "schema": "schema",
+                                                    "epoch": "log_epoch"}[damage]))
         else:
             from types import SimpleNamespace
             original = Path.lstat

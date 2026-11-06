@@ -2,7 +2,10 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
+from types import SimpleNamespace
 import zipfile
 
 import pytest
@@ -34,6 +37,33 @@ def test_image_lane_resolves_the_existing_runner_managed_interpreter():
     assert 'runpy.run_path("tools/run-standalone-tests.py")' in workflow
     assert 'runner["default_python"]("services/chat")' in workflow
     assert ".test-venvs/linux/services/chat/bin/python" not in workflow
+
+
+@pytest.mark.parametrize("timeout_probe", [0, 1], ids=["volume-preparation", "missing-store"])
+def test_timed_out_container_probe_is_named_and_force_removed(monkeypatch, timeout_probe):
+    probes, removed = [], []
+    monkeypatch.setattr(image, "os", SimpleNamespace(name="posix", chmod=os.chmod))
+    monkeypatch.setattr(image.sys, "platform", "linux")
+    monkeypatch.setattr(image.shutil, "which", lambda _name: "docker")
+    monkeypatch.setattr(image, "wheel_context", lambda root: root)
+
+    def docker(argv, **kwargs):
+        if argv[1:3] == ["image", "inspect"]:
+            return SimpleNamespace(stdout=json.dumps([{"Config": {"User": "65532:65532"}}]))
+        if argv[1] == "run":
+            name = argv[argv.index("--name") + 1]
+            probes.append(name)
+            if len(probes) - 1 == timeout_probe:
+                raise subprocess.TimeoutExpired(argv, 15)
+        if argv[1:3] == ["rm", "--force"]:
+            removed.append(argv[3])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(image, "run", docker)
+    with pytest.raises(subprocess.TimeoutExpired):
+        image.qualify("example@sha256:" + "a" * 64)
+    assert len(probes) == len(set(probes)) == timeout_probe + 1
+    assert set(probes) <= set(removed)
 
 
 def test_dedicated_context_contains_only_service_closure_wheels_and_recipe(tmp_path, monkeypatch):

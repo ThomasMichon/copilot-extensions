@@ -44,8 +44,11 @@ the deployment owner, override only the image command with:
 This initializes storage without starting a listener or generating a credential.
 It refuses a live local writer, prior history, unknown content or a partial
 initialization; it is not a repair, purge or adoption command. Ordinary startup
-requires existing database identity, schema and epoch and never creates a
-missing database. A configured installation ID must survive replacement.
+requires existing database identity, schema and epoch, including every current
+table and required column, and never creates missing history. Incomplete
+restores and schema upgrades require their owner's explicit recovery or
+migration; retained-only startup is not an additive-schema upgrade path.
+A configured installation ID must survive replacement.
 The canonical writer lease remains on the retained volume; `/tmp/chat-run`
 contains only disposable endpoint/socket state. Do not move the lease to
 ephemeral storage. Local locking is not cross-host fencing.

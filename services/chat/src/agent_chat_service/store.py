@@ -293,8 +293,28 @@ class ChatStore:
                     settings.get("installation_id") != installation_id
                     or settings.get("schema") != "1"
                     or not re.fullmatch(r"[a-f0-9]{32}", settings.get("log_epoch", ""))
+                    or not {"event_count", "message_bytes"} <= settings.keys()
                 ):
                     raise ChatError("conflict", "Retained store identity or schema mismatch.")
+                required = {
+                    "settings": {"key", "value"},
+                    "channels": {"name"},
+                    "actors": {"codename", "metadata"},
+                    "memberships": {"channel", "codename", "active", "joined_at", "cursor"},
+                    "events": {"id", "channel", "codename", "timestamp", "author",
+                               "text", "request_id", "text_bytes"},
+                    "collaborations": {"event_id", "kind", "metadata", "thread_root", "reply_to",
+                                       "supersedes", "channel", "reply_author", "author_codename"},
+                    "collaboration_recipients": {"event_id", "codename", "channel", "kind"},
+                }
+                tables = {row[0] for row in self._db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )}
+                if not required.keys() <= tables or any(
+                    not columns <= {row[1] for row in self._db.execute(f"PRAGMA table_info({table})")}
+                    for table, columns in required.items()
+                ):
+                    raise ChatError("conflict", "Retained store schema is incomplete.")
             self._db.execute("PRAGMA foreign_keys=ON")
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=FULL")
