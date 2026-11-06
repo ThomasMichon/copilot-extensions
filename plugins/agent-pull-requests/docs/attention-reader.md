@@ -31,6 +31,13 @@ interests/consumers are independent. An attempted operation with no capture has
 no recoverable interest binding: its scoped projections conservatively report
 `feedback-interest-unbound` rather than inventing which consumer handled it.
 Missing original provenance reports `feedback-provenance-unavailable`.
+Cursor order alone cannot prove another operation's readback. Every attempted
+capture needs its own original operation/generation/receipt-bound handled
+provenance; otherwise it is `feedback-operation-readback-unavailable`.
+The current layout retains only the current handled provenance, not a historical
+per-operation readback ledger. A newer operation replacing that proof can leave
+an older capture unavailable too; this reader reports that limitation rather
+than inventing historical completion or expanding the disk layout silently.
 
 This conservative reader does not prove which differences are independent
 dialogue or unsupported self-effects. It does not silently cover them, resend

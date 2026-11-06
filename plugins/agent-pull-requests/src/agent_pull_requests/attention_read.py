@@ -61,6 +61,17 @@ def _feedback_reason(row: dict, index: tuple[dict, dict, set[PRKey]]) -> str | N
             return "feedback-reconciliation-pending"
         if handled is None or handled["cursor"]["sequence"] < capture["cursor"]["sequence"]:
             return "feedback-tracking-unavailable"
+        proof = row["provenance"]
+        if (
+            proof["operation_id"] != capture["operation_id"]
+            or proof["generation_id"] != capture["generation_id"]
+            or handled["candidate"] != capture["candidate"]
+            or proof["receipt_refs"] != [
+                {"action_id": value["id"], "attempt_id": value["attempt_id"]}
+                for value in actions
+            ]
+        ):
+            return "feedback-operation-readback-unavailable"
         if (
             facts["candidate"] == capture["candidate"]
             and handled["cursor"]["sequence"] < facts["cursor"]["sequence"]

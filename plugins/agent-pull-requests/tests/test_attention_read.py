@@ -142,6 +142,46 @@ def test_proven_original_version_echo_reads_waiting_without_rewriting_capture(
     assert value[0].path.read_bytes() == before
 
 
+@pytest.mark.parametrize("kind", ["comment", "verdict"])
+def test_another_operations_echo_cursor_cannot_prove_this_operations_readback(
+    feedback_environment: tuple, reading: tuple, kind: str,
+) -> None:
+    value = feedback_environment
+    reader = reading[0]
+    backend = value[4]
+    backend.versioned_reply = True
+    backend.pr["reviewers"] = copy.deepcopy(value[2]["sections"]["reviewers"]["data"])
+    assert run(value)["feedback"]["status"] == "handled"
+    newer = observe(value, change="echo")
+    assert run(value, current=lambda: (newer, backend.positions[newer["id"]]))[
+        "feedback"
+    ]["echo"]["status"] == "covered"
+    first_proof = json.loads(value[0].path.read_bytes())["attention"]["records"][0]["provenance"]
+    selected = value[1]
+    selected.update(operation_id="second-operation", generation_id=newer["id"])
+    selected["actions"] = [
+        {"id": "second-action", "kind": "verdict", "verdict": "APPROVED"}
+        if kind == "verdict" else
+        {"id": "second-action", "kind": "comment", "body": "Second selected feedback"}
+    ]
+    attachment = copy.deepcopy(value[3])
+    attachment["generation_id"] = newer["id"]
+    backend.emit_vote_thread = True
+    second = (value[0], selected, newer, attachment, *value[4:])
+    result = run(second)
+    assert all(action["state"] == "confirmed" for action in result["actions"])
+    if kind == "verdict":
+        assert result["feedback"]["reason"] == "exact_vote_readback_unavailable"
+    document = json.loads(value[0].path.read_bytes())
+    assert document["attention"]["records"][0]["provenance"] == first_proof
+    assert document["feedback_captures"]["records"][1]["cursor"] == {"epoch": 1, "sequence": 2}
+    before = value[0].path.read_bytes()
+    item = read(reader, value[6])["items"][0]
+    assert item["status"] == "unavailable"
+    assert item["reasons"] == ("feedback-operation-readback-unavailable",)
+    assert value[0].path.read_bytes() == before
+
+
 def test_stale_observation_and_unknown_selection_are_not_actionable(
     feedback_environment: tuple, reading: tuple,
 ) -> None:
@@ -307,6 +347,26 @@ def test_default_cli_is_explicitly_unavailable_and_unknown_flags_refuse(environm
     with pytest.raises(SystemExit) as error:
         cli.main(["attention", "read", "--request", "-", "--consumer", "other"])
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize("operation", ["capabilities", "read"])
+def test_actual_gateway_authority_refusal_is_cli_exit_four(
+    feedback_environment: tuple, reading: tuple, monkeypatch, capsys, operation: str,
+) -> None:
+    reader, _, client, caller, _ = reading
+    before = reader.store.path.read_bytes()
+    original = caller.request
+    def refused() -> None:
+        raise PermissionError("synthetic current authority refused")
+    async def request(method, target, **kwargs):
+        if target.endswith("/" + operation):
+            reader.workspace.checkpoint = refused
+        return await original(method, target, **kwargs)
+    monkeypatch.setattr(caller, "request", request)
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"limit":16,"after":null}')))
+    assert cli.main(["attention", "read", "--request", "-"], attention_host=client) == 4
+    assert json.loads(capsys.readouterr().out)["error"] == "attention_owner_refused"
+    assert reader.store.path.read_bytes() == before
 
 
 def test_service_writer_qualifies_v5_reader_without_claiming_v3_conversation_support(

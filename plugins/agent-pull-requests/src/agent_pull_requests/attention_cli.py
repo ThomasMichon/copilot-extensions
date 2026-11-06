@@ -53,6 +53,9 @@ def run(args: argparse.Namespace, host: AttentionClient | None = None) -> int:
         print(json.dumps(asyncio.run(invoke(payload)), sort_keys=True, allow_nan=False))
         return 0
     except ReplayClientError as error:
+        if error.http_status == 403:
+            print(json.dumps({"error": "attention_owner_refused", "effects": "none"}))
+            return 4
         print(json.dumps({"error": error.code, "effects": "none"}))
         return 3
     except PermissionError:
