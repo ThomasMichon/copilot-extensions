@@ -190,6 +190,7 @@
     },
     "worktree_record_delegation": 1,
     "retained_acquisition_worktree_writer": 1,
+    "retained_acquisition_writer_inspection": 1,
     "owner_membership": {
       "capability": 1,
       "snapshot": {

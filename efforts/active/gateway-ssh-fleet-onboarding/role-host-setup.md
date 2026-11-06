@@ -1,6 +1,8 @@
 # Ordinary selected-role Gateway SSH setup
 
-Parent: [Gateway and SSH Fleet Onboarding](README.md), #6681.
+Parent: [Gateway and SSH Fleet Onboarding](README.md), received by OPEN #6030
+through [the direct cohort plan](../linux-role-fleet/cohort-receiving.md).
+Historical #6681 is tracking-only retired, not completed implementation.
 This is an **agent-recommended source proposal**, not an executable interface,
 source allocation, installation or deployment grant.
 
@@ -30,16 +32,29 @@ user configuration, credentials, sessions and accepted work survive.
 
 Source inspection distinguishes `plan_role_deployment` and `verify_role_plan`
 from installation; their configured projection supplies no activation grant.
-`construct_client_release` and `activate_client_runtime` operate on the client
-closure, not arbitrary hosted roles. `serve --role gateway|ssh-client`,
-`SSHDirectoryClient.watch`, `ssh_machine.run` and the SSH service provide
-foreground execution/cancellation behavior, not an installed host lifecycle.
-Their source/API presence is not an admitted role artifact or release.
+`construct_client_release` and `activate_client_runtime` still operate on the
+client closure, not arbitrary hosted roles. The selected Source application
+path now supplies bounded installed hosting: #10535 delivers the Gateway
+host, and #10954 embeds `ssh_machine.run` and its canonical writers in that
+same lifetime. Its host configuration v2 requires explicitly selected
+`gateway-host` and `ssh-client` extras. Ordinary client installation stays
+inert; first complete authenticated local convergence gates SSH readiness.
+Neither source delivery nor the installed synthetic fixture is a containing
+release, provider setup, real SSH route or adopter receipt.
 
-The missing composition must extend the existing role construction/lifecycle
-owner. Do not copy client selectors into a second host installer, turn a
-plan into effects, add a per-session watcher, or invent an available generic
-constructor that the implementation does not supply.
+The remaining setup gap is concrete at the #10954 merge: normal
+`repository_continuity.run` invokes the selected Fleet SDK and stops after
+authenticated outbound access. It does not choose an SSH participant or
+construct its configuration. The enrollment owner's private `machine.json`
+retains a JWK and original operation, whereas the delivered SSH configuration
+v2 consumes an externally provisioned private P-256 PEM reference. That
+private record is not an advertised credential interface. Copying its key
+into another PEM or teaching SSH to parse it would bypass its owner.
+
+Reuse `install_source.project_inputs` / `install_application` and the selected
+complete application profile through their existing owner; do not extend the
+client-only constructor into a competing host installer. No plan, directory
+DTO, per-session watcher or hand-authored test configuration closes this gap.
 
 ## Inputs and ownership contract
 
@@ -63,6 +78,76 @@ Before effects, the owning flow must resolve:
 These are required semantic inputs, not new DTO/schema names or a proposed
 second authority store. Secrets remain with the credential owner and do not
 enter argv, logs, receipts, desired state or the role artifact.
+
+## Next bounded seam: provider identity and selected setup
+
+This is a **proposal**, not implemented syntax, a source takeover or permission
+to read an adopter's credentials. It closes the existing continuity-backed
+bootstrap and thin-hosting intent without creating another issuer or installer.
+The source reservation under #6030 is contract-only until reviewed.
+
+The enrollment/credential owner must expose an explicit supported local
+reference/signing capability for its retained identity. The SSH caller and
+setup adapter consume that capability through fixed code, not an import path,
+command, URL executor or private-state parser supplied by configuration.
+The owner validates its current source/context and original key/operation
+binding; the requested Gateway origin, machine, principal, audience and service
+resource must match the selected admitted scope. Successful local decoding
+does not prove current remote admission. No raw JWK, PEM, proof or grant is
+returned in setup output, copied into role configuration or exported merely
+to fit the existing PEM caller.
+
+Keep v1 token/proof and v2 externally provisioned PEM configurations unchanged.
+An unsupported provider/caller reports the missing capability before identity
+or lifecycle effects; it never falls back to another credential mode. Expiry of
+the bootstrap grant alone must not rotate or reenroll an otherwise current
+machine identity. Actual withdrawal, binding expiry, changed source or
+unsettled original-operation state retain their existing refusal/reconciliation
+rules. Neither membership nor a configured role widens enrollment grants.
+
+The normal setup handoff must explicitly select participation as well as the
+trusted continuity context. Existing declarations without that selection retain
+outbound-only behavior. Resolve the provider-owned credential reference and
+owner-controlled SSH policy, target-login identity and writer scopes, then
+prepare the exact host configuration before selecting a candidate. Missing
+Vault/provider access is an honest pending or refused stage, not permission to
+materialize a key, change accounts or enable a role implicitly.
+
+Construction and activation still belong to the selected Source/profile and
+host owners. Setup must select the complete matching `gateway-host` /
+`ssh-client` closure, compatible configuration and installation identity,
+then invoke that existing lifecycle. Staging, enrollment and authenticated
+outbound connection are separate outcomes from installed host convergence.
+Failure before activation preserves the healthy selection and user inputs;
+an unknown install or enrollment result is inspected through its original
+owner rather than replayed under a new request.
+
+The first executable follow-through should join the owner-provided identity
+capability to the existing SSH caller and normal setup handoff, not publish
+another descriptor-only success. Shared credential/caller, enrollment,
+construction and release seams must be reconciled in the reviewed change;
+their retained worktrees and live authorities do not transfer. Provider login,
+new grants, live installation and predecessor retirement remain separately
+authorized effects.
+
+### Literal consumer tests before adoption
+
+- Start with the actual synthetic delegated enrollment and its retained original
+  key/operation. Through the normal installed Manager/engine setup process,
+  consume the declared provider capability and reach the real TLS SSH directory
+  service and existing local writers. A fake PEM copied from the state file or
+  an injected successful setup callback cannot satisfy this test.
+- Prove repeat and restart keep the same key and original enrollment, including
+  a still-current binding after bootstrap-grant expiry. Wrong context, source,
+  machine, origin, principal, audience, resource, changed key, revoked binding,
+  malformed private state and unavailable capability must refuse without
+  another identity, credential export or host selection.
+- Exercise the real complete Source application constructor, failed candidate
+  preservation, first converged readiness, repeat, selected update and exact
+  stop. Keep the existing thin-client and outbound-only setup negative cases.
+- Run source-denying noneditable installed Windows/Linux consumers with finite
+  owned cleanup. Name native ARM64, feed, actual provider and fresh-adopter
+  lanes separately; unavailable authority or resources are not synthetic passes.
 
 ## Lifecycle behavior
 
