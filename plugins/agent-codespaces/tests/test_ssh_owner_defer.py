@@ -1,13 +1,14 @@
 """Integration tests for the one-off ``agent-codespaces ssh`` Connection Owner
 defer (dotfiles#1345, slice 2c).
 
-Drives ``_cmd_ssh`` with the external SSH / provisioning seams mocked so the
-hold/skip/release wiring is exercised end-to-end:
+Drives the SSH handler and CLI parser with external SSH / provisioning seams
+mocked so the hold/skip/release and admission wiring is exercised:
 
 - when the Owner is live + enabled, ``_cmd_ssh`` does NOT stand up its own relay
   and places a hold that is released on cleanup; and
 - a busy target (``TargetBusyError`` before the run) does NOT leak a hold --
-  the hold is placed only *after* the target lock is acquired.
+  the hold is placed only *after* the target lock is acquired; and
+- failed relay admission stops downstream work while preserving cleanup.
 
 The connect loop returns a fake connection and the cross-harness fence is forced
 False so ``_run`` returns right after the relay decision, exercising the cleanup
@@ -55,6 +56,7 @@ class _FakeLock:
 
     def __init__(self, target, op=None):
         self.target = target
+        self.released = False
 
     def acquire(self, force=False):
         if _FakeLock.busy:
@@ -64,7 +66,7 @@ class _FakeLock:
             )
 
     def release(self):
-        pass
+        self.released = True
 
 
 def _args(name="cs-test"):
@@ -87,6 +89,10 @@ def harness(monkeypatch, store):
 
     import agent_codespaces.lifecycle as lifecycle
     monkeypatch.setattr(lifecycle, "account_for_codespace", lambda name: None)
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.credential_account_for_codespace",
+        lambda name: None,
+    )
 
     monkeypatch.setattr(
         m,
@@ -113,11 +119,15 @@ def harness(monkeypatch, store):
     import agent_codespaces.relay_token as relay_token
     monkeypatch.setattr(relay_token, "token_for", lambda name, **kw: "tok")
 
-    monkeypatch.setattr(ssh_manager, "ConnectionManager", _FakeManager)
-    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+    manager = _FakeManager()
+    lock = _FakeLock("cs-test")
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", lambda: manager)
+    monkeypatch.setattr(ssh_manager, "TargetLock", lambda *a, **k: lock)
 
     # Force the live-defer decision without a real daemon; keep hold/release real.
-    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: True)
+    monkeypatch.setattr(
+        owner, "should_defer_to_owner", lambda *a, **k: not k.get("no_relay", False)
+    )
 
     async def _served(name, **k):
         return True
@@ -138,7 +148,7 @@ def harness(monkeypatch, store):
     monkeypatch.setattr(m, "_check_cross_harness_fence", _fence)
 
     _FakeLock.busy = False
-    return types.SimpleNamespace(calls=calls)
+    return types.SimpleNamespace(calls=calls, manager=manager, lock=lock)
 
 
 def test_ssh_defers_and_releases_hold(monkeypatch, harness):
@@ -168,3 +178,59 @@ def test_ssh_busy_target_does_not_leak_hold(harness):
     # nothing and never stands up a relay.
     assert owner.list_holds() == []
     assert harness.calls["relay"] == 0
+
+
+@pytest.mark.parametrize("defer_to_owner", [True, False], ids=["owner", "direct"])
+@pytest.mark.parametrize("entrypoint", ["command", "cli"])
+def test_ssh_refuses_failed_relay_before_downstream_work(
+    monkeypatch, harness, capsys, defer_to_owner, entrypoint,
+):
+    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: defer_to_owner)
+
+    async def unavailable(*a, **k):
+        return False
+
+    async def downstream(*a, **k):
+        pytest.fail("failed relay admission reached downstream work")
+
+    monkeypatch.setattr(owner, "await_owner_relay", unavailable)
+    monkeypatch.setattr(m, "_check_cross_harness_fence", downstream)
+
+    if entrypoint == "cli":
+        rc = m.main(["ssh", "cs-test", "--remote-cmd", "true"])
+    else:
+        rc = m._cmd_ssh(_args())
+
+    assert rc == 1
+    assert "credential relay" in capsys.readouterr().err.lower()
+    assert harness.manager.disconnected == ["cs-test"]
+    assert harness.lock.released
+    assert owner.list_holds() == []
+    assert harness.calls["relay"] == (0 if defer_to_owner else 1)
+
+
+@pytest.mark.parametrize("mode", ["owner", "direct", "no-relay"])
+def test_ssh_preserves_successful_relay_and_explicit_no_relay(
+    monkeypatch, harness, mode,
+):
+    calls = []
+
+    class Relay:
+        async def stop(self):
+            calls.append("stop")
+
+    async def ready(*a, **k):
+        calls.append("start")
+        return Relay()
+
+    monkeypatch.setattr(
+        owner, "should_defer_to_owner", lambda *a, **k: mode == "owner"
+    )
+    monkeypatch.setattr(m, "_start_supervised_relay", ready)
+    args = _args()
+    args.no_relay = mode == "no-relay"
+
+    assert m._cmd_ssh(args) == m._BUSY_EXIT
+    assert calls == (["start", "stop"] if mode == "direct" else [])
+    assert harness.lock.released
+    assert owner.list_holds() == []
