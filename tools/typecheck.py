@@ -619,7 +619,7 @@ def check_project(
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
                 "--cache-dir", (
                     os.devnull if project.import_roots or guard
-                    else str(path / "mypy-cache" / project.name / platform / version)
+                    else str(path / "mypy-cache" / platform / version)
                 ),
             ]
             if strict or project.level == "strict":
