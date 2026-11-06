@@ -56,22 +56,29 @@ efforts/
 ```
 
 - **Slug:** kebab-case, descriptive.
-- **Decompose liberally.** The `README.md` is loaded whole every time an agent
-  resumes the effort, so keep it a navigable map. When a phase or slice grows a
-  large self-contained body (detailed sub-plan, deep design notes, its own
-  validation matrix), extract it to a sibling sub-doc
-  (`<effort-folder>/<phase>.md`) and
-  leave the Plan a checklist item with a one-line summary and a link. The agent
-  reads a sub-doc only when working that phase — upfront context stays small, at
-  the cost of an extra read on demand. Link out *and* back; no orphan sub-docs.
-- **Split a large journal by date.** The Journal is append-only, so it is the
-  one section that grows without bound. When it (as an inline README section or
-  an extracted `journal.md`) approaches the ~800-line soft cap, break it into
-  dated files: `<effort-folder>/journal/<YYYY>/MM.DD <title>.md`, one per day
-  (or per notable entry), mirroring the archive's date scheme. Leave
-  `journal.md` (or the README Journal section) as a **thin chronological index**
-  that links each dated file newest-first — so a resuming agent skims the index
-  and opens only the day it needs. Link out *and* back; no orphan entries.
+- **Keep the README a lean map (budget ~40 KB).** Agents re-enter the
+  `README.md` after every new context window, resumption and merge, so its size
+  is paid again each time. Keep each Plan item to one line (state, summary, link
+  to detail) and journal PR-by-PR history rather than growing a checkbox. When a
+  phase or slice grows a large self-contained body (detailed sub-plan, deep
+  design notes, its own validation matrix), extract it to a sibling sub-doc
+  (`<effort-folder>/<phase>.md`) read only when working that phase. Link out
+  *and* back; no orphan sub-docs.
+- **Journal in dated files early.** The Journal is append-only, so it is the
+  one section that grows without bound. Once the inline Journal passes ~100
+  lines, move entries to dated files `<effort-folder>/journal/<YYYY>/MM.DD
+  <title>.md`, one per day (or per notable entry), mirroring the archive's date
+  scheme. Leave the README Journal section (or `journal.md`) as a **thin
+  chronological index** linking each dated file newest-first. Link out *and*
+  back; no orphan entries.
+- **Read back by digest, not whole.** On resumption, after a merge or in a new
+  context window, run the planning skill's read-only
+  `scripts/effort_digest.py <effort-folder> [--since <last-read rev>]`. It lists
+  the outline with line ranges and sizes, open Plan and Validation Plan items,
+  the latest journal entries and, with `--since`, only the sections and files
+  that changed. Read just the ranges you need. The prose remains the authority;
+  the digest only says where to look. Plans must not prescribe whole-tree
+  re-reads ("read the entire parent effort"); name the sections a step needs.
 - **Grouping (a binding — set by the addendum):**
   - *flat* — `efforts/active/<slug>/` (default; for a repo that is itself the
     primary unit of work).
