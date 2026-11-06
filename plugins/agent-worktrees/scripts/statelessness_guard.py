@@ -43,6 +43,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+from tool_call_forms import write_targets
 
 # --- Personal-state paths that must never be written into a stateless harness -
 FORBIDDEN_PREFIXES = ("efforts/", "logs/", "weekly-updates/", "icm/")
@@ -209,12 +210,12 @@ def _resolve(p: str, cwd: str) -> str:
     return p if os.path.isabs(p) else os.path.join(cwd or os.getcwd(), p)
 
 
-def active_break_glass(repo_name: str, home: Path) -> bool:
+def active_break_glass(repo_name: str, home: Path, *, registry_root: Path | None = None) -> bool:
     """Honor a persisted ``allow-edits`` grant for the harness repo (epoch-ms)."""
     if not repo_name:
         return False
     try:
-        data = json.loads((home / ".agent-worktrees" / "allow-edits.json").read_text("utf-8"))
+        data = json.loads(((registry_root or home / ".agent-worktrees") / "allow-edits.json").read_text("utf-8"))
         g = (data.get("grants") or {}).get(repo_name)
         import time
         return bool(g) and float(g.get("expires_at_ms", 0)) > time.time() * 1000
@@ -253,20 +254,20 @@ def decide(payload: dict, *, env=None, home=None) -> dict | None:
     if root is None or not requires_external_state_root(root):
         return None  # not a stateless harness => not our business
 
+    override = env.get("AGENT_HOME", "").strip()
+    legacy_home = Path(os.path.abspath(override)) if override else home
     registry_root = resolve_registry_root(
-        legacy_root=home / ".agent-worktrees",
-        environment=env,
+        legacy_root=legacy_home / ".agent-worktrees", environment=env,
     )
     harness = project_name(root, home, registry_root).strip()
-    if active_break_glass(harness, home):
+    if active_break_glass(harness, home, registry_root=registry_root):
         return None
 
     args = _as_args(payload.get("toolArgs") if "toolArgs" in payload
                     else payload.get("tool_input"))
 
     if tool in WRITE_TOOLS:
-        raw = _pick(args, PATH_ARG_KEYS)
-        if raw:
+        for raw in write_targets(tool, args):
             abs_path = _resolve(raw, cwd)
             if path_is_personal_state_in_harness(abs_path, root):
                 return {"permissionDecision": "deny",

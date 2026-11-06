@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize native batched and freeform writes for scoped repository guidance and reuse session admission facts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

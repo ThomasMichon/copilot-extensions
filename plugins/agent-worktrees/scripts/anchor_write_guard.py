@@ -77,9 +77,12 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+from tool_call_forms import write_targets
 from anchor_shell_parser import (
     GIT_INTRINSIC_NONWRITE_COMMANDS as _GIT_READ_BUILTINS,
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
+    git_tokens as _git_tokens,
+    literal_write_targets as _literal_write_targets,
     shell_command_substitutions as _shell_command_substitutions,
     shell_segments as _shell_segments,
 )
@@ -199,77 +202,6 @@ def _unquote_shell_token(token: str) -> str:
     if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
         return token[1:-1]
     return token
-
-
-def _git_tokens(seg: str, tool: str) -> list[str]:
-    posix_escapes = tool.lower() in {"bash", "sh"}
-    powershell_escapes = tool.lower() in {"powershell", "pwsh"}
-    tokens: list[str] = []
-    current: list[str] = []
-    token_started = False
-    quote = None
-    index = 0
-    while index < len(seg):
-        char = seg[index]
-        if quote:
-            if (
-                powershell_escapes
-                and quote == "'"
-                and char == "'"
-                and index + 1 < len(seg)
-                and seg[index + 1] == "'"
-            ):
-                current.append("'")
-                index += 1
-            elif char == quote:
-                quote = None
-            elif (
-                posix_escapes
-                and char == "\\"
-                and quote == '"'
-                and index + 1 < len(seg)
-                and seg[index + 1] in {'"', "\\", "$", "`"}
-            ):
-                current.append(seg[index + 1])
-                index += 1
-            elif (
-                powershell_escapes
-                and quote == '"'
-                and char == "`"
-                and index + 1 < len(seg)
-            ):
-                current.append(seg[index + 1])
-                index += 1
-            else:
-                current.append(char)
-        elif char in {"'", '"'}:
-            token_started = True
-            quote = char
-        elif char.isspace():
-            if token_started:
-                tokens.append("".join(current))
-                current = []
-                token_started = False
-        elif (
-            posix_escapes
-            and char == "\\"
-            and index + 1 < len(seg)
-            and (seg[index + 1].isspace() or seg[index + 1] in {"'", '"', "\\"})
-        ):
-            current.append(seg[index + 1])
-            token_started = True
-            index += 1
-        elif powershell_escapes and char == "`" and index + 1 < len(seg):
-            current.append(seg[index + 1])
-            token_started = True
-            index += 1
-        else:
-            current.append(char)
-            token_started = True
-        index += 1
-    if token_started:
-        tokens.append("".join(current))
-    return tokens
 
 
 def _git_config_alias_name(value: str) -> str | None:
@@ -563,13 +495,13 @@ def _resolve(p: str, cwd: str) -> str:
 
 # --- Break-glass (persisted allow-edits.json) ---------------------------------
 
-def active_break_glass(repo_name: str, home: Path) -> bool:
+def active_break_glass(repo_name: str, home: Path, *, registry_root: Path | None = None) -> bool:
     """Honor a persisted ``allow-edits`` grant for the repo (epoch-ms)."""
     if not repo_name:
         return False
     try:
         data = json.loads(
-            (home / ".agent-worktrees" / "allow-edits.json").read_text("utf-8"))
+            ((registry_root or home / ".agent-worktrees") / "allow-edits.json").read_text("utf-8"))
         g = (data.get("grants") or {}).get(repo_name)
         return bool(g) and float(g.get("expires_at_ms", 0)) > time.time() * 1000
     except (OSError, ValueError, TypeError, KeyError):
@@ -830,6 +762,7 @@ def _shell_hit(
     # Effective cwd -- starts at the tool's cwd and follows in-command ``cd``s so
     # a repo-scoped git write (no ``-C``) is attributed to the right repo.
     eff_cwd = cwd
+    literal_roots = {}
 
     for seg in _shell_segments(cmd, tool):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
@@ -863,6 +796,7 @@ def _shell_hit(
             and _git_branch_invocation_is_readonly(git_args)
         ):
             git_write = False
+        literal_targets = None
         for a in anchors:
             gp = a.get("path")
             if not gp:
@@ -871,12 +805,25 @@ def _shell_hit(
             tok = _anchor_token(root_str)
             # 1. A file redirect whose target is the anchor. ``>>?(?!\s*&)``
             #    excludes fd-dup redirects (``2>&1``, ``1>&2``) -- not writes.
-            if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            redirect = re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay)
             # 2. A write cmdlet/verb at COMMAND POSITION with the anchor as an
             #    argument (e.g. ``Set-Content "<anchor>\x"``, ``rm <anchor>``).
-            if at_write_cmd and re.search(tok, seg_hay):
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            if redirect or at_write_cmd and re.search(tok, seg_hay):
+                if literal_targets is None:
+                    literal_targets = [
+                        token.replace("\\", os.sep)
+                        for token in _literal_write_targets(eff, tool)
+                    ]
+                for target in literal_targets:
+                    resolved = _resolve(target, eff_cwd)
+                    canonical = _canon(resolved)
+                    if canonical != root_str and not canonical.startswith(root_str + os.sep):
+                        continue
+                    if resolved not in literal_roots:
+                        literal_roots[resolved] = find_repo_root(resolved)
+                    root = literal_roots[resolved]
+                    if root is not None and not is_linked_worktree(root) and _canon(str(root)) == root_str:
+                        return {**a, "reason": _deny_reason(a["name"], a["path"])}
         # 3a. A git mutation with an explicit ``-C`` / ``--git-dir`` /
         #     ``--work-tree`` target writes any anchor named by those options.
         if git_write:
@@ -908,16 +855,12 @@ def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | Non
     canon_anchor = {_canon(a["path"]): a for a in anchors if a.get("path")}
 
     if tool in WRITE_TOOLS:
-        raw = _pick(args, PATH_ARG_KEYS)
-        if not raw:
-            return None
-        abs_path = _resolve(raw, cwd)
-        root = find_repo_root(abs_path)
-        if root is None or is_linked_worktree(root):
-            return None  # not a checkout, or a linked worktree -> always fine
-        a = canon_anchor.get(_canon(str(root)))
-        if a is not None:
-            return {**a, "reason": _deny_reason(a["name"], a["path"])}
+        for raw in write_targets(tool, args):
+            root = find_repo_root(_resolve(raw, cwd))
+            if root is not None and not is_linked_worktree(root):
+                a = canon_anchor.get(_canon(str(root)))
+                if a is not None:
+                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
         return None
 
     if tool in SHELL_TOOLS:
@@ -960,24 +903,26 @@ def decide(payload: dict, *, env=None, home=None,
         return None  # reads / everything else: fast allow
 
     cwd = str(payload.get("cwd") or "")
+    override = env.get("AGENT_HOME", "").strip()
+    legacy_home = Path(os.path.abspath(override)) if override else home
+    registry_root = resolve_registry_root(
+        legacy_root=legacy_home / ".agent-worktrees", environment=env,
+    )
     if anchors is None:
-        registry_root = resolve_registry_root(
-            legacy_root=home / ".agent-worktrees",
-            environment=env,
-        )
         anchors = load_worktree_anchors(registry_root)
     if not anchors:
         return None
 
     args = _as_args(payload.get("toolArgs") if "toolArgs" in payload
                     else payload.get("tool_input"))
-    hit = evaluate(tool, args, cwd, anchors)
-    if hit is None:
-        return None
-    # A live break-glass grant for the anchor repo lets the write through.
-    if active_break_glass(hit.get("name", ""), home):
-        return None
-    return _hit_to_output(hit, mode)
+    while anchors:
+        hit = evaluate(tool, args, cwd, anchors)
+        if hit is None:
+            return None
+        if not active_break_glass(hit.get("name", ""), home, registry_root=registry_root):
+            return _hit_to_output(hit, mode)
+        anchors = [row for row in anchors if row.get("name") != hit.get("name")]
+    return None
 
 
 def main() -> int:
