@@ -23,6 +23,7 @@ _TAG = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}\Z")
 _TASK_EVENTS = frozenset({
     "proposed", "created", "claimed", "started", "suspended", "resumed",
     "released", "yielded", "completed", "abandoned", "detached",
+    "submitted", "approved", "reopened", "reset",
 })
 
 

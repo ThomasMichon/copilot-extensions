@@ -177,3 +177,28 @@ def test_standalone_chart_distinguishes_invalid_and_partial_input_from_absence()
     assert chart != health_chart.render(report([]))
     assert "malformed 1, partial 1, oversized 2, unsupported 3; changed inputs 4" in chart
     ElementTree.fromstring(chart)
+
+
+@pytest.mark.parametrize("event", ["submitted", "approved", "reopened", "reset"])
+def test_dispatch_lifecycle_transitions_are_observations_without_metadata_events(event):
+    result = report([
+        {"kind": "state_transition", "name": "task", "event": "task." + event,
+         "to": "queued", "ts": STAMP // 1_000_000, "id": "not-output"},
+        {"kind": "state_transition", "name": "task", "event": "task.heartbeat",
+         "ts": STAMP // 1_000_000},
+    ])
+    assert result["hours"][-1]["state"] == "observed"
+    assert result["hours"][-1]["groups"][0]["outcomes"] == {event: 1}
+    assert result["coverage"]["unsupported_records"] == 1
+    assert "not-output" not in json.dumps(result)
+
+
+def test_standalone_chart_identifies_absolute_window_and_report_freshness():
+    current = report([])
+    later = report([], now=NOW + timedelta(days=7))
+    chart = health_chart.render(current)
+    assert chart != health_chart.render(later)
+    assert current["generated_at"] in chart
+    assert current["hours"][0]["hour"] in chart
+    assert current["hours"][-1]["hour"] in chart
+    assert current["hours"][24]["hour"][5:16].replace("T", " ") + "Z" in chart
