@@ -34,7 +34,7 @@ OWNERS = {
     "agent-ssh", "agent-mcp", "agent-vault",
 }
 _packaged_primitives: dict[Path, ModuleType] = {}
-_peer_runtimes: dict[Path, tuple[tuple[tuple[str, int, int, int, int], ...], ModuleType]] = {}
+_peer_runtimes: dict[Path, tuple[tuple[tuple[str, int, int, int, int], ...], ModuleType | None]] = {}
 _primitive_lock = threading.Lock()
 
 
@@ -242,16 +242,26 @@ def _peer_python_inprocess(context: dict[str, Any]) -> Path | None:
             module = ModuleType(name)
             module.__file__ = str(key)
             sys.modules[name] = module
-            exec(compile(key.read_bytes(), str(key), "exec"), module.__dict__)
+            _peer_runtimes[key] = (signature, None)
+            try:
+                exec(compile(key.read_bytes(), str(key), "exec"), module.__dict__)
+            except Exception as error:
+                raise ValueError("Peer runtime resolver load failed; restart the observing caller") from error
             _peer_runtimes[key] = (signature, module)
         else:
-            original, module = retained
+            original, retained_module = retained
             if original != signature:
                 raise ValueError("Peer runtime resolver changed; restart the observing caller")
+            if retained_module is None:
+                raise ValueError("Peer runtime resolver load failed; restart the observing caller")
+            module = retained_module
     resolve = getattr(module, "resolve_python", None)
     if not callable(resolve):
         return None
-    python = resolve(Path(context["pluginRoot"]))
+    try:
+        python = resolve(Path(context["pluginRoot"]))
+    except Exception as error:
+        raise ValueError("Peer runtime resolver selection failed") from error
     if python is None:
         raise ValueError(f"{context['pluginId']}: no completed runtime resolved")
     return _checked_python(context, Path(python))

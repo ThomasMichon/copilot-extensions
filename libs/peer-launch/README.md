@@ -59,6 +59,10 @@ source refuses cached observation until a fresh caller loads it, rather than
 using stale code or accumulating new fork callbacks. Imports do not write
 bytecode into the peer payload. Observation additionally rechecks selection
 and does not launch a child, provision or activate anything.
+Failed first loads retain a refusal for that source signature, so partial
+initialization cannot repeat fork callbacks on every health poll. Repairing
+the source still requires a fresh caller. Ordinary load/selection exceptions
+are normalized to context refusal; interruption exceptions still propagate.
 
 Normal POSIX venv
 interpreter symlinks remain supported. This boundary does not provision,

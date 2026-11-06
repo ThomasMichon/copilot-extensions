@@ -340,6 +340,52 @@ def test_peer_python_observation_and_launch_share_actual_resolver(
         peer_launch.observe_peer_python(*arguments)
 
 
+@pytest.mark.parametrize("failure", ["missing-component", "syntax", "runtime"])
+def test_peer_resolver_failures_refuse_without_repeated_initialization(
+    tmp_path, monkeypatch, failure,
+):
+    from agent_dispatch import peer_launch
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    _make_live_peer(cell, "agent-worktrees", "1.0.0")
+    scripts = cell / "payloads" / "agent-worktrees" / "scripts"
+    resolver = scripts / "versioned_runtime.py"
+    component = scripts / "versioned_runtime_leases.py"
+    original = component.read_bytes() if failure == "missing-component" else resolver.read_bytes()
+    if failure == "missing-component":
+        component.unlink()
+    elif failure == "syntax":
+        resolver.write_text("def broken(:\n", encoding="utf-8")
+    else:
+        resolver.write_bytes(original + b"\ndef resolve_python(root):\n raise RuntimeError('fixture failure')\n")
+    monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    calls = []
+    if hasattr(os, "register_at_fork"):
+        monkeypatch.setattr(os, "register_at_fork", lambda **kwargs: calls.append(kwargs))
+    arguments = ("agent-dispatch", own.parent, str(own), "agent-worktrees")
+    before = {str(p): p.read_bytes() for p in scripts.rglob("*") if p.is_file()}
+    monkeypatch.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("native fallback"))
+    for index in range(32):
+        with pytest.raises(ValueError, match="resolver (load|selection) failed"):
+            peer_launch.observe_peer_python(*arguments)
+        if index == 0:
+            first_count = len(calls)
+        assert len(calls) == first_count
+        assert len(peer_launch._peer_runtimes) == 1
+    assert {str(p): p.read_bytes() for p in scripts.rglob("*") if p.is_file()} == before
+    if failure != "runtime":
+        (component if failure == "missing-component" else resolver).write_bytes(original)
+        with pytest.raises(ValueError, match="resolver changed"):
+            peer_launch.observe_peer_python(*arguments)
+        monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
+        assert peer_launch.observe_peer_python(*arguments) is not None
+
+
 def test_native_only_peer_retains_execution_but_has_no_childfree_observation(tmp_path, monkeypatch):
     from agent_dispatch import peer_launch
 

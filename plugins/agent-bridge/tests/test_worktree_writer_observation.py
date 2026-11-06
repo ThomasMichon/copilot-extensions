@@ -281,7 +281,10 @@ def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
         assert load.call_count == 1
 
 
-@pytest.mark.parametrize("case", ["known", "native-only", "changed", "refused", "replaced-code"])
+@pytest.mark.parametrize("case", [
+    "known", "native-only", "changed", "refused", "replaced-code",
+    "runtime-error", "syntax-error", "late-runtime-error", "late-syntax-error",
+])
 def test_same_cell_health_rechecks_peer_selection_without_launch(tmp_path, monkeypatch, case):
     root = tmp_path / "marketplaces" / "fixture" / "plugins" / "agent-worktrees"
     slot = root / "versions" / "1.0.0"
@@ -296,9 +299,23 @@ def test_same_cell_health_rechecks_peer_selection_without_launch(tmp_path, monke
     monkeypatch.setattr(lifecycle, "_agent_bridge_installation_context", lambda: "receipt")
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: root.with_name("agent-bridge"))
     observed = []
+    if "error" in case:
+        scripts = tmp_path / "peer-payload" / "scripts"
+        scripts.mkdir(parents=True)
+        source = (
+            "def broken(:\n" if "syntax" in case else
+            "def resolve_python(root):\n raise RuntimeError('fixture failure')\n"
+        )
+        (scripts / "versioned_runtime.py").write_text(source, encoding="utf-8")
+        monkeypatch.setattr(lifecycle._peer_launch, "_peer_runtimes", {})
 
     def select(*args):
         observed.append(args)
+        if "error" in case and (not case.startswith("late-") or len(observed) == 2):
+            return lifecycle._peer_launch._peer_python_inprocess({
+                "payloadRoot": str(scripts.parent), "pluginRoot": str(root),
+                "pluginId": "agent-worktrees", "versionsRoot": str(root / "versions"),
+            })
         if case == "native-only":
             return None
         if case == "refused" or (case == "replaced-code" and len(observed) == 2):
