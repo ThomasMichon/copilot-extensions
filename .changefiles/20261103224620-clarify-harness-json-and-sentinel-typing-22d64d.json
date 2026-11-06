@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify harness source JSON and sentinel typing boundaries",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

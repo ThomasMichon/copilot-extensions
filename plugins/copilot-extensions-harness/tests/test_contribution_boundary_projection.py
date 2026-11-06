@@ -10,7 +10,7 @@ _DECLARATION = _PLUGIN / "instruction-projections.json"
 _TEMPLATE = _PLUGIN / "instructions" / "contribution-boundary.instructions.md"
 
 
-def test_projection_declaration_shape():
+def test_projection_declaration_shape() -> None:
     declaration = json.loads(_DECLARATION.read_text(encoding="utf-8"))
     assert declaration["schema"] == "copilot-extensions.instruction-projections"
     projections = declaration["projections"]
@@ -27,7 +27,7 @@ def test_projection_declaration_shape():
     assert projection["legacyMarkers"] == []
 
 
-def test_template_is_reviewable_static_fallback():
+def test_template_is_reviewable_static_fallback() -> None:
     content = _TEMPLATE.read_text(encoding="utf-8")
     assert content.startswith('---\napplyTo: "**"\n---\n')
     assert "contributing-to-copilot-extensions" in content
