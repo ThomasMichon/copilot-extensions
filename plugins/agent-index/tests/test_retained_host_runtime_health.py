@@ -90,6 +90,7 @@ def test_retained_host_health_gates_publication(
     for site in (cli_site, server_site):
         (site / "sitecustomize.py").write_text("import agent_index\n", encoding="utf-8")
     runtime = api._runtime()
+    runtime.retain_runtime_helpers(candidate, complete=False)
     runtime.mark_complete(root, "1.0.0", payload_hash="e" * 64)
     runtime.activate(root, "1.0.0", link_free=True)
     full_identity = json.dumps(api.manifest_fields(identity), sort_keys=True)

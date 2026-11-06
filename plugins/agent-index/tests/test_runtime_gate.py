@@ -1355,10 +1355,21 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
     script, env = _fixture(tmp_path, shell)
-    cell_root = tmp_path / "cell" / "plugins" / "agent-index"
-    context = cell_root / "install.json"
-    context.parent.mkdir(parents=True)
-    context.write_text("{}\n", encoding="utf-8")
+    from agent_index import _installation_context as installation
+
+    (script.parents[1] / "plugin.json").write_text(
+        json.dumps({"name": "agent-index", "version": "9.9.9"}), encoding="utf-8",
+    )
+    cell = installation.stamp_context(
+        payload_version="9.9.9", payload_origin="installed",
+        expected_namespace_generation=0, expected_install_generation=0,
+        payload_root=script.parents[1], plugin_id="agent-index",
+        marketplace_key="example",
+        source_descriptor={"source": "github", "repo": "Example/Plugins"},
+        durable_home=tmp_path / "cell", environment=env,
+    )
+    cell_root = Path(cell["pluginRoot"])
+    context = Path(cell["installReceipt"])
     repository = tmp_path / f"repo-{shell}-{command}"
     nested = repository / "nested" / "work"
     nested.mkdir(parents=True)
@@ -1375,13 +1386,6 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         encoding="utf-8",
     )
     _configure_repository_role(repository, env, "host")
-    # This fixture tests CWD forwarding, not installation-owner discovery.
-    env["AGENT_INDEX_CONFIG_DATA_B64"] = base64.urlsafe_b64encode(
-        json.dumps({
-            "corpus": {"sources": [{"name": "git:test"}]},
-            "indexers": [{"machine": env["AGENT_INDEX_MACHINE"], "ssh": "fixture-indexer"}],
-        }).encode("utf-8")
-    ).decode("ascii")
     captured = tmp_path / f"repo-context-{shell}-{command}.json"
     runtime_source = (
         "import json, os, sys\n"
@@ -1397,7 +1401,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     )
     env.update(
         {
-            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "COPILOT_EXTENSIONS_CONTEXT": json.dumps(cell),
             "AGENT_INDEX_ROLE": "host",
             "TEST_CELL_ROOT": str(cell_root),
             "TEST_INSTALLATION_STATUS": json.dumps(
@@ -1407,7 +1411,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
                     "actualMode": "namespaced",
                     "desiredMode": "namespaced",
                     "context": str(context),
-                    "marketplaceId": "example--1234",
+                    "marketplaceId": cell["marketplaceId"],
                     "policy": {"state": "valid", "enabled": True},
                 }
             ),
