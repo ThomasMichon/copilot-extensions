@@ -1761,7 +1761,7 @@ function Install-Runtime {
             exit 1
         }
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
-        & $VenvPython (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
+        & $VenvPython -B (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
             exit 1

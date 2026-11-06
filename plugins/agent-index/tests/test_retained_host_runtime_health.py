@@ -87,6 +87,8 @@ def test_retained_host_health_gates_publication(
     venv(previous / "server", host=True)
     _, cli_site = venv(candidate)
     _, server_site = venv(candidate / "server", host=True)
+    for site in (cli_site, server_site):
+        (site / "sitecustomize.py").write_text("import agent_index\n", encoding="utf-8")
     runtime = api._runtime()
     runtime.mark_complete(root, "1.0.0", payload_hash="e" * 64)
     runtime.activate(root, "1.0.0", link_free=True)
