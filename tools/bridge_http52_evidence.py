@@ -106,7 +106,7 @@ PROBES = {
     "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 2,
     "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
     "test_unknown_or_changed_slot_never_certifies_a_build": 10,
-    "test_same_cell_health_rechecks_peer_selection_without_launch": 9,
+    "test_same_cell_health_rechecks_peer_selection_without_launch": 11,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {

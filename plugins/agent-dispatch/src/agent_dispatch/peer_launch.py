@@ -79,7 +79,10 @@ def _load_primitive(path: Path, name: str) -> ModuleType:
         raise ValueError(f"Installation-context primitive is unavailable: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
+    try:
+        exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
+    except Exception as error:
+        raise ValueError(f"Installation-context primitive initialization failed: {path}") from error
     return module
 
 

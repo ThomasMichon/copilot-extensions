@@ -284,6 +284,7 @@ def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
 @pytest.mark.parametrize("case", [
     "known", "native-only", "changed", "refused", "replaced-code",
     "runtime-error", "syntax-error", "late-runtime-error", "late-syntax-error",
+    "validator-error", "late-validator-error",
 ])
 def test_same_cell_health_rechecks_peer_selection_without_launch(tmp_path, monkeypatch, case):
     root = tmp_path / "marketplaces" / "fixture" / "plugins" / "agent-worktrees"
@@ -308,10 +309,20 @@ def test_same_cell_health_rechecks_peer_selection_without_launch(tmp_path, monke
         )
         (scripts / "versioned_runtime.py").write_text(source, encoding="utf-8")
         monkeypatch.setattr(lifecycle._peer_launch, "_peer_runtimes", {})
+        if "validator" in case:
+            primitive = scripts / "installation-context"
+            primitive.mkdir()
+            provider = Path(__file__).resolve().parents[2] / "agent-worktrees" / "scripts" / "installation-context"
+            shutil.copyfile(provider / "installation_context.py", primitive / "installation_context.py")
+            (primitive / "_installation_context_base.py").write_text("def broken(:\n", encoding="utf-8")
 
     def select(*args):
         observed.append(args)
         if "error" in case and (not case.startswith("late-") or len(observed) == 2):
+            if "validator" in case:
+                return lifecycle._peer_launch._load_primitive(
+                    primitive / "installation_context.py", "_broken_peer_validator_fixture",
+                )
             return lifecycle._peer_launch._peer_python_inprocess({
                 "payloadRoot": str(scripts.parent), "pluginRoot": str(root),
                 "pluginId": "agent-worktrees", "versionsRoot": str(root / "versions"),

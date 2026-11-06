@@ -386,6 +386,30 @@ def test_peer_resolver_failures_refuse_without_repeated_initialization(
         assert peer_launch.observe_peer_python(*arguments) is not None
 
 
+@pytest.mark.parametrize("damaged", ["validator", "fragment"])
+def test_peer_validator_initialization_refuses_observation_and_execution(
+    tmp_path, monkeypatch, damaged,
+):
+    from agent_dispatch import peer_launch
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    _make_live_peer(cell, "agent-worktrees", "1.0.0")
+    primitive = cell / "payloads" / "agent-worktrees" / "scripts" / "installation-context"
+    damaged_path = primitive / (
+        "installation_context.py" if damaged == "validator" else "_installation_context_base.py"
+    )
+    damaged_path.write_text("def broken(:\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    arguments = ("agent-dispatch", own.parent, str(own), "agent-worktrees")
+    with pytest.raises(ValueError, match="primitive initialization failed"):
+        peer_launch.observe_peer_python(*arguments)
+    _assert_peer_refused(peer_launch.launch_prefix(*arguments))
+
+
 def test_native_only_peer_retains_execution_but_has_no_childfree_observation(tmp_path, monkeypatch):
     from agent_dispatch import peer_launch
 

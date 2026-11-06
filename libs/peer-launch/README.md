@@ -63,6 +63,8 @@ Failed first loads retain a refusal for that source signature, so partial
 initialization cannot repeat fork callbacks on every health poll. Repairing
 the source still requires a fresh caller. Ordinary load/selection exceptions
 are normalized to context refusal; interruption exceptions still propagate.
+The same refusal normalization covers installation-context primitive and
+fragment initialization, before owner or peer validation can consume that code.
 
 Normal POSIX venv
 interpreter symlinks remain supported. This boundary does not provision,
