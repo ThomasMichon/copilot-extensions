@@ -2688,3 +2688,26 @@ Every case runs twice and preserves existing file bytes, native identities and
 modification times, plus temporary-control cleanup. Its source-pinned native
 result is still required; no first-checkpoint evidence is relabeled for that
 expanded corpus. Item, child, group, plugin and hosted-job limits remain unchanged.
+
+Expanded checkpoint `c0fa12bd08eaa9ef0c9b348a17c81568d7d5ad10`
+runs as `42292146310`. Linux publishes all 53 passing controls, including
+all five actual-entry scenarios with repeats. Their native item times are
+39.241, 39.023, 37.658, 38.312 and 7.127 seconds. Windows publishes the
+original 39 passing reader controls, but its incoming step returns nonzero
+after roughly 304 seconds and no incoming JUnit report is retained. The
+failed-step log has no named native outcome or literal timeout diagnostic.
+That is missing qualification, not evidence that any Windows incoming case
+passed. Recover the exact failing boundary and named progress before another
+attempt; do not guess a timeout class or increase a resource/deadline limit.
+The original first-checkpoint native result remains independently valid for
+its own source and narrower corpus. No source PR is opened or merged yet.
+
+The full Windows job log also lacks runner output: its hidden subprocess
+inherited no explicit captured streams. Both registration qualification steps
+now capture and print stdout and stderr before checking the exit result; the
+incoming step retains flushed per-attempt progress through pytest's tee capture.
+The existing failed-runner guards now assert both diagnostic streams survive.
+All 15 focused portfolio/source guards and touched-file basic lint pass. No
+test case, execution limit or partition changes. A new exact-source run must
+identify the original failing boundary before choosing a runtime or scheduling
+fix; elapsed time alone still does not establish a timeout class.

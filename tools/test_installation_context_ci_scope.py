@@ -73,7 +73,7 @@ def test_bridge_historical_guards_preserve_selection_and_failure_diagnostics():
 @pytest.mark.parametrize("outcome", ["passed", "failed", "skipped", "missing", "empty", "duplicate"])
 @pytest.mark.parametrize("step_id", ["readers", "incoming"])
 def test_registration_inspection_portfolio_requires_complete_native_evidence(
-    tmp_path, monkeypatch, outcome, step_id,
+    tmp_path, monkeypatch, capsys, outcome, step_id,
 ):
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
@@ -106,6 +106,8 @@ import xml.etree.ElementTree as ET
 arguments = sys.argv[1:]
 Path("arguments.json").write_text(json.dumps(arguments))
 if {outcome!r} == "failed":
+    print("runner failure progress", flush=True)
+    print("runner failure reason", file=sys.stderr, flush=True)
     sys.exit(17)
 reports = Path(arguments[arguments.index("--junit-dir") + 1])
 reports.mkdir(parents=True)
@@ -135,6 +137,10 @@ ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
         expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
         with pytest.raises(expected):
             exec(body, {})
+    if outcome == "failed":
+        captured = capsys.readouterr()
+        assert "runner failure progress" in captured.out
+        assert "runner failure reason" in captured.err
     arguments = json.loads((tmp_path / "arguments.json").read_text())
     expected_file = (
         "tests/test_registration_inspection.py"

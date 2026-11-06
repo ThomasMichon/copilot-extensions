@@ -518,11 +518,15 @@ jobs:
           reports = Path(os.environ["RUNNER_TEMP"]) / "registration-inspection"
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
               print("REGISTRATION_INSPECTION_REPORTS=" + str(reports), file=output)
-          subprocess.run([
+          result = subprocess.run([
               sys.executable, str(Path("tools") / "run-plugin-tests.py"), "agent-worktrees",
               "--test-file", "tests/test_registration_inspection.py",
               "--junit-dir", str(reports),
-          ], check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+          ], capture_output=True, text=True, errors="backslashreplace",
+              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+          print(result.stdout, end="", flush=True)
+          print(result.stderr, end="", file=sys.stderr, flush=True)
+          result.check_returncode()
           cases = [
               case for report in reports.rglob("*.xml")
               for case in ET.parse(report).getroot().iter("testcase")
@@ -545,12 +549,17 @@ jobs:
           import sys
           import xml.etree.ElementTree as ET
           reports = Path(os.environ["REGISTRATION_INSPECTION_REPORTS"]) / "incoming"
-          subprocess.run([
+          result = subprocess.run([
               sys.executable, str(Path("tools") / "run-plugin-tests.py"), "agent-worktrees",
               "--test-file", "tests/test_incoming_registration_inspection.py",
               "--test-file", "tests/native/test_incoming_registration_inspection_native.py",
               "--allow-explicit-tiers", "--junit-dir", str(reports),
-          ], check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+          ], capture_output=True, text=True, errors="backslashreplace",
+              env={**os.environ, "PYTEST_ADDOPTS": "--capture=tee-sys", "PYTHONUNBUFFERED": "1"},
+              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+          print(result.stdout, end="", flush=True)
+          print(result.stderr, end="", file=sys.stderr, flush=True)
+          result.check_returncode()
           cases = [
               case for report in reports.rglob("*.xml")
               for case in ET.parse(report).getroot().iter("testcase")
