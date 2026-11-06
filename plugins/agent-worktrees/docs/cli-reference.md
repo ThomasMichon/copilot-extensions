@@ -1671,6 +1671,35 @@ when the installed provider cannot answer, rather than make old capability
 support a replacement veto. No caller migration or installed recovery is
 implied by publication of this read contract.
 
+#### Incoming source inspection before installation
+
+The source-owned `scripts/inspect_registration.py` entry runs the same version-1
+reader without using the selected runtime:
+
+```text
+<base-python> -I -B <incoming-payload>/scripts/inspect_registration.py --anchor "<absolute-anchor>" --default-name "<default-project>" --contract-version 1 --uv "<absolute-uv>"
+```
+
+It composes the existing frozen-input constructor in a private temporary control
+environment and retains the reader child until it exits. This is preparation,
+not installation: no globals, selectors, registrations, bindings or services
+are published, and the temporary environment is removed before returning.
+The existing dependency/feed, source health, process and cleanup owners remain
+in force. The entry requires an existing base Python and selected UV executable;
+it does not repair prerequisites or a selected historical runtime.
+
+An optional absolute `--install-source` consumes the matching complete prepared
+Source/profile through `install_source.project_inputs` and the same numbered
+constructor, including its generated application when present. Without it,
+the existing ordinary source-construction path owns dependency acquisition and
+builds. Neither form is an alternative registry parser or installation owner.
+
+Only the existing reader's JSON is written to stdout. Reader success and refusal
+retain exit 0/2 and their original response. Failed preparation has exit 1 and
+an explicit stderr diagnostic; it must not be interpreted as an absent project
+or retried as an effectful registration. This entry supplies incoming inspection,
+not completed caller adoption, installed readiness or whole-flow recovery.
+
 ### Bare-anchor sync (`repos sync`)
 
 `repos sync` fast-forwards a bare anchor (`core.bare=true`) by moving its

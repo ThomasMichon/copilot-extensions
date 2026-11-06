@@ -535,6 +535,29 @@ jobs:
           for name in required:
               assert len([case for case in cases if case.get("name") == name]) == 1, name
           assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error"))
+      - name: Qualify incoming inspection construction without changing the selected runtime
+        id: incoming
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+          reports = Path(os.environ["REGISTRATION_INSPECTION_REPORTS"]) / "incoming"
+          subprocess.run([
+              sys.executable, str(Path("tools") / "run-plugin-tests.py"), "agent-worktrees",
+              "--test-file", "tests/test_incoming_registration_inspection.py",
+              "--test-file", "tests/native/test_incoming_registration_inspection_native.py",
+              "--allow-explicit-tiers", "--junit-dir", str(reports),
+          ], check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+          cases = [
+              case for report in reports.rglob("*.xml")
+              for case in ET.parse(report).getroot().iter("testcase")
+          ]
+          required = "test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state"
+          assert len([case for case in cases if case.get("name") == required]) == 1
+          assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error"))
       - uses: actions/upload-artifact@v4
         if: always() && steps.readers.outcome != 'skipped'
         with:

@@ -129,6 +129,11 @@ authorize production updates, recovery mutations or new access.
   Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
   ambiguity/collision/read-failure refusal and no mutations through the native
   CLI boundary. Source release is not caller adoption or installed recovery.
+- [ ] Qualify the incoming inspection bootstrap under #11083/U18. Run the
+  existing reader from canonically constructed incoming code without consulting
+  or changing the selected runtime, registrations, selectors or service state.
+  Keep preparation/read failures distinct from absence, installation and caller
+  adoption; U17's delivered source/release remains complete.
 
 ### Phase 3 - Release and completion
 
@@ -2637,3 +2642,33 @@ runtime cannot answer the versioned request; the old provider must not veto
 incoming construction. Existing construction, registration and routing owners
 retain their mechanisms. Local Windows historical-seed qualification and every
 separate installed-recovery gate remain; no worktree is finalized.
+
+### 2026-11-06 - U18 incoming inspection construction selected
+
+Claimed #11083 after deduplicating the remaining registration work. The
+payload's ordinary command still selects an installed provider, so its presence
+cannot establish that U17 is independently runnable before installation.
+The source-owned inspection entry composes the existing constructor, optional
+closed Source/profile/application inputs, retained owned child and unchanged
+version-1 reader. It adds no registry parser, dependency builder, installation
+receipt, writer or activation path. This closes part of the installer vision's
+authoritative incoming replacement gap without changing that target.
+
+The focused composition and existing-reader packet passes all 48 controls.
+Basic Python lint and the installation-contract checker pass. Native cold
+construction is not yet qualified: an initial fixture redundantly froze,
+committed and copied the full graph, then the 180-second child expired. A
+diagnostic run hit the original 300-second group limit before rendering a
+report. Removing the unnecessary fixture preparation retained actual source
+construction and produced usable phase evidence: source selection took 4.640
+seconds, retention took 59.485 seconds, and local first-party builds were still
+active at the unchanged 180-second child deadline. The final native call lasted
+180.35 seconds; cleanup completed. None of those attempts is a pass or an
+installed result, and no deadline or resource limit was increased.
+
+The existing explicitly dispatched Linux/Windows portfolio now has a separate
+incoming-construction step with exact-source pinning, actual native case
+admission and no skipped/failed evidence. It does not expand required-unit CI
+or add a matrix. Native qualification, complete U18 controls, source review,
+required CI, merge/release and caller adoption remain open. Local cold-source
+construction cost is an unresolved measured boundary, not a flake waiver.
