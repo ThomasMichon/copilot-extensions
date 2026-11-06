@@ -24,10 +24,10 @@ _CUSTODY = (
 
 class Predecessor:
     def __init__(
-        self, endpoint: Endpoint, root: Path, record: dict[str, str],
+        self, pid: int, root: Path, record: dict[str, str],
         registry_root: Path | None,
     ) -> None:
-        self.endpoint = endpoint
+        self.pid = pid
         self.root = root
         self.record = dict(record)
         self.registry_root = registry_root
@@ -37,27 +37,33 @@ class Predecessor:
         cls, endpoint: Endpoint, root: Path, registry_root: Path | None = None,
     ) -> Predecessor | None:
         """Capture one admitted service owner, not an arbitrary endpoint PID."""
+        if endpoint.installation_id != installation_id():
+            return None
+        return cls.capture_pid(endpoint.pid, root, registry_root)
+
+    @classmethod
+    def capture_pid(
+        cls, pid: int | None, root: Path, registry_root: Path | None = None,
+    ) -> Predecessor | None:
+        """A lease PID identifies a candidate, not native or service authority."""
         try:
-            if (
-                endpoint.pid is None or endpoint.pid == os.getpid()
-                or endpoint.installation_id != installation_id()
-            ):
+            if type(pid) is not int or pid <= 0 or pid == os.getpid():
                 return None
             records = inspect_instances(registry_root)
             candidates = [
                 record for record in records
-                if record.get("pid") == str(endpoint.pid)
+                if record.get("pid") == str(pid)
             ]
             if len(candidates) != 1:
                 return None
-            result = cls(endpoint, root, candidates[0], registry_root)
+            result = cls(pid, root, candidates[0], registry_root)
             return result if result._owned(records) else None
         except (OSError, ValueError, KeyError, RuntimeError):
             return None
 
     def _owned(self, records: list[dict[str, str]]) -> bool:
         candidates = [
-            item for item in records if item.get("pid") == str(self.endpoint.pid)
+            item for item in records if item.get("pid") == str(self.pid)
         ]
         record = candidates[0] if len(candidates) == 1 else None
         if (
@@ -99,13 +105,13 @@ class Predecessor:
         if len(relative.parts) < 3:
             return False
         # Native peer admission enforces the current OS principal as well as birth.
-        peer_identity(self.endpoint.pid)
-        return identity_state(self.endpoint.pid, record["birth"]) == "matching"
+        peer_identity(self.pid)
+        return identity_state(self.pid, record["birth"]) == "matching"
 
     def exited(self) -> bool:
         """A different native incarnation cannot still own the old writer."""
         try:
-            return identity_state(self.endpoint.pid, self.record["birth"]) in {"dead", "changed"}
+            return identity_state(self.pid, self.record["birth"]) in {"dead", "reused"}
         except (OSError, ValueError):
             return False
 
@@ -116,12 +122,52 @@ class Predecessor:
                 return "exited"
             if not current() or not self._owned(inspect_instances(self.registry_root)):
                 return "refused-owner-or-selection"
-            with PinnedProcess(self.endpoint.pid, self.record["birth"]) as process:
+            with PinnedProcess(self.pid, self.record["birth"]) as process:
                 if process.exited():
                     return "exited"
+                process.pause()
                 if not current() or not self._owned(inspect_instances(self.registry_root)):
                     return "refused-owner-or-selection"
+                if _has_children(self.pid):
+                    return "refused-live-workers"
                 process.terminate(timeout=5)
             return "cold-retired"
         except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused):
             return "refused-native-retirement"
+
+
+def _has_children(pid: int) -> bool:
+    """The pinned, paused parent cannot launch another credential subprocess."""
+    try:
+        import psutil
+    except ImportError as error:
+        raise RetirementRefused("native worker census unavailable") from error
+    try:
+        children = psutil.Process(pid).children()
+        console = _console_host_path() if children else None
+        for child in children:
+            if console is None:
+                return True
+            image = Path(child.exe())
+            if image.parent != console.parent or not image.samefile(console):
+                return True
+        return False
+    except psutil.Error as error:
+        raise RetirementRefused("native worker census unconfirmed") from error
+
+
+def _console_host_path() -> Path | None:
+    """Only the native system console host is known not to be credential work."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetSystemDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.UINT]
+    kernel.GetSystemDirectoryW.restype = wintypes.UINT
+    directory = ctypes.create_unicode_buffer(32768)
+    length = kernel.GetSystemDirectoryW(directory, len(directory))
+    if not 0 < length < len(directory):
+        raise RetirementRefused("native system directory unavailable")
+    return Path(directory.value) / "conhost.exe"

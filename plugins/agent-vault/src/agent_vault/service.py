@@ -567,6 +567,10 @@ class VaultService:
                 self._generation.predecessor_retirement
                 if getattr(self, "_generation", None) is not None else "not-requested"
             ),
+            "writer_predecessor_retirement": (
+                self._generation.writer_predecessor_retirement
+                if getattr(self, "_generation", None) is not None else "not-requested"
+            ),
         }
 
     def _handle_admitted_request(self, request: dict, peer: str = "?",

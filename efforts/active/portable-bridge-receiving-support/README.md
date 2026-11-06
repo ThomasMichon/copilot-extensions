@@ -951,3 +951,43 @@ implementation. The exact support closure follows the consumer trace and tests.
   The unchanged settlement, lifetime, auth-state, readiness and discovery
   controls retain their earlier result. All 40 admitted strict projects pass
   both declared type targets; pending scopes are not implicitly qualified.
+
+### 2026-11-06 - Writer-chain and first-review corrections
+
+- The first implementation head's required CI passed, but review identified
+  live backend-child exclusion, stale Unix aliases and the shared native
+  identity's `reused` result. Held #11072 as draft while addressing them;
+  that earlier head is not accepted or deployed.
+- A new failing native control also reproduced three-generation replacement:
+  discovery can name a passive failed newcomer while an older daemon still
+  owns credential work. Capture that exact contended lease holder as a second
+  bounded candidate, independently validate its central ownership and recheck
+  current lease contention at mutation. No historical sweep is introduced.
+- Native retirement now pauses the exact parent before census. Credential or
+  unknown children refuse retirement and resume the parent, retaining writer
+  exclusion. Only the actual system console-host image is exempt on Windows;
+  a same-named foreign image remains a worker. No descendants are killed.
+  The declared `psutil` dependency supports this finite native census.
+- Positive original exit includes a reused PID. Unix alias reclamation checks
+  the captured owned socket identity and liveness, preserving changed/live
+  paths. These corrections preserve the existing incoming lifecycle owner.
+- All 73 focused generation/ownership controls pass, including actual repeated
+  replacement and a real held backend process reached through the production
+  KeePassXC edit constructor. Three subsequent changed-lease controls and the
+  explicit Linux Unix-alias assertion still require execution. Final source,
+  dependency-age, review/CI, release and installed acceptance remain open.
+- The final affected packet passes 232 cases with one platform skip and
+  named per-case/teardown JUnit retained by the test owner. An earlier packet
+  exposed a Windows-only portable-fixture omission (`AF_UNIX`); supplying the
+  explicitly mocked platform constant passes all five residual probe controls.
+  Final whole-packet execution is clean, without the prior pipe warning or
+  held-cleanup diagnostic. Linux-native execution is still not claimed.
+- Serialized documentation validation passes after preparation's transient
+  source inputs are gone. Python dependency seasoning passes all 564
+  declarations with zero violations; lint and the install contract pass.
+  Fresh committed-source checks and review/CI remain required.
+- Restrict console-image identity reads to the native system directory, so an
+  unrelated backend image never causes filesystem probing outside that directory.
+  All seven affected native/census controls pass again. The two retained reports
+  contain 240 named testcases, zero failures/errors and the single platform skip;
+  repeated controls are not counted as new portfolio coverage.

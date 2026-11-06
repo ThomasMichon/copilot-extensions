@@ -30,6 +30,7 @@ def owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(predecessor, "inspect_instances", lambda _: [dict(record)])
     monkeypatch.setattr(predecessor, "identity_state", lambda *args: "matching")
     monkeypatch.setattr(predecessor, "peer_identity", lambda _: SimpleNamespace())
+    monkeypatch.setattr(predecessor, "_has_children", lambda _: False)
     endpoint = Endpoint("tcp", "127.0.0.1:12345", pid=123, installation_id="fixture-installation")
     return endpoint, tmp_path, record
 
@@ -95,6 +96,9 @@ def test_mutation_rechecks_owner_selection_and_native_birth(
         def exited(self):
             return False
 
+        def pause(self):
+            pass
+
         def terminate(self, *, timeout: float):
             if change == "exit":
                 raise predecessor.RetirementRefused("fixture unconfirmed exit")
@@ -132,12 +136,15 @@ def test_one_owned_predecessor_uses_its_native_pin_and_confirms_exit(
         def exited(self):
             return False
 
+        def pause(self):
+            events.append("paused")
+
         def terminate(self, *, timeout: float):
             events.append(("terminate-and-confirm", timeout))
 
     monkeypatch.setattr(predecessor, "PinnedProcess", Process)
     assert captured.retire(lambda: True) == "cold-retired"
-    assert events == [(123, "native-birth"), ("terminate-and-confirm", 5), "closed"]
+    assert events == [(123, "native-birth"), "paused", ("terminate-and-confirm", 5), "closed"]
 
 
 def test_unavailable_native_identity_is_not_mistaken_for_exit(
@@ -153,3 +160,71 @@ def test_unavailable_native_identity_is_not_mistaken_for_exit(
     monkeypatch.setattr(predecessor, "identity_state", unavailable)
     assert not captured.exited()
     assert captured.retire(lambda: True) == "refused-native-retirement"
+
+
+def test_reused_pid_is_positive_original_exit_not_a_signal_target(
+    owned, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint, root, _ = owned
+    captured = predecessor.Predecessor.capture(endpoint, root)
+    assert captured is not None
+    monkeypatch.setattr(predecessor, "identity_state", lambda *args: "reused")
+    assert captured.exited()
+    assert captured.retire(lambda: True) == "exited"
+
+
+def test_live_credential_worker_refuses_parent_retirement_and_resumes_it(
+    owned, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint, root, _ = owned
+    captured = predecessor.Predecessor.capture(endpoint, root)
+    assert captured is not None
+    events = []
+
+    class Process:
+        def __init__(self, *args):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            events.append("resume-and-close")
+
+        def exited(self):
+            return False
+
+        def pause(self):
+            events.append("paused")
+
+        def terminate(self, **kwargs):
+            pytest.fail("A parent with live credential children was terminated")
+
+    monkeypatch.setattr(predecessor, "PinnedProcess", Process)
+    monkeypatch.setattr(predecessor, "_has_children", lambda _: True)
+    assert captured.retire(lambda: True) == "refused-live-workers"
+    assert events == ["paused", "resume-and-close"]
+
+
+@pytest.mark.parametrize("image", ("system-console", "foreign-console", "backend"))
+def test_worker_census_exempts_only_the_actual_system_console_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image: str,
+) -> None:
+    import psutil
+
+    system = tmp_path / "system" / "conhost.exe"
+    system.parent.mkdir()
+    system.touch()
+    foreign = tmp_path / ("conhost.exe" if image == "foreign-console" else "backend.exe")
+    foreign.touch()
+    child = SimpleNamespace(exe=lambda: str(system if image == "system-console" else foreign))
+    monkeypatch.setattr(psutil, "Process", lambda _: SimpleNamespace(children=lambda: [child]))
+    monkeypatch.setattr(predecessor, "_console_host_path", lambda: system)
+    samefile = Path.samefile
+
+    def local_identity(path: Path, other) -> bool:
+        assert path.parent == system.parent
+        return samefile(path, other)
+
+    monkeypatch.setattr(Path, "samefile", local_identity)
+    assert predecessor._has_children(123) is (image != "system-console")

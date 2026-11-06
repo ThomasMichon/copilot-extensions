@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import errno
 from collections.abc import Callable
 import os
 from pathlib import Path
@@ -91,6 +92,44 @@ def test_current_controller_cannot_retire_after_selection_or_discovery_changes(
     assert controller._retire_previous() == "refused-owner-or-selection"
 
 
+@pytest.mark.parametrize("change", ("holder", "available", "self-writer"))
+def test_older_writer_target_requires_current_contention_from_that_same_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    from agent_vault import service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "installation_id", lambda: "fixture-installation")
+    monkeypatch.setattr(generation, "selected", lambda: True)
+    monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(
+        pid=os.getpid(), installation_id="fixture-installation",
+    ))
+    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller.has_writer = change == "self-writer"
+    events = []
+
+    class Writer:
+        def acquire(self) -> None:
+            events.append("probe")
+            if change == "holder":
+                raise AlreadyRunningError(tmp_path / "writer.lock", 456)
+
+        def release(self) -> None:
+            events.append("release")
+
+    def retire(current: Callable[[], bool]) -> str:
+        assert not current()
+        return "refused-owner-or-selection"
+
+    controller.writer = Writer()
+    target = SimpleNamespace(pid=123, retire=retire)
+    assert controller._retire_previous(target, True) == "refused-owner-or-selection"
+    assert events == {
+        "holder": ["probe"], "available": ["probe", "release"], "self-writer": [],
+    }[change]
+
+
 def test_confirmed_predecessor_exit_does_not_repeat_native_process_probes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -111,6 +150,78 @@ def test_confirmed_predecessor_exit_does_not_repeat_native_process_probes(
     monkeypatch.setattr(generation, "pid_alive", unexpected)
     for _ in range(2):
         asyncio.run(controller.tick())
+
+
+@pytest.mark.parametrize("condition", ("stale", "live", "replaced", "grace"))
+def test_unix_alias_reclaims_only_the_captured_dead_listener(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, condition: str,
+) -> None:
+    legacy = str(tmp_path / "legacy.sock")
+    state = {"identity": (1, 2), "exists": True}
+    events = []
+    controller = object.__new__(generation.ServiceGeneration)
+    controller.socket = str(tmp_path / "incoming.sock")
+    controller.pipe = None
+    controller.port = controller.requested_port = 0
+    controller.servers = []
+    controller.legacy_socket_identity = (1, 2)
+    controller.predecessor_retirement = "grace" if condition == "grace" else "cold-retired"
+    controller.connections = SimpleNamespace(callback=lambda _: object())
+
+    def stale(path: str) -> bool:
+        assert path == legacy
+        if condition == "replaced":
+            state["identity"] = (3, 4)
+        return condition != "live"
+
+    controller.api = SimpleNamespace(SOCKET_PATH=legacy)
+    monkeypatch.setattr(controller, "_socket_identity", lambda _: state["identity"])
+    monkeypatch.setattr(controller, "_unix_stale", stale)
+    monkeypatch.setattr(generation.os.path, "lexists", lambda _: state["exists"])
+
+    def unlink(path: str) -> None:
+        assert path == legacy and state["identity"] == (1, 2)
+        state["exists"] = False
+        events.append("unlink")
+
+    async def listen(callback, *, path):
+        assert path == legacy and not state["exists"]
+        events.append("listen")
+        return object()
+
+    monkeypatch.setattr(generation.os, "unlink", unlink)
+    monkeypatch.setattr(generation.os, "chmod", lambda *args: None)
+    monkeypatch.setattr(generation.asyncio, "start_unix_server", listen, raising=False)
+    asyncio.run(controller._legacy_aliases())
+    assert events == (["unlink", "listen"] if condition == "stale" else [])
+    assert len(controller.servers) == (1 if condition == "stale" else 0)
+
+
+@pytest.mark.parametrize("error,expected", (
+    (None, False), (errno.ECONNREFUSED, True), (errno.ENOENT, True),
+    (errno.EACCES, False), (errno.ETIMEDOUT, False),
+))
+def test_unix_stale_probe_does_not_confuse_denied_or_unknown_with_no_listener(
+    monkeypatch: pytest.MonkeyPatch, error: int | None, expected: bool,
+) -> None:
+    class Peer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def settimeout(self, value: float) -> None:
+            assert value == .25
+
+        def connect(self, path: str) -> None:
+            assert path == "fixture.sock"
+            if error is not None:
+                raise OSError(error, "fixture probe")
+
+    monkeypatch.setattr(generation.socket, "AF_UNIX", object(), raising=False)
+    monkeypatch.setattr(generation.socket, "socket", lambda *args: Peer())
+    assert generation.ServiceGeneration._unix_stale("fixture.sock") is expected
 
 
 @pytest.mark.parametrize("receipt,version", (
@@ -513,12 +624,12 @@ def test_legacy_ping_uses_the_resident_default_without_an_owner_lookup(
 
 
 CHILD = r"""
-import asyncio, hashlib, json, os, sys, time
+import asyncio, hashlib, json, os, subprocess, sys, time
 from pathlib import Path
 from types import SimpleNamespace
 
 root, identity, port, mode = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
-if mode in {"hung-cleanup", "hung-work", "bounded-successor"}:
+if mode in {"hung-cleanup", "hung-work", "bounded-successor", "passive-legacy", "backend-work"}:
     sys.path.insert(0, str(root / "versions" / identity))
 os.environ.update(
     AGENT_VAULT_HOME=str(root), AGENT_VAULT_RUN_DIR=str(root / "run"),
@@ -570,16 +681,40 @@ if identity == "newer":
     vault._password_set_at[kpdb] = time.time() - 60
 if mode == "no-overlap":
     service.supported_versions = service_handoff.supported_versions = lambda: [99]
+if mode == "backend-work":
+    from agent_vault import keepassxc
+    backend_program = r'''
+import os, sys, time
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.stdin.read()
+(root / "backend.pid").write_text(str(os.getpid()))
+(root / "backend.entered").touch()
+deadline = time.monotonic() + 8
+while not (root / "backend.release").exists():
+    if time.monotonic() >= deadline:
+        raise RuntimeError("Owned backend fixture was not released")
+    time.sleep(.01)
+(root / "backend.finished").touch()
+'''
+    run_backend = subprocess.run
+    keepassxc.subprocess = SimpleNamespace(run=lambda argv, **kwargs: run_backend(
+        [sys.executable, "-c", backend_program, str(root)], **kwargs,
+    ))
+    vault.cli._cli_path = sys.executable
 
 def native(kpdb, entry, group=None):
     with (root / "work.jsonl").open("a") as stream:
         stream.write(json.dumps([identity, "entered"]) + "\n")
     (root / (identity + ".entered")).touch()
-    deadline = time.monotonic() + 15
-    while not (root / (identity + ".release")).exists():
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Owned fixture work was not released")
-        time.sleep(.01)
+    if mode == "backend-work":
+        assert vault.cli.edit_password(kpdb, entry, "fixture-value")[0]
+    else:
+        deadline = time.monotonic() + 15
+        while not (root / (identity + ".release")).exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Owned fixture work was not released")
+            time.sleep(.01)
     with (root / "work.jsonl").open("a") as stream:
         stream.write(json.dumps([identity, "settled"]) + "\n")
     return True
@@ -666,7 +801,7 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
     }
     source = (
         root / "versions" / identity / "agent_vault" / "service.py"
-        if mode in {"hung-cleanup", "hung-work", "bounded-successor"}
+        if mode in {"hung-cleanup", "hung-work", "bounded-successor", "passive-legacy", "backend-work"}
         else Path(generation.__file__).with_name("service.py")
     )
     return spawn_instance(
@@ -678,7 +813,8 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
 
 
 def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
-    for identity in ("newer", "older"):
+    (root / "backend.release").touch()
+    for identity in ("newer", "middle", "older"):
         (root / (identity + ".release")).touch()
         (root / (identity + ".stop")).touch()
     return ["".join(process.communicate(timeout=10)) for process in processes]
@@ -783,6 +919,65 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
     assert all(b"fixture-master" not in path.read_bytes()
                for path in tmp_path.rglob("*") if path.is_file())
     assert _endpoint(tmp_path) is None
+
+
+@pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned retirement")
+def test_native_repeated_replacement_excludes_the_actual_older_writer(
+    tmp_path: Path,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from zdd.private_protocol import Deadline
+
+    for identity in ("newer", "middle", "older"):
+        shutil.copytree(
+            Path(generation.__file__).parent, tmp_path / "versions" / identity / "agent_vault",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    (tmp_path / "selection").write_text("newer")
+    durable = tmp_path / "fixture.kdbx"
+    durable.write_bytes(b"fixture durable bytes")
+    old = _start(tmp_path, "newer", 0, "hung-work")
+    children = [old]
+    lifetime = None
+    try:
+        _until(lambda: _endpoint(tmp_path) is not None, children)
+        first = _endpoint(tmp_path)
+        lifetime = _capture_process(first["pid"])
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            pending = worker.submit(
+                _send, _port(first), {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+            )
+            _until(lambda: (tmp_path / "newer.entered").exists(), children)
+            (tmp_path / "selection").write_text("middle")
+            middle = _start(tmp_path, "middle", 0, "passive-legacy")
+            children.append(middle)
+            _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
+            second = _endpoint(tmp_path)
+            assert not _send(_port(second), {"action": "ping"})["accepting_work"]
+            (tmp_path / "selection").write_text("older")
+            new = _start(tmp_path, "older", 0, "bounded-successor")
+            children.append(new)
+            _until(
+                lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"], second["pid"]},
+                [new],
+            )
+            incoming = _endpoint(tmp_path)
+            port = _port(incoming)
+            _until(lambda: _send(port, {"action": "ping"})["accepting_work"], [new], timeout=8)
+            lifetime.wait_exit(Deadline(1))
+            old.communicate(timeout=2)
+            middle.communicate(timeout=2)
+            assert old.returncode != 0 and middle.returncode == 0
+            with pytest.raises((ValueError, OSError)):
+                pending.result(timeout=2)
+            (tmp_path / "older.release").touch()
+            assert _send(port, {"action": "has", "kpdb": str(durable), "entry": "fixture"})["ok"]
+            assert durable.read_bytes() == b"fixture durable bytes"
+            assert _endpoint(tmp_path)["pid"] == incoming["pid"]
+    finally:
+        _settle(tmp_path, children)
+        if lifetime is not None:
+            lifetime.close()
     assert not (tmp_path / "vault.pid").exists()
 
 
@@ -810,7 +1005,7 @@ def test_failed_successor_does_not_remove_or_stop_the_incumbent(tmp_path: Path) 
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned retirement")
-@pytest.mark.parametrize("old_mode", ("hung-cleanup", "hung-work"))
+@pytest.mark.parametrize("old_mode", ("hung-cleanup", "hung-work", "backend-work"))
 def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
     tmp_path: Path, old_mode: str,
 ) -> None:
@@ -839,6 +1034,8 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
                 _send, old_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
             )
             _until(lambda: (tmp_path / "newer.entered").exists(), children)
+            if old_mode == "backend-work":
+                _until(lambda: (tmp_path / "backend.entered").exists(), children)
             (tmp_path / "selection").write_text("older")
             new = _start(tmp_path, "older", 0, "bounded-successor")
             children.append(new)
@@ -862,25 +1059,51 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
                 lambda: _send(port, {"action": "ping"})["predecessor_retirement"] != "grace",
                 [new],
             )
-            assert _send(port, {"action": "ping"})["predecessor_retirement"] == "cold-retired"
-            lifetime.wait_exit(Deadline(1))
+            if old_mode == "backend-work":
+                assert _send(port, {"action": "ping"})["predecessor_retirement"] == "refused-live-workers"
+                assert old.poll() is None
+                assert not _send(port, {"action": "ping"})["accepting_work"]
+                assert not (tmp_path / "backend.finished").exists()
+                assert not (tmp_path / "older.entered").exists()
+                (tmp_path / "backend.release").touch()
+                assert pending.result(timeout=5)["ok"]
+                assert (tmp_path / "backend.finished").exists()
+            else:
+                assert _send(port, {"action": "ping"})["predecessor_retirement"] == "cold-retired"
+            lifetime.wait_exit(Deadline(5))
             old.communicate(timeout=2)
-            assert old.returncode != 0
+            assert (old.returncode == 0) is (old_mode == "backend-work")
             if old_mode == "hung-work":
                 with pytest.raises((ValueError, OSError)):
                     pending.result(timeout=2)
                 assert not (tmp_path / "newer.release").exists()
             _until(lambda: _send(port, {"action": "ping"})["accepting_work"], [new])
+            if old_mode == "backend-work":
+                _until(
+                    lambda: _send(port, {"action": "ping"})["predecessor_retirement"] == "exited",
+                    [new],
+                )
             health = _send(port, {"action": "ping"})
-            assert health["predecessor_retirement"] == "cold-retired"
-            assert health["unlocked_vaults"] == ([str(durable)] if old_mode == "hung-cleanup" else [])
+            assert health["predecessor_retirement"] in {"cold-retired", "exited"}
+            assert health["unlocked_vaults"] == ([str(durable)] if old_mode != "hung-work" else [])
             assert _endpoint(tmp_path)["pid"] == pid
+            if os.name != "nt":
+                from agent_vault import service
+
+                def unix_alias_ready() -> bool:
+                    response = service._dial_unix(
+                        {"action": "ping", "health_only": True},
+                        str(tmp_path / "vault.sock"), timeout=.25,
+                    )
+                    return bool(response and response.get("pid") == pid)
+
+                _until(unix_alias_ready, [new])
             (tmp_path / "older.release").touch()
             assert _send(port, {"action": "has", "kpdb": str(durable), "entry": "fixture"})["ok"]
             work = [json.loads(row) for row in (tmp_path / "work.jsonl").read_text().splitlines()]
             assert work == [
                 ["newer", "entered"],
-                *([["newer", "settled"]] if old_mode == "hung-cleanup" else []),
+                *([["newer", "settled"]] if old_mode != "hung-work" else []),
                 ["older", "entered"], ["older", "settled"],
             ]
             assert durable.read_bytes() == b"fixture durable bytes"

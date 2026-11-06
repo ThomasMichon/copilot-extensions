@@ -10,6 +10,8 @@ import logging
 import os
 from pathlib import Path
 import re
+import socket
+import stat
 import sys
 import time
 from typing import Any
@@ -168,19 +170,26 @@ class ServiceGeneration:
         self.predecessor_deadline = 0.0
         self.predecessor_retirement = "not-requested"
         self.aliases_after_exit = False
+        self.writer_candidate_pid: int | None = None
+        self.writer_predecessor = None
+        self.writer_predecessor_retirement = "not-requested"
+        self.legacy_socket_identity: tuple[int, int] | None = None
 
     def _take_writer(self) -> bool:
         if self.has_writer:
             return True
-        if (
+        waiting_for_exit = (
             self.legacy_predecessor and self.previous and pid_alive(self.previous.pid)
             and not (self.receiver and self.receiver.writer_released())
             and not (self.predecessor and self.predecessor.exited())
-        ):
-            return False
+        )
         try:
             self.writer.acquire()
-        except AlreadyRunningError:
+        except AlreadyRunningError as error:
+            self.writer_candidate_pid = error.holder_pid
+            return False
+        if waiting_for_exit:
+            self.writer.release()
             return False
         self.has_writer = True
         return True
@@ -217,6 +226,9 @@ class ServiceGeneration:
                 self.service._shutdown = True
                 return
             self.previous = read_endpoint(self.root)
+            if self.previous and self.previous.transport == "unix":
+                if self.previous.address == api.SOCKET_PATH:
+                    self.legacy_socket_identity = self._socket_identity(api.SOCKET_PATH)
             self.legacy_predecessor = bool(
                 self.previous and pid_alive(self.previous.pid)
             )
@@ -234,6 +246,7 @@ class ServiceGeneration:
                     self.handoff_result = "private-channel-unavailable"
             replacing = bool(self.previous and pid_alive(self.previous.pid))
             self.service._runtime_can_work = self._take_writer()
+            await self._capture_writer()
             suffix = f".{os.getpid()}"
             if not api.IS_WINDOWS:
                 self.socket = api.SOCKET_PATH + suffix if replacing else api.SOCKET_PATH
@@ -274,7 +287,7 @@ class ServiceGeneration:
                 installation_id=installation_id(), alt=advertised[2] or None,
             )
             self._write_pid()
-            if self.legacy_predecessor:
+            if self.legacy_predecessor or self.writer_predecessor is not None:
                 from .service_predecessor import GRACE_SECONDS
 
                 self.predecessor_deadline = time.monotonic() + GRACE_SECONDS
@@ -290,7 +303,19 @@ class ServiceGeneration:
 
     async def _legacy_aliases(self) -> None:
         api = self.api
-        if self.socket and self.socket != api.SOCKET_PATH and not os.path.exists(api.SOCKET_PATH):
+        if self.socket and self.socket != api.SOCKET_PATH:
+            if (
+                self.legacy_socket_identity is not None
+                and self.predecessor_retirement in {"exited", "cold-retired"}
+                and self._socket_identity(api.SOCKET_PATH) == self.legacy_socket_identity
+                and await asyncio.to_thread(self._unix_stale, api.SOCKET_PATH)
+                and self._socket_identity(api.SOCKET_PATH) == self.legacy_socket_identity
+            ):
+                try:
+                    os.unlink(api.SOCKET_PATH)
+                except OSError:
+                    log.warning("Legacy Unix alias unavailable; generation discovery remains active")
+        if self.socket and self.socket != api.SOCKET_PATH and not os.path.lexists(api.SOCKET_PATH):
             try:
                 listener = await asyncio.start_unix_server(
                     self.connections.callback("unix"), path=api.SOCKET_PATH,
@@ -314,6 +339,45 @@ class ServiceGeneration:
                 await self._tcp(self.requested_port)
             except OSError:
                 log.warning("Legacy TCP alias unavailable; generation discovery remains active")
+
+    @staticmethod
+    def _socket_identity(path: str) -> tuple[int, int] | None:
+        try:
+            info = os.lstat(path)
+            if stat.S_ISSOCK(info.st_mode) and (
+                os.name == "nt" or info.st_uid == os.getuid()
+            ):
+                return info.st_dev, info.st_ino
+        except OSError:
+            pass
+        return None
+
+    @staticmethod
+    def _unix_stale(path: str) -> bool:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+            peer.settimeout(.25)
+            try:
+                peer.connect(path)
+            except OSError as error:
+                return error.errno in {errno.ECONNREFUSED, errno.ENOENT}
+        return False
+
+    async def _capture_writer(self) -> None:
+        pid = self.writer_candidate_pid
+        if (
+            pid is None or (self.previous and pid == self.previous.pid)
+            or self.writer_predecessor_retirement != "not-requested"
+        ):
+            return
+        from .service_predecessor import Predecessor
+
+        self.writer_predecessor = await asyncio.to_thread(
+            Predecessor.capture_pid, pid, home_dir(),
+            getattr(self.service, "_instance_registry_root", None),
+        )
+        self.writer_predecessor_retirement = (
+            "grace" if self.writer_predecessor else "refused-owner"
+        )
 
     async def tick(self) -> None:
         if self.retiring is not None:
@@ -358,7 +422,15 @@ class ServiceGeneration:
         if previous_exited and self.hooks_started and not self.aliases_after_exit:
             await self._legacy_aliases()
             self.aliases_after_exit = True
+        if self.writer_predecessor_retirement == "grace":
+            if self.writer_predecessor.exited():
+                self.writer_predecessor_retirement = "exited"
+            elif time.monotonic() >= self.predecessor_deadline:
+                self.writer_predecessor_retirement = await settle_owned(asyncio.to_thread(
+                    self._retire_previous, self.writer_predecessor, True,
+                ))
         if not self._take_writer():
+            await self._capture_writer()
             return
         if not self.hooks_started:
             await self.close_handoff()
@@ -402,8 +474,9 @@ class ServiceGeneration:
         self.has_writer = False
         return True
 
-    def _retire_previous(self) -> str:
-        if self.predecessor is None:
+    def _retire_previous(self, predecessor=None, writer: bool = False) -> str:
+        predecessor = predecessor if predecessor is not None else self.predecessor
+        if predecessor is None:
             return "refused-owner"
         try:
             self.publication.acquire()
@@ -412,12 +485,22 @@ class ServiceGeneration:
         try:
             def current() -> bool:
                 endpoint = read_endpoint(self.root)
-                return bool(
+                selected_owner = bool(
                     selected() and endpoint and endpoint.pid == os.getpid()
                     and endpoint.installation_id == installation_id()
                 )
+                if not selected_owner or not writer:
+                    return selected_owner
+                if self.has_writer:
+                    return False
+                try:
+                    self.writer.acquire()
+                except AlreadyRunningError as error:
+                    return error.holder_pid == predecessor.pid
+                self.writer.release()
+                return False
 
-            result = self.predecessor.retire(current)
+            result = predecessor.retire(current)
             log.info("Vault predecessor retirement: %s", result)
             return result
         finally:

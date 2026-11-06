@@ -75,8 +75,13 @@ A candidate failure before publication leaves the incumbent's route intact.
 
 The selected incoming service's existing lifecycle tick grants the captured
 predecessor thirty seconds from discovery publication for cooperative work,
-handoff and exit. After grace, one bounded cold-retirement attempt may interrupt
-that exact central service, not its descendants. There is no new watchdog,
+handoff and exit. A failed earlier newcomer can publish discovery while an older
+generation still holds the credential-work lease. Capture that distinct lock
+holder too: the diagnostic PID selects a candidate, not retirement authority.
+At most these two current resources are considered, never historical processes.
+The writer candidate must still hold the contended lease at mutation time.
+After grace, each captured target gets one bounded cold-retirement attempt,
+never a descendant kill. There is no new watchdog,
 recurring reaper or per-request registry scan. The publication lease serializes
 the attempt with endpoint replacement; current selection and discovery are
 rechecked before native mutation.
@@ -90,7 +95,18 @@ identity-only termination is not sufficient owner authority. Reused PIDs,
 changed records, reselected successors, clients and unrelated installations
 cannot become targets.
 
-Health's additive `predecessor_retirement` reports `grace`, `exited`,
+The native pin pauses all parent threads before census and owner revalidation.
+Any live credential or unknown child refuses parent retirement and resumes it:
+parent exit alone would release the writer while its backend still mutates.
+The Windows native system console-host image is the only non-worker exemption,
+verified by file identity against `GetSystemDirectoryW`, never a process name.
+This census uses the declared `psutil` dependency only on the finite cold path.
+No child is terminated. A stuck backend can therefore retain write exclusion;
+it is not silently treated as a completed cold replacement. Admitted backend
+work may finish normally and transfer custody after a refused cold attempt.
+
+Health's additive `predecessor_retirement` and
+`writer_predecessor_retirement` report `grace`, `exited`,
 `cold-retired` or a specific `refused-*` outcome independently of
 `accepting_work`. A healthy incoming service is not rolled back for refused
 cleanup. Without a valid release receipt, credential admission still needs
@@ -113,6 +129,13 @@ The sender includes it only after closing admission, settling credential work
 and releasing its lease. Prior readers tolerate and ignore the additive field;
 prior senders omit it. Both mixed directions retain auth transfer and the
 original process-exit gate. No CLI syntax or auth-payload version is retired.
+
+After confirmed predecessor exit, the newcomer can reclaim the captured legacy
+Unix socket only when its owned socket type and device/inode still match and
+connection is refused or the pathname is absent. Permission denial and unknown
+probe failures are not stale-listener proof. Live listeners, replacement paths and unrelated files
+remain untouched. PID reuse is positive exit of the original incarnation, not
+permission to signal the reused PID.
 
 The payload contains unlocked KeePass master passwords, their original set
 times, and absolute expiration deadlines. It does not copy credential-value
@@ -142,8 +165,13 @@ tests/test_service_generation.py --test-file tests/test_service_predecessor.py
 both mixed receipt directions, no-overlap retirement, held connections during
 grace, hung credential work and transport cleanup, original native-process exit,
 writer exclusion, retained durable bytes, successor-safe cleanup and legacy TCP
-reconnection. Unit controls separately cover owner/selection/birth refusal,
-unconfirmed retirement, literal receipt admission and expiration preservation.
+reconnection. Three generations exercise a discovered passive predecessor
+ahead of the actual older writer. A real subprocess behind the production
+KeePassXC edit constructor proves refusal while backend mutation remains live,
+followed by cooperative settlement. Unit controls separately cover
+owner/selection/birth refusal, changed lease holders, unconfirmed retirement,
+PID reuse, literal receipt admission, stale/live/replaced Unix aliases and
+expiration preservation.
 These are not installed whole-suite adoption evidence.
 
 Native pinned cold retirement is implemented for Windows and Linux. macOS
