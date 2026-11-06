@@ -262,11 +262,58 @@ def launch_session_host(
     own stdout/stderr to ``os.devnull`` once ready
     (``_detach_stdio_from_frontend``), so output after that point is never
     coupled to this frontend process's lifetime.
+
+    Without ``state_dir`` the host's records live in a labeled scratch
+    directory (``scratch-owner.json`` breadcrumb). A launch that fails before
+    any caller can hold the host's authority removes that directory; a ready
+    host keeps it because its authority record is read after the host exits.
     """
-    sd = (
-        Path(os.path.abspath(state_dir))
-        if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
-    )
+    # Frontend-only helper; the compact host archive does not carry it.
+    from agent_procutil.scratch import create_labeled_scratch, remove_scratch
+
+    if state_dir:
+        sd, fallback = Path(os.path.abspath(state_dir)), None
+    else:
+        sd = fallback = create_labeled_scratch(
+            "agbridge-host", "agent Session Host state and authority record",
+            owner_refs={"session_id": session_id} if session_id else None,
+            retention="retained while its host authority may be read; removed on failed launch",
+        )
+    try:
+        return _launch_in(
+            sd, child_argv, cwd=cwd, env=env, ready_timeout=ready_timeout, nonce=nonce,
+            session_id=session_id, host_version=host_version,
+            unexpected_reap_seconds=unexpected_reap_seconds,
+            active_reap_seconds=active_reap_seconds, acquisition_launch=acquisition_launch,
+            host_entrypoint=host_entrypoint, policy_context=policy_context,
+            lifetime_policy=lifetime_policy,
+        )
+    except BaseException as exc:
+        # A timed-out host may still be exiting, and custody owners keep their evidence.
+        if fallback is not None and acquisition_launch is None and not isinstance(
+            exc, TimeoutError,
+        ):
+            remove_scratch(fallback)
+        raise
+
+
+def _launch_in(
+    sd: Path,
+    child_argv: list[str],
+    *,
+    cwd: str | None,
+    env: dict[str, str] | None,
+    ready_timeout: float,
+    nonce: str,
+    session_id: str,
+    host_version: str,
+    unexpected_reap_seconds: float,
+    active_reap_seconds: float,
+    acquisition_launch: LaunchOwner | None,
+    host_entrypoint: str,
+    policy_context: str | None,
+    lifetime_policy: str,
+) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
 
     _root(sd, create=True)

@@ -105,6 +105,14 @@ that actual owner, then admits the original handoff immediately before its
 `Popen`. A closure or owner change after the one-shot commit leaves it
 outstanding, never eligible for another launch.
 
+When a caller supplies no Host state directory, `launch_session_host` creates
+a labeled `agbridge-host-*` scratch directory (with an `agent_procutil`
+`scratch-owner.json` breadcrumb) under the OS temp root. A failed launch
+without an acquisition owner, other than a readiness timeout, removes it;
+custody owners and timed-out Hosts keep their evidence. A started Host keeps
+it too, because cold recovery still reads the
+far-side authority record there after the Host exits.
+
 The concrete acquisition adapter retains its original request and journal.
 `LocalLaunchOwner` owns the shared live Session/target/Host/child/ACP reference
 checks, one-shot native invocation and configuration fences. After acceptance,
