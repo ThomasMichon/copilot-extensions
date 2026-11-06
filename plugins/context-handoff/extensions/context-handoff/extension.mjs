@@ -71,6 +71,7 @@ import {
 } from "./thresholds.mjs";
 import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnostics.mjs";
 import { createNativeContextObserver, nativePressurePrompt } from "./native-context.mjs";
+import { nativePressureDeferred } from "./native-pressure.mjs";
 import { registerNativePromptReceiptObservation } from "./prompt-receipt.mjs";
 import {
   formatAuthorizationEvidence,
@@ -1417,6 +1418,22 @@ let pendingNudge = null;  // null | "soft" | "hard"
 let latestUsageEvent = null;
 let usageRetryTimer = null;
 
+// Native-selected sessions defer pressure handling to the host (see
+// native-pressure.mjs): drop any queued nudge, never log threshold crossings
+// computed from a possibly inaccurate usage estimate, and say so once per
+// window. Manual entry points are unaffected.
+function deferNativePressure(revision) {
+  pendingNudge = null;
+  const key = `${revision}:native-pressure-deferred`;
+  if (nativeWarnings.has(key)) return;
+  nativeWarnings.add(key);
+  session.log(
+    "[Context Handoff] Native context management is selected; automatic " +
+    "context-pressure nudges are deferred to the host (native_pressure: defer). " +
+    "Manual handoff tools remain available.",
+  );
+}
+
 function retryLatestUsage() {
   if (usageRetryTimer || !latestUsageEvent) return;
   usageRetryTimer = setTimeout(() => {
@@ -1432,6 +1449,11 @@ session.on("session.idle", async (event) => {
   const revision = state.windowRevision;
   const observation = await observeNativeContext(true);
   if (revision !== state.windowRevision) return;
+  await handoffConfigPromise;
+  if (nativePressureDeferred(observation, handoffConfig.nativePressure)) {
+    deferNativePressure(revision);
+    return;
+  }
   if (!observation.native && latestUsageEvent &&
       automaticHandoffEnabled(handoffConfig.mode) && !state.forceTriggered && !state.handoffGenerated) {
     await handleUsage(latestUsageEvent);
@@ -1499,6 +1521,11 @@ async function handleUsage(event) {
   }
   const observation = await observeNativeContext();
   if (revision !== state.windowRevision) return;
+  if (nativePressureDeferred(observation, handoffConfig.nativePressure)) {
+    deferNativePressure(revision);
+    persistState();
+    return;
+  }
 
   let pressure;
   try {
@@ -1533,6 +1560,11 @@ async function handleUsage(event) {
     if (revision !== state.windowRevision) return;
     if (state.forceTriggered || state.handoffGenerated) return;
     if (currentObservation.native) {
+      if (nativePressureDeferred(currentObservation, handoffConfig.nativePressure)) {
+        deferNativePressure(revision);
+        persistState();
+        return;
+      }
       pendingNudge = "hard";
       state.hardReminderSent = true;
       state.softReminderSent = true;

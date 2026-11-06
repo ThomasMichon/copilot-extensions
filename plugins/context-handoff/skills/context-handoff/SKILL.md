@@ -38,8 +38,11 @@ When `contextManagementTools: true` is selected in applicable Copilot settings,
 or all four context tools are offered without explicit false, use native
 context-only rollover. Confirmed unavailable tools override that selection.
 Unknown metadata does not undo explicit opt-in: check availability and diagnose
-failure, never invent a tool. The extension reports its selection and substitutes
-native checkpoint pressure prompts; explicit new-owner/process handoffs remain
+failure, never invent a tool. The extension reports its selection and, by
+default (`native_pressure: defer`), sends no automatic pressure prompts: the
+host's own checkpoint cadence governs, and the extension's usage estimate is
+not authoritative for host-managed windows. With `native_pressure: nudge` it
+substitutes native checkpoint pressure prompts instead. Explicit new-owner/process handoffs remain
 available in every mode. The remaining custom quiesce/sync/save/trigger flow is
 for actual responsibility transfer or diagnosed unsupported-native recovery,
 not a mandatory response to native token pressure.
