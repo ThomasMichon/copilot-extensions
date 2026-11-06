@@ -218,6 +218,8 @@ startup path first; it does not claim every suite entry point already conforms.
   through the direct [owner-fenced Plan](owner-fenced-recovery-intake.md#plan).
   Preserve original owners, all alternatives and unchecked product acceptance;
   actual reviewed merge/current full readback precede tracker supersession.
+  #3179 separately retains its actual current-owner acceptance requirement;
+  that issue stays OPEN unless the complete transfer is accepted.
 
 - [ ] Establish the budget before declaration/companion resolution and isolate
   expensive receipt integrity work from the master reconcile thread.

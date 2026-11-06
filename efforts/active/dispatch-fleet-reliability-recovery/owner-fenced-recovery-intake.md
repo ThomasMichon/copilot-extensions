@@ -6,6 +6,12 @@ owner. It retains #2798, #3179, #8780 and #8781 as distinct finite workstreams.
 Normal review, actual merge and complete current receiving readback precede
 administrative tracker supersession. Product acceptance remains unchecked.
 
+#3179 additionally retains its specific current-owner acceptance requirement:
+keep the complete incident/recovery token unless its current owner accepts
+the complete transfer. Plan review, merge and readback do not themselves
+record that acceptance. Keep #3179 OPEN until it is actually recorded; this
+does not add an owner-ACK requirement to the other receiving lanes.
+
 The existing Coordinator/Supervisor, issue-loop/provider, steering/control,
 Bridge, ground/cleanup, reservation, CLI/client/server and native-validation
 custodians retain their source, claims, tasks, allocations, approvals and
@@ -52,6 +58,10 @@ claim release or a generic owner-ACK ceremony.
   and lost mapping. Never guess from the current head or automatically repair
   old holds. Keep preview/permission/revision/creating-host/generation/
   allocation fences and terminal versus nonterminal recovery distinct.
+- [ ] **R3179-P6:** Preserve the existing incident/recovery custodian and
+  record that owner's actual acceptance of the complete planned-work transfer
+  before retiring #3179. No particular signoff format or implementation/
+  native completion is added; a merged plan alone is not that acceptance.
 - [ ] **R8780-P1:** Expose BOTH optional `--expected-generation INT` and
   `--expected-owner-session-id ID` through the abandon parser and forward
   exact values to existing client/API guards beside `--expected-status`.
@@ -92,6 +102,10 @@ claim release or a generic owner-ACK ceremony.
   through lost mapping, same/different-task exclusivity and newer competing
   allocation. Preserve preview/permission/revision/host/generation fences;
   no early key release, guessed identity or old-hold repair.
+- [ ] **R3179-V4:** Before administrative retirement, verify the recorded
+  current-owner acceptance covers the entire original/refined incident and
+  recovery contract. Otherwise retain #3179 OPEN. Product/operational
+  acceptance and every source/resource duty remain unchecked and unchanged.
 - [ ] **R8780-V1:** Real parser-to-client forwarding covers both values,
   integer zero and `None` defaults. Controlled same-status/new-generation
   and changed-owner races refuse atomically before transition; matched
