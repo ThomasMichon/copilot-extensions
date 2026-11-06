@@ -13,6 +13,8 @@ from .killswitch_mutation import mutation_lock
 
 
 def _plain_path(path: Path, *, directory=False, missing_parents=False) -> Path:
+    if ".." in path.parts:
+        raise codec.PreferenceError("parent-traversal")
     path = Path(os.path.abspath(path))
     for parent in path.parents:
         try:
@@ -45,6 +47,7 @@ def _distinct(paths: list[Path]) -> None:
 def _write(path: Path, value: dict) -> None:
     import json
 
+    path = _plain_path(path)
     raw = (json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode()
     if len(raw) > codec.MAX_BYTES:
         raise codec.PreferenceError("document-too-large")
@@ -169,7 +172,7 @@ def exchange(operation: str, *, apply=False, expected="", **arguments) -> dict:
     result, candidate, accepted, selected = _plan(operation, **arguments)
     if not apply:
         return result
-    with mutation_lock(Path(arguments["state"]) / "exchange"):
+    with mutation_lock(selected.parent / "exchange"):
         result, candidate, accepted, selected = _plan(operation, **arguments)
         if result["preview_token"] != expected:
             raise codec.PreferenceError("preview-changed")

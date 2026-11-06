@@ -250,6 +250,61 @@ def test_hardlink_aliases_cannot_turn_publication_into_a_local_state_overwrite(i
         publish(inputs, output)
 
 
+@pytest.mark.parametrize("selected", ["state", "output", "source", "local"])
+def test_parent_traversal_is_rejected_before_path_normalization_or_locking(inputs, tmp_path, monkeypatch, selected):
+    args = {"state": inputs["state"], "source": inputs["source"], "output": tmp_path / "output.json"}
+    operation = "publish"
+    if selected == "local":
+        args.pop("output")
+        args.update(machine=inputs["machine"], harness=inputs["harness"], local=tmp_path / "local.json")
+        operation = "accept"
+    path = args[selected]
+    args[selected] = path.parent / "link" / ".." / path.name
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("parent traversal reached normalization or a lock")
+
+    monkeypatch.setattr(exchange, "mutation_lock", forbidden)
+    original = exchange.os.path.abspath
+
+    def normalize(path):
+        if ".." in Path(path).parts:
+            forbidden()
+        return original(path)
+
+    monkeypatch.setattr(exchange.os.path, "abspath", normalize)
+    with pytest.raises(codec.PreferenceError, match="parent-traversal"):
+        exchange.exchange(operation, **args, apply=True, expected="0" * 64)
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("selected", ["state", "output"])
+def test_real_symlink_parent_traversal_never_redirects_publication_or_the_writer_lock(inputs, tmp_path, selected):
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    leaf = foreign / "leaf"
+    leaf.mkdir()
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(leaf, target_is_directory=True)
+    except OSError:
+        pytest.skip("fixture filesystem cannot create directory symlinks")
+    target = write(foreign / "published.json", snapshot(domains={}))
+    args = {"state": inputs["state"], "source": inputs["source"], "output": tmp_path / "published.json"}
+    if selected == "state":
+        args["state"] = link / ".." / inputs["state"].name
+    else:
+        args["output"] = link / ".." / "published.json"
+    before = target.read_bytes()
+    with pytest.raises(codec.PreferenceError, match="parent-traversal"):
+        exchange.exchange("publish", **args, apply=True, expected="0" * 64)
+    assert target.read_bytes() == before
+    assert not (foreign / inputs["state"].name).exists()
+    assert not (inputs["state"] / "exchange.lock").exists()
+    assert not (inputs["state"] / "publication.json").exists()
+
+
 def test_failed_acceptance_preserves_previous_complete_snapshot_and_cleans_temp(inputs, monkeypatch):
     apply(inputs)
     write(inputs["source"], snapshot(2, 1, domains={}))

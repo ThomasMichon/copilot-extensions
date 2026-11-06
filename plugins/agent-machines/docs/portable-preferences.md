@@ -206,6 +206,8 @@ atomic replacement, with bounded output and temporary-file cleanup. The local
 `exchange.lock` is retained for OS writer serialization, not synchronized or
 used as a fleet claim. Existing directory chains, inputs, outputs and state
 files must be ordinary nonlinked paths; aliases among the selected files refuse.
+Parent-traversal (`..`) components refuse before normalization, including in
+`--state-dir`, so inspected paths and actual lock/write targets cannot diverge.
 Write parent directories must already exist; an unavailable received directory
 still projects the accepted snapshot as offline data. Output replacement is local publication
 only: `remote_receipt` stays `not-observed`, and publication does not prove a
