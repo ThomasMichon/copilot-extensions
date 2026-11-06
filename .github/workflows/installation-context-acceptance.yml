@@ -446,7 +446,7 @@ jobs:
               for case in cases for child in case
           ), "Hosted qualification requires positive, non-skipped controls"
 
-      - name: Diagnose Bash controller ancestry without removing any runtime
+      - name: Diagnose the exact Bash rooted-consumer refusal in a copied fixture
         if: failure()
         shell: python
         run: |
