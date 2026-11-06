@@ -151,6 +151,8 @@ def archive_terminal(ledger: Path, expected: str) -> None:
             stream.write(raw)
             stream.flush()
             os.fsync(stream.fileno())
-    from .checkout_durability import files
+    from .checkout_durability import directory as synchronize_directory, files
 
     files([history])
+    synchronize_directory(directory.parent)
+    synchronize_directory(ledger.parent)

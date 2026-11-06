@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import json
 from contextlib import ExitStack
-from pathlib import Path
 
 from . import permissions, tracking
-
-
-def _under(value: str, root: str) -> bool:
-    return Path(value).is_relative_to(Path(root))
+from .checkout_reference_paths import canonical, under as _under
 
 
 def capture(source: str, destination: str) -> dict:
@@ -30,9 +26,9 @@ def capture(source: str, destination: str) -> dict:
         for value in entries:
             if not isinstance(value, str):
                 raise ValueError("unsupported Copilot permission path")
-            if Path(value) == Path(source) and value != source:
+            if canonical(value) == canonical(source) and value != source:
                 raise ValueError("relocation v1 refuses non-exact source permission aliases")
-            if _under(value, destination) or _under(value, source) and Path(value) != Path(source):
+            if _under(value, destination) or _under(value, source) and canonical(value) != canonical(source):
                 raise ValueError("relocation v1 refuses existing destination or nested permission entries")
         value = source in entries if kind == "trust" else entries.get(source)
         if kind == "permissions" and source in entries and not isinstance(value, dict):
@@ -59,12 +55,19 @@ def apply(source: str, destination: str, captured: dict) -> None:
             entries = data.get("trustedFolders", []) if kind == "trust" else data.get("locations", {})
             if isinstance(entries, (dict, list)) and any(
                 isinstance(value, str) and (
-                    Path(value) == Path(source) and value != source
-                    or Path(value) == Path(destination) and value != destination
+                    canonical(value) == canonical(source) and value != source
+                    or canonical(value) == canonical(destination) and value != destination
                 )
                 for value in entries
             ):
                 raise ValueError("permission aliases changed during relocation")
+            if isinstance(entries, (dict, list)) and any(
+                not isinstance(value, str)
+                or _under(value, source) and canonical(value) != canonical(source)
+                or _under(value, destination) and canonical(value) != canonical(destination)
+                for value in entries
+            ):
+                raise ValueError("nested permission bindings changed during relocation")
             if kind == "trust":
                 if not isinstance(entries, list):
                     raise ValueError("Copilot trust schema changed during relocation")

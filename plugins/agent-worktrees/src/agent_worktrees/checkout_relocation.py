@@ -15,6 +15,7 @@ from . import checkout_relocation_state as state, checkout_transfer as transfer
 from . import checkout_durability as durability, permissions
 from . import config as cfg, execution_spaces, git_ops, launch_admission, launch_seed_state
 from . import procs, retained_checkout, sessions, tracking, worktree_lifecycle
+from .checkout_reference_paths import under as reference_under
 from .finalize_lock import FinalizeLock
 
 SCHEMA = "agent-worktrees.checkout-relocation.v1"
@@ -153,23 +154,20 @@ def _sessionless(checkout: Path) -> None:
     directory = sessions._session_state_dir()
     import yaml
 
-    for workspace in directory.glob("*/workspace.yaml") if directory.exists() else ():
-        if workspace.is_symlink():
+    for index, workspace in enumerate(directory.glob("*/workspace.yaml") if directory.exists() else ()):
+        if index >= transfer.MAX_ENTRIES or workspace.stat().st_size > 64 * 1024 or workspace.is_symlink():
             raise ValueError("session workspace inventory is redirected")
         data = yaml.safe_load(workspace.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("session workspace inventory has an unsupported schema")
         for field in ("cwd", "git_root"):
             value = data.get(field)
-            if isinstance(value, str) and Path(value).is_relative_to(checkout):
+            if isinstance(value, str) and reference_under(value, checkout):
                 raise ValueError("relocation v1 refuses retained Copilot workspaces")
     database = directory.parent / "session-store.db"
     if database.exists():
-        root = checkout.as_posix().rstrip("/")
-        prefix = root.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "/%"
         queries = [
-            (f"SELECT 1 FROM {table} WHERE replace({column}, char(92), '/') = ? COLLATE NOCASE "
-             f"OR replace({column}, char(92), '/') LIKE ? ESCAPE '!' LIMIT 1", (root, prefix))
+            (f"SELECT 1 FROM {table} WHERE checkout_reference_under({column}, ?) LIMIT 1", (str(checkout),))
             for table, column in (("sessions", "cwd"), ("session_files", "file_path"))
         ]
         if _references(database, queries):
@@ -189,6 +187,18 @@ def _references(path: Path, queries: list[tuple]) -> bool:
     connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=3)
     deadline = time.monotonic() + 3
     connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+    inspected = 0
+    def bounded_reference(value, root):
+        nonlocal inspected
+        inspected += 1
+        if inspected > transfer.MAX_ENTRIES or time.monotonic() > deadline:
+            raise ValueError("operational reference inventory exceeds its budget")
+        if value is None:
+            return 0
+        if not isinstance(value, str):
+            raise ValueError("operational reference path has an unsupported schema")
+        return int(reference_under(value, root))
+    connection.create_function("checkout_reference_under", 2, bounded_reference)
     try:
         return any(connection.execute(query, parameters).fetchone() for query, parameters in queries)
     except sqlite3.DatabaseError as exc:

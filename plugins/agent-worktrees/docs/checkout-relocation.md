@@ -52,6 +52,9 @@ They are staged support boundaries, not a permanent exclusion of inactive WIP.
 Git-locked worktrees are refused even when their tracking disposition is final.
 Case/slash or normalized permission aliases are refused until their migration is
 qualified; they are not silently left pointing at the removed source.
+Reference containment uses normalized native paths, including parent-component
+and filesystem aliases. Unqualified network references and relative
+parent-component references refuse rather than triggering network probes.
 
 Only known operational permission/trust paths are rebound through their existing
 serialized file owners. Conversation/store/event/proposal history is never
@@ -59,6 +62,8 @@ globally rewritten. An existing live session database is read narrowly and
 read-only; a WAL database without its already-owned sidecars is refused.
 Unrelated live rows are untouched. Copilot session-reference matches are a
 refusal until their reader/writer semantics are qualified.
+Reference inspection has a 10,000-entry budget and a three-second database
+inventory budget; an incomplete inventory refuses.
 
 ## Transfer and recovery
 

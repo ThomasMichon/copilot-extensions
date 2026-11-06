@@ -179,14 +179,22 @@ def test_second_move_preserves_the_completed_receipt_and_restores_original_locat
     assert (source / "ignored.bin").read_bytes() == bytes(range(256))
 
 
-def test_archiving_never_removes_the_current_stale_location_fence(checkout):
+def test_archiving_never_removes_the_current_stale_location_fence(checkout, monkeypatch):
     import hashlib
 
     assert _move(checkout)["phase"] == "complete"
     journal = move_state.journal_path(checkout.record.yaml_path)
     original = journal.read_bytes()
+    synchronized = []
+    synchronize = relocation.durability.directory
+    def observe(path):
+        synchronized.append(path)
+        synchronize(path)
+    monkeypatch.setattr(relocation.durability, "directory", observe)
     move_state.archive_terminal(checkout.record.yaml_path, hashlib.sha256(original).hexdigest())
     assert journal.read_bytes() == original
+    assert checkout.record.yaml_path.parent / "checkout-relocations" in synchronized
+    assert checkout.record.yaml_path.parent in synchronized
     with pytest.raises(ValueError, match="stale checkout location"):
         tracking.save_record(checkout.record)
 
@@ -261,7 +269,7 @@ def test_destination_access_keeps_inherit_only_semantics(tmp_path):
     assert relocation.transfer._access(directories[0]) != relocation.transfer._access(directories[1])
 
 
-@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "seed"])
+@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "source-parent-alias", "seed"])
 def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
     record = checkout.record
     if blocker == "dirty":
@@ -287,6 +295,10 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
         config_path = checkout.copilot / "config.json"
         alias = str(checkout.source).replace("\\", "/").lower() if os.name == "nt" else str(checkout.source) + "/."
         config_path.write_text(json.dumps({"trustedFolders": [alias]}))
+    elif blocker == "source-parent-alias":
+        config_path = checkout.copilot / "config.json"
+        alias = checkout.source.parent / "sibling" / ".." / checkout.source.name
+        config_path.write_text(json.dumps({"trustedFolders": [str(alias)]}))
     elif blocker == "seed":
         from agent_worktrees import launch_seed_state
 
@@ -496,13 +508,15 @@ def test_unrelated_live_session_database_is_not_rewritten(checkout):
         connection.close()
 
 
-def test_retained_session_database_reference_refuses_before_mutation(checkout):
+@pytest.mark.parametrize("alias", [False, True])
+def test_retained_session_database_reference_refuses_before_mutation(checkout, alias):
     database = checkout.copilot / "session-store.db"
     connection = sqlite3.connect(database)
     try:
         connection.execute("CREATE TABLE sessions (cwd TEXT)")
         connection.execute("CREATE TABLE session_files (file_path TEXT)")
-        connection.execute("INSERT INTO sessions VALUES (?)", (str(checkout.source),))
+        value = checkout.source.parent / "sibling" / ".." / checkout.source.name if alias else checkout.source
+        connection.execute("INSERT INTO sessions VALUES (?)", (str(value),))
         connection.commit()
     finally:
         connection.close()
@@ -510,6 +524,34 @@ def test_retained_session_database_reference_refuses_before_mutation(checkout):
         _plan(checkout)
     assert not move_state.journal_path(checkout.record.yaml_path).exists()
     assert checkout.source.exists() and not checkout.destination.exists()
+
+
+def test_workspace_parent_alias_refuses_before_mutation(checkout):
+    directory = checkout.copilot / "session-state" / "retained"
+    directory.mkdir(parents=True)
+    alias = checkout.source.parent / "sibling" / ".." / checkout.source.name
+    (directory / "workspace.yaml").write_text(json.dumps({"cwd": str(alias)}))
+    with pytest.raises(ValueError, match="retained Copilot workspaces"):
+        _plan(checkout)
+    assert not move_state.journal_path(checkout.record.yaml_path).exists()
+
+
+@pytest.mark.parametrize("kind", ["trust", "permissions"])
+def test_capture_modify_apply_refuses_new_nested_permission_bindings(checkout, kind):
+    paths = relocation.permission_paths
+    captured = paths.capture(str(checkout.source), str(checkout.destination))
+    filename = "config.json" if kind == "trust" else "permissions-config.json"
+    path = checkout.copilot / filename
+    data = json.loads(path.read_text())
+    nested = str(checkout.source / "new-nested-binding")
+    if kind == "trust":
+        data["trustedFolders"].append(nested)
+    else:
+        data["locations"][nested] = {"tool_approvals": []}
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="nested permission bindings"):
+        paths.apply(str(checkout.source), str(checkout.destination), captured)
+    assert nested in (json.loads(path.read_text())["trustedFolders" if kind == "trust" else "locations"])
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native cross-volume qualification")
