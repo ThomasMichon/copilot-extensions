@@ -1355,26 +1355,21 @@ def show_install_status() -> None:
             f"(checked {python} and {lib})"
         )
 
-    bd = bin_dir()
     if platform.system() == "Windows":
-        from .manager_launch_cli import _control_plane_provider_selection
-
-        provider, selection_error = _control_plane_provider_selection()
-        if selection_error:
-            output.err(f"Session launch control-plane provider: {selection_error}")
-        elif provider is None:
-            output.err("Session launch: no registered control-plane provider")
+        from . import control_plane_providers, manager_launch_cli
+        provider, error = manager_launch_cli._control_plane_provider_selection(
+            directory=control_plane_providers._machine_control_plane_providers_dir(),
+        )
+        if error or provider is None:
+            output.err(f"Session launch: {error or 'no registered control-plane provider'}")
         else:
             output.ok(
-                f"Session launch provider: {provider.provider} ({provider.command[0]}); "
-                "registration only, runtime not probed"
+                f"Session launch provider: {provider.provider} ({provider.command[0]}); registration only, runtime not probed"
             )
+    elif (bin_dir() / "launch-session.sh").exists():
+        output.ok("launch-session.sh deployed")
     else:
-        p = bd / "launch-session.sh"
-        if p.exists():
-            output.ok("launch-session.sh deployed")
-        else:
-            output.err("launch-session.sh missing")
+        output.err("launch-session.sh missing")
 
     # Binstub
     lb = local_bin()

@@ -1180,6 +1180,48 @@ fi
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows installer entrypoint")
+@pytest.mark.timeout(300)
+def test_windows_legacy_provision_retry_repairs_receipt_after_activation(tmp_path):
+    payload = _stage_release_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    _offline_uv(tmp_path, env)
+    binding = payload / "scripts" / "command_binding.py"
+    text = binding.read_text(encoding="utf-8")
+    text = text.replace(
+        'if __name__ == "__main__":',
+        'if __name__ == "__main__":\n'
+        '    if os.environ.get("FIXTURE_REFUSE_MANIFEST") == "1" and "--write-manifest" in sys.argv:\n'
+        '        raise SystemExit("fixture publication refusal after activation")',
+    )
+    binding.write_text(text, encoding="utf-8")
+    host = shutil.which("pwsh") or shutil.which("powershell")
+    assert host is not None
+    command = [
+        host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", str(payload / "scripts" / "install.ps1"), "provision",
+    ]
+    options = dict(
+        capture_output=True, text=True, timeout=120,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    first = subprocess.run(command, env={**env, "FIXTURE_REFUSE_MANIFEST": "1"}, **options)
+    assert first.returncode != 0
+    assert "fixture publication refusal after activation" in first.stdout + first.stderr
+    _assert_complete_runtime(home)
+    root = home / ".agent-logger"
+    version = (root / "current-version").read_text().strip()
+    completion = root / "versions" / version / ".install-complete.json"
+    before = (completion.stat().st_mtime_ns, completion.read_bytes())
+    retried = subprocess.run(command, env=env, **options)
+    assert retried.returncode == 0, retried.stdout + retried.stderr
+    assert (completion.stat().st_mtime_ns, completion.read_bytes()) == before
+    assert (root / "current-version").read_text().strip() == version
+    manifest = json.loads((root / "deploy-manifest.json").read_text())
+    assert manifest["source"]["version"] == version
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
 def test_windows_task_access_denied_classifier_downgrades_and_rethrows(
