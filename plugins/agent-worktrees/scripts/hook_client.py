@@ -978,7 +978,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         if kind == "preToolUse":
             hold = getattr(_load_sibling("hook_pre_policy.py"), "hold_pending", None)
-            if strict_policy and callable(hold):
+            if callable(hold):
                 hold(error)
             sys.stdout.write(json.dumps(_pre_unavailable("policy client evaluation failed")))
     # sessionStart always emits exactly one JSON object -- write it here,

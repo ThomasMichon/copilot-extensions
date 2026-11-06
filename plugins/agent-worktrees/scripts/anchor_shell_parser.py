@@ -123,19 +123,54 @@ def literal_write_targets(seg: str, tool: str) -> list[str]:
     """Extract literal redirect operands and target-bearing shell arguments."""
     tokens = git_tokens(seg, tool, split_redirects=True)
     targets = []
-    for index, token in enumerate(tokens):
+    arguments = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
         if token in {">", ">>"}:
             if index + 1 < len(tokens) and not tokens[index + 1].startswith("&"):
                 targets.append(tokens[index + 1])
-            continue
-        if token.lower().startswith("of="):
-            token = token[3:]
-        elif tool.lower() in {"powershell", "pwsh"}:
-            token = re.sub(
-                r"^-(?:literalpath|path|filepath|destination):", "", token,
-                flags=re.IGNORECASE,
-            )
-        targets.append(token)
+            index += 2
+        else:
+            arguments.append(token)
+            index += 1
+    if not arguments:
+        return targets
+    verb, args = arguments[0].lower(), arguments[1:]
+    if verb == "dd":
+        return targets + [arg[3:] for arg in args if arg.lower().startswith("of=")]
+    positional, named = [], {}
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        option, separator, value = arg.partition(":")
+        option = option.lower()
+        if option in {"-path", "-literalpath", "-filepath", "-destination", "-value", "-inputobject"}:
+            if not separator and index + 1 < len(args):
+                index += 1
+                value = args[index]
+            named[option] = value
+        elif arg in {"-t", "--target-directory"} and index + 1 < len(args):
+            index += 1
+            named["-destination"] = args[index]
+        elif arg.startswith("--target-directory="):
+            named["-destination"] = arg.partition("=")[2]
+        elif not arg.startswith("-"):
+            positional.append(arg)
+        index += 1
+    paths = [named[key] for key in ("-path", "-literalpath", "-filepath") if key in named]
+    destination = named.get("-destination")
+    if verb in {"cp", "copy-item"}:
+        return targets + ([destination] if destination is not None else positional[-1:])
+    if verb in {"mv", "move-item"}:
+        return targets + paths + positional + ([destination] if destination is not None else [])
+    if verb in {
+        "set-content", "add-content", "out-file", "new-item", "remove-item",
+        "clear-content", "rename-item", "set-itemproperty", "tee-object",
+    }:
+        return targets + (paths or positional[:1])
+    if verb in {"tee", "sed", "rm", "touch", "mkdir", "truncate", "patch"}:
+        return targets + positional
     return targets
 
 

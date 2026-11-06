@@ -140,6 +140,9 @@ elevation defaults. Confirmed delegated roots remain independently usable.
 Worktree-only shell reminders reuse the anchor owner's classification, including
 its `pull --ff-only` maintenance exemption and linked-checkout exclusion.
 Delegation, read-only and elevation postures retain their stricter classifiers.
+Shell path attribution distinguishes mutating destinations from copy sources,
+`dd` input files and PowerShell value arguments; merely reading or quoting a
+guarded path does not require a write grant.
 
 Git identity uses bounded filesystem metadata reads, including ordinary `.git`
 directories, relative/absolute gitdir pointers, linked worktree `commondir`,

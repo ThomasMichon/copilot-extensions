@@ -253,3 +253,16 @@ gap, with no new sandbox, process interception, service, or security guarantee.
   destinations and unchanged stricter delegation, passed 266 tests.
 - Rebased onto the current contribution branch, preserving the concurrent
   effort-index addition and all implementation commits.
+
+### 2026-11-05 - Batch observation custody and mutating operands
+- The next review identified a native-batch gap in PR-observation supervision
+  and source/value shell operands incorrectly attributed as writes.
+- Supervisor selection now inspects normalized calls and retains the complete
+  batch under the existing owned worker and settlement deadline. Pending
+  cleanup decisions are no longer discarded by the legacy command entry.
+- Shell guidance shares actual mutating-operand selection: copy sources,
+  `dd` input paths and PowerShell values remain reads, while output destinations
+  and moved sources retain the applicable posture/delegation guidance.
+- The focused guard/parser packet passed 297 tests. The real Windows legacy
+  batch cleanup-error control passed in 25.88 seconds, preserving the earlier
+  ask and proving retirement of the exact retained lookup child.

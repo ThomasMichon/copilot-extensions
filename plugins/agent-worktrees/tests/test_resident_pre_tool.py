@@ -380,7 +380,7 @@ console.log(JSON.stringify(result));
 @pytest.mark.skipif(os.name != "nt", reason="Windows caller-owned native/SDK deadline consumers")
 @pytest.mark.parametrize("consumer", ["resident", "powershell.exe"])
 @pytest.mark.parametrize("late_result", ["timeout", "deny", "cleanup-error"])
-def test_pretool_preserves_accumulated_ask_across_later_lookup(tmp_path, consumer, late_result, aliased=False):
+def test_pretool_preserves_accumulated_ask_across_later_lookup(tmp_path, consumer, late_result, aliased=False, batched=False):
     import time
     import uuid
 
@@ -506,6 +506,14 @@ sys.setprofile(observe)
     if aliased:
         event = {"tool_name": "powershell", "cwd": str(cwd),
                  "tool_input": json.dumps({"script": event["toolArgs"]["command"]})}
+    if batched:
+        event = {
+            "cwd": str(cwd), "sessionId": "ask-deadline-fixture",
+            "toolCalls": [
+                {"name": "powershell", "args": {"command": command}}
+                for command in event["toolArgs"]["command"].split("; ")
+            ],
+        }
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps(event), encoding="utf-8")
     if consumer == "resident":
@@ -614,6 +622,13 @@ def test_missing_sdk_does_not_suppress_intact_stateless_guard(monkeypatch, tmp_p
 def test_legacy_aliased_json_keeps_ask_after_cleanup_error(tmp_path):
     test_pretool_preserves_accumulated_ask_across_later_lookup(
         tmp_path, "legacy", "cleanup-error", aliased=True,
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows legacy batch consumer")
+def test_legacy_native_batch_keeps_ask_after_cleanup_error(tmp_path):
+    test_pretool_preserves_accumulated_ask_across_later_lookup(
+        tmp_path, "legacy", "cleanup-error", batched=True,
     )
 
 

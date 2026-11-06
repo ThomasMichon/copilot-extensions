@@ -69,10 +69,12 @@ try:
     from anchor_write_guard import (
         _git_invocation, _git_subcommand_writes_worktree, evaluate as _anchor_evaluate,
     )
+    from anchor_shell_parser import literal_write_targets
 except (ImportError, OSError, SyntaxError):
     _git_invocation = None
     _git_subcommand_writes_worktree = None
     _anchor_evaluate = None
+    literal_write_targets = None
 
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
@@ -383,20 +385,16 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell",
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
         at_write_cmd = bool(_WRITE_CMD_START.match(eff))
+        targets = literal_write_targets(eff, tool) if literal_write_targets is not None else []
         for g in guarded:
             gp = g.get("path")
             if not gp:
                 continue
             reason = _deny_reason(g, "(a shell command writes into it).")
-            identity = g.get("identity") or {}
-            for root in {gp, identity.get("root", gp), g.get("registered_path", gp)}:
-                tok = _root_token(_canon(root))
-                # 1. A file redirect whose target is the repo (excludes fd dups).
-                if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
-                    return {**g, "reason": reason}
-                # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
-                if at_write_cmd and re.search(tok, seg_hay):
-                    return {**g, "reason": reason}
+            if at_write_cmd or ">" in seg_hay:
+                for target in targets:
+                    if _guard_map.matches(_resolve(target, eff_cwd), g, identity_cache=identity_cache):
+                        return {**g, "reason": reason}
         for git_cwd in _git_targets(eff, eff_cwd, tool):
             for g in guarded:
                 gp = g.get("path")

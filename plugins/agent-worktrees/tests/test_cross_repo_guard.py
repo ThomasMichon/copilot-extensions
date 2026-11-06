@@ -237,3 +237,32 @@ def test_nested_linked_shell_destination_preserves_posture_and_delegation(
         "toolArgs": {"command": command.format(target=target / "new.py")},
     }, env={}, home=tmp_path, guarded_roots=[row])
     assert bool(result) is (delegated or not linked)
+
+
+@pytest.mark.parametrize(("command", "denied"), [
+    ('cp "{root}/source.txt" "{outside}/copy.txt"', False),
+    ('cp "{outside}/source.txt" "{root}/copy.txt"', True),
+    ('Copy-Item -Path "{root}/source.txt" -Destination "{outside}/copy.txt"', False),
+    ('Copy-Item -Path "{outside}/source.txt" -Destination "{root}/copy.txt"', True),
+    ('Set-Content -Path "{outside}/out.txt" -Value "{root}/source.txt"', False),
+    ('Set-Content -Path:"{root}/out.txt" -Value "{outside}/source.txt"', True),
+    ('dd if="{root}/source.txt" of="{outside}/out.txt"', False),
+    ('dd if="{outside}/source.txt" of="{root}/out.txt"', True),
+    ('echo "{root}/source.txt" > "{outside}/out.txt"', False),
+    ('mv "{root}/source.txt" "{outside}/out.txt"', True),
+])
+@pytest.mark.parametrize("posture", ["reference", "worktree", "delegated"])
+def test_shell_reads_and_value_arguments_are_not_write_targets(tmp_path, command, denied, posture):
+    root = tmp_path / "target"
+    (root / ".git").mkdir(parents=True)
+    row = {
+        "name": "target", "path": str(root),
+        "delegate": "agent-bridge" if posture == "delegated" else "none",
+    }
+    if posture != "delegated":
+        row["posture"] = posture
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(tmp_path),
+        "toolArgs": {"command": command.format(root=root, outside=tmp_path / "outside")},
+    }, env={}, home=tmp_path, guarded_roots=[row])
+    assert bool(result) is denied

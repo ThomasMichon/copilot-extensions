@@ -60,7 +60,9 @@ def execute_owned_observations(payload, raw, load_sibling, merge_decisions):
     if not callable(needs):
         return None
     try:
-        if not needs(payload):
+        forms = load_sibling("tool_call_forms.py")
+        events = forms.tool_events(payload) if "toolCalls" in payload else [payload]
+        if not any(needs(event) for event in events):
             return None
     except Exception:
         # Ordinary evaluation isolates the failed component from intact guards.

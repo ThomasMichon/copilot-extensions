@@ -199,3 +199,39 @@ def test_composed_guards_consume_selected_grant_and_revocation(tmp_path, monkeyp
     assert not (tmp_path / ".agent-worktrees" / "allow-edits.json").exists()
     assert allow_edits.revoke("harness")
     assert decide()["permissionDecision"] == "deny"
+
+
+def test_batch_pr_observation_uses_one_owned_worker_after_cheap_ask(tmp_path, monkeypatch):
+    policy, forms, client = (load(name) for name in (
+        "hook_pre_policy", "tool_call_forms", "hook_client",
+    ))
+    observed = []
+    event = {"cwd": str(tmp_path), "toolCalls": [
+        {"name": "edit", "args": {"path": "target.py"}},
+        {"name": "powershell", "args": {"command": "gh pr close 41 --repo example/project"}},
+    ]}
+
+    def worker(frame, **kwargs):
+        assert json.loads(frame) == event
+        assert kwargs["legacy"] is True
+        assert kwargs["initial_decision"]["permissionDecision"] == "ask"
+        assert kwargs["settlement_deadline"] > 0
+        observed.append("owned-worker")
+        return 0
+
+    def sibling(name):
+        if name == "tool_call_forms.py":
+            return forms
+        if name == "hook_policy_process.py":
+            return SimpleNamespace(execute=worker)
+        if name == "pr_supersede_guard.py":
+            return SimpleNamespace(needs_observations=lambda e: e.get("toolName") == "powershell")
+        return SimpleNamespace(decide=lambda *a, **k: {
+            "permissionDecision": "ask", "permissionDecisionReason": "confirmed guard",
+        })
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    assert policy.execute_owned_observations(
+        event, json.dumps(event), sibling, client._merge_pre_decisions,
+    ) == 0
+    assert observed == ["owned-worker"]
