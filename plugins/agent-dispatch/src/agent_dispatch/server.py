@@ -399,6 +399,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                 "Docker bridge subnets only)",
                 cfg.host,
             )
+        app = build_app(cfg)
         # Stage C: pre-bind the listening socket ourselves so we can capture the
         # OS-assigned port and advertise the *actual* endpoint before serving. Passing
         # the already-bound socket to uvicorn avoids a fixed-port reservation entirely.
@@ -422,7 +423,6 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
 
         if not passive:
             write_running_version()
-        app = build_app(cfg)
         fed_runner = _maybe_start_federation(drain_gate=app.state.drain_gate)
         app.state.federation_runner = fed_runner
         server = uvicorn.Server(uvicorn.Config(app, log_level="info"))

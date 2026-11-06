@@ -131,3 +131,42 @@ def test_config_reads_are_passive_and_source_reuse_distinguishes_admission(monke
         config_identity(replace(cfg, relationship_admission=None, relationship_authority=None)),
     }
     assert len(identities) == 4
+
+
+@pytest.mark.parametrize("authority", [None, "local"])
+def test_actual_serve_entrypoint_preserves_explicit_admission_failure(monkeypatch, authority):
+    from agent_dispatch import coordinator_cli, logging_setup
+
+    monkeypatch.setenv("AGENT_DISPATCH_RELATIONSHIP_ADMISSION", "missing_admission:factory")
+    if authority is None:
+        monkeypatch.delenv("AGENT_DISPATCH_RELATIONSHIP_AUTHORITY", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_DISPATCH_RELATIONSHIP_AUTHORITY", authority)
+    monkeypatch.setattr(logging_setup, "configure_file_logging", lambda *args: None)
+    monkeypatch.setattr(coordinator_cli, "_reroot_serve_cwd", lambda: None)
+
+    def serve(cfg, **kwargs):
+        module.configured_writer(cfg.relationship_admission, cfg.relationship_authority)
+
+    monkeypatch.setattr(server, "serve", serve)
+    args = SimpleNamespace(token=None, port=None, db=None, host=None, passive=True, force=False)
+    with pytest.raises(ValueError if authority is None else ModuleNotFoundError):
+        coordinator_cli._cmd_serve(args)
+
+
+def test_factory_failure_precedes_socket_and_route_publication(monkeypatch, tmp_path):
+    from agent_dispatch import procutil
+
+    monkeypatch.setattr(procutil, "relocate_off_payload", lambda: None)
+    monkeypatch.setattr(server, "_clear_routing", lambda: None)
+    monkeypatch.setattr(server, "clear_endpoint", lambda *args, **kwargs: None)
+
+    def bind(*args):
+        pytest.fail("unqualified coordinator reached socket/routing publication")
+
+    monkeypatch.setattr(server, "_bind_listen_socket", bind)
+    with pytest.raises(ModuleNotFoundError):
+        server.serve(Config(
+            db_path=str(tmp_path / "tasks.db"),
+            relationship_admission="missing_admission:factory", relationship_authority="local",
+        ), passive=True)

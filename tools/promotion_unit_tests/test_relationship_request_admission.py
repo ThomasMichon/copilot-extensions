@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import ast
+import argparse
 import importlib.util
 import sys
 from contextlib import nullcontext
@@ -173,6 +175,49 @@ def test_configured_admission_carries_both_actual_independent_owners(boundary):
     with pytest.raises(ValueError, match="independent admission owners"):
         module.configured_writer("promotion_policy:factory", "local")
     assert len(selected) == 1
+
+
+def test_actual_serve_command_preserves_admission_selection(boundary):
+    b = boundary
+    path = ROOT / "plugins/agent-dispatch/src/agent_dispatch/coordinator_cli.py"
+    command = next(
+        node for node in ast.parse(path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_cmd_serve"
+    )
+    command.decorator_list = []
+    configured = SimpleNamespace(
+        token=None, port=9847, db_path="/queue", sweep_interval=0,
+        pool_publication_enabled=False, relationship_admission="policy:factory",
+        relationship_authority="local",
+    )
+    calls = []
+    for name, attributes in {
+        "logging_setup": {"configure_file_logging": lambda *args: None},
+        "server": {
+            "CoordinatorAlreadyLiveError": RuntimeError,
+            "serve": lambda cfg, **kwargs: calls.append((cfg, kwargs)),
+        },
+    }.items():
+        stub = ModuleType(f"{PACKAGE}.{name}")
+        stub.__dict__.update(attributes)
+        b.monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    scope = {
+        "argparse": argparse,
+        "__name__": f"{PACKAGE}.coordinator_cli", "__package__": PACKAGE,
+        "_config": SimpleNamespace(
+            load_config=lambda: configured, resolve_control_token=lambda: None,
+        ),
+        "_config_class": lambda: SimpleNamespace,
+        "_resolve_serve_host": lambda *args: "127.0.0.1",
+        "_reroot_serve_cwd": lambda: None,
+    }
+    exec(compile(ast.Module(body=[command], type_ignores=[]), str(path), "exec"), scope)
+    args = SimpleNamespace(token=None, port=None, db=None, passive=True, force=False)
+    assert scope["_cmd_serve"](args) == 0
+    cfg, flags = calls[0]
+    assert cfg.relationship_admission == configured.relationship_admission
+    assert cfg.relationship_authority == configured.relationship_authority
+    assert flags == {"passive": True, "force": False}
 
 
 @pytest.mark.parametrize(

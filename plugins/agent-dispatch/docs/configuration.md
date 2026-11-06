@@ -52,7 +52,9 @@ This is executable local service configuration, not portable registrar content,
 a task-supplied receipt or a public API that accepts factories. Configuration
 reads do not import the factory; only coordinator construction does. Incomplete
 selection, a bad factory, unavailable selected writer or construction failure
-refuses startup without a legacy/no-writer fallback. With both selectors absent,
+refuses startup before socket/routing publication, without a legacy/no-writer
+fallback. The ordinary `serve` CLI forwards both selectors unchanged.
+With both selectors absent,
 ordinary construction remains unchanged and supplies no relationship writer.
 Source startup's configuration identity includes both selectors, so it cannot
 adopt a same-build incumbent with a different admission selection.
