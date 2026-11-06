@@ -164,6 +164,21 @@ def test_retained_host_health_gates_publication(
             "Get-VersionedCurrent", "Invoke-VersionedActivate", "Publish-IndexRuntime",
             "Deploy-SetupGatedBinstub", "Write-Manifest", "Publish-FileAtomically", "Get-SourceKind",
         ))
+        for marker, phase in (
+            ("[void](Invoke-VersionedSlotClean)", "construction-admission"),
+            ("$reuseRole = Get-RequiredRuntimeRole", "host-closure"),
+            ("$slotOk = Test-RuntimeOrigin -Python $VenvPython -Slot $VenvDir", "primary-health"),
+            ("if (-not (Invoke-VersionedMarkComplete))", "completion"),
+            ("if (-not (Publish-IndexRuntime))", "publication"),
+            ("$importOk = Test-RuntimeOrigin -Python $LinkPython -Slot $LinkDir", "selected-health"),
+        ):
+            assert marker in definitions
+            definitions = definitions.replace(
+                marker,
+                "[Console]::Error.WriteLine('retained-phase:"
+                + phase + " ' + [DateTimeOffset]::UtcNow.ToString('o')); " + marker,
+                1,
+            )
         text = f"""
 $ErrorActionPreference = 'Stop'
 $ScriptDir = '{SCRIPTS}'
