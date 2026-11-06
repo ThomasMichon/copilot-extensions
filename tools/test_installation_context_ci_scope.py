@@ -24,6 +24,44 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def test_bridge_historical_guards_preserve_selection_and_failure_diagnostics():
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["bridge-contracts-linux"]
+    step = next(
+        value for value in job["steps"]
+        if value.get("name") == "Exercise immutable bytes and historical publication guards"
+    )
+    arguments = shlex.split(step["run"])
+    files = [
+        arguments[index + 1] for index, value in enumerate(arguments)
+        if value == "--test-file"
+    ]
+    assert files == [
+        "tests/test_http48_source_retention.py",
+        "tests/test_http48_capture_guards.py",
+        "tests/test_http47_capture_guards.py",
+    ]
+    assert arguments[arguments.index("-k") + 1] == (
+        "http48 or shared_capture_seed_has_owned_committed_inputs "
+        "or capture_reproducible_real_commit_preserves_history"
+    )
+    assert not set(arguments) & {
+        "--test-timeout", "--timeout", "--plugin-timeout",
+        "--allow-host-state", "--allow-explicit-tiers",
+    }
+    options = shlex.split(step["env"]["PYTEST_ADDOPTS"])
+    assert "-vv" in options and "--durations=20" in options
+    upload = next(
+        value for value in job["steps"]
+        if value.get("name") == "Retain historical publication guard outcomes"
+    )
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == arguments[arguments.index("--junit-dir") + 1]
+    assert not step.get("continue-on-error")
+
+
 @pytest.mark.parametrize("outcome", ["passed", "failed", "skipped", "missing", "empty", "duplicate"])
 def test_registration_inspection_portfolio_requires_complete_native_evidence(
     tmp_path, monkeypatch, outcome,

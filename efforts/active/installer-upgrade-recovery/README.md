@@ -2263,3 +2263,55 @@ qualification-controller equivalence will be checked separately from changed
 shared inputs. Normal same-PR publication, fresh review/CI, source merge and
 containing release remain open; the parent is Active and no installed effect
 or gate bypass is introduced.
+
+### 2026-11-06 - Current capture succeeds but historical packet exceeds its bound
+
+The reconciled-source portfolio `42239617443` is failed, not qualified.
+Every failed job/step is inspected: declared preparation, input boundaries,
+immutable peer prefix, current capture, independent verification, canonical
+validation and artifact export all succeed. The sole failure is the later
+`Exercise immutable bytes and historical publication guards` request.
+
+That request combines `test_http48_source_retention.py`,
+`test_http48_capture_guards.py` and `test_http47_capture_guards.py` under the
+existing selector. The bounded runner reports `wall-clock limit exceeded
+(300s)` and exit 124, 302.92 seconds including cleanup. Anonymous progress
+shows 72 cases at 62 percent and more dots, but has no retained named outcomes
+or per-case timing; those dots cannot license a residual passing subset.
+This is not relabeled as a successful portfolio or retried unchanged.
+
+The exported current artifact remains provisional evidence; it is not
+materialized while the required historical packet is unfinished. The next
+source correction must inspect fixture/packet cost and preserve all selected
+assertions and original item/group/plugin/resource limits. The existing runner's
+independent file-group composition and named JUnit/progress support are the
+first bounded avenue to assess, not a larger timeout or a skipped history guard.
+Source #11003, containing release, caller migration and the parent remain open.
+
+### 2026-11-06 - Diagnose the historical seed and retain named guard results
+
+The existing filtered runner deliberately keeps `-k` selections together;
+`--max-files-per-sub-suite 1` therefore does not split this request. That
+ineffective change is removed, not credited as a fix or used to expand a
+deadline. Named local collection resolves 115 selected cases, rather than an
+inferred count from the prior anonymous dots.
+
+The HTTP-47 composed seed repeatedly parses immutable historical packets for
+each semantic source. It now indexes their exact `(source_path, source_sha256)`
+identities once and retains the same coverage decision, source files, fixtures,
+assertions and fresh consumer repositories. The 2,244-file, approximately
+22-MB source/history seed is not trimmed. The workflow retains named progress,
+slow-case timing and JUnit output on failure without lifting the original
+30/300/900-second item/group/plugin or resource limits.
+
+The workflow admission/retention and existing registration admission controls
+pass locally, 10 cases; touched Python passes `ruff --select F,E9` and the
+diff is whitespace-clean. The first local Windows run times out during repeated
+packet reads; the indexed revision gets past those reads but still reaches the
+30-second setup deadline while staging its real Git seed. Neither is a
+passing guard portfolio. The existing Ubuntu guard-only portfolio is the next
+bounded diagnostic execution before another full current-source capture.
+The provisional earlier artifact is still not materialized. This below-altitude
+test/controller correction changes neither production inspection nor runtime
+behavior; required CI, complete historical qualification, source merge and
+parent completion remain open.

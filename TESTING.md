@@ -2731,6 +2731,11 @@ Shared immutable-input preparation has its own bounded qualification control;
 each publication case still creates a fresh consumer fixture.
 It retains the ordinary runner's containment and test deadlines. This is
 source/publication evidence, not SDK, native Windows or installed qualification.
+Historical seed preparation indexes each immutable packet's source identity
+once, instead of rereading every packet for every source. Named progress and
+slow-case timings identify unfinished work; JUnit outcomes are retained on
+failure without changing the 30/300/900-second item/group/plugin limits or test
+selection. The controlled HTTP-52 capture uses the same guard step.
 Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.

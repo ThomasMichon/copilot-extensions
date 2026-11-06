@@ -2049,13 +2049,21 @@ jobs:
           if-no-files-found: error
       - name: Exercise immutable bytes and historical publication guards
         env:
-          PYTEST_ADDOPTS: "--maxfail=1"
+          PYTEST_ADDOPTS: "--maxfail=1 -vv --durations=20"
         run: >-
           python tools/run-plugin-tests.py agent-bridge
           --test-file tests/test_http48_source_retention.py
           --test-file tests/test_http48_capture_guards.py
           --test-file tests/test_http47_capture_guards.py
           -k "http48 or shared_capture_seed_has_owned_committed_inputs or capture_reproducible_real_commit_preserves_history"
+          --junit-dir "${{ runner.temp }}/bridge-historical-guard-junit"
+      - name: Retain historical publication guard outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-historical-guard-outcomes-${{ github.run_id }}
+          path: ${{ runner.temp }}/bridge-historical-guard-junit
+          if-no-files-found: warn
 
   logger-recipes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'
