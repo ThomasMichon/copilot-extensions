@@ -358,12 +358,17 @@ os.environ.pop("AGENT_VAULT_INSTALLATION_ID", None)
 from agent_vault import service, service_generation as generation
 from agent_vault import service_handoff
 if mode == "legacy-health":
-    dial = service._dial_tcp
-    def legacy_ping(request, host, port, timeout=5.0):
-        request = dict(request)
-        request.pop("health_only", None)
-        return dial(request, host, port, timeout)
-    service._dial_tcp = legacy_ping
+    def legacy_dial(dial):
+        def send(request, *args, **kwargs):
+            request = dict(request)
+            request.pop("health_only", None)
+            (root / "legacy-health.json").write_text(json.dumps({
+                "transport": dial.__name__, "request": request,
+            }))
+            return dial(request, *args, **kwargs)
+        return send
+    service._dial_tcp = legacy_dial(service._dial_tcp)
+    service._dial_unix = legacy_dial(service._dial_unix)
 generation.PROCESS_GENERATION = service.PROCESS_GENERATION = identity
 generation.selected_generation = lambda: (root / "selection").read_text().strip()
 generation.selected = lambda: generation.selected_generation() == identity
@@ -536,6 +541,11 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
         stdout, stderr = old.communicate(timeout=10)
         assert old.returncode == 0, stdout + stderr
         old_lifetime.wait_exit(Deadline(1))
+        if warm:
+            assert json.loads((tmp_path / "legacy-health.json").read_text()) == {
+                "transport": "_dial_tcp" if os.name == "nt" else "_dial_unix",
+                "request": {"action": "ping"},
+            }
         _until(lambda: _send(new_port, {"action": "ping"})["accepting_work"], [new])
         assert _send(new_port, {"action": "ping"})["unlocked_vaults"] == (
             [str(durable)] if warm else []
