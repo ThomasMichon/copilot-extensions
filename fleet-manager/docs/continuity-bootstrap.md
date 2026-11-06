@@ -227,8 +227,24 @@ Each factory invocation revalidates the source and retained state. Like existing
 PEM callers, the constructed caller holds its selected key; changing the identity
 requires the lifetime owner to prepare a new caller, not an implicit credential
 fallback or key watcher. Existing token/PEM callers and normal outbound-only
-repository setup are unchanged. This provider expansion does not yet wire SSH
+repository setup are unchanged. The factory alone does not select SSH
 configuration or the normal selected-role setup/installation handoff.
+
+The additive `continuity-machine-reference-v1` interface is
+`machine_caller_reference`, with the same scope arguments plus an explicit
+`gateway_ca` and optional finite `timeout`. It returns `MachineCallerReference`
+containing the exact existing `ServiceCaller` and an opaque `revision`.
+The selected CA must match before retained identity access. The revision hashes
+the owner's public source/key/original-operation bindings and CA reference,
+never private JWK bytes; it is an input-change fence, not current admission or
+an effect receipt. An embedding still owns capture of the actual CA-file bytes.
+The original `machine_caller` signature and return type remain unchanged.
+
+SSH configuration v3 consumes this fixed owner interface, and the installed host
+uses the owner revision without parsing private state. V1/v2 token/PEM and normal
+outbound-only repository setup remain unchanged. Missing state or reference
+support is explicit; the normal selected-role Manager/engine handoff is not
+implemented by these APIs.
 
 ## Qualification and release boundary
 

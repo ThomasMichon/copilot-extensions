@@ -48,11 +48,13 @@ class SSHMachineConfig:
         if not isinstance(value, dict):
             raise PlanError("input must be an object")
         version = value.get("version")
-        if type(version) is not int or version not in (1, 2):
+        if type(version) is not int or version not in (1, 2, 3):
             raise PlanError("unsupported input schema/version")
         fields = FIELDS if version == 1 else FIELDS - {"access_token_file"} | {"authentication"}
+        if version == 3:
+            fields = fields - {"proof_key_file"} | {"credential_source"}
         record(value | {"version": 1}, "fleet-manager.ssh-client", fields)
-        if version == 2:
+        if version in (2, 3):
             authentication = value["authentication"]
             if not isinstance(authentication, dict) or set(authentication) != {
                 "profile", "principal", "audience", "resource",
@@ -67,11 +69,23 @@ class SSHMachineConfig:
                 32 < ord(char) < 127 for char in audience
             ):
                 raise PlanError("SSH client authentication audience is invalid")
+        if version == 3:
+            credential = value["credential_source"]
+            if not isinstance(credential, dict) or set(credential) != {
+                "provider", "source", "harness", "state_root",
+            } or credential["provider"] != "local-projection-v1":
+                raise PlanError("SSH client credential source is unsupported or incomplete")
+            identifier(credential["harness"], "SSH client credential context")
+            for name in ("source", "state_root"):
+                absolute(credential[name])
         for name in ("machine", "gateway", "controller"):
             identifier(value[name], "SSH client identity")
         if not isinstance(value["environment"], str) or value["environment"] not in ENVIRONMENTS:
             raise PlanError("SSH client environment is unsupported")
-        for name in PATHS if version == 1 else PATHS - {"access_token_file"}:
+        paths = PATHS if version == 1 else PATHS - {"access_token_file"}
+        if version == 3:
+            paths = paths - {"proof_key_file"}
+        for name in paths:
             absolute(value[name])
         for name in ("gateway_ca", "authorization_dir"):
             if value[name] is not None:
@@ -91,18 +105,16 @@ class SSHMachineConfig:
             if value[name] is not None
         ):
             raise PlanError("SSH client requires a dedicated state directory")
-        if any(
-            absolute(value[name]).resolve().is_relative_to(root)
-            for name in ("policy_path", "identity_file", "public_key_file", "proof_key_file",
-                         "access_token_file", "gateway_ca")
-            if value.get(name) is not None
-        ):
+        config = cls(canonical(value))
+        if any(path.resolve().is_relative_to(root) for path in config.input_paths()):
             raise PlanError("SSH client state directory must exclude input references")
+        if version == 3 and root.is_relative_to(absolute(value["credential_source"]["state_root"]).resolve()):
+            raise PlanError("SSH client lease and credential state must be separate")
         origin(value["gateway_origin"])
         path, query = target(value["namespace"])
         if query or path in ("", "/") or path.endswith("/"):
             raise PlanError("SSH client namespace is invalid")
-        return cls(canonical(value))
+        return config
 
     @classmethod
     def load(cls, path: Path) -> SSHMachineConfig:
@@ -111,6 +123,18 @@ class SSHMachineConfig:
 
     def to_dict(self) -> dict:
         return decode(self.encoded)
+
+    def input_paths(self) -> tuple[Path, ...]:
+        value = self.to_dict()
+        paths = [
+            absolute(value[name])
+            for name in ("policy_path", "identity_file", "public_key_file", "proof_key_file",
+                         "access_token_file", "gateway_ca")
+            if value.get(name) is not None
+        ]
+        if value["version"] == 3:
+            paths.extend(absolute(value["credential_source"][name]) for name in ("source", "state_root"))
+        return tuple(paths)
 
     def local_scope(self) -> dict:
         value = self.to_dict()
