@@ -230,7 +230,7 @@ class WorktreesRuntime:
         result["worktree_observations"]["native_receipts"] = self.native_observations.status()
         if self.hook_facts is not None:
             result["worktrees"]["hook_facts"] = {
-                "version": 1, "generation": self.hook_facts.generation,
+                "version": 2, "generation": self.hook_facts.generation,
                 "quality": "advisory", "error": self.hook_facts.error,
             }
         return result

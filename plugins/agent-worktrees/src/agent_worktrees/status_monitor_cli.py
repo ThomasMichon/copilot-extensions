@@ -526,7 +526,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             extra.update(tracking_write.rendezvous_fields(tracking_write_server))
         if published_lock:
             extra.update(
-                hook_facts_version=1,
+                hook_facts_version=2,
                 hook_facts_generation=worktrees_runtime.hook_facts.generation,
             )
             extra.update(worktree_status_runtime.lock_extra())

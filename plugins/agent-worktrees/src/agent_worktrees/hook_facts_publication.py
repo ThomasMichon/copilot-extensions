@@ -12,12 +12,12 @@ from pathlib import Path
 
 from .worktree_data_contract import segment, store_identity
 
-VERSION = 1
+VERSION = 2
 MAX_BYTES = 16 * 1024
 MAX_STRING_BYTES = 4096
 MAX_VIEWS = 4096
 _CONTEXT_FIELDS = ("marketplaceId", "installReceipt", "pluginRoot")
-_TEXT_FACTS = ("status", "status_note_at", "last_session_id")
+_TEXT_FACTS = ("status", "status_note_at", "last_session_id", "record_head_session")
 
 
 def _text(value: object, *, required: bool = False) -> str | None:
@@ -109,7 +109,7 @@ class HookFactsPublisher:
         if type(revision) is not int or revision < 1:
             raise ValueError("invalid hook fact row revision")
         value = {
-            "version": VERSION,
+            "version": VERSION if "record_head_session" in row else 1,
             "quality": "advisory",
             "completeness": "partial",
             "scope": {
@@ -122,7 +122,10 @@ class HookFactsPublisher:
             },
             "revision": revision,
             "facts": {
-                **{field: _text(row.get(field)) for field in _TEXT_FACTS},
+                **{
+                    field: _text(row.get(field)) for field in _TEXT_FACTS
+                    if field != "record_head_session" or field in row
+                },
                 "head_yielded": yielded,
             },
         }

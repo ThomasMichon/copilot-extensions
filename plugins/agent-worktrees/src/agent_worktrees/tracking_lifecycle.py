@@ -40,6 +40,7 @@ def listing_head_session(record: tracking.WorktreeRecord, row: dict) -> str | No
     """The head a worktree listing shows: the resolved head, else a yielded one
     (marked ``head_yielded`` on *row*: resumable until a successor registers)."""
     head = getattr(record, "resolved_head_session", None)
+    row["record_head_session"] = head
     if not head and (head := yielded_head_session(record)):
         row["head_yielded"] = True
     return head

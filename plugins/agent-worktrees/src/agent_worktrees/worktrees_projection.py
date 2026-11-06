@@ -37,7 +37,7 @@ MAX_DEPTH = 6
 ROW_FIELDS = frozenset("""
 id branch path repo machine platform machine_identity_version environment execution_machine
 status started_at title resume_count
-last_resumed_at codename creation_nonce session_count last_session_id head_yielded execution_leg
+last_resumed_at codename creation_nonce session_count last_session_id head_yielded record_head_session execution_leg
 execution_leg_live completed_at kind owner interface origin checkout_managed checkout_present
 picker_hidden bound_agent dispatch_attempt active_effort follow_up paused
 summary status_note_at activity activity_at caller_worktree controller_revision

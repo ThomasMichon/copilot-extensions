@@ -72,6 +72,20 @@ def test_accepted_row_is_detached_partial_and_shell_readable(owner, tmp_path):
     assert runtime.health()["worktrees"]["hook_facts"]["generation"] == publisher.generation
 
 
+def test_recorded_head_is_not_the_listing_or_execution_leg_resume_target(owner, tmp_path):
+    runtime, publisher, project = owner
+    source = row(tmp_path, record_head_session=None, last_session_id="resumable")
+    runtime.publish("project", [source], observed_at=1)
+    value = json.loads(output_path(publisher, project).read_bytes())
+    assert value["version"] == 2
+    assert value["facts"]["record_head_session"] is None
+    assert value["facts"]["last_session_id"] == "resumable"
+    runtime.publish("project", [row(tmp_path)], observed_at=2)
+    value = json.loads(output_path(publisher, project).read_bytes())
+    assert value["version"] == 1
+    assert "record_head_session" not in value["facts"]
+
+
 @pytest.mark.parametrize("unrelated_change", [False, True])
 def test_unrelated_or_observation_only_change_does_not_replace_file(
     owner, tmp_path, monkeypatch, unrelated_change,

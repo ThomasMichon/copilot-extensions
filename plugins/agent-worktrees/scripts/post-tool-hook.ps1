@@ -107,6 +107,15 @@ function Invoke-PostToolHook {
     $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
     if (-not [IO.File]::Exists($admission)) { return }
     . $admission
+    $factsReader = Join-Path $PSScriptRoot 'hook-facts.ps1'
+    if ([IO.File]::Exists($factsReader)) {
+        . $factsReader
+        $readResult = Invoke-PreparedPostToolRead -Raw $Raw
+        if ($null -ne $readResult) {
+            if ($readResult.Count) { [Console]::Out.Write((ConvertTo-Json -InputObject $readResult -Compress)) }
+            return
+        }
+    }
     if (-not (Test-ManagedWorktreesSession -Raw $Raw)) { return }
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $OutputEncoding = $utf8

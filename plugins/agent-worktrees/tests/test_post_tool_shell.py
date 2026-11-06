@@ -280,7 +280,8 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
 @pytest.mark.effect("filesystem")
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell):
+@pytest.mark.parametrize("event_case", ["mutation", "late-watch"])
+def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell, event_case):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
     from test_managed_session import environment, fixture_project, load
@@ -293,11 +294,17 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
     anchor, registry = fixture_project(tmp_path)
     session = tmp_path / ".copilot" / "session-state" / "prepared"
     session.mkdir(parents=True)
-    payload = {"sessionId": "prepared", "cwd": str(anchor), "toolName": "view"}
+    payload = {
+        "sessionId": "prepared", "cwd": str(anchor),
+        "toolName": "edit" if event_case == "mutation" else "view",
+    }
+    if event_case == "late-watch":
+        (session / "local-guidance-watch.json").write_text("{}")
     assert module.admitted(payload, home=tmp_path)
     scripts = tmp_path / "payload" / "scripts"
     scripts.mkdir(parents=True)
     shutil.copyfile(SCRIPT, scripts / SCRIPT.name)
+    shutil.copyfile(PLUGIN / "scripts" / "hook-facts.ps1", scripts / "hook-facts.ps1")
     original = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
     (scripts / "managed-session.ps1").write_text(
         f". '{original}'\n"
@@ -334,6 +341,204 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
         assert seen == [("postToolUse", payload), ("postToolUse", payload)]
     finally:
         server.close()
+
+
+@pytest.fixture
+def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
+    from agent_worktrees import __main__ as main, config as cfg, handoff_diagnostics, sessions, tracking
+    from agent_worktrees.hook_facts_publication import HookFactsPublisher
+    from agent_worktrees.worktrees_runtime import WorktreesRuntime
+    from test_managed_session import environment, fixture_linked_worktree, fixture_project, load
+    from test_session_worktree_binding import _save_record
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    workspace, _ = fixture_linked_worktree(tmp_path, anchor)
+    project = tmp_path / "resolved-project-state"
+    records = project / "worktrees"
+    records.mkdir(parents=True)
+    cfg.set_active_project("example")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project)
+    session_root = tmp_path / ".copilot" / "session-state"
+    session = session_root / "prepared"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: session_root)
+    _save_record(records, "worktree", str(workspace))
+    path = records / "worktree.yaml"
+    record = tracking._load_record_uncached(path)
+    record.repo = "example"
+    record.creation_nonce = "read-incarnation"
+    tracking.save_record(record, path)
+    tracking.register_session("worktree", "prepared")
+    record = tracking._load_record_uncached(path)
+    binding = handoff_diagnostics.stamp_session_state_worktree_binding(
+        "prepared", "worktree", worktree_dir="not-a-locator", worktree_record=record,
+    )
+    assert binding["hookFacts"]["projectRoot"] == str(project)
+    assert binding["hookFacts"]["workspace"] == str(workspace)
+    row = main._worktree_to_dict(record, current_only=True)
+    assert row["record_head_session"] == "prepared"
+    row.update(
+        live_session_ids=["prepared"],
+        fact_provenance={"record": {"quality": "current", "observed_at": 1}},
+        status_note_at="2026-11-05T20:00:00.123+05:30",
+    )
+    publisher = HookFactsPublisher(registry, "a" * 32, project_root=lambda name: project)
+    runtime = WorktreesRuntime(tmp_path / "current.sqlite3", hook_facts=publisher)
+    runtime.activate()
+    runtime.publish("example", [row], observed_at=1)
+    fact_path = project / "worktrees" / "worktree" / "hook-facts" / f"{publisher.generation}.json"
+    discovery = {
+        "hook_facts_version": 2, "hook_facts_generation": publisher.generation,
+        **{key: publisher.producer[key] for key in (
+            "runtime_generation", "marketplaceId", "installReceipt", "pluginRoot",
+        )},
+    }
+    (registry / "status-monitor.lock").write_text(json.dumps(discovery), encoding="utf-8")
+    payload = {"sessionId": "prepared", "cwd": str(workspace), "toolName": "view"}
+    assert load("managed_session").admitted(payload, home=tmp_path)
+    scripts = tmp_path / "payload" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("post-tool-hook.ps1", "hook-facts.ps1"):
+        shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
+    with (scripts / "post-tool-hook.ps1").open("a", encoding="utf-8") as stream:
+        stream.write("\nfunction Invoke-ResidentPostTool { throw 'synchronous resident call' }\n")
+    original = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+    (scripts / "managed-session.ps1").write_text(
+        f". '{original}'\n"
+        "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }\n",
+        encoding="utf-8",
+    )
+    command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
+    measured_command = command.removesuffix("exit 0") + (
+        "[Console]::Error.WriteLine('entry_seconds=' + "
+        "$entryClock.Elapsed.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)); exit 0"
+    )
+    harness = tmp_path / "registered-read.ps1"
+    harness.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "function Get-Command { throw 'a client/CLI child was requested' }\n"
+        "$entryClock=[Diagnostics.Stopwatch]::StartNew()\n"
+        "try {\n" + measured_command + "\n} catch {\n"
+        "  [Console]::Error.WriteLine($_.Exception.ToString() + \"`n\" + $_.ScriptStackTrace)\n"
+        "  exit 91\n}\n",
+        encoding="utf-8",
+    )
+    env = environment(tmp_path, workspace)
+    env.update(
+        COPILOT_PLUGIN_ROOT=str(scripts.parent),
+        AGENT_WORKTREES_NUDGE_CALLS="2", AGENT_WORKTREES_NUDGE_MINUTES="999",
+    )
+    env.pop("AGENT_WORKTREES_NUDGE", None)
+    try:
+        yield dict(
+            env=env, harness=harness, payload=payload, facts=fact_path,
+            row=row, runtime=runtime, session=session, registry=registry,
+            sidecar=registry / "nudge-state" / "worktree.json",
+        )
+    finally:
+        runtime.shutdown()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows shell read consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "accounting", "note-reset", "bind-reminder", "malformed-counter", "disabled", "terminal",
+    "missing-membership", "changed-input", "missing-locator", "wrong-incarnation",
+    "wrong-workspace", "missing-discovery", "legacy-facts", "malformed-facts",
+])
+def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, shell, case):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    fixture = prepared_read_event
+    env, payload = fixture["env"], fixture["payload"]
+    session, registry = fixture["session"], fixture["registry"]
+    sidecar = fixture["sidecar"]
+
+    def invoke(tool="view"):
+        event = {**payload, "toolName": tool}
+        started = time.monotonic()
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+            input=json.dumps(event), text=True, capture_output=True, timeout=10,
+            env=env, **no_window_kwargs(),
+        )
+        elapsed = time.monotonic() - started
+        assert result.returncode == 0, result.stderr
+        prefix = "entry_seconds="
+        assert result.stderr.startswith(prefix) and result.stderr.count("\n") == 1, result.stderr
+        entry = float(result.stderr[len(prefix):].strip())
+        print(f"{shell}/{case}/{tool}: entry={entry:.4f}s process={elapsed:.4f}s")
+        return json.loads(result.stdout) if result.stdout else {}
+
+    if case in {"accounting", "note-reset", "terminal"}:
+        assert invoke() == {}
+        assert json.loads(sidecar.read_text())["count"] == 1
+        if case == "accounting":
+            assert "2 tool call(s)" in invoke("rg")["additionalContext"]
+            assert json.loads(sidecar.read_text())["count"] == 0
+            assert invoke("glob") == {}
+            assert json.loads(sidecar.read_text())["count"] == 1
+            return
+        row = dict(fixture["row"])
+        if case == "note-reset":
+            row["status_note_at"] = "2026-11-05T20:01:00Z"
+        else:
+            row["status"] = "completed"
+        fixture["runtime"].publish("example", [row], observed_at=2)
+        assert invoke() == {}
+        assert sidecar.exists() is (case == "note-reset")
+        if sidecar.exists():
+            assert json.loads(sidecar.read_text())["count"] == 1
+        return
+    if case in {"bind-reminder", "malformed-counter"}:
+        row = {**fixture["row"], "record_head_session": None, "last_session_id": "resumable"}
+        fixture["runtime"].publish("example", [row], observed_at=2)
+        if case == "malformed-counter":
+            sidecar.parent.mkdir(parents=True)
+            sidecar.write_text(json.dumps({
+                "count": [], "window_start": 1, "seen_note_at": row["status_note_at"],
+            }))
+        assert "bind-session" in invoke()["additionalContext"]
+        if case == "malformed-counter":
+            assert invoke() == {}
+            return
+        second = invoke()["additionalContext"]
+        assert "2 tool call(s)" in second and "bind-session" not in second
+        return
+    if case == "disabled":
+        env["AGENT_WORKTREES_NUDGE"] = " OFF "
+    elif case == "missing-membership":
+        (session / "agent-worktrees" / "managed-session.json").unlink()
+    elif case == "changed-input":
+        (registry / "projects.yaml").write_text("projects: {}\n")
+    elif case in {"missing-locator", "wrong-incarnation", "wrong-workspace"}:
+        path = session / "worktree-binding.json"
+        binding = json.loads(path.read_text())
+        if case == "missing-locator":
+            binding.pop("hookFacts")
+        elif case == "wrong-incarnation":
+            binding["creationNonce"] = "another-incarnation"
+        else:
+            binding["hookFacts"]["workspace"] = str(registry)
+        path.write_text(json.dumps(binding))
+    elif case == "missing-discovery":
+        (registry / "status-monitor.lock").unlink()
+    elif case == "legacy-facts":
+        row = dict(fixture["row"])
+        row.pop("record_head_session")
+        fixture["runtime"].publish("example", [row], observed_at=2)
+    else:
+        fixture["facts"].write_text('{"version":')
+    assert invoke() == {}
+    assert not sidecar.exists()
 
 
 @pytest.mark.portfolio_tier("T2")
