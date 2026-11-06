@@ -344,7 +344,7 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
 
 
 @pytest.fixture
-def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
+def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     from agent_worktrees import __main__ as main, config as cfg, handoff_diagnostics, sessions, tracking
     from agent_worktrees.hook_facts_publication import HookFactsPublisher
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
@@ -353,7 +353,11 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     anchor, registry = fixture_project(tmp_path)
-    workspace, _ = fixture_linked_worktree(tmp_path, anchor)
+    checkout_home = tmp_path
+    if getattr(request.node, "callspec", None) and request.node.callspec.params.get("case") == "quoted-bind":
+        checkout_home = tmp_path / "space's $workspace; literal"
+        checkout_home.mkdir()
+    workspace, _ = fixture_linked_worktree(checkout_home, anchor)
     project = tmp_path / "resolved-project-state"
     records = project / "worktrees"
     records.mkdir(parents=True)
@@ -462,7 +466,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config):
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows shell read consumer")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", [
-    "accounting", "note-reset", "bind-reminder", "malformed-counter", "disabled", "terminal",
+    "accounting", "note-reset", "bind-reminder", "quoted-bind", "malformed-counter", "disabled", "terminal",
     "mixed-note", "missing-membership", "changed-input", "missing-locator", "wrong-incarnation",
     "wrong-workspace", "missing-discovery", "legacy-facts", "malformed-facts",
 ])
@@ -543,7 +547,7 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
         if sidecar.exists():
             assert json.loads(sidecar.read_text())["count"] == 1
         return
-    if case in {"bind-reminder", "malformed-counter"}:
+    if case in {"bind-reminder", "quoted-bind", "malformed-counter"}:
         row = {**fixture["row"], "last_session_id": "resumable"}
         heads = {"worktree": {**fixture["record_heads"]["worktree"], "head_session": None}}
         fixture["runtime"].publish("example", [row], observed_at=2, record_heads=heads)
@@ -552,7 +556,21 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
             sidecar.write_text(json.dumps({
                 "count": [], "window_start": 1, "seen_note_at": row["status_note_at"],
             }))
-        assert "bind-session" in invoke()["additionalContext"]
+        reminder = invoke()["additionalContext"]
+        assert "bind-session" in reminder
+        if case == "quoted-bind":
+            command = next(line.strip() for line in reminder.splitlines() if "agent-worktrees bind-session" in line)
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 "function agent-worktrees { [Console]::Write((ConvertTo-Json -InputObject @($args) -Compress)) }; " + command],
+                text=True, capture_output=True, timeout=10, env=env, **no_window_kwargs(),
+            )
+            assert result.returncode == 0, result.stderr
+            assert not result.stderr
+            assert json.loads(result.stdout) == [
+                "bind-session", "--worktree-dir=" + payload["cwd"],
+            ]
+            return
         if case == "malformed-counter":
             assert invoke() == {}
             return

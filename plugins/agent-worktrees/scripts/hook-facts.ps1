@@ -362,12 +362,13 @@ function Invoke-PreparedPostToolRead {
                 $age = $now - ([IO.File]::GetLastWriteTimeUtc($stamp) - [datetime]'1970-01-01').TotalSeconds
                 if (-not [IO.File]::Exists($stamp) -or $age -ge 90) {
                     try { [IO.File]::WriteAllText($stamp, $now.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch {}
+                    $quotedWorkspace = "'" + $locator['workspace'].Replace("'", "''") + "'"
                     $messages.Add(
                         '[agent-worktrees] This worktree has no session bound on record, but ' +
                         'you are working in it -- so its live tracking (status bar, picker) is ' +
                         'inactive. If you started here (or changed directory in) without being ' +
                         "registered, restore the binding by running:`n" +
-                        "    agent-worktrees bind-session --worktree-dir=$($locator['workspace'])`n" +
+                        "    agent-worktrees bind-session --worktree-dir=$quotedWorkspace`n" +
                         'This is a one-time declaration; once bound, this reminder stops.'
                     )
                 }
