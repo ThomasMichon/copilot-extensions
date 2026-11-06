@@ -190,6 +190,15 @@ def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatc
     ])
 
 
+def test_targeted_manager_accepts_inert_controller_override(inventory, monkeypatch):
+    monkeypatch.setattr(self_install, "self_update", lambda **_kwargs: SimpleNamespace(
+        action="already-current", cutover=None, reason="", version="1",
+    ))
+    assert manager._cmd_update([
+        "--target", "worktree-manager", "--no-project-controller",
+    ]) == 0
+
+
 @pytest.mark.parametrize("cutover", [
     {"action": "error", "reason": "synthetic cutover lease busy"},
     {"action": "cutover", "result": {"ok": False, "reason": "synthetic cutover lease busy"}},

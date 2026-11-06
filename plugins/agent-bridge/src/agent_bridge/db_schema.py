@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from .db_core import SCHEMA_VERSION, _SCHEMA_SQL, _SESSIONS_ENSURE_COLUMNS, log
+from .owner_membership_schema import ensure_schema as ensure_membership_indexes
 
 
 def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
@@ -158,6 +159,7 @@ class _SchemaMixin:
             " WHERE idempotency_key IS NOT NULL"
         )
         self._ensure_live_session_aliases(conn)
+        ensure_membership_indexes(conn)
 
     def _ensure_live_session_aliases(self, conn: sqlite3.Connection) -> None:
         """Schema v24, idempotently: the alias table, its two triggers and

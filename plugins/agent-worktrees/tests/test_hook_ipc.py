@@ -612,7 +612,8 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     installed.mkdir(parents=True)
     helpers = (
         "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py",
-        "managed_session.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py", "guarded_anchor_map.py", "registry_root.py",
+        "managed_session.py", "tool_call_forms.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py", "guarded_anchor_map.py", "registry_root.py",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "anchor_shell_parser.py",
         "managed_project_identity.py", "remote_identity.py",
         "hook_lifecycle_runtime.py", "native_source_context.py",
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
@@ -748,6 +749,14 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
             if name == "native_source_context.py" else scripts / name
         )
         assert (installed / name).read_bytes() == source.read_bytes()
+    imports = subprocess.run(
+        [sys.executable, "-I", "-S", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); "
+         "import tool_call_forms, statelessness_guard, cross_repo_guard, anchor_write_guard",
+         str(installed)],
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert imports.returncode == 0, imports.stderr
     spec = importlib.util.spec_from_file_location("installed_hook_client", installed / "hook_client.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -173,12 +173,20 @@ def binding_lock(base: Path) -> Iterator[None]:
             release()
 
 
-def write_binding(config: Path, harness: str, knowledge: str, *, preserve: bool) -> None:
+def write_binding(
+    config: Path, harness: str, knowledge: str, *, preserve: bool,
+    precondition: Callable[[], None] | None = None,
+    committed: Callable[[], None] | None = None,
+) -> None:
     with binding_lock(config.parent):
         existing = config.read_text(encoding="utf-8") if config.exists() else ""
         check_document_shape(existing)
         matching = check_existing_binding(existing, knowledge) if preserve else False
+        if precondition is not None:
+            precondition()
         if matching:
+            if committed is not None:
+                committed()
             return
         if not existing.strip():
             existing = (
@@ -187,6 +195,8 @@ def write_binding(config: Path, harness: str, knowledge: str, *, preserve: bool)
             )
         updated = set_top_yaml_key(existing, "knowledge_repo", knowledge)
         if config.is_file() and updated == existing:
+            if committed is not None:
+                committed()
             return
         temporary = None
         try:
@@ -198,6 +208,8 @@ def write_binding(config: Path, harness: str, knowledge: str, *, preserve: bool)
             if config.exists():
                 temporary.chmod(config.stat().st_mode & 0o777)
             os.replace(temporary, config)
+            if committed is not None:
+                committed()
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)

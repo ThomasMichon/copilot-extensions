@@ -129,6 +129,7 @@ class PickerScreenLoadingMixin:
         # startup also waits for this boundary so it cannot contend with paint.
         self.call_after_refresh(self._after_first_refresh)
     def _after_first_refresh(self):
+        self._refresh_knowledge_readiness()
         if (
             os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH")
             or os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE")

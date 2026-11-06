@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 import hashlib
 import re
+import shutil
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from collections import OrderedDict
+from threading import Lock
 from threading import Event
 from pathlib import Path
 
@@ -20,10 +23,90 @@ from .self_install import default_root
 
 _PANE = re.compile(r"%\d+\Z")
 _INCARNATION = re.compile(r"\$\d+:\d+\Z")
+_PSMUX_TARGETS: OrderedDict[tuple[str, tuple[int, ...], str, str], str] = OrderedDict()
+_PSMUX_TARGET_LOCK = Lock()
 
 
 class PaneError(RuntimeError):
     """No verified same-window navigation target is available."""
+
+
+def _psmux_binary(binary: str) -> str:
+    selected = shutil.which(binary) if Path(binary).name == binary else binary
+    if not selected:
+        raise PaneError("The registered PSMux executable is unavailable on PATH.")
+    try:
+        return str(Path(selected).resolve(strict=True))
+    except OSError as exc:
+        raise PaneError(f"The registered PSMux executable is unavailable: {exc}") from exc
+
+
+def _psmux_separator(version: str) -> str:
+    parsed = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    if parsed is None:
+        raise PaneError("PSMux did not report a supported pane-target version.")
+    release = tuple(map(int, parsed.groups()))
+    if release[:2] == (3, 3):
+        return ":"
+    if release[:2] == (3, 4):
+        return ":."
+    raise PaneError(f"PSMux {version} has no qualified pane-target syntax.")
+
+
+def _psmux_pane_separator(
+    binary: str, identity: tuple[int, ...], session: str, incarnation: str, timeout: float,
+) -> str:
+    key = (binary, identity, session, incarnation)
+    deadline = time.monotonic() + timeout
+    with _PSMUX_TARGET_LOCK:
+        if key in _PSMUX_TARGETS:
+            _PSMUX_TARGETS.move_to_end(key)
+            return _PSMUX_TARGETS[key]
+    result = run_mux_child(
+        [binary, "-V"], capture_output=True, text=True, timeout=timeout,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if result.returncode:
+        raise PaneError((result.stderr or "PSMux version is unavailable.").strip())
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    separator = _psmux_separator(first_line.removeprefix("tmux "))
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise PaneError("Mux navigation deadline expired during pane-target discovery.")
+    result = run_mux_child(
+        [binary, "display-message", "-p", "-t", "=" + session,
+         "#{version}\t#{session_name}\t#{session_id}:#{session_created}"],
+        capture_output=True, text=True, timeout=remaining,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if result.returncode:
+        raise PaneError((result.stderr or "The live PSMux version is unavailable.").strip())
+    fields = result.stdout.rstrip("\r\n").split("\t")
+    if len(fields) != 3 or fields[1:] != [session, incarnation]:
+        raise PaneError("The live PSMux session changed during pane-target discovery.")
+    server_separator = _psmux_separator(fields[0])
+    if separator == ":." and server_separator == ":":
+        raise PaneError("The PSMux client and live session server use incompatible pane targets.")
+    with _PSMUX_TARGET_LOCK:
+        _PSMUX_TARGETS[key] = separator
+        _PSMUX_TARGETS.move_to_end(key)
+        if len(_PSMUX_TARGETS) > 8:
+            _PSMUX_TARGETS.popitem(last=False)
+    return separator
+
+
+def _psmux_pane_target(
+    binary: str, session: str, pane: str, incarnation: str, *, timeout: float = 5,
+) -> str:
+    """Keep the session explicit without confusing a pane ID with an index."""
+    try:
+        selected = Path(_psmux_binary(binary))
+        stat = selected.stat()
+        identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        separator = _psmux_pane_separator(str(selected), identity, session, incarnation, timeout)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        raise PaneError(f"PSMux pane-target discovery failed: {exc}") from exc
+    return session + separator + pane
 
 
 def _call(mapping: dict, *args: str, cancelled=None, timeout=5) -> str:
@@ -31,19 +114,30 @@ def _call(mapping: dict, *args: str, cancelled=None, timeout=5) -> str:
         raise PaneError("View switch cancelled.")
     environment = dict(os.environ)
     arguments = list(args)
+    binary = mapping["mux_bin"]
     if os.name == "nt":
         environment["PSMUX_SESSION"] = mapping["mux_session"]
         if "-t" in arguments:
             index = arguments.index("-t") + 1
             if index < len(arguments) and _PANE.fullmatch(arguments[index]):
-                arguments[index] = mapping["mux_session"] + ":" + arguments[index]
+                deadline = time.monotonic() + timeout
+                binary = _psmux_binary(binary)
+                arguments[index] = _psmux_pane_target(
+                    binary, mapping["mux_session"], arguments[index],
+                    mapping["session_incarnation"], timeout=timeout,
+                )
+                if cancelled is not None and cancelled.is_set():
+                    raise PaneError("View switch cancelled.")
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    raise PaneError("Mux navigation deadline expired during pane-target discovery.")
     elif arguments[0] in {"show-options", "set-option"} and "-t" in arguments:
         index = arguments.index("-t") + 1
         if arguments[index] == "=" + mapping["mux_session"]:
             arguments[index] = mapping["session_incarnation"].split(":", 1)[0]
     try:
         result = run_mux_child(
-            [mapping["mux_bin"], *arguments], capture_output=True, text=True,
+            [binary, *arguments], capture_output=True, text=True,
             env=environment,
             timeout=timeout, **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )

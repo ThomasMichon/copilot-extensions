@@ -795,6 +795,7 @@ def native_source(tmp_path, request):
     payload = original / "source"
     options = getattr(request, "param", False)
     sibling = isinstance(options, dict) and options.get("sibling", False)
+    standalone = isinstance(options, dict) and options.get("standalone", False)
     dependency = isinstance(options, dict) and options.get("dependency", False)
     entry = isinstance(options, dict) and options.get("entry", False)
     content = (
@@ -808,6 +809,7 @@ def native_source(tmp_path, request):
         "                return 17\n"
         "        (root / ('setup.json' if '--setup' in sys.argv else 'started.json'))"
         ".write_text(json.dumps(sys.argv[1:]))\n"
+        "        (root / 'callback-cwd').write_text(str(Path.cwd()))\n"
         "    else:\n"
         "        print('prepared application ready')\n"
         "    return 0\n"
@@ -826,7 +828,8 @@ def native_source(tmp_path, request):
     if not (isinstance(options, dict) and options.get("standalone", False)):
         (payload / "plugin.json").write_text('{"name":"demo-app","version":"1.0.0"}\n')
     scripts = payload / "scripts"
-    scripts.mkdir()
+    if not standalone:
+        scripts.mkdir()
     root = Path(__file__).resolve().parents[1]
     native.source_inputs.engine.freeze_inputs(
         root / "libs" / "agent-procutil", (original if sibling else payload) / "libs",
@@ -835,8 +838,9 @@ def native_source(tmp_path, request):
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
     ):
-        shutil.copyfile(root / "libs" / "versioned-runtime" / name, scripts / name)
-    if not isinstance(options, dict) or options.get("legacy_bootstrap", True):
+        if not standalone:
+            shutil.copyfile(root / "libs" / "versioned-runtime" / name, scripts / name)
+    if not standalone and (not isinstance(options, dict) or options.get("legacy_bootstrap", True)):
         shutil.copyfile(
             root / "libs" / "installer-engine" / "runtime_launcher.py",
             scripts / "runtime_launcher.py",
@@ -918,6 +922,60 @@ def test_native_profile_emits_independent_locked_uv_application(native_source):
     with source.project_inputs(snapshot, "demo-app") as (_, inputs):
         declared = json.loads((application / "application.json").read_text())["construction"]
         assert declared == source.application_inputs(selected, inputs)
+
+
+@pytest.mark.parametrize("native_source", [True, {"standalone": True}], indirect=True)
+def test_application_candidate_retains_its_admitted_runtime_helpers(native_source, tmp_path):
+    source, snapshot = native_source
+    selected = source.select_project(snapshot, "demo-app")
+    application = snapshot / selected.project["application"]
+    root = tmp_path / "retained-application"
+    with source.project_inputs(snapshot, "demo-app") as (_, inputs):
+        selection = source.native_selection(selected, inputs)
+        with source.engine.numbered_candidate(
+            root, selection["runtime_version"], plugin=selected.payload,
+            uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+            health_module="demo_app", local_packages=tuple(selection["local_packages"]),
+            wheel_inputs=inputs, application=application, process_retention=True,
+            expected_source_identity=selection["identity"],
+        ) as candidate:
+            for name in (
+                "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+                "versioned_runtime_source.py", "versioned_runtime_construction.py",
+                "versioned_runtime_publication.py",
+            ):
+                assert (candidate.slot / ".runtime-bootstrap" / name).read_bytes() == (
+                    application / "runtime" / name
+                ).read_bytes()
+            assert source.engine.runtime.is_complete(
+                root, candidate.slot.name, expect_hash=selection["payload_hash"],
+            )
+    assert not (root / "current-version").exists()
+
+
+@pytest.mark.parametrize("native_source", [True], indirect=True)
+def test_application_retention_refuses_missing_helper_without_plugin_fallback(
+    native_source, tmp_path,
+):
+    source, snapshot = native_source
+    selected = source.select_project(snapshot, "demo-app")
+    application = snapshot / selected.project["application"]
+    assert (selected.payload / "scripts" / "runtime_launcher.py").is_file()
+    (application / "runtime" / "runtime_launcher.py").unlink()
+    root = tmp_path / "missing-application-helper"
+    with source.project_inputs(snapshot, "demo-app") as (_, inputs):
+        selection = source.native_selection(selected, inputs)
+        with pytest.raises(FileNotFoundError, match="runtime_launcher"):
+            with source.engine.numbered_candidate(
+                root, selection["runtime_version"], plugin=selected.payload,
+                uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+                health_module="demo_app", local_packages=tuple(selection["local_packages"]),
+                wheel_inputs=inputs, application=application, process_retention=True,
+                expected_source_identity=selection["identity"],
+            ):
+                pytest.fail("application retained a helper from a different representation")
+    assert not source.engine.runtime.marker_path(root, selection["runtime_version"]).exists()
+    assert not (root / "current-version").exists()
 
 
 @pytest.mark.parametrize("native_source", [True], indirect=True)
@@ -1169,6 +1227,17 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     native_source, tmp_path, tmp_path_factory, monkeypatch,
 ):
     source, snapshot = native_source
+    run_owned = source.engine.run_owned
+    activation_calls = []
+
+    def observed_child(argv, **options):
+        activation = any(Path(argument).name == "install.py" for argument in argv)
+        assert options.get("allow_breakaway", False) is activation
+        if activation:
+            activation_calls.append(tuple(argv))
+        return run_owned(argv, **options)
+
+    monkeypatch.setattr(source.engine, "run_owned", observed_child)
     with source.project_inputs(snapshot, "demo-app") as (selected, inputs):
         selection = source.native_selection(selected, inputs)
     application = snapshot / selected.project["application"]
@@ -1188,6 +1257,9 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
         monkeypatch.setenv("HOMEDRIVE", home.drive)
         monkeypatch.setenv("HOMEPATH", str(home)[len(home.drive):])
     root = tmp_path_factory.mktemp("app")
+    if os.name == "nt":
+        repair_path = root / "versions" / (selection["runtime_version"] + ".repair." + "0" * 32)
+        root = root.with_name(root.name + "x" * max(0, 270 - len(str(repair_path))))
     options = dict(
         uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
         health_module="demo_app", expected_version=selection["runtime_version"],
@@ -1201,6 +1273,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     before = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
     assert json.loads((root / "setup.json").read_text()) == ["--setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start"]
+    assert Path((root / "callback-cwd").read_text()).samefile(slot)
     marker = source.engine.runtime.marker_path(root, slot.name).read_bytes()
     assert source.install_application(snapshot, "demo-app", selected.payload, root, **options) == result
     assert source.engine.runtime.marker_path(root, slot.name).read_bytes() == marker
@@ -1227,6 +1300,9 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     )
     repaired_slot = Path(repaired["slot"])
     assert repaired_slot != slot and ".repair." in repaired_slot.name
+    if os.name == "nt":
+        assert len(str(repaired_slot)) >= 270
+    assert Path((root / "callback-cwd").read_text()).samefile(repaired_slot)
     assert (root / "current-version").read_text().strip() == repaired_slot.name
     assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
@@ -1243,6 +1319,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
     assert probe.stdout.strip() == "prepared application ready"
+    assert len(activation_calls) == 4
 
 
 @pytest.mark.parametrize("repair", [False, True])

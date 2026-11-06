@@ -10,9 +10,9 @@ from . import __version__
 
 if TYPE_CHECKING:
     from .config import ServiceConfig
+    from .local_control import LocalControl
 
-
-async def _foreground(config: "ServiceConfig") -> int:
+async def _foreground(config: "ServiceConfig", *, lifecycle: "LocalControl | None" = None) -> int:
     from agent_procutil.daemon_instances import admit_daemon_instance
 
     from .hosting import UnsettledRelay, run
@@ -22,7 +22,10 @@ async def _foreground(config: "ServiceConfig") -> int:
         runtime_root=Path(os.path.abspath(config.to_dict()["data_dir"])),
     ):
         try:
-            await run(config)
+            if lifecycle is None:
+                await run(config)
+            else:
+                await run(config, lifecycle=lifecycle)
             return 0
         except UnsettledRelay as unsettled:
             print("agent-ssh-service: native-relay-cleanup-unconfirmed; "
@@ -32,7 +35,21 @@ async def _foreground(config: "ServiceConfig") -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in {"__source-start", "__local-serve", "__local-stop"}:
+        from .source_start import dispatch
+
+        try:
+            return dispatch(argv)
+        except (OSError, ValueError, RuntimeError) as error:
+            from .config import SSHServiceError
+
+            diagnostic = str(error) if isinstance(error, SSHServiceError) or str(error) == (
+                "installed-Source-provider-unsupported"
+            ) else type(error).__name__
+            print("agent-ssh-service: " + diagnostic, file=sys.stderr)
+            return 1
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args(argv)

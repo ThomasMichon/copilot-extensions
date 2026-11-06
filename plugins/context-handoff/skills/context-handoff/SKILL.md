@@ -46,24 +46,41 @@ not a mandatory response to native token pressure.
 
 ### Native checkpoint flow
 
+Follow the host's offered tools and built-in checkpoint instructions, including
+its cadence and imminent-rollover ordering. Do not initialize a checkpoint for
+a short task or rewrite one after every tool call.
+
 1. Use `get_context_remaining` to inspect the current window. Discover the
    offered `session_artifacts`, `session_history`, and `new_context` tools through
    the host's tool catalog; do not infer argument schemas or internal file paths.
 2. Write a compact checkpoint using `session_artifacts` for the **current owner**,
-   preserving its expected revision and host-required snapshot binding. Include
+   following its actual revision contract. Include
    the parent objective/completion gate, canonical effort pointer, current slice,
    unresolved requests, settled evidence/decisions, original approval
    evidence/limits and current holds/revocations, live background/external
    obligations and recovery references, and **exactly one next action**.
    Use bounded `session_history` reads only to repair missing evidence. Empty
    boilerplate is not a checkpoint. Do not mutate another agent's artifact.
-3. Verify persistence and revision before terminal `new_context` using its
-   actual offered schema. Respect tool-in-flight and terminal ordering. No timer,
+   Keep essential recovery content within the host's complete-read budget.
+   If artifact reads are capped at 8,000 bytes, measure UTF-8 bytes, not string
+   length, and leave room for the next meaningful delta. This is a read
+   projection limit, not a claimed storage maximum. Consolidate before appends
+   bury essential middle content; reference canonical evidence instead of
+   copying it. Never replace a checkpoint from a truncated view as if complete.
+3. Confirm persistence from the mutation result. Read/stat when the host requires
+   it for replacement, content verification or an uncertain outcome; do not add
+   a read-back cycle solely as ceremony. At an imminent-rollover reminder, honor
+   its single-mutation and terminal ordering rather than repeatedly contracting
+   the checkpoint. Invoke `new_context` with its actual offered schema: the
+   current tool binds the private snapshot itself, without a snapshot argument.
+   Respect tool-in-flight constraints. No timer,
    raw clear RPC, arbitrary artifact file writes, or concurrent checkpoint store.
    Native context rollover keeps the logical owner/workspace; do not stop its
    live watchers/agents merely to rotate context or signal custom pickup.
 4. Read the bound checkpoint in the new window, refresh durable applicable
    session guidance and the targeted skill, then execute the one next action.
+   Truncated readback means incomplete returned content, not lost stored state;
+   recover only the missing details from complete authoritative sources.
    A root clear resets pressure accounting, not effort completion or ownership.
 5. Diagnose missing/stale checkpoint and static-load limits in place. A policy
    cap is not permission for an alternate session. A clear may succeed despite

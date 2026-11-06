@@ -72,6 +72,77 @@ differences do not manufacture `claim-added`, effort binding or disposition
 events. Changes between samples, before demand or outside supported fields are
 not reconstructed.
 
+## Advisory hook files
+
+The current-roster owner also has an optional small file projection for future
+shell consumers. It is separate from the selected observation journal and does
+not replace managed-session admission, canonical write receipts or hook policy.
+Ordinary pre/post hook entry points retain their existing execution path.
+
+The monitor's original passive discovery record advertises
+`hook_facts_version: 1` and `hook_facts_generation`, a process-local publisher
+identity. Do not substitute `runtime_generation`: that existing field identifies
+a build and can be shared by replacement processes. The original project-state
+owner resolves `project_dir(project)/worktrees/<id>/hook-facts/`; read only the
+advertised `<hook_facts_generation>.json`, never a directory scan or newest file.
+Adopted-anchor admission remains separate; this projection covers tracked
+worktree rows with known incarnation, workspace, current record provenance and
+sampled live-session membership/flags. Inactive rows do not create file homes.
+Those eligibility observations do not certify process liveness or head custody.
+
+Each UTF-8 envelope has exactly `version`, `quality`, `completeness`, `scope`,
+`producer`, `revision` and `facts`. Scope is exact project/worktree/incarnation/
+workspace. Producer metadata retains selected runtime root, build/publisher/
+projection generations and the existing installation-context fields. Facts
+contain only `status`, `status_note_at`, `last_session_id` and `head_yielded`.
+The listing session is an observation, **not head custody or permission to
+bind, resume or retire anything**. Missing facts stay null. The whole envelope
+is always advisory and partial, even when its source record was current.
+
+Bounds are 16 KiB per file, 4 KiB per string, a fixed four-level admitted shape
+and 4096 rows per project publication. Safe regular-file replacement occurs in
+the same directory with no retry loop. Configured project-root aliases retain
+their original admission; derived children and producer output files cannot
+be links/reparse points or hard links. Unrelated row-field/timestamp changes
+do not rewrite unchanged facts. The retained revision names the accepted row
+that last changed this view, not the latest whole-roster observation.
+The original project root resolves once per publication or withdrawal, never
+once per row or as a lifetime cache. Derived-path checks still run before each
+replacement or removal.
+
+The original runtime withdraws affected files on publication failure,
+unqualified/removed rows, admission closure and shutdown. Old publishers only
+own their own filenames; closing one cannot remove a successor's view.
+Failure of this optional projection does not change canonical writes or the
+existing roster. If withdrawal itself is refused, the publisher retains its
+owned path and reports the error; it does not delete aliases or claim fresh data.
+A crash can leave an old advisory file. Presence is never daemon-liveness or
+current-authority proof.
+
+`Read-PostToolHookFacts` in the separately shipped `scripts/hook-facts.ps1` library is a
+read-only point reader, not an active hook implementation. Its caller must
+already supply original-owner discovery, selected runtime/project roots and
+exact expected project/worktree/incarnation/workspace after applicable live
+admission/input checks. It validates the full envelope and scope, reads at most
+16 KiB plus one overflow byte with replacement-compatible file sharing, and
+returns null for absent, malformed, wrong-scope or unsupported data. It performs
+no command discovery, Python fallback, daemon call, directory enumeration or
+wait for publication. The existing bounded-file input is decoded in process. PowerShell 7 uses its
+bundled JSON reader with depth 4, duplicate-field rejection and date coercion
+disabled, preserving timestamp strings exactly; PowerShell 5 uses the existing
+framework JSON library with a separate depth-4, 16-KiB decoder. Missing parser support is unavailable, not
+permission to install one or invoke Python. The ordinary event decoder remains
+unchanged. No lifecycle operation follows from a returned advisory view.
+
+Version support expands only this passive file contract. Old hook callers keep
+their existing behavior; new readers facing old/rolled-back discovery report
+unavailable rather than guessing support. A complete shell-only event transition
+still needs managed-admission publication, reminder/reset and late-guidance
+consumers, nonblocking invalidation and a qualified POSIX decoder. Those
+requirements are not supplied by these files.
+The ordinary hook does not load this library yet, so the provider expansion
+does not add its parsing/definition cost to the current hot path.
+
 ## Qualified resident native saves
 
 The resident can additionally ingest complete committed-save receipts from

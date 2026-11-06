@@ -23,6 +23,7 @@ class Inspection:
         "status": "unsupported", "reason": "No explicit tracked workspace was supplied.",
     })
     findings: list = field(default_factory=list)
+    readiness: dict = field(default_factory=lambda: {"ready": None, "code": "unavailable"})
 
 
 def _validate_routes(raw: dict) -> None:
@@ -95,6 +96,7 @@ def inspect_project(project: str, workspace: str) -> Inspection:
                 _validate_routes(mapping(path))
         result.routes = related.read_related_grafted(anchors).related
         root = state_root.resolve_state_root(config, cwd=checkout)
+        result.readiness = state_root.coordination_readiness(config, cwd=checkout).as_dict()
         result.binding = {
             "status": "present" if root.bound and not root.error else "absent",
             "identity": resource_name(config.knowledge_repo, allow_empty=True),
@@ -142,8 +144,11 @@ def inspect_project(project: str, workspace: str) -> Inspection:
 
 
 def catalog(project: str, *, workspace: str = "") -> dict:
+    from .repos_knowledge_configuration import binding_names_supported, owner_status
+
     registry = repos.read_registry(strict=True)
     inspection = inspect_project(project, workspace)
+    binding_owner = owner_status(project)
     composition_error = None
     try:
         fingerprint([repos._repos_yaml_path()])
@@ -164,6 +169,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             # unsupported row like any other composition failure instead.
             name_error = exc
         entry = registry.repos.get(name)
+        binding_names = binding_names_supported(project, name)
         local_path = entry.local_path() if entry else None
         registration = (
             "absent" if entry is None else "unsupported" if not local_path else
@@ -226,6 +232,8 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             f"Route: {route}; editing unsupported",
             f"Bound state identity: {inspection.binding}",
             f"Actual tracked pair: {inspection.pair}",
+            "Binding identifiers: " + ("supported" if binding_names else
+                "unsupported; exact Configuration names starting with an ASCII letter or digit are required."),
             "Sources (higher precedence last): " + str(state["sources"]),
             "Findings: " + str(findings),
             FUTURE_ONLY,
@@ -242,5 +250,23 @@ def catalog(project: str, *, workspace: str = "") -> dict:
                 "default": state.get("override", ""), "required": True,
             }] if editable else [],
             "reset_fields": [],
+            "knowledge_bindable": str(
+                binding_names and not inspection.findings
+                and inspection.readiness.get("ready") is False
+                and inspection.binding.get("identity") in ("", name)
+                and entry is not None and entry.repo_class in {"knowledge", "worktree"}
+                and name != project and registration == "present"
+                and binding_owner == "available"
+            ).lower(),
+            "binding_fields": [],
         })
-    return {"entries": rows, "summary": {"repositories": len(rows)}}
+    summary = {
+        "repositories": len(rows), "knowledge_readiness": inspection.readiness,
+        "binding_owner": binding_owner,
+    }
+    if binding_owner != "available" and inspection.readiness.get("ready") is False:
+        summary.update(
+            banner_text="Knowledge binding is unavailable. Enable and prepare one qualified harness-knowledge owner.",
+            banner_level="warn",
+        )
+    return {"entries": rows, "summary": summary}

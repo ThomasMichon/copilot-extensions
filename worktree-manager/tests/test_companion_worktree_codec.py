@@ -324,7 +324,7 @@ def test_manager_explicit_refresh_recovers_exhausted_owner_window(configured, mo
     async def check() -> None:
         app = companion.MuxCompanionApp(cwd=str(root))
         app._timeline_panel.window = TimelineWindow(max_proofs=21)
-        async with app.run_test(size=(80, 30)) as pilot:
+        async with app.run_test(size=(80, 20)) as pilot:
             await until(pilot, lambda: not app._loading)
             app.query_one("#views", TabbedContent).active = "timeline-tab"
             timeline = app.query_one(SubwayTimeline)
@@ -371,6 +371,7 @@ def test_manager_explicit_refresh_recovers_exhausted_owner_window(configured, mo
             (root / "responses.json").write_text(json.dumps(responses), encoding="utf-8")
             if mode == "retention-budget":
                 monkeypatch.setattr(attachment_module, "MAX_RETAINED_EVIDENCE_BYTES", 0)
+            await pilot.pause()
             anchor = timeline.capture_anchor()
             assert anchor is not None
             anchor_offset = timeline._anchor_character_offset
@@ -404,13 +405,13 @@ def test_manager_explicit_refresh_recovers_exhausted_owner_window(configured, mo
                         and control.region.right <= app.size.width and control.region.bottom <= app.size.height
                         and app.get_widget_at(control.region.x, control.region.y)[0] is control
                     ))
+                control.focus()
+                await pilot.pause()
                 anchor = timeline.capture_anchor()
                 assert anchor is not None
                 anchor_offset = timeline._anchor_character_offset
-                assert await pilot.click(control), {
-                    "button": button, "region": control.region, "display": control.display,
-                    "disabled": control.disabled, "status": status(app),
-                }
+                # Pilot clips footer mouse coordinates against the bordered Screen.
+                await pilot.press("enter")
             if mode == "superseded":
                 await until(pilot, prepared.is_set)
                 app.query_one("#views", TabbedContent).active = "summary-tab"

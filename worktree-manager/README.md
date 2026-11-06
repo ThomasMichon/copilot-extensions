@@ -235,6 +235,10 @@ answerability stay unknown; the independently selected worktree/head fence
 controls admission and retires the reader when that selection is invalidated.
 Paginated replacement stages bounded intermediate membership without publishing
 it as current facts; current members remain unknown until replay completes.
+Bootstrap positions must equal the retained head. Delta bases must remain within
+retention, and their delivered positions and pagination flags must agree.
+Global sequence gaps and empty caught-up reads remain valid because unrelated
+owners share the sequence; they do not manufacture local events.
 Already-published rich Agenda work is admitted before optional Bridge startup
 waits. Worktrees and Bridge preparations start independently, including after
 Refresh while Bridge evidence is exhausted. A blocked optional bootstrap cannot
@@ -450,6 +454,13 @@ identity refuse rather than guessing pane zero. Reattachment preserves a
 recorded same-owner CLI while native evidence is unavailable, and removes it
 only when native inventory confirms its loss. Snapshot-fenced registration
 cannot overwrite a concurrently created CLI identity.
+Windows pane targeting keeps the session explicit and checks the selected
+client's `-V` and live server's reported version and native identity before
+selecting compatible 3.3.x or 3.4.x syntax. Discovery resolves registered bare
+names through PATH, is cached by executable/session generation and shares the
+operation's deadline. Unknown or incompatible releases refuse before pane
+actions. See the [native qualification
+packet](../TESTING.md) for the supported syntax and evidence limits.
 Replacing a conflicting recorded native incarnation also requires current
 native session evidence; a delayed reconnect cannot displace its successor.
 The observer uses the constructed runtime's bootstrap, not source or `uv`.
@@ -525,7 +536,11 @@ machine with `--apply`. Apply rechecks prerequisites after provisioning and
 continues in the same invocation when they are available. Failed provisioning
 or unresolved prerequisites stop before the core installer; a PATH-changing
 install that still leaves a gap requests a shell restart. Re-running is
-idempotent and can heal a partial install. The core install is never
+idempotent and can heal a partial install. Required Python must return a
+successful, supported version from the exact discovered executable; a found
+but unusable or unqualified Python remains a prerequisite gap. Detection does
+not reorder candidates, substitute a private runtime or repair public PATH.
+The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
 `install.{ps1,sh}`. Core detection uses the same read-only, installation-context-
 qualified runtime selection as the engine client. Empty runtime/versions
@@ -1518,6 +1533,23 @@ normal polling cadence can retry them.
 Highlighting the right-docked **Configuration** entry immediately displays its
 last selected section. This is browsing only; Apply/confirmation remains
 required for changes. Escape returns to the previous operational view.
+
+Worktrees reads the selected engine's knowledge readiness off the input thread
+in both local and live modes. The last validated observation and button
+identities remain stable while a refresh is pending.
+Missing required knowledge shows **Configure knowledge**, which navigates to
+the native Repositories section and its confirmed existing-repository binding
+action. An unavailable binding payload shows preparation guidance in the
+Repositories banner. Unavailable/failed reads remain explicit; a banner is not
+proof of readiness. Completion refreshes the owner observation and reconciles
+current and saved Worktrees button focus before returning from Configuration.
+The native New gate
+still decides admission, while source-only Bare allocation and existing-session
+recovery retain their separate behavior. This flow does not create a repository,
+authenticate a provider, retrofit a pair or install a missing binding owner.
+Caller timeout does not establish rollback. Inspect native readiness before
+retrying; the binding worker retains registration serialization independently
+of a caller that has lost its result.
 
 One header update action is shown: a Manager update takes precedence when both
 Manager and payload report availability (that path also reconciles the payload).

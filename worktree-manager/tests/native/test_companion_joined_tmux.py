@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Awaitable, Callable
 import json
 import os
@@ -51,7 +52,7 @@ def source_entrypoint(
     bridge = companion_bridge_source.bridge_command(ROOT)
     state_path = peer["checkout"].parent / "native-state.json"
     bootstrap = f"""
-import argparse,json,sys
+import argparse,json,os,sys
 from pathlib import Path
 sys.path[:0]={[str(ROOT / "worktree-manager/src"), *map(str, SOURCE_PATHS)]!r}
 from worktree_manager import companion_bridge_source,engine_client,mux_companion
@@ -67,9 +68,13 @@ def observed_mount(app):
     previous=[None]
     def observe():
         timeline=app.query_one(SubwayTimeline)
+        bridge=app.query_one('#bridge-feed')
         value=json.dumps({{
             'app_cells':list(app.size),'timeline_cells':list(timeline.size),
             'focus':type(app.focused).__name__,'follow_live':timeline.window.follow_live,
+            'bridge_members':len(app._bridge_attachment._members),
+            'bridge_select':{{'expanded':bridge.expanded,'value':str(bridge.value),
+                             'highlighted':bridge.query_one('SelectOverlay').highlighted}},
             'event_count':len(timeline.window.events),
             'sources':[{{'provider':state.token.identity.provider.value,
                         'before':state.before is not None,
@@ -80,7 +85,12 @@ def observed_mount(app):
             path=Path({str(state_path)!r})
             pending=path.with_suffix('.pending')
             pending.write_text(value,encoding='utf-8')
-            pending.replace(path)
+            try:
+                pending.replace(path)
+            except PermissionError as error:
+                if os.name!='nt' or getattr(error,'winerror',None) not in (32,33):
+                    raise
+                return
             previous[0]=value
     app.set_interval(.05,observe)
 mux_companion.MuxCompanionApp.on_mount=observed_mount
@@ -92,9 +102,18 @@ raise SystemExit(mux_companion.run(
     args.cwd,args.cli_pane,project=args.project,worktree_id=args.worktree_id,
     session_incarnation=args.session_incarnation))
 """
+    entry = peer["checkout"].parent / "native-app.py"
+    entry.write_text(bootstrap, encoding="utf-8")
 
     def command(arguments: list[str]) -> str:
         assert arguments[:2] == ["-m", "worktree_manager.mux_companion"]
+        if os.name == "nt":
+            argv = [sys.executable, "-I", "-B", str(entry), *arguments[2:]]
+            script = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
+            script += "; exit $LASTEXITCODE"
+            return "pwsh -NoLogo -NoProfile -EncodedCommand " + base64.b64encode(
+                script.encode("utf-16-le"),
+            ).decode("ascii")
         return shlex.join([sys.executable, "-I", "-B", "-c", bootstrap, *arguments[2:]])
 
     monkeypatch.setattr(companion_runtime, "companion_shell_command", command)

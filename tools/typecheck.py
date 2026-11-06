@@ -566,12 +566,15 @@ def main(argv: list[str] | None = None) -> int:
             raise TypecheckError("No projects selected")
         failed = False
         for project in selected:
+            files = tuple(path for path, owner in owners.items() if owner.name == project.name)
+            if args.all and project.level == "pending" and not files:
+                print(f"{project.name}: pending, no physical Python files in this checkout; not checked.")
+                continue
             if args.prepare:
                 prepare(ROOT, project)
                 path, _digest = environment_path(ROOT, project)
                 print(f"Prepared {project.name}: {environment_python(path)}")
             else:
-                files = tuple(path for path, owner in owners.items() if owner.name == project.name)
                 failed = check_project(
                     ROOT, project, files, all_paths=tuple(owners), strict=args.strict,
                 ) != 0 or failed

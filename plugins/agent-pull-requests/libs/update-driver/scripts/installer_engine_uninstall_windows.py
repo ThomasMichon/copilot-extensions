@@ -19,6 +19,52 @@ def inspect_processes(
     script += r"""
 $ErrorActionPreference='Stop'
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$nativeOwnerAvailable=$false
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class CensusTokenOwner {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool GetProcessTimes(IntPtr process, out long created,
+        out long exited, out long kernel, out long user);
+    [DllImport("advapi32.dll", SetLastError=true)]
+    static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+    public static string Read(int pid, long expectedCreation) {
+        IntPtr process = OpenProcess(0x1000, false, pid);
+        if (process == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        IntPtr token = IntPtr.Zero;
+        try {
+            long created, exited, kernel, user;
+            if (!GetProcessTimes(process, out created, out exited, out kernel, out user))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            // CIM retains microseconds; the native identity has 100ns precision.
+            if (created - created % 10 != expectedCreation)
+                throw new InvalidOperationException("Process identity changed during inspection");
+            if (!OpenProcessToken(process, 8, out token))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            using (WindowsIdentity identity = new WindowsIdentity(token)) {
+                if (identity.User == null)
+                    throw new InvalidOperationException("Process token has no user identity");
+                return identity.User.Value;
+            }
+        } finally {
+            if (token != IntPtr.Zero) CloseHandle(token);
+            CloseHandle(process);
+        }
+    }
+}
+'@ -ErrorAction Stop
+    $nativeOwnerAvailable=$true
+} catch {
+    # Restricted hosts retain the existing CIM ownership observation.
+}
 function Test-CensusProcessExited([int]$processId) {
     try { $process=[Diagnostics.Process]::GetProcessById($processId) } catch {
         if ($_.Exception.InnerException -is [ArgumentException]) { return $true }
@@ -27,6 +73,15 @@ function Test-CensusProcessExited([int]$processId) {
     try { return $process.HasExited } finally { $process.Dispose() }
 }
 function Get-CensusProcessOwner($row) {
+    if ($nativeOwnerAvailable) {
+        try {
+            $nativeSid=[CensusTokenOwner]::Read(
+                $row.ProcessId, ([datetime]$row.CreationDate).ToFileTimeUtc())
+            return [pscustomobject]@{Sid=$nativeSid;ReturnValue=0}
+        } catch {
+            if ($_.Exception.InnerException -isnot [ComponentModel.Win32Exception]) { throw }
+        }
+    }
     try { $owner=Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop } catch {
         if (-not (Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue)) { return }; throw
     }

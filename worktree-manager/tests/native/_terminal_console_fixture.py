@@ -189,6 +189,27 @@ class Console:
         ))
         return (created.dwHighDateTime << 32) | created.dwLowDateTime
 
+    def process_state(self, pid: int) -> dict:
+        script = (
+            f"$p=Get-Process -Id {int(pid)} -ErrorAction Stop; "
+            "$p.Threads | ForEach-Object { "
+            "@{id=$_.Id;state=$_.ThreadState.ToString();"
+            "wait=$(if ($_.ThreadState -eq 'Wait') {$_.WaitReason.ToString()} else {$null})} "
+            "} | ConvertTo-Json -Compress"
+        )
+        try:
+            result = subprocess.run(
+                [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, encoding="utf-8", timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return {"pid": pid, "error": str(error)}
+        return {
+            "pid": pid, "returncode": result.returncode,
+            "threads": result.stdout.strip(), "error": result.stderr.strip(),
+        }
+
     def pin_descendants(self):
         snapshot = self.api.CreateToolhelp32Snapshot(2, 0)
         if snapshot == w.HANDLE(-1).value:

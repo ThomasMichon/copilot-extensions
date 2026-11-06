@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+import threading
+import time
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -170,6 +172,218 @@ def tree(root):
     }
 
 
+def test_missing_binding_owner_refuses_without_any_native_configuration_write(native):
+    before = tree(native)
+    result = request("knowledge-preview", name="sample")
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "binding-owner-unavailable"
+    assert SECRET not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
+def test_missing_binding_owner_catalog_exposes_visible_recovery_without_writes(native):
+    source = native / "repository" / ".agent-worktrees" / "config.yaml"
+    source.parent.mkdir()
+    source.write_text("stateless: true\nrequires_external_state_root: true\n", encoding="utf-8")
+    before = tree(native)
+    result = cli("catalog", "--context-project", "sample")
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["summary"]["knowledge_readiness"]["ready"] is False
+    assert "Enable and prepare" in value["summary"]["banner_text"]
+    assert "harness-knowledge" in value["summary"]["banner_text"]
+    assert value["summary"]["banner_level"] == "warn"
+    assert all(row["knowledge_bindable"] == "false" for row in value["entries"])
+    assert SECRET not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
+@pytest.mark.parametrize("selection", ["project-installed", "global-installed", "sandbox-missing"])
+def test_binding_owner_uses_selected_home_and_project_activation(native, monkeypatch, selection):
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    host = native / "host-home"
+    project = native / "repository"
+    monkeypatch.setenv("HOME", str(host))
+    monkeypatch.setenv("USERPROFILE", str(host))
+    monkeypatch.setattr(binding.cfg, "load_project_config", lambda *_args, **_kwargs: SimpleNamespace(
+        default_repo=SimpleNamespace(anchor=str(project)),
+    ))
+
+    def write(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    def payload(root):
+        write(root / "plugin.json", {"name": "harness-knowledge"})
+        script = root / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("# Selected payload fixture\n", encoding="utf-8")
+        return script.resolve()
+
+    enabled = {"enabledPlugins": {"harness-knowledge@binding-source": True}}
+    payload(host / ".copilot" / "installed-plugins" / "binding-source" / "harness-knowledge")
+    write(host / ".copilot" / "settings.json", enabled)
+    expected = None
+    if selection != "sandbox-missing":
+        expected = payload(native / ".copilot" / "installed-plugins" / "binding-source" / "harness-knowledge")
+        write(native / ".copilot" / "settings.json", enabled)
+    if selection == "project-installed":
+        market = native / "global-marketplace"
+        payload(market / "payload")
+        write(market / ".claude-plugin" / "marketplace.json", {
+            "name": "binding-source", "plugins": [{"name": "harness-knowledge", "source": "./payload"}],
+        })
+        write(native / ".copilot" / "settings.json", {**enabled, "extraKnownMarketplaces": {
+            "binding-source": {"source": {"source": "directory", "path": str(market)}},
+        }})
+        write(project / ".github" / "copilot" / "settings.json", {**enabled, "extraKnownMarketplaces": {
+            "binding-source": {"source": {"source": "github", "repo": "example/marketplace"}},
+        }})
+        observed = binding.resolve_active_plugins(
+            home=native, project_root=project, plugin_names=("harness-knowledge",),
+        ).active["harness-knowledge@binding-source"]
+        assert observed.root == (market / "payload").resolve()
+        assert observed.root_for_scope("project:current") == expected.parents[3]
+    before = tree(native)
+    if expected is None:
+        assert binding.owner_status("sample") == "unavailable"
+    else:
+        assert binding.owner_script("sample") == expected
+    assert tree(native) == before
+
+
+def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
+    from agent_procutil import owned_process
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    calls = []
+    monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
+
+    def execute(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"version": 1}), "")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", execute)
+    with pytest.raises(ConfigurationError) as caught:
+        binding.invoke("sample", "sample", "apply", "a" * 64)
+    assert caught.value.code == "binding-owner-unsupported"
+    assert len(calls) == 1 and "--capabilities" in calls[0]
+    assert "--configuration" not in calls[0]
+
+
+def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    started, completed = threading.Event(), threading.Event()
+
+    def write():
+        started.set()
+        try:
+            return repos.set_copilot_account("sample", "after")
+        finally:
+            completed.set()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        futures = []
+        script = native / "qualified-binding.py"
+        script.write_text("# Owned binding fixture\n", encoding="utf-8")
+
+        def delegated(_path, *, run_name):
+            assert run_name == "__main__"
+            futures.append(pool.submit(write))
+            assert started.wait(2)
+            assert not completed.wait(0.1)
+            return {}
+
+        monkeypatch.setattr(binding, "owner_script", lambda _project: script)
+        monkeypatch.setattr(binding.runpy, "run_path", delegated)
+        binding._apply_worker("sample", "sample", "a" * 64, str(script))
+        assert futures[0].result(timeout=5)
+    assert repos.read_registry(strict=True).repos["sample"].copilot_account == "after"
+
+
+def test_binding_worker_refuses_a_changed_payload_before_execution(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    monkeypatch.setattr(binding, "owner_script", lambda _project: native / "new-owner.py")
+    monkeypatch.setattr(binding.runpy, "run_path", lambda *_args, **_kwargs: pytest.fail("changed owner executed"))
+    with pytest.raises(ConfigurationError) as caught:
+        binding._apply_worker("sample", "knowledge", "a" * 64, str(native / "old-owner.py"))
+    assert caught.value.code == "binding-owner-changed"
+
+
+def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(native, monkeypatch):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import repos_knowledge_configuration as binding
+    from agent_worktrees.repos_registry_transaction import registry_lock
+
+    def write(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    project = native / "repository"
+    config = native / ".sample" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(yaml.safe_dump({
+        "repo_name": "sample", "repos": {"sample": {"anchor": str(project)}},
+    }), encoding="utf-8")
+    (native / ".agent-worktrees" / "projects.yaml").write_text(yaml.safe_dump({
+        "schema_version": 2, "projects": {"sample": {"config_dir": str(config.parent)}},
+    }), encoding="utf-8")
+    payload = native / ".copilot" / "installed-plugins" / "fixture" / "harness-knowledge"
+    write(payload / "plugin.json", {"name": "harness-knowledge"})
+    write(native / ".copilot" / "settings.json", {
+        "enabledPlugins": {"harness-knowledge@fixture": True},
+    })
+    script = payload / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
+    script.parent.mkdir(parents=True)
+    marker = native / "late-execution"
+    script.write_text(
+        "import json,sys,time\nfrom pathlib import Path\n"
+        "if '--capabilities' in sys.argv:\n"
+        " time.sleep(0.5)\n"
+        " print(json.dumps({'version':1,'existing_binding_configuration':2}))\n"
+        "else:\n"
+        f" Path({str(marker)!r}).touch()\n"
+        " print(json.dumps({'status':'persisted','pointer_committed':True}))\n",
+        encoding="utf-8",
+    )
+    original = OwnedExecutionBudget.from_timeout
+    budgets = []
+
+    def budget(_cls, timeout, *, cleanup_reserve):
+        value = original(6 if timeout == 26 else timeout, cleanup_reserve=cleanup_reserve)
+        if timeout == 26:
+            budgets.append(value)
+        return value
+
+    monkeypatch.setattr(OwnedExecutionBudget, "from_timeout", classmethod(budget))
+    with registry_lock(repos._repos_yaml_path()):
+        with pytest.raises(ConfigurationError) as caught:
+            binding.invoke("sample", "knowledge", "apply", "a" * 64)
+        assert caught.value.code == "binding-owner-failed"
+        assert isinstance(caught.value.__cause__, (subprocess.TimeoutExpired, TimeoutError))
+        assert len(budgets) == 1 and time.monotonic() <= budgets[0].deadline + 0.5
+    time.sleep(0.2)
+    assert not marker.exists()
+    assert yaml.safe_load(config.read_text("utf-8")).get("knowledge_repo") is None
+
+
+def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native, monkeypatch, capsys):
+    from agent_worktrees import repos_configuration, repos_knowledge_configuration
+
+    monkeypatch.setattr(repos_knowledge_configuration, "invoke", lambda *_args: {
+        "status": "incomplete", "pointer_committed": True, "plugins_status": "failed",
+    })
+    assert repos_configuration.command([
+        "knowledge-apply", "--context-project", "sample", "--repository", "sample",
+        "--preview-token", "a" * 64,
+    ]) == 1
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["pointer_committed"] is True and receipt["status"] == "incomplete"
+
+
 def test_real_cli_set_reset_inheritance_and_allowlisted_local_writes(native):
     before = tree(native)
     catalog = request("catalog")
@@ -245,7 +459,7 @@ def test_secret_shaped_repository_name_remains_browsable_and_editable(native):
     assert repos.copilot_account_for("sk-ui") == "chosen"
 
 
-def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(native):
+def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(native, monkeypatch):
     """A registered name longer than the shared character-length cap (native
     `add_repo()` imposes none) must only mark that one row unsupported, never
     abort the whole catalog for the properly named selected project."""
@@ -255,13 +469,57 @@ def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(nati
     raw["repos"][overlong] = {
         "class": "worktree", repos._current_platform(): str(native / "repository"),
     }
+    raw["repos"]["knowledge"] = {
+        "class": "knowledge", repos._current_platform(): str(native / "knowledge"),
+    }
     registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    before = tree(native)
     result = request("catalog")
     assert result.returncode == 0, result.stderr
     rows = {row["id"]: row for row in json.loads(result.stdout)["entries"]}
     assert rows["sample"]["effective"] == "inherited" and rows["sample"]["editable"] == "true"
     assert rows[overlong]["effective"] == "unknown" and rows[overlong]["editable"] == "false"
     assert rows[overlong]["configuration"]["findings"]
+    from agent_worktrees import repos_configuration_catalog as catalog, repos_knowledge_configuration as binding
+
+    monkeypatch.setattr(catalog, "inspect_project", lambda *_args: catalog.Inspection(
+        binding={"identity": ""}, readiness={"ready": False},
+    ))
+    monkeypatch.setattr(binding, "owner_status", lambda _project: "available")
+    rows = {row["id"]: row for row in catalog.catalog("sample")["entries"]}
+    assert rows["knowledge"]["knowledge_bindable"] == "true"
+    assert rows[overlong]["knowledge_bindable"] == "false"
+    assert tree(native) == before
+
+
+@pytest.mark.parametrize("project,name", [
+    ("sample", "_knowledge"), ("sample", ".knowledge"),
+    ("sample", "-knowledge"), ("_project", "knowledge"),
+])
+def test_binding_name_rules_match_catalog_and_preview_without_blocking_preferences(native, monkeypatch, project, name):
+    from agent_worktrees import repos_configuration_catalog as catalog, repos_knowledge_configuration as binding
+
+    registry = repos._repos_yaml_path()
+    raw = yaml.safe_load(registry.read_text("utf-8"))
+    raw["repos"][project] = {"class": "worktree", repos._current_platform(): str(native / "repository")}
+    for repository in (name, "sk-knowledge"):
+        raw["repos"][repository] = {"class": "knowledge", repos._current_platform(): str(native / "knowledge")}
+    registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    before = tree(native)
+    monkeypatch.setattr(catalog, "inspect_project", lambda *_args: catalog.Inspection(
+        binding={"identity": ""}, readiness={"ready": False},
+    ))
+    monkeypatch.setattr(binding, "owner_status", lambda _project: "available")
+    rows = {row["id"]: row for row in catalog.catalog(project)["entries"]}
+    assert rows[name]["editable"] == "true"
+    assert rows[name]["knowledge_bindable"] == "false"
+    assert "Binding identifiers: unsupported" in rows[name]["card"]["body"]
+    assert rows["sk-knowledge"]["knowledge_bindable"] == ("true" if project == "sample" else "false")
+    result = cli("knowledge-preview", f"--context-project={project}", f"--repository={name}")
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "binding-name-unsupported"
+    assert SECRET not in result.stdout + result.stderr
+    assert tree(native) == before
 
 
 @pytest.mark.parametrize("change", ["registry", "global", "machine", "drop-in", "target", "login"])
@@ -357,6 +615,44 @@ def test_malformed_projects_registry_is_sanitized_native_inspection(native):
     row = next(row for row in json.loads(result.stdout)["entries"] if row["id"] == "sample")
     assert row["configuration"]["binding"]["status"] == "unknown"
     assert row["configuration"]["findings"][0]["code"] == "native-inspection-unavailable"
+    assert SECRET not in result.stdout + result.stderr
+    assert "Traceback" not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
+@pytest.mark.parametrize("command", ["catalog", "knowledge-preview"])
+def test_missing_default_repository_is_sanitized_and_read_only(native, command):
+    from agent_worktrees import installer
+
+    project = "multi"
+    config = native / ".multi" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(yaml.safe_dump({
+        "repo_name": project, "repos": {
+            "one": {"anchor": str(native / "repository")},
+            "two": {"anchor": str(native / "knowledge")},
+        },
+    }), encoding="utf-8")
+    installer.projects_yaml_path().write_text(yaml.safe_dump({
+        "schema_version": 2, "projects": {project: {"config_dir": str(config.parent)}},
+    }), encoding="utf-8")
+    before = tree(native)
+    with pytest.raises(KeyError):
+        cfg.load_project_config(project, include_control_plane_related_pr=False).default_repo
+    args = [command, "--context-project", project]
+    if command == "knowledge-preview":
+        args += ["--repository", "sample"]
+    result = cli(*args)
+    value = json.loads(result.stdout)
+    if command == "catalog":
+        assert result.returncode == 0, result.stderr
+        assert value["summary"]["binding_owner"] == "unavailable"
+        assert all(row["knowledge_bindable"] == "false" for row in value["entries"])
+        row = next(row for row in value["entries"] if row["id"] == project)
+        assert row["configuration"]["findings"][0]["code"] == "native-inspection-unavailable"
+    else:
+        assert result.returncode != 0
+        assert value["code"] == "binding-owner-unavailable"
     assert SECRET not in result.stdout + result.stderr
     assert "Traceback" not in result.stdout + result.stderr
     assert tree(native) == before

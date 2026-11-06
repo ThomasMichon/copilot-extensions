@@ -34,6 +34,153 @@ def git_branch_invocation_is_readonly(args: list[str]) -> bool:
     )
 
 
+def git_tokens(seg: str, tool: str, *, split_redirects: bool = False) -> list[str]:
+    """Tokenize literal arguments with the selected shell's quoting rules."""
+    posix_escapes = tool.lower() in {"bash", "sh"}
+    powershell_escapes = tool.lower() in {"powershell", "pwsh"}
+    tokens: list[str] = []
+    current: list[str] = []
+    token_started = False
+    quote = None
+    index = 0
+    while index < len(seg):
+        char = seg[index]
+        if quote:
+            if (
+                powershell_escapes
+                and quote == "'"
+                and char == "'"
+                and index + 1 < len(seg)
+                and seg[index + 1] == "'"
+            ):
+                current.append("'")
+                index += 1
+            elif char == quote:
+                quote = None
+            elif (
+                posix_escapes
+                and char == "\\"
+                and quote == '"'
+                and index + 1 < len(seg)
+                and seg[index + 1] in {'"', "\\", "$", "`"}
+            ):
+                current.append(seg[index + 1])
+                index += 1
+            elif (
+                powershell_escapes
+                and quote == '"'
+                and char == "`"
+                and index + 1 < len(seg)
+            ):
+                current.append(seg[index + 1])
+                index += 1
+            else:
+                current.append(char)
+        elif char in {"'", '"'}:
+            token_started = True
+            quote = char
+        elif char.isspace():
+            if token_started:
+                tokens.append("".join(current))
+                current = []
+                token_started = False
+        elif split_redirects and char == ">":
+            if token_started:
+                tokens.append("".join(current))
+                current = []
+                token_started = False
+            if index + 1 < len(seg) and seg[index + 1] == ">":
+                tokens.append(">>")
+                index += 1
+            else:
+                tokens.append(">")
+        elif (
+            posix_escapes
+            and char == "\\"
+            and index + 1 < len(seg)
+            and (
+                seg[index + 1].isspace() or seg[index + 1] in {"'", '"', "\\"}
+                or split_redirects and seg[index + 1] in {">", "<", "|", "&"}
+            )
+        ):
+            current.append(seg[index + 1])
+            token_started = True
+            index += 1
+        elif powershell_escapes and char == "`" and index + 1 < len(seg):
+            current.append(seg[index + 1])
+            token_started = True
+            index += 1
+        else:
+            current.append(char)
+            token_started = True
+        index += 1
+    if token_started:
+        tokens.append("".join(current))
+    return tokens
+
+
+def literal_write_targets(seg: str, tool: str) -> list[str]:
+    """Extract literal redirect operands and target-bearing shell arguments."""
+    tokens = git_tokens(seg, tool, split_redirects=True)
+    targets = []
+    arguments = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {">", ">>"}:
+            if index + 1 < len(tokens) and not tokens[index + 1].startswith("&"):
+                targets.append(tokens[index + 1])
+            index += 2
+        else:
+            arguments.append(token)
+            index += 1
+    if not arguments:
+        return targets
+    verb, args = arguments[0].lower(), arguments[1:]
+    if verb == "dd":
+        return targets + [arg[3:] for arg in args if arg.lower().startswith("of=")]
+    positional, named = [], {}
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        option, separator, value = arg.partition(":")
+        option = option.lower()
+        if option in {
+            "-path", "-literalpath", "-filepath", "-destination", "-value", "-inputobject",
+            "-encoding", "-filter", "-include", "-exclude", "-stream", "-delimiter",
+            "-width", "-newname", "-name", "-itemtype", "-type", "-property", "-credential",
+            "-erroraction", "-warningaction", "-informationaction", "-progressaction",
+            "-errorvariable", "-warningvariable", "-informationvariable",
+            "-outvariable", "-outbuffer", "-pipelinevariable",
+        }:
+            if not separator and index + 1 < len(args):
+                index += 1
+                value = args[index]
+            named[option] = value
+        elif arg in {"-t", "--target-directory"} and index + 1 < len(args):
+            index += 1
+            named["-destination"] = args[index]
+        elif arg.startswith("--target-directory="):
+            named["-destination"] = arg.partition("=")[2]
+        elif not arg.startswith("-"):
+            positional.append(arg)
+        index += 1
+    paths = [named[key] for key in ("-path", "-literalpath", "-filepath") if key in named]
+    destination = named.get("-destination")
+    if verb in {"cp", "copy-item"}:
+        return targets + ([destination] if destination is not None else positional[-1:])
+    if verb in {"mv", "move-item"}:
+        return targets + paths + positional + ([destination] if destination is not None else [])
+    if verb in {
+        "set-content", "add-content", "out-file", "new-item", "remove-item",
+        "clear-content", "rename-item", "set-itemproperty", "tee-object",
+    }:
+        return targets + (paths or positional[:1])
+    if verb in {"tee", "sed", "rm", "touch", "mkdir", "truncate", "patch"}:
+        return targets + positional
+    return targets
+
+
 def shell_segments(cmd: str, tool: str) -> list[str]:
     lower_tool = tool.lower()
     posix_escapes = lower_tool in {"bash", "sh"}

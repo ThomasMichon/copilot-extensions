@@ -17,13 +17,18 @@ without treating an incidental generated Git commit as another release identity.
 
 Promotion should continuously deliver qualified development changes in less
 than thirty minutes end-to-end, including queueing, while changes await release.
-Its test portfolio consists only of unit tests with coverage; required PR testing
+Its general test portfolio consists only of unit tests with coverage; required PR testing
 selects that unit portfolio conditionally by impact. A separate, bounded
 construction and installed-entry-point qualification must establish that every
 declared release environment can be assembled and launched under the selected
 package-feed restrictions before publication. This is an explicit exception to
 unit-only release execution, not permission to reclassify integration as unit
-evidence or restore the general integration portfolio. Repeated bookkeeping,
+evidence or restore the general integration portfolio. Every promotion must also
+qualify the real Windows Resume pane-startup consumer against the frozen release
+candidate, including concurrent cold starts with prewarming enabled and disabled, argument acknowledgment,
+terminal attachment and owned retirement. This bounded native exception remains
+separate from unit coverage and does not require a model session or operator state.
+Repeated bookkeeping,
 composition or bootstrap
 failures should not turn release control into a barrier to its own repair.
 Agreement between artifact production and verification belongs in ordinary
@@ -127,9 +132,10 @@ server-enforced freshness protect the final merge.
 ### qualified-before-complete
 
 Complete admitted unit evidence, production artifact-availability/integrity and
-complete configured-feed construction/launch qualification establish the actual
-release, not merely successful submission or an open PR. Apart from that bounded
-construction/launch exception, real-Git, multi-process, native, installation and
+complete configured-feed construction/launch qualification and native Windows
+Resume consumer qualification establish the actual release, not merely successful
+submission or an open PR. Apart from these bounded
+construction/launch and Resume exceptions, real-Git, multi-process, native, installation and
 end-to-end integration tests belong to periodic containerized validation.
 Publication and runtime activation remain distinct outcomes. Optional client
 artifact use and governed source assembly follow the
@@ -212,9 +218,9 @@ a green wrapper, a larger deadline or an ever-growing test gate.
 Promotion runs eligible unit tests and collects coverage once. Conditional PR
 testing uses that bounded unit portfolio. General integration does not rejoin the
 gate through a baseline, preflight or generated-consumer dependency. The separate
-configured-feed construction/launch qualification below is the sole bounded
-exception; it does not change unit eligibility or credit integration coverage as
-unit proof.
+configured-feed construction/launch qualification below and native Windows Resume
+consumer qualification are the two bounded exceptions. Neither changes unit
+eligibility or credits integration coverage as unit proof.
 
 ### configured-feed-construction-and-first-launch
 
@@ -266,7 +272,8 @@ eligible units within the same or smaller budget, instead of accumulating them.
 - No fake or omitted admitted-unit evidence, or removal of byte integrity,
   signing, exact locks, source governance or publication authority.
 - No general end-to-end, actual-Git or multi-process integration-test portfolio
-  in promotion; only the bounded configured-feed construction/launch exception.
+  in promotion; only bounded configured-feed construction/launch and native
+  Windows Resume consumer qualification are exceptions.
 - No implicit authorization for a main repair, stale overwrite, forced tag
   movement or change to independently governed control preservation.
 - No second release channel, competing publisher or separate client provenance

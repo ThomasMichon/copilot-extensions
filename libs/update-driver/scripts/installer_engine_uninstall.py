@@ -601,6 +601,9 @@ def _parent(pid: int, image: str, command: str, payload: Path, root: Path, plugi
         arguments = _argv(command, image) if arguments is None else arguments
     except ValueError:
         return False
+    if os.name == "nt" and Path(image).stem.lower() in {"bash", "sh"}:
+        arguments = [re.sub(r"^/(?:cygdrive/)?([A-Za-z])/", r"\1:/", value)
+                     for value in arguments]
     entries = {payload / "scripts" / name for name in ("install.ps1", "init.ps1", "install.sh", "init.sh")}
     if plugin in {"agent-machines", "agent-containers"}:
         entries.add(payload / "scripts" / "legacy-uninstall.sh")

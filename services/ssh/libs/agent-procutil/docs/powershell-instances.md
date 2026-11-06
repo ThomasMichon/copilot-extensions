@@ -1,0 +1,87 @@
+# PowerShell daemon instance custody
+
+[Back to agent-procutil](../README.md)
+
+Dot-source `daemon_instances.ps1`, then use `New-DaemonInstanceReservation`,
+`Set-DaemonInstanceProcess`, `Enter-DaemonInstance`, `Exit-DaemonInstance` and
+`Invoke-DaemonInstanceReconcile`. These operations use the existing shared
+registry and schema, not a second service or inventory.
+
+## Original shell and private transport
+
+Import refuses a loaded legacy adapter before replacing any existing guard
+functions; otherwise it only defines the adapter. The first explicit operation lazily starts one
+windowless, private-pipe Python helper for the original PowerShell process.
+AppDomain state and a process-wide monitor serialize concurrent runspaces;
+subsequent calls share that channel and the original instance's nested guard
+references. Source-only distributions carry the complete
+`daemon_instance_runtime.pyz` beside the adapter, including installed dtssh and
+WSL keepalive entrypoints. Python is resolved normally from PATH, without
+interpreter attestation or download.
+
+The kernel's input-pipe server PID and the same retained process handle/birth
+authenticate the original shell. The helper is never registered as that shell's
+daemon. Child binding/completion duplicates the caller's retained
+`Process.Handle` through that same shell pin, checks native PID and birth, and
+requires actual exit for child completion. It does not reconstruct custody by
+reopening a reported child PID. Unknown launch outcomes retain their record.
+Missing or uncorrelated transport outcomes break the channel and refuse
+automatic replay.
+The same private transport serves `native_owned.ps1`'s finite process
+operation without creating an instance record or another helper service.
+Only a correlated response carrying a Boolean cleanup witness can attest a
+failed finite operation. Unconfirmed native cleanup retains its exact process
+and Job objects and fences the channel. Cancellation of an unfinished request
+closes helper custody from `finally`, including runspace stop that bypasses
+`catch`; an already-received uncertain outcome is retained, not replayed.
+Later correlated requests at that finite-cleanup fence return an explicit
+replay refusal without exiting the helper or retrying cleanup. The retained
+process, Job and failed-log objects remain owned by that original session.
+Unrelated fatal lifetime-admission failures retain their existing fatal path;
+a settled finite failure without retained log custody does not fence the
+session.
+The finite target's monotonic deadline starts before target creation and is
+never reset after spawning. A completion observed after that deadline remains
+a timeout; the separate ten-second retirement allowance does not grant more
+target execution time.
+Fully qualified, normalized UNC share-root working directories retain their
+original spelling, with or without a trailing backslash. The cwd exception
+does not admit a bare share root as an executable or log filename, or relax
+drive-relative, current-drive-rooted or unnormalized path refusal.
+Large outcomes use ordered, nonce/request-correlated fragments within the same
+request deadline. Each frame remains bounded; supported reconciliation batches
+and removed-artifact paths are reassembled without discarding outcomes after
+the registry or cursor has changed.
+
+An already-loaded legacy compiled instance adapter refuses this migration
+before activation. Use a fresh PowerShell process after the normal authorized
+payload update; the new adapter never fabricates ownership of an old guard.
+
+## Disposable lifetime and completion
+
+The existing caller-owned Job protocol keeps the helper and its descendants
+bound to the original shell. Before disposable admission is published, a
+separate strict kill-on-close Job contains that shell and its future children;
+only the helper holds its handle. Helper loss therefore retires the disposable
+shell, while shell loss retires the helper in the kernel.
+
+Closing the final admission guard marks its record finished and stops lease
+observation, but does not release that process-lifetime Job. Renewable deadlines
+cannot move the original observer-local monotonic hard bound, including during
+busy-record inspection. The observer never waits on the process-local record
+mutex, so another operation cannot suspend its periodic hard-bound check.
+Containment extends only the original shell's supplied Job scope chain, not
+the helper's private Job metadata. Production still has no expiry and is not
+assigned the disposable shell Job. Reconciliation retains the original shell's self-cleanup
+refusal, shared cursor/byte-range locks and exact-file ownership checks.
+
+An authenticated test lifecycle declaration supplies the effective purpose,
+owner, registry and lease before spec validation. An explicit interactive-test
+request still refuses an unattended lifecycle owner rather than substituting a
+shorter policy.
+
+Portable transaction/ABI-call doubles and PowerShell facade controls are
+distinct from actual Windows process/Job and desktop qualification. The retained
+compiled `native_daemon.ps1` launcher remains a separate migration boundary.
+The compiler-free `native_owned.ps1` facade also uses this transport, but its
+actual process/desktop qualification is a separate gate.

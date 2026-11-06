@@ -534,6 +534,11 @@ uses the native read/preview/apply CLI to inspect registration, routes, state
 binding and tracked pairs. Its only editable setting is the machine-local
 future-launch Copilot login preference; it does not log in or launch agents.
 
+The standalone [repository authentication inspection](docs/repository-authentication.md)
+separately observes an explicitly configured GitHub account and repository API
+access. It does not acquire credentials or certify Git, Copilot, MCP or complete
+onboarding readiness.
+
 ## Independent Execution Spaces
 
 Native Windows and WSL can register independent execution-space keys without
@@ -909,7 +914,12 @@ and on-demand skills remain available.
 The passive `scripts/managed_session.py` owner reads the project/repository
 registries, adopted-project ownership configuration and bounded Git metadata,
 without invoking Git, a service or an installer. Positively established session/workspace associations are
-cached under the selected registry's `cache/managed-sessions/`. Registry and
+cached under the selected registry's `cache/managed-sessions/`. When the exact
+native session folder is available, a positive association is also published
+under its `agent-worktrees/managed-session.json`; warm admission checks that
+scoped record before traversing Git metadata. Folder presence alone is not
+admission: controller-only, unrelated-workspace and invalidated records remain
+inert or use the existing passive fallback. Registry and
 Git-ownership inputs invalidate reuse; the extension also checks these inputs
 before pulse, nudge or resident-policy effects. Membership is a reusable fact,
 not a cached tool permission: admitted events still evaluate current policy.
@@ -951,20 +961,26 @@ behavior; an already-loaded older extension is not retroactively changed.
 | `sessionStart` | Managed-session start | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks |
 | `sessionEnd` | Managed-session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
 
-The cross-repo guard reuses complete topology discovery for up to five minutes,
-scoped to the source checkout and home directory, including when discovery has a
-deadline. Failed, malformed or deadline-exhausted discovery is not cached;
-confirmed roots from a partial result still protect the current tool call.
-Shell commands excluded by the guard's existing write-verb classifier skip
-topology discovery. Cold discovery can still exceed its budget; this cache
-does not change the guard's fail-open policy or guarantee cold-call latency.
+The existing guard family accepts legacy single-call events and native
+`toolCalls[]` batches under one composed deadline. Direct-write classification
+recognizes structured edit paths and freeform `apply_patch` add, update, delete
+and move directives; edited content and quoted path data do not become targets.
+The current command owner evaluates batches before selecting a legacy monitor
+transport, so an older healthy monitor cannot silently accept an unknown batch.
+Legacy single-call transport remains unchanged.
+These are cooperative first-write reminders, not exhaustive interception of
+arbitrary process writes or a security boundary.
 
-`related list --json` includes each entry's `registry` object (`class`, `remote`,
-and the current platform's `path`), matching `related show --json`; `null` means
-no registered repository. The command guard consumes this batched result in one
-CLI lookup on a cache miss. An older runtime that omits `registry` retains the
-per-repository `show` fallback. Cache scope, lifetime and completeness rules are
-unchanged, and break-glass grants are still read live for every decision.
+Cross-repository evaluation reads the caller-scoped
+[prepared guard map](docs/guarded-anchor-map.md), without topology discovery or
+a CLI lookup on the tool path. Its supplemental repository postures support
+read-only, isolated-worktree and required-elevation reminders alongside the
+existing delegation rule. An unavailable supplemental posture is reported as
+partial, not used to erase independently confirmed delegated roots. Current
+policy switches and scoped, expiring break-glass grants remain live on every
+decision; a grant for one target never exempts another target in the same call.
+Mixed modes compose by priority: a warning or ask for one target cannot hide a
+denial for another. Every guard reads grants from the same selected registry.
 
 Session registration defaults to the hook's 1.5-second request budget with
 zero daemon boot-wait. Explicit `bind-session` selects the existing normal

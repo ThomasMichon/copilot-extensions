@@ -332,13 +332,26 @@ def install_application(
             python = candidate.slot / ".venv" / (
                 "Scripts/python.exe" if os.name == "nt" else "bin/python"
             )
+            command = [str(candidate.slot / "install.py"), "--", *arguments]
+            cwd = candidate.slot
+            if os.name == "nt":
+                # CreateProcess rejects long cwd values, including native spelling.
+                # Enter the physical slot inside the same isolated interpreter.
+                command = [
+                    "-c", "import os,runpy,sys\n"
+                    f"os.chdir({engine._native_retained_path(candidate.slot)!r})\n"
+                    "runpy.run_path(sys.argv.pop(1), run_name='__main__')",
+                    *command,
+                ]
+                cwd = Path(candidate.slot.anchor)
             engine._child(
                 [
                     str(engine._native_retained_path(python)), "-I", "-X", "utf8", "-B",
-                    str(candidate.slot / "install.py"), "--", *arguments,
+                    *command,
                 ],
                 inputs=frozen, descriptor=candidate.descriptor,
-                timeout=180, cwd=candidate.slot, candidate=candidate.slot,
+                timeout=180, cwd=cwd, candidate=candidate.slot,
+                allow_breakaway=True,
             )
             inputs.verify()
             receipt = _read(candidate.slot / "install-success.json")

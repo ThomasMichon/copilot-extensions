@@ -41,12 +41,41 @@ try:
     load_source(
         "anchor_shell_parser", "plugins/agent-worktrees/scripts/anchor_shell_parser.py"
     )
+    forms = load_source(
+        "tool_call_forms", "plugins/agent-worktrees/scripts/tool_call_forms.py"
+    )
     guard = load_source(
         "cohort_anchor_write_guard",
         "plugins/agent-worktrees/scripts/anchor_write_guard.py",
     )
 finally:
     sys.path[:] = _original_path
+
+
+def test_native_patch_targets_exclude_content_and_keep_moves():
+    patch = (
+        "*** Begin Patch\n*** Update File: source.py\n"
+        "+mentions other/repo.py\n*** Move to: moved.py\n"
+        "*** Add File: added.py\n+content\n*** Delete File: deleted.py\n*** End Patch\n"
+    )
+    assert forms.write_targets("apply_patch", patch) == [
+        "source.py", "moved.py", "added.py", "deleted.py",
+    ]
+    assert forms.write_targets("multi_edit", {
+        "edits": [{"file_path": "source.py", "new_string": "other/repo.py"}],
+    }) == ["source.py"]
+
+
+def test_native_batch_retains_session_scope_and_valid_calls():
+    events = forms.tool_events({
+        "sessionId": "synthetic-session", "workingDirectory": "/synthetic/project",
+        "toolCalls": [None, {"id": "write", "name": "apply_patch", "args": "patch"}],
+    })
+    assert events == [{
+        "sessionId": "synthetic-session", "workingDirectory": "/synthetic/project",
+        "cwd": "/synthetic/project", "toolCallId": "write",
+        "toolName": "apply_patch", "toolArgs": "patch",
+    }]
 
 
 @pytest.mark.parametrize(

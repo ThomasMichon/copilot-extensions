@@ -124,11 +124,12 @@ class MembershipCodec:
             raise TimelineContractError("Bridge membership strengthened unavailable authority")
         stamp(frame["observed_at"])
         retained = object_fields(frame["retained"], {"floor", "head", "complete"})
+        position = offset(frame["position"], source)
         if (
             any(type(retained[key]) is not int or not 0 <= retained[key] <= 2**63 - 1
                 for key in ("floor", "head"))
             or retained["floor"] > retained["head"] + 1 or retained["complete"] is not False
-            or offset(frame["position"], source) > retained["head"]
+            or position > retained["head"]
         ):
             raise TimelineContractError("invalid Bridge membership retained range")
         if not isinstance(frame["limitations"], list) or any(
@@ -146,12 +147,19 @@ class MembershipCodec:
             seen.add(member["member_id"])
         previous = -1
         if kind == "snapshot":
-            if frame["base_position"] is not None or frame["changes"] or frame["has_more"]:
+            if (
+                frame["base_position"] is not None or frame["changes"] or frame["has_more"]
+                or position != retained["head"]
+            ):
                 raise TimelineContractError("Bridge membership snapshot is not an atomic bootstrap")
         else:
             previous = offset(frame["base_position"], source)
-            if frame["members"]:
-                raise TimelineContractError("Bridge membership delta cannot replace current members")
+            if (
+                frame["members"] or not retained["floor"] - 1 <= previous <= position
+                or frame["has_more"] != (position < retained["head"])
+                or frame["has_more"] and not frame["changes"]
+            ):
+                raise TimelineContractError("Bridge membership delta lost its retained replay boundary")
         for change in frame["changes"]:
             object_fields(change, {
                 "kind", "operation", "member", "evidence_kind", "grants_claim_release", "observed_at", "id",
@@ -159,7 +167,7 @@ class MembershipCodec:
             self.member(change["member"])
             sequence = offset(change["id"], source)
             if (
-                sequence <= previous or sequence > offset(frame["position"], source)
+                sequence <= previous or sequence > position
                 or not isinstance(change["operation"], str)
                 or change["operation"] not in {"upsert", "tombstone"}
                 or change["evidence_kind"] != "observed-change"
@@ -169,8 +177,6 @@ class MembershipCodec:
                 raise TimelineContractError("Bridge membership change lost continuity or custody qualification")
             stamp(change["observed_at"])
             previous = sequence
-        if kind == "delta" and offset(frame["position"], source) < previous:
-            raise TimelineContractError("Bridge membership cursor regressed")
         return frame
 
     def member(self, member: Any) -> None:

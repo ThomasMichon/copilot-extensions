@@ -42,6 +42,7 @@ on:
           - coverage-selection
           - pane-argv
           - generic-mux
+          - resume-pane
           - manager-uninstall
           - komodo-recovery
           - manager-suite
@@ -1467,8 +1468,8 @@ jobs:
           --timeout 300 --plugin-timeout 360 --test-timeout 60
 
   generic-mux-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'generic-mux'
-    name: Generic PSMux 3.3.8 creation (isolated session)
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'generic-mux' || inputs.portfolio == 'resume-pane')
+    name: PSMux 3.3.8 consumer qualification (isolated sessions)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -1496,7 +1497,25 @@ jobs:
           $binaries = @(Get-ChildItem -LiteralPath $root -Filter psmux.exe -Recurse -File)
           if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
           "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+          $binaries[0].DirectoryName >> $env:GITHUB_PATH
+      - name: Qualify concurrent Resume consumers before controller activation
+        if: inputs.portfolio == 'resume-pane'
+        env:
+          UV_PYTHON: "3.12"
+        shell: pwsh
+        run: |
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers --junit-dir "$env:RUNNER_TEMP\resume-evidence" --timeout 360 --plugin-timeout 600 --test-timeout 180
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain native Resume evidence
+        if: always() && inputs.portfolio == 'resume-pane'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-resume-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resume-evidence
+          if-no-files-found: error
+          retention-days: 2
       - name: Qualify generic creation and truthful verification
+        if: inputs.portfolio == 'generic-mux'
         env:
           PSMUX_FILE_LAUNCH_E2E: "1"
           UV_PYTHON: "3.12"
@@ -1507,7 +1526,7 @@ jobs:
 
   pane-argv-windows:
     if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'pane-argv' || inputs.portfolio == 'mux-companion')
-    name: Native PSMux 3.3.6 (isolated session)
+    name: Native PSMux ${{ inputs.portfolio == 'mux-companion' && '3.4.0' || '3.3.6' }} (isolated session)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -1522,14 +1541,22 @@ jobs:
           version: "0.12.6"
       - name: Prepare pinned disposable PSMux
         shell: pwsh
+        env:
+          PORTFOLIO: ${{ inputs.portfolio }}
         run: |
           $ErrorActionPreference = 'Stop'
           $null = Get-Command pwsh -CommandType Application -ErrorAction Stop
           $root = Join-Path $env:RUNNER_TEMP 'pane-argv-psmux'
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.6/psmux-v3.3.6-windows-x64.zip' -OutFile $archive
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947') {
+          $version = '3.3.6'
+          $digest = 'a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947'
+          if ($env:PORTFOLIO -eq 'mux-companion') {
+            $version = '3.4.0'
+            $digest = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
+          }
+          Invoke-WebRequest -Uri "https://github.com/psmux/psmux/releases/download/v$version/psmux-v$version-windows-x64.zip" -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $digest) {
             throw 'Pinned PSMux archive digest mismatch'
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $root
@@ -1551,10 +1578,20 @@ jobs:
         env:
           UV_PYTHON: "3.12"
           EXPECTED_SOURCE: ${{ github.sha }}
+          COMPANION_MEMBERSHIP_PROFILE: "1"
         run: |
           python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_companion_pane_native.py --test-file tests/native/test_companion_app_psmux.py --test-file tests/test_companion_attention.py --test-file tests/test_companion_attention_ui.py --test-file tests/test_daemons_status.py --test-file tests/test_daemons_cli.py --test-file tests/test_windows_daemon_observation.py --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers --test-timeout 120
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_companion_python_startup.py --test-file tests/native/test_companion_pane_native.py --test-file tests/native/test_companion_app_psmux.py --test-file tests/native/test_companion_joined_psmux.py --test-file tests/native/test_companion_joined_fixture.py --test-file tests/test_companion_attention.py --test-file tests/test_companion_attention_ui.py --test-file tests/test_daemons_status.py --test-file tests/test_daemons_cli.py --test-file tests/test_windows_daemon_observation.py --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers --test-timeout 120
+      - name: Qualify native bounded owner lookups and writable preparation
+        if: inputs.portfolio == 'mux-companion'
+        env:
+          UV_PYTHON: "3.12"
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_owner_membership_budget.py
+          -k "selected_owner_capture or writable_bootstrap"
+          --allow-explicit-tiers
 
   worktree-state-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktree-state'

@@ -8,8 +8,9 @@ Loads without `context-handoff`; needs only a shell.
 
 ## Preparing a brief
 
-For native-selected context-only rollover, use the skill's verified current-owner
-checkpoint/terminal `new_context` flow, not custom pickup. Preserve the parent
+For native-selected context-only rollover, follow the host's built-in checkpoint
+cadence, revision and terminal ordering, with the skill's current-owner recovery
+flow, not custom pickup or a competing verification loop. Preserve the parent
 gate, original approval evidence/limits, current holds, unresolved work, live
 obligations and one next action. The sequence below
 is only for actual new-owner/process transfer or diagnosed unavailable-native

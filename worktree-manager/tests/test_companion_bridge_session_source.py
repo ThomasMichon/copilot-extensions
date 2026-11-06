@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import cProfile
 from dataclasses import replace
 import importlib
+import io
 import json
 import os
 from pathlib import Path
+import pstats
 import select
 import socket
 import sys
 from threading import Event, Lock, Thread
+import time
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlsplit
 
@@ -34,8 +38,30 @@ pytestmark = [
 ]
 
 
+def membership_seed(manager, owner, source_for, report=None):
+    """Optionally profile one unchanged seed; never retry or replace its result."""
+    if report is None:
+        return source_for(manager, owner)
+    profile, output = cProfile.Profile(), io.StringIO()
+    wall, cpu = time.perf_counter(), time.thread_time()
+    outcome = "error"
+    try:
+        result = profile.runcall(source_for, manager, owner)
+        outcome = "seeded"
+        return result
+    finally:
+        wall_ms = (time.perf_counter() - wall) * 1000
+        cpu_ms = (time.thread_time() - cpu) * 1000
+        stats = pstats.Stats(profile, stream=output).strip_dirs().sort_stats("cumulative")
+        stats.print_stats(25)
+        report(
+            f"membership-seed-profile outcome={outcome} "
+            f"wall_ms={wall_ms:.3f} thread_ms={cpu_ms:.3f}\n{output.getvalue()}"
+        )
+
+
 @pytest.fixture
-def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
     paths = [ROOT / "plugins/agent-bridge/src", *SOURCE_PATHS]
     for path in reversed(paths):
         monkeypatch.syspath_prepend(str(path))
@@ -44,6 +70,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     membership = importlib.import_module("agent_bridge.owner_membership")
     wire = importlib.import_module("agent_bridge.session_observation_contract")
     routes = importlib.import_module("agent_bridge.routes.session_observations")
+    membership_routes = importlib.import_module("agent_bridge.routes.owner_membership")
     db = db_module.Database(tmp_path / "bridge.sqlite3")
     db.create_session(
         "child", "fixture", None, str(tmp_path), "local", "starting", 1.0,
@@ -60,7 +87,14 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         db=db, _generation_id="fixture-generation", get_session=lambda key: session if key == "child" else None,
     )
     state = SimpleNamespace(session_manager=manager, db=db)
-    owner = membership.source_for(manager, OWNER)
+    def report(message: str) -> None:
+        with capsys.disabled():
+            print(message, flush=True)
+
+    owner = membership_seed(
+        manager, OWNER, membership.source_for,
+        report if os.environ.get("COMPANION_MEMBERSHIP_PROFILE") == "1" else None,
+    )
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(8)
@@ -77,6 +111,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     old_statistics_provider = tmp_path / "old-statistics-provider"
     reject_statistics = tmp_path / "reject-statistics-flag"
     invocations = tmp_path / "invocations.jsonl"
+    diagnostic = tmp_path / "bridge-failure.json"
     owner_loop = asyncio.new_event_loop()
     owner_thread = Thread(target=owner_loop.run_forever)
     owner_thread.start()
@@ -95,17 +130,14 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     with lock:
                         counts["held"] += 1
                         counts["max_held"] = max(counts["max_held"], counts["held"])
-                if url.path.endswith("/owner-observations"):
+                membership_read = url.path.endswith("/owner-observations")
+                if membership_read:
                     assert query["owner_ref"] == OWNER
-                    body = membership.source_for(manager, OWNER).frame(OWNER, query.get("after"))
-                    peer.sendall(wire.sse(body))
-                    while held and not stop.wait(0.05):
-                        if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
-                            return
-                    return
-                history = "/session-observation-history/" in url.path
-                read = wire.ReadRequest.parse(url.path.rsplit("/", 1)[-1], pairs, history=history)
-                if history:
+                    read = membership_routes.OwnerRead.parse(pairs)
+                else:
+                    history = "/session-observation-history/" in url.path
+                    read = wire.ReadRequest.parse(url.path.rsplit("/", 1)[-1], pairs, history=history)
+                if not membership_read and history:
                     history_entered.set()
                     while block_history.is_set() and not stop.wait(0.05):
                         if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
@@ -121,7 +153,10 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                             return True
 
                     request = SimpleNamespace(app=SimpleNamespace(state=state), is_disconnected=disconnected)
-                    stream = routes.observations(request, read)
+                    stream = (
+                        membership_routes.stream(request, read) if membership_read
+                        else routes.observations(request, read)
+                    )
                     try:
                         async for chunk in stream:
                             await asyncio.to_thread(peer.sendall, chunk)
@@ -212,11 +247,17 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         f"'version':json.load(open({str(refusal_version)!r})),'kind':'error','code':'unsupported',"
         "'message':'selected daemon does not support bridge-session-current-requests-v1'}),flush=True)\n"
         "    raise SystemExit(3)\n"
-        "args.func(args)\n",
+        "try:\n"
+        "    args.func(args)\n"
+        "except BaseException:\n"
+        "    import traceback\n"
+        "    from pathlib import Path\n"
+        f"    Path({str(diagnostic)!r}).write_text(traceback.format_exc(),encoding='utf-8')\n"
+        "    raise\n",
         encoding="utf-8",
     )
     script.chmod(0o700)
-    monkeypatch.setattr(bridge, "bridge_command", lambda root: [str(script)])
+    monkeypatch.setattr(bridge, "bridge_command", lambda root: [sys.executable, "-I", str(script)])
     result = {
         "log": log, "session": session, "requests": requests, "following": following,
         "counts": counts, "unsupported": unsupported,
@@ -228,6 +269,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "old_statistics_cli": old_statistics_cli, "old_statistics_provider": old_statistics_provider,
         "reject_statistics": reject_statistics, "invocations": invocations,
         "failures": failures,
+        "diagnostic": diagnostic,
     }
     try:
         yield result

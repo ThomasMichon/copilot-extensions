@@ -858,6 +858,12 @@ def decide(
         return _pre_unavailable("event payload is not an object")
     if kind == "preToolUse" and require_policy:
         return _fallback_pre(payload, home, require_policy=True)
+    if kind == "preToolUse" and (
+        "toolCalls" in payload
+        or (payload.get("toolName") or payload.get("tool_name")) in {"apply_patch", "multi_edit"}
+    ):
+        # Older healthy monitors cannot classify these native write forms.
+        return _fallback_pre(payload, home)
     if (
         kind == "sessionStart"
         and not isinstance(payload.get("_agentWorktrees"), dict)
@@ -972,7 +978,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         if kind == "preToolUse":
             hold = getattr(_load_sibling("hook_pre_policy.py"), "hold_pending", None)
-            if strict_policy and callable(hold):
+            if callable(hold):
                 hold(error)
             sys.stdout.write(json.dumps(_pre_unavailable("policy client evaluation failed")))
     # sessionStart always emits exactly one JSON object -- write it here,

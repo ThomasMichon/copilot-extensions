@@ -174,6 +174,8 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path: Path) -> None:
     assert content.startswith("# Context handoff session guidance\n\n")
     assert "[owner: context-handoff@" in content
     assert "When you own the active objective" in content
+    assert "Confirm mutation success; new_context binds the snapshot" in content
+    assert "Verify persistence/snapshot binding" not in content
     assert "agent-worktrees session command catalog" not in content
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 

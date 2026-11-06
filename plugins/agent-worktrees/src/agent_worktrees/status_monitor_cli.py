@@ -271,15 +271,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     segment_cache = status_segment_cache_type(cache_ttl)
     wake_event = threading.Event()
+    installation_context = registry_paths.installation_context()
     repositories_runtime = repository_map.RepositoryMapRuntime(
         status_monitor_runtime._aw_runtime_home()
     )
-    worktrees_runtime = WorktreesRuntime(
-        status_monitor_runtime._aw_runtime_home() / "worktrees-current.sqlite3",
-        wake=wake_event,
-        elected=lambda: status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None,
-        admitted=handover.read_admitted,
-    )
+    worktrees_runtime = WorktreesRuntime.for_monitor(wake_event, handover.read_admitted, installation_context)
     resident_push.bind(wake_event, segment_cache)
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
@@ -302,7 +298,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     hook_policy = resident_hook_policy_type(hook_client)
     if hook_policy.ready():
         hook_policy.plugin_related_anchors()
-    installation_context = registry_paths.installation_context()
     receipts = receipt_control.for_runtime(
         status_monitor_runtime._aw_runtime_home(), PROCESS_GENERATION,
         lambda: published_lock and not admission_closed and not shutdown_requested.is_set(),
@@ -530,6 +525,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if tracking_write_server is not None and published_lock:
             extra.update(tracking_write.rendezvous_fields(tracking_write_server))
         if published_lock:
+            extra.update(
+                hook_facts_version=1,
+                hook_facts_generation=worktrees_runtime.hook_facts.generation,
+            )
             extra.update(worktree_status_runtime.lock_extra())
             extra.update(managed_mux_runtime.lock_extra())
         return extra

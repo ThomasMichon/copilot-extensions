@@ -214,12 +214,11 @@ def cmd_update(args: argparse.Namespace) -> int:
     Phase/target requests stay with the engine, preserving queue custody.
     """
     update_options.validate_auth_flags(args)
-    if getattr(args, "auth_report", False):
-        return _auth.cmd_report(args)
-    handed_off = manager_handoff(args)
-    if handed_off is not None:
-        return handed_off
-    return _core_helper("_cmd_update_in_plugin", _cmd_update_in_plugin)(args)
+    from .project_update_controller import dispatch_update
+    return dispatch_update(
+        args, _auth.cmd_report, manager_handoff,
+        lambda: _core_helper("_cmd_update_in_plugin", _cmd_update_in_plugin)(args),
+    )
 
 
 def manager_handoff(args: argparse.Namespace) -> int | None:

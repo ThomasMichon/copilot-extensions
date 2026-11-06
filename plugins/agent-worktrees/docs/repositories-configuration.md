@@ -35,7 +35,7 @@ or block editing; invalid or indeterminate contributions still require repair.
 Route/pair editing and plugin enablement remain unsupported: use their owning
 capabilities, not a generic source-file editor.
 
-## The one local edit
+## Local account preference
 
 **Set future-launch Copilot preference** changes only the selected registered
 repository's existing `copilot_account` in the native machine-local registry.
@@ -88,6 +88,55 @@ repository/knowledge/plugin/preset source is
 written. Unrecognized local registry metadata is preserved by this API.
 YAML aliases are detached at the selected registration before an edit, so
 unselected registrations and metadata cannot change through shared mappings.
+
+## Confirmed existing knowledge binding
+
+When the selected harness requires missing knowledge, **Bind this existing
+knowledge repository** is offered on eligible canonical knowledge/worktree
+registrations. It delegates to the enabled, selected `harness-knowledge`
+payload. An unavailable payload or unresolved native composition leaves the
+action unavailable; browsing never installs it or starts authentication.
+Payload activation uses the native selected home, including `AGENT_HOME`, and
+prefers the current project's selected root before the global fallback.
+An ambiguous native default-repository selection remains a recoverable
+configuration finding; binding refuses it without choosing a default.
+Binding identifiers use exact canonical Configuration names beginning with an
+ASCII letter or digit. The same native check drives action eligibility and
+invocation; unsupported identifiers remain inspectable without a binding action.
+Generic Copilot-preference editing retains its own broader name rules.
+When binding is required but its payload is unavailable, the section's visible
+banner directs the user to enable and prepare its qualified owner.
+
+```text
+agent-worktrees repos configuration knowledge-preview --context-project sample --repository knowledge
+agent-worktrees repos configuration knowledge-apply --context-project sample --repository knowledge --preview-token <returned-token>
+```
+
+Preview qualifies existing Git roots, canonical class/path/provider/account
+facts and the native stateless configuration destination. Apply rechecks
+registration and configuration under the binding owner's existing lock and
+uses its preserving writer and personal-plugin composer. An absent or identical
+binding is supported; conflicting inherited/local selections require explicit
+re-pointing through the normal binding owner. No registration, clone, repository
+creation, credential editor, source commit or session launch is added.
+
+The result distinguishes a persisted binding from an incomplete result after
+the pointer committed. Refresh actual readiness before retrying or creating a
+New task; a timeout does not prove that a prior write did not happen. Binding
+does not retrofit an existing tracked pair or establish server landing policy.
+The native New-admission gate remains authoritative.
+
+The native binding worker itself holds the existing registration-writer lock
+through the pointer commit. Its registry wait, execution and cleanup share
+the existing finite caller-owned budget; a caller losing its result cannot
+release a still-running writer's lock. Binding Configuration capability version 2 is
+required; older binding payloads refuse rather than use an unlocked apply.
+Direct binding-script Configuration apply routes through this same native
+transaction. The owner's internal `apply-locked` delegate is not a standalone
+apply API. Final preflight confirms registration again after its Git/account
+probes. Pointer completion is captured at the preserving writer boundary, so
+a later cleanup or observation failure still returns a nonzero incomplete
+receipt with `pointer_committed: true`.
 
 ## Validation
 

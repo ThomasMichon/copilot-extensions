@@ -535,6 +535,41 @@ def payload_package_version(payload: Path, plugin: str) -> str:
     return version
 
 
+def parse_source_identity(
+    data: object, *, package_version: str | None = None, plugin: str | None = None,
+) -> SourceIdentity:
+    """Parse claimed Source fields, not proof of payload or installed admission."""
+    fields = {
+        "schema", "version", "plugin", "package_version", "source_commit",
+        "source_tree", "assembly_hash", "runtime_version",
+    }
+    if not isinstance(data, dict) or set(data) != fields:
+        raise SourceIdentityError("Source identity has an unsupported field set")
+    if data["schema"] != SOURCE_SCHEMA or type(data["version"]) is not int or data["version"] != 1:
+        raise SourceIdentityError("Source identity has an unsupported schema or version")
+    names = fields - {"schema", "version"}
+    if any(not isinstance(data[name], str) or not data[name] for name in names):
+        raise SourceIdentityError("Source identity fields must be nonempty strings")
+    if (
+        (package_version is not None and data["package_version"] != package_version)
+        or (plugin is not None and data["plugin"] != plugin)
+    ):
+        raise SourceIdentityError("Source identity does not match the plugin and package version")
+    if not _OBJECT_ID.fullmatch(data["source_tree"]):
+        raise SourceIdentityError("Source identity requires a full Git tree identity")
+    expected = runtime_version(data["package_version"], data["source_commit"], data["assembly_hash"])
+    if data["runtime_version"] != expected:
+        raise SourceIdentityError("Source runtime version does not match its immutable inputs")
+    return SourceIdentity(
+        plugin=data["plugin"],
+        package_version=data["package_version"],
+        source_commit=data["source_commit"],
+        source_tree=data["source_tree"],
+        assembly_hash=data["assembly_hash"],
+        runtime_version=data["runtime_version"],
+    )
+
+
 def read_source_identity(
     payload: Path, package_version: str, *, plugin: str | None = None,
     on_progress=None,
@@ -550,38 +585,12 @@ def read_source_identity(
     ):
         raise SourceIdentityError("Source identity must be an ordinary file")
     data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
-    fields = {
-        "schema", "version", "plugin", "package_version", "source_commit",
-        "source_tree", "assembly_hash", "runtime_version",
-    }
-    if not isinstance(data, dict) or set(data) != fields:
-        raise SourceIdentityError("Source identity has an unsupported field set")
-    if data["schema"] != SOURCE_SCHEMA or type(data["version"]) is not int or data["version"] != 1:
-        raise SourceIdentityError("Source identity has an unsupported schema or version")
-    names = fields - {"schema", "version"}
-    if any(not isinstance(data[name], str) or not data[name] for name in names):
-        raise SourceIdentityError("Source identity fields must be nonempty strings")
-    if (
-        payload_package_version(payload, data["plugin"]) != package_version
-        or data["package_version"] != package_version
-        or (plugin is not None and data["plugin"] != plugin)
-    ):
+    identity = parse_source_identity(data, package_version=package_version, plugin=plugin)
+    if payload_package_version(payload, identity.plugin) != package_version:
         raise SourceIdentityError("Source identity does not match the plugin and package version")
-    if not _OBJECT_ID.fullmatch(data["source_tree"]):
-        raise SourceIdentityError("Source identity requires a full Git tree identity")
-    expected = runtime_version(package_version, data["source_commit"], data["assembly_hash"])
-    if data["runtime_version"] != expected:
-        raise SourceIdentityError("Source runtime version does not match its immutable inputs")
-    if assembly_hash(payload, on_progress=on_progress) != data["assembly_hash"]:
+    if assembly_hash(payload, on_progress=on_progress) != identity.assembly_hash:
         raise SourceIdentityError("Materialized payload bytes do not match the source identity")
-    return SourceIdentity(
-        plugin=data["plugin"],
-        package_version=data["package_version"],
-        source_commit=data["source_commit"],
-        source_tree=data["source_tree"],
-        assembly_hash=data["assembly_hash"],
-        runtime_version=data["runtime_version"],
-    )
+    return identity
 
 
 def manifest_fields(identity: SourceIdentity | None) -> dict[str, object]:

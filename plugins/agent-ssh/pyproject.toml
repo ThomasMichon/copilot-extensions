@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-ssh"
-version = "0.1.252-dev1"
+version = "0.1.253-dev1"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -88,6 +88,8 @@ dev = [
     "pytest>=9.1.1",
     "jsonschema>=4.26.0",
     "fleet-manager>=0.1.0.dev1",
+    "setuptools>=83.0.0",
+    "wheel",
 ]
 
 [tool.ruff.lint]

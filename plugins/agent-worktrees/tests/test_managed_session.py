@@ -109,6 +109,30 @@ def test_positive_membership_is_cached_but_registration_alone_is_not(tmp_path, m
     assert not module.admitted({**payload, "sessionId": "../bad"}, home=tmp_path)
 
 
+def test_native_session_association_avoids_warm_git_traversal(tmp_path, monkeypatch):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    session_dir = tmp_path / ".copilot" / "session-state" / "owned"
+    session_dir.mkdir(parents=True)
+    (session_dir / "agent-worktrees.json").write_text(json.dumps({
+        "version": 2, "session_id": "owned",
+        "relations": [{"role": "controller", "project": "example"}],
+    }))
+    unrelated = fixture_checkout(tmp_path / "unrelated")
+    assert not module.admitted({"sessionId": "owned", "cwd": str(unrelated)}, home=tmp_path)
+    payload = {"sessionId": "owned", "cwd": str(anchor)}
+    assert module.admitted(payload, home=tmp_path)
+    marker = session_dir / "agent-worktrees" / "managed-session.json"
+    assert marker.is_file()
+    original = module.repository_identity
+    monkeypatch.setattr(module, "repository_identity", lambda *a, **k: pytest.fail("warm Git traversal"))
+    assert module.admitted(payload, home=tmp_path)
+    (registry / "projects.yaml").write_text("projects: {}\n")
+    monkeypatch.setattr(module, "repository_identity", original)
+    assert not module.admitted(payload, home=tmp_path)
+
+
 @pytest.mark.parametrize("relative", [False, True])
 def test_linked_worktree_requires_the_adopted_common_directory(tmp_path, monkeypatch, relative):
     module = load("managed_session")
@@ -633,6 +657,102 @@ def test_real_managed_pretool_preserves_anchor_write_protection(tmp_path):
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["permissionDecision"] == "deny"
     assert "anchor-write-guard" in result.stdout
+
+
+@pytest.mark.parametrize("entry", ["python", "powershell"])
+@pytest.mark.timeout(120)
+def test_native_batch_entry_and_live_scoped_grants(tmp_path, record_testsuite_property, entry):
+    anchor, registry = fixture_project(tmp_path)
+    caller, _ = fixture_linked_worktree(tmp_path, anchor)
+    reader = load("guarded_anchor_map")
+    targets = [fixture_checkout(tmp_path / name) for name in ("first", "second")]
+    rows = [{
+        "name": target.name, "delegate": "agent-bridge", "path": reader.canonical(target),
+        "locus": None, "identity": reader.repository_identity(target),
+    } for target in targets]
+    for index in range(98):
+        path = reader.canonical(tmp_path / f"inventory-{index}")
+        rows.append({
+            "name": f"inventory-{index}", "delegate": "agent-bridge", "path": path,
+            "locus": None,
+            "identity": {"root": path, "git_dir": path + os.sep + ".git",
+                         "common_dir": path + os.sep + ".git"},
+        })
+    path = reader.map_path(caller, registry)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "schema": "agent-worktrees.guarded-anchors", "version": 1,
+        "source_root": reader.canonical(caller),
+        "source_identity": reader.repository_identity(caller),
+        "registry_root": reader.canonical(registry), "inventory_authority": "complete",
+        "generation": "native-entry-fixture", "roots": rows,
+    }))
+    env = environment(tmp_path, caller)
+    for key in ("CROSS_REPO_GUARD", "CROSS_REPO_GUARD_MODE"):
+        env.pop(key, None)
+    command = [sys.executable, "-B", str(SCRIPTS / "hook_client.py"), "preToolUse"]
+    if entry == "powershell":
+        powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        if not powershell:
+            pytest.skip("PowerShell is unavailable")
+        payload = tmp_path / "payload"
+        shutil.copytree(SCRIPTS, payload / "scripts")
+        (payload / "scripts" / "resolve-runtime.ps1").write_text(
+            "param([string]$TraceMode)\n$AwPy = '" + sys.executable.replace("'", "''") + "'\n",
+            encoding="utf-8-sig",
+        )
+        env["COPILOT_PLUGIN_ROOT"] = str(payload)
+        hooks = json.loads((SCRIPTS.parent / "hooks.json").read_text())
+        command = [powershell, "-NoProfile", "-NonInteractive", "-Command",
+                   hooks["hooks"]["preToolUse"][0]["powershell"]]
+    session = tmp_path / ".copilot" / "session-state" / "native-entry"
+    session.mkdir(parents=True)
+    event = {"sessionId": "native-entry", "cwd": str(caller), "toolCalls": [
+        {"id": "read", "name": "view", "args": {"path": str(targets[0] / "source.py")}},
+        {"id": "write", "name": "apply_patch", "args": (
+            f"*** Begin Patch\n*** Update File: {targets[0] / 'source.py'}\n*** End Patch\n"
+        )},
+    ]}
+    timings = []
+
+    def invoke(value):
+        started = time.monotonic()
+        result = subprocess.run(
+            command, input=json.dumps(value), text=True, capture_output=True,
+            timeout=15, cwd=caller, env=env, **no_window_kwargs(),
+        )
+        timings.append(round((time.monotonic() - started) * 1000, 2))
+        print(f"{entry} {timings[-1]} ms: {result.stdout} {result.stderr}")
+        assert result.returncode == 0, result.stderr
+        decision = json.loads(result.stdout or "{}")
+        assert "could not evaluate" not in decision.get("additionalContext", ""), result.stderr
+        return decision
+
+    assert invoke({**event, "cwd": str(tmp_path)}).get("permissionDecision") is None
+    denied = invoke(event)
+    assert denied["permissionDecision"] == "deny"
+    assert "allow-edits first" in denied["permissionDecisionReason"]
+    assert (session / "agent-worktrees" / "managed-session.json").is_file()
+    grants = registry / "allow-edits.json"
+    grants.write_text(json.dumps({
+        "grants": {"first": {"expires_at_ms": (time.time() + 600) * 1000}},
+    }))
+    assert invoke(event).get("permissionDecision") is None
+    mixed = {**event, "toolCalls": [*event["toolCalls"], {
+        "id": "other", "name": "apply_patch", "args": (
+            f"*** Begin Patch\n*** Delete File: {targets[1] / 'source.py'}\n*** End Patch\n"
+        ),
+    }]}
+    assert "allow-edits second" in invoke(mixed)["permissionDecisionReason"]
+    grants.write_text(json.dumps({
+        "grants": {"first": {"expires_at_ms": (time.time() - 10) * 1000}},
+    }))
+    assert invoke(event)["permissionDecision"] == "deny"
+    grants.unlink()
+    assert invoke(event)["permissionDecision"] == "deny"
+    assert invoke({**event, "toolCalls": event["toolCalls"][:1]}).get("permissionDecision") is None
+    record_testsuite_property(f"native_batch_entry_ms:{entry}", json.dumps(timings))
+    record_testsuite_property(f"native_batch_inventory:{entry}", len(rows))
 
 
 def test_invalid_query_does_not_reuse_ambient_admission(tmp_path):

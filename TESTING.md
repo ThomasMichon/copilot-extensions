@@ -8,7 +8,7 @@ prerequisites for one contribution.
 
 | Question | Start here |
 |----------|------------|
-| What does required PR/promotion testing cover? | [Unit-only packet](#unit-only-promotion-packet) and [portfolio invariants](#test-portfolio-invariants) |
+| What does required PR/promotion testing cover? | [Unit packet](#unit-only-promotion-packet), [portfolio invariants](#test-portfolio-invariants), and the bounded Windows Resume promotion exception below |
 | How do I run a focused local selection? | [Turn-key runner](#the-turn-key-runner); select the affected files/contracts rather than the whole portfolio |
 | How do I isolate portable integration? | [Devcontainer isolation](#optional-devcontainer-based-isolation-linux) and the declared periodic inventory in `tools/periodic-integration-inventory.json` |
 | What proves a native or external consumer? | Its explicitly selected packet below, with the actual platform, launch mode and prerequisites; a portable or synthetic pass is not equivalent |
@@ -34,6 +34,47 @@ CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
 
 ## Focused packet catalog
+
+The Windows Resume consumer packet is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
+It requires PowerShell 7 and real PSMux, without fallback or prerequisite skips
+on Windows. Four concurrent admitted Resume plans traverse the unchanged
+production launcher, copied pane assets, argument receipt and startup reader,
+real ConPTY attachment, detach and owned child retirement. Cold Resume starts
+with PSMux prewarming enabled and disabled carry a realistic JSON environment and literal
+33-argument commands. Private engine resolution and finite Copilot setup
+substitutions isolate user worktrees, credentials and model sessions. This is
+native consumer qualification, not warm-server adoption, a reproduction of every field failure,
+installed-runtime or authentication/inference acceptance. The source release
+controller requires it for every frozen candidate, separately from unit coverage;
+live enforcement depends on the independently governed Main controller.
+
+Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
+--allow-explicit-tiers` packet exercises the emitted Windows census script in
+Windows PowerShell and PowerShell 7. A controlled census verifies the real
+native token/creation-time query, compilation-unavailable and native-access
+CIM fallbacks, and hard refusal of an incarnation mismatch without fallback.
+It does not qualify desktop census completeness or runtime removal. Existing
+`tests/test_native_uninstall_footprint.py` entrypoint controls preserve their
+original deadlines and the explicit unrelated-consumer refusal classification.
+The manual `installation-context-acceptance.yml` `runtime_removal` selection
+also runs this packet on Windows at the dispatch SHA and requires all eleven
+controls, including the three positive entrypoints, to pass without skips.
+Native capture uses the existing caller-owned root-exit/cleanup boundary,
+with 64 KiB per stream for token probes and 8 MiB for entrypoint captures.
+The original ten-second probe and per-item entrypoint deadlines are unchanged.
+Required unit-only CI is unchanged.
+
+Bridge's opt-in `--test-file tests/test_owner_membership_budget.py --test-file
+tests/test_owner_membership.py --test-file tests/test_db.py --test-file
+tests/test_db_custody_schema.py --allow-explicit-tiers` packet checks indexed
+exact-owner membership capture, old unindexed VM cutoffs, read-only non-preparation
+and ordinary writable database bootstrap. Large unrelated owned, relationship
+and represented histories retain one physical query budget. The manual
+`installation-context-full.yml` `mux-companion` Windows lane additionally selects
+the two indexed lookup/bootstrap controls alongside its unchanged actual-client
+packet. This qualifies SQLite behavior, not cold-read scheduling reliability or
+a wall-clock deadline increase; required unit-only CI is unchanged.
 
 Worktrees' opt-in `--test-file tests/test_resident_recovery.py
 --test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py
@@ -474,6 +515,26 @@ is replanned through the ordinary next pass; genuinely stale external actions
 still refuse. Runtime package normalization is checked against the canonical
 source/repair identity function, preserving profile and other package qualifiers.
 
+Fresh application-root privacy is covered by the six explicitly admitted
+`test_windows_lease_acl.py` root-creation cases in the ordinary promotion-unit
+packet. Portable controls observe both canonical call boundaries; on POSIX the
+same packet takes actual construction/retention kernel leases, checks `0700`
+and the strict SSH private-state owner, and refuses an unchanged existing
+`0755` root. These tests never change the controller's umask; the actual Linux
+mask is recorded from `/proc/self/status` (an observed `0022` in Linux CI is
+evidence, not a local Windows projection or an assumed result).
+
+`tools/test_installer_closed_wheels.py -k standard_posix_umask` is a separate
+integration case: a bounded caller-owned, single-threaded child sets its own
+umask to `022` before imports/threads and exercises the actual first-touch
+filesystem and kernel-lease paths. It is not admitted as an eligible unit,
+because that packet deliberately forbids child-process effects. Likewise the
+Linux-only `services/ssh/tests/test_local_control_native.py -k linux_` cases use
+actual private Unix sockets and native peer-pidfd authentication and preserve
+unexpected directory entries. They require the existing standalone/native lane,
+not the unit packet; Windows skips are not native Linux proof. No classification
+exemption or unit budget is widened to run these integration controls.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
 guard-publication consumers plus ordinary pre/post-hook idle-retention and
@@ -782,7 +843,11 @@ starting an SDK actor. `test_companion_bridge_codec.py` and
 The discovery packet invokes the real passive payload gate with an inherited
 foreign-plugin receipt and root and checks no provisioning. Replacement controls replay
 64 old members to 64 new members across bounded pages without transient current
-facts. The joined fixture exhausts Bridge evidence, refreshes the baseline, and
+facts. Retained-range controls reject stale bootstrap positions, expired replay
+bases and contradictory pagination without imposing contiguous owner-local event
+numbers. An actual canonical two-owner source verifies global sequence gaps and
+empty caught-up reads without manufacturing local events.
+The joined fixture exhausts Bridge evidence, refreshes the baseline, and
 checks the other providers' rows, proofs, purpose, browsing anchor and next
 Worktrees delta. Tokenless head invalidation and a blocked Bridge preparation
 separately check retirement and independent rich Agenda admission, including a
@@ -2426,7 +2491,7 @@ This explicit five-minute job does not expand required unit-only CI.
 The manual `installation-context-full.yml` portfolio `mux-companion` runs
 `tests/native/test_companion_pane_tmux.py` on Ubuntu 24.04 with tmux 3.4 and
 `tests/native/test_companion_pane_native.py` on Windows with digest-pinned
-disposable PSMux 3.3.6 against the dispatch's recorded immutable source.
+disposable PSMux 3.4.0 against the dispatch's recorded immutable source.
 It verifies actual native option targeting, a fresh
 synthetic constructed-prefix invocation, same-window reuse and the unchanged
 CLI process in an isolated socket. It is not a required PR lane or a production
@@ -2455,6 +2520,109 @@ it never relaxes Job breakaway restrictions to make a run pass.
 Linux skips do not qualify this Windows boundary. Source/commit-stamped Windows
 execution is required; server captures and ConPTY bytes are not headed pixels,
 window/focus-stealing observations, real owner composition or frame latency.
+The same Windows packet separately selects `test_companion_joined_psmux.py`
+over the actual private Worktrees resident, managed Agenda, Bridge semantic
+route/EventLog and callback-derived current-input projection. It uses the
+shared source selection/bootstrap and loopback carrier substitutions, not a
+production service or SDK actor. Actual ConPTY keyboard input selects a known
+session, browses independent history, retains sparse full/narrow views and
+observes live purpose/count updates without leaving older work. Escape requires
+all three birth-qualified reader processes and the observer to exit while the
+original CLI pane/PID/session remains live and accepts further input. The strict
+caller-owned Job and retained handles govern failure cleanup. Linux skips are
+not Windows qualification; exact source-stamped native execution is required.
+Its change-only geometry/focus snapshots are fixture observations, not headed
+pixels, native-frame or input-ready performance measurements.
+`test_companion_joined_fixture.py` deterministically checks that this observer
+retries only Windows sharing/lock violations on a later tick without advancing
+its published value; other permission failures remain visible errors.
+Its private Bridge prerequisite also requires an actual owning membership-route
+heartbeat after the snapshot, so a one-frame carrier that starves healthy
+readers cannot masquerade as native integration failure.
+Pre-app startup failures additionally record a bounded read-only thread-state
+query for the already-pinned inert CLI. That diagnostic never resumes, stops or
+repairs the process and does not change the original startup deadline.
+The manual packet also selects `test_companion_python_startup.py`: three
+stdlib-only controls compare the prepared virtualenv interpreter directly in
+ConPTY, that interpreter inside private PSMux/ConPTY, and its base interpreter
+inside private PSMux/ConPTY. Each requires a script receipt and banner within
+the same 15-second deadline, retains process identities and strict Job/handle
+cleanup, and uses the existing private profile and no-warm policy. These
+controls isolate startup layers; they neither fix nor waive a client failure
+and are not Companion, installed or startup-stability qualification.
+Portable fixture controls execute the native polling code with timely,
+exact-deadline and late observations; success is checked after blocking polls,
+so a query started before the deadline cannot admit a late result.
+The Companion portfolio now pins disposable PSMux 3.4.0; the separate pane-argv
+portfolio retains 3.3.6. Under 3.3.6, the direct virtualenv/ConPTY startup
+control passes while both PSMux controls (virtualenv and base Python) fail
+before the script. Its upstream ConPTY implementation requests inherited cursor
+state; 3.4.0 removes that startup handshake, with an upstream first-pane
+regression control. This narrows the failure to the additional PSMux/ConPTY
+layer, not a virtualenv-only failure or Companion behavior. The version change
+does not erase the failed 3.3.6 runs or qualify 3.4.0 without actual execution.
+All three startup controls pass on 3.4.0, exposing a separate target-parser
+refusal: `session:%id` is treated as a window by its client validator.
+Companion and the three native wrappers select exact, explicitly session-scoped
+pane IDs using the selected executable's `-V` release: `session:%id` for 3.3.x
+and `session:.%id` for 3.4.x. The latter is not sent to 3.3.x, whose parser
+silently drops that pane ID. Other or unrecognized release lines refuse pane
+actions before mutation rather than guessing or replaying effects. The bounded,
+headless discovery also reads the selected live server's `#{version}`, session
+name and incarnation. A 3.4 client with a retained 3.3 server refuses before
+pane effects; a 3.3 client retains its old syntax against either server.
+Discovery is cached per executable filesystem identity and verified session
+incarnation, not per event; replacement or a new incarnation invalidates it.
+Bare registered executable names resolve through PATH before discovery and
+execution. POSIX tmux targeting remains unchanged. Portable controls cover the
+compatible pairs, mixed-version refusal, replacement, bare names, stale native
+identity and the unchanged operation deadline; they are not native integration
+qualification.
+The next reviewed Windows run passes all startup controls, the synthetic-owner
+client and pane-lifetime control, and reaches the actual joined client's
+post-Escape exit wait. That wait remains a failure: its original diagnostic
+queried the already-departed observer pane and obscured which cleanup condition
+was unmet. A phase-specific diagnostic now reports retained observer/reader
+handles, live birth-qualified owner commands and Bridge subscription counts
+without querying a dead pane. The unchanged cleanup assertions and 15-second
+deadline remain the acceptance gate.
+The diagnostic run confirms the observer and all three retained reader handles
+are signaled and Bridge has no subscribers or held connections, while the
+PID-existence-only owner check still sees the two exited source commands.
+Windows retains process objects while another process holds their handles.
+The native exit check now uses a matching retained handle's signaled state;
+unretained commands still require disappearance or a known changed birth,
+and unknown birth stays unsettled. All source commands, readers and observer
+must still exit before further input is sent to the original CLI. The same
+run's separate 50 ms membership-seed setup failure is retained under #8811,
+not waived or hidden by this exit-check correction.
+The manual Windows Companion packet enables the fixture-only
+`COMPANION_MEMBERSHIP_PROFILE=1` diagnostic. It profiles the existing initial
+`source_for` call, reports total wall and current-thread CPU time plus the top
+25 cumulative call costs with directory paths stripped, and preserves the
+original result or exception. It does not retry, prewarm, replace an owner,
+change the 50 ms/VM budgets or make a failed read pass. Other runs remain
+unprofiled unless explicitly selected. Portable controls preserve one call
+and exact result/exception identity in both modes. Profiled timings include
+instrumentation and are diagnostic evidence, not native performance acceptance.
+The fixture's state reader also opens its Windows handle with read/write/delete
+sharing, matching atomic publication rather than temporarily denying its
+publisher's DELETE access. A native control holds the publisher's DELETE-access
+handle: the old ordinary reader refuses while the shared reader obtains complete
+JSON. After the publisher closes, replacement and a complete new read succeed.
+This does not claim that `MoveFileEx` can replace a still-open destination.
+Only a missing publication is deferred. Access, sharing and malformed-JSON
+errors remain failures; there is no permission-error retry or deadline reset.
+The blocked attention-refresh controls wait for the actual successor observation
+and single-flight completion, not `wait_for_complete()` over the intentionally
+cancelled predecessor worker. They still release and observe the late old read
+and assert it cannot replace the new head or its idle result. This avoids a
+test-only `WorkerCancelled` race without changing production cancellation.
+Actual keyboard selection waits for the fixture-observed menu expansion and
+highlight before committing the session choice, rather than batching keys across
+asynchronous widget transitions. Expansion, highlight and source admission share
+the original single 15-second deadline. These observations do not set widget
+state or replace real client input.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

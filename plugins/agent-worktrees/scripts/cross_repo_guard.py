@@ -58,6 +58,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from registry_root import resolve_registry_root
+from tool_call_forms import write_targets
 
 try:
     import guarded_anchor_map as _guard_map
@@ -65,10 +66,15 @@ except (ImportError, OSError, SyntaxError):
     _guard_map = None
 
 try:
-    from anchor_write_guard import _git_invocation, _git_subcommand_writes_worktree
+    from anchor_write_guard import (
+        _git_invocation, _git_subcommand_writes_worktree, evaluate as _anchor_evaluate,
+    )
+    from anchor_shell_parser import literal_write_targets
 except (ImportError, OSError, SyntaxError):
     _git_invocation = None
     _git_subcommand_writes_worktree = None
+    _anchor_evaluate = None
+    literal_write_targets = None
 
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
@@ -291,6 +297,21 @@ def _channel_hint(g: dict) -> str:
 
 def _deny_reason(g: dict, detail: str) -> str:
     name, delegate, path = g.get("name", ""), g.get("delegate", ""), g.get("path", "")
+    posture = g.get("posture")
+    if posture:
+        guidance = {
+            "reference": "is registered read-only; inspect it without editing",
+            "worktree": f"is a shared anchor; create a linked worktree with `agent-worktrees -p {name} create --json` and edit there",
+            "elevated": f"requires an elevated execution venue; resolve its owner with `agent-worktrees related resolve {name}`",
+        }[posture]
+        return (
+            f"repository-write-guidance: '{name}' {guidance}. {detail} "
+            f"Honor its own repository instructions. For an already-authorized "
+            f"targeted maintenance exception, acknowledge this guidance using "
+            f"`agent-worktrees repos allow-edits {name} --reason \"<why>\" "
+            f"--minutes 10`, then retry. The grant is repo-scoped and time-bounded; "
+            f"it does not grant access or elevation."
+        )
     return (
         f"cross-repo-guard: '{name}' is an agent-guarded repo (delegate: "
         f"{delegate}). Do NOT edit its checkout ({path}) directly from the "
@@ -319,12 +340,38 @@ def load_guarded_roots(
             "Run agent-worktrees refresh-guards or prepare this checkout.",
             file=sys.stderr,
         )
-    return result.roots
+    if result.status != "ready":
+        return []
+    if getattr(result, "posture_errors", None):
+        print(
+            "repository-write-guidance: supplemental posture inventory is partial; "
+            "confirmed roots remain usable. Run agent-worktrees refresh-guards to retry.",
+            file=sys.stderr,
+        )
+    return result.roots + (getattr(result, "postures", None) or [])
+
+
+def _is_elevated() -> bool:
+    if os.name == "nt":
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    return os.geteuid() == 0
+
+
+def _posture_mode(row: dict, env, default: str) -> str:
+    if row.get("posture") != "worktree":
+        return default
+    if _truthy_off(env.get("ANCHOR_WRITE_GUARD")):
+        return "off"
+    mode = (env.get("ANCHOR_WRITE_GUARD_MODE") or "").strip().lower()
+    return mode if mode in {"deny", "ask", "warn", "off"} else "deny"
 
 
 # --- Core evaluation ----------------------------------------------------------
 
-def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") -> dict | None:
+def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell",
+               identity_cache: dict | None = None) -> dict | None:
     """Return a guarded-repo hit for a shell command that WRITES into a guarded
     repo, or None. Fires only on a real write target (redirect target /
     command-position write verb argument / git mutation via ``-C <repo>`` or the
@@ -333,25 +380,21 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") 
     if not _shell_may_write(cmd, tool):
         return None
     eff_cwd = cwd
-    identity_cache = {}
+    identity_cache = identity_cache if identity_cache is not None else {}
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
         at_write_cmd = bool(_WRITE_CMD_START.match(eff))
+        targets = literal_write_targets(eff, tool) if literal_write_targets is not None else []
         for g in guarded:
             gp = g.get("path")
             if not gp:
                 continue
             reason = _deny_reason(g, "(a shell command writes into it).")
-            identity = g.get("identity") or {}
-            for root in {gp, identity.get("root", gp), g.get("registered_path", gp)}:
-                tok = _root_token(_canon(root))
-                # 1. A file redirect whose target is the repo (excludes fd dups).
-                if re.search(r">>?(?!\s*&)\s*[\"']?" + tok, seg_hay):
-                    return {**g, "reason": reason}
-                # 2. A write cmdlet/verb at COMMAND POSITION with the repo as an arg.
-                if at_write_cmd and re.search(tok, seg_hay):
-                    return {**g, "reason": reason}
+            if at_write_cmd or ">" in seg_hay:
+                for target in targets:
+                    if _guard_map.matches(_resolve(target, eff_cwd), g, identity_cache=identity_cache):
+                        return {**g, "reason": reason}
         for git_cwd in _git_targets(eff, eff_cwd, tool):
             for g in guarded:
                 gp = g.get("path")
@@ -365,26 +408,33 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") 
     return None
 
 
-def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | None:
+def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict],
+             *, identity_cache: dict | None = None) -> dict | None:
     """Return the guarded repo hit (with a ``reason``), or None to allow."""
     if not guarded or _guard_map is None:
         return None
     if tool in WRITE_TOOLS:
-        raw = _pick(args, PATH_ARG_KEYS)
-        if not raw:
-            return None
-        abs_path = _resolve(raw, cwd)
-        identity_cache = {}
-        for g in guarded:
-            if g.get("path") and _guard_map.matches(abs_path, g, identity_cache=identity_cache):
-                return {**g, "reason": _deny_reason(
-                    g, f"('{tool}' targeting {raw}).")}
+        identity_cache = identity_cache if identity_cache is not None else {}
+        for raw in write_targets(tool, args):
+            abs_path = _resolve(raw, cwd)
+            for g in guarded:
+                if g.get("path") and _guard_map.matches(abs_path, g, identity_cache=identity_cache):
+                    return {**g, "reason": _deny_reason(
+                        g, f"('{tool}' targeting {raw}).")}
         return None
     if tool in SHELL_TOOLS:
         cmd = _pick(args, CMD_ARG_KEYS)
         if not cmd:
             return None
-        return _shell_hit(cmd, cwd, guarded, tool=tool)
+        worktree_rows = [row for row in guarded if row.get("posture") == "worktree"]
+        if worktree_rows and _anchor_evaluate is not None:
+            hit = _anchor_evaluate(tool, args, cwd, worktree_rows)
+            if hit is not None:
+                return {**hit, "reason": _deny_reason(hit, "(a shell command writes into it).")}
+        return _shell_hit(
+            cmd, cwd, [row for row in guarded if row.get("posture") != "worktree"],
+            tool=tool, identity_cache=identity_cache,
+        )
     return None
 
 
@@ -438,14 +488,27 @@ def decide(payload: dict, *, env=None, home=None,
         guarded = guarded_roots
     if not guarded:
         return None
-
-    hit = evaluate(tool, args, cwd, guarded)
-    if hit is None:
-        return None
-    # A live break-glass grant for the target repo lets the write through.
-    if active_break_glass(hit.get("name", ""), home, registry_root=selected_root):
-        return None
-    return _hit_to_output(hit, mode)
+    if any(row.get("elevated") for row in guarded):
+        elevated = _is_elevated()
+        guarded = [
+            {**row, "posture": "elevated"}
+            if row.get("elevated") and not elevated and row.get("posture") != "reference"
+            else row
+            for row in guarded
+            if row.get("delegate") != "none" or row.get("posture")
+            or row.get("elevated") and not elevated
+        ]
+    identity_cache = {}
+    for decision_mode in ("deny", "ask", "warn"):
+        candidates = [row for row in guarded if _posture_mode(row, env, mode) == decision_mode]
+        while candidates:
+            hit = evaluate(tool, args, cwd, candidates, identity_cache=identity_cache)
+            if hit is None:
+                break
+            if not active_break_glass(hit.get("name", ""), home, registry_root=selected_root):
+                return _hit_to_output(hit, decision_mode)
+            candidates = [row for row in candidates if row.get("name") != hit.get("name")]
+    return None
 
 
 def main() -> int:

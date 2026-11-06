@@ -504,6 +504,7 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
         if os.name == "nt":
             fd = _windows_private_lease_file(root, lock_dir, lock_path.name)
         else:
+            root.mkdir(mode=0o700, parents=True, exist_ok=True)
             lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
             flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
             fd = os.open(lock_path, flags, 0o600)

@@ -531,7 +531,9 @@
       "include": [
         "services/dispatch"
       ],
-      "exclude": [],
+      "exclude": [
+        "services/dispatch/libs"
+      ],
       "level": "strict"
     },
     {
@@ -539,7 +541,9 @@
       "include": [
         "services/index"
       ],
-      "exclude": [],
+      "exclude": [
+        "services/index/libs"
+      ],
       "level": "strict",
       "requirements": "tools/typecheck-service-index-requirements.txt"
     },
@@ -548,7 +552,9 @@
       "include": [
         "services/pr"
       ],
-      "exclude": [],
+      "exclude": [
+        "services/pr/libs"
+      ],
       "level": "strict",
       "requirements": "tools/typecheck-service-pr-requirements.txt"
     },
@@ -557,7 +563,9 @@
       "include": [
         "services/ssh"
       ],
-      "exclude": [],
+      "exclude": [
+        "services/ssh/libs"
+      ],
       "level": "strict",
       "python_version": "3.10",
       "platforms": [
@@ -565,6 +573,17 @@
         "win32"
       ],
       "requirements": "tools/typecheck-service-ssh-requirements.txt"
+    },
+    {
+      "name": "service-vendored-libraries",
+      "include": [
+        "services/dispatch/libs",
+        "services/index/libs",
+        "services/pr/libs",
+        "services/ssh/libs"
+      ],
+      "exclude": [],
+      "level": "pending"
     },
     {
       "name": "repository-tools",

@@ -469,6 +469,8 @@ class RepoConfig:
     as a child process and therefore cannot set env for the Copilot exec."""
     validate_paths: list[str] = field(default_factory=list)
     validate_hook: dict[str, list[str]] = field(default_factory=dict)
+    update_controller: dict[str, str] = field(default_factory=dict)
+    """Optional repo-relative Python controller for an ordinary project update."""
     service_paths: list[str] = field(default_factory=list)
     bootstrap_services: list[str] = field(default_factory=list)
     """Optional additional service names (from ``service_paths`` manifests)
@@ -1481,6 +1483,11 @@ def _build_repo_config(
         if isinstance(cmd_list, list):
             validate_hook[plat_key] = [str(c) for c in cmd_list]
 
+    update_controller: dict[str, str] = {}
+    for plat_key, script_path in (data.get("update_controller") or {}).items():
+        if isinstance(script_path, str) and script_path.strip():
+            update_controller[plat_key] = script_path.strip()
+
     raw_spaths = data.get("service_paths", [])
     service_paths = (
         [str(p) for p in raw_spaths] if isinstance(raw_spaths, list) else []
@@ -1510,6 +1517,7 @@ def _build_repo_config(
         session_env=session_env,
         validate_paths=validate_paths,
         validate_hook=validate_hook,
+        update_controller=update_controller,
         service_paths=service_paths,
         bootstrap_services=bootstrap_services,
         post_install_hook=post_install_hook,

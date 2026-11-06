@@ -474,10 +474,14 @@ def application(tmp_path, monkeypatch, request):
     if uv is None:
         pytest.skip("a real uv executable is required")
     long_repair = getattr(request, "param", None) == "long-repair"
+    standalone = getattr(request, "param", None) == "standalone-service"
+    distribution = "agent-ssh-service" if standalone else "fixture-app"
+    component = "ssh-service" if standalone else "fixture-app"
+    wheel_prefix = distribution.replace("-", "_") + "-1.0.0"
     root = tmp_path / "runtime root"
     artifact = tmp_path / "artifacts"
     artifact.mkdir()
-    wheel = artifact / "fixture_app-1.0.0-py3-none-any.whl"
+    wheel = artifact / (wheel_prefix + "-py3-none-any.whl")
     files = {
         "fixture_app.py": (
             "import json, os, sys\nfrom pathlib import Path\n"
@@ -495,14 +499,18 @@ def application(tmp_path, monkeypatch, request):
             "if __name__ == '__main__':\n"
             "    raise SystemExit(cli())\n"
         ).encode(),
-        "fixture_app-1.0.0.dist-info/METADATA": (
-            "Metadata-Version: 2.1\nName: fixture-app\nVersion: 1.0.0\n"
+        wheel_prefix + ".dist-info/METADATA": (
+            f"Metadata-Version: 2.1\nName: {distribution}\nVersion: 1.0.0\n"
             "Requires-Python: >=3.10\n"
         ).encode(),
-        "fixture_app-1.0.0.dist-info/WHEEL": (
+        wheel_prefix + ".dist-info/WHEEL": (
             "Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
         ).encode(),
     }
+    if standalone:
+        files["fixture_app.py"] = files["fixture_app.py"].replace(
+            b"FIXTURE_APP_HOME", b"AGENT_SSH_SERVICE_HOME",
+        )
     if getattr(request, "param", None) == "long-asset":
         member = "/".join(["fixture_assets", *["nested-resources" * 2] * 5, "operational.txt"])
         files[member] = b"retained operational asset\n"
@@ -541,7 +549,7 @@ def application(tmp_path, monkeypatch, request):
          len(raw))
         for name, raw in files.items()
     ]
-    record = "fixture_app-1.0.0.dist-info/RECORD"
+    record = wheel_prefix + ".dist-info/RECORD"
     output = io.StringIO()
     csv.writer(output, lineterminator="\n").writerows([*rows, (record, "", "")])
     files[record] = output.getvalue().encode()
@@ -552,31 +560,31 @@ def application(tmp_path, monkeypatch, request):
     source.mkdir()
     (source / "fixture_app.py").write_bytes(files["fixture_app.py"])
     (source / "pyproject.toml").write_text(
-        '[project]\nname="fixture-app"\nversion="1.0.0"\n'
-        '[project.scripts]\nfixture-app="fixture_app:cli"\n', encoding="utf-8",
+        f'[project]\nname="{distribution}"\nversion="1.0.0"\n'
+        f'[project.scripts]\n{distribution}="fixture_app:cli"\n', encoding="utf-8",
     )
     source_hash = engine.runtime_source.assembly_hash(source)
     identity = engine.runtime_source.SourceIdentity(
-        "fixture-app", "1.0.0", "a" * 40, "b" * 40, source_hash,
+        component, "1.0.0", "a" * 40, "b" * 40, source_hash,
         engine.runtime_source.runtime_version("1.0.0", "a" * 40, source_hash),
     )
     (source / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
     digest = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
     profile = {
-        "component": "fixture-app",
+        "component": component,
         "release": {"identity": "source:" + identity.source_commit,
                     "sha256": "sha256:" + identity.assembly_hash},
         "wheels": [{
-            "name": "fixture-app", "version": "1.0.0", "filename": wheel.name,
+            "name": distribution, "version": "1.0.0", "filename": wheel.name,
             "sha256": digest, "requires_python": ">=3.10", "requires_dist": [],
             "provides_extras": [], "selected_extras": [],
         }],
     }
     selected = install_source.ProjectSource(source, identity, {
-        "projects": {"fixture-app": {"artifact": {"wheels": [
-            {"name": "fixture-app", "filename": wheel.name, "sha256": digest},
+        "projects": {component: {"artifact": {"wheels": [
+            {"name": distribution, "filename": wheel.name, "sha256": digest},
         ]}}},
-    }, "fixture-app")
+    }, component)
     with retain_wheel_inputs(
         {wheel.name: wheel}, {wheel.name: digest}, max_wheels=1,
         max_archive_bytes=1 << 20, max_total_bytes=1 << 20, max_snapshot_bytes=1 << 20,
@@ -584,7 +592,7 @@ def application(tmp_path, monkeypatch, request):
     ) as retained:
         inputs = engine.WheelInstallInputs(
             retained, json.dumps(profile, sort_keys=True, separators=(",", ":")),
-            (("fixture-app", "1.0.0", wheel.name, digest),),
+            ((distribution, "1.0.0", wheel.name, digest),),
         )
         construction = install_source.application_inputs(selected, inputs)
     generation = construction["runtime_version"]
@@ -595,10 +603,10 @@ def application(tmp_path, monkeypatch, request):
             root /= "physical-" + "r" * shortfall
     slot = root / "versions" / generation
     emit(
-        slot, distribution="fixture-app", version="1.0.0",
+        slot, distribution=distribution, version="1.0.0",
         requires_python=f">={sys.version_info.major}.{sys.version_info.minor}",
-        commands={"fixture-app": "fixture_app:cli", "fixture-alias": "fixture_app:cli"},
-        wheels={"fixture-app": wheel},
+        commands={distribution: "fixture_app:cli", "fixture-alias": "fixture_app:cli"},
+        wheels={distribution: wheel},
         setup=["--setup"], start=["--start"],
         construction=construction, runtime_source=identity.document(),
     )
@@ -646,6 +654,116 @@ def invoke(path, arguments, caller, environment, *, host=None):
         command, cwd=caller, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
+
+
+@pytest.mark.parametrize("application", ["standalone-service"], indirect=True)
+@pytest.mark.parametrize("failure", [
+    pytest.param(None, id="accepted"), "component", "source", "profile", "wheel",
+    "completion", "construction", "selection", "entry-point", "python",
+])
+def test_read_only_installed_application_source_under_publication_lease(application, failure):
+    root, slot, caller, environment = application
+    environment["UV_PYTHON"] = sys.executable
+    extension = ".ps1" if os.name == "nt" else ".sh"
+    installed = invoke(slot / ("install" + extension), [], caller, environment)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    (slot / "install-success.json").unlink()
+    (root / "last-known-good").write_bytes(b"0.9.0\n")
+    if failure == "source":
+        path = slot / "runtime-source.json"
+        data = json.loads(path.read_bytes())
+        data["source_tree"] = "c" * 40
+        path.write_text(json.dumps(data), encoding="utf-8")
+    elif failure == "profile":
+        path = slot / ".runtime-input-origins.json"
+        data = json.loads(path.read_bytes())
+        data["packages"]["agent-ssh-service"] = "file:///unselected.whl"
+        path.write_text(json.dumps(data), encoding="utf-8")
+    elif failure == "wheel":
+        path = next((slot / "wheels").glob("*.whl"))
+        with path.open("ab") as stream:
+            stream.write(b"altered")
+    elif failure == "completion":
+        (slot / engine.runtime.COMPLETE_MARKER).unlink()
+    elif failure == "construction":
+        path = slot / "application.json"
+        data = json.loads(path.read_bytes())
+        data["construction"]["source_hash"] = "0" * 64
+        path.write_text(json.dumps(data), encoding="utf-8")
+    elif failure == "selection":
+        (root / "current-version").write_bytes(b"1.0.0\n")
+    python = sys.executable if failure == "python" else str(engine.runtime.slot_python(root, slot.name))
+    script = r"""
+import builtins, importlib.util, json, pathlib, subprocess, sys
+slot, failure = pathlib.Path(sys.argv[1]), json.loads(sys.argv[2])
+root = slot.parent.parent
+def snapshot():
+    files = {}
+    for path in root.rglob('*'):
+        if not path.is_file():
+            continue
+        relative, state = path.relative_to(root), path.stat()
+        try:
+            data = path.read_bytes()
+        except PermissionError:
+            assert relative.parts[0] == '.publication-leases'
+            data = ('held-native-lease', state.st_size)
+        files[str(relative)] = state.st_mtime_ns, data
+    return files
+before = snapshot()
+spec = importlib.util.spec_from_file_location('qualification_api', slot / 'install.py')
+api = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = api
+spec.loader.exec_module(api)
+original_import = builtins.__import__
+def guarded_import(name, *args, **kwargs):
+    assert name != 'fixture_app', 'reader imported the application'
+    return original_import(name, *args, **kwargs)
+def forbidden(*args, **kwargs):
+    raise AssertionError('reader attempted lifecycle effects')
+builtins.__import__ = guarded_import
+api._write = forbidden
+subprocess.run = forbidden
+resources = api._resources
+def guarded_resources(slot):
+    runtime, engine = resources(slot)
+    for action in ('construction_lease', 'retention_lease', '_publication_lease', 'mark_complete'):
+        setattr(runtime, action, forbidden)
+    return runtime, engine
+api._resources = guarded_resources
+try:
+    result = api.qualify_installed_application(
+        slot, component='wrong' if failure == 'component' else 'ssh-service',
+        command='agent-ssh-service',
+        entry_point='wrong:main' if failure == 'entry-point' else 'fixture_app:cli',
+        deadline=__import__('time').monotonic() + 10,
+    )
+except (ValueError, RuntimeError) as error:
+    assert failure is not None, str(error)
+    assert snapshot() == before, 'reader changed the installation on refusal'
+    print(json.dumps({'rejected': failure, 'reason': str(error)}))
+else:
+    assert failure is None, 'reader accepted invalid installed inputs'
+    assert result.slot.samefile(slot)
+    assert result.root.samefile(root)
+    assert result.python.samefile(sys.executable)
+    source = result.identity.document()
+    assert source['plugin'] == 'ssh-service'
+    assert source == json.loads((slot / 'runtime-source.json').read_bytes())
+    assert snapshot() == before, 'reader changed the installation'
+    print(json.dumps({'qualified': source, 'profile': result.profile_lock_id}))
+"""
+    with engine.runtime._publication_lease(root):
+        result = subprocess.run(
+            [engine._native_retained_path(python), "-I", "-B", "-c", script,
+             str(slot), json.dumps(failure)],
+            executable=engine._native_retained_path(python),
+            cwd=caller, env=environment, capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    response = json.loads(result.stdout)
+    assert ("qualified" in response) is (failure is None)
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
@@ -816,20 +934,24 @@ def test_retention_bootstrap_uses_the_completed_application_environment(
     assert installed.returncode == 0, installed.stdout + installed.stderr
     completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
     python = sys.executable if foreign_interpreter else str(engine.runtime.slot_python(root, slot.name))
-    result = subprocess.run(
-        [python, "-I", "-S", "-B", "-X", "utf8",
-         str(slot / ".runtime-bootstrap" / "runtime_launcher.py"), "-m", "fixture_app", "--fail"],
-        executable=python, cwd=caller, env=environment,
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    if foreign_interpreter:
-        assert result.returncode != 0
-        assert "interpreter resolved outside its slot" in result.stderr
-        assert not result.stdout.strip()
-    else:
-        assert result.returncode == 17, result.stdout + result.stderr
-        assert Path(json.loads(result.stdout)["prefix"]) == slot / ".venv"
+    interpreters = [python]
+    if os.name == "nt" and not foreign_interpreter:
+        interpreters.append(str(engine._native_retained_path(Path(python))))
+    for python in interpreters:
+        result = subprocess.run(
+            [python, "-I", "-S", "-B", "-X", "utf8",
+             str(slot / ".runtime-bootstrap" / "runtime_launcher.py"), "-m", "fixture_app", "--fail"],
+            executable=python, cwd=caller, env=environment,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if foreign_interpreter:
+            assert result.returncode != 0
+            assert "interpreter resolved outside its slot" in result.stderr
+            assert not result.stdout.strip()
+        else:
+            assert result.returncode == 17, result.stdout + result.stderr
+            assert Path(json.loads(result.stdout)["prefix"]).samefile(slot / ".venv")
     assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
 
 
@@ -887,6 +1009,13 @@ def test_install_forwards_explicit_application_arguments_only_when_regular(appli
         assert records[0]["args"] == ["--setup", *forwarded]
         assert records[1]["args"] == ["--start", *forwarded]
         assert records[2]["state"] == "installed"
+        record = json.loads((slot / "application.json").read_text())
+        module_record = {**record, "module": "json.tool"}
+        runtime_application_install._run(module_record, ["--help"], root, slot)
+        with pytest.raises(RuntimeError, match="exit code 2"):
+            runtime_application_install._run(
+                module_record, ["--unrecognized-fixture-option"], root, slot,
+            )
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])

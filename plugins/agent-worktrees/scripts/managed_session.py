@@ -287,6 +287,36 @@ def _anchor_candidates(
     return candidates
 
 
+def _session_marker(session: str, home: Path | None) -> Path | None:
+    base = home or Path(os.environ.get("USERPROFILE") or Path.home())
+    root = base / ".copilot" / "session-state"
+    folder = root / session
+    if any(not path.is_dir() or _is_link_or_reparse(path) for path in (root, folder)):
+        return None
+    marker_dir = folder / "agent-worktrees"
+    if marker_dir.exists() and _is_link_or_reparse(marker_dir):
+        return None
+    return marker_dir / "managed-session.json"
+
+
+def _publish_association(path: Path, record: dict) -> None:
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(record, stream)
+        os.replace(temporary, path)
+    except OSError:
+        pass  # Publication is optional, never admission or a permission grant.
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def inspect(payload: dict, *, home: Path | None = None) -> dict:
     """Return membership facts, never a tool permission or lifecycle result."""
     result = {"admitted": False, "inputs": {}}
@@ -324,23 +354,39 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
                  "context": context, "platform": platform}
         key = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
         cache = registry / "cache" / "managed-sessions" / f"{key}.json"
+        marker = _session_marker(session, home)
         def observe(path: Path) -> None:
             result["inputs"][str(path)] = _stamp(path)
 
+        for path in ([marker, cache] if marker is not None else [cache]):
+            try:
+                if _is_link_or_reparse(path):
+                    continue
+                cached = json.loads(_read(path))
+                if (
+                    cached.get("version") == 1 and cached.get("scope") == scope
+                    and isinstance(cached.get("identity"), dict)
+                    and all(
+                        isinstance(cached["identity"].get(name), str)
+                        and os.path.isabs(cached["identity"][name])
+                        for name in ("root", "git_dir", "common_dir")
+                    )
+                    and (
+                        workspace == cached["identity"]["root"]
+                        or workspace.startswith(cached["identity"]["root"] + os.sep)
+                    )
+                    and cached.get("sources") == source_inputs
+                    and isinstance(cached.get("inputs"), dict)
+                    and str(Path(cached["identity"]["root"]) / ".git") in cached["inputs"]
+                    and all(cached["inputs"].get(name) == stamp for name, stamp in source_inputs.items())
+                    and _current(cached["inputs"])
+                ):
+                    if marker is not None and path == cache:
+                        _publish_association(marker, cached)
+                    return {"admitted": True, "workspace": workspace, "inputs": cached["inputs"]}
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                pass
         identity = repository_identity(cwd, observe=observe)
-        try:
-            cached = json.loads(_read(cache))
-            if (
-                cached.get("version") == 1 and cached.get("scope") == scope
-                and cached.get("identity") == identity and identity is not None
-                and cached.get("sources") == source_inputs
-                and isinstance(cached.get("inputs"), dict)
-                and all(cached["inputs"].get(path) == stamp for path, stamp in source_inputs.items())
-                and _current(cached["inputs"])
-            ):
-                return {"admitted": True, "workspace": workspace, "inputs": cached["inputs"]}
-        except (OSError, ValueError, TypeError, KeyError, AttributeError):
-            pass
         if identity is None:
             return result
         if inputs[str(sources[0])] is None:
@@ -400,18 +446,9 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
                 "sources": source_inputs,
                 "inputs": inputs,
             }
-            # Cache publication is optional; admission itself is read-only.
-            try:
-                cache.parent.mkdir(parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=cache.parent, delete=False) as stream:
-                    temporary = Path(stream.name)
-                    json.dump(record, stream)
-                try:
-                    os.replace(temporary, cache)
-                finally:
-                    temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
+            _publish_association(cache, record)
+            if marker is not None:
+                _publish_association(marker, record)
             return {"admitted": True, "workspace": workspace, "inputs": inputs}
         result["inputs"] = ownership_inputs
         return result
