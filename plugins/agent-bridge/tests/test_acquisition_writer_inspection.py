@@ -181,6 +181,35 @@ async def test_changes_during_observation_invalidate_the_result(rig, monkeypatch
     assert len(rig.calls) == 2
 
 
+@pytest.mark.parametrize("operation", ["resource-relationship", "record"])
+@pytest.mark.parametrize("failure", [FileNotFoundError, PermissionError])
+def test_unavailable_retained_command_is_a_structured_read_only_refusal(
+    rig, monkeypatch, operation, failure,
+):
+    original = rig.command
+
+    async def command(args, *a, **kwargs):
+        if args[0] == operation:
+            raise failure("unavailable original launcher")
+        return await original(args, *a, **kwargs)
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", command)
+    app = FastAPI()
+    app.include_router(router)
+    app.state.acquisition_runtime = rig.runtime
+    before = snapshot(rig.db)
+    with TestClient(app) as http:
+        response = http.get(
+            f"/api/v1/acquisitions/{rig.request.delivery_id}?worktree_writer=true",
+        )
+    assert response.status_code == 409
+    assert response.json() == {"detail": {
+        "code": "worktree_writer_unconfirmed",
+        "message": "original acquisition writer is unavailable",
+    }}
+    assert snapshot(rig.db) == before
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["missing", "legacy", "refused", "passive"])
 async def test_unqualified_original_owner_is_not_repaired_or_adopted(rig, changed):

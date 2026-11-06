@@ -14,6 +14,8 @@
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_original_writer_inspection_rechecks_owner_without_selection[nonce]",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_original_writer_inspection_rechecks_owner_without_selection[journal]",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_original_writer_inspection_rechecks_owner_without_selection[instance]",
+        "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_original_writer_inspection_rechecks_owner_without_selection[missing-launcher]",
+        "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_original_writer_inspection_rechecks_owner_without_selection[unreadable-record]",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_receiving_scope_checks_locked_incarnation_and_resets_after_failure",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_required_scope_refuses_another_workspace_and_propagates_lineage_error",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_required_cli_refuses_without_writer_or_native_effect",
@@ -4585,7 +4587,7 @@
         "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "378675547ea7045eb1d6c1183506c3663b05b39517107073f8f579fb29d4d4f4",
         "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "9bf81ff5ecc2c3ff01330020ab08b1d3eefc67c82db07dc2818585dafdc0c554",
         "plugins/agent-worktrees/src/agent_worktrees/retained_record_writer.py": "2ab03a9acd1ac75761c5922057c6b140aced9383dea1dc5892d0da7aeb856ede",
-        "tools/promotion_unit_tests/test_retained_acquisition_writer.py": "6f79ec8cd1f3f04b0d5cb9bdb4137b565794e1bb31f7886149aa79c51a4649a6",
+        "tools/promotion_unit_tests/test_retained_acquisition_writer.py": "6b041c8b087aaf2da5a0061461cf5ff9612d0d32648b2e2f0baf47223b4de3ad",
         "plugins/agent-bridge/src/agent_bridge/session_status.py": "96e8aec0a62cc68c7db7215d6a575c4ad772ce4a96c5def00b18cc1103f3b335",
         "plugins/agent-bridge/src/agent_bridge/singleton_anchor.py": "15b2ce0dc947dbc9e47c3f0de23d43ec91974b2a5898d034cd5bcbce305c12f8",
         "plugins/agent-bridge/src/agent_bridge/startup_observation.py": "8620e8b587e07d22e8234a5392ce07207759c8a474682b9b529cd3487ad6f9ae",
@@ -4911,7 +4913,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "0c2c0bb91dd954a290bb7477d7c30d62ad7fde622522a99d8ab06b4430c7aa0f",
         "tools/sweep_forbidden_labels.py": "cc848ce49e60253946d2180331ac13a66b417987014db1184973212b1a634818",
         "tools/promotion_unit_tests/test_label_cleanup.py": "5c60fa35649184a8c59ddd88ecb6a92a4963f04be808921fc68f0eeb07e1861c",
-        "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py": "374446c834b746da0e381396aee61610c98b5e474c05abef8340d88997412441"
+        "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py": "08ac3b2329d3adb9a21638efc3a07c3a0acd4c4dd4fa38d35f642426101dece6"
     },
     "coverage_targets": [
         "libs/repository-policy/src/repository_policy/receiving.py",

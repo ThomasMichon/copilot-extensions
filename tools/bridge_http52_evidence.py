@@ -135,6 +135,7 @@ PROBES = {
     "test_retained_acquisition_and_later_lineage_use_actual_owner_processes": 1,
     "test_retained_session_receiver_refuses_changed_scope_without_resident_fallback": 12,
     "test_retained_writer_inspection_cli_http": 3,
+    "test_retained_writer_inspection_unavailable_http": 4,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {

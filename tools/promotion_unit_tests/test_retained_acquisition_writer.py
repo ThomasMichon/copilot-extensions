@@ -187,7 +187,9 @@ def test_required_session_commands_carry_original_executing_scope(boundary):
     assert b.writer.current() is None
 
 
-@pytest.mark.parametrize("changed", [None, "nonce", "journal", "instance"])
+@pytest.mark.parametrize("changed", [
+    None, "nonce", "journal", "instance", "missing-launcher", "unreadable-record",
+])
 def test_original_writer_inspection_rechecks_owner_without_selection(boundary, monkeypatch, changed):
     b = boundary
     contract = sys.modules[f"{PACKAGE}.acquisition_contract"]
@@ -210,6 +212,10 @@ def test_original_writer_inspection_rechecks_owner_without_selection(boundary, m
     }
     b.rows.append(original.copy())
     authority = sys.modules[f"{PACKAGE}.acquisition_authority"]
+    if changed == "missing-launcher":
+        async def missing(*args, **kwargs):
+            raise FileNotFoundError("original launcher unavailable")
+        monkeypatch.setattr(authority, "worktree_command", missing)
 
     async def record(worktree_id, project, *, command):
         assert worktree_id == b.request.worktree_id and project == b.request.project
@@ -218,6 +224,8 @@ def test_original_writer_inspection_rechecks_owner_without_selection(boundary, m
             b.rows[0]["stage"] = "launching"
         elif changed == "instance":
             slot["active"]["generation"] = 2
+        elif changed == "unreadable-record":
+            raise PermissionError("original owner record unavailable")
         return {
             "repo": project, "path": b.request.worktree_path,
             "creation_nonce": "replaced" if changed == "nonce" else "original-nonce",
@@ -242,7 +250,7 @@ def test_original_writer_inspection_rechecks_owner_without_selection(boundary, m
         assert observed["bridge_instance"]["generation"] == 1
         assert observed["reservation_key"] == b.request.reservation_key
         assert b.rows == [original]
-    assert [call[0] for call in b.calls] == ["qualify"]
+    assert [call[0] for call in b.calls] == ([] if changed == "missing-launcher" else ["qualify"])
     assert b.writer.current() is None
 
 

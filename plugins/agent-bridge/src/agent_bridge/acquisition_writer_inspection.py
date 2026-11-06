@@ -59,11 +59,16 @@ async def inspect_writer(db: Any, delivery_id: str, original: dict) -> dict:
         raise AcquisitionRefused(
             "worktree_writer_unconfirmed", "original acquisition writer binding is unconfirmed",
         )
-    support = await _qualify(RetainedWriter(request, prefix))
-    record = await read_worktree_record(
-        request.worktree_id, request.project,
-        command=partial(worktree_command, owner_prefix=prefix),
-    )
+    try:
+        support = await _qualify(RetainedWriter(request, prefix))
+        record = await read_worktree_record(
+            request.worktree_id, request.project,
+            command=partial(worktree_command, owner_prefix=prefix),
+        )
+    except OSError as exc:
+        raise AcquisitionRefused(
+            "worktree_writer_unconfirmed", "original acquisition writer is unavailable",
+        ) from exc
     if (
         record["repo"] != request.project or record["path"] != request.worktree_path
         or record["creation_nonce"] != request.worktree_writer.creation_nonce
