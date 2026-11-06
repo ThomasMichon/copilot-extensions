@@ -284,20 +284,11 @@ def _tracked_files(checkout: str, target: Path) -> str | None:
 
 
 def _process_blocker(target: Path) -> str | None:
-    """Refusal reason when a live process works in, or runs an image from,
-    ``target``. Working-directory discovery fails closed when unavailable."""
-    from . import procs
+    """Refusal reason when a live process uses ``target`` or that cannot be
+    ruled out (see :mod:`derived_liveuse`)."""
+    from . import derived_liveuse
 
-    if blocker := procs.checkout_retirement_blocker(str(target)):
-        return blocker
-    try:
-        images = procs.processes_with_executable_under(os.path.realpath(target))
-    except OSError as exc:
-        return f"executable inspection unavailable: {exc}; reclaim deferred"
-    if images:
-        names = ", ".join(f"{p.get('name') or '?'}({p['pid']})" for p in images)
-        return f"live process(es) run an executable from it: {names}"
-    return None
+    return derived_liveuse.blocker(target)
 
 
 def _ledger_refusal(record, claim) -> str | None:
@@ -367,9 +358,20 @@ def reclaim_refusals(record, claim) -> list[str]:
 
 
 def remove_directory(target: Path) -> tuple[bool, str]:
-    from . import gc
+    """Delete ``target``; on Windows only after the kernel lets it move aside.
+    A failed delete moves what remains back so the open claim still names it."""
+    from . import derived_liveuse, gc
 
-    return gc.remove_tree(target)
+    aside, why = derived_liveuse.move_aside(target)
+    if aside is None:
+        return False, why
+    removed, detail = gc.remove_tree(aside)
+    if not removed and aside != target:
+        try:
+            os.rename(aside, target)
+        except OSError as exc:
+            detail = f"{detail}; the remainder stays at {aside} ({exc})"
+    return removed, detail
 
 
 def claim_directory(

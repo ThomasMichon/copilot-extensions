@@ -134,8 +134,13 @@ everything else uses the CLI command above.
 when every check passes: the marker names this worktree and the ledger entry's
 nonce; the path is strictly inside this worktree's checkout (lexically and
 after resolving links, never inside `.git`); nothing at or below it is a
-symlink, junction or other reparse point (never followed); Git tracks no file
-beneath it; and no live process uses it. Any failure refuses, leaves the claim
+symlink, junction or other reparse point (never followed); no link sits
+between the checkout and it; Git tracks no file beneath it; the ledger would
+accept the settle (no handoff reservation, owner not finalizing); and no live
+process uses it. "No live process" fails closed: on POSIX every live process
+owned by this user must be fully inspectable, and on Windows the directory is
+first moved aside, which Windows refuses while any process works in it or
+holds a file inside it open. Any failure refuses, leaves the claim
 open and lists every reason. It never acts on another worktree's claims, and
 there is no bulk form. Overwriting the claim's note (`claims annotate`) drops
 the nonce, after which reclaim safely refuses -- release the claim instead.

@@ -226,6 +226,7 @@ def test_reclaim_refuses_reserved_claim_before_deleting(seeded, capfd, monkeypat
     assert target.is_dir()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows image-path check")
 def test_process_blocker_covers_executables_inside(monkeypatch, tmp_path):
     from agent_worktrees import procs
 
@@ -233,6 +234,50 @@ def test_process_blocker_covers_executables_inside(monkeypatch, tmp_path):
     monkeypatch.setattr(procs, "processes_with_executable_under",
                         lambda root: [{"pid": 7, "name": "python.exe"}])
     assert "python.exe(7)" in _REAL_PROCESS_BLOCKER(tmp_path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX /proc census")
+def test_posix_census_refuses_uninspectable_own_process(monkeypatch, tmp_path):
+    from agent_worktrees import derived_liveuse, procs
+
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda root: None)
+    target = tmp_path / "cache"
+    target.mkdir()
+    proc_root = tmp_path / "proc"
+
+    def fake(pid, cwd, exe):
+        entry = proc_root / str(pid)
+        entry.mkdir(parents=True)
+        (entry / "stat").write_text(f"{pid} (x) S 1")
+        for name, dest in (("cwd", cwd), ("exe", exe)):
+            if dest is None:
+                (entry / name).write_text("unreadable")
+            else:
+                (entry / name).symlink_to(dest)
+
+    fake(101, tmp_path, "/bin/true")
+    assert derived_liveuse.blocker(target, proc_root=proc_root) is None
+    fake(102, tmp_path, target / "bin" / "python")
+    assert "pid 102" in derived_liveuse.blocker(target, proc_root=proc_root)
+    (proc_root / "102" / "exe").unlink()
+    (proc_root / "102" / "exe").symlink_to("/bin/true")
+    fake(103, None, "/bin/true")
+    assert "cannot inspect" in derived_liveuse.blocker(target, proc_root=proc_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows in-use enforcement")
+def test_windows_reclaim_keeps_dir_held_open(tmp_path):
+    target = tmp_path / "cache"
+    target.mkdir()
+    held = open(target / "held.txt", "w")
+    try:
+        removed, detail = dc.remove_directory(target)
+    finally:
+        held.close()
+    assert not removed and "refused to move it aside" in detail
+    assert (target / "held.txt").exists()
+    assert [p.name for p in tmp_path.iterdir()] == ["cache"]
+    assert dc.remove_directory(target)[0] and not tmp_path.joinpath("cache").exists()
 
 
 def test_reclaim_refuses_git_tracked_file(seeded, capfd, monkeypatch):
