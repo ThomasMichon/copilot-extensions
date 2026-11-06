@@ -658,7 +658,8 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("damage", [
     "withdraw", "nested", "git-link", "session", "registry", "context",
-    "missing-witness", "malformed", "oversize", "wrong-type",
+    "missing-witness", "malformed", "oversize", "wrong-type", "workspace-unicode",
+    "session-array", "cwd-array", "working-directory-array",
 ])
 def test_prepared_native_membership_rejects_changed_or_unavailable_inputs(
     tmp_path, monkeypatch, shell, damage,
@@ -674,7 +675,7 @@ def test_prepared_native_membership_rejects_changed_or_unavailable_inputs(
     nested.mkdir()
     session = tmp_path / ".copilot" / "session-state" / "prepared"
     session.mkdir(parents=True)
-    payload = {"sessionId": "prepared", "cwd": str(nested)}
+    payload = {"sessionId": "prepared", "cwd": str(anchor if damage == "workspace-unicode" else nested)}
     assert module.admitted(payload, home=tmp_path)
     marker = session / "agent-worktrees" / "managed-session.json"
     env = environment(tmp_path, nested)
@@ -702,6 +703,19 @@ def test_prepared_native_membership_rejects_changed_or_unavailable_inputs(
         value = json.loads(marker.read_text())
         value["scope"]["session"] = ["prepared"]
         marker.write_text(json.dumps(value))
+    elif damage == "workspace-unicode":
+        other = fixture_checkout(tmp_path / "anchor-e\u0301")
+        payload["cwd"] = str(other)
+        assert not module.admitted(payload, home=tmp_path)
+    elif damage == "session-array":
+        payload["sessionId"] = ["prepared"]
+        assert not module.admitted(payload, home=tmp_path)
+    elif damage == "cwd-array":
+        payload["cwd"] = [str(nested)]
+        assert not module.admitted(payload, home=tmp_path)
+    elif damage == "working-directory-array":
+        payload["workingDirectory"] = [payload.pop("cwd")]
+        assert not module.admitted(payload, home=tmp_path)
     env["PREPARED_MEMBERSHIP_SCRIPT"] = str(SCRIPTS / "managed-session.ps1")
     command = (
         ". $env:PREPARED_MEMBERSHIP_SCRIPT; "

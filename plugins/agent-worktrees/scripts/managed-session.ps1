@@ -98,22 +98,28 @@ function Test-PreparedWorktreesStamp {
     }
     if ($Stamp -isnot [Collections.IList] -or $Stamp.Count -lt 2 -or
         $Stamp[0] -isnot [string] -or $Stamp[1] -isnot [string] -or
-        $Stamp[1] -cne $canonical) { return $false }
+        -not [string]::Equals($Stamp[1], $canonical, [StringComparison]::Ordinal)) { return $false }
     if ($attributes -band [IO.FileAttributes]::Directory) {
-        if ($Stamp[0] -ceq 'directory') { return $Stamp.Count -eq 2 }
-        if ($Stamp[0] -cne 'listing' -or $Stamp.Count -ne 3) { return $false }
+        if ([string]::Equals($Stamp[0], 'directory', [StringComparison]::Ordinal)) {
+            return $Stamp.Count -eq 2
+        }
+        if (-not [string]::Equals($Stamp[0], 'listing', [StringComparison]::Ordinal) -or
+            $Stamp.Count -ne 3) { return $false }
         $mtime = [IO.Directory]::GetLastWriteTimeUtc($Path)
     } else {
-        if ($Stamp[0] -cne 'file' -or $Stamp.Count -ne 4 -or
+        if (-not [string]::Equals($Stamp[0], 'file', [StringComparison]::Ordinal) -or $Stamp.Count -ne 4 -or
             $Stamp[2] -isnot [string] -or
-            $Stamp[2] -cne ([IO.FileInfo]::new($Path)).Length.ToString(
-                [Globalization.CultureInfo]::InvariantCulture)) { return $false }
+            -not [string]::Equals($Stamp[2], ([IO.FileInfo]::new($Path)).Length.ToString(
+                [Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal)) {
+            return $false
+        }
         $mtime = [IO.File]::GetLastWriteTimeUtc($Path)
     }
     # Python's Windows stat uses the same 100 ns filesystem timestamp.
     $nanoseconds = ($mtime.Ticks - [long]621355968000000000) * [long]100
-    return $Stamp[-1] -is [string] -and $Stamp[-1] -ceq $nanoseconds.ToString(
-        [Globalization.CultureInfo]::InvariantCulture)
+    return $Stamp[-1] -is [string] -and [string]::Equals(
+        $Stamp[-1], $nanoseconds.ToString([Globalization.CultureInfo]::InvariantCulture),
+        [StringComparison]::Ordinal)
 }
 
 function Test-PreparedManagedWorktreesSession {
@@ -124,14 +130,14 @@ function Test-PreparedManagedWorktreesSession {
             $env:COPILOT_EXTENSIONS_CONTEXT -or $Raw.Length -gt 1048576) { return $false }
         $event = ConvertFrom-ManagedWorktreesJson $Raw
         if ($event -isnot [Collections.IDictionary]) { return $false }
-        $session = if ($event.ContainsKey('sessionId')) {
-            $event['sessionId']
-        } else { $env:COPILOT_AGENT_SESSION_ID }
-        $cwd = if ($event.ContainsKey('cwd')) {
-            $event['cwd']
+        if ($event.ContainsKey('sessionId')) {
+            $session = $event['sessionId']
+        } else { $session = $env:COPILOT_AGENT_SESSION_ID }
+        if ($event.ContainsKey('cwd')) {
+            $cwd = $event['cwd']
         } elseif ($event.ContainsKey('workingDirectory')) {
-            $event['workingDirectory']
-        } else { $env:COPILOT_PROJECT_DIR }
+            $cwd = $event['workingDirectory']
+        } else { $cwd = $env:COPILOT_PROJECT_DIR }
         if ($session -isnot [string] -or
             $session -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { return $false }
         $workspace = Get-PreparedWorktreesPath $cwd
@@ -167,27 +173,32 @@ function Test-PreparedManagedWorktreesSession {
             if ($value[$name] -isnot [Collections.IDictionary]) { return $false }
         }
         $scope = $value['scope']
-        if ($scope.Count -ne 5 -or $scope['session'] -isnot [string] -or
-            $scope['session'] -cne $session -or $scope['workspace'] -isnot [string] -or
-            $scope['workspace'] -cne $workspace -or $scope['registry'] -isnot [string] -or
-            $scope['registry'] -cne $registry -or $scope['context'] -isnot [string] -or
-            $scope['context'] -cne '' -or $scope['platform'] -isnot [string] -or
-            $scope['platform'] -cne 'windows') { return $false }
+        $expectedScope = @{
+            session = $session; workspace = $workspace; registry = $registry
+            context = ''; platform = 'windows'
+        }
+        if ($scope.Count -ne $expectedScope.Count) { return $false }
+        foreach ($name in $expectedScope.Keys) {
+            if ($scope[$name] -isnot [string] -or
+                -not [string]::Equals($scope[$name], $expectedScope[$name], [StringComparison]::Ordinal)) {
+                return $false
+            }
+        }
         $identity = $value['identity']
         foreach ($name in @('root', 'git_dir', 'common_dir')) {
             $null = Get-PreparedWorktreesPath $identity[$name]
         }
         $root = $identity['root']
-        if ($workspace -cne $root -and -not $workspace.StartsWith($root + '\', [StringComparison]::Ordinal)) {
+        if (-not [string]::Equals($workspace, $root, [StringComparison]::Ordinal) -and
+            -not $workspace.StartsWith($root + '\', [StringComparison]::Ordinal)) {
             return $false
         }
         $inputs = $value['inputs']
         $sources = $value['sources']
         if ($inputs.Count -gt 256 -or $sources.Count -ne 2) { return $false }
-        $expectedSources = @{
-            ([IO.Path]::Combine($registry, 'projects.yaml')) = $false
-            ([IO.Path]::Combine($registry, 'repos.yaml')) = $false
-        }
+        $expectedSources = [Collections.Generic.Dictionary[string, bool]]::new([StringComparer]::Ordinal)
+        $expectedSources.Add([IO.Path]::Combine($registry, 'projects.yaml'), $false)
+        $expectedSources.Add([IO.Path]::Combine($registry, 'repos.yaml'), $false)
         foreach ($path in $sources.Keys) {
             $canonical = Get-PreparedWorktreesPath $path
             if (-not $expectedSources.ContainsKey($canonical) -or $expectedSources[$canonical] -or
@@ -196,13 +207,15 @@ function Test-PreparedManagedWorktreesSession {
             $expectedSources[$canonical] = $true
             $source = ConvertTo-Json -InputObject $sources[$path] -Compress
             $inputStamp = ConvertTo-Json -InputObject $inputs[$path] -Compress
-            if ($source -cne $inputStamp) { return $false }
+            if (-not [string]::Equals($source, $inputStamp, [StringComparison]::Ordinal)) { return $false }
         }
         $hasGitMarker = $false
         foreach ($path in $inputs.Keys) {
             if ($path -isnot [string] -or
                 -not (Test-PreparedWorktreesStamp $path $inputs[$path])) { return $false }
-            if ((Get-PreparedWorktreesPath $path) -ceq [IO.Path]::Combine($root, '.git')) {
+            if ([string]::Equals(
+                (Get-PreparedWorktreesPath $path), [IO.Path]::Combine($root, '.git'),
+                [StringComparison]::Ordinal)) {
                 $hasGitMarker = $true
             }
         }

@@ -151,7 +151,9 @@ For a supported legacy Windows caller it validates the session, workspace,
 registry, platform, original project/repository sources and every recorded
 filesystem witness in process before returning positive membership. The
 reader uses the original size, kind and 100-nanosecond timestamp semantics;
-it does not reparse registries, run Git, discover a runtime or start Python.
+path and scope equality is ordinal, and event extraction preserves JSON array
+types instead of treating singleton arrays as scalar identities.
+It does not reparse registries, run Git, discover a runtime or start Python.
 Membership remains distinct from permission, head custody and liveness.
 
 The read is capped at 1 MiB plus one overflow byte, 256 witnesses, 4,096
