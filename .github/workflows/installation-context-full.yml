@@ -33,6 +33,7 @@ on:
           - bridge-snapshots
           - bridge-commands
           - bridge-contracts
+          - bridge-http52-capture
           - bridge-binding
           - vault-activation
           - dispatch-binding
@@ -50,6 +51,10 @@ on:
           - codespaces-installer
           - fleet-client-generations
         default: context
+      source_sha:
+        description: Exact published checkpoint; required only for current HTTP-52 capture
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -339,6 +344,22 @@ jobs:
           version: "0.12.6"
       - name: Record exact source
         run: python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Qualify Vault launcher and cold peer capture
+        timeout-minutes: 5
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
+          --test-file tests/test_payload_invocation.py
+          --test-file tests/test_runtime_activation.py
+          -k "scheduled_task_launcher_resolves_slot_at_every_run or cold_namespaced_capture"
+          --plugin-timeout 180 --timeout 120 --test-timeout 60
+          --junit-dir vault-configuration-critical-junit
+      - name: Retain Vault launcher and cold peer results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-configuration-critical-${{ runner.os }}-${{ github.sha }}
+          path: vault-configuration-critical-junit
+          if-no-files-found: warn
       - name: Qualify inactive first touch and configured consumers
         run: >-
           python tools/run-plugin-tests.py agent-vault --max-files-per-sub-suite 2
@@ -1771,10 +1792,10 @@ jobs:
           --test-file tests/test_install_binstub.py
           --max-files-per-sub-suite 1 --test-timeout 180 --timeout 420
   bridge-contracts-linux:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'bridge-contracts' || inputs.portfolio == 'bridge-http52-capture')
     name: Bridge historical source proof (Ubuntu)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ inputs.portfolio == 'bridge-http52-capture' && 30 || 10 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1786,9 +1807,82 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Pin current capture source
+        if: inputs.portfolio == 'bridge-http52-capture'
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python - <<'PY'
+          import os, re, subprocess
+          source = os.environ["SOURCE_SHA"]
+          assert re.fullmatch(r"[0-9a-f]{40}", source)
+          assert source == os.environ["GITHUB_SHA"]
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == source
+          PY
+      - name: Prepare declared isolated capture dependencies
+        if: inputs.portfolio == 'bridge-http52-capture'
+        timeout-minutes: 5
+        run: python tools/run-plugin-tests.py agent-bridge --prepare-only
+      - name: Check controlled artifact input boundaries
+        if: inputs.portfolio == 'bridge-http52-capture' || inputs.portfolio == 'bridge-contracts'
+        timeout-minutes: 3
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge --allow-explicit-tiers
+          --test-file tests/test_http52_artifact.py
+          --plugin-timeout 120 --timeout 90 --test-timeout 30
+      - name: Check the immutable peer-prefix consumer
+        if: inputs.portfolio == 'bridge-http52-capture' || inputs.portfolio == 'bridge-contracts'
+        timeout-minutes: 5
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests --allow-explicit-tiers
+          --test-file tests/test_watch_peer.py
+          -k cli_peer_prefix_uses_immutable_snapshot_not_management_payload
+          --plugin-timeout 180 --timeout 120 --test-timeout 90
+      - name: Capture current HTTP-52 controlled source evidence
+        if: inputs.portfolio == 'bridge-http52-capture'
+        timeout-minutes: 10
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python -I -B - <<'PY'
+          import os, runpy, sys
+          from pathlib import Path
+          root = Path.cwd()
+          sys.path[:0] = [str(root / "libs/agent-procutil/src"), str(root / "tools")]
+          sys.argv = ["tools/capture_bridge_http52.py", "--source-commit", os.environ["SOURCE_SHA"], "--write"]
+          runpy.run_path(sys.argv[0], run_name="__main__")
+          PY
+      - name: Independently verify current HTTP-52 controlled source evidence
+        if: inputs.portfolio == 'bridge-http52-capture'
+        timeout-minutes: 10
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python -I -B - <<'PY'
+          import os, runpy, sys
+          from pathlib import Path
+          root = Path.cwd()
+          sys.path[:0] = [str(root / "libs/agent-procutil/src"), str(root / "tools")]
+          sys.argv = ["tools/capture_bridge_http52.py", "--source-commit", os.environ["SOURCE_SHA"]]
+          runpy.run_path(sys.argv[0], run_name="__main__")
+          PY
       - name: Validate canonical historical evidence
         run: python tools/check-agent-bridge-contracts.py
+      - name: Export only canonical current outputs and source preimages
+        if: inputs.portfolio == 'bridge-http52-capture'
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python tools/bridge_http52_artifact.py export --source-commit "$SOURCE_SHA" --artifact-dir http52-qualified-artifact
+      - name: Retain qualified current HTTP-52 outputs
+        if: inputs.portfolio == 'bridge-http52-capture'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http52-qualified-${{ github.sha }}
+          path: http52-qualified-artifact
+          if-no-files-found: error
       - name: Exercise immutable bytes and historical publication guards
+        env:
+          PYTEST_ADDOPTS: "--maxfail=1"
         run: >-
           python tools/run-plugin-tests.py agent-bridge
           --test-file tests/test_http48_source_retention.py

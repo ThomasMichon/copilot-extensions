@@ -1031,6 +1031,18 @@ function Register-AgentVaultTask {
     # the junction, dotfiles #637); $LinkPython is only the last-resort fallback
     # for a host where the resolver hasn't been deployed yet.
     New-Item -ItemType Directory -Force -Path $RunDir, (Join-Path $InstallDir 'logs') | Out-Null
+    $configurationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).ProviderPath }
+    $serviceConfigurationJson = & $LinkPython -I -B -c `
+        'import json,sys; from agent_vault.configuration import service_configuration_snapshot; print(json.dumps(service_configuration_snapshot(sys.argv[1]),ensure_ascii=True))' `
+        $configurationProject
+    if ($LASTEXITCODE -ne 0 -or -not $serviceConfigurationJson) {
+        throw 'Vault service configuration context could not be captured'
+    }
+    $serviceConfiguration = ([string]$serviceConfigurationJson) | ConvertFrom-Json -ErrorAction Stop
+    $serviceConfigurationRoot = [string]$serviceConfiguration.root
+    $serviceConfigurationPath = [string]$serviceConfiguration.config
     $portDirective = if ($installationId) {
         "`$env:AGENT_VAULT_PORT = '0'"
     } else {
@@ -1048,6 +1060,7 @@ function Register-AgentVaultTask {
 `$env:AGENT_VAULT_LOG = '$($LogFile -replace "'","''")'
 `$env:AGENT_VAULT_TASK_NAME = '$($TaskName -replace "'","''")'
 `$env:AGENT_VAULT_INSTALLATION_ID = '$($installationId -replace "'","''")'
+`$env:AGENT_VAULT_CONFIG = '$($serviceConfigurationPath -replace "'","''")'
 $portDirective
 `$_root = '$($InstallDir -replace "'","''")'
 `$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
@@ -1061,9 +1074,15 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not `$_pyt
         '\\?\UNC\' + `$_pythonCache.Substring(2)
     } else { '\\?\' + `$_pythonCache }
 }
-& `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service --foreground --persistent @args
+`$_supportsContext = & `$_py -I -B -c "import importlib.util; print(int(importlib.util.find_spec('agent_vault.service_arguments') is not None))"
+if (`$LASTEXITCODE -ne 0) { throw 'Vault service argument capability could not be read' }
+`$_serviceArguments = @('--foreground', '--persistent')
+if (([string]`$_supportsContext).Trim() -ceq '1') {
+    `$_serviceArguments += @('--configuration-root', '$($serviceConfigurationRoot -replace "'","''")')
+}
+& `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service @_serviceArguments @args
 exit `$LASTEXITCODE
-"@, $utf8NoBom)
+"@, [Text.UTF8Encoding]::new($true))
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `

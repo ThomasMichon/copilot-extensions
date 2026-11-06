@@ -247,7 +247,7 @@ class WatchInvocation:
             PLUGIN_ID, self.installation.plugin_root,
             str(self.installation.receipt), "agent-worktrees",
         )
-        return [prefix[0], "-B", *prefix[1:]]
+        return prefix if "-B" in prefix[1:3] else [prefix[0], "-B", *prefix[1:]]
 
     def snapshot_peer_prefix(self) -> list[str]:
         """Retain immutable launcher code, never its current-governance verdict."""

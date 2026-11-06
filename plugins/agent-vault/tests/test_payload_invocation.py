@@ -158,11 +158,12 @@ def test_scheduled_task_launcher_resolves_slot_at_every_run() -> None:
     # The launcher body written to $TaskLauncher must dot-source the resolver
     # and resolve $_py fresh every time it runs, not at registration time.
     launcher_start = body.index("[System.IO.File]::WriteAllText($TaskLauncher")
-    launcher_body = body[launcher_start : body.index('"@, $utf8NoBom)', launcher_start)]
+    launcher_body = body[launcher_start : body.index('"@, [Text.UTF8Encoding]::new($true))', launcher_start)]
     assert "resolve-runtime.ps1" in launcher_body
     assert "$_py = $null" in launcher_body.replace("`$", "$")
     assert '& `$_py -X "pycache_prefix=`$_pythonCache"' in launcher_body
-    assert "-m agent_vault.service --foreground --persistent @args" in launcher_body
+    assert "`$_serviceArguments = @('--foreground', '--persistent')" in launcher_body
+    assert "-m agent_vault.service @_serviceArguments @args" in launcher_body
 
     # The registration-time code path must NOT resolve/bake a concrete slot
     # path itself (that responsibility moved into the launcher body above).

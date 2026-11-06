@@ -95,7 +95,9 @@ def invoke():
             assert argv[bootstrap + 1] == launch._SERVICE_BOOTSTRAP
             assert argv[bootstrap + 2] == str(Path(launch.__file__).resolve().parent.parent)
             service_args = argv[bootstrap + 3:]
-            assert service_args == ["--handoff-stdin", "--foreground"]
+            assert service_args == [
+                "--handoff-stdin", "--foreground", "--configuration-root", os.getcwd(),
+            ]
             command = [
                 sys.executable, "-c", os.environ["VAULT_STARTUP_HARNESS"],
                 "resident", str(registry), str(state), *service_args,
@@ -173,6 +175,9 @@ def test_actual_main_has_one_resident_and_no_finished_setup_record(tmp_path, mod
     environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
     environment["VAULT_STARTUP_HARNESS"] = HARNESS
     environment["KPDB"] = str(tmp_path / "unconfigured.kdbx")
+    activation = tmp_path / "activation.json"
+    activation.write_text('{"enabled":true}', encoding="utf-8")
+    environment["AGENT_VAULT_CONFIG"] = str(activation)
     result = subprocess.run(
         [
             sys.executable, "-B", "-c", HARNESS, mode,

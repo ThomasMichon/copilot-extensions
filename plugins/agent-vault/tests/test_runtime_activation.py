@@ -139,7 +139,7 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     assert json.loads(result.stdout)["state"] == "configured"
 
 
-@pytest.mark.parametrize("layout", ["retained", "application", "deployed", "mixed-owner"])
+@pytest.mark.parametrize("layout", ["retained", "application", "deployed", "mixed-owner", "service-cwd"])
 def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, layout):
     import venv
 
@@ -176,13 +176,27 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         (slot.parent.parent / "current-version").write_text("1.0.0", encoding="utf-8")
     installed = packages["agent-vault"] / "agent_vault"
     installed.mkdir()
-    for name in ("__init__.py", "config.py", "configuration.py", "_peer_launch.py"):
+    for name in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "_peer_launch.py"):
         shutil.copyfile(PLUGIN / "src" / "agent_vault" / name, installed / name)
+    if layout == "service-cwd":
+        shutil.copytree(
+            PLUGIN / "src" / "agent_vault", installed, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
     for package in (agent_procutil, configuration_context, configuration_layers):
         shutil.copytree(
             Path(package.__file__).parent, packages["agent-vault"] / package.__name__,
             ignore=shutil.ignore_patterns("__pycache__"),
         )
+    if layout == "service-cwd":
+        import importlib
+
+        for name in ("zdd", "single_instance_lease", "update_driver"):
+            package = importlib.import_module(name)
+            shutil.copytree(
+                Path(package.__file__).parent, packages["agent-vault"] / name,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
     if layout not in ("deployed", "mixed-owner"):
         bootstrap = slots["agent-vault"] / ".runtime-bootstrap"
         bootstrap.mkdir()
@@ -200,7 +214,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         "import json, sys\nfrom pathlib import Path\n"
         "assert sys.argv[1:] == ['state-root', '--configuration', '--json']\n"
         "report = json.loads(Path(__file__).with_name('report.json').read_text())\n"
-        "assert Path.cwd() == Path(report['context']['base_root'])\n"
+        "assert Path.cwd().is_relative_to(Path(report['context']['base_root']))\n"
         "print(json.dumps(report))\n",
         encoding="utf-8",
     )
@@ -222,6 +236,9 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         ):
             env.pop(name)
     env["AGENT_VAULT_CONFIG"] = str(home / "absent-global.json")
+    caller = project / "local" if layout == "service-cwd" else project
+    if caller != project:
+        caller.mkdir()
     reader = (
         "import json, sys\nfrom pathlib import Path\n"
         "from agent_vault.configuration import runtime_enabled\n"
@@ -231,8 +248,32 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         "selected = resolve_context(sys.argv[1], strict=True)\n"
         "print(json.dumps({'enabled': enabled, 'group': selected.group}))\n"
     )
+    if layout == "service-cwd":
+        reader = (
+            "import json, os, sys\nfrom pathlib import Path\n"
+            "from agent_vault import service, config, configuration, launch\n"
+            "state = Path.cwd()\nproject = sys.argv[1]\n"
+            "captured = {}\n"
+            "def capture(argv, **kwargs):\n"
+            " captured.update(argv=argv, **kwargs)\n"
+            "launch.spawn_daemon = capture\n"
+            "os.chdir(project)\n"
+            "launch.spawn_service(['--foreground'])\n"
+            "assert captured['cwd'] == state\n"
+            "os.chdir(state)\n"
+            "def probe(args):\n"
+            " assert Path.cwd() == state\n"
+            " selected = config.resolve_context(strict=True)\n"
+            " print(json.dumps({'enabled':configuration.runtime_enabled(), 'group':selected.group}))\n"
+            "service._run_resident = probe\n"
+            "sys.argv = ['agent_vault.service', *captured['argv'][6:]]\n"
+            "service.main()\n"
+        )
     for enabled in (True, False, None, "invalid"):
-        config_path = knowledge / ".agent-vault.json"
+        config_path = (
+            caller / ".agent-vault.json" if layout == "service-cwd"
+            else knowledge / ".agent-vault.json"
+        )
         if enabled is None:
             config_path.unlink()
         else:
@@ -240,13 +281,17 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
                 "enabled": enabled, "group": "portable-group",
             }), encoding="utf-8")
         result = subprocess.run(
-            [str(python), "-I", "-B", "-c", reader, str(project), str(environments["agent-vault"])],
-            cwd=staging, env=env, capture_output=True, text=True, timeout=20,
+            [str(python), "-I", "-B", "-c", reader, str(caller), str(environments["agent-vault"])],
+            cwd=slots["agent-vault"].parent.parent if layout == "service-cwd" else staging,
+            env=env, capture_output=True, text=True, timeout=20,
             **no_window_kwargs(),
         )
         if enabled == "invalid":
             assert result.returncode != 0
             assert "enabled must be a boolean" in result.stderr
+        elif layout == "service-cwd" and enabled is not True:
+            assert result.returncode == 2, result.stdout + result.stderr
+            assert "inactive" in result.stderr
         else:
             assert result.returncode == 0, result.stdout + result.stderr
             assert json.loads(result.stdout) == {
@@ -256,6 +301,121 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
     assert not (home / ".agent-vault" / "scripts").exists()
     assert not (slots["agent-vault"] / "Lib" / "scripts").exists()
     assert not (installed.parents[1] / "scripts").exists()
+
+
+@pytest.mark.parametrize("layout", ["namespaced", "legacy"])
+def test_cold_namespaced_capture_and_legacy_capture_keep_slots(tmp_path, layout):
+    import venv
+    import configuration_context
+    import configuration_layers
+    from .test_identity_payload_gate import load_module
+
+    home, payload, runtime, _identity, context = prepare_payload(tmp_path, layout)
+    peer_payload = payload.parent / "agent-worktrees"
+    (peer_payload / "scripts").mkdir(parents=True)
+    source_peer = PLUGIN.parent / "agent-worktrees"
+    shutil.copytree(
+        source_peer / "scripts" / "installation-context",
+        peer_payload / "scripts" / "installation-context",
+    )
+    for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+        shutil.copyfile(source_peer / "scripts" / name, peer_payload / "scripts" / name)
+    shutil.copyfile(source_peer / "plugin.json", peer_payload / "plugin.json")
+    peer = home / ".agent-worktrees"
+    if context:
+        primitive = load_module(
+            payload / "scripts" / "installation-context" / "installation_context.py",
+            "cold_capture_installation",
+        )
+        own = json.loads(Path(context).read_text(encoding="utf-8"))
+        namespace = json.loads(Path(own["namespaceReceipt"]).read_text(encoding="utf-8"))
+        environment = {"HOME": str(home), "USERPROFILE": str(home)}
+        stamped = primitive.stamp_context(
+            payload_version="1.0.0", payload_origin="installed",
+            expected_namespace_generation=namespace["generation"], expected_install_generation=0,
+            payload_root=peer_payload, plugin_id="agent-worktrees", environment=environment,
+            copilot_home=home / ".copilot", durable_home=home / ".copilot-extensions",
+        )
+        primitive.compare_and_swap_activation(
+            context=stamped["installReceipt"], expected_marketplace_id=stamped["marketplaceId"],
+            expected_plugin_id="agent-worktrees",
+            expected_namespace_generation=stamped["namespaceGeneration"],
+            expected_install_generation=stamped["generation"], expected_activation_generation=0,
+            activation_mode="namespaced", activation_state="active", legacy_disposition="absent",
+            legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+            legacy_root=home / ".agent-worktrees", environment=environment,
+            durable_home=home / ".copilot-extensions",
+        )
+        peer = Path(stamped["pluginRoot"])
+    slots = {}
+    for name, owner in (("agent_vault", runtime), ("agent_worktrees", peer)):
+        slot = owner / "versions" / "1.0.0"
+        venv.EnvBuilder(with_pip=False).create(slot)
+        site = (
+            slot / "Lib" / "site-packages" if os.name == "nt"
+            else next((slot / "lib").glob("python*/site-packages"))
+        )
+        package = site / name
+        package.mkdir()
+        if name == "agent_vault":
+            if not context:
+                bootstrap = slot / ".runtime-bootstrap"
+                bootstrap.mkdir()
+                for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
+                    shutil.copyfile(source, bootstrap / source.name)
+            for filename in ("__init__.py", "config.py", "configuration.py",
+                             "configuration_scope.py", "_peer_launch.py"):
+                shutil.copyfile(PLUGIN / "src" / name / filename, package / filename)
+            for source in (PLUGIN / "src" / name).glob("_installation_context*.py"):
+                shutil.copyfile(source, package / source.name)
+            for dependency in (configuration_context, configuration_layers):
+                shutil.copytree(
+                    Path(dependency.__file__).parent, site / dependency.__name__,
+                    ignore=shutil.ignore_patterns("__pycache__"),
+                )
+        else:
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            report = {
+                "schema": "agent-worktrees.configuration", "version": 1,
+                "context": {
+                    "repository_id": "cold-capture", "execution_machine": "fixture",
+                    "installation_cell": str(peer.parent.parent) if context else "legacy",
+                    "binding": "unbound",
+                    "base_root": str(tmp_path),
+                },
+            }
+            (package / "__main__.py").write_text(
+                "import json,sys\n"
+                "assert sys.argv[1:] == ['state-root','--configuration','--json']\n"
+                "print(" + repr(json.dumps(report)) + ")\n", encoding="utf-8",
+            )
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+        }), encoding="utf-8")
+        (owner / "current-version").write_text("1.0.0", encoding="utf-8")
+        slots[name] = slot
+    before = {
+        path: path.read_bytes()
+        for slot in slots.values() for path in slot.rglob("*") if path.is_file()
+    }
+    python = slots["agent_vault"] / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home), "AGENT_RT_ROOT": str(runtime),
+        "AGENT_VAULT_HOME": str(runtime), "COPILOT_EXTENSIONS_CONTEXT": context,
+    })
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c",
+         "import json;from agent_vault.configuration import service_configuration_snapshot;"
+         "print(json.dumps(service_configuration_snapshot()))"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["root"] == str(tmp_path)
+    assert {
+        path: path.read_bytes()
+        for slot in slots.values() for path in slot.rglob("*") if path.is_file()
+    } == before
 
 
 @pytest.mark.parametrize("shell", ["python", "powershell", "pwsh"])
