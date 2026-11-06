@@ -377,6 +377,44 @@ def test_candidate_checker_preserves_checker_failure_and_environment_custody(
     assert not (view / "installation_context.py").exists()
 
 
+def test_candidate_projects_reuse_dependency_cache_without_reusing_verdicts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    guard_scope: tuple[checker.Project, tuple[str, ...], Path, list[str]],
+) -> None:
+    project, files, environment, events = guard_scope
+    project = replace(
+        project, name="first", include=files[:1], import_roots=(), level="strict",
+        platforms=("linux", "win32"), additional_python_versions=("3.11",),
+    )
+    other = replace(project, name="second", include=files[1:])
+    calls: list[tuple[str, str, Path, tuple[str, ...]]] = []
+
+    def run(
+        argv: list[str], root: Path, *, env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        version = argv[argv.index("--python-version") + 1]
+        platform = argv[argv.index("--platform") + 1]
+        cache = Path(argv[argv.index("--cache-dir") + 1])
+        targets = tuple(Path(argv[-1][1:]).read_text().splitlines())
+        assert root == tmp_path and "--strict" in argv
+        assert "PYTHONPATH" not in env and "PYTHONHOME" not in env
+        calls.append((version, platform, cache, targets))
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "inert-unit-cache").write_bytes(b"not an analyzer result")
+        return subprocess.CompletedProcess(argv, int(targets == files[1:]), "", "")
+
+    monkeypatch.setattr(checker, "_run", run)
+    assert checker.check_project(tmp_path, project, files[:1], all_paths=files) == 0
+    assert checker.check_project(tmp_path, other, files[1:], all_paths=files) == 1
+    assert len(calls) == 8
+    assert len({cache for _version, _platform, cache, _targets in calls}) == 4
+    for first, second in zip(calls[:4], calls[4:]):
+        assert first[:3] == second[:3]
+        assert first[3] == files[:1] and second[3] == files[1:]
+    assert events == ["acquired", "released", "acquired", "released"]
+    assert not list(environment.glob("typecheck-*"))
+
+
 def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(tmp_path):
     root = Path(__file__).resolve().parents[2]
     directory = Path(views.INSTALLATION_ENTRY).parent

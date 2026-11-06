@@ -364,7 +364,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
                     label = f"[strict] sample (Python {version}, {platform},"
                     segment = result.stdout.split(label, 1)[1].split("[strict] sample", 1)[0]
                     assert (": error:" in segment) == (regression == version)
-                    assert (environment / "mypy-cache/sample" / platform / version).is_dir()
+                    assert (environment / "mypy-cache" / platform / version).is_dir()
             assert result.stdout.count("[strict] sample (Python ") == len(versions) * 2
         if checkout == root:
             (root / "tools/typecheck-projects.json").write_text("{}", encoding="utf-8")
@@ -581,7 +581,7 @@ def test_import_roots_are_ordered_project_local_and_lease_cleaned(
         assert (tmp_path / "typecheck-targets.txt").read_text(encoding="utf-8") == "sample.py\n"
         assert argv[argv.index("--follow-imports") + 1] == "silent"
         assert argv[argv.index("--cache-dir") + 1] == (
-            os.devnull if roots else str(tmp_path / "mypy-cache/sample/linux/3.10")
+            os.devnull if roots else str(tmp_path / "mypy-cache/linux/3.10")
         )
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -605,6 +605,58 @@ def test_import_roots_are_ordered_project_local_and_lease_cleaned(
     assert lease.released and item.level == "pending"
     assert not (tmp_path / "typecheck-targets.txt").exists()
     assert not (tmp_path / "typecheck-mypy.ini").exists()
+
+
+def test_actual_mypy_rechecks_projects_and_changed_dependencies_with_shared_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reusing dependency analysis must not reuse another project's verdict."""
+    (tmp_path / "requirements.txt").write_text("mypy==1.18.2\n", encoding="utf-8")
+    (tmp_path / "shared.py").write_text("value: int = 'invalid'\n", encoding="utf-8")
+    (tmp_path / "first.py").write_text(
+        "from shared import value\nresult: int = value\n", encoding="utf-8",
+    )
+    (tmp_path / "second.py").write_text(
+        "from shared import value\nresult: str = value\n", encoding="utf-8",
+    )
+    first = replace(project("first"), include=("first.py",))
+    second = replace(project("second"), include=("second.py",))
+    dependency = replace(project("dependency"), include=("shared.py",))
+    environment, digest = typecheck.environment_path(tmp_path, first)
+    environment.mkdir(parents=True)
+    (environment / ".typecheck-prepared").write_text(digest + "\n", encoding="utf-8")
+    leases: list[Lease] = []
+    caches: list[str] = []
+    original_run = typecheck._run
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        lease = Lease()
+        leases.append(lease)
+        return lease
+
+    def run(
+        argv: list[str], root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        caches.append(argv[argv.index("--cache-dir") + 1])
+        return original_run(argv, root, env=env)
+
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    paths = ("first.py", "second.py", "shared.py")
+    assert typecheck.check_project(tmp_path, first, ("first.py",), all_paths=paths) == 0
+    assert typecheck.check_project(tmp_path, second, ("second.py",), all_paths=paths) == 1
+    assert typecheck.check_project(tmp_path, dependency, ("shared.py",), all_paths=paths) == 1
+    (tmp_path / "shared.py").write_text("value: str = 'changed'\n", encoding="utf-8")
+    assert typecheck.check_project(tmp_path, first, ("first.py",), all_paths=paths) == 1
+    assert typecheck.check_project(tmp_path, second, ("second.py",), all_paths=paths) == 0
+    assert len(caches) == 5 and len(set(caches)) == 1
+    assert all(lease.released for lease in leases)
+    assert not (environment / "typecheck-targets.txt").exists()
+    assert not (environment / "typecheck-mypy.ini").exists()
 
 
 def test_import_inputs_accept_owned_wip_and_namespace_members_only(tmp_path: Path) -> None:

@@ -294,8 +294,13 @@ The checker runs the minimum and every additional version against every
 declared platform. An additional-version matrix finishes all cells even after
 diagnostics and returns the first failing status; single-version projects retain
 their existing fail-fast behavior. Every result names its Python version and
-platform, and MyPy caches are separated by project, platform and analysis
-version. Source views are verified after every invocation. The prepared
+platform, and MyPy caches are separated by prepared dependency environment,
+platform and analysis version. Ordinary projects share incremental dependency
+analysis instead of rebuilding common dependencies in a project-private cache;
+each project still runs its own complete checker invocation. MyPy retains its
+normal source and option invalidation.
+Projects with explicit import roots and the guard alias still disable the cache.
+Source views are verified after every invocation. The prepared
 dependency environment remains keyed by its actual host interpreter/platform
 and captured lock bytes; analysis targets do not select a different interpreter
 or install another runtime.
