@@ -30,6 +30,9 @@ launch/record sidecars. Unknown owner proof is an explicit refusal.
 - An existing ordinary managed linked Git checkout with a retained creation
   nonce, completed/final tracking disposition and locally proven landed source
   content: ancestry, patch equivalence or identical upstream tree.
+- A canonical, nonredirected recorded source location, checked before creating
+  recovery custody; unsupported source aliases never create an unrecoverable
+  journal.
 - Confirmed inactive session/mux and process-CWD owners, no retained sessions,
   launch requests/attempts, active effort/follow-up, unmerged PRs, unsettled
   obligations, pairing or opaque backend/execution state.

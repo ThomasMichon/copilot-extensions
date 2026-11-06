@@ -269,7 +269,7 @@ def test_destination_access_keeps_inherit_only_semantics(tmp_path):
     assert relocation.transfer._access(directories[0]) != relocation.transfer._access(directories[1])
 
 
-@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "source-parent-alias", "seed"])
+@pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "source-parent-alias", "source-record-alias", "seed"])
 def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
     record = checkout.record
     if blocker == "dirty":
@@ -299,6 +299,9 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
         config_path = checkout.copilot / "config.json"
         alias = checkout.source.parent / "sibling" / ".." / checkout.source.name
         config_path.write_text(json.dumps({"trustedFolders": [str(alias)]}))
+    elif blocker == "source-record-alias":
+        record.worktree_path = str(checkout.source.parent / "sibling" / ".." / checkout.source.name)
+        tracking.save_record(record)
     elif blocker == "seed":
         from agent_worktrees import launch_seed_state
 
