@@ -206,6 +206,7 @@ def _git(source, *arguments):
 
 @pytest.fixture(scope="session")
 def bootstrap_source(tmp_path_factory):
+    started = time.monotonic()
     host = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
     if host is None:
         pytest.skip("native bootstrap shell is unavailable")
@@ -284,11 +285,15 @@ def bootstrap_source(tmp_path_factory):
         source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
         "commit", "-qm", "finite bootstrap source",
     )
+    print(json.dumps({
+        "stage": "source-fixture-ready", "elapsed": round(time.monotonic() - started, 3),
+    }), file=sys.stderr, flush=True)
     return source
 
 
 @pytest.fixture
 def bootstrap(tmp_path, bootstrap_source):
+    started = time.monotonic()
     host = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
     source = tmp_path / "source"
     shutil.copytree(bootstrap_source, source)
@@ -373,6 +378,9 @@ def bootstrap(tmp_path, bootstrap_source):
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
     try:
+        print(json.dumps({
+            "stage": "case-fixture-ready", "elapsed": round(time.monotonic() - started, 3),
+        }), file=sys.stderr, flush=True)
         yield root, source, driver, start, effects
     finally:
         (root / "release-suite").touch()
@@ -449,6 +457,15 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     bootstrap, lose_caller,
 ):
     root, source, driver, start, effects = bootstrap
+    started = time.monotonic()
+
+    def milestone(stage):
+        print(json.dumps({
+            "stage": stage, "elapsed": round(time.monotonic() - started, 3),
+            "states": [row.state for row in core.status(root=driver)],
+            "phases": [row["phase"] for row in effects()],
+        }), file=sys.stderr, flush=True)
+
     if lose_caller:
         (root / "config.toml").write_text(
             '[source]\nrepo="source"\nref="main"\n', encoding="utf-8",
@@ -463,6 +480,7 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
         lambda: any(row["phase"] == "suite-start" for row in effects()),
         processes=(first,),
     )
+    milestone("first-suite-started")
     original, = core.status(root=driver)
     assert original.state == "running" and original.exit_code is None
     assert original.spec.backend == "manager"
@@ -483,6 +501,7 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
         lambda: f"Update request {pending.id};" in second_log.read_text(encoding="utf-8"),
         processes=(first, second),
     )
+    milestone("second-pending")
     assert second.poll() is None
     if lose_caller:
         from agent_procutil.process_retirement import PinnedProcess
@@ -498,15 +517,20 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
         processes=(second, equivalent, different),
     )
     _eventually(lambda: len(core.status(root=driver)) == 3, processes=(second, different))
+    milestone("mixed-observers-admitted")
     running, queued, distinct = core.status(root=driver)
     assert running.id == original.id and running.state == "running"
     assert queued.id == pending.id and distinct.state == "pending"
     assert [row["phase"] for row in effects()] == ["manager", "suite-start"]
     (root / "release-suite").touch()
+    milestone("suite-released")
     assert second.wait(timeout=20) == 23, second_log.read_text(encoding="utf-8")
+    milestone("second-completed")
     assert equivalent.wait(timeout=20) == 0, equivalent_log.read_text(encoding="utf-8")
     assert json.loads(equivalent_log.with_suffix(".out").read_text())["request_id"] == pending.id
+    milestone("equivalent-accepted")
     assert different.wait(timeout=20) == 23, different_log.read_text(encoding="utf-8")
+    milestone("distinct-completed")
     if not lose_caller:
         assert first.wait(timeout=20) == 23, first_log.read_text(encoding="utf-8")
     completed = core.status(root=driver)

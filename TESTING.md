@@ -739,7 +739,10 @@ checkout while the retained worker continues to its recorded final result.
 The detached control runs twice and observes native Windows windows and focus
 changes without weakening the enclosing test lifecycle. Its first acceptance
 wait allows 60 seconds; the second remains 20 seconds. Behavioral cases retain
-their 90-second limit. After the first pending receipt, equivalent and distinct
+their 90-second limit, including fixtures and teardown. Bounded stderr
+breadcrumbs retain fixture-setup costs and queue-stage elapsed times even when
+a hard pytest timeout prevents normal teardown diagnostics.
+After the first pending receipt, equivalent and distinct
 callers acquire concurrently within the unchanged 40-second finite suite hold.
 The pending callers mix explicit wait and detached JSON observation. Observer
 modes remain local, while the durable installation recipe contains only
