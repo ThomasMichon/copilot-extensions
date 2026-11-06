@@ -1277,3 +1277,12 @@ All twelve focused controls pass, including the ten slot cases and explicit
 88.91-second contained runner. Changed Python passes F/E9, and all 615 admitted
 sources still verify. Reproduce the complete capture on this changed fixture
 source before updating the PR; a passing prior head is not its qualification.
+
+The first refreshed capture passes the existing owner flow, then the other
+real serializer flow reaches its original 90-second item limit in the final
+lineage write. It publishes no evidence. Use the same canonical parent-side
+record reader already used by the first flow for four assertion-only
+snapshots, rather than cold-starting more helper interpreters. The protected
+reservation, reachable unqualified resident, every actual capability/read/
+parser/writer command, ordering assertion and full CLI session-write path
+remain real and unchanged. No item/group/deadline or receipt check is widened.

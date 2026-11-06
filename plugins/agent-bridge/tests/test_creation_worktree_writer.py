@@ -681,11 +681,23 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     from agent_procutil import direct_python
     from agent_bridge import local_launch_preparation, worktree_lineage
     from agent_bridge.transport import SpawnTarget
-    from test_worktree_lineage_authority import snapshot
+    from test_worktree_lineage_authority import snapshot as owner_command
 
     root = Path(__file__).resolve().parents[3]
     state = tmp_path / "authority"
     state.mkdir()
+    monkeypatch.syspath_prepend(str(root / "plugins" / "agent-worktrees" / "src"))
+    from agent_worktrees import tracking
+
+    def snapshot():
+        record = tracking.load_record(state / "project" / "worktrees" / "worktree-a.yaml")
+        return {
+            "creation_nonce": record.creation_nonce,
+            "resources": [item.to_dict() for item in record.resources],
+            "head": record.resolved_head_session,
+            "sessions": [item.session_id for item in record.sessions],
+        }
+
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     identity_file = state / "writer-identity.json"
     identity_file.write_text(json.dumps(identity), encoding="utf-8")
@@ -706,8 +718,8 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         ))
     for owner in (acquisition_authority, worktree_lineage):
         monkeypatch.setattr(owner, "_agent_worktrees_environment", lambda: environment.copy())
-    protected = snapshot(list(prefix), "protect")
-    before = snapshot(list(prefix))
+    protected = owner_command(list(prefix), "protect")
+    before = snapshot()
     checkout = state / "trees" / "worktree-a"
     assert not rig.register_session(
         "worktree-a", "legacy-resident-probe", worktree_dir=str(checkout), owner_prefix=prefix,
@@ -744,7 +756,7 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     session, receipt = await workspace_creation.start(
         rig.manager, target, key="original-key", worktree_writer=requirement,
     )
-    after = snapshot(list(prefix))
+    after = snapshot()
     assert after["head"] == receipt["native_session_id"]
     assert after["creation_nonce"] == before["creation_nonce"]
     assert [item for item in after["resources"] if item["ref"] == protected["ref"]] == before["resources"]
@@ -766,7 +778,7 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     successor = await rig.manager.handoff_session(
         session.session_id, reason="bounded test", seed=False, seed_text="Continue",
     )
-    linked = snapshot(list(prefix))
+    linked = snapshot()
     assert linked["head"] == successor.acp_session_id
     assert linked["creation_nonce"] == before["creation_nonce"]
     assert [item for item in linked["resources"] if item["ref"] == protected["ref"]] == before["resources"]
@@ -776,6 +788,6 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         await rig.manager.handoff_session(
             successor.session_id, reason="changed writer", seed=False, seed_text="Continue",
         )
-    assert snapshot(list(prefix)) == linked
+    assert snapshot() == linked
     assert selected.call_count == 1
     assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
