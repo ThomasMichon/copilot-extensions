@@ -140,6 +140,22 @@ def test_damaged_acquisition_custody_is_refused_not_repaired(tmp_db: Database, m
             passive.close()
 
 
+def test_acquisition_writer_trigger_migrates_onto_an_existing_database(tmp_db: Database) -> None:
+    """A database stamped before the Worktrees writer trigger existed opens and gains
+    it through migration, rather than failing startup as damaged custody."""
+    name = "acquisition_worktree_writer_retained"
+    path = tmp_db.db_path
+    tmp_db.execute_write(f"DROP TRIGGER {name}")
+    tmp_db.execute_write("UPDATE schema_version SET version=41")
+    tmp_db.close()
+    db = Database(path)
+    try:
+        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
+        assert db.execute_read("SELECT 1 FROM sqlite_master WHERE name=?", (name,))
+    finally:
+        db.close()
+
+
 def test_legacy_acquisition_migration_preserves_original_unknown_history(tmp_path: Path) -> None:
     path = tmp_path / "legacy.db"
     frozen = Path(__file__).with_name("fixtures") / "pre-custody-schema27.sql"
