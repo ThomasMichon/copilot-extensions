@@ -1270,6 +1270,108 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
 
 
 @pytest.fixture
+def bridge_historical_plan(tmp_path, monkeypatch):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    target = tests / "test_http48_capture_guards.py"
+    target.write_text(textwrap.dedent("""
+    import pytest
+    @pytest.fixture(params=["http48", "http49", "http50", "http51"])
+    def capture_case(request): return request.param
+    @pytest.mark.parametrize("fault", ["one", "two"])
+    def test_http48_guard(capture_case, fault): pass
+    def test_http48_untagged_control(): pass
+    @pytest.mark.parametrize("future", [48, 49, 50, 51])
+    def test_http47_future_history(future): pass
+    @pytest.mark.parametrize("value", ["untagged", "http49-http50-http51"])
+    def test_future_unclassified_contract(value): pass
+    """), encoding="utf-8")
+    (tests / "test_http47_capture_guards.py").write_text(
+        "def test_shared_capture_seed_has_owned_committed_inputs(): pass\n",
+        encoding="utf-8",
+    )
+    for name in runner._INDEPENDENT_SUBSUITE_FILES["agent-bridge"]:
+        (tests / name).write_text("def test_unrelated_native(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_args, **_kwargs: Path(sys.executable))
+    return tmp_path, target
+
+
+@pytest.mark.parametrize("kexpr", [
+    None, "http48 or shared_capture_seed_has_owned_committed_inputs",
+    "http49", "never_matches",
+])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_bridge_historical_partitions_collect_every_selected_case_exactly_once(
+    bridge_historical_plan, monkeypatch, kexpr, explicit,
+):
+    plugin, target = bridge_historical_plan
+    inventory = []
+
+    class Inventory:
+        def pytest_collection_finish(self, session):
+            inventory.extend(session.items)
+
+    arguments = [
+        "-q", "--collect-only", "--import-mode=importlib", f"--rootdir={plugin}",
+        "-p", "no:cacheprovider",
+    ]
+    if kexpr:
+        arguments += ["-k", kexpr]
+    arguments.append(str(target.relative_to(plugin)) if explicit else "tests")
+    with monkeypatch.context() as context:
+        context.chdir(plugin)
+        expected_status = pytest.main(arguments, plugins=[Inventory()])
+    selections = []
+
+    def collect(command, **kwargs):
+        selector = command[command.index("-k") + 1] if "-k" in command else ""
+        expression = Expression.compile(selector) if selector.strip() else None
+        files = {argument.replace("\\", "/") for argument in command if argument.endswith(".py")}
+        selected = [
+            item.nodeid for item in inventory
+            if item.nodeid.split("::", 1)[0] in files
+            and (expression is None or expression.evaluate(KeywordMatcher.from_item(item)))
+        ]
+        selections.extend(selected)
+        assert "--timeout=30" in command
+        limits = kwargs["limits"]
+        assert 0 < limits.wall_seconds <= 300
+        assert (limits.max_processes, limits.max_memory_mb, limits.max_temp_mb) == (128, 4096, 2048)
+        return 0 if selected else 5
+
+    monkeypatch.setattr(runner, "run_contained", collect)
+    result = runner.run_plugin(
+        "agent-bridge", "unused", reinstall=False, kexpr=kexpr,
+        test_files=(str(runner._BRIDGE_HISTORICAL_FILE),) if explicit else (),
+        collect_only=True, limits=runner.Limits(wall_seconds=300), plugin_timeout=900,
+        test_timeout=30, max_files_per_subsuite=25,
+    )
+    assert result == expected_status
+    assert Counter(selections) == Counter(item.nodeid for item in inventory)
+    assert len(selections) == len(set(selections))
+
+
+def test_bridge_historical_partitions_share_the_original_plugin_deadline(
+    bridge_historical_plan, monkeypatch,
+):
+    clock = iter([0, 0, 250, 650, 901, 901])
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    seen = []
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda _command, **kwargs: seen.append(kwargs["limits"].wall_seconds) or 0,
+    )
+    assert runner.run_plugin(
+        "agent-bridge", "unused", reinstall=False, kexpr="http48",
+        test_files=(str(runner._BRIDGE_HISTORICAL_FILE),),
+        limits=runner.Limits(wall_seconds=300), plugin_timeout=900, test_timeout=30,
+        max_files_per_subsuite=25,
+    ) == 124
+    assert seen == [300, 300, 250]
+
+
+@pytest.fixture
 def codespaces_native_plan(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary).resolve()

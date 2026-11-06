@@ -49,11 +49,12 @@ on:
           - manager-suite
           - worktrees-git-probes
           - related-knowledge
+          - registration-inspection
           - codespaces-installer
           - fleet-client-generations
         default: context
       source_sha:
-        description: Exact published checkpoint; required only for current HTTP-52 capture
+        description: Exact published checkpoint; required for HTTP-52 capture and registration inspection
         required: false
         type: string
 
@@ -472,6 +473,81 @@ jobs:
     timeout-minutes: 20
     env: *related-knowledge-env
     steps: *related-knowledge-steps
+  registration-inspection-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'registration-inspection'
+    name: Native registration inspection (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env: &registration-inspection-env
+      UV_PYTHON: "3.12"
+      REGISTRATION_INSPECTION_SOURCE: ${{ inputs.source_sha }}
+    steps: &registration-inspection-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Verify the explicitly selected qualification source
+        shell: python
+        run: |
+          import os
+          import re
+          import subprocess
+          expected = os.environ["REGISTRATION_INSPECTION_SOURCE"]
+          assert re.fullmatch(r"[0-9a-f]{40}", expected), "Supply the exact source_sha"
+          actual = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True,
+              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+          ).strip()
+          assert actual == expected == os.environ["GITHUB_SHA"]
+          print("qualification-source=" + actual)
+      - name: Qualify native registration readers and actual CLI without mutation
+        id: readers
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+          reports = Path(os.environ["RUNNER_TEMP"]) / "registration-inspection"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              print("REGISTRATION_INSPECTION_REPORTS=" + str(reports), file=output)
+          subprocess.run([
+              sys.executable, str(Path("tools") / "run-plugin-tests.py"), "agent-worktrees",
+              "--test-file", "tests/test_registration_inspection.py",
+              "--junit-dir", str(reports),
+          ], check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+          cases = [
+              case for report in reports.rglob("*.xml")
+              for case in ET.parse(report).getroot().iter("testcase")
+          ]
+          required = {
+              "test_actual_neutral_cwd_cli_and_existing_inventory_remain_read_only",
+              "test_native_namespace_selection_and_invalid_context_do_not_use_legacy_state",
+          }
+          assert cases
+          for name in required:
+              assert len([case for case in cases if case.get("name") == name]) == 1, name
+          assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error"))
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.readers.outcome != 'skipped'
+        with:
+          name: registration-inspection-${{ runner.os }}-${{ github.sha }}
+          path: ${{ env.REGISTRATION_INSPECTION_REPORTS }}
+          if-no-files-found: error
+  registration-inspection-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'registration-inspection'
+    name: Native registration inspection (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env: *registration-inspection-env
+    steps: *registration-inspection-steps
   worktrees-git-probes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
     name: Worktrees Git probe packet (Linux)
@@ -1957,6 +2033,23 @@ jobs:
           sys.argv = ["tools/capture_bridge_http52.py", "--source-commit", os.environ["SOURCE_SHA"]]
           runpy.run_path(sys.argv[0], run_name="__main__")
           PY
+      - name: Exercise immutable bytes and historical publication guards
+        env:
+          PYTEST_ADDOPTS: "--maxfail=1 -vv --durations=20"
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_http48_source_retention.py
+          --test-file tests/test_http48_capture_guards.py
+          --test-file tests/test_http47_capture_guards.py
+          -k "http48 or shared_capture_seed_has_owned_committed_inputs or capture_reproducible_real_commit_preserves_history"
+          --junit-dir "${{ runner.temp }}/bridge-historical-guard-junit"
+      - name: Retain historical publication guard outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-historical-guard-outcomes-${{ github.run_id }}
+          path: ${{ runner.temp }}/bridge-historical-guard-junit
+          if-no-files-found: warn
       - name: Validate canonical historical evidence
         run: python tools/check-agent-bridge-contracts.py
       - name: Export only canonical current outputs and source preimages
@@ -1971,15 +2064,6 @@ jobs:
           name: http52-qualified-${{ github.sha }}
           path: http52-qualified-artifact
           if-no-files-found: error
-      - name: Exercise immutable bytes and historical publication guards
-        env:
-          PYTEST_ADDOPTS: "--maxfail=1"
-        run: >-
-          python tools/run-plugin-tests.py agent-bridge
-          --test-file tests/test_http48_source_retention.py
-          --test-file tests/test_http48_capture_guards.py
-          --test-file tests/test_http47_capture_guards.py
-          -k "http48 or shared_capture_seed_has_owned_committed_inputs or capture_reproducible_real_commit_preserves_history"
 
   logger-recipes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'
