@@ -92,6 +92,16 @@ complete participating-cohort admission.
 Unavailable-launcher controls require structured 409 refusals from both
 retained probes without mutating the original journal.
 
+Ordinary keyed-creation writer controls add 32 cases, bringing the current
+portfolio to 229. They cover schema preparation/passive refusal, original
+workspace-journal custody, strict continuation, frontend rehydration, concurrent
+replay, registration dormancy, unknown handoff-seed retention and optional
+exact-session inspection. The actual Worktrees parser/serializer preserves the
+protected relationship and nonce through creation and succession with an
+unqualified resident reachable. The two creation capabilities are independently
+negotiated within HTTP 52; no acquisition attempt is manufactured. These remain
+source/HTTP/SQLite controls, not installed/native or closed-cohort acceptance.
+
 The joined portable-mux fixture retains the production native socket-path
 bound. Its isolated physical temporary root must be short enough for that
 bound; a long caller `TMPDIR` can correctly refuse before creating the mocked

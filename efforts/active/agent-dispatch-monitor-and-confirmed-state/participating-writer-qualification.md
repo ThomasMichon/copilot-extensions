@@ -237,6 +237,8 @@ UUID alone cannot qualify their later writes.
 
 This is an **agent-proposed implementation refinement** of the same unchecked
 delegated-writer and ordinary-integration items, not an activation decision.
+Its documentation-only refinement was reviewed and merged in #11013; the
+provider/consumer implementation and every validation item below remain open.
 Ordinary managed ACP startup uses keyed `create` on an already prepared
 workspace, followed by exact `send` and later strict `resume`. Its owner is
 `workspace_creation` and the existing `workspace_embodiments` row, not

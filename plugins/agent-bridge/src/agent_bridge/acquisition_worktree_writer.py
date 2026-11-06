@@ -8,10 +8,13 @@ from dataclasses import dataclass
 from functools import wraps
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .acquisition_contract import AcquisitionRefused, AcquisitionRequest
 from .acquisition_journal import _digest
+
+if TYPE_CHECKING:
+    from .creation_worktree_writer import CreationWriterScope
 
 CAPABILITY = "retained_acquisition_worktree_writer"
 DELIVERY_KEY = "_agent_bridge_worktree_writer_delivery"
@@ -20,7 +23,7 @@ JOURNAL_KEY = "_worktree_writer"
 
 @dataclass(frozen=True)
 class RetainedWriter:
-    request: AcquisitionRequest
+    request: AcquisitionRequest | CreationWriterScope
     prefix: tuple[str, ...]
 
     def document(self) -> dict:
@@ -175,14 +178,24 @@ def bind_target(target: Any, request: AcquisitionRequest) -> Any:
 
 def require_target(target: Any) -> None:
     """A retained target can launch only inside its original owner scope."""
+    from .creation_worktree_writer import CreationWriterScope, JOURNAL_KEY as CREATION_KEY
+
     delivery = (target.venue or {}).get(DELIVERY_KEY)
-    if delivery is None:
-        return
+    creation = (target.venue or {}).get(CREATION_KEY)
     writer = current()
+    if delivery is None and creation is None:
+        if writer is not None and isinstance(writer.request, CreationWriterScope):
+            raise AcquisitionRefused("worktree_writer_unconfirmed", "launch lost its keyed creation pointer")
+        return
     if writer is None or (
         target.type != "local" or target.worktree_id != writer.request.worktree_id
         or target.cwd != writer.request.worktree_path or target.project != writer.request.project
         or target.spawn_command or target.container or target.codespace or target.remote_acp
+        or creation is not None and (
+            delivery is not None or not isinstance(writer.request, CreationWriterScope)
+            or writer.request.key_digest != creation
+        )
+        or delivery is not None and not isinstance(writer.request, AcquisitionRequest)
     ):
         raise AcquisitionRefused("worktree_writer_unconfirmed", "launch lost its original writer owner")
 
@@ -226,6 +239,12 @@ def handoff_state(
     if writer is None:
         return None
     request = writer.request
+    from .creation_worktree_writer import CreationWriterScope, handoff_state as creation_handoff
+
+    if isinstance(request, CreationWriterScope):
+        return creation_handoff(
+            db, request, predecessor, create=create, stage=stage, native_session_id=native_session_id,
+        )
     with db._runtime_transaction(write=create is not None or stage is not None, full_sync=True) as conn:
         row = conn.execute(
             "SELECT a.request_digest,e.data_json FROM acquisition_attempts a "
@@ -263,6 +282,11 @@ def session_writer(method):
     async def run(manager, session_id, *args, **kwargs):
         resolved = manager._resolve_ref(session_id) or session_id
         session = manager._sessions.get(resolved)
+        from .creation_worktree_writer import continue_session
+
+        handled, result = await continue_session(manager, session, method, resolved, args, kwargs)
+        if handled:
+            return result
         retained_delivery = (session.target.venue or {}).get(DELIVERY_KEY) if session else None
         delivery = retained_delivery
         caller = getattr(session, "caller_id", None)

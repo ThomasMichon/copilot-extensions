@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import Field, model_validator
 
 from .preference_models import PreferenceRequestFields
+from .acquisition_contract import WorktreeWriterRequirement
 
 
 class StartSessionRequest(PreferenceRequestFields):
@@ -20,11 +21,18 @@ class StartSessionRequest(PreferenceRequestFields):
     creation_key: str | None = Field(default=None, min_length=1, max_length=1024)
     creation_prompt: str | None = None
     provider_instance: bool = False  # explicit keyed provider-native creation, never a worktree
+    worktree_writer: WorktreeWriterRequirement | None = None
 
     @model_validator(mode="after")
     def require_provider_creation_key(self) -> StartSessionRequest:
         if self.provider_instance and self.creation_key is None:
             raise ValueError("provider_instance requires creation_key")
+        if self.worktree_writer is not None and (
+            self.creation_key is None or not self.worktree_id or self.provider_instance
+            or self.target_dir is not None or self.remote_session_id is not None
+            or self.parity_fault is not None
+        ):
+            raise ValueError("worktree_writer requires keyed creation into a prepared local worktree")
         return self
 
     caller_id: str | None = None  # caller identity for session affinity
