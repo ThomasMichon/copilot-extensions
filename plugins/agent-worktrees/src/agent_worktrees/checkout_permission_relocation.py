@@ -110,4 +110,5 @@ def apply(source: str, destination: str, captured: dict) -> None:
                 elif source in entries or destination in entries:
                     raise ValueError("source permissions changed during relocation")
             if expected is not None and (kind != "trust" or expected):
+                require_file_mutation(path)
                 permissions._atomic_json_write(path, data, header=header)

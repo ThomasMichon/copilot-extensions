@@ -383,6 +383,8 @@ def move(worktree_id: str, destination: str, config) -> dict:
         if report["phase"] == "published":
             _git(Path(config.default_repo.anchor), "worktree", "repair", str(target))
             retained_checkout.require_git_checkout(target, Path(config.default_repo.anchor), record.branch)
+            administrative = Path(_git(target, "rev-parse", "--absolute-git-dir"))
+            durability.files([administrative / "gitdir", target / ".git"])
             report["phase"] = "git-repaired"
             state.write(ledger, report)
         if report["phase"] == "git-repaired":
@@ -393,6 +395,13 @@ def move(worktree_id: str, destination: str, config) -> dict:
                     raise ValueError("relocation ledger changed; original operation remains unsettled")
                 record.worktree_path = str(target)
                 tracking.save_record(record)
+                durability.files([
+                    ledger,
+                    *(path for kind, path in (
+                        ("trust", permissions._config_path()), ("permissions", permissions._permissions_path()),
+                    ) if path.exists() and report["permissions"][kind] is not None
+                      and (kind != "trust" or report["permissions"][kind])),
+                ])
             report["phase"] = "rebound"
             state.write(ledger, report)
         if report["phase"] == "rebound":
