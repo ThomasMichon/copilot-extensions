@@ -1872,3 +1872,14 @@ real import is lazy when no bound-state metadata exists. Existing fixtures
 now include the actual StateRoot repository-name field. All 157 related
 admission controls pass functionally in 4.46 seconds; full guarded packet and
 revised-head CI/review remain required.
+
+The documented Windows-native full packet executes 4,177 passes but refuses
+qualification because three admitted POSIX filesystem/kernel-lease cases
+intentionally skip on Windows. The 402.68-second run is within that separate
+600-second profile, not the Linux 300-second CI contract. No successful
+unit-evidence packet is claimed, no expected node is dropped and no platform
+marker is spoofed. The exact Linux source-CI packet remains the required
+no-skip proof. Missing `coverage` initially stops before execution; the
+existing CI-declared test toolchain is then restored only in the private
+prepared environment. Native registry acquisition remains outside the pure
+unit frontier, and required revised-head review/CI must still pass.
