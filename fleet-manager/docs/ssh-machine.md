@@ -57,6 +57,10 @@ Installed hosting additionally excludes the entire application installation
 root from those writer scopes. Local public-key bytes are bounded and parsed
 through the existing canonical ed25519 validator before watch or lease creation;
 they are still reread and matched to the authenticated directory at each write.
+Preflight checks existing lease-state directory privacy, its lease-file shape
+and absence of unowned contents without creating or acquiring anything. A missing
+state directory requires an existing ordinary parent; regular files and invalid
+lease state refuse before the watch or an installed selection can change.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an

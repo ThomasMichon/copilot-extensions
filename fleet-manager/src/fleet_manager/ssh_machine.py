@@ -12,7 +12,9 @@ import stat
 import sys
 
 from .planning import PlanError
-from .private_state import create_private_file, private_directory, windows_private
+from .private_state import (
+    create_private_file, private_directory, validate_private_directory, windows_private,
+)
 from .ssh_machine_config import SSHMachineConfig, absolute
 
 LEASE = "fleet-ssh-client.lock"
@@ -31,23 +33,35 @@ def _consumer(config):
     return partial(apply_update, **config.local_scope())
 
 
+def _validate_lease(path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise PlanError("SSH client lease is not an ordinary owned file")
+    if os.name == "nt":
+        windows_private(path)
+    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise PlanError("SSH client lease is not private to its owner")
+
+
+def _validate_state(root):
+    validate_private_directory(root)
+    if {path.name for path in root.iterdir()} - {LEASE}:
+        raise PlanError("SSH client state directory contains unowned files")
+    path = absolute(str(root / LEASE))
+    if os.path.lexists(path):
+        _validate_lease(path)
+
+
 def _lease(root):
     from single_instance_lease import SingleInstance
 
     private_directory(root)
-    if {path.name for path in root.iterdir()} - {LEASE}:
-        raise PlanError("SSH client state directory contains unowned files")
+    _validate_state(root)
     path = absolute(str(root / LEASE))
     try:
         descriptor = create_private_file(path)
     except FileExistsError:
-        info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise PlanError("SSH client lease is not an ordinary owned file")
-        if os.name == "nt":
-            windows_private(path)
-        elif info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise PlanError("SSH client lease is not private to its owner")
+        _validate_lease(path)
     else:
         os.close(descriptor)
     return SingleInstance(str(root), service="fleet-ssh-client")
@@ -76,6 +90,11 @@ def prepare(config: SSHMachineConfig):
     from .ssh_directory import SSHDirectoryClient
 
     value = config.to_dict()
+    state = absolute(value["state_dir"])
+    if os.path.lexists(state):
+        _validate_state(state)
+    elif not state.parent.is_dir():
+        raise PlanError("SSH client state parent must be an existing ordinary directory")
     with absolute(value["public_key_file"]).open("rb") as stream:
         public = stream.read(257)
     if len(public) > 256:

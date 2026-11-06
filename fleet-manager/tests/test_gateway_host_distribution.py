@@ -24,6 +24,7 @@ from packaging.utils import canonicalize_name
 import pytest
 
 from fleet_manager import gateway_host as host
+from fleet_manager.private_state import create_private_file
 from test_client_distribution import PROJECT, build, project_at, run
 from test_gateway_host import selected as select_host
 
@@ -461,6 +462,19 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
             assert failed.returncode != 0
             assert (root / "current-version").read_text().strip() == first.name
             assert (root / "last-known-good").read_text().strip() == first.name
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
+            state_file = tmp_path / "retained-state-file"
+            with os.fdopen(create_private_file(state_file), "wb") as stream:
+                stream.write(b"retained owner state")
+            host.write_private(Path(selection["configuration"]), value | {
+                "state_dir": str(state_file),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            assert state_file.read_bytes() == b"retained owner state"
             host.write_private(Path(selection["configuration"]), value)
             await preserved_owner(initial["pid"])
             host.write_private(Path(selection["configuration"]), value | {

@@ -1728,6 +1728,7 @@ jobs:
       - name: Selected host lifecycle and SSH consumer authentication
         env:
           PYTEST_ADDOPTS: >-
+            -vv --durations=20
             -k "(test_gateway_host and not distribution) or test_gateway_enrollment
             or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
             or selected_gateway_application_first_touch_repeat_update_and_stop

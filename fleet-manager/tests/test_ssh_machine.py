@@ -82,6 +82,35 @@ def test_malformed_local_public_key_refuses_before_lease_or_network(tmp_path, mo
     assert not Path(value["config_d"]).exists()
 
 
+@pytest.mark.parametrize("failure", ["file", "unowned", "lease-directory", "missing-parent"])
+def test_existing_consumer_state_preflight_refuses_before_network_or_writes(tmp_path, failure):
+    from fleet_manager.private_state import create_private_file, private_directory
+    import os
+
+    value, _, _ = machine_config(tmp_path)
+    root = Path(value["state_dir"])
+    if failure == "missing-parent":
+        value["state_dir"] = str(root / "missing-parent" / "state")
+    elif failure == "file":
+        with os.fdopen(create_private_file(root), "wb") as stream:
+            stream.write(b"retained owner state")
+    else:
+        private_directory(root)
+        if failure == "unowned":
+            (root / "retained").write_bytes(b"retained owner state")
+        else:
+            (root / ssh_machine.LEASE).mkdir()
+    before = {
+        path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    }
+    with pytest.raises(PlanError):
+        ssh_machine.prepare(SSHMachineConfig.from_dict(value))
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert not Path(value["config_d"]).exists()
+    if failure == "missing-parent":
+        assert not root.exists()
+
+
 def update(policy, directory):
     return DirectoryUpdate.parse(canonical({
         "schema": "agent-ssh.service-directory", "version": 1,
