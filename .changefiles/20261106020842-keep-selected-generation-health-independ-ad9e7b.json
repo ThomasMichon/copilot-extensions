@@ -1,0 +1,9 @@
+{
+  "comment": "Keep selected-generation health independent of configuration owner and backend work.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

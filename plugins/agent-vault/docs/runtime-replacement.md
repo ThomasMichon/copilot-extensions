@@ -42,6 +42,15 @@ requests while waiting for that lease, but reports `accepting_work=false`.
 Credential requests receive a retriable transition refusal; CLI and installer
 readiness do not mistake endpoint reachability for credential readiness.
 
+Native generation probes send `{"action":"ping","health_only":true}` under the
+existing generation protocol. This optional hint returns only generation,
+admission and private-handoff metadata, without resolving default vault
+configuration, checking backend state or expiring passwords. The existing
+250 ms probe deadline is unchanged. Earlier peers ignore the hint and return
+their ordinary full ping; new readers accept that response while retaining
+PID, generation and admission checks. Ordinary public ping and strict
+installer configuration/backend readiness keep their existing behavior.
+
 The old build observes a different, live, selected build and closes its work
 admission. It settles already-admitted native requests, optionally transfers
 compatible auth state, and retires itself. Its cleanup preserves the successor's
