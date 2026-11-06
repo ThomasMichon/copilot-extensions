@@ -55,7 +55,25 @@ import {
   triggerHandoff,
   waitForWorktreeSyncToSettle,
 } from "./handoff-core.mjs";
-import { defaultConfig, loadContextHandoffConfigAsync } from "./config.mjs";
+import {
+  contextHandoffConfigPathsAsync,
+  defaultConfig,
+  loadContextHandoffConfigAsync,
+} from "./config.mjs";
+import {
+  ACTOR_AGENT,
+  ACTOR_OPERATOR,
+  applyOverrideRequest,
+  createConfigReloader,
+  describeThresholds,
+  effectiveThresholds,
+  overrideActive,
+  parseOverrideArgs,
+  parseThresholdValue,
+  readOverride,
+  sessionOverridePath,
+  writeOverride,
+} from "./live-control.mjs";
 import {
   FORCE_TIER_DENY_FEEDBACK,
   isReadOnlyPermissionRequest,
@@ -115,12 +133,26 @@ const emergencyDiagnostics = installEmergencyDiagnostics(emergencyLog);
 // `mode: auto`, or custom thresholds. Awaiting an already-resolved promise
 // is a cheap microtask, so this costs nothing once config has loaded.
 let handoffConfig = defaultConfig();
-const handoffConfigPromise = loadContextHandoffConfigAsync(process.cwd()).then(
-  (resolved) => {
-    handoffConfig = resolved;
-    return resolved;
-  },
-);
+// Watches the user and repo config layers so an edit made mid-session takes
+// effect without restarting (see refreshHandoffConfig below). The watcher is
+// primed before the first load, so an edit racing that load is re-read later.
+let configReloader = null;
+const handoffConfigPromise = (async () => {
+  const startDir = process.cwd();
+  try {
+    const reloader = createConfigReloader({
+      paths: await contextHandoffConfigPathsAsync(startDir),
+      load: () => loadContextHandoffConfigAsync(startDir),
+    });
+    await reloader.prime();
+    configReloader = reloader;
+  } catch {
+    configReloader = null; // Live reload is best-effort; the initial load still runs.
+  }
+  const resolved = await loadContextHandoffConfigAsync(startDir);
+  handoffConfig = resolved;
+  return resolved;
+})();
 handoffConfigPromise.catch(() => {}); // loadContextHandoffConfigAsync never rejects; guard anyway.
 
 // Design decision (revised from the original Phase 4 judgment call): `mode:
@@ -171,6 +203,15 @@ const state = {
 
 let nativeObserver;
 const nativeWarnings = new Set();
+
+// Session-only pressure override (pause or replacement thresholds), backed by
+// a sidecar in this session's state folder so a module refork keeps it. It is
+// never written to any config file. See live-control.mjs.
+const SESSION_STATE_ROOT = join(homedir(), ".copilot", "session-state");
+let sessionOverride = null;
+let sessionOverrideFor = undefined;
+let overrideWarningShown = false;
+let configRefreshInFlight = null;
 async function observeNativeContext(fresh = false) {
   const revision = state.windowRevision;
   const observation = await nativeObserver.observe(state.cwd || process.cwd(), { fresh });
@@ -1095,6 +1136,58 @@ const session = await joinSession({
         );
       },
     },
+    {
+      name: "handoff_pressure",
+      description:
+        "Inspect or quiet THIS session's automatic context-pressure handling " +
+        "(soft/hard handoff nudges and the force-tier auto-handoff). Use it ONLY " +
+        "when the operator explicitly asks you to pause or relax handoff nudges -- " +
+        "never on your own initiative to avoid or postpone a handoff. Allowed " +
+        "actions: 'status', 'pause', or 'set' with HIGHER thresholds (soft/hard/" +
+        "force as a percent like '65' / '65%', or tokens like '160k' / '160000t'). " +
+        "Lowering thresholds, resuming, and clearing are operator-only via the " +
+        "/handoff-pressure command. Changes last for this session only and are " +
+        "never written to config. Manual handoff tools are unaffected.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["status", "pause", "set"],
+            description: "status (read-only), pause, or set (raise thresholds only).",
+          },
+          soft: { type: "string", description: "New soft threshold for 'set' (percent or tokens)." },
+          hard: { type: "string", description: "New hard threshold for 'set' (percent or tokens)." },
+          force: { type: "string", description: "New force threshold for 'set' (percent or tokens)." },
+        },
+        required: ["action"],
+      },
+      handler: async (args, invocation) => {
+        ensureState(invocation);
+        const thresholds = {};
+        try {
+          for (const tier of ["soft", "hard", "force"]) {
+            if (args?.[tier] != null && String(args[tier]).trim() !== "") {
+              Object.assign(thresholds, parseThresholdValue(tier, args[tier]));
+            }
+          }
+        } catch (error) {
+          return `Rejected: ${error.message}`;
+        }
+        const action = String(args?.action ?? "status").toLowerCase();
+        const result = await applyPressureOverride({ action, thresholds }, ACTOR_AGENT);
+        if (!result.ok) return `Rejected: ${result.text}`;
+        if (action !== "status") {
+          session.log(
+            `[Context Handoff] The agent changed this session's pressure handling (${action}). ` +
+            "Use /handoff-pressure status to review or /handoff-pressure clear to undo.",
+            { level: "warning" },
+          );
+        }
+        return result.text;
+      },
+    },
   ],
 
   commands: [
@@ -1285,6 +1378,28 @@ const session = await joinSession({
         });
       },
     },
+    {
+      name: "handoff-pressure",
+      description:
+        "Live control of automatic context-pressure handling for THIS session " +
+        "only (never written to config): /handoff-pressure [status | pause | " +
+        "resume | clear | set soft=60 hard=150k force=78%]. Edits to " +
+        ".context-handoff/config.yaml also reload automatically mid-session.",
+      handler: async (ctx) => {
+        let request;
+        try {
+          request = parseOverrideArgs(ctx?.args);
+        } catch (error) {
+          session.log(`[Context Handoff] /handoff-pressure: ${error.message}`, { level: "warning" });
+          return;
+        }
+        const result = await applyPressureOverride(request, ACTOR_OPERATOR);
+        session.log(
+          result.ok ? result.text : `[Context Handoff] /handoff-pressure: ${result.text}`,
+          result.ok ? undefined : { level: "warning" },
+        );
+      },
+    },
   ],
 });
 emergencyDiagnostics.markReady();
@@ -1445,8 +1560,144 @@ function retryLatestUsage() {
   }, 50);
 }
 
+// --- Live control: config reload + session override ---
+
+const INVALID_CONFIG_PREFIX = /^Invalid context-handoff config; using defaults \([^)]*\): /;
+
+// Re-reads the config layers when their files changed since the last check.
+// A valid edit replaces the live config; an invalid one is reported once and
+// the previous config stays in effect. Concurrent callers share one refresh.
+async function refreshHandoffConfig() {
+  await handoffConfigPromise;
+  if (!configReloader) return handoffConfig;
+  if (!configRefreshInFlight) {
+    configRefreshInFlight = (async () => {
+      try {
+        const result = await configReloader.refresh();
+        if (result.changed) {
+          handoffConfig = result.config;
+          state.thresholdWarningShown = false;
+          overrideWarningShown = false;
+          session.log(
+            `[Context Handoff] Reloaded config from ${result.config.configPath ?? "defaults"}: ` +
+            `mode ${result.config.mode}, native_pressure ${result.config.nativePressure}, ` +
+            `thresholds ${describeThresholds(result.config.thresholds)}.`,
+          );
+          retryLatestUsage();
+        } else if (result.warning) {
+          session.log(
+            "[Context Handoff] Ignoring the edited context-handoff config and keeping " +
+            `the previous settings: ${result.warning.replace(INVALID_CONFIG_PREFIX, "")}`,
+            { level: "warning" },
+          );
+        }
+      } catch (error) {
+        session.log(`[Context Handoff] Config reload failed: ${error.message}`, { level: "warning" });
+      } finally {
+        configRefreshInFlight = null;
+      }
+    })();
+  }
+  await configRefreshInFlight;
+  return handoffConfig;
+}
+
+function currentOverride() {
+  const sid = state.sessionId ?? null;
+  if (!sessionOverride || sessionOverrideFor !== sid) {
+    sessionOverrideFor = sid;
+    sessionOverride = readOverride(sessionOverridePath(SESSION_STATE_ROOT, sid));
+  }
+  return sessionOverride;
+}
+
+function currentEffectiveThresholds() {
+  const effective = effectiveThresholds(handoffConfig.thresholds, currentOverride());
+  if (effective.warning && !overrideWarningShown) {
+    overrideWarningShown = true;
+    session.log(`[Context Handoff] ${effective.warning}`, { level: "warning" });
+  }
+  return effective.thresholds;
+}
+
+function pressureStatusText() {
+  const override = currentOverride();
+  const usage = formatContextUsage(state.currentTokens, state.tokenLimit);
+  const by = override.updatedBy ? ` (set by the ${override.updatedBy})` : "";
+  const lines = [
+    "Context-handoff pressure control:",
+    `- Config: ${handoffConfig.configPath ?? "built-in defaults"} ` +
+      `(mode ${handoffConfig.mode}, native_pressure ${handoffConfig.nativePressure}); ` +
+      "edits reload automatically.",
+    `- Config thresholds: ${describeThresholds(handoffConfig.thresholds)}.`,
+    `- Effective thresholds: ${describeThresholds(currentEffectiveThresholds())}` +
+      (override.thresholds ? ` (session override${by})` : "") + ".",
+    `- Automatic pressure handling: ${override.paused ? `PAUSED for this session${by}` : "active"}.`,
+    `- Context: ${usage.utilization} (${usage.tokens}).`,
+  ];
+  if (overrideActive(override)) {
+    lines.push("- The override applies to this session only; `/handoff-pressure clear` removes it.");
+  }
+  return lines.join("\n");
+}
+
+// Applies a session override request from the operator or the agent (the
+// agent is limited to quieting changes; see applyOverrideRequest).
+async function applyPressureOverride(request, actor) {
+  await refreshHandoffConfig();
+  const current = currentOverride();
+  const result = applyOverrideRequest(current, request, {
+    actor,
+    configThresholds: handoffConfig.thresholds,
+    tokenLimit: state.tokenLimit > 0 ? state.tokenLimit : null,
+  });
+  if (!result.ok) return { ok: false, text: result.message };
+  const action = String(request.action).toLowerCase();
+  if (action === "status") return { ok: true, text: pressureStatusText() };
+
+  sessionOverride = result.override;
+  sessionOverrideFor = state.sessionId ?? null;
+  const persisted = writeOverride(
+    sessionOverridePath(SESSION_STATE_ROOT, state.sessionId),
+    result.override,
+  );
+  state.thresholdWarningShown = false;
+  overrideWarningShown = false;
+  if (result.override.paused) {
+    pendingNudge = null;
+    // Only the operator may lift an active force-tier tool block this way.
+    if (actor === ACTOR_OPERATOR) state.blockMutatingTools = false;
+  }
+  if ((action === "set" || action === "clear") && !state.handoffGenerated && state.tokenLimit > 0) {
+    // Re-arm only tiers still above current usage, so they fire fresh at the
+    // new threshold instead of repeating a nudge that already landed.
+    let pressure = null;
+    try {
+      pressure = contextPressure(state.currentTokens, state.tokenLimit, currentEffectiveThresholds());
+    } catch {
+      pressure = null;
+    }
+    if (pressure && !pressure.soft) {
+      state.softReminderSent = false;
+      state.softLogShown = false;
+    }
+    if (pressure && !pressure.hard) {
+      state.hardReminderSent = false;
+      state.hardLogShown = false;
+    }
+  }
+  retryLatestUsage();
+  const note = persisted ? "" : "\n- Note: kept in memory only (session folder unavailable).";
+  return { ok: true, text: `${pressureStatusText()}${note}` };
+}
+
 session.on("session.idle", async (event) => {
   if (event.agentId || !pendingNudge) return;
+  await refreshHandoffConfig();
+  if (currentOverride().paused) {
+    pendingNudge = null;
+    return;
+  }
   const revision = state.windowRevision;
   const observation = await observeNativeContext(true);
   if (revision !== state.windowRevision) return;
@@ -1509,7 +1760,7 @@ async function handleUsage(event) {
   state.messagesLength = d.messagesLength;
   state.lastUtilization = d.tokenLimit > 0 ? d.currentTokens / d.tokenLimit : 0;
   const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
-  await handoffConfigPromise;
+  await refreshHandoffConfig();
   // Context-pressure warnings/nudges are automatic/unprompted behavior --
   // `off` disables exactly this (manual entry points stay available in every
   // mode; see `automaticPressureHandlingEnabled`'s own docstring). Only the
@@ -1517,6 +1768,13 @@ async function handleUsage(event) {
   // automaticHandoffEnabled -- restoring these warnings must never silently
   // re-enable live cutover.
   if (!automaticPressureHandlingEnabled(handoffConfig.mode)) {
+    persistState();
+    return;
+  }
+  // A session pause (operator or operator-requested agent call) suppresses
+  // every automatic tier, including the force-tier auto-handoff.
+  if (currentOverride().paused) {
+    pendingNudge = null;
     persistState();
     return;
   }
@@ -1533,15 +1791,15 @@ async function handleUsage(event) {
     pressure = contextPressure(
       d.currentTokens,
       d.tokenLimit,
-      handoffConfig.thresholds,
+      currentEffectiveThresholds(),
     );
   } catch (error) {
     if (!state.thresholdWarningShown) {
       state.thresholdWarningShown = true;
       const message = error instanceof Error ? error.message : String(error);
       session.log(
-        `[Context Handoff] Invalid configured thresholds for this token window; ` +
-        `using defaults for automatic pressure handling instead: ${message}`,
+        `[Context Handoff] Invalid configured or session-override thresholds for this ` +
+        `token window; using defaults for automatic pressure handling instead: ${message}`,
         { level: "warning" },
       );
     }
