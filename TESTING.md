@@ -2746,6 +2746,11 @@ cohort. Other selected modules remain present. Every cohort retains the
 no parallel workers, larger resource limits or omitted cases are introduced.
 `tools/plugin_test_selection.py` owns that cohort policy; the runner retains
 containment, execution, cleanup and aggregate deadline enforcement.
+Each admitted capture interpreter binds its source-name suffix index once;
+lookup specificity and refusal boundaries remain exact. Per-execution source
+hash/code/origin checks, role/launch verification and durable receipts are not
+cached or relaxed. Three pure locator controls supplement the original
+historical packet without widening its or the current capture's deadlines.
 Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.

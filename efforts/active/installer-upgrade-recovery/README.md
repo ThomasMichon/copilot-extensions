@@ -2453,3 +2453,39 @@ composed tree. Fresh exact-source native and complete current capture are
 required before final CI/review/merge/release. The reconciled branch's module
 guard already passes without changing a ceiling. Source #11003 and this parent
 remain open, and no installed effect or larger validation budget is introduced.
+
+### 2026-11-06 - Preserve the 240-second capture bound by indexing admitted source names
+
+Reconciled source `7f31ec078ec27f8dd355389b504cb025bb13f8f8` independently
+passes native run `42259056903`: both actual source-pin/execution steps and
+downloaded Linux/Windows reports have the same complete 39 unique passing
+cases, no skips/errors and every native/prefix/identity witness. This is fresh
+qualification of the newer shared source, not a relabeled earlier pass.
+
+Its full 229-case run `42259071477` fails in current capture before independent
+verification, historical guards, canonical validation or export. The literal
+failure is the existing caller-owned 240-second POSIX deadline in
+`capture_bridge_http48.run_probes`; no assertion failure or passing residual
+set is established by its buffered output. No artifact is imported and the
+deadline is not raised.
+
+The capture audit's `exec` hook currently scans the entire source inventory
+for every source-name lookup, including unowned dynamic code. Against the
+actual 2,012-path earlier proof, 5,000 lookups take 6.92153 seconds locally.
+An admitted interpreter now binds one suffix index after its existing
+self/preloaded-source verification. The lookup retains longest-suffix choice,
+lexical ties, exact case/segment boundaries, Windows separators and unmatched
+refusals. Source bytes, compiled code, origins, roles, launch binding and
+durable audit records are still checked exactly as before; neither hashes
+nor authorization are cached or inferred from the index.
+
+Four focused matching/no-rescan/observer-refusal controls pass in 0.60 seconds
+of tests, 121.39 seconds including declared preparation and verified cleanup.
+The same 5,000-lookups/2,012-path local sample takes 0.003941 seconds with the
+prebound locator and returns the same expected sources. This is a local lookup
+measurement, not a full-portfolio or latency claim. Three new pure locator
+controls join the original 115 historical cases; no existing case is removed.
+The complete 229-case capture and all 118 historical guards still require
+genuine execution at the next committed source with original deadlines and
+resource bounds. Normal current review/CI, import, merge and release remain
+open, as do the caller, Windows historical-seed and parent gates.
