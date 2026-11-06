@@ -21,7 +21,89 @@ from credential_relay.account_relay import AccountRelay
 from credential_relay.sources.gh_auth import GhAuthSource
 
 from agent_index.server import build_app, INSTALLATION_HEADER
-from agent_index.source_account_relay import acquire
+from agent_index.source_account_relay import acquire, acquire_source_lease, exchange_source_lease_for
+
+
+def test_native_source_lease_client_renewal_and_source_loss(tmp_path, monkeypatch):
+    async def scenario():
+        calls = []
+        available = True
+
+        async def provider(self, action, fields, *, timeout):
+            calls.append(action)
+            if not available:
+                return None
+            return (
+                "protocol=https\nhost=github.com\nusername=fixture-account\n"
+                f"token=synthetic-renewal-{len(calls)}\n\n"
+            )
+
+        monkeypatch.setattr(GhAuthSource, "resolve", provider)
+        capability = "synthetic-source-lease-capability-0123456789"
+        source_cap = tmp_path / "source-capability"
+        worker_cap = tmp_path / "worker-capability"
+        source_cap.write_text(capability)
+        worker_cap.write_text(capability)
+        fields = {
+            "source": "github:example/project", "account": "fixture-account",
+            "recipient": "fixture-worker", "host": "github.com", "action": "get-github-token",
+        }
+        source_policy = tmp_path / "source.json"
+        source_policy.write_text(json.dumps({
+            "schema": "credential-relay.account-policy", "version": 1,
+            "providers": {"fixture": {
+                "kind": "gh-auth", "account": fields["account"], "host": fields["host"],
+            }},
+            "grants": [dict(
+                fields, provider="fixture", capability_file=str(source_cap),
+                expires_at=time.time() + 3600, source_lease_seconds=60,
+            )],
+        }))
+        source = AccountRelay(str(source_policy))
+        await source.start()
+        worker = tmp_path / "worker.json"
+        worker.write_text(json.dumps({
+            "schema": "credential-relay.account-worker", "version": 1,
+            "transport": {"host": "127.0.0.1", "port": source._publication["port"]},
+            "bindings": [dict(fields, capability_file=str(worker_cap))],
+        }))
+
+        async def native():
+            return await asyncio.to_thread(
+                acquire_source_lease, worker, source=fields["source"], account=fields["account"],
+                host="github.com", timeout=5,
+            )
+
+        try:
+            first, second = await native(), await native()
+            assert first.lease_id != second.lease_id
+            assert first.token != second.token
+            assert 0 < second.remaining_seconds() <= 60
+            assert len(calls) == 2
+            worker_cap.unlink()
+            with pytest.raises(RuntimeError, match="source-account-relay-unavailable"):
+                await native()
+            third = await asyncio.to_thread(
+                exchange_source_lease_for, worker, fields, capability, host="github.com", timeout=5,
+            )
+            assert third.token != second.token
+            with pytest.raises(RuntimeError, match="source-account-relay-unavailable"):
+                await asyncio.to_thread(
+                    exchange_source_lease_for, worker, fields, "wrong-synthetic-capability-0123456789",
+                    host="github.com", timeout=5,
+                )
+            assert len(calls) == 3
+            available = False
+            with pytest.raises(RuntimeError, match="source-account-relay-unavailable"):
+                await asyncio.to_thread(
+                    exchange_source_lease_for, worker, fields, capability,
+                    host="github.com", timeout=5,
+                )
+            assert len(calls) == 4
+        finally:
+            await source.stop()
+
+    asyncio.run(scenario())
 
 
 def test_native_source_http_capabilities_renewal_denial_and_disconnect(tmp_path, monkeypatch):
