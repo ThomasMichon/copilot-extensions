@@ -197,6 +197,29 @@ def test_stale_observation_and_unknown_selection_are_not_actionable(
     assert read(reader, value[6])["items"][0]["reasons"] == ("selection-unknown",)
 
 
+def test_unknown_native_feedback_survives_reopen_without_masking_independent_consumers(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    value = feedback_environment
+    reader = reading[0]
+    value[4].lose_reply = True
+    result = run(value)
+    assert result["actions"][0]["state"] == "unknown"
+    observe(value, change="completed")
+    observe(value, change="active", second=12)
+    before = value[0].path.read_bytes()
+    item = read(reader, value[6])["items"][0]
+    assert item["cursor"]["epoch"] == 2
+    assert item["status"] == "unavailable" and item["reasons"] == ("feedback-reconciliation-pending",)
+    other = AttentionReader(reader.workspace, consumer="consumer-b", max_age_seconds=60, aging_seconds=30)
+    independent = read(other, value[6])["items"][0]
+    assert independent["cursor"]["epoch"] == 2 and independent["reasons"] == ("initial-review",)
+    assert independent["status"] == "actionable"
+    assert value[0].path.read_bytes() == before
+    assert value[0].inspect_review(value[1]["operation_id"], value[1]["scope"],
+                                  expires_at=value[6])["actions"] == result["actions"]
+
+
 def test_page_snapshot_refuses_changed_input_instead_of_skipping(
     feedback_environment: tuple, reading: tuple,
 ) -> None:
@@ -391,6 +414,46 @@ def test_cli_distinguishes_invalid_successful_results_from_missing_owners(
     assert json.loads(capsys.readouterr().out)["error"] == (
         "attention_unsupported" if cause == "missing-owner" else "invalid_attention_response"
     )
+    assert reader.store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("refresh_finished", [True, False])
+def test_overlapping_refresh_explicitly_supersedes_read_without_invalid_result(
+    feedback_environment: tuple, reading: tuple, monkeypatch, refresh_finished: bool,
+) -> None:
+    reader, gateway, client, caller, _ = reading
+    before = reader.store.path.read_bytes()
+    async def scenario() -> None:
+        await client.capabilities()
+        original = caller.request
+        entered, release, refresh_entered, refresh_release = (asyncio.Event() for _ in range(4))
+        async def request(method, target, **kwargs):
+            response = await original(method, target, **kwargs)
+            if target.endswith("/read"):
+                entered.set()
+                await release.wait()
+            elif not refresh_finished:
+                refresh_entered.set()
+                await refresh_release.wait()
+            return response
+        monkeypatch.setattr(caller, "request", request)
+        pending = asyncio.create_task(client.read(limit=16, after=None))
+        await entered.wait()
+        refresh = asyncio.create_task(client.capabilities())
+        try:
+            if refresh_finished:
+                await refresh
+            else:
+                await refresh_entered.wait()
+            release.set()
+            with pytest.raises(ReplayClientError, match="attention_discovery_superseded"):
+                await pending
+        finally:
+            release.set()
+            refresh_release.set()
+            await asyncio.gather(pending, refresh, return_exceptions=True)
+            await gateway.drain(timeout=1)
+    asyncio.run(scenario())
     assert reader.store.path.read_bytes() == before
 
 

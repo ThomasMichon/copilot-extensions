@@ -85,10 +85,13 @@ class AttentionClient:
     async def read(self, *, limit: int, after: dict | None) -> dict:
         if self._capabilities is None:
             raise ReplayClientError("attention_capability_required")
+        epoch, capabilities = self._epoch, copy.deepcopy(self._capabilities)
         if type(limit) is not int or not 1 <= limit <= MAX_BATCH:
             raise ValueError("invalid attention batch limit")
         validate_after(after)
         value = await self._exchange("read", {"limit": limit, "after": after})
+        if epoch != self._epoch:
+            raise ReplayClientError("attention_discovery_superseded")
         try:
             if (
                 set(value) != {"protocol", "items", "snapshot", "next", "effects"}
@@ -120,7 +123,7 @@ class AttentionClient:
                     or any(type(raw[name]) is not int or raw[name] < 0
                            for name in ("priority", "pending_since", "observed_at", "expires_at"))
                     or item.pending_since > item.observed_at
-                    or item.expires_at != item.observed_at + self._capabilities["max_age_seconds"]
+                    or item.expires_at != item.observed_at + capabilities["max_age_seconds"]
                 ):
                     raise ValueError
                 seen.add((item.key.number, item.role))

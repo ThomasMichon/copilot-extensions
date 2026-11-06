@@ -30,7 +30,7 @@ def _feedback_index(document: dict) -> tuple[dict, dict, set[PRKey]]:
         captured_operations.add(value["operation_id"])
         key = PRKey(**value["key"])
         for interest in value["interests"]:
-            captures[(key, interest["consumer"], interest["role"], value["cursor"]["epoch"])].append(value)
+            captures[(key, interest["consumer"], interest["role"])].append(value)
     operations = {value["intent"]["operation_id"]: value for value in document["reviews"]}
     unbound = {
         conversation_key(value["intent"]["scope"], document["namespace"])
@@ -49,7 +49,7 @@ def _feedback_reason(row: dict, index: tuple[dict, dict, set[PRKey]]) -> str | N
         return "feedback-interest-unbound"
     captures = {
         value["operation_id"]: value for value in retained.get(
-            (key, interest["consumer"], interest["role"], facts["cursor"]["epoch"]), (),
+            (key, interest["consumer"], interest["role"]), (),
         )
     }
     for capture in captures.values():
@@ -59,6 +59,8 @@ def _feedback_reason(row: dict, index: tuple[dict, dict, set[PRKey]]) -> str | N
             continue
         if any(value["state"] != "confirmed" for value in actions):
             return "feedback-reconciliation-pending"
+        if capture["cursor"]["epoch"] != facts["cursor"]["epoch"]:
+            continue
         if handled is None or handled["cursor"]["sequence"] < capture["cursor"]["sequence"]:
             return "feedback-tracking-unavailable"
         proof = row["provenance"]
@@ -83,6 +85,7 @@ def _feedback_reason(row: dict, index: tuple[dict, dict, set[PRKey]]) -> str | N
         operation = operations.get(proof["operation_id"])
         if (
             capture is None or operation is None
+            or capture["cursor"]["epoch"] != facts["cursor"]["epoch"]
             or proof["generation_id"] != capture["generation_id"]
             or handled["candidate"] != capture["candidate"]
             or proof["receipt_refs"] != [

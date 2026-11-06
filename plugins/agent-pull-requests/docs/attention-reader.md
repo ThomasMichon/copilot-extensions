@@ -45,6 +45,9 @@ feedback, reset pending age or create a second reconciliation-status ledger.
 Original captures, native outcomes, journal input and handled state remain
 untouched. A genuine later candidate or reopen retains its existing semantics;
 unknown native outcomes do not become confirmed merely because a candidate moved.
+Unknown or partially confirmed attempts remain unavailable for their original
+consumer/role after close/reopen too; only handled/echo qualification is scoped
+to the current epoch. Independent consumers keep the genuine reopened work.
 
 ## Distinct optional wire contract
 
@@ -69,6 +72,8 @@ the caller may explicitly select a smaller page.
 validates scope and bounded response fields, and performs no retry or legacy
 fallback. Missing routes, invalid declarations and owner/data loss are explicit
 unavailable outcomes. Existing watch and workspace wire contracts are unchanged.
+An overlapping capability refresh explicitly supersedes an in-flight read;
+the client does not validate that result against cleared or replaced negotiation.
 In particular, v5 bytes are never advertised as owner-v3 conversation support;
 that older conversation-serving contract continues to refuse expanded layouts.
 Disk compatibility is separate from HTTP compatibility.
