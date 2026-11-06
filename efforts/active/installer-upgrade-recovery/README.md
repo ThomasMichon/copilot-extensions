@@ -2527,3 +2527,30 @@ CI/review and actual merge/release still precede source completion. The owned
 local Windows historical-seed follow-up and original caller/cold-entry/
 installed recovery gates remain open, with no installed update or larger
 validation budget authorized.
+
+### 2026-11-06 - Final evidence revision passes CI and review before incoming-source reconciliation
+
+Evidence-only revision `87f97ad1cdaf2f3ecca8cbbfb2a262d4f41e5132`
+passes required CI `42267204327` and receives an Approved review at
+18:06:28 UTC. It does not merge: the base advances to `1593247e20`,
+and GitHub reports an actual conflict in the canonical HTTP-52 outputs.
+The membership review thread remains open pending the final reconciled
+publication; a green verdict does not resolve that thread automatically.
+
+All previously qualified source and producer outputs remain on the retained
+pre-reconciliation branch and in their original artifacts. The guarded sync
+aborts without changing the branch. A subsequent owned rebase preserves every
+incoming source change and resolves exactly 139 generated-output conflicts
+using the accepted upstream canonical outputs as a temporary baseline.
+No production, fixture, workflow or instrumentation conflict is discarded.
+That baseline is not qualification of the combined source.
+
+Incoming Bridge status contracts and their seven declared probe instances
+remain included: the next current capture and independent verification must
+execute all 252 cases. Incoming runtime-delivery changes also require fresh
+native qualification. The genuine `0055` 39/39, 245/245 and 118-case passes
+retain their exact source attribution, not a claim about this new tree.
+Current-source capture, verification, historical guards, canonical import,
+review/CI, merge and release remain open under the original bounds.
+Caller, local Windows historical-seed and installed-host recovery gates are
+unchanged; no update, deployment or larger validation budget is authorized.
