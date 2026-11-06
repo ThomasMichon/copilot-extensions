@@ -210,6 +210,8 @@ update successful. POSIX installation uses the same native deployment owner
 without requiring systemd; a deployment failure is not retried through a
 healthy-service shortcut. A completed runtime slot remains immutable and can be
 reused when retrying the service phase.
+Health probes, completeness checks, activation, and current-version reads
+suppress selected-slot bytecode writes explicitly.
 Deployment and verification share the scoped `service.env` settings. Ordinary
 `-devN`/`.devN` spellings compare equivalently; source-qualified generation
 identities remain exact.

@@ -547,7 +547,7 @@ _versioned_activate() {
         _fail "Refusing to activate runtime slot without its target interpreter: $py"
         return 1
     }
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
+    if ! "$py" -B "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
         _fail "Refusing to activate incomplete runtime slot versions/$SRC_VERSION"
         return 1
     fi
@@ -561,7 +561,7 @@ _versioned_activate() {
         _runtime_publication_native_begin receipt_file || return 1
         receipt_args=(--ownership-receipt "$receipt_file")
     fi
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
+    if ! "$py" -B "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
@@ -576,7 +576,7 @@ _versioned_current() {
     local py="$LINK_DIR/bin/python"
     [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || { echo ""; return 0; }
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
+    "$py" -B "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
 }
 
 _versioned_gc() {

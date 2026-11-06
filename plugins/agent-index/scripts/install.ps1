@@ -709,7 +709,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Refusing to activate runtime slot without its target interpreter: $py"
         return $false
     }
-    & $py $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
+    & $py -B $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Refusing to activate incomplete runtime slot versions/$SrcVersion"
         return $false
@@ -718,7 +718,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Refusing to activate runtime slot versions/$SrcVersion because agent_index is not importable"
         return $false
     }
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
+    & $py -B $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -736,7 +736,7 @@ function Get-VersionedCurrent {
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
     if (-not $py) { return '' }
-    $out = & $py $vr --root $InstallDir --link-name '.venv' current 2>$null
+    $out = & $py -B $vr --root $InstallDir --link-name '.venv' current 2>$null
     return ("$out").Trim()
 }
 
