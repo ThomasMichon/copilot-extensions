@@ -88,6 +88,11 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         for flag in ("--config", "--workspace")
     ):
         return True
+    if command == "pr-author-capabilities" and all(
+        any(arg == flag or arg.startswith(flag + "=") for arg in args_list[1:])
+        for flag in ("--repo", "--config")
+    ):
+        return True
     if command == "pr-status" and all(
         any(arg == flag or arg.startswith(flag + "=") for arg in args_list[1:])
         for flag in ("--repo", "--pr")

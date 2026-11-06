@@ -349,7 +349,10 @@ def _github_create(
 def _cmd_create(args: argparse.Namespace) -> int:
     if args.worktrees_command is not None:
         return _cmd_native(args)
-    if any(getattr(args, field, None) for field in ("source_workspace", "expected_head", "body_file")):
+    if (
+        any(getattr(args, field, None) for field in ("source_workspace", "expected_head", "body_file"))
+        or getattr(args, "config", None) is not None
+    ):
         message = "Delegated creation requires an explicit --worktrees-command; no GitHub fallback was attempted."
         print(json.dumps({"error": message, "repo": args.repo})) if args.json else print(message, file=sys.stderr)
         return 2
@@ -815,6 +818,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--draft", action="store_true", help="open as a draft pull request")
     create.add_argument("--source-workspace", help="Exact reachable delegated Git root (native only)")
     create.add_argument("--expected-head", help="Full reviewed source commit (native only)")
+    create.add_argument("--config", help="Explicit delivered worker policy (native only)")
     create.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     create.set_defaults(handler=_cmd_create)
 

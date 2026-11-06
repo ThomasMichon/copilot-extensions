@@ -95,6 +95,12 @@ def resolve_repo_config_for_slug(
     Read-only callers may supply their own fresh strict ``registry_entries`` to
     share that acquisition across targets; absent input retains the native read.
     """
+    explicit_target = getattr(config, "explicit_pr_target", None)
+    if explicit_target is not None:
+        if repo_slug != explicit_target.pr.repository:
+            return ForeignRepoResolution(None, error="Explicit worker policy addresses another PR target")
+        return ForeignRepoResolution(explicit_target, "pr-worker")
+
     from . import repos as repos_mod
 
     entries = None
