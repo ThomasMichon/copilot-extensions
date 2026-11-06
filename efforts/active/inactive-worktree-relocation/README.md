@@ -482,3 +482,22 @@ adopter pilot feedback gates subsequent widening.
 - Exact-source lint, the existing module budgets, documentation consistency
   and the source-history install-contract guard passed. The source umbrella,
   current-head review/CI/merge and retained-fixture disposition remain open.
+
+### 2026-11-06 — Native fixture ownership reconciliation
+- The expanded native packet initially refused unscoped mux queries through
+  the test runner's existing command-safety boundary. Read-only diagnostics
+  identified that exact `UnsafeTestCommand`; session-lock resolution was empty.
+  No production inactivity check was weakened or bypassed.
+- Scoped the fixture's real mux transport through the runner-owned private
+  namespace helper. Namespace enrollment stays inside the runner sandbox even
+  when separately enrolled primary Git/recovery evidence is retained elsewhere.
+  Only read-only mux queries were requested, never server launch/stop;
+  no surviving private test mux process was observed after the bounded attempt.
+- The complete native move, prepublication cancellation, malformed-ledger
+  plan/recovery and mount-inventory packet then passed **10 controls** with a
+  selected 120-second native-case budget and bounded file wall time. Production
+  probe budgets and every lifecycle/data/identity assertion are unchanged.
+- The approved concurrent creation-repair capture prerequisite is resolved by
+  its previously recorded isolated and 44-case continuation evidence. The
+  source effort/umbrella stay Active; current-head review/CI/merge, the retained
+  external-fixture disposition and corrected real-volume retry remain open.
