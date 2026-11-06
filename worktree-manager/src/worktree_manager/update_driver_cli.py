@@ -385,7 +385,12 @@ def cmd_update_request(rest: list[str]) -> int:
                     if selected.configured and selected.mode == "standalone":
                         if "--no-project-controller" not in forwarded:
                             forwarded = [*forwarded, "--no-project-controller"]
-                    controlled = handoff(forwarded, authority=selected)
+                    delegated = requested == "project" and not any(
+                        flag in {"--phase", "--target", "--repair-engine", "--no-project-controller"}
+                        or flag.startswith(("--phase=", "--target=", "--repair-engine="))
+                        for flag in getattr(request.spec, "argv", ())
+                    )
+                    controlled = handoff(forwarded, authority=selected, delegated=delegated)
                     if controlled is not None:
                         return controlled
                     if request.spec.backend == "manager" and request.spec.source != _source_key():

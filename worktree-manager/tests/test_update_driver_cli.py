@@ -569,6 +569,53 @@ def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp
     assert "--no-project-controller" in calls[0]
 
 
+@pytest.mark.parametrize(("parent_flags", "expected"), [
+    ((), 8), (("--no-project-controller",), 1), (("--target", "agent-bridge"), 1),
+])
+def test_borrowed_project_authority_allows_controller_delegation(
+    queued, monkeypatch, tmp_path, parent_flags, expected,
+):
+    import update_driver
+    from update_driver.authority import selection
+    from worktree_manager import __main__ as manager, engine_client
+
+    class Custody:
+        request_id = "synthetic-request"
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pass
+
+    request = SimpleNamespace(
+        state="running",
+        spec=update_driver.RequestSpec(
+            "engine", parent_flags, project="example", cwd=str(tmp_path), authority="project",
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
+    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
+    monkeypatch.setattr(
+        update_driver, "current_authority", lambda **_kwargs: selection("project", "example"),
+    )
+    monkeypatch.setattr(
+        engine_client, "get_value",
+        lambda *_args: pytest.fail("delegated bypass re-entered the controller"),
+    )
+    monkeypatch.setattr(manager, "_cmd_update", lambda flags: calls.append(flags) or 8)
+    assert driver.cmd_update_request(["--project", "example", "--no-project-controller"]) == expected
+    if expected == 8:
+        assert "--no-project-controller" in calls[0]
+    else:
+        assert not calls
+
+
 def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
     seen, request = queued
     assert driver.cmd_update_request(["--force", "--project", "example"]) == 6

@@ -8,6 +8,7 @@ from .update_orchestration import extract_project
 
 def handoff(
     arguments: list[str], *, observer: list[str] | None = None, authority=None,
+    delegated: bool = False,
 ) -> int | None:
     managed = authority is not None and authority.configured and authority.mode == "project"
     if authority is not None and authority.configured and authority.mode == "standalone":
@@ -18,7 +19,7 @@ def handoff(
         for value in arguments
     )
     if bypass:
-        if managed:
+        if managed and not (delegated and "--no-project-controller" in arguments):
             raise ValueError("standalone or partial update is disabled by project authority")
         return None
     project, forwarded = extract_project(arguments)

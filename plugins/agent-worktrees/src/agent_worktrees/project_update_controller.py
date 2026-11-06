@@ -36,7 +36,7 @@ def dispatch_update(args, auth, manager, standalone) -> int:
         ):
             output.err("The selected project update authority is unavailable.")
             return 1
-        if getattr(args, "phase", None):
+        if getattr(args, "phase", None) or getattr(args, "no_project_controller", False):
             if any(
                 flag in {"--phase", "--target", "--no-project-controller"}
                 or flag.startswith(("--phase=", "--target="))
@@ -44,11 +44,14 @@ def dispatch_update(args, auth, manager, standalone) -> int:
             ):
                 output.err("A partial request cannot own the project update.")
                 return 1
-            return standalone()
-        controlled = run_project_update(args)
-        if controlled is None:
-            output.err("The selected project update controller is unavailable; no update ran.")
-            return 1
+            if getattr(args, "phase", None):
+                return standalone()
+            controlled = None
+        else:
+            controlled = run_project_update(args)
+            if controlled is None:
+                output.err("The selected project update controller is unavailable; no update ran.")
+                return 1
     elif selected is not None and selected.configured and selected.mode == "project":
         output.err("Standalone update is disabled by the selected project authority.")
         return 1

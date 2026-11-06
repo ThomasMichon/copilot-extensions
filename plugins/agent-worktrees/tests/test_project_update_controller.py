@@ -269,7 +269,12 @@ def test_project_authority_reaches_controller_under_real_driver_custody(project,
     assert result.read_text(encoding="utf-8") == "--force"
 
 
-def test_project_controller_can_delegate_runtime_phase_under_real_custody(project, monkeypatch, tmp_path):
+@pytest.mark.parametrize(("delegation", "expected"), [
+    ("phase", "runtimes"), ("standalone", "standalone"),
+])
+def test_project_controller_can_delegate_under_real_custody(
+    project, monkeypatch, tmp_path, delegation, expected,
+):
     import update_driver
     from agent_worktrees import update_driver_cli
 
@@ -287,10 +292,12 @@ def test_project_controller_can_delegate_runtime_phase_under_real_custody(projec
         "from agent_worktrees import config,update_cli,update_driver_cli\n"
         "config.set_active_project('example')\n"
         f"config.install_dir = lambda: Path({str(engine)!r})\n"
-        f"def phase(args): Path({str(result)!r}).write_text(args.phase, encoding='utf-8'); return 0\n"
+        f"def phase(args): Path({str(result)!r}).write_text(getattr(args,'phase',None) or 'standalone', encoding='utf-8'); return 0\n"
         "update_cli._core_helper = lambda name, local: phase if name == '_cmd_update_in_plugin' else local\n"
-        "raise SystemExit(update_driver_cli.cmd_update_request("
-        "argparse.Namespace(phase='runtimes', no_manager=True)))\n"
+        "raise SystemExit(update_driver_cli.cmd_update_request(argparse.Namespace("
+        + ("phase='runtimes', no_manager=True" if delegation == "phase"
+           else "no_project_controller=True, no_manager=True")
+        + ")))\n"
     )
     script.write_text(
         "import os,subprocess,sys\n"
@@ -330,7 +337,7 @@ def test_project_controller_can_delegate_runtime_phase_under_real_custody(projec
 
     assert update_driver.drain(root=driver_root, executor=execute) == 0
     assert update_driver.status(request.id, root=driver_root).exit_code == 0
-    assert result.read_text(encoding="utf-8") == "runtimes"
+    assert result.read_text(encoding="utf-8") == expected
 
 
 def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
