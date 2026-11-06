@@ -2489,3 +2489,41 @@ The complete 229-case capture and all 118 historical guards still require
 genuine execution at the next committed source with original deadlines and
 resource bounds. Normal current review/CI, import, merge and release remain
 open, as do the caller, Windows historical-seed and parent gates.
+
+### 2026-11-06 - Indexed current capture qualifies all 245 cases within the original bound
+
+Exact indexed source `0055ce93cbf6478e4fad06a3cbbc94d2a2e1c904` independently
+passes fresh native run `42263400947`: both source-pin/execution steps and
+downloaded Linux/Windows reports have 39 unique passing cases each, no
+skips/errors, identical complete sets and every real CLI/namespace/prefix/
+identity witness. This is the source including the newer prepared Windows
+entrypoint inputs, not a relabeled earlier pass.
+
+Full run `42263417055` succeeds in 14m44s. Capture and independent verification
+each pass all 245 declared cases, with test times 183.10 and 180.35 seconds,
+and 196.59 / 193.73 seconds including preparation and cleanup. Both finish
+inside the unchanged 240-second caller-owned POSIX limit. Five historical
+JUnit reports contain 6, 34, 26, 26 and 26 unique passing cases: all original
+115 plus the three new locator controls, 118 total, no skips/errors.
+Their case-duration sums are 61.146, 100.192, 67.783, 66.954 and 71.304 seconds.
+The whole historical request takes 376.97 seconds including preparation and
+cleanup within its original shared 900-second aggregate; group/item/resource
+bounds remain unchanged. This is genuine complete indexed-source execution,
+not the local micro sample, a partial timeout result or an older capture.
+
+Actual current artifact `13526268689` and historical outcomes `13526478412`
+are downloaded and audited. The producer's logged manifest digest
+`1973f62366cf7a6576ead010afc0934b5adb58f339aa8270697c524b9c0826e0`
+matches the downloaded manifest. At unchanged source HEAD `0055`, the native
+publication owner validates all 3,072 original input preimages and materializes
+all 139 declared outputs. Independent hash/byte comparisons match every output;
+only those declared paths differ and HTTP-51 remains untouched. No failed
+229-case or earlier provisional artifact is used.
+
+The next revision contains canonical evidence and this journal only. Production
+read code, native fixture, cohort policy and capture instrumentation remain
+the qualified `0055` source; its source pin is not relabeled. Current required
+CI/review and actual merge/release still precede source completion. The owned
+local Windows historical-seed follow-up and original caller/cold-entry/
+installed recovery gates remain open, with no installed update or larger
+validation budget authorized.
