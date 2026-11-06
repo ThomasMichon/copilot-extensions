@@ -179,8 +179,8 @@ $VersionedRuntime = $true
 $Force = $false
 . '{ENGINE / "installer-engine.ps1"}'
 . '{SCRIPTS / "versioned_runtime_native.ps1"}'
-function Write-Ok {{ param($Msg) }}
-function Write-Skip {{ param($Msg) }}
+function Write-Ok {{ param($Msg) Write-Output $Msg }}
+function Write-Skip {{ param($Msg) Write-Output $Msg }}
 function Write-Warn {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
 function Write-Fail {{ param($Msg) throw $Msg }}
 {definitions}
@@ -231,9 +231,16 @@ _ensure_runtime
 """
         argv = [executable, str(harness)]
     harness.write_bytes(text.encode("utf-8"))
-    result = subprocess.run(
-        argv, env=env, capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
-    )
+    try:
+        result = subprocess.run(
+            # Match the existing full source-publication fixture's finite bound.
+            argv, env=env, capture_output=True, text=True, timeout=40, creationflags=HEADLESS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            f"Retained-slot publication exceeded the native source fixture bound: "
+            f"stdout={exc.stdout!r}; stderr={exc.stderr!r}"
+        )
     if corruption == "cli" or (role in {"host", "machine-host-client"} and corruption != "none"):
         assert result.returncode != 0, result.stdout + result.stderr
         assert token in result.stdout + result.stderr

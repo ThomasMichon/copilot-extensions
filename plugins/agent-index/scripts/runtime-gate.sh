@@ -394,7 +394,7 @@ _runtime_origin_ok() {
         esac
     fi
     origin="$(CDPATH= cd -- "$slot_abs" 2>/dev/null &&
-        "$python" -I -X utf8 -c \
+        "$python" -I -B -X utf8 -c \
         'from pathlib import Path; import agent_index; print(Path(agent_index.__file__).resolve())' \
         2>/dev/null)" || return 1
     [ -n "$origin" ] && [ -f "$origin" ] || return 1

@@ -1375,6 +1375,13 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         encoding="utf-8",
     )
     _configure_repository_role(repository, env, "host")
+    # This fixture tests CWD forwarding, not installation-owner discovery.
+    env["AGENT_INDEX_CONFIG_DATA_B64"] = base64.urlsafe_b64encode(
+        json.dumps({
+            "corpus": {"sources": [{"name": "git:test"}]},
+            "indexers": [{"machine": env["AGENT_INDEX_MACHINE"], "ssh": "fixture-indexer"}],
+        }).encode("utf-8")
+    ).decode("ascii")
     captured = tmp_path / f"repo-context-{shell}-{command}.json"
     runtime_source = (
         "import json, os, sys\n"

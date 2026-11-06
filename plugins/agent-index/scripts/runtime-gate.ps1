@@ -545,7 +545,7 @@ function Test-RuntimeOrigin(
         Set-Location -LiteralPath $slot
         [IO.Directory]::SetCurrentDirectory($slot)
         $originOutput = @(
-            & $Interpreter -I -X utf8 -c (
+            & $Interpreter -I -B -X utf8 -c (
                 'from pathlib import Path; import agent_index; ' +
                 'print(Path(agent_index.__file__).resolve())'
             ) 2>$null
