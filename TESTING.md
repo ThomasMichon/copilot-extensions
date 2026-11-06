@@ -3032,6 +3032,14 @@ qualification.
 
 ## Optional macOS guardian follow-through
 
+`libs/agent-procutil/tests/test_daemon_instances_darwin.py` exercises the shipped
+shell/archive reconciliation boundary against private native macOS inventories:
+missing/empty stores, actual live and exited process identities, finite-record
+settlement, production/protected preservation, reused identity, invalid controls
+and rejected archive custody. Its portable libproc error controls distinguish
+explicit `ESRCH` from permission/unknown results. The native cases do not grant
+external termination authority, perform installation or expand required unit CI.
+
 The manual `installation-context-acceptance.yml` selector
 `guardian_followthrough=true` runs a bounded packet on a fresh `macos-latest`
 runner, outside required CI. It uses Python 3.11 (supported by the shared

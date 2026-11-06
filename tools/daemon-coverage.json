@@ -159,11 +159,12 @@
       "commands": {
         "supervise": "supervised-service-child",
         "cleanup": "finite-worker",
+        "reconcile": "finite-worker",
         "check": "finite-worker",
         "lease-fields": "finite-worker"
       },
       "resource": "daemon_instance_runtime.pyz",
-      "platforms": ["linux"]
+      "platforms": ["linux", "darwin"]
     }
   ],
   "finite_helpers": {

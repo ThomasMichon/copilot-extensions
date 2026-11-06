@@ -87,6 +87,46 @@ def test_time_budget_resumes_past_every_visited_unknown_row(inventory, monkeypat
     assert store._read_cursor(root) == paths[3].stem
 
 
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="POSIX archive reconciliation CLI")
+@pytest.mark.parametrize("elapsed", [.5, 1.0, 1.5])
+def test_identity_observation_cannot_restart_cleanup_budget(
+    inventory, monkeypatch, capsys, elapsed,
+):
+    from agent_procutil import _daemon_instance_cli as cli
+
+    root, _, populate = inventory
+    path = populate(1)[0]
+    receipt = DaemonInstanceReceipt(path.stem, root)
+    with store._locked(receipt):
+        record = store._read(path)
+        record.update(lifecycle="finite-worker", protected="0", pid="4321", birth="fixture")
+        store._write(path, record)
+    before = path.read_bytes()
+    now = [0.0]
+
+    def observe(*_args):
+        now[0] = elapsed
+        return "dead"
+
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: now[0])
+    monkeypatch.setattr(store, "identity_state", observe)
+    result = cli.main([
+        "reconcile", "--registry-root", str(root), "--limit", "128",
+        "--max-seconds", "1", "--caller-pid", str(os.getpid()),
+    ])
+    output = capsys.readouterr()
+    if elapsed >= 1:
+        assert result == 1
+        assert "held\tTimeoutError" in output.out
+        assert "TimeoutError" in output.err
+        assert path.read_bytes() == before
+    else:
+        assert result == 0 and not output.err
+        assert "finite-worker-exit-observed" in output.out
+        assert not path.exists()
+    assert path.with_suffix(".lock").is_file()
+
+
 @pytest.mark.parametrize("contents", [b"", b"garbage\n", b"copilot-daemon-reconcile-v1\nUPPER\n"])
 def test_bad_cursor_is_visible_and_untouched_even_empty(inventory, contents):
     root, _, _ = inventory

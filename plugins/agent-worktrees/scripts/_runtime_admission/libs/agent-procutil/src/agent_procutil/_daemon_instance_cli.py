@@ -1,4 +1,4 @@
-"""Isolated-interpreter entry point for the shared Linux lifecycle protocol."""
+"""Isolated lifecycle entry point, including native Darwin reconciliation."""
 
 from __future__ import annotations
 
@@ -36,7 +36,32 @@ def main(arguments: list[str] | None = None) -> int:
     cleanup = subcommands.add_parser("cleanup")
     cleanup.add_argument("record", type=Path)
     cleanup.add_argument("timeout", type=float)
+    reconcile = subcommands.add_parser("reconcile")
+    reconcile.add_argument("--registry-root", type=Path)
+    reconcile.add_argument("--limit", type=int, default=128)
+    reconcile.add_argument("--max-seconds", type=float, default=5)
+    reconcile.add_argument("--caller-pid", type=int, required=True)
     options = parser.parse_args(arguments)
+    if options.operation == "reconcile":
+        if sys.platform not in ("linux", "darwin") or sys.version_info < (3, 10):
+            parser.error("daemon reconciliation requires Linux/macOS and Python 3.10 or newer")
+        if options.caller_pid <= 0:
+            parser.error("daemon reconciliation requires a positive caller PID")
+        try:
+            results = store.reconcile(
+                options.registry_root, options.limit, options.max_seconds,
+                _caller_pid=options.caller_pid,
+            )
+        except (OSError, ValueError, RuntimeError) as error:
+            print(f"daemon instance reconciliation failed: {error}", file=sys.stderr)
+            return 1
+        held = False
+        for result in results:
+            print(f"{result.status}\t{result.reason}\t{result.instance_id}")
+            if result.status == "held":
+                print(f"daemon instance held: {result.instance_id} {result.reason}", file=sys.stderr)
+                held = True
+        return int(held)
     if not sys.platform.startswith("linux") or sys.version_info < (3, 10):
         parser.error("daemon lifecycle requires Linux and Python 3.10 or newer")
     if options.operation == "check":

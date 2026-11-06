@@ -1,0 +1,9 @@
+{
+  "comment": "Release native Darwin process identity updates to the newly registered SSH consumer",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

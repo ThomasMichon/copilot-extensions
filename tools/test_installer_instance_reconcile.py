@@ -368,10 +368,15 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
     monkeypatch.setitem(sys.modules, "installer_instance_reconcile", SimpleNamespace(
         reconcile_installer_instances=reconcile,
     ))
+    monkeypatch.setitem(sys.modules, "_fixture_manager.runtime_identity", SimpleNamespace(
+        running_application_slot=lambda: None,
+    ))
     namespace = {
+        "__name__": "_fixture_manager.self_install", "__package__": "_fixture_manager",
         "Path": Path, "SelfInstallResult": SimpleNamespace,
         "os": os, "subprocess": subprocess, "ExitStack": ExitStack,
         "running_payload_dir": lambda: payload,
+        "_runtime_scripts": lambda: payload / "scripts",
         "payload_version": lambda path: "1.0",
         "version_slot": lambda version, root: root / "versions" / version,
         "current_version": lambda root: None if state == "fresh" else "1.0",
@@ -410,7 +415,7 @@ def test_manager_bootstrap_does_not_sweep_for_ordinary_commands(command, expecte
         )
     )
     consumer = next(
-        node for node in functions["_install"].body if isinstance(node, ast.Assign)
+        node for node in functions["_install_payload"].body if isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "reconcile" for target in node.targets)
     )
     namespace = {"command": command, "args": SimpleNamespace(skip_instance_reconcile=False)}

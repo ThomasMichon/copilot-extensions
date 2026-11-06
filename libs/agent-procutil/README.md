@@ -1114,6 +1114,20 @@ PowerShell instance adapter described above; its retained compiled process
 launchers and actual native qualification remain separate gates. Darwin external
 termination currently holds when kernel-pinned custody cannot be established.
 
+On macOS, `reconcile_daemon_instances` uses the isolated source archive's bounded
+Python inventory owner, not the Linux shell collector's procfs/GNU primitives.
+Interpreter/archive custody is checked with native path and file metadata.
+The existing libproc birth tuple distinguishes a matching process from reuse;
+an explicit `ESRCH` observation establishes absence, while permission errors and
+other incomplete observations remain unknown. External Darwin termination still
+holds without kernel-pinned custody. Missing/empty inventories remain untouched,
+resident production records are preserved, and held/error outcomes remain visible.
+This adapter does not add Darwin support to Linux-only shell reservation or
+supervision operations.
+Collection forwards its original monotonic deadline to each cleanup. An identity
+observation that exhausts that budget produces a hold before further deletion;
+cleanup does not receive a fresh budget after the observation.
+
 Renewable expiry is decided from the current record while holding its mutation
 lock. A contended inspection remains explicitly unknown until a current read
 or the independent monotonic hard maximum; it is not evidence that a cached

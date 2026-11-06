@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux shell binding of agent_procutil.daemon_instances inventory.
+# Linux shell binding and Darwin reconciliation adapter for daemon instances.
 # Sourcing is inert. No installer, service, process scan or implicit sweep.
 
 daemon_instance_root() {
@@ -23,9 +23,18 @@ _di_python() {
             printf '%s\n' 'daemon lifecycle requires a supported Python interpreter' >&2; return 1;
         }
     fi
-    target="$(readlink -e -- "$target")" || return 1
+    if [[ "${OSTYPE:-}" == darwin* ]]; then
+        target="$(/bin/realpath "$target")" || return 1
+    else
+        target="$(readlink -e -- "$target")" || return 1
+    fi
     [[ -f "$target" && -x "$target" ]] || return 1
-    owner="$(stat -c '%u' -- "$target")"; mode="$(stat -c '%a' -- "$target")"
+    if [[ "${OSTYPE:-}" == darwin* ]]; then
+        owner="$(/usr/bin/stat -f '%u' "$target")" || return 1
+        mode="$(/usr/bin/stat -f '%Lp' "$target")" || return 1
+    else
+        owner="$(stat -c '%u' -- "$target")"; mode="$(stat -c '%a' -- "$target")"
+    fi
     if [[ "$owner" == 0 || "$owner" == "$(id -u)" ]] && (( (8#$mode & 06022) == 0 )); then
         printf '%s\n' "$target"; return
     fi
@@ -35,10 +44,20 @@ _di_python() {
 
 _di_lifecycle_source() {
     local target owner mode source_root
-    source_root="$(readlink -e -- "$(dirname -- "${BASH_SOURCE[0]}")")" || return 1
+    if [[ "${OSTYPE:-}" == darwin* ]]; then
+        source_root="$(/bin/realpath "$(dirname -- "${BASH_SOURCE[0]}")")" || return 1
+    else
+        source_root="$(readlink -e -- "$(dirname -- "${BASH_SOURCE[0]}")")" || return 1
+    fi
     target="$source_root/daemon_instance_runtime.pyz"
-    if [[ -f "$target" && ! -L "$target" && "$(readlink -e -- "$target")" == "$target" ]]; then
-        owner="$(stat -c '%u' -- "$target")"; mode="$(stat -c '%a' -- "$target")"
+    if [[ -f "$target" && ! -L "$target" ]]; then
+        if [[ "${OSTYPE:-}" == darwin* ]]; then
+            owner="$(/usr/bin/stat -f '%u' "$target")" || return 1
+            mode="$(/usr/bin/stat -f '%Lp' "$target")" || return 1
+        else
+            [[ "$(readlink -e -- "$target")" == "$target" ]] || return 1
+            owner="$(stat -c '%u' -- "$target")"; mode="$(stat -c '%a' -- "$target")"
+        fi
         if [[ "$owner" == 0 || "$owner" == "$(id -u)" ]] && (( (8#$mode & 0022) == 0 )); then
             printf '%s\n' "$target"; return
         fi
@@ -53,6 +72,17 @@ _di_lifecycle() {
     target="$(_di_lifecycle_source)" || return 1
     "$python" -I -S -B "$target" "$@"
 }
+
+if [[ "${OSTYPE:-}" == darwin* ]]; then
+    reconcile_daemon_instances() (
+        local limit="${1:-128}" seconds="${2:-5}" root="${3:-}"
+        local -a arguments=(reconcile --limit "$limit" --max-seconds "$seconds" --caller-pid "$$")
+        [[ -z "$root" ]] || arguments+=(--registry-root "$root")
+        _di_lifecycle "${arguments[@]}"
+    )
+    # Stock macOS Bash cannot parse the Linux binding's Bash 4 conditionals.
+    return 0
+fi
 
 _di_plain() {
     local path="$1" kind="${2:-file}" ownership="${3:-owned}"

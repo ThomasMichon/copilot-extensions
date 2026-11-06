@@ -6307,6 +6307,13 @@ origin qualification or migrate a service.
 
 ## Compiler-free daemon-instance artifact construction
 
+Darwin installer reconciliation uses the shipped isolated Python inventory owner
+through `daemon_instances.sh`, retaining native libproc birth observations and
+filesystem custody rather than invoking Linux procfs/GNU shell primitives.
+Missing/empty inventory is a successful no-op; invalid controls, unknown process
+identity and unconfirmed external termination remain visible failures/holds.
+This does not extend Linux-only shell reservation or supervision to Darwin.
+
 The shared `agent-procutil` Linux lifetime owner is standard-library Python,
 using existing kernel/libc interfaces without native compilation. Source and
 release construction produce a pure Python wheel; governed verification rejects
