@@ -110,6 +110,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "test_gateway_host or test_gateway_enrollment "
         "or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies "
         "or test_ssh_machine or test_machine_identity or test_credential_references"
+        " or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
     )
     nodes = {
         path.name + "::" + node.name
@@ -131,6 +132,10 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert groups[0].isdisjoint(groups[1])
     assert groups[0] | groups[1] == selected(original)
     assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
+    assert (
+        "test_continuity_bootstrap.py::"
+        "test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
+    ) in groups[1]
 
 
 @pytest.mark.parametrize(

@@ -13,15 +13,18 @@ import sqlite3
 import sys
 import shlex
 import subprocess
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from agent_procutil import no_window_kwargs
 import pytest
 
 from fleet_manager import planning
+from fleet_manager import continuity_bootstrap, machine_identity
 from fleet_manager.continuity_bootstrap import _state, bootstrap
 from fleet_manager import private_state
 from fleet_manager.gateway_service_server import STATE, start
+from fleet_manager.gateway_service_channel import TransportError
 from fleet_manager.ledger import OperationLedger
 from gateway_service_transport_fixtures import Rig
 from test_gateway_enrollment import EnrollmentHarness, GRANT
@@ -37,6 +40,103 @@ def test_engine_consumer_uses_explicit_prepared_environment(tmp_path, monkeypatc
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_VENV_ROOT", str(prepared))
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "unrelated-sandbox"))
     assert _prepared_engine_python() == prepared / "agent-worktrees" / "bin" / "python"
+
+
+def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment(tmp_path, monkeypatch):
+    async def scenario():
+        rig = Rig(tmp_path)
+        enrollment = EnrollmentHarness(tmp_path)
+        now = rig.h.clock.value
+        enrollment.h.clock.value = now
+        enrollment.scope["expires_at"] = now + 600
+        enrollment.delegation["grant_expires_at"] = now + 300
+        enrollment.document["policy"]["manifest"]["revision"] += 1
+        rig.h.document = enrollment.document
+        projection_root = tmp_path / "projection"
+        projection_root.mkdir(mode=0o700)
+        source, state = projection_root / "selected.json", tmp_path / "machine-state"
+        try:
+            await rig.start(enrollment_journal=enrollment.ledger)
+            enrollment.scope["destination"] = rig.origin
+            enrollment.document["policy"]["manifest"]["revision"] += 1
+            rig.save()
+            await rig.state.reload()
+            source.write_bytes(planning.canonical({
+                "schema": "fleet-manager.continuity-projection", "version": 1,
+                "provider": "local-projection-v1", "authority": "authority-a",
+                "audience": "example-gateway", "delegation": enrollment.delegation,
+                "grant": GRANT, "gateway_ca": rig.ca,
+            }))
+            source.chmod(0o600)
+            arguments = dict(
+                source=source, harness="harness-a", state_root=state, machine="machine-a",
+                gateway_origin=rig.origin, principal="new-caller", audience="example-gateway",
+                resource="service-a",
+            )
+            with pytest.raises(TransportError, match="continuity-machine-identity-unavailable"):
+                continuity_bootstrap.machine_caller(**arguments)
+            assert not state.exists()
+            assert await bootstrap(source, harness="harness-a", state_root=state, apply=True) == {
+                "status": "ready", "stage": "connected",
+            }
+            retained = state / "machine.json"
+            before = retained.read_bytes(), retained.stat().st_mtime_ns, source.read_bytes()
+            for name, value in {
+                "harness": "other-harness", "machine": "other-machine",
+                "gateway_origin": "https://other.example", "principal": "other-caller",
+                "audience": "other-audience", "resource": "service-b",
+            }.items():
+                with monkeypatch.context() as patch:
+                    patch.setattr(
+                        continuity_bootstrap, "_state",
+                        lambda *_args, **_kwargs: pytest.fail("mismatched scope read private identity"),
+                    )
+                    with pytest.raises(TransportError):
+                        continuity_bootstrap.machine_caller(**(arguments | {name: value}))
+            for _ in range(2):
+                caller = continuity_bootstrap.machine_caller(**arguments)
+                response = await caller.request(
+                    "POST", "/_fleet/machine-connect", body=planning.canonical({"slot": "service-a"}),
+                )
+                assert response.status == 200
+            changed = json.loads(before[0])
+            changed["source_digest"] = "0" * 64
+            retained.write_bytes(planning.canonical(changed))
+            tampered = retained.read_bytes()
+            with pytest.raises(TransportError, match="continuity-state-conflict"):
+                continuity_bootstrap.machine_caller(**arguments)
+            assert retained.read_bytes() == tampered
+            retained.write_bytes(before[0])
+            before = retained.read_bytes(), retained.stat().st_mtime_ns, source.read_bytes()
+            clock = SimpleNamespace(time=lambda: now + 301)
+            monkeypatch.setattr(continuity_bootstrap, "time", clock)
+            monkeypatch.setattr(machine_identity, "time", clock)
+            rig.h.clock.value = now + 301
+            caller = continuity_bootstrap.machine_caller(**arguments)
+            response = await caller.request(
+                "POST", "/_fleet/machine-connect", body=planning.canonical({"slot": "service-a"}),
+            )
+            assert response.status == 200
+            enrollment.document["delegations"] = []
+            enrollment.document["policy"]["manifest"]["revision"] += 1
+            rig.save()
+            await rig.state.reload()
+            response = await caller.request(
+                "POST", "/_fleet/machine-connect", body=planning.canonical({"slot": "service-a"}),
+            )
+            assert response.status == 401
+            clock.time = lambda: now + 601
+            with pytest.raises(TransportError, match="continuity-grant-expired"):
+                continuity_bootstrap.machine_caller(**arguments)
+            assert (retained.read_bytes(), retained.stat().st_mtime_ns, source.read_bytes()) == before
+            assert set(state.iterdir()) == {retained}
+            with sqlite3.connect(enrollment.ledger.path) as connection:
+                assert connection.execute("SELECT count(*) FROM machine_enrollments").fetchone() == (1,)
+                assert connection.execute("SELECT count(*) FROM operations").fetchone() == (1,)
+        finally:
+            await rig.close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine"])
