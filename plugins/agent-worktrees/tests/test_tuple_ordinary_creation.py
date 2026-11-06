@@ -200,6 +200,14 @@ def test_ordinary_create_carries_selected_tuple_to_actual_knowledge_pair(
     config = observed_config(platform, "matching", "ordinary")
     knowledge_anchor = tmp_path / "knowledge"
     knowledge_anchor.mkdir()
+    knowledge_root = tmp_path / "independent-knowledge-root"
+    knowledge_config = replace(config, repo_name="knowledge", repos={"knowledge": replace(
+        config.default_repo, anchor=str(knowledge_anchor), worktree_root=str(knowledge_root),
+    )})
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *_a, project=None, **_k: knowledge_config if project == "knowledge" else config,
+    )
     monkeypatch.setattr(
         m.state_root_mod, "resolve_state_root",
         lambda _config: _state_root(path=str(knowledge_anchor), repo="knowledge"),
@@ -212,6 +220,7 @@ def test_ordinary_create_carries_selected_tuple_to_actual_knowledge_pair(
     row = json.loads(capfd.readouterr().out)["worktree"]
     harness = tracking.load_record(cfg.tracking_dir() / f"{row['id']}.yaml")
     knowledge = tracking.load_record(cfg.tracking_dir("knowledge") / f"{row['id']}-k.yaml")
+    assert Path(knowledge.worktree_path).parent == knowledge_root
     expected = WorktreeMachineIdentity("friendly-host", platform, "local-space")
     assert harness.machine_identity == knowledge.machine_identity == expected
     assert harness.pair_id == knowledge.pair_id
