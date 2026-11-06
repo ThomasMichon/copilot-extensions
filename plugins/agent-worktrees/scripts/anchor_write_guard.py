@@ -425,7 +425,11 @@ def shell_may_mutate(command: str, tool: str) -> bool:
                 effective, re.IGNORECASE,
             ):
                 return True
-            if _WRITE_CMD_START.match(effective) or _literal_write_targets(effective, tool):
+            syntax: set[str] = set()
+            targets = _literal_write_targets(effective, tool, syntax=syntax)
+            if "{" in syntax or tool.lower() in {"powershell", "pwsh"} and "[" in syntax:
+                return True
+            if _WRITE_CMD_START.match(effective) or targets:
                 return True
             if not _GIT_START.match(effective):
                 continue

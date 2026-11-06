@@ -618,6 +618,8 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "shell-assignment", "shell-literal-assignment", "shell-read-sed",
     "shell-quoted-parentheses", "batch-shell-metadata",
     "shell-control-block", "shell-conditional", "shell-bash-assignment",
+    "shell-typed-assignment", "shell-pipeline-block", "shell-invoke-block",
+    "shell-literal-scriptblock",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -743,6 +745,14 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
                 args = {"command": "if ($true) { Set-Content file value }"}
             elif case == "bash-assignment":
                 args = {"command": 'result="$(git commit -m test)"'}
+            elif case == "typed-assignment":
+                args = {"command": "[string]$result = git commit -m test"}
+            elif case == "pipeline-block":
+                args = {"command": "1 | % { Set-Content file value }"}
+            elif case == "invoke-block":
+                args = {"command": "Invoke-Command -ScriptBlock { Set-Content file value }"}
+            elif case == "literal-scriptblock":
+                args = {"command": "Write-Output 'Invoke-Command -ScriptBlock { Set-Content file value }'"}
             payload.update(toolName="powershell", toolArgs=args)
             if case == "bash-assignment":
                 payload["toolName"] = "bash"
@@ -779,11 +789,12 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             assert notices[0]["kind"] == (
                 "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
             )
-        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment", "control-block", "conditional", "bash-assignment"}
+        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment", "control-block", "conditional", "bash-assignment", "typed-assignment", "pipeline-block", "invoke-block"}
         assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch", "shell-metadata"} else [])
         assert server.has_recent_hook_demand() is (writes or case in {
             "structured", "patch", "reads", "read", "literal-assignment", "read-sed",
             "quoted-parentheses", "shell-metadata",
+            "literal-scriptblock",
         })
     finally:
         release.set()

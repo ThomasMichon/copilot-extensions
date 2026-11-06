@@ -359,7 +359,11 @@ Quoted literal parentheses are not executable PowerShell grouping; assignment
 right-hand commands retain mutation detection without treating quoted data as
 a command. Substitutions are examined before environment-assignment
 normalization. Unsupported executable block/control-flow and complex assignment
-shapes conservatively invalidate rather than being asserted read-only. Read-only `sed`
+shapes conservatively invalidate rather than being asserted read-only. The
+original quote-aware tokenizer reports unquoted block/type syntax for this
+classification, including pipeline/invocation blocks and typed assignments;
+quoted data does not become executable syntax. Ordinary tokenizer callers do
+not request that observation and keep their original output. Read-only `sed`
 does not invalidate unless it independently redirects output, while in-place
 forms remain mutations. Batch presence takes precedence over outer shell
 metadata, preserving the original native-batch request kind. Classification

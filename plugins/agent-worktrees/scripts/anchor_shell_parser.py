@@ -34,7 +34,9 @@ def git_branch_invocation_is_readonly(args: list[str]) -> bool:
     )
 
 
-def git_tokens(seg: str, tool: str, *, split_redirects: bool = False) -> list[str]:
+def git_tokens(
+    seg: str, tool: str, *, split_redirects: bool = False, syntax: set[str] | None = None,
+) -> list[str]:
     """Tokenize literal arguments with the selected shell's quoting rules."""
     posix_escapes = tool.lower() in {"bash", "sh"}
     powershell_escapes = tool.lower() in {"powershell", "pwsh"}
@@ -110,6 +112,10 @@ def git_tokens(seg: str, tool: str, *, split_redirects: bool = False) -> list[st
             current.append(seg[index + 1])
             token_started = True
             index += 1
+        elif syntax is not None and char in "{[":
+            syntax.add(char)
+            current.append(char)
+            token_started = True
         else:
             current.append(char)
             token_started = True
@@ -119,9 +125,9 @@ def git_tokens(seg: str, tool: str, *, split_redirects: bool = False) -> list[st
     return tokens
 
 
-def literal_write_targets(seg: str, tool: str) -> list[str]:
+def literal_write_targets(seg: str, tool: str, *, syntax: set[str] | None = None) -> list[str]:
     """Extract literal redirect operands and target-bearing shell arguments."""
-    tokens = git_tokens(seg, tool, split_redirects=True)
+    tokens = git_tokens(seg, tool, split_redirects=True, syntax=syntax)
     targets = []
     arguments = []
     index = 0

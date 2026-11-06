@@ -92,6 +92,12 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     pytest.param("Write-Output '& { git commit -m test }'", False, id="literal-block"),
     pytest.param("$result.Value = git commit -m test", True, id="member-assignment"),
     pytest.param("$result[0] = Set-Content file value", True, id="indexed-assignment"),
+    pytest.param("[string]$result = git commit -m test", True, id="typed-assignment"),
+    pytest.param("[string]$result = Set-Content file value", True, id="typed-write"),
+    pytest.param("1 | % { Set-Content file value }", True, id="pipeline-block"),
+    pytest.param("Invoke-Command -ScriptBlock { Set-Content file value }", True, id="invocation-block"),
+    pytest.param("Write-Output 'Invoke-Command -ScriptBlock { Set-Content file value }'", False, id="quoted-scriptblock"),
+    pytest.param("Write-Output '[string]$result = git commit -m test'", False, id="quoted-type"),
 ])
 def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
     assert guard.shell_may_mutate(command, "powershell") is mutates
