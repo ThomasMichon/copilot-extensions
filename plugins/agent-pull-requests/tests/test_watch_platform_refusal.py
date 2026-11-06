@@ -45,6 +45,19 @@ started = time.monotonic()
 assert watch_entry.stop(invocation, timeout=10) is False
 assert time.monotonic() - started < 10
 candidate = WatchInstance(runtime, os.getpid(), "1", str(uuid4()))
+EXIT_PROBE
+for root, names in (
+    (installation.plugin_root, (
+        api.CURRENT_VERSION_FILE, api.LAST_KNOWN_GOOD_FILE, "deploy-manifest.json",
+    )),
+    (installation.run_root, ("watch-owner-transaction.json", "active.json")),
+):
+    assert all(not (root / name).exists() for name in names)
+assert not installation.state_root.exists()
+print(json.dumps({"startup": "refused", "idleStop": "bounded", "effects": False}))
+"""
+
+_EXIT_REFUSAL = """
 try:
     candidate.capture_exit(installation, read_health=forbidden, environment={})
 except NotImplementedError:
@@ -57,22 +70,12 @@ except NotImplementedError:
     pass
 else:
     raise AssertionError("unsupported recovery guessed that the original exited")
-for root, names in (
-    (installation.plugin_root, (
-        api.CURRENT_VERSION_FILE, api.LAST_KNOWN_GOOD_FILE, "deploy-manifest.json",
-    )),
-    (installation.run_root, ("watch-owner-transaction.json", "active.json")),
-):
-    assert all(not (root / name).exists() for name in names)
-assert not installation.state_root.exists()
-print(json.dumps({"startup": "refused", "idleStop": "bounded", "cleanup": "refused",
-                  "exitObservation": "refused", "effects": False}))
 """
 
 _SIMULATION = """
 def unavailable(*_args, **_kwargs):
     raise NotImplementedError("fixture-owned unsupported native exit evidence")
-diagnostics.process_start_time = lambda _pid: None
+diagnostics.process_start_time = lambda _pid: BIRTH_TOKEN
 process_exit.open_process = unavailable
 process_exit.observe_original_exit = unavailable
 """
@@ -81,14 +84,16 @@ process_exit.observe_original_exit = unavailable
 def _assert_refusal(result):
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
-        "startup": "refused", "idleStop": "bounded", "cleanup": "refused",
-        "exitObservation": "refused", "effects": False,
+        "startup": "refused", "idleStop": "bounded", "effects": False,
     }
 
 
 @pytest.mark.timeout(90)
-def test_unsupported_native_watch_evidence_refuses_before_control(installed):
-    _assert_refusal(_probe(installed, script=_PLATFORM.replace("SIMULATION", _SIMULATION)))
+@pytest.mark.parametrize("birth", [None, "1700000000:123456"])
+def test_unsupported_native_watch_evidence_refuses_before_control(installed, birth):
+    _assert_refusal(_probe(installed, script=_PLATFORM.replace(
+        "SIMULATION", _SIMULATION.replace("BIRTH_TOKEN", repr(birth)),
+    ).replace("EXIT_PROBE", _EXIT_REFUSAL)))
 
 
 @pytest.mark.portfolio_tier("T3")
@@ -96,5 +101,7 @@ def test_unsupported_native_watch_evidence_refuses_before_control(installed):
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires the native macOS kernel")
 def test_native_macos_governed_watch_refuses_unprovable_identity(installed):
     _assert_refusal(_probe(
-        installed, script=_PLATFORM.replace("SIMULATION", "assert sys.platform == 'darwin'"),
+        installed, script=_PLATFORM.replace(
+            "SIMULATION", "assert sys.platform == 'darwin'",
+        ).replace("EXIT_PROBE", ""),
     ))
