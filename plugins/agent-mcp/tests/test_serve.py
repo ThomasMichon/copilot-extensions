@@ -482,6 +482,49 @@ async def test_attach_full_session_roundtrip(tmp_path):
         await asyncio.wait_for(task, timeout=5)
 
 
+async def test_forced_drain_preserves_real_attached_mcp_session(tmp_path):
+    from agent_mcp import cutover
+    from agent_mcp.serve import open_attached_session
+
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock, enable_lease=False, control_port=0, control_token="tok")
+    task = asyncio.create_task(server.serve_forever())
+    writer = None
+    try:
+        await _await_socket(sock)
+        reader, writer = await open_attached_session(sock, str(bridge))
+        initialized = await _rpc(
+            reader, writer,
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        )
+        assert initialized["id"] == 1 and "result" in initialized
+        assert server.attached == 1
+        port = server._control_server.sockets[0].getsockname()[1]
+        context = cutover._CutoverContext(
+            data_root=tmp_path, new_socket_path=tmp_path / "new.sock",
+            new_log_path=tmp_path / "new.log", new_control_token="tok",
+            old_control_token=None, token_by_port={port: "tok"},
+        )
+        client = cutover.CutoverClient(f"http://127.0.0.1:{port}", context)
+        result = await asyncio.to_thread(client.drain, timeout=0, poll=0, force=True)
+        assert result["drained"] is False and result["forced"] is False
+        assert result["busy_sessions"] == 1
+        reply = await _rpc(
+            reader, writer,
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "echo", "arguments": {"still": "attached"}}},
+        )
+        assert json.loads(reply["result"]["content"][0]["text"]) == {"still": "attached"}
+        assert server.attached == 1 and not task.done()
+    finally:
+        if writer is not None:
+            writer.close()
+            await writer.wait_closed()
+        server._stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+
 async def test_two_attached_sessions_are_independent(tmp_path):
     # One serve process hosts two concurrent client sessions, each with its own
     # upstream + pipeline (the multiplexer property: interpreters collapse, but

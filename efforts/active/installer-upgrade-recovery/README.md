@@ -1470,3 +1470,105 @@ claiming a concrete remaining gap. Ordinary-command and explicit-installer
 adoption, U13 fresh settlement, existing fenced queues, macOS and affected-host
 acceptance retain their separate owners and gates. This release observation
 does not update any installation or authorize rollout.
+
+### 2026-11-05 - U15 held-session drain protocol selected
+
+After #10734 merges and managed source sync passes, current Dev still has
+the concrete #10653 timeout branch: the MCP control client reports a
+nonzero attached-session count as `drained: true` when force is requested.
+The [bounded claim](https://github.com/ThomasMichon/copilot-extensions/issues/10653#issuecomment-6662663871)
+selects only this protocol truthfulness correction and its direct
+orchestrator consumer. This closes an existing protected-session invariant,
+not a new retirement architecture.
+
+The original current source and containing release #10732 are retained as
+the before-state. Add red-on-old loopback control and direct orchestrator
+tests before changing the timeout branch; retain the zero-session success
+control, ordinary rollback and truthful malformed/unauthorized refusals.
+The planned correction does not change native installer/watchdog paths,
+publication readiness, reaping, adopted-client handover or live hosts.
+Those broader #10653/#10652/#10486/#6928 gates remain separately tracked.
+
+The bounded pre-fix packet reproduces two real failures: the loopback client
+reports two held sessions as drained, and its actual orchestrator consumer
+commits and requests shutdown. The zero-session control passes. After removing
+the false forced-success branch, all 36 applicable cutover controls pass with
+eight platform skips in 4.77 seconds. This includes ordinary rollback, truthful
+unauthorized/malformed replies and preserved zero-session behavior.
+
+A separate real native attached-session control passes in 1.83 seconds. It
+starts a private Server and synthetic stdio echo upstream, initializes an
+actual MCP attach, refuses forced drain while that attach is live, and
+successfully exchanges another tool call over the same connection. The runner
+retains its normal process and cleanup limits. The counter-only loopback
+fixture and synthetic passive orchestration remain distinct from that real
+session-consumer proof.
+
+CLI help retains `--force` syntax without promising session destruction; the
+MCP timeout diagnostic no longer recommends a force retry. Existing control
+errors are not replaced with the busy-timeout message. Fatal Ruff and the
+thirteen-plugin install-contract gate pass. The canonical refresh changes only
+MCP's source digest and keeps footprint revision 36; a patch changefile is
+generated without hand-editing any version.
+
+These are source/private-process tests in fresh isolated profiles, not an
+installer migration or full incoming-publication test. Native Linux/macOS and
+live external installation are unperformed: the available hosted bootstrap
+lifetime portfolio is a different contract, and no new venue or installed
+host is activated for this slice. U13 and the remaining #10653 acceptance
+retain their owners. Current-head CI, review, merge and release remain required.
+
+Final pre-merge inspection tightens the diagnostic-only change: replace only
+the known force-retry advice, never the entire existing error. Added controls
+retain unrelated readiness failures as well as control errors. The combined
+cutover and real attached-session packet passes 39 tests with eight platform
+skips in 6.08 seconds; fatal lint and all thirteen install contracts pass again.
+No native installer/watchdog or serving-publication behavior is added.
+
+The first review of #10736 reports one Low documentation finding: explicit
+Contract impact and Graceful cutover impact sections are required for the
+observable busy-timeout change. The revised description names the legacy
+`cutover --require-live --force` activation seam, unchanged wire shape and
+supported count-bearing peer baseline, deliberate nonzero/rollback outcome
+instead of false forced success, and the absence of a protection guarantee
+when rolling back to the older defective control client. U13/#10652 incoming
+publication and #10653's broader reaping/installer acceptance remain separate.
+The new source head still requires its own CI and review.
+
+### 2026-11-05 - U15 CI recovery and footprint-only rebase
+
+Run `42065880698` completes its unit and guard jobs but never schedules the
+required PR gate. GitHub's read API remains in progress while ordinary and
+force cancellation say not in progress; rerun says already running. No refused
+control operation is counted as an effect or a passing result.
+
+Rerunning the completed same-head run `42065711918` succeeds: attempt 2 passes
+units, guards and the actual required PR gate at 23:20:18 UTC. No source change
+or gate bypass is needed to recover CI. The precise internal GitHub cause is
+unknown.
+
+By then Dev has advanced and the source PR needs a rebase. Both conflicts are
+only in generated MCP producer digests, not the behavioral code or tests.
+Retain the new base's peer-launch and packaged-runtime changes, regenerate the
+combined current source digest through the canonical footprint tool, and keep
+contract revision 36 unchanged. All four touched source/test bodies remain
+identical to the approved revision. The rebased packet passes 39 controls with
+eight platform skips in 5.72 seconds, including the actual attached-session
+exchange; fatal lint and all thirteen install contracts pass. The rebased head
+still needs its own source CI and review before merge. Broader #10653 acceptance
+and all parent completion gates remain open.
+
+The rebased source CI `42129460056` passes all three jobs at 23:35:28 UTC.
+Current-head review `5793610263` identifies a Medium diagnostic gap: the
+shared rollback logger emits the old force-retry advice before MCP corrects
+the returned result. Both actual-orchestrator stderr regression cases fail
+on that revision, with force false and true.
+
+The MCP-local orchestrator normalizes only the known busy-session retry
+advice before calling the unchanged shared rollback implementation; result
+serialization uses the same correction. Control and unrelated errors remain
+intact. No shared ZDD code, shutdown ordering or retirement authority changes.
+The combined packet passes 41 controls with eight platform skips and 30
+deselections in 7.50 seconds, including stderr and the real attached-session
+exchange. Fatal lint, all thirteen install contracts and whitespace pass;
+canonical MCP source-digest refresh retains footprint revision 36.
