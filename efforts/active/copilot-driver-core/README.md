@@ -1286,3 +1286,10 @@ snapshots, rather than cold-starting more helper interpreters. The protected
 reservation, reachable unqualified resident, every actual capability/read/
 parser/writer command, ordering assertion and full CLI session-write path
 remain real and unchanged. No item/group/deadline or receipt check is widened.
+
+The first guarded single-case run after that reader change still reaches the
+original item limit, with only an async wait in its final stack. The existing
+log does not identify the active owner operation. Add capture-only start/end
+timestamps around the real asynchronous owner command and synchronous lineage
+command, forwarding every argument and result unchanged. This supplies named
+phase evidence for the next diagnostic instead of another blind full rerun.

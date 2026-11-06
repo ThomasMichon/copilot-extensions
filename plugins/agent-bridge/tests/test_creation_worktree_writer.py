@@ -675,6 +675,9 @@ async def test_keyed_creation_registration_failure_retains_native_and_dormancy(w
 async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim(
     rig, tmp_path, monkeypatch,
 ):
+    import time
+
+    started = time.monotonic()
     import os
     from pathlib import Path
     import sys
@@ -716,6 +719,26 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         environment["PYTHONPATH"] = os.pathsep.join((
             str(root / "tools/http47_capture_bootstrap"), str(root / "tools"),
         ))
+        lineage_run = worktree_lineage._run
+
+        def traced_lineage(command, *args, **kwargs):
+            print(f"lineage {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
+            try:
+                return lineage_run(command, *args, **kwargs)
+            finally:
+                print(f"lineage {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
+
+        async def traced_owner(command, *args, **kwargs):
+            print(f"owner {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
+            try:
+                return await rig.owner_command(command, *args, **kwargs)
+            finally:
+                print(f"owner {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
+
+        monkeypatch.setattr(worktree_lineage, "_run", traced_lineage)
+        receiving_command = traced_owner
+    else:
+        receiving_command = rig.owner_command
     for owner in (acquisition_authority, worktree_lineage):
         monkeypatch.setattr(owner, "_agent_worktrees_environment", lambda: environment.copy())
     protected = owner_command(list(prefix), "protect")
@@ -731,8 +754,8 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         session_lifecycle_cli, "_agent_worktrees_selection",
         MagicMock(side_effect=AssertionError("must not use a dynamic writer")),
     )
-    monkeypatch.setattr(acquisition_authority, "worktree_command", rig.owner_command)
-    monkeypatch.setattr(workspace_creation, "worktree_command", rig.owner_command)
+    monkeypatch.setattr(acquisition_authority, "worktree_command", receiving_command)
+    monkeypatch.setattr(workspace_creation, "worktree_command", receiving_command)
     monkeypatch.setattr(
         acquisition_authority, "_agent_worktrees_launch_prefix",
         session_lifecycle_cli._agent_worktrees_launch_prefix,
