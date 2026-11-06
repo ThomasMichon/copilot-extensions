@@ -4721,7 +4721,7 @@
         "plugins/agent-worktrees/tests/test_pr_target_probes.py": "219ecc24697ea1c55b95772dce73ae9c9f2bc2d7cbf9f5c069f96a2c376ec3ac",
         "tools/promotion_unit_tests/test_pr_target_probes.py": "3a761a7bfaeeb5a803b9053e9bb186e2ee05a6c176866d271a93d7bc8c378030",
         "plugins/agent-worktrees/src/agent_worktrees/git_repository_environment.py": "833fae6bc0aad32823312203baea0460f4a1f83913152fc36e8d0debeca3f253",
-        "plugins/agent-worktrees/src/agent_worktrees/github_credentials.py": "bf2839f66dea58adf3c671bcbbf30c31d9c3c7df0c4e0aa975e588d5b84f1fc9",
+        "plugins/agent-worktrees/src/agent_worktrees/github_credentials.py": "2eadbc5b2c5160d65dc72f344e812d6c4b6787f7e747968e7c1e55dc5b4df433",
         "libs/update-telemetry/src/update_telemetry/redact.py": "8dc433890dae3e4924e676cc66e564b5c576829e46659687be887c073ba4c8d3",
         "libs/update-telemetry/src/update_telemetry/outcomes.py": "d3c39fa778e0fc22ddc36ac5c40f9914233ed857ee59cd737f5e9ef7fc0e408a",
         "libs/update-telemetry/src/update_telemetry/fold.py": "bab1331a413166139ae4bd7da7b47f567fb7f1ea7e8268f1148d65afcb8842a8",

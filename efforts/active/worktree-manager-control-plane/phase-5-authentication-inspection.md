@@ -163,11 +163,13 @@ bounded GitHub CLI credential/API adapter. It requires an explicitly configured
 account and exact supported host. Registration, preference and binding
 operations are unchanged; no ordinary consumer emits the new syntax yet.
 
-Thirty-three focused controls pass, including the native parser, unchanged private
+Thirty-seven focused controls pass, including the native parser, unchanged private
 registry/sentinel bytes, synthetic credential/API failures, identity mismatch,
-real owned synthetic processes and a real aggregate deadline. The final focused
-and legacy scoped-credential packet passes 119 tests; twenty additional
-account-resolution controls also pass. The actual built wheel contains the
+real owned synthetic processes and a real aggregate deadline. The review fix
+also projects runner `RuntimeError` outcomes without swallowing retained
+cleanup errors. Eighty-six legacy scoped-credential controls also pass;
+twenty additional account-resolution controls retain their earlier evidence.
+The actual built wheel contains the
 exact inspection source, descriptor and preserved existing package data;
 install-contract and documentation guards pass.
 

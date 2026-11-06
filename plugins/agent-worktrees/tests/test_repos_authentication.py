@@ -139,7 +139,7 @@ def test_owner_account_mapping_uses_same_strict_snapshot(registry, provider, mon
 
 
 @pytest.mark.parametrize("stage", ["credential", "identity", "repository"])
-@pytest.mark.parametrize("failure", ["nonzero", "malformed", "timeout", "overflow"])
+@pytest.mark.parametrize("failure", ["nonzero", "malformed", "timeout", "overflow", "runtime"])
 def test_stage_failures_are_distinct_sanitized_and_not_retried(registry, provider, stage, failure):
     from agent_procutil.owned_process import OutputLimitExceeded
 
@@ -149,6 +149,8 @@ def test_stage_failures_are_distinct_sanitized_and_not_retried(registry, provide
         value = subprocess.TimeoutExpired(["secret-command"], 1, output="private-output")
     elif failure == "overflow":
         value = OutputLimitExceeded("stdout", 1024)
+    elif failure == "runtime":
+        value = RuntimeError("private-output")
     elif failure == "nonzero":
         value = api({"secret": "private-output"}, code=403, exit_code=1)
     else:
@@ -207,6 +209,24 @@ def test_cleanup_failure_retains_exact_owner_custody(registry, provider):
     with pytest.raises(OwnedCleanupError) as caught:
         inspect()
     assert caught.value is failure
+
+
+def test_runner_failure_returns_contract_json_without_traceback(registry, provider, capsys):
+    from agent_worktrees.repos_cli import cmd_repos_dispatch
+
+    _, responses = provider
+    responses[0] = RuntimeError("private-native-diagnostic")
+    assert cmd_repos_dispatch([
+        "authentication", "inspect", "--context-project", "sample",
+        "--repository", "sample", "--json",
+    ]) != 0
+    captured = capsys.readouterr()
+    value = json.loads(captured.out)
+    assert value["contract"] == "agent-worktrees.repository-authentication"
+    assert value["status"] == "unavailable"
+    assert value["failure"] == {"stage": "credential", "code": "capture-failed"}
+    assert captured.err == ""
+    assert "private-native-diagnostic" not in captured.out
 
 
 def test_strict_cli_typo_refuses_before_registry_or_credentials(monkeypatch, capsys):

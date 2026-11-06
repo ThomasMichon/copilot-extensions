@@ -116,7 +116,7 @@ def inspect_github_account(host: str, login: str, repository: str) -> dict:
             raise CredentialObservationError(stage, "timeout") from None
         except OutputLimitExceeded:
             raise CredentialObservationError(stage, "output-limit") from None
-        except (OSError, ValueError, subprocess.SubprocessError):
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             raise CredentialObservationError(stage, "capture-failed") from None
         if result.returncode:
             status = re.match(r"HTTP/\S+ ([1-5][0-9]{2})(?:\s|$)", result.stdout)
