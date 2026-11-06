@@ -445,6 +445,73 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
         assert not record.yaml_path.with_suffix(".lock").exists()
 
 
+def test_ignored_nested_linked_worktree_refuses_without_changing_either_registration(checkout):
+    nested = checkout.source / "nested"
+    (checkout.anchor / ".git" / "info" / "exclude").write_text("nested/\n")
+    git_ops.create_worktree(str(checkout.anchor), str(nested), "worktree/nested", "HEAD")
+    before = git_ops.git("worktree", "list", "--porcelain", cwd=checkout.anchor).stdout
+    with pytest.raises(ValueError, match="nested Git"):
+        _plan(checkout)
+    assert git_ops.git("worktree", "list", "--porcelain", cwd=checkout.anchor).stdout == before
+    assert nested.is_dir() and not move_state.journal_path(checkout.record.yaml_path).exists()
+
+
+@pytest.mark.parametrize("state", ["open", "pending-transfer"])
+def test_itemized_followup_refuses_without_legacy_boolean(checkout, state):
+    record = checkout.record
+    record.follow_ups = [tracking.FollowUpRecord(id="item", summary="remaining work", state=state)]
+    tracking.save_record(record)
+    assert not tracking.load_record(record.yaml_path).follow_up
+    with pytest.raises(ValueError, match="completed ordinary"):
+        _plan(checkout)
+    assert not move_state.journal_path(record.yaml_path).exists()
+
+
+@pytest.mark.parametrize("kind", ["trust", "permissions"])
+@pytest.mark.parametrize("phase", ["capture", "apply"])
+def test_nonobject_permission_schema_is_a_controlled_refusal(checkout, kind, phase):
+    paths = relocation.permission_paths
+    captured = paths.capture(str(checkout.source), str(checkout.destination)) if phase == "apply" else None
+    path = checkout.copilot / ("config.json" if kind == "trust" else "permissions-config.json")
+    path.write_text("[]" if kind == "trust" else "null")
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="permission object schema"):
+        if phase == "capture":
+            paths.capture(str(checkout.source), str(checkout.destination))
+        else:
+            paths.apply(str(checkout.source), str(checkout.destination), captured)
+    assert path.read_bytes() == before
+    assert not move_state.journal_path(checkout.record.yaml_path).exists()
+
+
+def test_invalid_capability_effect_combination_uses_existing_error_output(capsys):
+    from agent_worktrees import worktree_ops_cli
+
+    args = SimpleNamespace(
+        capabilities=True, worktree_id=None, destination=None, apply=True, abort=False,
+    )
+    assert worktree_ops_cli.cmd_move(args) == 1
+    assert "accepts no target or effects" in capsys.readouterr().err
+
+
+@pytest.mark.timeout(120)
+def test_malformed_workspace_yaml_returns_structured_cli_refusal(checkout):
+    directory = checkout.copilot / "session-state" / "unrelated"
+    directory.mkdir(parents=True)
+    (directory / "workspace.yaml").write_text("cwd: [\n")
+    env = dict(os.environ, AGENT_HOME=str(checkout.home), USERPROFILE=str(checkout.home), HOME=str(checkout.home))
+    result = run_caller_owned(
+        [sys.executable, "-m", "agent_worktrees", "--project", "sample", "move",
+         checkout.record.worktree_id, "--to", str(checkout.destination), "--json"],
+        env=env, cwd=checkout.home, timeout=60,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 1
+    assert "malformed YAML" in json.loads(result.stdout)["error"]
+    assert "Traceback" not in result.stderr
+    assert not move_state.journal_path(checkout.record.yaml_path).exists()
+
+
 @pytest.mark.parametrize("phase", ["git-repair", "permissions", "ledger", "retirement", "durability"])
 def test_effect_interruption_retries_without_losing_source_or_identity(checkout, monkeypatch, phase):
     fixture = checkout

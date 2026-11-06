@@ -33,6 +33,8 @@ def capture(source: str, destination: str) -> dict:
         _, data = permissions._read_config_jsonc(path) if kind == "trust" else (
             "", json.loads(path.read_text(encoding="utf-8")),
         )
+        if not isinstance(data, dict):
+            raise ValueError("unsupported Copilot permission object schema")
         entries = data.get("trustedFolders", []) if kind == "trust" else data.get("locations", {})
         if not isinstance(entries, list if kind == "trust" else dict):
             raise ValueError("unsupported Copilot permission schema")
@@ -69,6 +71,8 @@ def apply(source: str, destination: str, captured: dict) -> None:
             header, data = permissions._read_config_jsonc(path) if kind == "trust" else (
                 "", json.loads(path.read_text(encoding="utf-8")),
             )
+            if not isinstance(data, dict):
+                raise ValueError("Copilot permission object schema changed during relocation")
             entries = data.get("trustedFolders", []) if kind == "trust" else data.get("locations", {})
             if isinstance(entries, (dict, list)) and any(
                 isinstance(value, str) and (

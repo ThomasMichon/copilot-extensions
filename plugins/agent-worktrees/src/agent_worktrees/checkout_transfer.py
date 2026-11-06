@@ -83,6 +83,8 @@ def manifest(root: Path) -> dict[str, tuple]:
         info = path.lstat()
         relative = path.relative_to(root).as_posix()
         attributes = getattr(info, "st_file_attributes", 0)
+        if path.name == ".git" and relative != ".git":
+            raise ValueError("relocation v1 refuses nested Git checkouts")
         if (
             stat.S_ISLNK(info.st_mode) or attributes & 0x144DE00
             or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))

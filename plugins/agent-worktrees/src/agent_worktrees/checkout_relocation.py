@@ -77,7 +77,8 @@ def _ordinary_shape(record, ledger: Path) -> None:
         or record.session_backend is not None or record.session_backend_opaque
         or record.execution_leg is not None or record.execution_leg_opaque
         or record.profile_assignments or record.pending_seed
-        or record.follow_up or record.active_effort is not None
+        or record.follow_up or tracking.effective_open_follow_up_count(record)
+        or record.active_effort is not None
     ):
         raise ValueError("relocation v1 requires a completed ordinary sessionless, unpaired linked checkout")
     if any(claim.is_unsettled or claim.metadata_opaque for claim in record.resources):
@@ -157,7 +158,10 @@ def _sessionless(checkout: Path) -> None:
     for index, workspace in enumerate(directory.glob("*/workspace.yaml") if directory.exists() else ()):
         if index >= transfer.MAX_ENTRIES or workspace.stat().st_size > 64 * 1024 or workspace.is_symlink():
             raise ValueError("session workspace inventory is redirected")
-        data = yaml.safe_load(workspace.read_text(encoding="utf-8"))
+        try:
+            data = yaml.safe_load(workspace.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise ValueError("session workspace inventory has malformed YAML") from exc
         if not isinstance(data, dict):
             raise ValueError("session workspace inventory has an unsupported schema")
         for field in ("cwd", "git_root"):

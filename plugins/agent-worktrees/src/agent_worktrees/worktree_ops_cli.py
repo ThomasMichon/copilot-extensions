@@ -269,7 +269,7 @@ def cmd_move(args: argparse.Namespace) -> int:
 
     if args.capabilities:
         if args.worktree_id or args.destination or args.apply or args.abort:
-            output.error("move capability discovery accepts no target or effects")
+            output.err("move capability discovery accepts no target or effects")
             return 1
         print(json.dumps(checkout_relocation.capabilities()))
         return 0
