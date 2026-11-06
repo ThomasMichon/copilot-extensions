@@ -330,6 +330,22 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [two complete cohort intakes](project-context-and-resource-custody-cohorts.md)
+preserve authoritative project facts/selected-policy delivery under OPEN
+#4173 and persistent custody/exact settlement under OPEN #4619. Complete
+actual bodies were delivered/read back; review still precedes #4205/#5003
+tracking retirement. #4233 retired as stale/not actionable, not completed.
+Complete08:41 PST scans measure811 whole OPEN,1011 audited dispositions
+and82 above729. Existing owners, claims and technical check states remain.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed #11036 delivery and two further disjoint 24-contract studies.
+Fifteen nominated subordinate trackers are already CLOSED and add no credit.
+Two substantive project-context/resource-custody cohort designs and two finite
+source assessments continue; no source, native or custody completion follows.
+Complete08:23 PST scans remain812 whole OPEN,1010 audited dispositions
+and83 above729. Both canonical efforts and the campaign gate remain Active.
+
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records actual reviewed #11032 merge, complete canonical startup-root and
 #3303 receiving readback, then separate `NOT_PLANNED` retirement of
