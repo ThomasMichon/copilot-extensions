@@ -179,3 +179,34 @@ def test_text_render_is_compact(tmp_path: Path, capsys: pytest.CaptureFixture[st
     out = capsys.readouterr().out
     assert "[Plan > Phase 1 — Build]\nL" in out
     assert "Done thing" not in out
+
+
+def test_longer_fence_quotes_inner_fence(tmp_path: Path) -> None:
+    text = (
+        "# E\n\n## Plan\n\n````markdown\n```\n## Sample heading\n- [ ] sample item\n```\n````\n\n"
+        "- [ ] Real item after example\n"
+    )
+    digest = digest_mod.build_digest(_write(tmp_path / "effort", text))
+
+    assert [i["text"] for i in digest["open_items"]] == ["Real item after example"]
+    assert "Sample heading" not in [entry["title"] for entry in digest["outline"]]
+
+
+DUPLICATES = "# E\n\n## Plan\n\n### Follow-up\n- [ ] first\n\n### Follow-up\n- [ ] second\n"
+
+
+def test_since_keeps_duplicate_headings_distinct(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q")
+    folder = tmp_path / "effort"
+    readme = _write(folder, DUPLICATES)
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+
+    unchanged = digest_mod.build_digest(folder, since="HEAD")["since"]
+    assert unchanged["sections"] == [] and unchanged["removed_sections"] == []
+
+    readme.write_text("# E\n\n## Plan\n\n### Follow-up\n- [ ] second\n", encoding="utf-8")
+    deleted = digest_mod.build_digest(folder, since="HEAD")["since"]
+
+    assert deleted["sections"] == []
+    assert deleted["removed_sections"] == ["E > Plan > Follow-up"]

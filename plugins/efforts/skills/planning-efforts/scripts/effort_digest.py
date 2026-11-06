@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
-FENCE = re.compile(r"^\s*(```|~~~)")
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 OPEN_ITEM = re.compile(r"^\s*[-*+]\s+\[ \]\s+(.*)$")
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 PLAN_SECTIONS = ("plan", "validation plan")
@@ -70,18 +70,44 @@ class Section:
         return self.body[1:] if self.level else self.body
 
 
+def fenced_lines(lines: list[str]) -> list[bool]:
+    """Mark fence delimiters and fenced content.
+
+    A fence closes only on the same character repeated at least as many times
+    as the opener with nothing after it, so a longer outer fence can quote an
+    inner triple-backtick example.
+    """
+    mask: list[bool] = []
+    fence: tuple[str, int] | None = None
+    for line in lines:
+        match = FENCE.match(line)
+        if fence is None:
+            if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
+                fence = (match.group(1)[0], len(match.group(1)))
+                mask.append(True)
+            else:
+                mask.append(False)
+            continue
+        mask.append(True)
+        if (
+            match
+            and match.group(1)[0] == fence[0]
+            and len(match.group(1)) >= fence[1]
+            and not match.group(2).strip()
+        ):
+            fence = None
+    return mask
+
+
 def parse_sections(text: str) -> list[Section]:
     """Split Markdown into heading sections, ignoring headings in code fences."""
     lines = text.splitlines()
     sections: list[Section] = []
     stack: list[tuple[int, str]] = []
-    in_fence = False
     current: Section | None = None
     preamble = Section(0, "(preamble)", ("(preamble)",), 1, 0)
-    for number, line in enumerate(lines, start=1):
-        if FENCE.match(line):
-            in_fence = not in_fence
-        match = None if in_fence else HEADING.match(line)
+    for number, (line, fenced) in enumerate(zip(lines, fenced_lines(lines)), start=1):
+        match = None if fenced else HEADING.match(line)
         if match:
             level = len(match.group(1))
             title = match.group(2).strip()
@@ -110,12 +136,8 @@ def open_items(sections: list[Section]) -> list[dict]:
     for section in sections:
         if section.area not in PLAN_SECTIONS:
             continue
-        in_fence = False
-        for offset, line in enumerate(section.body):
-            if FENCE.match(line):
-                in_fence = not in_fence
-                continue
-            match = None if in_fence else OPEN_ITEM.match(line)
+        for offset, (line, fenced) in enumerate(zip(section.body, fenced_lines(section.body))):
+            match = None if fenced else OPEN_ITEM.match(line)
             if match:
                 text = match.group(1).strip()
                 if len(text) > ITEM_TEXT_LIMIT:
@@ -219,22 +241,33 @@ def changes_since(readme: Path, sections: list[Section], rev: str) -> dict:
     files.extend({"status": "?", "file": name} for name in untracked.stdout.splitlines() if name)
 
     old = _git(root, "show", f"{rev}:{readme_rel}")
-    old_content = {s.path: s.content for s in parse_sections(old.stdout)} if old.returncode == 0 else {}
-    changed = []
+    # Match by heading path, keeping repeated sibling headings as distinct
+    # occurrences: unchanged copies pair first, then leftovers pair in order.
+    remaining: dict[tuple[str, ...], list[list[str]]] = {}
+    if old.returncode == 0:
+        for section in parse_sections(old.stdout):
+            remaining.setdefault(section.path, []).append(section.content)
+    pending = []
     for section in sections:
-        previous = old_content.get(section.path)
-        if previous == section.content:
-            continue
+        previous = remaining.get(section.path, [])
+        if section.content in previous:
+            previous.remove(section.content)
+        else:
+            pending.append(section)
+    changed = []
+    for section in pending:
+        previous = remaining.get(section.path)
         changed.append(
             {
-                "state": "added" if previous is None else "changed",
+                "state": "changed" if previous else "added",
                 "section": section.label,
                 "lines": [section.start, section.end],
                 "bytes": section.size,
             }
         )
-    current_paths = {s.path for s in sections}
-    removed = [" > ".join(path) for path in old_content if path not in current_paths]
+        if previous:
+            previous.pop(0)
+    removed = [" > ".join(path) for path, left in remaining.items() for _ in left]
     return {
         "rev": rev,
         "readme_existed": old.returncode == 0,
