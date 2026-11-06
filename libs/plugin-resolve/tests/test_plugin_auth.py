@@ -78,7 +78,7 @@ def test_git_owner_uses_the_execution_checkout_and_exact_source(
         "fill",
     ]
     assert options["cwd"] == tmp_path
-    assert options["input"] == f"url={expected_url}\n\n"
+    assert options["input"] == f"capability[]=authtype\nurl={expected_url}\n\n"
     assert options["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert options["env"]["GCM_INTERACTIVE"] == "never"
     assert "GIT_DIR" not in options["env"]
@@ -199,6 +199,46 @@ def test_credential_from_another_authority_is_not_forwarded(
     )
     with pytest.raises(RuntimeError, match="different authority"):
         plugin_auth.plugin_management_environment(GITHUB, {}, tmp_path)
+
+
+@pytest.mark.parametrize("legacy_fields", [False, True])
+def test_bearer_only_owner_negotiates_without_ambient_account_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_fields: bool,
+) -> None:
+    original = {"GH_TOKEN": "ambient-account-value", "COPILOT_GITHUB_TOKEN": "inference-value"}
+    before = dict(original)
+    monkeypatch.setattr(plugin_auth, "execution_executable", lambda *args: "selected-git")
+
+    def capture(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if "capability[]=authtype" not in kwargs["input"].splitlines():
+            return subprocess.CompletedProcess(arguments, 128, "", "no negotiated credential")
+        scheme = "bea" + "rer"
+        selected = "bearer-owner-value"
+        legacy = "username=legacy\npassword=legacy-value\n" if legacy_fields else ""
+        return subprocess.CompletedProcess(
+            arguments, 0, f"authtype={scheme}\ncredential={selected}\n{legacy}\n", "",
+        )
+
+    monkeypatch.setattr(plugin_auth, "_credential_run", capture)
+    child = plugin_auth.plugin_management_environment(GITHUB, original, tmp_path)
+    assert child["COPILOT_GITHUB_TOKEN"] == child["GH_TOKEN"] == "bearer-owner-value"
+    assert original == before
+
+
+def test_unsupported_negotiated_credential_does_not_select_an_ambient_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(plugin_auth, "execution_executable", lambda *args: "selected-git")
+    monkeypatch.setattr(
+        plugin_auth, "_credential_run",
+        lambda arguments, **kwargs: subprocess.CompletedProcess(
+            arguments, 0, "authtype=basic\ncredential=encoded-owner-value\n\n", "",
+        ),
+    )
+    with pytest.raises(RuntimeError, match="unsupported authentication type"):
+        plugin_auth.plugin_management_environment(
+            GITHUB, {"GH_TOKEN": "ambient-account-value"}, tmp_path,
+        )
 
 
 def test_credential_lookup_respects_the_remaining_budget(

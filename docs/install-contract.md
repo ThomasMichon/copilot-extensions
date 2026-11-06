@@ -2253,7 +2253,10 @@ GitHub HTTPS sources, the shared `plugin_resolve.plugin_auth` helper asks Git's
 configured credential owner at the execution checkout, preserving command-scope
 credential-router configuration while removing inherited repository selectors.
 It uses a matching public-host `GH_TOKEN` or `GITHUB_TOKEN` only when Git supplies
-no credential. An explicit owner refusal or a different returned authority is
+no credential. It advertises Git's standard `authtype` capability and accepts
+password or negotiated bearer credentials; a negotiated credential takes
+precedence over legacy username/password fields. An explicit owner refusal,
+unsupported negotiated authentication type or different returned authority is
 not an ambient fallback. Lookups are non-interactive, headless and bounded to
 ten seconds or the caller's shorter remaining budget.
 The existing stdlib process supervisor contains the lookup and its credential

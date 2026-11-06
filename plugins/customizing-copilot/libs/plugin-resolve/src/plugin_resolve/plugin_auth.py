@@ -122,7 +122,7 @@ def _git_token(
                 "credential",
                 "fill",
             ],
-            input=f"url={url}\n\n",
+            input=f"capability[]=authtype\nurl={url}\n\n",
             cwd=cwd,
             env=lookup,
             timeout=min(10, timeout),
@@ -151,9 +151,13 @@ def _git_token(
         "www.github.com:443",
     }:
         raise RuntimeError("GitHub credential owner returned a different authority")
-    token = fields.get("password")
-    if token is None and fields.get("authtype", "").casefold() == "bearer":
-        token = fields.get("credential")
+    token: str | None
+    if "credential" in fields:
+        if fields.get("authtype", "").casefold() != "bearer":
+            raise RuntimeError("GitHub credential owner returned an unsupported authentication type")
+        token = fields["credential"]
+    else:
+        token = fields.get("password")
     return _usable_token(token)
 
 
