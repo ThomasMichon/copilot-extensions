@@ -4107,25 +4107,33 @@ class _ResidentHookPolicy:
             return {}
         return {"additionalContext": text} if text else {}
 
+    def native_batch_targets(self, payload: dict) -> list[str] | None:
+        from .hook_ipc import HookUnavailable
+
+        forms = self._module("tool_call_forms.py")
+        if forms is None:
+            raise HookUnavailable
+        try:
+            return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
+        except ValueError as exc:
+            raise HookUnavailable from exc
+
     def mutation_targets(self, payload: dict) -> list[str] | None:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
-        batch = "toolCalls" in payload
-        if batch or tool in _HOOK_WRITE_TOOLS:
-            from .hook_ipc import HookUnavailable
-
+        if tool in _HOOK_WRITE_TOOLS:
+            args = payload.get("toolArgs") or payload.get("tool_input") or {}
+            cwd = _hook_payload_cwd(payload)
             forms = self._module("tool_call_forms.py")
             if forms is None:
-                if batch:
-                    raise HookUnavailable
                 return None
             try:
-                return forms.native_mutation_targets(
-                    payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload),
-                )
-            except ValueError as exc:
-                if batch:
-                    raise HookUnavailable from exc
+                targets = forms.write_targets(tool, args)
+            except ValueError:
                 return None
+            return [
+                path if os.path.isabs(path) else os.path.join(cwd, path)
+                for path in targets
+            ] or [cwd]
         if tool not in _HOOK_SHELL_TOOLS:
             return []
         args = payload.get("toolArgs") or payload.get("tool_input") or {}
@@ -4166,7 +4174,7 @@ def _resident_hook_decision(
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        targets = policy.mutation_targets(payload)
+        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:

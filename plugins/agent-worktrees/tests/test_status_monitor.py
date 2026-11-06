@@ -1468,6 +1468,31 @@ def test_native_batch_reuses_original_normalization_and_bounded_targets(tmp_path
     assert invalidated == expected
 
 
+@pytest.mark.parametrize("tool", ["edit", "powershell"])
+def test_legacy_post_batch_metadata_preserves_outer_mutation_and_advice(tmp_path, monkeypatch, tool):
+    policy = m._ResidentHookPolicy(m._load_hook_client_module())
+    payload = {
+        "cwd": str(tmp_path), "toolName": tool,
+        "toolArgs": {"path": "one"} if tool == "edit" else {"command": "git commit -m test"},
+        "toolCalls": [{"name": "powershell"}, None],
+    }
+    invalidated, advised = [], []
+    cache = types.SimpleNamespace(
+        activate_hook_project=lambda *args: None,
+        invalidate=lambda path: invalidated.append(path),
+        invalidate_all=lambda: invalidated.append("all"),
+    )
+    monkeypatch.setattr(policy, "post", lambda event, deadline: advised.append(event) or {
+        "additionalContext": "legacy advice",
+    })
+    monkeypatch.setattr(m, "_bind_nudge_decision", lambda *args, **kwargs: {})
+    assert m._resident_hook_decision(
+        "postToolUse", payload, policy=policy, segment_cache=cache,
+    ) == {"additionalContext": "legacy advice"}
+    assert advised == [payload]
+    assert invalidated == ([str(tmp_path / "one")] if tool == "edit" else ["all"])
+
+
 def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path, monkeypatch):
     registry = tmp_path / "repos.yaml"
     registry.write_text("one", encoding="utf-8")
@@ -5185,6 +5210,7 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
 @pytest.mark.parametrize("kind", [
     "handoffWake", "nativeToolMutation", "native-unadmitted",
     "nativeToolBatchMutation", "batch-unadmitted", "batch-reads",
+    "legacy-batch-shell", "legacy-batch-native", "legacy-batch-read",
 ])
 def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, monkeypatch, kind):
     """Wiring-level regression: a real ``handoffWake`` request, dialed through
@@ -5205,7 +5231,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
 
     class _FakeHookClient:
         def _load_sibling(self, name):
-            if name == "tool_call_forms.py":
+            if name in {"tool_call_forms.py", "statelessness_guard.py"}:
                 return original_client._load_sibling(name)
             return object()  # any non-None stub satisfies ready()'s check
 
@@ -5280,15 +5306,25 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         "name": "view" if kind == "batch-reads" else "edit",
                         "args": {"path": "one"},
                     }]}
+                legacy = kind.startswith("legacy-batch-")
+                if legacy:
+                    payload.update(toolCalls=[None, {"name": "powershell"}])
+                    if kind == "legacy-batch-shell":
+                        payload.update(toolName="powershell", toolArgs={"command": "git commit -m test"})
+                    elif kind == "legacy-batch-read":
+                        payload.update(toolName="view")
                 request = {
                     "version": 1, "token": self.token,
-                    "kind": "nativeToolBatchMutation" if batch else "nativeToolMutation",
+                    "kind": "postToolUse" if legacy else "nativeToolBatchMutation" if batch else "nativeToolMutation",
                     "hook_generation": self.generation, "deadline": time.time() + 1,
                     "payload": payload,
                 }
                 with socket.create_connection(self.server.server_address, timeout=1) as conn:
                     conn.sendall(json.dumps(request).encode() + b"\n")
-                    dial_results.append(conn.recv(1) == b"")
+                    if legacy:
+                        dial_results.append(json.loads(conn.makefile("rb").readline())["result"] == {})
+                    else:
+                        dial_results.append(conn.recv(1) == b"")
                 assert self.has_recent_hook_demand() is (
                     kind not in {"native-unadmitted", "batch-unadmitted"}
                 )
@@ -5301,7 +5337,9 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     assert dial_results == [True], "the real wire round-trip must be accepted"
     assert len(bound) == 1
     # The loop may legitimately consume the event while draining after start().
-    assert wake_at_reply == [(False, kind not in {"native-unadmitted", "batch-unadmitted", "batch-reads"})], (
+    assert wake_at_reply == [(False, kind not in {
+        "native-unadmitted", "batch-unadmitted", "batch-reads", "legacy-batch-read",
+    })], (
         "a real handoffWake request through the actual HookIpcServer must "
         "set the real wake_event the sweep loop waits on, not just satisfy "
         "the _kind_wakes_sweep predicate in isolation"
