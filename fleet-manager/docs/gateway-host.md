@@ -111,7 +111,10 @@ An unchanged install reuses the same ready owner. Key, local policy, target-logi
 identity, CA or configuration changes invalidate reuse; token renewal stays with
 the existing per-admission reference reader and is not a host restart trigger.
 Selected-generation replacement still observes the existing exact stop and
-lease exclusion; this does not claim gap-free notification handoff.
+lease exclusion. Before opening a watch, the same incoming process allows up
+to the existing ten-second cold-rebind window for an outgoing lease to settle;
+it neither creates duplicate consumers nor terminates a foreign incumbent.
+This does not claim gap-free notification handoff.
 
 Prelaunch intent is written before process creation and settled by that exact
 child's readiness publication or confirmed launcher cleanup. If the launcher

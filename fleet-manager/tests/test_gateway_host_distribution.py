@@ -106,7 +106,14 @@ def prepared_application(tmp_path, wheel, monkeypatch, *, extras="gateway-host")
     original.mkdir()
     source, _ = project_at(original / "source")
     engine = native.source_inputs.engine
-    packages = engine._package_roots(PROJECT)
+    packages = set(engine._package_roots(PROJECT))
+    if "ssh-client" in extras.split(","):
+        for component in (
+            PROJECT.parent / "plugins" / "agent-ssh",
+            PROJECT.parent / "libs" / "single-instance-lease",
+        ):
+            packages.update(engine._package_roots(component))
+    packages = sorted(packages)
     for package in packages:
         if package != PROJECT:
             shutil.copytree(
@@ -415,7 +422,11 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
             host.write_private(Path(selection["configuration"]), value)
             assert (await status(first))["pid"] == initial["pid"]
             updated = await invoke(updated_slot, "install")
-            assert updated.returncode == 0, updated.stdout + updated.stderr
+            assert updated.returncode == 0, (
+                updated.stdout + updated.stderr + (root / host.STATE / "host.log").read_text(
+                    encoding="utf-8", errors="replace",
+                )
+            )
             selected_slot = updated_slot
             incoming = await status(updated_slot)
             assert incoming["ready"] and incoming["selected"] and incoming["pid"] != initial["pid"]

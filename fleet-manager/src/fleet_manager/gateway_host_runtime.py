@@ -147,6 +147,7 @@ async def _control(root, slot, nonce, identity, stopping, status):
 
 
 async def _run_ssh(root, nonce, slot, selection):
+    from single_instance_lease import AlreadyRunningError
     from zdd.diagnostics import process_start_time
     from .gateway_host_start import require_launch
     from .ssh_machine import _settle, run
@@ -169,7 +170,21 @@ async def _run_ssh(root, nonce, slot, selection):
         revision = value
         converged.set()
 
-    consumer = asyncio.create_task(run(config, stop=stopping, on_applied=applied))
+    async def consume():
+        deadline = asyncio.get_running_loop().time() + 10
+        while not stopping.is_set():
+            try:
+                await run(config, stop=stopping, on_applied=applied)
+                return
+            except AlreadyRunningError:
+                if (
+                    asyncio.get_running_loop().time() >= deadline
+                    or host.selected_version(root) != slot.name
+                ):
+                    raise
+                await asyncio.sleep(.1)
+
+    consumer = asyncio.create_task(consume())
     initial = asyncio.create_task(converged.wait())
     control = None
     try:
@@ -246,8 +261,11 @@ def main() -> int:
     try:
         asyncio.run(run(host.installation_root(), nonce))
         return 0
-    except Exception:
-        print("fleet-manager: selected Gateway hosting failed", file=sys.stderr)
+    except Exception as error:
+        print(
+            f"fleet-manager: selected Gateway hosting failed ({type(error).__name__})",
+            file=sys.stderr,
+        )
         return 1
 
 

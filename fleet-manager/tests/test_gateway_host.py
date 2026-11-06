@@ -244,7 +244,8 @@ def test_ssh_host_preflight_is_inert_and_keeps_provider_token_renewal(tmp_path):
 
 
 @pytest.mark.parametrize("denied", [False, True])
-def test_ssh_host_waits_for_complete_directory_and_settles_owned_consumer(tmp_path, monkeypatch, denied):
+@pytest.mark.parametrize("held", [False, True])
+def test_ssh_host_waits_for_complete_directory_and_settles_owned_consumer(tmp_path, monkeypatch, denied, held):
     from fleet_manager import ssh_machine
     from fleet_manager.ssh_directory import SSHDirectoryClient
     from test_gateway_ssh_provider import key
@@ -265,6 +266,24 @@ def test_ssh_host_waits_for_complete_directory_and_settles_owned_consumer(tmp_pa
     async def exercise():
         incoming, entered = asyncio.Queue(), asyncio.Event()
         positions = []
+        attempted = asyncio.Event()
+        incumbent = None
+        if held:
+            original_lease = ssh_machine._lease
+            incumbent = original_lease(Path(value["state_dir"]))
+            incumbent.acquire()
+
+            def observed_lease(path):
+                lease = original_lease(path)
+                original_acquire = lease.acquire
+
+                def acquire():
+                    attempted.set()
+                    return original_acquire()
+
+                return SimpleNamespace(acquire=acquire, release=lease.release)
+
+            monkeypatch.setattr(ssh_machine, "_lease", observed_lease)
 
         async def wait(_client, after, *, seconds=25):
             positions.append(after)
@@ -285,6 +304,11 @@ def test_ssh_host_waits_for_complete_directory_and_settles_owned_consumer(tmp_pa
             monkeypatch.setattr(ssh_machine, "_consumer", selected_consumer)
         task = asyncio.create_task(gateway_host_runtime.run(root, nonce))
         try:
+            if held:
+                await reached(attempted.is_set, task)
+                assert not entered.is_set() and not (root / host.STATE / host.RUNTIME).exists()
+                incumbent.release()
+                incumbent = None
             await reached(entered.is_set, task)
             assert gateway_host_start.inspect(root, selection)["state"] == "launch-unresolved"
             assert not (root / host.STATE / host.RUNTIME).exists()
@@ -306,6 +330,8 @@ def test_ssh_host_waits_for_complete_directory_and_settles_owned_consumer(tmp_pa
             await asyncio.wait_for(task, 5)
             assert positions == [0, directory["revision"]]
         finally:
+            if incumbent is not None:
+                incumbent.release()
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
