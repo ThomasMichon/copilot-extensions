@@ -1053,6 +1053,23 @@ callback an implicit credential store.
   current source and existing fixes; do not infer Dispatch success from the
   passing PR-owner/Fleet cohort or repeat the completed qualification.
 
+### 2026-11-06 - Land the compact comment-origin producer before its consumer
+
+- #11137 actually merged as `a914f7815b7915c66b7cd8f0f660cc60ee932fe5`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. The source worktree reconciled through its normal completion path.
+- The optional Worktrees producer returns a distinct compact comment-origin
+  contract from its actual managed record, defaults to public-safe source
+  data and preserves raw/anonymous/codename policy. It does not compose or
+  post a comment, mint GUIDs or become a PR-ownership refresh.
+- The exact published two-file source packet passes 37 cases with bounded
+  cleanup verified. Fatal lint, module/docs/install contracts pass; the
+  changed module's typecheck project remains pending, not strict evidence.
+- Re-read the current canonical Plan and Validation Plan; the parent and
+  #11128 remain open. Continue configured body/GUID preparation, then actual
+  publisher inventory, durable correlation and separately authorized adopter
+  qualification. No deployment, live feedback or custody transfer occurred.
+
 ### 2026-11-06 - Review compact forge-comment provenance before implementation
 
 - #11129 actually merged as `5687588a648f5ac54bcd7acf6e5857fdebe4ada4`
