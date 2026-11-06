@@ -592,6 +592,28 @@ def test_guard_is_active_during_conftest_import_before_sessionstart(tmp_path):
     assert not sentinel.exists()
 
 
+@pytest.mark.parametrize("matching_birth", [False, True])
+def test_native_cleanup_signals_only_the_verified_process_incarnation(matching_birth):
+    import ast
+
+    source = Path(__file__).resolve().parents[1] / "worktree-manager" / "tests" / "native" / "test_warm_picker_lifetime.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in {"_live", "_kill"}
+    ]
+    calls = []
+    namespace = {
+        "_pid_alive": lambda _: True,
+        "process_start_time": lambda _: "owned" if matching_birth else "reused",
+        "os": SimpleNamespace(name="nt", kill=lambda *args: calls.append(args)),
+        "signal": SimpleNamespace(SIGTERM=15, SIGKILL=9),
+    }
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"), namespace)
+    namespace["_kill"]({"pid": 123, "start": "owned"})
+    assert calls == ([(123, 15)] if matching_birth else [])
+
+
 def test_native_startup_failure_keeps_bounded_diagnostics_without_native_execution(tmp_path):
     import ast
     import json
