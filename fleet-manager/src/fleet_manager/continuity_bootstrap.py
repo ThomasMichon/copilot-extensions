@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 import hashlib
 import hmac
 import os
@@ -17,7 +18,7 @@ from joserfc.jwk import ECKey
 
 from . import planning
 from .gateway_service_caller import ServiceCaller, _read
-from .gateway_service_channel import TransportError, check, origin, shape, unpack
+from .gateway_service_channel import DEADLINE, TransportError, check, origin, shape, unpack
 from .gateway_service_connector import verified_tls
 from .gateway_service_context import fields
 from .gateway_enrollment import enrollment_scope
@@ -29,6 +30,14 @@ from .runtime_identity import _text, _time
 PROVIDER = "local-projection-v1"
 CAPABILITY = "delegated-machine-enrollment-v1"
 MACHINE_CALLER_CAPABILITY = "continuity-machine-caller-v1"
+MACHINE_REFERENCE_CAPABILITY = "continuity-machine-reference-v1"
+_UNSELECTED_CA = object()
+
+
+@dataclass(frozen=True)
+class MachineCallerReference:
+    caller: ServiceCaller = field(repr=False)
+    revision: str
 
 
 def _projection(path: Path, harness: str) -> dict:
@@ -147,11 +156,11 @@ def _locations(source: Path, state_root: Path) -> None:
         check(not (parent / ".git").exists(), "continuity-state-in-repository")
 
 
-def machine_caller(
+def _machine_caller_reference(
     source: Path, *, harness: str, state_root: Path, machine: str,
     gateway_origin: str, principal: str, audience: str, resource: str,
-) -> ServiceCaller:
-    """Bind the existing retained identity to one finite caller; never enroll or export."""
+    expected_ca: object = _UNSELECTED_CA, timeout: float = DEADLINE,
+) -> MachineCallerReference:
     _locations(source, state_root)
     projection = _projection(source, harness)
     scope = projection["delegation"]["scope"]
@@ -160,14 +169,49 @@ def machine_caller(
         and scope["principal"] == principal and projection["audience"] == audience
         and resource in scope["slots"], "continuity-caller-scope-mismatch",
     )
+    check(
+        expected_ca is _UNSELECTED_CA or projection["gateway_ca"] == expected_ca,
+        "continuity-caller-trust-mismatch",
+    )
     retained = _state(state_root, projection, apply=False)
     check(retained is not None, "continuity-machine-identity-unavailable")
     key = ECKey.import_key(retained["private_key"])
     check(key.as_dict(private=False).get("crv") == "P-256", "invalid-continuity-key")
-    return ServiceCaller(
-        gateway_origin=scope["destination"], proof_key=key,
-        gateway_ca=projection["gateway_ca"], machine_principal=scope["principal"],
-        machine_audience=projection["audience"], machine_resource=resource,
+    return MachineCallerReference(
+        ServiceCaller(
+            gateway_origin=scope["destination"], proof_key=key,
+            gateway_ca=projection["gateway_ca"], machine_principal=scope["principal"],
+            machine_audience=projection["audience"], machine_resource=resource,
+            timeout=timeout,
+        ),
+        planning.digest({
+            "source_digest": retained["source_digest"], "request": retained["request"],
+            "gateway_ca": projection["gateway_ca"],
+        }),
+    )
+
+
+def machine_caller(
+    source: Path, *, harness: str, state_root: Path, machine: str,
+    gateway_origin: str, principal: str, audience: str, resource: str,
+) -> ServiceCaller:
+    """Bind the existing retained identity to one finite caller; never enroll or export."""
+    return _machine_caller_reference(
+        source, harness=harness, state_root=state_root, machine=machine,
+        gateway_origin=gateway_origin, principal=principal, audience=audience, resource=resource,
+    ).caller
+
+
+def machine_caller_reference(
+    source: Path, *, harness: str, state_root: Path, machine: str,
+    gateway_origin: str, gateway_ca: str | None, principal: str, audience: str, resource: str,
+    timeout: float = DEADLINE,
+) -> MachineCallerReference:
+    """Capture a caller and opaque public-input revision with explicitly selected trust."""
+    return _machine_caller_reference(
+        source, harness=harness, state_root=state_root, machine=machine,
+        gateway_origin=gateway_origin, principal=principal, audience=audience, resource=resource,
+        expected_ca=gateway_ca, timeout=timeout,
     )
 
 

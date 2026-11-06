@@ -254,6 +254,40 @@ def test_ssh_host_preflight_is_inert_and_keeps_provider_token_renewal(tmp_path):
     assert not (root / host.STATE).exists()
 
 
+def test_continuity_host_uses_owner_revision_without_reading_private_key_storage(tmp_path, monkeypatch):
+    from dataclasses import replace
+    import hashlib
+    from fleet_manager import continuity_bootstrap, credential_references
+    from test_ssh_machine import continuity_config
+
+    root = tmp_path / "i"
+    selection, previous, _, _ = ssh_selected(root)
+    value, _, _, _ = continuity_config(root)
+    for name in ("state_dir", "config_d", "ssh_config", "authorization_dir"):
+        value[name] = previous[name]
+    host.write_private(Path(selection["configuration"]), value)
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda *_args: pytest.fail("continuity host used an external private-key file reader"),
+    )
+    host.prepare(root, selection)
+    before = host.startup_digest(selection)
+    assert host.startup_digest(selection) == before
+    source = continuity_bootstrap.machine_caller_reference
+
+    def changed_reference(*args, **kwargs):
+        reference = source(*args, **kwargs)
+        return replace(
+            reference, revision=hashlib.sha256((reference.revision + "changed").encode()).hexdigest(),
+        )
+
+    monkeypatch.setattr(continuity_bootstrap, "machine_caller_reference", changed_reference)
+    assert host.startup_digest(selection) != before
+    assert not Path(value["state_dir"]).exists()
+    assert not (root / host.STATE).exists()
+    assert not Path(value["config_d"]).exists()
+
+
 @pytest.mark.parametrize("scope", ["config", "fragments", "authorization", "sources", "locks"])
 def test_ssh_host_state_is_outside_all_writer_and_derived_scopes(tmp_path, scope):
     from agent_ssh import gateway_profile, ssh_profile

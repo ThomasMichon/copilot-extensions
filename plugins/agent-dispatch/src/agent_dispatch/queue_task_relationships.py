@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import secrets
 import sqlite3
@@ -307,10 +308,14 @@ class QueueTaskRelationshipsMixin:
             ):
                 raise TaskError("original task assignment changed; relationship retained")
         common = {"expected_creation_nonce": workspace.creation_nonce}
+        writer = self._relationship_writer
+        bind_request = getattr(writer, "bind_request", None)
+        if callable(bind_request):
+            writer = bind_request(copy.deepcopy(request))
 
         def write(operation: str, payload: dict, *, phase: str | None = None) -> dict:
             try:
-                result = self._relationship_writer(workspace, operation, {**payload, **common})
+                result = writer(workspace, operation, {**payload, **common})
             except Exception as exc:
                 raise TaskError(
                     "task relationship request is unresolved; reconcile its original assignment"
@@ -320,7 +325,7 @@ class QueueTaskRelationshipsMixin:
             return result
 
         if retiring:
-            receipt = self._relationship_writer(
+            receipt = writer(
                 workspace,
                 "inspect",
                 {

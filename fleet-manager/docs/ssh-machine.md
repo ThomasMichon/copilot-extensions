@@ -22,8 +22,9 @@ foreground command or make ordinary thin-client installation active.
 ## Configuration and authority
 
 Supply strict bounded `fleet-manager.ssh-client` JSON in one explicitly selected
-version. Version 1 remains token-only. Version 2 opts into `machine-key-v1`;
-missing tokens never select it implicitly. All fields in the selected form are
+version. Version 1 remains token-only. Version 2 selects `machine-key-v1` with
+external PEM references; version 3 selects the continuity owner's supported
+machine reference. Missing tokens never select either mode implicitly. All fields in the selected form are
 required; optional references use explicit `null`, not ambient defaults.
 
 | Fields | Meaning |
@@ -31,9 +32,10 @@ required; optional references use explicit `null`, not ambient defaults.
 | `state_dir` | Dedicated absolute owner-private directory containing only this role's canonical lease |
 | `gateway_origin`, `gateway_ca` | Selected canonical HTTPS Gateway origin and nullable absolute CA reference |
 | `namespace` | Selected SSH service namespace, such as `/ssh`; no query or trailing slash |
-| `proof_key_file` | Absolute existing provider-owned P-256 private PEM reference, read through Fleet's credential-reference owner |
+| `proof_key_file` (v1/v2 only) | Absolute existing provider-owned P-256 private PEM reference, read through Fleet's credential-reference owner |
 | `access_token_file` (v1 only) | Absolute existing access-token reference; required in v1 and forbidden in v2 |
-| `authentication` (v2 only) | Exact record containing `profile`, `principal`, `audience`, `resource`; forbidden in v1 |
+| `authentication` (v2/v3 only) | Exact record containing `profile`, `principal`, `audience`, `resource`; forbidden in v1 |
+| `credential_source` (v3 only) | Exact `provider`, `source`, `harness`, `state_root` reference to the existing continuity owner; no key bytes |
 | `policy_path`, `machine`, `environment`, `controller` | Absolute local policy and exact selected logical machine/environment/controller |
 | `gateway` | Existing SSH Gateway alias, not a new endpoint or an enrollment grant |
 | `identity_file`, `public_key_file` | Absolute existing target-login key references; no key acquisition, export or rotation |
@@ -53,6 +55,11 @@ Before policy/credential reads or lease creation, the existing agent-ssh adapter
 also checks the writers' derived source and lock directories. The lease state
 cannot contain or sit inside any profile, authorization, source or lock scope;
 no second copy of those writer-owned path names is maintained by Fleet.
+All selected input references, including the v3 source file and entire provider
+state directory, must be outside those writer scopes too. The lease cannot
+contain provider inputs or sit inside the provider's state. Unsafe overlap
+refuses before key reads; previously configured unsafe input layouts are not
+silently preserved as supported behavior.
 Installed hosting additionally excludes the entire application installation
 root from those writer scopes. Local public-key bytes are bounded and parsed
 through the existing canonical ed25519 validator before watch or lease creation;
@@ -99,7 +106,7 @@ After trimming surrounding file whitespace, both preparation and fresh
 callbacks require the caller's visible-ASCII token format, excluding internal
 spaces, non-ASCII characters and DEL.
 
-In v2, replace `access_token_file` with this explicit record:
+In v2/v3, replace `access_token_file` with this explicit record:
 
 ```json
 {
@@ -113,7 +120,7 @@ In v2, replace `access_token_file` with this explicit record:
 `principal` and `resource` are bounded identifiers; `audience` is a nonempty
 visible-ASCII string of at most 512 characters. These must match the external
 Gateway enrollment, audience and selected service resource; local configuration
-does not create those bindings. The reference must already contain an
+does not create those bindings. In v2 the reference must already contain an
 unencrypted private P-256 PEM key (PKCS8 or SEC1), not a public key, JWK,
 other curve or key type. Fleet imports that selected PEM as a JOSE `ECKey`
 locally, after local policy/output preflight and before lease or profile effects.
@@ -122,12 +129,38 @@ The existing `ServiceCaller` owns TLS and peer-profile validation, fresh Gateway
 challenges and proofs binding the principal, audience, resource, actual method,
 full target including query and body.
 
-Both modes consume caller-explicit, externally provisioned references. No
-provider login, enrollment, key generation/materialization/export, token minting,
-cache or credential renewal is supplied. In particular, private continuity
-bootstrap state is not a PEM provider interface. Key provisioning and rotation
-remain external; replacing the selected signing key requires restarting the
-foreground consumer.
+V3 instead removes `proof_key_file` and adds:
+
+```json
+{
+  "credential_source": {
+    "provider": "local-projection-v1",
+    "source": "<absolute protected continuity projection>",
+    "harness": "harness-a",
+    "state_root": "<absolute existing continuity state directory>"
+  }
+}
+```
+
+The fixed continuity owner validates that source/context and the configured
+machine, Gateway origin, principal, audience and resource. The explicit
+`gateway_ca` must exactly match the owner's selected CA reference or null for
+platform trust; no trust substitution is inferred. The owner returns the existing
+finite ServiceCaller and an opaque revision of its public identity/operation
+bindings. SSH does not read private JWK storage, export another PEM or acquire a
+token. Missing/older `continuity-machine-reference-v1` support refuses before
+identity access, lease creation or profiles; it does not fall back to v1/v2.
+The installed host uses that owner revision plus its existing input capture,
+not a consumer-side hash of private bootstrap data.
+
+All modes consume explicit, already provisioned references. No provider login,
+enrollment, key generation/materialization/export, token minting, cache or
+credential renewal is supplied. V3 requires existing continuity state; it does
+not bootstrap a missing identity. Key provisioning and rotation remain external;
+replacing the selected signing key requires restarting the foreground consumer.
+V1/v2 retain their existing defaults and meanings. Old readers refuse v3 before
+effects; rollback never translates a continuity reference into a PEM or token.
+Normal Manager/engine selected-role setup is still a separate integration.
 
 ## Lifetime, catch-up and failure
 

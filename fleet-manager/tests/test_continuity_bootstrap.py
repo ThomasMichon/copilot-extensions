@@ -99,6 +99,19 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
                     "POST", "/_fleet/machine-connect", body=planning.canonical({"slot": "service-a"}),
                 )
                 assert response.status == 200
+            captured = continuity_bootstrap.machine_caller_reference(
+                **arguments, gateway_ca=rig.ca, timeout=35,
+            )
+            assert captured.revision == continuity_bootstrap.machine_caller_reference(
+                **arguments, gateway_ca=rig.ca, timeout=35,
+            ).revision
+            with monkeypatch.context() as patch:
+                patch.setattr(
+                    continuity_bootstrap, "_state",
+                    lambda *_args, **_kwargs: pytest.fail("mismatched trust read private identity"),
+                )
+                with pytest.raises(TransportError, match="continuity-caller-trust-mismatch"):
+                    continuity_bootstrap.machine_caller_reference(**arguments, gateway_ca=None)
             changed = json.loads(before[0])
             changed["source_digest"] = "0" * 64
             retained.write_bytes(planning.canonical(changed))
@@ -112,6 +125,9 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
             monkeypatch.setattr(continuity_bootstrap, "time", clock)
             monkeypatch.setattr(machine_identity, "time", clock)
             rig.h.clock.value = now + 301
+            assert continuity_bootstrap.machine_caller_reference(
+                **arguments, gateway_ca=rig.ca, timeout=35,
+            ).revision == captured.revision
             caller = continuity_bootstrap.machine_caller(**arguments)
             response = await caller.request(
                 "POST", "/_fleet/machine-connect", body=planning.canonical({"slot": "service-a"}),

@@ -186,13 +186,7 @@ def prepare(root: Path, selection: dict) -> tuple[object, object]:
         from agent_ssh.gateway_directory import validate_consumer_state
 
         value = config.to_dict()
-        protected = [root, Path(selection["configuration"])]
-        protected.extend(
-            Path(value[name])
-            for name in ("policy_path", "identity_file", "public_key_file", "proof_key_file",
-                         "gateway_ca", "access_token_file")
-            if value.get(name) is not None
-        )
+        protected = [root, Path(selection["configuration"]), *config.input_paths()]
         for path in protected:
             if path.resolve().is_relative_to(state):
                 raise PlanError("SSH client lease state must exclude protected host inputs")
@@ -297,8 +291,9 @@ def startup_digest(selection: dict, *, listener=None, configuration=None) -> str
     if selection["role"] == "ssh-client":
         from .credential_references import read_credential_reference
 
-        config = (configuration if configuration is not None else ssh_configuration(selection)).to_dict()
-        return digest({
+        selected = configuration if configuration is not None else ssh_configuration(selection)
+        config = selected.to_dict()
+        inputs: dict[str, object] = {
             "configuration": config,
             "references": {
                 key: hashlib.sha256(
@@ -307,9 +302,15 @@ def startup_digest(selection: dict, *, listener=None, configuration=None) -> str
                 ).hexdigest()
                 for key in ("policy_path", "identity_file", "public_key_file",
                             "proof_key_file", "gateway_ca")
-                if config[key] is not None
+                if config.get(key) is not None
             },
-        })
+        }
+        if config["version"] == 3:
+            from .ssh_machine import _consumer, _continuity_reference
+
+            _consumer(selected)
+            inputs["credential_reference"] = _continuity_reference(selected).revision
+        return digest(inputs)
     if listener is None:
         listener = _listener(selection)
     return digest({
