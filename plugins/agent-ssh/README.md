@@ -547,7 +547,7 @@ pass. A real GUI-subsystem Python parent drives completed SSH/Worktrees runtimes
 two native callbacks, a missing-adapter red control and resolution/execution
 timeout cleanup while Win32 enumerates visible windows and foreground changes.
 The fixture requires the native adapter and makes shell fallback fail closed.
-Disposable fixtures precompile package and payload Python inputs with their
+Disposable fixtures precompile package and used payload Python inputs with their
 selected isolated interpreter, not the runner's redirected bytecode cache.
 Their measurements do not qualify cold-cache startup.
 Set `AGENT_SSH_NATIVE_CALLER` plus the runner's host-state flags to reuse an

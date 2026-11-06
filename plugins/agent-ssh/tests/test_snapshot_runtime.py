@@ -449,9 +449,22 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
                         shutil.copyfile(package, site / package.name)
             paths = [str(p) for p in sys.path if "site-packages" in p]
             (site / "snapshot-fixture.pth").write_text("\n".join(paths) + "\n", encoding="utf-8")
+        payload_source = payload / "src" / plugin.replace("-", "_")
+        payload_inputs = [
+            payload_source / "_peer_launch.py",
+            *payload_source.glob("_installation_context*.py"),
+            payload / "scripts" / "installation-context",
+        ]
+        payload_inputs.extend(
+            path for name in (
+                "snapshot_runtime.py", "snapshot_worktrees.py",
+                "versioned_runtime.py", "registry_root.py",
+            )
+            if (path := payload / "scripts" / name).is_file()
+        )
         _compile_native_fixture(
             slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
-            [site / "agent_worktrees" if native_peer else site, payload / "scripts", payload / "src"],
+            [site / "agent_worktrees" if native_peer else site, *payload_inputs],
         )
         (slot / ".install-complete.json").write_text(
             json.dumps(
