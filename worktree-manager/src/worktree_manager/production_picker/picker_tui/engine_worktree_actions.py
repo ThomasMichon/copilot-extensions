@@ -283,6 +283,10 @@ class PickerScreenWorktreeActionsMixin:
         # cross-plugin verbs below need engine state, so they are appended here.
         acts = self._session_action_verbs(rec)
         self._wt_submenu_workers = {}
+        from .worktree_assets import claim_coverage
+
+        if claim_coverage(rec) or self._warning(rec) or rec.get("session_head_mismatch"):
+            acts.append("Doctor")
         execution_leg = rec.get("execution_leg")
         if not isinstance(execution_leg, dict):
             execution_leg = (rec.get("raw") or {}).get("execution_leg")
@@ -346,7 +350,7 @@ class PickerScreenWorktreeActionsMixin:
         groups = {
             "Open": 0, "Resume": 0, "Restore": 0, "Launch in new window": 0,
             "Stop": 1, "Repair": 1, "Reclaim": 1, "Dispose hosted session": 1,
-            "Messages": 2, "Sessions": 2,
+            "Messages": 2, "Sessions": 2, "Doctor": 2,
             "Sync": 4, "Cleanup": 4, "Finalize": 4, "Refresh": 5, "View details": 6,
         }
         return sorted(acts, key=lambda action: groups.get(action, 3)), ext
@@ -373,7 +377,7 @@ class PickerScreenWorktreeActionsMixin:
             return
         cur, no_mux, ahp, *prompt = result
         seed_prompt = prompt[0] if prompt else ""
-        if cur not in {"View details", "Jump to host", "Jump to caller", "Go to controller"}:
+        if cur not in {"View details", "Doctor", "Jump to host", "Jump to caller", "Go to controller"}:
             if picker_review.refuse(self):
                 return
         if (
@@ -479,6 +483,8 @@ class PickerScreenWorktreeActionsMixin:
             self._start_refresh(rec)
         elif cur == "View details":
             self.app.push_screen(WtDetailsScreen(rec, engine=self))
+        elif cur == "Doctor":
+            self.app.push_screen(WtDetailsScreen(rec, engine=self, doctor=True))
 
     def _load_worktree_claim_details(self, rec):
         from .worktree_detail_queries import load_claims

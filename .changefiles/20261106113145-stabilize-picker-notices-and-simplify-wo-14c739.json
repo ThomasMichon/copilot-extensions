@@ -1,0 +1,9 @@
+{
+  "comment": "Stabilize Picker notices and simplify worktree warning diagnostics",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
