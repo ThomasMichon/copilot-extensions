@@ -331,6 +331,8 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
          "key_source": principal, "expires_at": rig.h.clock.value + 1800}
         for principal, kind in (("service-a", "service"), ("caller-a", "caller"))
     ]}
+    # Native installation can outlast the proof-skew window of the frozen unit clock.
+    rig.h.clock = lambda: int(time.time())
     value["authentication"]["audience"] = AUDIENCE
     value["namespace"] = "/api"
     value["gateway_ca"] = rig.ca
@@ -376,12 +378,14 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
         assert await request.read() == b""
         if request.query["after"] == "0":
             return web.Response(body=update(policy, directory).encoded)
-        await asyncio.Event().wait()
+        await asyncio.sleep(int(request.query["wait"]))
+        return web.Response(status=204)
 
     rig.backends[0].handle = handle
 
     async def exercise():
         selected_slot = first
+        connector_stop = asyncio.Event()
         try:
             await rig.start()
             connector = ServiceConnector(
@@ -389,7 +393,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
                 proof_key=rig.h.keys[1], gateway_ca=rig.ca,
                 machine_principal="service-a", machine_audience=AUDIENCE,
             )
-            rig.tasks.append(asyncio.create_task(connector.connect_once()))
+            rig.tasks.append(asyncio.create_task(connector.run(connector_stop)))
             await asyncio.wait_for(connector.connected.wait(), 3)
             value["gateway_origin"] = rig.origin
             host.write_private(Path(selection["configuration"]), value)
@@ -443,6 +447,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
                     result = await invoke(selected_slot, "fleet-manager", "gateway-host", "stop")
                     assert result.returncode == 0, result.stdout + result.stderr
             finally:
+                connector_stop.set()
                 await rig.close()
 
     asyncio.run(exercise())
