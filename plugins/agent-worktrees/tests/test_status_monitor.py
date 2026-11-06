@@ -1412,6 +1412,18 @@ def test_shell_mutation_rejects_wrong_tool_and_batch_before_effects(payload):
         )
 
 
+@pytest.mark.parametrize("tool,command,mutates", [
+    ("terminal", "git log --format=$(git commit -m test)", True),
+    ("run_command", "Write-Output 'Set-Content file value'", True),
+    ("shell", "git status --short", False),
+])
+def test_ambiguous_shell_aliases_retain_original_occurrence_semantics(tool, command, mutates):
+    policy = m._ResidentHookPolicy(m._load_hook_client_module())
+    assert policy.mutation_targets(
+        {"toolName": tool, "toolArgs": {"command": command}},
+    ) == (None if mutates else [])
+
+
 @pytest.mark.parametrize("tool,args,paths", [
     ("multi_edit", {"edits": [{"file_path": "one"}, {"path": "two"}]}, ["one", "two"]),
     ("apply_patch", {"input": "*** Update File: one\n*** Move to: two\n*** Delete File: three\n"},

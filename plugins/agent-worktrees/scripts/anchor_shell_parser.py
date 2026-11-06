@@ -170,6 +170,16 @@ def literal_write_targets(seg: str, tool: str, *, syntax: set[str] | None = None
     args = arguments[1:]
     if syntax is not None and verb in {"invoke-expression", "iex", "eval"}:
         syntax.add("evaluation")
+    if syntax is not None and tool.lower() in {"bash", "sh", "powershell", "pwsh", "cmd"}:
+        if verb in {
+            "write-output", "write-host", "echo", "printf", "get-content", "cat", "type",
+            "head", "tail", "get-item", "get-childitem", "ls", "dir", "pwd", "get-location",
+            "select-string", "grep", "rg", "select-object", "format-list", "format-table",
+            "out-string", "get-command", "get-date",
+        } or tool.lower() in {"powershell", "pwsh"} and re.match(
+            r"""^\s*\$[\w:]+\s*\+?=\s*['"]""", seg,
+        ):
+            syntax.add("read")
     if verb == "sed" and not _sed_in_place(args):
         return targets
     if verb == "dd":

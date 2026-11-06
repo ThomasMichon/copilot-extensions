@@ -381,6 +381,13 @@ metadata, preserving the original native-batch request kind. Classification
 remains a heuristic, not execution of an arbitrary shell program or proof that
 external programs cannot write.
 
+Unclassified forms retain the original stateless guard's write heuristic rather
+than being silently declared read-only. Confirmed literal/read forms avoid
+that fallback, and source-bound controls use the actual original pattern.
+Dialect-ambiguous shell aliases retain the original occurrence rule entirely;
+the receiver does not guess their dialect. This is conservative compatibility,
+not a new permission decision or an assertion of complete command semantics.
+
 Original managed admission, current governance/state locks and idle grace
 remain authoritative. Accepted reads renew demand without mutation wake;
 accepted mutations use the original invalidation and wake. Lost notifications

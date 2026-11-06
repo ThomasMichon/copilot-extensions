@@ -49,6 +49,10 @@ try:
         "cohort_anchor_write_guard",
         "plugins/agent-worktrees/scripts/anchor_write_guard.py",
     )
+    stateless = load_source(
+        "cohort_statelessness_guard",
+        "plugins/agent-worktrees/scripts/statelessness_guard.py",
+    )
 finally:
     sys.path[:] = _original_path
 
@@ -134,6 +138,22 @@ def test_shell_invalidation_uses_original_parser_not_permission_exemptions(comma
 ])
 def test_assignment_substitution_precedes_environment_normalization(tool, command, mutates):
     assert guard.shell_may_mutate(command, tool) is mutates
+
+
+@pytest.mark.parametrize("tool,command,mutates", [
+    pytest.param("powershell", "pwsh -Command 'Set-Content file value'", True, id="nested-shell"),
+    pytest.param("bash", "command -p git commit -m test", True, id="wrapper-options"),
+    pytest.param("bash", "/usr/bin/git commit -m test", True, id="explicit-executable"),
+    pytest.param("powershell", "Write-Output 'git commit; Set-Content file value'", False, id="read-data"),
+    pytest.param("powershell", "$result = 'git commit -m test'", False, id="literal-assignment"),
+    pytest.param("bash", "result='$(git commit -m test)'", False, id="literal-substitution"),
+    pytest.param("powershell", r"Microsoft.PowerShell.Management\Get-Content Set-Content.txt", False, id="module-read"),
+    pytest.param("powershell", "git log --format=Set-Content", False, id="git-format-data"),
+])
+def test_unclassified_shell_forms_retain_original_write_heuristic(tool, command, mutates):
+    assert guard.shell_may_mutate(
+        command, tool, legacy_writes=stateless._WRITE_VERBS,
+    ) is mutates
 
 
 def test_native_batch_retains_session_scope_and_valid_calls():

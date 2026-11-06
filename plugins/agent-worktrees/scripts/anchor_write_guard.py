@@ -391,7 +391,7 @@ def _git_subcommand_writes_worktree(subcommand: str) -> bool:
     return bool(separator and prefix in _GIT_WORKTREE_WRITE_SUBCOMMANDS)
 
 
-def shell_may_mutate(command: str, tool: str) -> bool:
+def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern | None = None) -> bool:
     """Classify post-tool invalidation, not permission to write an anchor."""
     pending = [(command, 0)]
     remaining = 128
@@ -428,22 +428,22 @@ def shell_may_mutate(command: str, tool: str) -> bool:
                 return True
             syntax: set[str] = set()
             targets = _literal_write_targets(effective, tool, syntax=syntax)
-            if syntax & {"{", "evaluation", "write"} or (
+            if targets or syntax & {"{", "evaluation", "write"} or (
                 tool.lower() in {"powershell", "pwsh"} and "[" in syntax
                 and re.match(r"^\s*\[[^=\r\n]+\]\s*\$", effective)
             ):
                 return True
-            if _WRITE_CMD_START.match(effective) or targets:
-                return True
             if not _GIT_START.match(effective):
+                if effective.strip() and "read" not in syntax and legacy_writes is not None and legacy_writes.search(segment):
+                    return True
                 continue
             subcommand, args, _targets, _overridden = _git_invocation(effective, "", tool)
             if subcommand == "branch" and _git_branch_invocation_is_readonly(args):
                 continue
-            if subcommand and (
+            if (subcommand is None and legacy_writes is not None and legacy_writes.search(segment)) or (subcommand and (
                 subcommand not in _GIT_READ_BUILTINS or subcommand == "fetch"
                 or any(arg == "--output" or arg.startswith("--output=") for arg in (args[:args.index("--")] if "--" in args else args))
-            ):
+            )):
                 return True
     return False
 
