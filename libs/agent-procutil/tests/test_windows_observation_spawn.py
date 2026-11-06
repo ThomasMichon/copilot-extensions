@@ -151,6 +151,20 @@ def test_expired_observation_deadline_starts_nothing(launch):
     assert launch.calls == []
 
 
+def test_inherited_console_requires_current_attachment_before_create(launch, tmp_path):
+    launch.kernel.GetConsoleMode = lambda *_args: True
+    launch.kernel.GetConsoleProcessList = lambda *_args: 0
+    with (tmp_path / "input").open("w+b") as source, pytest.raises(
+        OSError, match="attached caller console",
+    ):
+        native.spawn(
+            ["git"], cleanup_deadline=110, stdin=source,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    assert not any(isinstance(call, tuple) and call[0] == "create" for call in launch.calls)
+    assert all(job.closed for job in launch.jobs)
+
+
 @pytest.mark.parametrize("environment", [{}, {"Z": "é", "A": "值"}])
 def test_atomic_attributes_keep_storage_and_exact_environment_cwd(launch, environment):
     from agent_procutil import _job_scopes

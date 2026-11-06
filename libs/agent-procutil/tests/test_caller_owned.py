@@ -114,6 +114,69 @@ def test_inherited_output_is_delivered_before_completion_without_closing_sink(tm
         assert stream.read() == b"\xff\r\n"
 
 
+@pytest.mark.real_installer_processes
+@pytest.mark.skipif(os.name != "nt", reason="requires actual Windows console handles")
+@pytest.mark.parametrize("send_input", [True, False])
+def test_inherited_console_streams_work_through_headless_owned_child(tmp_path, send_input):
+    import importlib.util
+    import agent_procutil
+
+    fixture_path = (
+        Path(__file__).resolve().parents[3] / "worktree-manager" / "tests" / "native"
+        / "_terminal_console_fixture.py"
+    )
+    spec = importlib.util.spec_from_file_location("borrowed_console_fixture", fixture_path)
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    receipt = tmp_path / "console.json"
+    script = """
+import ctypes,json,os,pathlib,subprocess,sys
+from ctypes import wintypes
+sys.path.insert(0,sys.argv[2])
+from agent_procutil.owned_process import run_caller_owned
+kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+kernel.GetConsoleMode.argtypes=[wintypes.HANDLE,ctypes.POINTER(wintypes.DWORD)]
+kernel.GetConsoleMode.restype=wintypes.BOOL
+import msvcrt
+state={}
+with open('CONIN$','rb',buffering=0) as source, open('CONOUT$','wb',buffering=0) as sink:
+    for name,stream in [('input_console',source),('output_console',sink)]:
+        mode=wintypes.DWORD()
+        state[name]=bool(kernel.GetConsoleMode(msvcrt.get_osfhandle(stream.fileno()),ctypes.byref(mode)))
+    try:
+        result=run_caller_owned(
+            [sys.executable,'-I','-c',
+             "import sys;v=sys.stdin.buffer.readline();sys.stdout.buffer.write(b'child:'+v);sys.stdout.flush()"],
+            timeout=3,max_stdout_bytes=128,max_stderr_bytes=4096,capture=False,
+            stdin_stream=source,stdout_stream=sink)
+        state['returncode']=result.returncode
+    except subprocess.TimeoutExpired:
+        state['timed_out']=True
+    except Exception as error:
+        state['error']=type(error).__name__+': '+str(error)
+    os.fstat(source.fileno())
+    os.fstat(sink.fileno())
+    state['caller_streams_open']=not source.closed and not sink.closed
+pathlib.Path(sys.argv[1]).write_text(json.dumps(state),encoding='utf-8')
+"""
+    with fixture.Console(
+        [sys.executable, "-I", "-c", script, str(receipt),
+         str(Path(agent_procutil.__file__).resolve().parents[1])],
+        env=dict(os.environ), cwd=tmp_path,
+    ) as console:
+        if send_input:
+            console.send(b"probe\r")
+        assert console.wait() == 0
+        state = json.loads(receipt.read_text(encoding="utf-8"))
+        assert state == {
+            "input_console": True, "output_console": True,
+            **({"returncode": 0} if send_input else {"timed_out": True}),
+            "caller_streams_open": True,
+        }, state
+    if send_input:
+        assert b"child:probe" in console.output
+
+
 @native_execution
 def test_blocked_inherited_output_remains_inside_finite_owner():
     reader, writer = os.pipe()

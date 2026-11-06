@@ -12,6 +12,10 @@ descriptors. Supplied text/byte input cannot be combined with borrowed stdin.
 Borrowed stdout has no captured result or capture-byte quota: the trusted
 producer must enforce its own response/encoding bound before writing. Its
 physical write still shares the absolute execution/cleanup budget.
+On Windows, an explicitly borrowed console stream keeps the caller's existing
+attached console; it does not allocate or hide a new console. File and pipe
+streams retain the no-window creation path. Both paths acquire the same
+creation-time Job and finite cleanup owner.
 The POSIX guardian keeps these descriptors separate from its private framing
 and lifetime pipe; neither is application input. Ordinary captured calls and
 their stream limits are unchanged.

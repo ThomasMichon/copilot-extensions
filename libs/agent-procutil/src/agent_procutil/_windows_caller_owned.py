@@ -86,6 +86,12 @@ def _api():
         "GetExitCodeProcess": (
             [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL,
         ),
+        "GetConsoleMode": (
+            [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL,
+        ),
+        "GetConsoleProcessList": (
+            [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD], wintypes.DWORD,
+        ),
         "TerminateProcess": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
         "TerminateJobObject": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
         "CloseHandle": ([wintypes.HANDLE], wintypes.BOOL),
@@ -428,6 +434,7 @@ def spawn(
             raise ctypes.WinError(ctypes.get_last_error())
         with ExitStack() as resources, ExitStack() as parent_streams:
             child_fds = []
+            inherit_console = False
             for index, name in enumerate(("stdin", "stdout", "stderr")):
                 if kwargs[name] == subprocess.PIPE:
                     reader, writer = os.pipe()
@@ -445,6 +452,10 @@ def spawn(
                 elif kwargs[name] not in (subprocess.DEVNULL, None):
                     child = os.dup(kwargs[name].fileno())
                     resources.callback(release, "descriptor", child, lambda fd=child: os.close(fd))
+                    mode = wintypes.DWORD()
+                    inherit_console |= bool(kernel.GetConsoleMode(
+                        msvcrt.get_osfhandle(child), ctypes.byref(mode),
+                    ))
                     stream = None
                 else:
                     child = os.open(
@@ -454,6 +465,10 @@ def spawn(
                     stream = None
                 child_fds.append(child)
                 streams.append(stream)
+            if inherit_console and not kernel.GetConsoleProcessList(
+                (wintypes.DWORD * 1)(), 1,
+            ):
+                raise OSError("borrowed console streams require an attached caller console")
             stdio = [msvcrt.get_osfhandle(fd) for fd in child_fds]
             inherited = list(dict.fromkeys(stdio))
             handles = (wintypes.HANDLE * len(inherited))(*inherited)
@@ -477,7 +492,7 @@ def spawn(
                     raise ctypes.WinError(ctypes.get_last_error())
             startup = _StartupInfoEx()
             startup.StartupInfo.cb = ctypes.sizeof(startup)
-            startup.StartupInfo.dwFlags = 0x100 | 1
+            startup.StartupInfo.dwFlags = 0x100 | (0 if inherit_console else 1)
             startup.StartupInfo.hStdInput, startup.StartupInfo.hStdOutput, \
                 startup.StartupInfo.hStdError = stdio
             startup.lpAttributeList = ctypes.cast(attributes, wintypes.LPVOID)
@@ -491,9 +506,11 @@ def spawn(
                 if launch_deadline is not None:
                     remaining(launch_deadline)
                 creation_attempted = True
+                # Borrow the attached console, never allocate or hide another one.
+                window_flags = 0 if inherit_console else 0x8000000
                 if not kernel.CreateProcessW(
                     application, command, None, None, True,
-                    0x80000 | 0x8000000 | 4 | (0x400 if environment is not None else 0),
+                    0x80000 | window_flags | 4 | (0x400 if environment is not None else 0),
                     environment, cwd, ctypes.byref(startup), ctypes.byref(info),
                 ):
                     creation_attempted = False
