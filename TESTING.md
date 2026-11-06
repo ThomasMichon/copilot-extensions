@@ -2468,10 +2468,16 @@ pane IDs using the selected executable's `-V` release: `session:%id` for 3.3.x
 and `session:.%id` for 3.4.x. The latter is not sent to 3.3.x, whose parser
 silently drops that pane ID. Other or unrecognized release lines refuse pane
 actions before mutation rather than guessing or replaying effects. The bounded,
-headless version query is cached per executable filesystem identity, not per
-event; replacement invalidates it. POSIX tmux targeting remains unchanged.
-Portable controls cover both grammars, replacement and pre-effect refusal;
-they are not native integration qualification.
+headless discovery also reads the selected live server's `#{version}`, session
+name and incarnation. A 3.4 client with a retained 3.3 server refuses before
+pane effects; a 3.3 client retains its old syntax against either server.
+Discovery is cached per executable filesystem identity and verified session
+incarnation, not per event; replacement or a new incarnation invalidates it.
+Bare registered executable names resolve through PATH before discovery and
+execution. POSIX tmux targeting remains unchanged. Portable controls cover the
+compatible pairs, mixed-version refusal, replacement, bare names, stale native
+identity and the unchanged operation deadline; they are not native integration
+qualification.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

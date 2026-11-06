@@ -450,10 +450,12 @@ identity refuse rather than guessing pane zero. Reattachment preserves a
 recorded same-owner CLI while native evidence is unavailable, and removes it
 only when native inventory confirms its loss. Snapshot-fenced registration
 cannot overwrite a concurrently created CLI identity.
-Windows pane targeting keeps the session explicit and selects the 3.3.x or
-3.4.x PSMux grammar from the selected executable's bounded `-V` result,
-cached by filesystem identity. Unknown releases refuse before pane actions;
-discovery shares the operation's deadline. See the [native qualification
+Windows pane targeting keeps the session explicit and checks the selected
+client's `-V` and live server's reported version and native identity before
+selecting compatible 3.3.x or 3.4.x syntax. Discovery resolves registered bare
+names through PATH, is cached by executable/session generation and shares the
+operation's deadline. Unknown or incompatible releases refuse before pane
+actions. See the [native qualification
 packet](../TESTING.md) for the supported syntax and evidence limits.
 Replacing a conflicting recorded native incarnation also requires current
 native session evidence; a delayed reconnect cannot displace its successor.

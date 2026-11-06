@@ -93,7 +93,7 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                 index = arguments.index("-t") + 1
                 if arguments[index].startswith("%"):
                     arguments[index] = companion_pane._psmux_pane_target(
-                        binary, session, arguments[index],
+                        binary, session, arguments[index], incarnation,
                     )
             result = subprocess.run(
                 [binary, *arguments], capture_output=True, encoding="utf-8", timeout=5,

@@ -44,6 +44,10 @@ def mux(monkeypatch, tmp_path):
         assert 0 < kwargs["timeout"] <= 5
         if argv[1:] == ["-V"]:
             return SimpleNamespace(returncode=0, stdout="tmux 3.3.6\n", stderr="")
+        if argv[-1].startswith("#{version}"):
+            return SimpleNamespace(
+                returncode=0, stdout="3.3.6\t" + mapping["mux_session"] + "\t$7:123\n", stderr="",
+            )
         state.calls.append(argv[1:])
         command = argv[1]
         if "-t" in argv:
@@ -189,12 +193,15 @@ def test_windows_job_failure_becomes_visible_pane_error(mux, monkeypatch):
         pane.switch("show", cwd)
 
 
-@pytest.mark.parametrize("banner,separator", [
-    ("tmux 3.3.6\n", ":"),
-    ("tmux 3.4.0\npsmux 3.4.0 (build provenance)\n", ":."),
+@pytest.mark.parametrize("banner,server,separator,bare", [
+    ("tmux 3.3.6\n", "3.3.6", ":", False),
+    ("tmux 3.3.6\n", "3.4.0", ":", False),
+    ("tmux 3.4.0\npsmux 3.4.0 (build provenance)\n", "3.4.0", ":.", False),
+    ("tmux 3.4.0\n", "3.4.0", ":.", True),
 ])
 def test_windows_pane_id_keeps_exact_session_and_backend_grammar(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, banner: str, separator: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    banner: str, server: str, separator: str, bare: bool,
 ) -> None:
     binary = tmp_path / "psmux.exe"
     binary.write_bytes(b"selected executable")
@@ -202,6 +209,11 @@ def test_windows_pane_id_keeps_exact_session_and_backend_grammar(
 
     def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
         calls.append((argv, kwargs))
+        if argv[-1].startswith("#{version}"):
+            return SimpleNamespace(
+                returncode=0, stdout=server + "\tselected\t" + mapping["session_incarnation"] + "\n",
+                stderr="",
+            )
         return SimpleNamespace(
             returncode=0, stdout=banner if argv[1:] == ["-V"] else "done\n", stderr="",
         )
@@ -211,11 +223,17 @@ def test_windows_pane_id_keeps_exact_session_and_backend_grammar(
     ))
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(pane, "run_mux_child", run)
-    mapping = {"mux_bin": str(binary), "mux_session": "selected"}
+    monkeypatch.setattr(pane.shutil, "which", lambda value: str(binary) if value == "psmux.exe" else None)
+    mapping = {
+        "mux_bin": "psmux.exe" if bare else str(binary),
+        "mux_session": "selected", "session_incarnation": "$7:123",
+    }
     for selected in ("%42", "%99"):
         assert pane._call(mapping, "select-pane", "-t", selected) == "done"
     assert [argv for argv, _ in calls] == [
         [str(binary), "-V"],
+        [str(binary), "display-message", "-p", "-t", "=selected",
+         "#{version}\t#{session_name}\t#{session_id}:#{session_created}"],
         [str(binary), "select-pane", "-t", "selected" + separator + "%42"],
         [str(binary), "select-pane", "-t", "selected" + separator + "%99"],
     ]
@@ -225,6 +243,10 @@ def test_windows_pane_id_keeps_exact_session_and_backend_grammar(
     binary.write_bytes(b"replacement executable with another identity")
     pane._call(mapping, "select-pane", "-t", "%42")
     assert sum(argv[1:] == ["-V"] for argv, _ in calls) == 2
+    mapping["session_incarnation"] = "$7:124"
+    pane._call(mapping, "select-pane", "-t", "%42")
+    assert sum(argv[1:] == ["-V"] for argv, _ in calls) == 3
+    assert sum(argv[-1].startswith("#{version}") for argv, _ in calls) == 3
 
 
 @pytest.mark.parametrize("banner,returncode,error", [
@@ -247,7 +269,9 @@ def test_windows_unknown_target_grammar_refuses_before_mutation(
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(pane, "run_mux_child", run)
     with pytest.raises(pane.PaneError, match=error):
-        pane._call({"mux_bin": str(binary), "mux_session": "selected"}, "select-pane", "-t", "%42")
+        pane._call({
+            "mux_bin": str(binary), "mux_session": "selected", "session_incarnation": "$7:123",
+        }, "select-pane", "-t", "%42")
     assert calls == [[str(binary), "-V"]]
 
 
@@ -271,9 +295,40 @@ def test_windows_target_discovery_cannot_restart_navigation_deadline(
     monkeypatch.setattr(pane, "run_mux_child", run)
     with pytest.raises(pane.PaneError, match="deadline expired"):
         pane._call(
-            {"mux_bin": str(binary), "mux_session": "selected"}, "select-pane", "-t", "%42", timeout=2,
+            {"mux_bin": str(binary), "mux_session": "selected", "session_incarnation": "$7:123"},
+            "select-pane", "-t", "%42", timeout=2,
         )
     assert calls == [[str(binary), "-V"]]
+
+
+@pytest.mark.parametrize("server,error", [
+    ("3.3.6\tselected\t$7:123\n", "incompatible pane targets"),
+    ("3.4.0\tselected\t$7:999\n", "session changed"),
+    ("3.4.0\tother-owner\t$7:123\n", "session changed"),
+    ("4.0.0\tselected\t$7:123\n", "qualified pane-target"),
+])
+def test_windows_live_server_must_accept_exact_pane_grammar_before_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: str, error: str,
+) -> None:
+    binary = tmp_path / "psmux.exe"
+    binary.write_bytes(b"selected executable")
+    calls = []
+
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append(argv)
+        return SimpleNamespace(
+            returncode=0, stdout="tmux 3.4.0\n" if argv[1:] == ["-V"] else server, stderr="",
+        )
+
+    monkeypatch.setattr(pane, "os", SimpleNamespace(name="nt", environ={}))
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(pane, "run_mux_child", run)
+    with pytest.raises(pane.PaneError, match=error):
+        pane._call({
+            "mux_bin": str(binary), "mux_session": "selected", "session_incarnation": "$7:123",
+        }, "kill-pane", "-t", "%99")
+    assert [argv[1] for argv in calls] == ["-V", "display-message"]
+    assert calls[-1][calls[-1].index("-t") + 1] == "=selected"
 
 
 def test_old_observer_never_returns_to_reused_successor_pane(mux):
