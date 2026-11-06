@@ -345,6 +345,13 @@ def test_creation_reuses_companion_after_parent_stamp_failure(native_creation, m
     )
     code, report = _run(creation, capsys, fix=True)
     assert code == 1 and "fixture publication failed" in report["error"]
+    assert report["checks"] == {
+        "trusted": True, "facility_approvals": True, "paired": False,
+        "companion_permissions": True,
+    }
+    assert report["initial_checks"] == {
+        "trusted": False, "facility_approvals": False, "paired": False,
+    }
     children = sorted(creation.projects["knowledge"].joinpath("worktrees").glob("*.yaml"))
     assert len(children) == 1 and not tracking.load_record(creation.record.yaml_path).is_paired
     monkeypatch.setattr(worktree_creation, "_stamp_and_compose_paired_knowledge", original)
@@ -883,7 +890,53 @@ def test_creation_reports_projection_failure_without_claiming_seed(native_creati
     code, report = _run(creation, capsys, fix=True)
     assert code == 1 and "fixture renderer unavailable" in report["error"]
     assert not report["repaired"] and "prepared" not in report
+    assert all(report["checks"].values())
+    assert not all(report["initial_checks"].values())
+    assert report["projection_status"] == "failed"
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.parametrize("observation", ["unreadable", "changed_seed", "malformed_record"])
+def test_creation_preserves_failure_when_post_attempt_checks_are_unavailable(
+    native_creation, monkeypatch, capsys, observation,
+):
+    creation = native_creation
+    original_checks = repair._checks
+
+    def guidance(path):
+        if observation == "changed_seed":
+            seed_path = launch_seed_state.state_path(creation.record.yaml_path)
+            state = json.loads(seed_path.read_text())
+            state["text"] = "newer intent"
+            seed_path.write_text(json.dumps(state))
+        elif observation == "malformed_record":
+            state = yaml.safe_load(creation.record.yaml_path.read_text())
+            state.pop("branch")
+            creation.record.yaml_path.write_text(yaml.safe_dump(state))
+        else:
+            monkeypatch.setattr(
+                repair, "_checks",
+                lambda *a: (_ for _ in ()).throw(ValueError("fixture checks unavailable")),
+            )
+        return local_cache_refresh.RefreshResult("failed", detail="fixture renderer unavailable")
+
+    monkeypatch.setattr(local_cache_refresh, "prepare_for_launch", guidance)
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "fixture renderer unavailable" in report["error"]
+    assert report["error_type"] == "ValueError" and not report["repaired"]
+    assert "checks" not in report and report["checks_error"]
+    assert not all(report["initial_checks"].values())
+    assert report["projection_status"] == "failed"
+    monkeypatch.setattr(repair, "_checks", original_checks)
+    if observation == "malformed_record":
+        state = yaml.safe_load(creation.record.yaml_path.read_text())
+        assert "branch" not in state
+        state["branch"] = creation.record.branch
+        creation.record.yaml_path.write_text(yaml.safe_dump(state))
+    record = tracking.load_record(creation.record.yaml_path)
+    assert all(repair._checks(record, repair._pair_plan(creation.configs["harness"], record)).values())
+    retained = launch_seed_state.peek(creation.record.yaml_path)
+    assert retained.text == ("newer intent" if observation == "changed_seed" else creation.seed.text)
 
 
 def test_creation_reports_guidance_only_interruption_as_repairable(
@@ -1477,7 +1530,8 @@ def test_creation_detached_git_head_returns_refusal_report(native_creation, monk
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
-def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch):
+@pytest.mark.parametrize("guidance_status", ["ready", "failed"])
+def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch, guidance_status):
     home, anchor = tmp_path / "home", tmp_path / "anchor"
     anchor.mkdir()
     git_ops.git("init", "-b", "main", cwd=anchor)
@@ -1527,11 +1581,18 @@ def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch):
         "AGENT_WORKTREES_STATUS_MONITOR": "0",
         "PYTHONPATH": str(Path(repair.__file__).resolve().parents[1]),
     })
+    guidance = (
+        "from agent_worktrees import local_cache_refresh; "
+        "local_cache_refresh.prepare_for_launch = lambda path: "
+        "local_cache_refresh.RefreshResult('failed', detail='fixture renderer unavailable'); "
+        if guidance_status == "failed" else ""
+    )
     # Keep the actual CLI independent of an installed mux in the test container.
     command = [
         sys.executable, "-c",
         "import sys; from agent_worktrees import __main__ as main, sessions; "
         "sessions._list_mux_sessions = lambda **kwargs: {}; "
+        + guidance +
         "raise SystemExit(main.main(sys.argv[1:]))",
         "--project", "fixture",
         "doctor", "--repair-creation", identity, "--seed-id", seed.seed_id, "--json",
@@ -1546,10 +1607,17 @@ def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch):
     assert copilot_config.read_text() == '{"trustedFolders":[]}'
     assert not (copilot / "permissions-config.json").exists()
     applied = subprocess.run([*command, "--fix"], **options)
-    assert applied.returncode == 0, applied.stdout + applied.stderr
-    assert json.loads(applied.stdout)["prepared"]
-    assert json.loads(applied.stdout)["projection_status"] == "ready"
-    assert all(json.loads(applied.stdout)["checks"].values())
+    assert applied.returncode == (1 if guidance_status == "failed" else 0), (
+        applied.stdout + applied.stderr
+    )
+    result = json.loads(applied.stdout)
+    if guidance_status == "failed":
+        assert not result["repaired"] and "prepared" not in result
+        assert "fixture renderer unavailable" in result["error"]
+    else:
+        assert result["prepared"]
+    assert result["projection_status"] == guidance_status
+    assert all(result["checks"].values()) and not all(result["initial_checks"].values())
     assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
     assert unrelated.read_bytes() == b"unrelated: malformed: record\n"
     assert seed.text not in reported.stdout + reported.stderr + applied.stdout + applied.stderr

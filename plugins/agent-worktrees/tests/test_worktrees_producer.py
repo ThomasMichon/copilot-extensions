@@ -9,6 +9,7 @@ from agent_worktrees import __main__ as core
 from agent_worktrees import git_ops, reclaim, sessions, tracking
 from agent_worktrees import worktrees_producer as producer
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
+from agent_worktrees.hook_facts_publication import HookFactsPublisher
 
 
 @pytest.mark.parametrize("failure", [None, sqlite3.OperationalError, KeyError])
@@ -38,10 +39,15 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
         status="active",
         completed_at=None,
         resources=[tracking.ResourceClaim(kind="worktree", ref=f"child-{i}") for i in range(1000)],
+        creation_nonce="producer-incarnation",
+        head_session="canonical-head",
+        sessions=[tracking.SessionEntry("canonical-head", "2026-10-13T00:00:00")],
     )
     monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
     monkeypatch.setattr(tracking, "list_records", lambda *a, **kw: [record])
-    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: sessions.SessionContext())
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: sessions.SessionContext(
+        active_sessions={sessions._normalize_path(str(checkout)): ["canonical-head"]},
+    ))
     monkeypatch.setattr(
         sessions,
         "mux_status_many",
@@ -58,7 +64,10 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
     )
     monkeypatch.setattr(reclaim, "bare_orphan_worktree_ids", lambda: set())
     monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
-    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    project = producer.cfg.project_dir("project")
+    (project / "worktrees").mkdir(exist_ok=True)
+    publisher = HookFactsPublisher(tmp_path / "runtime", None, project_root=lambda _: project)
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3", hook_facts=publisher)
     owner.activate()
     observed = []
     assert producer.publish_active_project(
@@ -72,6 +81,9 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
     assert len(row["claims_links"]) <= 8 and "resources" not in row
     assert row["checkout_present"] is True
     assert row["fact_provenance"]["git"]["quality"] == "current"
+    assert "record_head_session" not in row
+    hook_path = project / "worktrees" / "one" / "hook-facts" / f"{publisher.generation}.json"
+    assert json.loads(hook_path.read_bytes())["facts"]["record_head_session"] == "canonical-head"
     if failure is not None:
         error = failure("fixture producer publication failure")
         stream = owner.feed.stream({"contract_version": 1, "project": "project"}, lambda: False)

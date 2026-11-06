@@ -47,6 +47,8 @@ import os
 import re
 import sys
 import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 _DEFAULT_CALLS = 25
@@ -123,6 +125,67 @@ def _read_record_fields(yaml_path: Path) -> tuple[str | None, str | None]:
     # First state/status line wins (the record's top-level field).
     state = _clean(_STATE_RE.search(text))
     return note, (state.lower() if state else None)
+
+
+def _note_identity(value):
+    if not isinstance(value, str):
+        return value
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    except ValueError:
+        return value
+
+
+@contextmanager
+def _counter_lock(aw: Path, worktree_id: str, deadline=None):
+    """Share one bounded byte-range transaction with the shell read consumer."""
+    if deadline is not None and time.time() >= deadline:
+        yield False
+        return
+    stream = None
+    acquired = False
+    try:
+        directory = aw / "nudge-state"
+        directory.mkdir(parents=True, exist_ok=True)
+        stream = (directory / f"{worktree_id}.lock").open("a+b")
+        until = time.monotonic() + min(
+            0.1, max(0, deadline - time.time()) if deadline is not None else 0.1,
+        )
+        while True:
+            try:
+                stream.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.lockf(stream, fcntl.LOCK_EX | fcntl.LOCK_NB, 1)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= until:
+                    break
+                time.sleep(0.005)
+    except OSError:
+        pass
+    try:
+        yield acquired
+    finally:
+        if stream is not None:
+            try:
+                if acquired:
+                    stream.seek(0)
+                    if os.name == "nt":
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        fcntl.lockf(stream, fcntl.LOCK_UN, 1)
+            finally:
+                stream.close()
 
 
 def _nudge_text(calls: int, minutes: int) -> str:
@@ -303,12 +366,23 @@ def decide(
         return None
     worktree_id, yaml_path = found
 
+    with _counter_lock(aw, worktree_id, deadline) as acquired:
+        if not acquired:
+            return None
+        return _update_counter(aw, worktree_id, yaml_path, env, now, deadline)
+
+
+def _update_counter(aw, worktree_id, yaml_path, env, now, deadline):
     note_at, state = _read_record_fields(yaml_path)
+    note_at = _note_identity(note_at)
     if state in _TERMINAL_STATES:
         if deadline is not None and time.time() >= deadline:
             return None
         # Sealed disposition -- stop nudging and drop any sidecar.
-        _clear_sidecar(aw, worktree_id)
+        try:
+            (aw / "nudge-state" / f"{worktree_id}.json").unlink(missing_ok=True)
+        except OSError:
+            pass
         return None
 
     calls_thresh = _int_env(env, "AGENT_WORKTREES_NUDGE_CALLS", _DEFAULT_CALLS)
@@ -325,7 +399,7 @@ def decide(
 
     # Reset the drift window when the agent has written a disposition since we
     # last looked (status_note_at advanced), or on first sight of this worktree.
-    if data.get("seen_note_at") != note_at or "window_start" not in data:
+    if _note_identity(data.get("seen_note_at")) != note_at or "window_start" not in data:
         data = {"count": 0, "window_start": now, "seen_note_at": note_at}
 
     data["count"] = int(data.get("count", 0)) + 1
@@ -351,10 +425,12 @@ def decide(
 
 
 def _clear_sidecar(aw: Path, worktree_id: str) -> None:
-    try:
-        (aw / "nudge-state" / f"{worktree_id}.json").unlink(missing_ok=True)
-    except OSError:
-        pass
+    with _counter_lock(aw, worktree_id) as acquired:
+        if acquired:
+            try:
+                (aw / "nudge-state" / f"{worktree_id}.json").unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def main() -> int:

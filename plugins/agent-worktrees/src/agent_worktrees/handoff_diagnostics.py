@@ -167,6 +167,16 @@ def stamp_session_state_worktree_binding(
                     )
                 ):
                     record.update(project=current.repo, creationNonce=current.creation_nonce)
+                    if (
+                        isinstance(current.worktree_path, str)
+                        and Path(current.worktree_path).is_absolute()
+                        and record_path.is_absolute()
+                    ):
+                        record["hookFacts"] = {
+                            "version": 1,
+                            "projectRoot": str(record_path.parent.parent),
+                            "workspace": current.worktree_path,
+                        }
                     activation = session_activation_observation(current.session_entry(session_id))
                     if activation is not None:
                         record["sessionActivation"] = activation

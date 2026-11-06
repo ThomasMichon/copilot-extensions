@@ -20,6 +20,12 @@ from .resume_seed import cold_start_error
 from .worktree_naming import session_worktree_allocation
 
 
+_REPAIR_ERRORS = (
+    OSError, ValueError, RuntimeError, TypeError, yaml.YAMLError, subprocess.TimeoutExpired,
+    git_ops.GitError,
+)
+
+
 def _same_repository(anchor: str, checkout: str, *, branch: str | None = None) -> None:
     common_dirs = [
         git_ops.git(
@@ -376,6 +382,7 @@ def targeted_doctor(args) -> int:
         report["repairable"] = True
         setup_incomplete = not all(checks.values())
         if apply:
+            report["initial_checks"] = checks
             with fin.FinalizeLock(
                 Path(config.default_repo.worktree_root) / ".finalize.lock",
                 timeout=300, stale_after=3600,
@@ -395,31 +402,40 @@ def targeted_doctor(args) -> int:
                         child_path = cfg.tracking_dir(root.repo) / f"{child_id}.yaml"
                         admission.enter_context(launch_admission.guard(child_path))
                         plan = _pair_plan(config, record)
-                with step("Restoring creation permissions", worktree_id=identity):
-                    _prepare_permissions(config.default_repo.anchor, record.worktree_path)
-                with step("Restoring creation pair", worktree_id=identity):
-                    _prepare_pair(config, record, path, seed, plan, admission)
-                with step("Restoring creation guidance", worktree_id=identity):
-                    refreshed = local_cache_refresh.prepare_for_launch(record.worktree_path)
-                    if refreshed.status != "ready":
-                        raise ValueError(refreshed.diagnostic)
-                config = cfg.load_config()
-                current, _ = _validate(
-                    config, path, seed.seed_id, retained=record, retained_seed=seed,
-                )
-                current_plan = _pair_plan(config, current)
-                checks = _checks(current, current_plan)
-                if not all(checks.values()):
-                    raise ValueError("creation setup remains incomplete")
-                report.update(
-                    checks=checks, prepared=True,
-                    repaired=setup_incomplete or bool(refreshed.changed),
-                    projection_status=refreshed.status,
-                )
-    except (
-        OSError, ValueError, RuntimeError, TypeError, yaml.YAMLError, subprocess.TimeoutExpired,
-        git_ops.GitError,
-    ) as exc:
+                try:
+                    with step("Restoring creation permissions", worktree_id=identity):
+                        _prepare_permissions(config.default_repo.anchor, record.worktree_path)
+                    with step("Restoring creation pair", worktree_id=identity):
+                        _prepare_pair(config, record, path, seed, plan, admission)
+                    with step("Restoring creation guidance", worktree_id=identity):
+                        refreshed = local_cache_refresh.prepare_for_launch(record.worktree_path)
+                        report["projection_status"] = refreshed.status
+                        if refreshed.status != "ready":
+                            raise ValueError(refreshed.diagnostic)
+                    config = cfg.load_config()
+                    current, _ = _validate(
+                        config, path, seed.seed_id, retained=record, retained_seed=seed,
+                    )
+                    current_plan = _pair_plan(config, current)
+                    checks = _checks(current, current_plan)
+                    if not all(checks.values()):
+                        raise ValueError("creation setup remains incomplete")
+                    report.update(
+                        checks=checks, prepared=True,
+                        repaired=setup_incomplete or bool(refreshed.changed),
+                    )
+                except _REPAIR_ERRORS:
+                    report.pop("checks", None)
+                    try:
+                        config = cfg.load_config()
+                        current, _ = _validate(
+                            config, path, seed.seed_id, retained=record, retained_seed=seed,
+                        )
+                        report["checks"] = _checks(current, _pair_plan(config, current))
+                    except Exception as observation_error:
+                        report["checks_error"] = str(observation_error)
+                    raise
+    except _REPAIR_ERRORS as exc:
         report.update(error=str(exc), error_type=type(exc).__name__)
     if getattr(args, "json", False):
         output._json_output(report)

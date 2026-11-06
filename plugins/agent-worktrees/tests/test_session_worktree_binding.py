@@ -146,6 +146,11 @@ def test_trusted_binding_qualifies_actual_non_head_record(qualified_binding, mon
     )
     assert result["project"] == "test-repo"
     assert result["creationNonce"] == "subject-incarnation"
+    assert result["hookFacts"] == {
+        "version": 1,
+        "projectRoot": str(record_path.parent.parent),
+        "workspace": snapshot.worktree_path,
+    }
     assert json.loads((session_dir / "worktree-binding.json").read_text()) == result
     assert held_at_replace == [True]
 
@@ -272,6 +277,7 @@ def test_trusted_binding_invalid_or_legacy_rewrite_removes_stale_fields(
     assert result["worktreeDir"] == "legacy-path"
     assert result["machine"] == "test"
     assert "project" not in result and "creationNonce" not in result
+    assert "hookFacts" not in result
     assert json.loads(binding_path.read_text()) == result
 
 
