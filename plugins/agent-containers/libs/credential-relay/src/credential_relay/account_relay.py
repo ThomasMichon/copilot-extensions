@@ -19,6 +19,9 @@ from typing import Any, Protocol, TypedDict, cast
 from .sources.gh_auth import GhAuthSource
 
 ACTION = "get-account-token"
+SOURCE_LEASE_ACTION = "get-account-source-lease"
+DESCRIBE_ACTION = "describe-account-relay"
+SOURCE_LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
 REQUEST_FIELDS = frozenset({"source", "account", "recipient", "host", "action"})
 
 
@@ -207,7 +210,13 @@ class AccountRelay:
             if len(data) > 16384:
                 return
             lines = data.decode("utf-8").strip().splitlines()
-            if not lines or lines[0] != ACTION:
+            if lines == [DESCRIBE_ACTION]:
+                writer.write(
+                    f"contract={SOURCE_LEASE_CONTRACT}\noperation={SOURCE_LEASE_ACTION}\n\n".encode(),
+                )
+                await asyncio.wait_for(writer.drain(), timeout=5)
+                return
+            if not lines or lines[0] not in {ACTION, SOURCE_LEASE_ACTION}:
                 return
             fields = {}
             for line in lines[1:]:
@@ -216,7 +225,11 @@ class AccountRelay:
                     return
                 fields[key] = value
             capability = fields.pop("auth", "")
-            raw = await asyncio.wait_for(self.resolve(fields, capability), timeout=20)
+            operation = (
+                self.resolve(fields, capability, source_lease=True)
+                if lines[0] == SOURCE_LEASE_ACTION else self.resolve(fields, capability)
+            )
+            raw = await asyncio.wait_for(operation, timeout=20)
             if raw:
                 writer.write(raw.encode("utf-8"))
                 await asyncio.wait_for(writer.drain(), timeout=5)
@@ -231,7 +244,9 @@ class AccountRelay:
             except (OSError, asyncio.TimeoutError):
                 pass
 
-    async def resolve(self, fields: dict[str, str], capability: str) -> str | None:
+    async def resolve(
+        self, fields: dict[str, str], capability: str, *, source_lease: bool = False,
+    ) -> str | None:
         if set(fields) != REQUEST_FIELDS or not capability:
             return None
         try:
@@ -266,12 +281,20 @@ class AccountRelay:
             selected = []
             identities = set()
             now = time.time()
+            started = time.monotonic()
             for grant in document["grants"]:
                 if (
                     not isinstance(grant, dict)
-                    or set(grant) != REQUEST_FIELDS | {"provider", "capability_file", "expires_at"}
+                    or set(grant) - {"source_lease_seconds"} != (
+                        REQUEST_FIELDS | {"provider", "capability_file", "expires_at"}
+                    )
                     or type(grant["expires_at"]) not in (int, float)
                     or not 0 < grant["expires_at"] < 1e12
+                ):
+                    return None
+                if "source_lease_seconds" in grant and (
+                    type(grant["source_lease_seconds"]) is not int
+                    or not 1 <= grant["source_lease_seconds"] <= 3600
                 ):
                     return None
                 for key in REQUEST_FIELDS | {"provider"}:
@@ -298,6 +321,8 @@ class AccountRelay:
             if len(selected) != 1 or selected[0]["expires_at"] <= now:
                 return None
             grant = selected[0]
+            if source_lease and "source_lease_seconds" not in grant:
+                return None
             expected = read_reference(grant["capability_file"], 4096).decode("ascii").strip()
             if len(expected) < 32 or not secrets.compare_digest(expected, capability):
                 return None
@@ -311,6 +336,38 @@ class AccountRelay:
             actual = read_reference(grant["capability_file"], 4096).decode("ascii").strip()
             if not secrets.compare_digest(actual, expected):
                 return None
+            if source_lease:
+                if not raw:
+                    return None
+                # Count acquisition time against the source authorization, not
+                # against the unknown validity of the returned account token.
+                deadline = min(now + grant["source_lease_seconds"], grant["expires_at"])
+                if (
+                    not now <= time.time() < deadline
+                    or time.monotonic() - started >= deadline - now
+                ):
+                    return None
+                response = {}
+                for line in raw.strip().splitlines():
+                    key, separator, value = line.partition("=")
+                    if not separator or key in response:
+                        return None
+                    response[key] = value
+                if (
+                    set(response) != {"protocol", "host", "username", "token"}
+                    or response["protocol"] != "https"
+                    or response["host"] != fields["host"]
+                    or response["username"] != fields["account"]
+                ):
+                    return None
+                _text(response["token"])
+                return (
+                    raw.rstrip("\n") + "\n"
+                    f"lease_contract={SOURCE_LEASE_CONTRACT}\n"
+                    f"lease_id={secrets.token_hex(16)}\n"
+                    f"lease_issued_at={now:.9f}\n"
+                    f"lease_expires_at={deadline:.9f}\n\n"
+                )
             return raw
         except (OSError, ValueError, TypeError, KeyError, UnicodeError):
             return None

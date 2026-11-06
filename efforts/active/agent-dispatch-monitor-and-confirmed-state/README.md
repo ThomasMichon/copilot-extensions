@@ -63,6 +63,10 @@ It retains the original installed command and reobserves the resident before
 each relationship call, while keeping both independent admission callbacks.
 Bridge's future keyed creation, original continuation journal and other admitted
 writers remain unassembled; the complete cohort is not qualified.
+Ordinary Bridge status observation transport subsequently merged in #11055.
+The existing CLI now carries passive health JSON and optional original keyed-writer
+inspection, with explicit executing-CLI support. This closes a read-transport
+gap, not actual installed-owner or complete-cohort admission.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running
