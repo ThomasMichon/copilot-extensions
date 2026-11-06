@@ -4,11 +4,14 @@
 [Application support/runbook](../../../docs/patterns/fast-application-install-and-cutover.md) |
 [Reviewed transition](wheel-first-transition.md)
 
-**Snapshot: 2026-11-02. The parent effort remains Active.**
+**Evidence refresh: 2026-11-06. The parent effort remains Active.**
 This is the shared implementation map, not a deployment approval or a second
 effort. Keep progress here and contracts in the linked guide. Update a row when
 claiming work, after qualification, after merge and after release; do not mark
 an app converted from wheel production or a callback declaration alone.
+This refresh records the bounded SSH release and Bridge/MCP merge status.
+Other app rows retain their prior evidence boundaries; they have not been
+requalified by this documentation change.
 
 ## Request capture
 
@@ -111,25 +114,36 @@ it yields **21 runtime roots**. The requested shared SSH Manager library is a
 separate dependency row below, not a twenty-second independently declared app.
 This corrects the ambiguity in an informal "22 apps" portfolio count.
 
-**Two app front doors have the bounded new flow released:** Manager and
-Worktrees (#9990, Main promotion #10024). Neither release proves fleet rollout,
-every platform, whole-toolset atomicity or the complete target stage contract.
-Bridge/MCP are in active unmerged qualification (#10054). Other rows are not
-counted converted: retained WIP or prior legacy functionality is not release
-evidence for this flow.
+**Published bundles, bounded app qualification and deployment are separate.**
+Main promotion #10862 (`072a626be5f8507df1719d69ed736db9e51f5fa2`)
+released the selected Dev snapshot
+`b53f38db3e72362fc3343837dc743c46fee32746`. Its schema-2
+`python-artifacts.json` lists **21 application bundles plus one shared-core
+composition**. The composition is not another application, and bundle
+publication does not prove that every installer, callback, platform or lifecycle
+consumer is qualified.
+
+Manager and Worktrees retain their bounded released front doors (#9990,
+Main promotion #10024). SSH's CLI and service have the additional bounded
+qualification from #10462, released in #10862, as scoped in their rows below.
+Bridge/MCP startup #10054 is merged; their remaining app/lifecycle acceptance
+stays with the existing owners. There is no new portfolio-wide conversion
+count here: release, installed operation, full target conformance and host/fleet
+rollout are different claims. Neither bundle publication nor these app slices
+establish every platform, whole-toolset atomicity or the complete stage contract.
 
 | App / source owner | Fast-flow evidence and current gap | Next bounded acceptance / coordination |
 |--------------------|------------------------------------|---------------------------------------|
 | [worktree-manager](../../../worktree-manager/README.md) (`copilot-extensions-worktree-manager`) | Bounded app-project/UV path released in #9990/#10024; Windows cold/repeat/update, real command/readiness, retained state and caller-Job lifetime qualified. Full stage-readiness, native POSIX and rollout remain open. | Preserve released behavior; complete only an agreed remaining platform/integration gap under #7028. |
 | [agent-worktrees](../../../plugins/agent-worktrees/README.md) | Same bounded released pair; historical command-owner restoration and installed-wheel consumer admission included. Full adopted-system/status-monitor transition remains separate. | Verify actual worktree/registry operations and monitor continuity for the claimed integration/platform; do not rebuild the first pair to begin another app. |
-| [agent-bridge](../../../plugins/agent-bridge/README.md) | Active #10054 owner; wheel/callback and focused unit work exists, but live Session Host/ACP reattachment has not converged. Review also identifies cancellation, relay overlap, unset install-root and mutating-hydration gaps. Not released. | Current owner resolves findings and qualifies a real fixture Host/peer across forward/reverse updates, failure/retry and native exits. Coordinate there; do not open a competing repair PR. |
-| [agent-mcp](../../../plugins/agent-mcp/README.md) | Active #10054 owner; rollback/reuse unit controls exist. Native denied endpoint replacement reached guarded route restoration, but full failure/retry witness remains incomplete. Not released. | Current owner completes authenticated data/control-handle, unchanged-generation reuse, failed-flip retry and native lifetime proof. Keep SQLite fixture-upstream checks distinct from a product DB claim. The [parent Plan](README.md) tracks the unchecked authoritative-replacement adoption delta under existing #10054/#7028/#9716/#10377 owners: #10652 incoming completion, #6389 fresh serving convergence and #10653 protected retirement. Unknown outgoing cleanup is separately deferred; #10486 full reattachment remains required separate work, not an incoming gate. No fix or qualification is claimed. |
+| [agent-bridge](../../../plugins/agent-bridge/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. That merge is not a new whole-app qualification claim here; the remaining Session Host/ACP, cancellation, relay and hydration acceptance stays with its existing owners. | Current owners qualify the remaining real fixture Host/peer forward/reverse updates, failure/retry and native exits. Coordinate through #10054/#7028 and their follow-ups; do not open a competing repair PR or treat the historical pre-merge findings as freshly verified defects. |
+| [agent-mcp](../../../plugins/agent-mcp/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. Bounded rollback/reuse work is not complete authoritative-replacement or whole-app acceptance; the remaining failure/retry and lifecycle qualification stays open. | Current owners complete authenticated data/control-handle, unchanged-generation reuse, failed-flip retry and native lifetime proof. Keep SQLite fixture-upstream checks distinct from a product DB claim. The [parent Plan](README.md) tracks the unchecked authoritative-replacement adoption delta under existing #10054/#7028/#9716/#10377 owners: #10652 incoming completion, #6389 fresh serving convergence and #10653 protected retirement. Unknown outgoing cleanup is separately deferred; #10486 full reattachment remains required separate work, not an incoming gate. This refresh claims no additional runtime fix or qualification. |
 | [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Retained implementation scope; new-flow app acceptance/release not established. Existing coordinator cutover is not automatically this install contract. | Candidate must not dequeue/claim before ownership. Prove task/state round trip, held claims/reservations, update/retry and coordinator self-retirement; claim a non-overlapping slice under #7028. |
 | [agent-codespaces](../../../plugins/agent-codespaces/README.md) | Retained provider/setup scope; new-flow installed-app qualification and release open. | Stage without provider writes; normal setup contributes a plain manifest to Bridge's configuration-root `providers.d` via the installed command. Prove either install order, manifest discovery and preserved reservations/forwards; live venue evidence is separate. |
 | [agent-containers](../../../plugins/agent-containers/README.md) | Existing source/profile preservation is bounded prior work, not new-flow completion. New app qualification/release open. | Preserve base/provider-exec profile, copied-wheel resources, provider registration and existing fleet custody; test both install orders and no foreign-container mutation. |
-| [agent-ssh](../../../plugins/agent-ssh/README.md) | Retained command/source work; new-flow app acceptance/release not established. Not the SSH Manager library or remote SSH service. | Prove generated command execution, profile/config preservation and existing forward/connection use without a new daemon or credential acquisition; coordinate shared-library changes below. |
+| [agent-ssh](../../../plugins/agent-ssh/README.md) | Bounded copied-application CLI slice #10462 released in #10862. Native Windows cold/reuse installs and installed source-qualified commands passed; retained slot members were unchanged on reuse. This is the CLI, not the SSH Manager library or remote SSH service. | Preserve installed command/resources, configuration and source-unavailable reads. Immutable Linux app adoption, real operator connections/forwards and full target conformance remain separate; do not infer them from the service CI or shared-library wheel. |
 | [agent-dispatch-service](../../../services/dispatch/README.md) | Separate standalone runtime root, not automatically covered by the Dispatch plugin. No `[project.scripts]` entry in this snapshot; an emitted callback alone cannot qualify it. | Resolve the existing service entry/owner before emitting an application; prove task admission and durable state without introducing a competing coordinator. |
-| [agent-ssh-service](../../../services/ssh/README.md) | Standalone service; retained native/source scope is not complete new-flow acceptance. | Preserve enrollment, signatures/roles, connections and native relay custody; qualify a credential-free fixture and explicitly separate any unavailable live SSH lane. |
+| [agent-ssh-service](../../../services/ssh/README.md) | Bounded installed startup/fenced-transfer slice #10462 released in #10862. Native Windows copied-app cold/reuse, lost-prepare reply/retry, successor readiness and outgoing self-exit passed with fixture state preserved. Installed-wheel regression also covers the stale-writer notification gap. Separate Linux/Windows service CI passed; that is not immutable Linux app adoption. | Preserve enrollment, signatures/roles, connections and native relay custody. Keep immutable Linux app adoption, live operator Gateway/SSH integration, desktop-focus observation, broader recovery and rollout open. Incoming readiness/current selection and outgoing retirement remain distinct; this bounded witness does not establish complete authoritative replacement. |
 | [agent-pull-requests](../../../plugins/agent-pull-requests/README.md) | Retained source/native work; app-level new-flow release open. | Qualify installed commands and supported cache/service discovery, without publishing reviews or changing PRs as an install side effect. |
 | [agent-pull-requests-service](../../../services/pr/README.md) | Separate standalone service; bounded retained witnesses do not establish whole-app acceptance. | Prove service readiness and durable request/cache continuity, ownership-safe update/rollback and independent client skew. |
 | [agent-chat-service](../../../services/chat/README.md) | Separate service/client entry points; retained catalog/packaging WIP, new-flow qualification open. | Package and test both declared commands, preserve member/cursor/state and native ownership; no implicit join, credential enrollment or new chat store. |
@@ -149,6 +163,9 @@ daemon/install callback for it. Qualify its wheel/resources and actual consuming
 apps' SSH connection/forward continuity, native custody and version skew.
 Coordinate through #7028 with the existing SSH source/native owners before
 touching shared code.
+The released SSH slice exercises its consuming CLI/service paths; it does not
+turn the library into a separately qualified application or establish every
+consumer's connection/forward continuity.
 
 Rows marked open mean **not qualified/released by this campaign**, not proof
 that no source or other contributor implementation exists. Existing app-specific
