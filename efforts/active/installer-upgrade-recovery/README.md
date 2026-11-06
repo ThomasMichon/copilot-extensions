@@ -2315,3 +2315,14 @@ The provisional earlier artifact is still not materialized. This below-altitude
 test/controller correction changes neither production inspection nor runtime
 behavior; required CI, complete historical qualification, source merge and
 parent completion remain open.
+
+The Ubuntu diagnostic run `42247019069` stops at canonical validation before
+reaching the guards: the literal error is `HTTP-52 historical closure lacks
+required owners`. No historical case runs or passes in that attempt. The
+workflow now exercises the unchanged guard selection after independent capture
+verification but before canonical validation/export. This preserves every
+gate, exposes guard failures even when committed current metadata is stale,
+and prevents exporting a qualified artifact before the guards succeed.
+The updated stage-order/admission packet passes all 10 cases in 4.99 seconds,
+with touched F/E9 lint and whitespace checks passing. A fresh exact published
+checkpoint is required for the next diagnostic execution.

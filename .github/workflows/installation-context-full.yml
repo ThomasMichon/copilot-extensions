@@ -2033,20 +2033,6 @@ jobs:
           sys.argv = ["tools/capture_bridge_http52.py", "--source-commit", os.environ["SOURCE_SHA"]]
           runpy.run_path(sys.argv[0], run_name="__main__")
           PY
-      - name: Validate canonical historical evidence
-        run: python tools/check-agent-bridge-contracts.py
-      - name: Export only canonical current outputs and source preimages
-        if: inputs.portfolio == 'bridge-http52-capture'
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: python tools/bridge_http52_artifact.py export --source-commit "$SOURCE_SHA" --artifact-dir http52-qualified-artifact
-      - name: Retain qualified current HTTP-52 outputs
-        if: inputs.portfolio == 'bridge-http52-capture'
-        uses: actions/upload-artifact@v4
-        with:
-          name: http52-qualified-${{ github.sha }}
-          path: http52-qualified-artifact
-          if-no-files-found: error
       - name: Exercise immutable bytes and historical publication guards
         env:
           PYTEST_ADDOPTS: "--maxfail=1 -vv --durations=20"
@@ -2064,6 +2050,20 @@ jobs:
           name: bridge-historical-guard-outcomes-${{ github.run_id }}
           path: ${{ runner.temp }}/bridge-historical-guard-junit
           if-no-files-found: warn
+      - name: Validate canonical historical evidence
+        run: python tools/check-agent-bridge-contracts.py
+      - name: Export only canonical current outputs and source preimages
+        if: inputs.portfolio == 'bridge-http52-capture'
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python tools/bridge_http52_artifact.py export --source-commit "$SOURCE_SHA" --artifact-dir http52-qualified-artifact
+      - name: Retain qualified current HTTP-52 outputs
+        if: inputs.portfolio == 'bridge-http52-capture'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http52-qualified-${{ github.sha }}
+          path: http52-qualified-artifact
+          if-no-files-found: error
 
   logger-recipes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'

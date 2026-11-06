@@ -60,6 +60,14 @@ def test_bridge_historical_guards_preserve_selection_and_failure_diagnostics():
     assert upload["if"] == "always()"
     assert upload["with"]["path"] == arguments[arguments.index("--junit-dir") + 1]
     assert not step.get("continue-on-error")
+    names = [value.get("name") for value in job["steps"]]
+    assert (
+        names.index("Independently verify current HTTP-52 controlled source evidence")
+        < names.index(step["name"])
+        < names.index("Validate canonical historical evidence")
+        < names.index("Export only canonical current outputs and source preimages")
+        < names.index("Retain qualified current HTTP-52 outputs")
+    )
 
 
 @pytest.mark.parametrize("outcome", ["passed", "failed", "skipped", "missing", "empty", "duplicate"])
