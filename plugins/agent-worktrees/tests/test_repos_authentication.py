@@ -211,6 +211,32 @@ def test_cleanup_failure_retains_exact_owner_custody(registry, provider):
     assert caught.value is failure
 
 
+@pytest.mark.parametrize("available", [True, False])
+def test_configuration_projection_preserves_native_observation_and_read_safety(
+    registry, provider, monkeypatch, available,
+):
+    calls, _ = provider
+    if not available:
+        monkeypatch.setattr("shutil.which", lambda name: None)
+    before = registry.read_bytes()
+    result = inspect()
+    projection = result["configuration"]
+    assert projection["summary"]["status"] == result["status"]
+    assert projection["summary"]["observed_at"] == result["observed_at"]
+    rows = {row["id"]: row for row in projection["entries"]}
+    assert rows["repository"]["status"] == result["repository_access"]["status"]
+    assert rows["identity"]["status"] == result["identity"]["status"]
+    assert rows["credential"]["status"] == result["credential"]["status"]
+    details = "\n".join(row["card"]["body"] for row in rows.values())
+    for value in (result["target"]["resource"], result["registry_revision"], result["observed_at"]):
+        assert value in details
+    assert "Git transport" in details and "not observed" in details
+    assert "no sign-in" in details
+    assert registry.read_bytes() == before
+    assert len(calls) == (3 if available else 0)
+    assert "synthetic-private-token" not in json.dumps(projection)
+
+
 def test_runner_failure_returns_contract_json_without_traceback(registry, provider, capsys):
     from agent_worktrees.repos_cli import cmd_repos_dispatch
 

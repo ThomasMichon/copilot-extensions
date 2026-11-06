@@ -114,6 +114,13 @@ class PickerScreenPivotsMixin:
             self.pivots.append({
                 "label": reg.label, "kind": "registered", "pivot": reg, "placement": "config",
             })
+        from worktree_manager.repository_authentication import configuration_pivot as authentication_pivot
+
+        reg = authentication_pivot()
+        if not any(getattr(item.get("pivot"), "name", None) == reg.name for item in self.pivots):
+            self.pivots.append({
+                "label": reg.label, "kind": "registered", "pivot": reg, "placement": "config",
+            })
     def _pivot_descriptor_key(self, index=None):
         descriptors = getattr(self, "pivots", ())
         index = getattr(self, "htab", 0) if index is None else index
