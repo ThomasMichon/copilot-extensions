@@ -20,6 +20,26 @@ from tools import typecheck_source_views as views
 from installer_dependency_policy import DependencyPolicyError
 
 
+@pytest.fixture(autouse=True)
+def _isolated_scratch(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep temporary checkouts' environments out of the shared scratch root."""
+    real = typecheck.resource_path
+    original = os.environ.get("AGENT_SCRATCH_ROOT")
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path_factory.mktemp("scratch")))
+
+    def resource_path(root: Path) -> Path:
+        if root.resolve() != typecheck.ROOT:
+            return real(root)
+        with monkeypatch.context() as scoped:
+            if original is None:
+                scoped.delenv("AGENT_SCRATCH_ROOT")
+            else:
+                scoped.setenv("AGENT_SCRATCH_ROOT", original)
+            return real(root)
+
+    monkeypatch.setattr(typecheck, "resource_path", resource_path)
+
+
 def _harness_emitted_fixture(root: Path) -> tuple[str, ...]:
     declaration = json.loads((typecheck.ROOT / views.HARNESS_DECLARATION).read_bytes())
     paths = tuple(row["path"] for row in declaration["members"])
@@ -1135,6 +1155,7 @@ def test_missing_preparation_is_actionable_and_does_not_create_environment(
         typecheck.check_project(
             tmp_path, project(), ("sample.py",), all_paths=("sample.py",),
         )
+    assert not typecheck.environment_path(tmp_path, project())[0].exists()
     assert not (tmp_path / ".test-venvs").exists()
 
 
