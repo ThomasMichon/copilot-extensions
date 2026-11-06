@@ -53,7 +53,7 @@ def test_public_toolchain_metadata_shares_the_caller_deadline(monkeypatch, deadl
         assert options["fetch"]("https://example.invalid/" + name) == b"metadata fixture"
         return SeasonedPublicRelease(PINS[name], HASHES[name])
 
-    monkeypatch.setattr(feed.urllib.request, "urlopen", open_url)
+    monkeypatch.setattr(feed, "_deadline_opener", lambda deadline: SimpleNamespace(open=open_url))
     monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve)
     if deadline == 135:
         with pytest.raises(btl.ArtifactBuildError, match="deadline"):

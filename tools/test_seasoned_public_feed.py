@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,7 +48,10 @@ def test_default_fetch_deadline_interrupts_continuous_response_bytes(monkeypatch
             pass
 
     producer = threading.Thread(target=stream)
-    monkeypatch.setattr(spf.urllib.request, "urlopen", lambda *args, **kwargs: response)
+    monkeypatch.setattr(
+        spf, "_deadline_opener",
+        lambda deadline: SimpleNamespace(open=lambda *args, **kwargs: response),
+    )
     producer.start()
     started = time.monotonic()
     try:
@@ -68,13 +72,65 @@ def test_default_fetch_completes_response_before_deadline(monkeypatch):
     writer.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
     response = http.client.HTTPResponse(reader)
     response.begin()
-    monkeypatch.setattr(spf.urllib.request, "urlopen", lambda *args, **kwargs: response)
+    monkeypatch.setattr(
+        spf, "_deadline_opener",
+        lambda deadline: SimpleNamespace(open=lambda *args, **kwargs: response),
+    )
     try:
         assert spf._default_fetch("https://pypi.org/pypi/pkg/json", deadline=time.monotonic() + 1) == b"{}"
     finally:
         response.close()
         reader.close()
         writer.close()
+
+
+@pytest.mark.parametrize("prefix,slow", [
+    (b"HTTP/1.1 200", True),
+    (b"HTTP/1.1 200 OK\r\nX-Slow: ", True),
+    (b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", False),
+])
+def test_default_fetch_bounds_actual_header_parsing(monkeypatch, prefix, slow):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    listener.settimeout(1)
+    stop, streaming = threading.Event(), threading.Event()
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    def stream():
+        with listener.accept()[0] as connection:
+            connection.settimeout(1)
+            request = b""
+            while b"\r\n\r\n" not in request:
+                block = connection.recv(4096)
+                if not block:
+                    return
+                request += block
+            try:
+                connection.sendall(prefix)
+                streaming.set()
+                while slow and not stop.wait(0.02):
+                    connection.sendall(b"x")
+            except OSError:
+                pass
+
+    producer = threading.Thread(target=stream)
+    producer.start()
+    started = time.monotonic()
+    try:
+        url = f"http://127.0.0.1:{listener.getsockname()[1]}/metadata"
+        if slow:
+            with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
+                spf._default_fetch(url, deadline=started + 0.35)
+        else:
+            assert spf._default_fetch(url, deadline=started + 1) == b"{}"
+        assert streaming.is_set()
+        assert time.monotonic() - started < 0.9
+    finally:
+        stop.set()
+        producer.join(timeout=1)
+        listener.close()
+    assert not producer.is_alive()
 
 
 def test_release_retains_only_selected_seasoned_file_hashes():

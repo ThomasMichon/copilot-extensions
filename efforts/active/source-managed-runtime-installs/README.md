@@ -1550,11 +1550,12 @@ onto one branch.
 ### 2026-11-06 - Integration review deadline and CI corrections
 
 PR #11121's public metadata fetch now interrupts its owned response socket at
-the caller's body deadline, including continuously streamed body bytes and
-partial chunk framing. The bounded watchdog is canceled and joined on every
-read exit. Containers' operating documentation now distinguishes version-one
-target/profile declarations from the required V2 complete-application packet
-and selected-application currentness.
+the caller's header/body deadline, including continuously streamed status/header
+lines, body bytes and partial chunk framing. Its HTTP/HTTPS response parser
+starts that bound before header parsing, not only after `urlopen` returns.
+Each bounded watchdog is canceled and joined on exit. Containers' operating
+documentation now distinguishes version-one target/profile declarations from
+the required V2 complete-application packet and selected-application currentness.
 
 The launch census records the two adopted native installer drivers and the
 Manager recovery spawn's current function. The unit manifest binds the exact
@@ -1565,6 +1566,9 @@ native token-owner path failing for a synthetic PID.
 
 Contained deadline/selection controls passed 79 cases; packaged-provider and
 Windows CIM controls passed 86 cases, with cleanup verified in both runs.
+After reconciling the branch with current Dev and extending the same deadline
+controls to actual trickled status/header parsing plus an on-time response,
+the combined selection passed all 168 cases with verified cleanup.
 The broader historical workflow test selection still encounters the
 [previously recorded non-enrolled recipe gap](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6627995884)
 and [retired-workflow fixture failures](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6282693571).
