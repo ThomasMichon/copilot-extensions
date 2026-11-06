@@ -44,6 +44,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     membership = importlib.import_module("agent_bridge.owner_membership")
     wire = importlib.import_module("agent_bridge.session_observation_contract")
     routes = importlib.import_module("agent_bridge.routes.session_observations")
+    membership_routes = importlib.import_module("agent_bridge.routes.owner_membership")
     db = db_module.Database(tmp_path / "bridge.sqlite3")
     db.create_session(
         "child", "fixture", None, str(tmp_path), "local", "starting", 1.0,
@@ -77,6 +78,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     old_statistics_provider = tmp_path / "old-statistics-provider"
     reject_statistics = tmp_path / "reject-statistics-flag"
     invocations = tmp_path / "invocations.jsonl"
+    diagnostic = tmp_path / "bridge-failure.json"
     owner_loop = asyncio.new_event_loop()
     owner_thread = Thread(target=owner_loop.run_forever)
     owner_thread.start()
@@ -95,17 +97,14 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     with lock:
                         counts["held"] += 1
                         counts["max_held"] = max(counts["max_held"], counts["held"])
-                if url.path.endswith("/owner-observations"):
+                membership_read = url.path.endswith("/owner-observations")
+                if membership_read:
                     assert query["owner_ref"] == OWNER
-                    body = membership.source_for(manager, OWNER).frame(OWNER, query.get("after"))
-                    peer.sendall(wire.sse(body))
-                    while held and not stop.wait(0.05):
-                        if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
-                            return
-                    return
-                history = "/session-observation-history/" in url.path
-                read = wire.ReadRequest.parse(url.path.rsplit("/", 1)[-1], pairs, history=history)
-                if history:
+                    read = membership_routes.OwnerRead.parse(pairs)
+                else:
+                    history = "/session-observation-history/" in url.path
+                    read = wire.ReadRequest.parse(url.path.rsplit("/", 1)[-1], pairs, history=history)
+                if not membership_read and history:
                     history_entered.set()
                     while block_history.is_set() and not stop.wait(0.05):
                         if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
@@ -121,7 +120,10 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                             return True
 
                     request = SimpleNamespace(app=SimpleNamespace(state=state), is_disconnected=disconnected)
-                    stream = routes.observations(request, read)
+                    stream = (
+                        membership_routes.stream(request, read) if membership_read
+                        else routes.observations(request, read)
+                    )
                     try:
                         async for chunk in stream:
                             await asyncio.to_thread(peer.sendall, chunk)
@@ -212,11 +214,17 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         f"'version':json.load(open({str(refusal_version)!r})),'kind':'error','code':'unsupported',"
         "'message':'selected daemon does not support bridge-session-current-requests-v1'}),flush=True)\n"
         "    raise SystemExit(3)\n"
-        "args.func(args)\n",
+        "try:\n"
+        "    args.func(args)\n"
+        "except BaseException:\n"
+        "    import traceback\n"
+        "    from pathlib import Path\n"
+        f"    Path({str(diagnostic)!r}).write_text(traceback.format_exc(),encoding='utf-8')\n"
+        "    raise\n",
         encoding="utf-8",
     )
     script.chmod(0o700)
-    monkeypatch.setattr(bridge, "bridge_command", lambda root: [str(script)])
+    monkeypatch.setattr(bridge, "bridge_command", lambda root: [sys.executable, "-I", str(script)])
     result = {
         "log": log, "session": session, "requests": requests, "following": following,
         "counts": counts, "unsupported": unsupported,
@@ -228,6 +236,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "old_statistics_cli": old_statistics_cli, "old_statistics_provider": old_statistics_provider,
         "reject_statistics": reject_statistics, "invocations": invocations,
         "failures": failures,
+        "diagnostic": diagnostic,
     }
     try:
         yield result

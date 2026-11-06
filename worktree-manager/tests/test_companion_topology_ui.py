@@ -123,6 +123,7 @@ def test_escape_cancels_blocked_graph_read(monkeypatch):
             await app.workers.wait_for_complete()
             app.query_one("#views", TabbedContent).active = "topology-tab"
             assert await asyncio.to_thread(entered.wait, 2)
+            await pilot.wait_for_animation()
             await pilot.press("escape")
         assert await asyncio.to_thread(stopped.wait, 2)
 

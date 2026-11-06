@@ -14,8 +14,9 @@ exact-repository provider discovery merged in #10503; explicit policy-first
 managed export/collection composition merged in #10512; D4's default-off
 existing-tick source integration merged in #10520; D5 checkout-preservation
 source controls merged in #10528; supported local rescue/finalization
-qualification merged in #10539.**
-Native durability, actual archive acknowledgment and D5 remain open.
+qualification merged in #10539; private native Windows allocation/retry and
+complete-export qualification merged in #10777.**
+Combined native integration, actual archive acknowledgment and D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
 [D1 readback](journal/2026/11.03-sidecar-durable-placement.md) and
@@ -263,15 +264,20 @@ not consequences of a reviewed design.
 - [ ] Atomic allocation/registration and interrupted relocation leave at most
   one admitted writer location; conflicting or partial registration is visible.
   #10224 qualifies new-home publication/faults and concurrent worktree allocation;
-  no active-store relocation or native Windows durability is qualified.
-- [ ] Execute the owning allocation/retry and complete-export durability controls on native Windows
+  #10777 adds actual private native Windows allocation/retry barriers.
+  Active-store relocation remains unqualified.
+- [x] Execute the owning allocation/retry and complete-export durability controls on native Windows
   and record actual filesystem barriers separately from Linux API-double
   coverage. Hardware power-loss behavior and unsupported filesystems are not
   inferred from source tests.
   The manual `installation-context-full.yml` `worktree-state` portfolio selects
   real allocation, final-barrier failure/retry and complete export/copy/readback
-  controls in private temporary homes. A source change or Linux skip is not
-  native execution; this item remains open until the selected Windows run passes.
+  controls in private temporary homes. #10777's exact reviewed source passed
+  run `42112356837`, Windows job `127542924527`: two allocation/final-barrier
+  retry controls and one complete export/copy/readback control, zero skips.
+  Both ordinary contained runners completed cleanup. This closes only this
+  finite native filesystem criterion; combined native collection, real-data
+  relocation, installed operation and archive acknowledgment remain open.
 - [x] Qualify efforts-owned new managed initialization and complete local export/
   readback in isolated processes, preserving declared identity and every
   accepted operation/record under concurrent mutation. #10238 covers malformed

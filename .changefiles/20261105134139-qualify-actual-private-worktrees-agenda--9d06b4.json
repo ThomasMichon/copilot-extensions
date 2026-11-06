@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual private Worktrees, Agenda and Bridge source composition through the native Windows Companion client.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1526,7 +1526,7 @@ jobs:
 
   pane-argv-windows:
     if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'pane-argv' || inputs.portfolio == 'mux-companion')
-    name: Native PSMux 3.3.6 (isolated session)
+    name: Native PSMux ${{ inputs.portfolio == 'mux-companion' && '3.4.0' || '3.3.6' }} (isolated session)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -1541,14 +1541,22 @@ jobs:
           version: "0.12.6"
       - name: Prepare pinned disposable PSMux
         shell: pwsh
+        env:
+          PORTFOLIO: ${{ inputs.portfolio }}
         run: |
           $ErrorActionPreference = 'Stop'
           $null = Get-Command pwsh -CommandType Application -ErrorAction Stop
           $root = Join-Path $env:RUNNER_TEMP 'pane-argv-psmux'
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.6/psmux-v3.3.6-windows-x64.zip' -OutFile $archive
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947') {
+          $version = '3.3.6'
+          $digest = 'a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947'
+          if ($env:PORTFOLIO -eq 'mux-companion') {
+            $version = '3.4.0'
+            $digest = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
+          }
+          Invoke-WebRequest -Uri "https://github.com/psmux/psmux/releases/download/v$version/psmux-v$version-windows-x64.zip" -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $digest) {
             throw 'Pinned PSMux archive digest mismatch'
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $root
@@ -1573,7 +1581,7 @@ jobs:
         run: |
           python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_companion_pane_native.py --test-file tests/native/test_companion_app_psmux.py --test-file tests/test_companion_attention.py --test-file tests/test_companion_attention_ui.py --test-file tests/test_daemons_status.py --test-file tests/test_daemons_cli.py --test-file tests/test_windows_daemon_observation.py --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers --test-timeout 120
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_companion_python_startup.py --test-file tests/native/test_companion_pane_native.py --test-file tests/native/test_companion_app_psmux.py --test-file tests/native/test_companion_joined_psmux.py --test-file tests/native/test_companion_joined_fixture.py --test-file tests/test_companion_attention.py --test-file tests/test_companion_attention_ui.py --test-file tests/test_daemons_status.py --test-file tests/test_daemons_cli.py --test-file tests/test_windows_daemon_observation.py --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers --test-timeout 120
 
   worktree-state-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktree-state'

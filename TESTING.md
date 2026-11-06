@@ -2440,7 +2440,7 @@ This explicit five-minute job does not expand required unit-only CI.
 The manual `installation-context-full.yml` portfolio `mux-companion` runs
 `tests/native/test_companion_pane_tmux.py` on Ubuntu 24.04 with tmux 3.4 and
 `tests/native/test_companion_pane_native.py` on Windows with digest-pinned
-disposable PSMux 3.3.6 against the dispatch's recorded immutable source.
+disposable PSMux 3.4.0 against the dispatch's recorded immutable source.
 It verifies actual native option targeting, a fresh
 synthetic constructed-prefix invocation, same-window reuse and the unchanged
 CLI process in an isolated socket. It is not a required PR lane or a production
@@ -2469,6 +2469,82 @@ it never relaxes Job breakaway restrictions to make a run pass.
 Linux skips do not qualify this Windows boundary. Source/commit-stamped Windows
 execution is required; server captures and ConPTY bytes are not headed pixels,
 window/focus-stealing observations, real owner composition or frame latency.
+The same Windows packet separately selects `test_companion_joined_psmux.py`
+over the actual private Worktrees resident, managed Agenda, Bridge semantic
+route/EventLog and callback-derived current-input projection. It uses the
+shared source selection/bootstrap and loopback carrier substitutions, not a
+production service or SDK actor. Actual ConPTY keyboard input selects a known
+session, browses independent history, retains sparse full/narrow views and
+observes live purpose/count updates without leaving older work. Escape requires
+all three birth-qualified reader processes and the observer to exit while the
+original CLI pane/PID/session remains live and accepts further input. The strict
+caller-owned Job and retained handles govern failure cleanup. Linux skips are
+not Windows qualification; exact source-stamped native execution is required.
+Its change-only geometry/focus snapshots are fixture observations, not headed
+pixels, native-frame or input-ready performance measurements.
+`test_companion_joined_fixture.py` deterministically checks that this observer
+retries only Windows sharing/lock violations on a later tick without advancing
+its published value; other permission failures remain visible errors.
+Its private Bridge prerequisite also requires an actual owning membership-route
+heartbeat after the snapshot, so a one-frame carrier that starves healthy
+readers cannot masquerade as native integration failure.
+Pre-app startup failures additionally record a bounded read-only thread-state
+query for the already-pinned inert CLI. That diagnostic never resumes, stops or
+repairs the process and does not change the original startup deadline.
+The manual packet also selects `test_companion_python_startup.py`: three
+stdlib-only controls compare the prepared virtualenv interpreter directly in
+ConPTY, that interpreter inside private PSMux/ConPTY, and its base interpreter
+inside private PSMux/ConPTY. Each requires a script receipt and banner within
+the same 15-second deadline, retains process identities and strict Job/handle
+cleanup, and uses the existing private profile and no-warm policy. These
+controls isolate startup layers; they neither fix nor waive a client failure
+and are not Companion, installed or startup-stability qualification.
+Portable fixture controls execute the native polling code with timely,
+exact-deadline and late observations; success is checked after blocking polls,
+so a query started before the deadline cannot admit a late result.
+The Companion portfolio now pins disposable PSMux 3.4.0; the separate pane-argv
+portfolio retains 3.3.6. Under 3.3.6, the direct virtualenv/ConPTY startup
+control passes while both PSMux controls (virtualenv and base Python) fail
+before the script. Its upstream ConPTY implementation requests inherited cursor
+state; 3.4.0 removes that startup handshake, with an upstream first-pane
+regression control. This narrows the failure to the additional PSMux/ConPTY
+layer, not a virtualenv-only failure or Companion behavior. The version change
+does not erase the failed 3.3.6 runs or qualify 3.4.0 without actual execution.
+All three startup controls pass on 3.4.0, exposing a separate target-parser
+refusal: `session:%id` is treated as a window by its client validator.
+Companion and the three native wrappers select exact, explicitly session-scoped
+pane IDs using the selected executable's `-V` release: `session:%id` for 3.3.x
+and `session:.%id` for 3.4.x. The latter is not sent to 3.3.x, whose parser
+silently drops that pane ID. Other or unrecognized release lines refuse pane
+actions before mutation rather than guessing or replaying effects. The bounded,
+headless discovery also reads the selected live server's `#{version}`, session
+name and incarnation. A 3.4 client with a retained 3.3 server refuses before
+pane effects; a 3.3 client retains its old syntax against either server.
+Discovery is cached per executable filesystem identity and verified session
+incarnation, not per event; replacement or a new incarnation invalidates it.
+Bare registered executable names resolve through PATH before discovery and
+execution. POSIX tmux targeting remains unchanged. Portable controls cover the
+compatible pairs, mixed-version refusal, replacement, bare names, stale native
+identity and the unchanged operation deadline; they are not native integration
+qualification.
+The next reviewed Windows run passes all startup controls, the synthetic-owner
+client and pane-lifetime control, and reaches the actual joined client's
+post-Escape exit wait. That wait remains a failure: its original diagnostic
+queried the already-departed observer pane and obscured which cleanup condition
+was unmet. A phase-specific diagnostic now reports retained observer/reader
+handles, live birth-qualified owner commands and Bridge subscription counts
+without querying a dead pane. The unchanged cleanup assertions and 15-second
+deadline remain the acceptance gate.
+The diagnostic run confirms the observer and all three retained reader handles
+are signaled and Bridge has no subscribers or held connections, while the
+PID-existence-only owner check still sees the two exited source commands.
+Windows retains process objects while another process holds their handles.
+The native exit check now uses a matching retained handle's signaled state;
+unretained commands still require disappearance or a known changed birth,
+and unknown birth stays unsettled. All source commands, readers and observer
+must still exit before further input is sent to the original CLI. The same
+run's separate 50 ms membership-seed setup failure is retained under #8811,
+not waived or hidden by this exit-check correction.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that
