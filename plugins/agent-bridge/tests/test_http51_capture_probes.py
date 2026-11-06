@@ -175,6 +175,10 @@ from test_acquisition_writer_inspection import (
     test_unavailable_retained_command_is_a_structured_read_only_refusal as _inspect_unavailable,
 )
 from test_creation_worktree_writer import (
+    test_required_creation_writer_cli_carries_requirement_to_actual_client
+    as test_required_creation_writer_cli_carries_requirement_to_actual_client,
+    test_required_creation_writer_cli_invalid_input_refuses_before_connect
+    as test_required_creation_writer_cli_invalid_input_refuses_before_connect,
     creation_rig as creation_rig, writer_creation as writer_creation,
     test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses
     as test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses,
