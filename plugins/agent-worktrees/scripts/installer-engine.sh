@@ -533,7 +533,28 @@ write_simple_binstub() {
     local snapshot_source_path="${10:-}" snapshot_id="${11:-}" payload_version="${12:-}"
     local runtime_root_literal snapshot_installer_literal
     local cold_dispatch=""
+    local early_dispatch=""
     if [[ "$command_name" == agent-vault ]]; then
+        early_dispatch="$(cat <<'DISPATCH'
+_scope_requested=0
+for _argument in "$@"; do
+    [[ "$_argument" != -- ]] || break
+    case "$_argument" in --configuration-root|--configuration-root=*) _scope_requested=1 ;; esac
+done
+if [[ "$_scope_requested" == 1 || "${1:-}" == invocation-contract ]]; then
+    _snapshot="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+    _gate="$_snapshot/scripts/runtime-gate.sh"
+    if [[ -f "$_gate" ]] &&
+       grep -Fq '# Configuration root contract: vault-context-v1' "$_gate"; then
+        export AGENT_VAULT_HOME="$_root"
+        export AGENT_VAULT_PAYLOAD_ROOT="$_snapshot"
+        exec bash "$_gate" "$@"
+    fi
+    printf '[agent-vault] native repository context/contract support is unavailable; update the owning snapshot before retrying.\n' >&2
+    exit 2
+fi
+DISPATCH
+)" || return 1
         cold_dispatch="$(cat <<'DISPATCH'
 _gate="$_snapshot/scripts/runtime-gate.sh"
 if [[ ! -f "$_gate" ]] ||
@@ -656,6 +677,7 @@ _resolve() {
 }
 _resolve
 [ -n "\$AGENT_RT_PY" ] && exec "\$AGENT_RT_PY" -m "$module_name" "\$@"
+$early_dispatch
 if [ -n "\${$no_self_provision_env:-}" ]; then
     printf '[%s] runtime not provisioned (%s set).\n' "\$_name" "$no_self_provision_env" >&2
     exit 1

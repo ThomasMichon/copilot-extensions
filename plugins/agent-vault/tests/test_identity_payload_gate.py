@@ -101,7 +101,8 @@ def prepare_runtime(runtime, payload):
         else next((slot / "lib").glob("python*/site-packages"))
     )
     sources = [
-        payload / "src", REPO / "libs" / "agent-procutil" / "src",
+        payload / "src", REPO / "libs" / "configuration-layers" / "src",
+        REPO / "libs" / "agent-procutil" / "src",
         REPO / "libs" / "zdd" / "src", REPO / "libs" / "single-instance-lease" / "src",
         *map(Path, site.getsitepackages()),
     ]

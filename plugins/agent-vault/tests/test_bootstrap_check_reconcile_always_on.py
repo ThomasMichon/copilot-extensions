@@ -95,7 +95,7 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
     )
     source = plugin_dir / "src" / "agent_vault"
     source.mkdir(parents=True)
-    for filename in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "_peer_launch.py"):
+    for filename in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "invocation.py", "_peer_launch.py"):
         shutil.copyfile(_PLUGIN_ROOT / "src" / "agent_vault" / filename, source / filename)
     (root / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
     (scripts_dir / "install.sh").write_text(

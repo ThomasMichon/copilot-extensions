@@ -58,6 +58,48 @@ state, so an installer refusal remains distinguishable from inactive readiness.
 Activation does not load extension configuration providers or treat invocation
 database/credential environment variables as an opt-in declaration.
 
+When activation comes from repository or bound-knowledge configuration, invoke
+Vault from the adopted repository (including its worktrees/subdirectories).
+From a neutral directory such as HOME, use `<repo> vault unlock`; the repository
+router supplies `--configuration-root <absolute-checkout>` to Vault. This selects
+repository and bound-knowledge discovery without changing the caller directory
+or rewriting native environment selectors. The same routing applies to other
+Vault verbs, including operations with relative input/output files.
+`AGENT_VAULT_CONFIG`, `KPDB`, local/core endpoints, discovery paths and KEK/cache
+settings therefore keep their native expansion, symlink and Unix-address-length
+semantics. The parent environment and process directory are unchanged.
+An unavailable checkout, invalid/duplicate root or unsupported native option
+fails without retrying against another context.
+
+The CLI advertises `agent-vault.invocation` version 1 and
+`configuration-root-v1` through `invocation-contract --json` in the executing
+runtime. Ordinary routing does not add a capability-probe subprocess or infer
+support from a package version. It submits one required scoped invocation;
+strict parsing accepts the scope or rejects it before command dispatch.
+Contract queries are read-only, including with inactive or invalid application
+configuration. With no prepared runtime the front door reports an empty
+capability list and `runtime_prepared: false`; it never installs a runtime just
+to discover its capabilities.
+The router inhibits legacy first-use provisioning while the option is unknown.
+A supporting payload restores only that router-owned inhibition after validating
+the root, while an explicit caller `AGENT_VAULT_NO_SELFPROVISION` remains in force.
+Thus an older root-unaware front door/runtime declines the new form without
+provisioning in the caller's unrelated context or silently executing a CWD alias.
+Update Vault through its normal owner workflow if the option is unsupported.
+Existing unscoped CLI syntax and first-use behavior remain supported.
+The common configuration-root getter composes an explicit discovery argument,
+then this CLI operation's root, then an installed resident-source binding, then
+the process directory. Native configuration-file selection stays caller-absolute,
+independently of that repository discovery root. This lets resident launchers
+retain the selected discovery source without reinterpreting a relative native
+configuration-file selector.
+At a real first-use constructor handoff, the front door retains this native file
+selector as a separate caller-absolute value before the worker changes directory.
+
+A missing repository context is reported separately from malformed
+configuration, unresolved bindings and installation errors. This does not make
+Worktrees a dependency of standalone Vault installations.
+
 The payload reads activation with its bundled configuration SDK before requiring
 a Vault runtime or backend. Inactive readiness is `configuration-empty`, not a
 service-health claim. Configured readiness retains strict database and service
