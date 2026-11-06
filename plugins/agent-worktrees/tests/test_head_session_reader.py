@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import output, session_tracking_cli, tracking
 from test_session_lifecycle import _rec
@@ -31,7 +34,7 @@ def test_head_reader_uses_canonical_or_loaded_controller_projection(
     captured = {}
     monkeypatch.setattr(output, "_json_output", lambda value: captured.update(value))
     parser = argparse.ArgumentParser(allow_abbrev=False)
-    session_tracking_cli.add_parsers(parser.add_subparsers(dest="command", required=True))
+    session_tracking_cli.add_head_parser(parser.add_subparsers(dest="command", required=True))
     args = parser.parse_args(["head-session", "--worktree-id", "wt-1", "--json"])
 
     assert session_tracking_cli.cmd_head_session(args) == 0
@@ -40,3 +43,38 @@ def test_head_reader_uses_canonical_or_loaded_controller_projection(
     assert captured["controller_findings"] == (findings if loaded_override else [])
     assert sys.modules.get("agent_worktrees.__main__") is core
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["head", "capabilities"])
+def test_bounded_read_frontends_do_not_load_mutation_surfaces(operation):
+    code = """
+import argparse, sys
+blocked = {
+    'agent_worktrees.__main__', 'agent_worktrees.reap_cli',
+    'agent_worktrees.terminal_conclusion', 'agent_worktrees.claims_cli',
+    'agent_worktrees.worktree_ops_cli',
+}
+class RefuseMutationImports:
+    def find_spec(self, name, *args):
+        if name in blocked:
+            raise AssertionError('read loaded mutation surface: ' + name)
+sys.meta_path.insert(0, RefuseMutationImports())
+parser = argparse.ArgumentParser(allow_abbrev=False)
+sub = parser.add_subparsers(dest='command', required=True)
+if sys.argv[1] == 'head':
+    from agent_worktrees import session_tracking_cli as cli
+    cli.add_head_parser(sub)
+    parser.parse_args(['head-session', '--worktree-id', 'fixture', '--json'])
+else:
+    from agent_worktrees import resource_producer_cli as cli, resource_relationship
+    resource_relationship.writer_identity = lambda: {'fixture': True}
+    cli.add_relationship_parser(sub)
+    args = parser.parse_args(['resource-relationship', 'capabilities', '--json'])
+    raise SystemExit(cli.cmd_resource_relationship(args))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, operation], capture_output=True, text=True,
+        timeout=15, env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr

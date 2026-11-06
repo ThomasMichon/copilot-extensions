@@ -1318,3 +1318,20 @@ read-only parsers and handlers before constructing the server. All session
 writes still use the full CLI with the reachable unqualified-resident trap.
 Add the same capture-only command timings to acquisition so either flow's
 next failure names its phase. Preserve all commands, assertions and deadlines.
+
+The next trace completes the handoff in 88.31 seconds but reaches the same
+90-second limit during inspection. A guarded import profile measures repeated
+record/head/capability cold starts at 2.33/2.73/3.55 seconds and the full session
+CLI at 5.99 seconds. Receipt `fsync` accounts for only 0.06–0.16 seconds, so its
+checks and durability remain unchanged. Defer mutation-only imports from the
+bounded head/capability frontends and share their existing parser definitions
+with focused registration helpers. Preserve full-CLI compatibility and every
+actual write, read and negative control in the real-process fixtures.
+
+All 68 focused controls pass in 43.49 seconds, including fresh-interpreter
+refusal of unrelated mutation imports, canonical/loaded head projections,
+relationship CLI, producer request, full-parser consistency and conclusion CLI.
+The contained runner succeeds in 131.81 seconds; F/E9 passes. The earlier broad
+334-case selection reached its original 300-second group limit and is not a
+completed-suite result. Guarded flows and the complete 245-case capture still
+owe fresh source-specific evidence before publication.

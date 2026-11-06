@@ -30,7 +30,8 @@ cfg.load_config = lambda *a, **k: config
 cfg.project_dir = lambda *a, **k: project
 cfg.tracking_dir = lambda *a, **k: records
 cfg.active_project = lambda: project_name
-if argv != ["snapshot"]:
+command = argv[2:] if argv[:1] == ["--project"] else argv
+if command[:1] not in (["snapshot"], ["record"], ["head-session"]):
     from agent_worktrees import resource_relationship as relationship
 
     relationship.writer_identity = lambda: json.loads((state / "writer-identity.json").read_text())
@@ -64,7 +65,6 @@ elif argv == ["snapshot"]:
         "sessions": [item.session_id for item in record.sessions],
     }))
 else:
-    command = argv[2:] if argv[:1] == ["--project"] else argv
     if command[:1] in (["record"], ["head-session"]) or command[:2] == ["resource-relationship", "capabilities"]:
         import argparse
         from importlib import import_module
@@ -80,7 +80,12 @@ else:
         provider = import_module("agent_worktrees." + module)
         if command[0] == "head-session":
             provider._all_tracking_dirs = lambda: [records]
-        provider.add_parsers(sub)
+        if command[0] == "head-session":
+            provider.add_head_parser(sub)
+        elif command[0] == "resource-relationship":
+            provider.add_relationship_parser(sub)
+        else:
+            provider.add_parsers(sub)
         args = parser.parse_args(argv)
         cfg.set_active_project(args.project or project_name)
         sys.exit(getattr(provider, handler_name)(args))

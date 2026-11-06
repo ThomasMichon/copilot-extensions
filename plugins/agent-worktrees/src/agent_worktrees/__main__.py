@@ -5727,7 +5727,7 @@ def _load_full_command_surface() -> None:
     cmd_session_tail = session_tracking_cli.cmd_session_tail
     cmd_recent_messages = session_tracking_cli.cmd_recent_messages
     cmd_resolve_handoff_successor = handoff_successor_repair_cli.cmd_resolve_handoff_successor
-    terminal_conclusion = session_tracking_cli.terminal_conclusion
+    from . import terminal_conclusion
     _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
     _session_role = session_metadata_cli._session_role
     _CONCLUDED_STATES = session_metadata_cli._CONCLUDED_STATES
