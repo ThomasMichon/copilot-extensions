@@ -223,8 +223,16 @@ refuses before the next owner call; earlier effects remain accountable to
 that same retained request. These are optimistic reads, not a transaction
 held across external I/O, so the existing post-I/O CAS remains mandatory.
 They add one indexed, task-scoped snapshot per relationship call, with no
-process or wire probe and no preflight on unrelated record saves. This
-original-queue check does not qualify the resident, Bridge or other writers.
+process or wire probe and no preflight on unrelated record saves.
+For an allocator-prepared request, admission also rereads its exact original
+reservation by key. Task, workspace/project/path, execution machine, nonce,
+required relationship, event and original generation must still agree.
+Supported machine-case aliases remain valid. Missing or changed preparation
+refuses the next owner call without adopting another reservation or dropping
+earlier effects. This additional indexed read retains the original preparation
+across startup continuation and retirement; it does not require the historical
+reservation to remain active. Neither check qualifies the resident, Bridge or
+other writers.
 
 The original direct-claim audit event stores one immutable relationship
 request in `task_events.task_relationship`. Allocator placement still claims

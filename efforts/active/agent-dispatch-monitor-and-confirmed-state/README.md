@@ -70,8 +70,10 @@ gap, not actual installed-owner or complete-cohort admission.
 The conditional ordinary writer consumer subsequently merged in #11063.
 It retains the original requirement before create, uses the shipped CLI
 discovery command and recovers the original key after a lost reply or moved
-selector. This is source credit; explicit-resume per-attempt support and
-complete-cohort assembly remain open before ordinary activation.
+selector. Required exact-session resume subsequently merged in #11078,
+including endpoint-pinned per-attempt capability checks under concurrent
+startup-observer cutover. This is source credit; complete-cohort assembly
+remains open before ordinary activation.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running

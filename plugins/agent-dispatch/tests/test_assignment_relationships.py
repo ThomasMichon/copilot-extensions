@@ -317,6 +317,76 @@ def test_caller_snapshot_cannot_substitute_the_original_queue_request(assignment
     assert queue.task_relationship(task.id)["request"] == original["request"]
 
 
+@pytest.mark.parametrize("field,replacement", [
+    ("worktree", "replacement"),
+    ("allocation_project", "another"),
+    ("worktree_path", "/another"),
+    ("execution_machine", "host-b"),
+])
+@pytest.mark.parametrize("boundary", ["reserve", "bind", "close"])
+def test_original_prepared_reservation_is_read_before_each_relationship_effect(
+    assignment, field, replacement, boundary,
+):
+    queue, owner, workspace, task = assignment
+    publish(queue, pool())
+    reservation, _ = place(queue, task)
+    owner.lose_reply = "reserve"
+    with pytest.raises(TaskError, match="unresolved"):
+        queue.record_spawn_worktree(
+            reservation.key, workspace.worktree, ownership="created",
+            execution_machine=workspace.machine, allocation_project=workspace.project,
+            worktree_path=workspace.path, driver="cli", creation_nonce=workspace.creation_nonce,
+        )
+    if boundary == "close":
+        queue.reconcile_task_relationship(task.id)
+        queue.record_spawn(reservation.key, session_handle="native", worktree=workspace.worktree)
+        queue.start(
+            task.id, workspace.worker_id, owner_session_id="native",
+            expected_generation=queue.get(task.id).generation,
+        )
+        queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
+        queue.confirm(task.id)
+    original = copy.deepcopy(queue.task_relationship(task.id))
+    before = len(owner.calls)
+
+    def replace_preparation():
+        with queue._connect() as conn:
+            retained = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key=?", (reservation.key,),
+            ).fetchone()
+            conn.execute(
+                f"UPDATE spawn_reservations SET {field}=? WHERE key=?",
+                (replacement, reservation.key),
+            )
+        return retained[field]
+
+    retained = []
+    if boundary == "reserve":
+        retained.append(replace_preparation())
+    else:
+        def after_observation(operation, result):
+            if operation == ("inspect" if boundary == "close" else "reserve"):
+                retained.append(replace_preparation())
+        owner.before_reply = after_observation
+    with pytest.raises(TaskError, match="original prepared workspace"):
+        queue.reconcile_task_relationship(task.id)
+    assert [operation for operation, _ in owner.calls[before:]] == (
+        [] if boundary == "reserve" else ["inspect" if boundary == "close" else "reserve"]
+    )
+    assert queue.task_relationship(task.id) == original
+    assert len(owner.claims) == 1
+    with queue._connect() as conn:
+        conn.execute(
+            f"UPDATE spawn_reservations SET {field}=? WHERE key=?",
+            (retained[0], reservation.key),
+        )
+    owner.before_reply = None
+    recovered = queue.reconcile_task_relationship(task.id)
+    assert recovered["state"] == ("closed" if boundary == "close" else "bound")
+    assert recovered["request"] == original["request"]
+    assert len(owner.claims) == 1
+
+
 def test_submission_and_abandonment_keep_responsibility_until_independent_completion(assignment):
     queue, owner, workspace, task = assignment
     claim(queue, workspace, task)

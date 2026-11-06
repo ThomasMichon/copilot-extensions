@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import sys
+from contextlib import nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -152,6 +153,52 @@ def test_original_queue_admission_uses_its_own_exact_request_snapshot(boundary, 
             queue._admit_original_relationship_request(b.request)
     assert reads == [(queue, b.request["task_id"], 7)]
     assert b.calls == []
+
+
+@pytest.mark.parametrize("change", [
+    None, "missing", "task_id", "worktree", "allocation_project", "worktree_path",
+    "execution_machine", "creation_nonce", "task_relationship_event_id",
+    "task_relationship_generation", "task_relationship_required",
+])
+def test_original_preparation_is_requeried_without_recapturing_another_reservation(boundary, change):
+    b = boundary
+    request = {**b.request, "reservation_key": "original-reservation"}
+    snapshot = {
+        "queue_identity": request["recovery"]["queue_identity"],
+        "assignment": {"event_id": 7, "worker_id": b.workspace.worker_id},
+        "relationship": copy.deepcopy(request),
+    }
+    prepared = {
+        "task_id": request["task_id"], "worktree": b.workspace.worktree,
+        "allocation_project": b.workspace.project, "worktree_path": b.workspace.path,
+        "execution_machine": b.workspace.machine.upper(),
+        "creation_nonce": b.workspace.creation_nonce, "task_relationship_required": 1,
+        "task_relationship_event_id": 7, "task_relationship_generation": 1,
+    }
+    if change == "missing":
+        prepared = None
+    elif change is not None:
+        prepared[change] = 999 if type(prepared[change]) is int else "replacement"
+    reads = []
+
+    def execute(sql, parameters):
+        assert "FROM spawn_reservations WHERE key=?" in sql
+        reads.append(parameters)
+        return SimpleNamespace(fetchone=lambda: prepared)
+
+    queue = b.relationships.QueueTaskRelationshipsMixin()
+    queue._relationship_authority = "local"
+    queue._connect = lambda: nullcontext(SimpleNamespace(execute=execute))
+    b.monkeypatch.setattr(
+        sys.modules[f"{PACKAGE}.task_obligations"], "read_snapshot",
+        lambda *args, **kwargs: snapshot, raising=False,
+    )
+    if change is None:
+        assert queue._admit_original_relationship_request(request) == snapshot
+    else:
+        with pytest.raises(b.Refused, match="original prepared workspace"):
+            queue._admit_original_relationship_request(request)
+    assert reads == [("original-reservation",)] and b.calls == []
 
 
 def test_bound_snapshot_isolated_from_caller_and_admission_mutation(boundary):
