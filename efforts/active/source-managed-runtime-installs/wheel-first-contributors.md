@@ -9,9 +9,10 @@ This is the shared implementation map, not a deployment approval or a second
 effort. Keep progress here and contracts in the linked guide. Update a row when
 claiming work, after qualification, after merge and after release; do not mark
 an app converted from wheel production or a callback declaration alone.
-This refresh records the bounded SSH release and Bridge/MCP merge status.
-Other app rows retain their prior evidence boundaries; they have not been
-requalified by this documentation change.
+This refresh records bounded Linux CodeSpaces controls and credits the
+previously recorded Windows releases and CLI qualification. Evidence remains
+source-, profile- and platform-specific; it does not requalify later binaries
+or establish whole-app acceptance.
 
 ## Request capture
 
@@ -127,10 +128,14 @@ Manager and Worktrees retain their bounded released front doors (#9990,
 Main promotion #10024). SSH's CLI and service have the additional bounded
 qualification from #10462, released in #10862, as scoped in their rows below.
 Bridge/MCP startup #10054 is merged; their remaining app/lifecycle acceptance
-stays with the existing owners. There is no new portfolio-wide conversion
-count here: release, installed operation, full target conformance and host/fleet
-rollout are different claims. Neither bundle publication nor these app slices
-establish every platform, whole-toolset atomicity or the complete stage contract.
+stays with the existing owners. CodeSpaces #10311, Containers #10347 and
+Dispatch's plugin/standalone slice #10345 also have recorded bounded Windows
+releases. The additional CodeSpaces Linux controls below use their own explicit
+Main snapshot, not an inferred qualification of current Dev.
+There is no new portfolio-wide conversion count here: release, installed
+operation, full target conformance and host/fleet rollout are different claims.
+Neither bundle publication nor these app slices establish every platform,
+whole-toolset atomicity or the complete stage contract.
 
 | App / source owner | Fast-flow evidence and current gap | Next bounded acceptance / coordination |
 |--------------------|------------------------------------|---------------------------------------|
@@ -138,19 +143,19 @@ establish every platform, whole-toolset atomicity or the complete stage contract
 | [agent-worktrees](../../../plugins/agent-worktrees/README.md) | Same bounded released pair; historical command-owner restoration and installed-wheel consumer admission included. Full adopted-system/status-monitor transition remains separate. | Verify actual worktree/registry operations and monitor continuity for the claimed integration/platform; do not rebuild the first pair to begin another app. |
 | [agent-bridge](../../../plugins/agent-bridge/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. Its bounded Windows witness passed staging, first touch/reuse, pre-publication failure, Host/ACP upgrade and rollback, retained data, caller-Job closure and native exits. These historical candidate checks do not qualify subsequent changes, an installed Copilot agent or the whole app. | Existing owners retain native POSIX, fresh-OS clean-room, full credential-relay/provider and broader legacy-adoption acceptance. Coordinate through #10054/#7028 and their follow-ups; do not repeat the completed Windows witness as unfinished work or open a competing repair PR. |
 | [agent-mcp](../../../plugins/agent-mcp/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. All 15 bounded Windows phases passed, including three-shell first touch, same-generation reuse, denied publication with exact recovery/retry, forward/reverse replacement, caller-Job survival and native exits. These historical candidate checks do not qualify subsequent changes or complete authoritative-replacement/whole-app acceptance. | Existing owners retain native POSIX, fresh-OS and broader legacy-adoption acceptance. Keep SQLite fixture-upstream checks distinct from a product DB claim. The [parent Plan](README.md) tracks the unchecked authoritative-replacement adoption delta under existing #10054/#7028/#9716/#10377 owners: #10652 incoming completion, #6389 fresh serving convergence and #10653 protected retirement. Unknown outgoing cleanup is separately deferred; #10486 full reattachment remains required separate work, not an incoming gate. This refresh claims no additional runtime fix or qualification. |
-| [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Retained implementation scope; new-flow app acceptance/release not established. Existing coordinator cutover is not automatically this install contract. | Candidate must not dequeue/claim before ownership. Prove task/state round trip, held claims/reservations, update/retry and coordinator self-retirement; claim a non-overlapping slice under #7028. |
-| [agent-codespaces](../../../plugins/agent-codespaces/README.md) | Retained provider/setup scope; new-flow installed-app qualification and release open. | Stage without provider writes; normal setup contributes a plain manifest to Bridge's configuration-root `providers.d` via the installed command. Prove either install order, manifest discovery and preserved reservations/forwards; live venue evidence is separate. |
-| [agent-containers](../../../plugins/agent-containers/README.md) | Existing source/profile preservation is bounded prior work, not new-flow completion. New app qualification/release open. | Preserve base/provider-exec profile, copied-wheel resources, provider registration and existing fleet custody; test both install orders and no foreign-container mutation. |
+| [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Bounded modern user-mode application slice #10345 released on Main `a48e41419190fe43ef006a8ef6dfa08e134785b6`. Historical Windows generated cold/restart/handoff, authenticated readiness, held synthetic claims/reservations/data and native cleanup passed; this is not whole-SDK or later-binary qualification. | Existing owners retain native POSIX, flat/nonprofile and native-service-owned supervisor transitions, distinct-source and complete authoritative-replacement acceptance. Preserve candidate admission and unfinished-work custody; do not repeat the completed Windows slice as missing. |
+| [agent-codespaces](../../../plugins/agent-codespaces/README.md) | #10311 released bounded Windows application/provider work on Main `27aab5a3262cc331c0d73564a8a59dfd20fced01`, including historical A/B/A Owner/replacement and both provider-install orders. The separate Linux x86_64 CLI/provider controls below pass on explicit Main `1a83c1d250ae8093a47afab1107c3ebb9553a53e`, with Connection Owner disabled. Neither record qualifies every newer SDK or the whole app. | Existing owners retain Linux daemon lifecycle, source-change/reverse/failure integration, healthy foreign-provider collision coverage on Linux, other architectures, pristine OS, live backend/forwards and rollout. Keep stage-only environment preparation separate from full candidate readiness. |
+| [agent-containers](../../../plugins/agent-containers/README.md) | #10347 released bounded configuration/provider callbacks on Main `f85bd817958a3ead2ba69182ad01f76bb11e4076`. Historical Windows installed front doors, app-first/Bridge-first discovery, repeat and original-manifest preservation passed; later producer corrections have their own focused consumer/source controls, not another native whole-bundle qualification. | Existing owners retain native POSIX, pristine OS and live credentialed fleet/backend acceptance. Preserve base/provider-exec profile and foreign-container custody; callbacks do not borrow containers, query fleets or start a resident. |
 | [agent-ssh](../../../plugins/agent-ssh/README.md) | Bounded copied-application CLI slice #10462 released in #10862. Native Windows cold/reuse installs and installed source-qualified commands passed; retained slot members were unchanged on reuse. This is the CLI, not the SSH Manager library or remote SSH service. | Preserve installed command/resources, configuration and source-unavailable reads. Immutable Linux app adoption, real operator connections/forwards and full target conformance remain separate; do not infer them from the service CI or shared-library wheel. |
-| [agent-dispatch-service](../../../services/dispatch/README.md) | Separate standalone runtime root, not automatically covered by the Dispatch plugin. No `[project.scripts]` entry in this snapshot; an emitted callback alone cannot qualify it. | Resolve the existing service entry/owner before emitting an application; prove task admission and durable state without introducing a competing coordinator. |
+| [agent-dispatch-service](../../../services/dispatch/README.md) | Separate standalone root exercised explicitly by #10345, released with the plugin slice. Its historical Windows generated cold/handoff front doors, Source-unavailable version/authenticated health and held-state/native cleanup passed; plugin evidence alone is not its qualification. | Retain its own installed entry and dependency boundary. Native POSIX, native-service supervision, complete source-change/recovery and authoritative-replacement adoption remain separate under the existing owners; no competing coordinator. |
 | [agent-ssh-service](../../../services/ssh/README.md) | Bounded installed startup/fenced-transfer slice #10462 released in #10862. Native Windows copied-app cold/reuse, lost-prepare reply/retry, successor readiness and outgoing self-exit passed with fixture state preserved. Installed-wheel regression also covers the stale-writer notification gap. Separate Linux/Windows service CI passed; that is not immutable Linux app adoption. | Preserve enrollment, signatures/roles, connections and native relay custody. Keep immutable Linux app adoption, live operator Gateway/SSH integration, desktop-focus observation, broader recovery and rollout open. Incoming readiness/current selection and outgoing retirement remain distinct; this bounded witness does not establish complete authoritative replacement. |
 | [agent-pull-requests](../../../plugins/agent-pull-requests/README.md) | Retained source/native work; app-level new-flow release open. | Qualify installed commands and supported cache/service discovery, without publishing reviews or changing PRs as an install side effect. |
 | [agent-pull-requests-service](../../../services/pr/README.md) | Separate standalone service; bounded retained witnesses do not establish whole-app acceptance. | Prove service readiness and durable request/cache continuity, ownership-safe update/rollback and independent client skew. |
 | [agent-chat-service](../../../services/chat/README.md) | Separate service/client entry points; retained catalog/packaging WIP, new-flow qualification open. | Package and test both declared commands, preserve member/cursor/state and native ownership; no implicit join, credential enrollment or new chat store. |
 | [fleet-manager](../../../fleet-manager/README.md) | Shared source preparation/resources exist; new-flow native application acceptance/release not established. | Preserve registry, execution/maintenance and connection ownership. Prove installed client/service operations and independent startup; no installation-triggered remote rollout. |
 | [agent-vault](../../../plugins/agent-vault/README.md) | New-flow acceptance open; existing installer/recovery contracts remain. | Use a disposable vault fixture; prove credential-free status and configuration retention plus owned service retirement, without unlocking a real vault or printing secrets. |
-| [agent-machines](../../../plugins/agent-machines/README.md) | CLI root; a declared no-start callback is not app qualification. | Test copied-wheel command/resources and repeat install; installation must not apply arbitrary machine requirements or create privileged tasks. |
-| [budget-guidance](../../../plugins/budget-guidance/README.md) | CLI root; new-flow app acceptance/release open. | Prove installed read/status commands with configured offline fixture inputs; no backend refresh, polling service or policy change at install. |
+| [agent-machines](../../../plugins/agent-machines/README.md) | Retained Windows single-source qualification under #7028 covers copied-application cold/reuse, installed command/resources and Source-unavailable reads against the merged shared constructor correction. This snapshot evidence is not broader update/platform or release qualification. | Coordinate remaining source-change, failure/recovery, platform and publication scope under #7028 rather than repeating the retained Windows witness. Installation must not apply arbitrary machine requirements or create privileged tasks. |
+| [budget-guidance](../../../plugins/budget-guidance/README.md) | Retained Windows single-source qualification under #7028 covers copied-application cold/reuse and installed offline reads against the shared correction, with fixture configuration/data preserved. Publication remains separately gated under its existing owner; this is not a new release claim. | Preserve the original qualified snapshot while resolving publication and remaining update/platform scope. Do not refresh a backend, introduce polling, change policy or rewrite the historical qualification to address an unrelated publication problem. |
 | [agent-logger](../../../plugins/agent-logger/README.md) | Retained WIP; deliberately lower priority, no new-flow release claim. | Preserve every declared command and configured source/sink; stage/setup must not start logging or rewrite history. Do not gate the main-service slices on this row. |
 | [agent-index](../../../plugins/agent-index/README.md) | Lower priority; separate CLI/service/engine closures remain distinct. Retained work is not whole-app acceptance. | Qualify only an agreed bounded command/setup slice; preserve configured host selection and avoid provisioning heavy engine dependencies as a core-install prerequisite. |
 | [agent-index-service](../../../services/index/README.md) | Optional standalone service, not qualified by the plugin wheel or Engine tests. | Preserve configured store/corpus and optional native profile; qualify independently when prioritized. |
@@ -170,6 +175,58 @@ consumer's connection/forward continuity.
 Rows marked open mean **not qualified/released by this campaign**, not proof
 that no source or other contributor implementation exists. Existing app-specific
 efforts, open PRs, retained WIP and resource reservations remain authoritative.
+
+### Bounded CodeSpaces Linux CLI/provider record
+
+The additional controls use explicit public Main
+`1a83c1d250ae8093a47afab1107c3ebb9553a53e`, tree
+`c08de7c4297b244928229c59e2da881d48edcd08`, on Linux x86_64 with
+CPython 3.12.11 in a fresh container from a pinned, preprovisioned image.
+This is not a merged-Dev selection or a pristine operating system.
+The canonical source producer supplies only the CodeSpaces closure: sixteen
+first-party dependency wheels are not sixteen converted applications.
+The recorded source/wheel preparation takes 13 seconds in the preceding
+phase; the later phase reuses those unchanged inputs. Its fresh canonical
+toolchain preparation takes 7 seconds and profile preparation 10 seconds,
+separately from the prepared-input application calls:
+
+| Generated front-door control | Elapsed | Boundary checked |
+|------------------------------|---------|------------------|
+| Separate fresh `install --stage` root | 0.344 s | Environment created without selector, global-command or provider publication |
+| Fresh **unstaged** normal `install` root | 2.562 s | Environment creation, actual selected completion, installed command and plain provider |
+| Repeat normal `install` in that same root | 2.500 s | Same generation, unchanged completion/provider bytes and timestamps, protected fixture state |
+| Fresh Bridge-config-first normal `install` root | 2.552 s | Other installation order and existing fixture-byte preservation |
+
+Every call retains its 300-second limit. These measurements do not hide
+staging inside a claimed cold call or include source/profile preparation as
+installation time. Test execution is network-disconnected, non-root,
+capability-dropped and read-only outside owned temporary storage, with no host
+checkout, Docker socket or credential mount. Connection Owner is disabled
+through the canonical adopted-repository configuration before application
+calls; no daemon or backend readiness is inferred.
+
+The installed module/generation, all 103 application-package wheel members
+and three required assets match. Three direct calls to the real pinned Bridge
+registry consumer cover app-first and Bridge-config-first discovery; the plain
+provider's `legacy-unattributed` finding is expected. An unrelated invalid-entry
+sentinel is preserved but does not qualify healthy foreign-provider collision
+handling. Two installed CLI/module/resource reads pass with the original
+checkout, payload and preparation paths unavailable. These are native controls,
+not a claim that a pytest suite ran or an installed Bridge daemon was qualified.
+Source/wheel, profile and native-proof archives are exported and readback-checked
+before exact container cleanup. Subsequent parent review independently checks
+their stored hashes and the container's absence.
+
+The earlier missing-dependency and malformed-invocation attempts remain failed;
+their lost partial snapshot receives no retention credit. The subsequent
+credential-lookup warning is resolved only in the fixture by replacing
+deprecated `UV_NATIVE_TLS` with supported `UV_SYSTEM_CERTS`, retaining the same
+OS certificate store, hostname verification, configured feed and seasoning.
+A disabled-owner configuration preflight is corrected through canonical
+repository adoption before any application call. No production parser or trust
+policy is changed. Full daemon lifecycle, legacy, source-change/reverse/failure,
+whole-suite, live-backend, other-architecture and pristine-OS gates remain with
+the parent effort.
 
 **Bounded downstream composition (#10277; source handle `rusty-socket`):**
 the additive `install_source.install_application` repository API joins the
