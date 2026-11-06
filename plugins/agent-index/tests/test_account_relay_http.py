@@ -315,6 +315,51 @@ def test_native_source_http_capabilities_renewal_denial_and_disconnect(tmp_path,
                 worker_policy["transport"]["port"] = relay._publication["port"]
                 worker.write_text(json.dumps(worker_policy))
                 assert (await post(first, Path(first["capability_file"]).read_text())).status_code == 200
+                # Exercise the actual consumer against these native routes, not a second fake server.
+                monkeypatch.syspath_prepend(str(
+                    Path(__file__).resolve().parents[3] / "plugins" / "agent-bridge" / "src",
+                ))
+                from agent_bridge.source_lease_http import HttpSourceLeaseClient, SourceLeaseError
+                from credential_relay.http_auth import HttpAuthContext, SourceHttpAuth
+
+                class HttpSource:
+                    def supports(self, action, fields):
+                        return action == "get"
+
+                    async def resolve(self, action, fields, *, timeout):
+                        return "username=fixture-user\npassword=synthetic-http-token\n"
+
+                source_http = HttpSource()
+                context = HttpAuthContext("https://example.com", "fixture-user", "fixture-generation")
+                credential_endpoint = "https://example.com/source-credentials"
+                discovery_endpoint = "https://example.com/health"
+                client_cap = tmp_path / "http-client-capability"
+                client_cap.write_text(Path(first["capability_file"]).read_text())
+
+                def consumer(installation="synthetic-index"):
+                    return HttpSourceLeaseClient(
+                        credential_endpoint,
+                        auth=SourceHttpAuth(source_http, context, credential_endpoint), context=context,
+                        discovery_endpoint=discovery_endpoint, discovery_context=context,
+                        discovery_auth=SourceHttpAuth(source_http, context, discovery_endpoint),
+                        installation_id=installation, capability_file=client_cap,
+                        source=first["source"], account=first["account"],
+                        recipient=first["recipient"], host=first["host"],
+                        transport=httpx.ASGITransport(app=app),
+                    )
+
+                count = len(calls)
+                with pytest.raises(SourceLeaseError, match="unsupported"):
+                    await consumer("different-index").acquire(timeout=5)
+                assert len(calls) == count
+                lease_one, lease_two = await consumer().acquire(), await consumer().acquire()
+                assert lease_one.token != lease_two.token and lease_one.lease_id != lease_two.lease_id
+                assert 0 < lease_two.remaining_seconds() <= 60
+                assert len(calls) == count + 2
+                client_cap.write_text("invalid-synthetic-capability-01234567890123456789")
+                with pytest.raises(SourceLeaseError):
+                    await consumer().acquire()
+                assert len(calls) == count + 2
         finally:
             server.should_exit = True
             await asyncio.wait_for(serving, timeout=5)
