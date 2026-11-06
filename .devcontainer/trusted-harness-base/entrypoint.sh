@@ -13,12 +13,6 @@ if ! mountpoint -q /run || [ -L /run ] || [ -L /run/systemd ]; then
     echo "A private /run mount and an unlinked systemd runtime root are required." >&2
     exit 65
 fi
-install -d -m 755 /run/systemd
-mount --bind /run/systemd /run/systemd
-if ! mountpoint -q /run/systemd; then
-    echo "The systemd runtime root must be pinned before namespace aliases exist." >&2
-    exit 65
-fi
 for path in /home/vscode /workspaces; do
     if ! mountpoint -q "$path"; then
         echo "Required per-container persistent mount is missing: $path" >&2

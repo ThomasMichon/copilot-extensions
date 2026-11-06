@@ -55,6 +55,9 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
     source root, including vendored layouts, rather than selecting its service
     implementation from the runtime cwd or the caller's ambient module path.
     """
+    from .configuration import service_configuration_root
+
+    configuration_root = service_configuration_root()
     python = sys.executable
     root = service_root()
     overrides = dict(windowless_python_env(python))
@@ -76,6 +79,8 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
         [
             windowless_python(python), *python_cache_args(root), "-c", _SERVICE_BOOTSTRAP,
             str(Path(__file__).resolve().parent.parent), *args,
+            *([] if "--configuration-root" in args else
+              ["--configuration-root", configuration_root]),
         ],
         cwd=root,
         instance=DaemonInstanceSpec("agent-vault", root, Path(__file__).resolve()),

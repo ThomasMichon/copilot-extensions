@@ -14,6 +14,7 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "follow_ups_cli",
     "handoff_cancel_cli",
     "handoff_cli",
+    "handoff_head_observation",
     "handoff_successor_repair_cli",
     "installation_cli",
     "historical_daemons_cli",

@@ -363,9 +363,12 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
         controllers = _core()._controller_metadata(records[0])
         controller_findings = _core()._controller_findings(records[0])
 
+    from .handoff_head_observation import declaration
+
     output._json_output(
         {
             "sessions": list(by_session.values()),
+            "handoff_head_observation": declaration(),
             "head_session": head_session,
             "head_revision": head_revision,
             "handoffs": handoffs,

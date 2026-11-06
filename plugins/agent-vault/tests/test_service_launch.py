@@ -13,7 +13,7 @@ from pathlib import Path
 import agent_procutil
 import pytest
 
-from agent_vault import cli, config, launch, service
+from agent_vault import cli, config, configuration, configuration_scope, launch, service
 
 
 def _cache_args(argv, root):
@@ -113,6 +113,7 @@ def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_pa
     assert seen["argv"][3] == "-c"
     assert seen["argv"][5:] == [
         str(Path(launch.__file__).resolve().parent.parent), "--foreground",
+        "--configuration-root", str(Path.cwd()),
     ]
     assert seen["cwd"] == root
     assert seen["log_path"] == root / launch.SERVICE_STDIO_LOG
@@ -207,7 +208,7 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
         )
         assert result.returncode == 0, result.stderr
         observed = json.loads(result.stdout)
-        assert observed["argv"] == args
+        assert observed["argv"] == [*args, "--configuration-root", str(caller)]
         assert Path(observed["cwd"]) == home.resolve()
         assert Path(observed["module"]).resolve() == (package / "service.py").resolve()
         assert {path: path.read_bytes() for path in package.rglob("*") if path.is_file()} == before
@@ -220,8 +221,10 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual Windows service launcher template")
-def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
-    root = tmp_path / "vault home"
+@pytest.mark.parametrize("supports_context", [False, True])
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, supports_context, shell):
+    root = tmp_path / "vault home-\u03bb"
     slot = root / "versions/1.0.0"
     venv.EnvBuilder(with_pip=False).create(slot)
     site = slot / "Lib/site-packages"
@@ -230,10 +233,13 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
         package.mkdir()
         (package / "__init__.py").write_text("", encoding="utf-8")
     (site / "zdd/private_peer.py").write_text("VALUE = 42\n", encoding="utf-8")
+    if supports_context:
+        (site / "agent_vault/service_arguments.py").write_text("", encoding="utf-8")
     (site / "agent_vault/service.py").write_text(
-        "import json,sys\nfrom zdd import private_peer\n"
+        "import json,os,sys\nfrom zdd import private_peer\n"
         "print(json.dumps({'args':sys.argv[1:],'cache':sys.pycache_prefix,"
-        "'cached':private_peer.__cached__,'value':private_peer.VALUE}))\n",
+        "'cached':private_peer.__cached__,'value':private_peer.VALUE,"
+        "'config':os.environ.get('AGENT_VAULT_CONFIG')}))\n",
         encoding="utf-8",
     )
     source = (Path(__file__).resolve().parents[1] / "scripts/install.ps1").read_text(encoding="utf-8")
@@ -241,13 +247,15 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
         '[System.IO.File]::WriteAllText($TaskLauncher, @"',
         source.index("function Register-AgentVaultTask"),
     )
-    ending = '"@, $utf8NoBom)'
+    ending = '"@, [Text.UTF8Encoding]::new($true))'
     emission = source[start:source.index(ending, start) + len(ending)]
     values = {
         "InstallDir": root, "RunDir": root / "run", "SocketPath": root / "run/socket",
         "PipePath": "fixture-pipe", "PidFile": root / "run/pid", "LogFile": root / "logs/service.log",
         "TaskName": "FixtureVault", "installationId": "", "portDirective": "",
         "TaskLauncher": root / "service.ps1", "LinkPython": slot / "Scripts/python.exe",
+        "serviceConfigurationRoot": tmp_path / "configuration-\u03bb",
+        "serviceConfigurationPath": tmp_path / "selected-\u03bb.json",
     }
     harness = tmp_path / "publish-service.ps1"
     harness.write_text(
@@ -257,9 +265,9 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
             for name, value in values.items()
         )
         + "\n" + emission + "\n& $TaskLauncher --cache-probe\nexit $LASTEXITCODE\n",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
-    host = shutil.which("pwsh")
+    host = shutil.which(shell)
     assert host, "native PowerShell is required"
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
     before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
@@ -272,8 +280,13 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
         )
         assert result.returncode == 0, result.stderr
         observed = json.loads(result.stdout)
-        assert observed["args"] == ["--foreground", "--persistent", "--cache-probe"]
+        assert observed["args"] == [
+            "--foreground", "--persistent",
+            *(["--configuration-root", str(tmp_path / "configuration-\u03bb")] if supports_context else []),
+            "--cache-probe",
+        ]
         assert observed["value"] == 42
+        assert observed["config"] == str(tmp_path / "selected-\u03bb.json")
         assert {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
         _cache_args(["-X", "pycache_prefix=" + observed["cache"]], root)
         cached = Path(observed["cached"])
@@ -310,6 +323,157 @@ def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):
     root = (tmp_path / "state").resolve()
     assert seen["cwd"] == root
     assert seen["env_overrides"][config.HOME_ENV] == str(root)
+
+
+def test_service_launch_captures_qualified_discovery_before_changing_cwd(tmp_path, monkeypatch):
+    base = tmp_path / "base"
+    caller = base / "worktree"
+    caller.mkdir(parents=True)
+    home = tmp_path / "state"
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv(config.HOME_ENV, str(home))
+    monkeypatch.setattr(configuration, "owner_report", lambda root: {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "fixture", "execution_machine": "fixture",
+            "installation_cell": "fixture", "binding": "unbound", "base_root": str(base),
+        },
+    })
+    seen = {}
+    monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kwargs: seen.update(argv=argv, **kwargs))
+    launch.spawn_service(["--foreground"])
+    assert seen["cwd"] == home
+    assert seen["argv"][-2:] == ["--configuration-root", str(caller)]
+
+
+def test_service_snapshot_preserves_relative_selected_config_and_unicode_caller(tmp_path, monkeypatch):
+    root = tmp_path / "configuration-\u03bb"
+    root.mkdir()
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    monkeypatch.setenv(config.CONFIG_ENV, "selected.json")
+    assert configuration.service_configuration_snapshot(str(root)) == {
+        "root": str(root), "config": str(root / "selected.json"),
+    }
+
+
+def test_bound_service_uses_persisted_nondefault_activation_file(tmp_path, monkeypatch):
+    caller, state = tmp_path / "caller", tmp_path / "state"
+    caller.mkdir()
+    state.mkdir()
+    selected = caller / "selected.json"
+    selected.write_text('{"enabled":true}', encoding="utf-8")
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    monkeypatch.setenv(config.CONFIG_ENV, "selected.json")
+    snapshot = configuration.service_configuration_snapshot(str(caller))
+    monkeypatch.setenv(config.CONFIG_ENV, snapshot["config"])
+    config.bind_service_configuration(snapshot["root"])
+    monkeypatch.chdir(state)
+    assert configuration.runtime_enabled() is True
+    selected.write_text('{"enabled":false}', encoding="utf-8")
+    assert configuration.runtime_enabled() is False
+
+
+@pytest.mark.parametrize("root", ["relative", "absent"])
+def test_service_configuration_binding_rejects_invalid_roots(tmp_path, monkeypatch, root):
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    selected = root if root == "relative" else str(tmp_path / "absent")
+    with pytest.raises(ValueError, match="existing absolute directory"):
+        config.bind_service_configuration(selected)
+
+
+def test_bound_service_configuration_survives_state_cwd(tmp_path, monkeypatch):
+    base, state = tmp_path / "base", tmp_path / "state"
+    base.mkdir()
+    state.mkdir()
+    (base / ".agent-vault.json").write_text('{"enabled":true,"group":"configured"}')
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    monkeypatch.setenv(config.CONFIG_ENV, str(tmp_path / "absent.json"))
+    config.bind_service_configuration(str(base))
+    monkeypatch.chdir(state)
+    assert configuration.runtime_enabled() is True
+    assert config.resolve_context(strict=True).group == "configured"
+    (base / ".agent-vault.json").write_text('{"enabled":false}')
+    assert configuration.runtime_enabled() is False
+    (base / ".agent-vault.json").write_text('{"enabled":"invalid"}')
+    with pytest.raises(RuntimeError, match="enabled must be a boolean"):
+        configuration.runtime_enabled()
+
+
+@pytest.mark.parametrize("current", ["rebound", "refused", "foreign"])
+def test_resident_binding_requeries_same_cell_inherited_configuration(tmp_path, monkeypatch, current):
+    base, old, new, state = (tmp_path / name for name in ("base", "old", "new", "state"))
+    for root in (base, old, new, state):
+        root.mkdir()
+    (old / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
+    (new / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
+    cell = tmp_path / "marketplaces" / "fixture"
+    own = cell / "plugins" / "agent-vault"
+    (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "fixture", "execution_machine": "fixture",
+            "installation_cell": str(cell), "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(old),
+        },
+    }
+    fresh = json.loads(json.dumps(report))
+    fresh["context"]["knowledge_root"] = str(new)
+    if current == "foreign":
+        fresh["context"]["installation_cell"] = str(tmp_path / "foreign")
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own / "install.json"))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setenv(config.CONFIG_ENV, str(tmp_path / "absent.json"))
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    monkeypatch.setattr(configuration._peer_launch, "validate_owner", lambda *args: {
+        "cellRoot": str(cell), "pluginRoot": str(own),
+    })
+    monkeypatch.setattr(configuration._peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
+    calls = []
+
+    def run(argv, **kwargs):
+        assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
+        assert kwargs["cwd"] == base
+        assert "AGENT_CONFIGURATION_CONTEXT" not in kwargs["env"]
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 126 if current == "refused" else 0,
+            json.dumps(fresh).encode("utf-8"), b"",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert configuration.runtime_enabled(str(base)) is True
+    assert calls == []
+    config.bind_service_configuration(str(base))
+    monkeypatch.chdir(state)
+    if current == "rebound":
+        assert configuration.runtime_enabled() is False
+    else:
+        with pytest.raises(ValueError):
+            configuration.runtime_enabled()
+    assert len(calls) == 1
+
+
+def test_extension_source_keeps_unbound_default_and_uses_bound_service_root(tmp_path, monkeypatch):
+    from agent_vault import extensions
+
+    calls = []
+
+    class Registry:
+        def collect_config(self, cwd):
+            calls.append(cwd)
+            return {}
+
+    monkeypatch.setattr(extensions, "get_registry", lambda: Registry())
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    config._ext_config(None)
+    config.bind_service_configuration(str(tmp_path))
+    config._ext_config(None)
+    config._ext_config("explicit")
+    assert calls == [None, str(tmp_path), "explicit"]
 
 
 def test_unset_home_override_stays_unset(monkeypatch, tmp_path):
