@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Installation driver contract: vault-first-use-v1
+# Configuration root contract: vault-context-v1
 set -euo pipefail
 
 export PYTHONUTF8=1
@@ -13,6 +14,54 @@ PAYLOAD_ROOT="${AGENT_VAULT_PAYLOAD_ROOT:-}"
 
 SCRIPT_DIR="$PAYLOAD_ROOT/scripts"
 PROJECT_ROOT="$(pwd -P)"
+INVOCATION_DIRECTORY="$PROJECT_ROOT"
+has_configuration_root=false
+invocation_args=("$@")
+argument_count=$#
+command_arguments=()
+command_argument_count=0
+for ((index=0; index<argument_count; index++)); do
+    argument="${invocation_args[$index]}"
+    if [[ "$argument" == -- ]]; then
+        for ((remaining=index; remaining<argument_count; remaining++)); do
+            command_arguments+=("${invocation_args[$remaining]}")
+            command_argument_count=$((command_argument_count + 1))
+        done
+        break
+    fi
+    selected_root=""
+    case "$argument" in
+        --configuration-root)
+            ((index + 1 < argument_count)) || {
+                printf '[agent-vault] --configuration-root requires a directory.\n' >&2
+                exit 2
+            }
+            index=$((index + 1))
+            selected_root="${invocation_args[$index]}"
+            ;;
+        --configuration-root=*) selected_root="${argument#*=}" ;;
+        *)
+            command_arguments+=("$argument")
+            command_argument_count=$((command_argument_count + 1))
+            continue ;;
+    esac
+    if [[ "$has_configuration_root" == true ]]; then
+        printf '[agent-vault] --configuration-root may be supplied only once.\n' >&2
+        exit 2
+    fi
+    [[ "$selected_root" == /* && -d "$selected_root" ]] || {
+        printf '[agent-vault] --configuration-root must name an existing absolute directory.\n' >&2
+        exit 2
+    }
+    PROJECT_ROOT="$selected_root"
+    has_configuration_root=true
+done
+if [[ "$has_configuration_root" == true ]]; then
+    if [[ "${_AGENT_WORKTREES_VAULT_RUNTIME_GUARD:-}" == 1 ]]; then
+        unset AGENT_VAULT_NO_SELFPROVISION
+    fi
+    unset _AGENT_WORKTREES_VAULT_RUNTIME_GUARD
+fi
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
@@ -191,10 +240,19 @@ if [[ -z "$CONTEXT" ]]; then
 fi
 
 resolve_runtime
+if [[ "${command_arguments[0]:-}" == invocation-contract ]]; then
+    if [[ "$command_argument_count" != 2 || "${command_arguments[1]:-}" != --json ]]; then
+        printf '[agent-vault] usage: invocation-contract --json\n' >&2
+        exit 2
+    fi
+    if [[ -n "$AGENT_RT_PY" ]]; then run_runtime "$@"; fi
+    printf '%s\n' '{"schema":"agent-vault.invocation","version":1,"capabilities":[],"runtime_prepared":false}'
+    exit 0
+fi
 if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
     . "$SCRIPT_DIR/runtime-activation.sh"
     activation_code=0
-    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT")" || activation_code=$?
+    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector)" || activation_code=$?
     if [[ "$activation_code" == 2 ]]; then
         if [[ "${1:-}" == installer-readiness ]]; then
             printf '%s\n' "$activation"
@@ -207,7 +265,11 @@ if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
             exit 2
         fi
     elif [[ "$activation_code" != 0 ]]; then
-        printf '[agent-vault] activation configuration could not be resolved; correct its configuration, binding or payload.\n' >&2
+        if [[ "$(json_get "$activation" "$(json_path reason)" 2>/dev/null || true)" == repository-context-missing ]]; then
+            printf "%s\n" "[agent-vault] repository context is missing. Run from an adopted repository or use '<repo> vault unlock' from any directory." >&2
+        else
+            printf '[agent-vault] activation configuration could not be resolved; correct its configuration, binding or payload.\n' >&2
+        fi
         exit 3
     fi
 fi
@@ -268,6 +330,10 @@ if [[ ! -f "$FIRST_USE" ]]; then
     exit 126
 fi
 EXECUTION_ROOT="$HOME/.copilot-extensions/update-driver"
+NATIVE_SELECTOR="$(json_get "${activation:-}" "$(json_path native_configuration_file)" 2>/dev/null || true)"
+if [[ -n "$NATIVE_SELECTOR" ]]; then
+    export AGENT_VAULT_CONFIG="$NATIVE_SELECTOR"
+fi
 printf '[agent-vault] submitting first-use provisioning to the installation driver: %s\n' "$EXECUTION_ROOT" >&2
 apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
 bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait || exit "$?"

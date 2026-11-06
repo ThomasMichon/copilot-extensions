@@ -135,12 +135,9 @@ _CORE_SLUGS = frozenset(
     }
 )
 
-# Slugs whose sibling plugin consumes a top-level ``--project`` (bridge overrides
-# its remote-resolve target project; codespaces chdir's to the project checkout).
-# The router injects ``--project <repo>`` only for these; every other slug routes
-# as a cwd-preserving alias (so plugins that don't declare --project never see it
-# and can't argparse-error on it).
-_PROJECT_ARG_SLUGS = frozenset({"bridge", "codespaces"})
+# Bridge/CodeSpaces accept a project name. Vault accepts an already-resolved
+# configuration directory and preserves the caller's working directory.
+_PROJECT_ARG_SLUGS = frozenset({"bridge", "codespaces", "vault"})
 
 # Slugs the router pins to the resolved project's checkout by chdir'ing the
 # child process, rather than forwarding ``--project`` for the sibling to
@@ -271,7 +268,25 @@ def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) ->
     child_env = os.environ.copy()
     cwd: str | None = None
     chdir_verb = _chdir_verb_for(slug, rest) if project else None
-    if chdir_verb is not None:
+    if project and slug == "vault":
+        resolved = _core_helper(
+            "_resolve_project_checkout", _resolve_project_checkout
+        )(project)
+        if resolved is None:
+            print(
+                f"  \u2717 --project {project!r}: no checkout found for 'vault' to run against.",
+                file=sys.stderr,
+            )
+            return 1
+        forwarded += ["--configuration-root", str(resolved)]
+        child_env.pop("AGENT_WORKTREES_PROJECT_ROUTED", None)
+        child_env.pop("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", None)
+        # Legacy front doors must reach strict parsing without first provisioning
+        # a runtime in the caller's unrelated repository context.
+        if not child_env.get("AGENT_VAULT_NO_SELFPROVISION"):
+            child_env["_AGENT_WORKTREES_VAULT_RUNTIME_GUARD"] = "1"
+        child_env["AGENT_VAULT_NO_SELFPROVISION"] = "1"
+    elif chdir_verb is not None:
         # Resolve and chdir the child process ourselves (agent-worktrees owns
         # the repo registry) rather than forwarding --project for a lower-tier
         # sibling to resolve itself -- see _PROJECT_CHDIR_VERBS. Fail the
@@ -302,7 +317,14 @@ def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) ->
         cmd = [pwsh, "-NoProfile", "-NoLogo", "-File", str(stub), *forwarded]
     else:
         cmd = [str(stub), *forwarded]
-    return subprocess.run(cmd, env=child_env, cwd=cwd).returncode
+    result = subprocess.run(cmd, env=child_env, cwd=cwd).returncode
+    if project and slug == "vault" and result in (2, 3):
+        print(
+            "Repository-scoped Vault requires native --configuration-root support. "
+            "If that option was rejected, update agent-vault. No cwd fallback was attempted.",
+            file=sys.stderr,
+        )
+    return result
 
 
 

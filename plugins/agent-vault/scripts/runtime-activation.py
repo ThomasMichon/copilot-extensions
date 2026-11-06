@@ -15,13 +15,20 @@ def main() -> int:
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--runtime-root")
     parser.add_argument("--context")
+    parser.add_argument("--invocation-cwd")
+    parser.add_argument("--retain-native-selector", action="store_true")
     args = parser.parse_args()
     payload = Path(__file__).resolve().parents[1]
     sys.path[:0] = [
         str(payload / "src"),
         str(payload / "scripts" / "configuration-layers" / "src"),
     ]
+    reason = None
+    missing_context_errors = ()
     try:
+        from configuration_context import RepositoryContextRequired
+
+        missing_context_errors = (RepositoryContextRequired,)
         from agent_vault.config import _global_config_path, home_dir
         from agent_vault.configuration import runtime_enabled
 
@@ -36,9 +43,8 @@ def main() -> int:
         )
         os.environ["AGENT_RT_ROOT"] = runtime
         os.environ["AGENT_VAULT_HOME"] = runtime
-        selected = _global_config_path()
-        if not selected.is_absolute():
-            os.environ["AGENT_VAULT_CONFIG"] = os.path.abspath(os.path.join(args.cwd, selected))
+        selected = _global_config_path(invocation_directory=args.invocation_cwd or args.cwd)
+        os.environ["AGENT_VAULT_CONFIG"] = str(selected)
         enabled = runtime_enabled(args.cwd)
         state = "configured" if enabled else "configuration-empty"
         detail = (
@@ -50,6 +56,15 @@ def main() -> int:
             "KeePassXC installation is required while inactive."
         )
         code = 0 if enabled else 2
+    except missing_context_errors:
+        state = "failed"
+        reason = "repository-context-missing"
+        detail = (
+            "Agent Vault repository context is missing. Run from an adopted "
+            "repository or use '<repo> vault unlock' from any directory. "
+            "No installation or unlock was attempted."
+        )
+        code = 3
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as error:
         state = "failed"
         frames = ", ".join(
@@ -62,11 +77,16 @@ def main() -> int:
             f"not an unconfigured result. Reader failure: {type(error).__name__} ({frames})."
         )
         code = 3
-    print(json.dumps({
+    result = {
         "schema": "copilot-extensions.module-readiness",
         "version": 1, "module": "agent-vault/runtime",
         "state": state, "detail": detail,
-    }))
+    }
+    if reason:
+        result["reason"] = reason
+    if args.retain_native_selector and state == "configured":
+        result["native_configuration_file"] = str(selected)
+    print(json.dumps(result))
     return code
 
 

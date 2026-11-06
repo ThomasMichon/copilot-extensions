@@ -9,6 +9,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .invocation import configuration_root as invocation_configuration_root
+from .configuration_scope import configuration_root as resident_configuration_root
+
+
+def configuration_root(cwd: str | None = None) -> str:
+    selected = invocation_configuration_root(cwd)
+    if selected is not None:
+        return selected
+    return resident_configuration_root()
+
 IS_WINDOWS = platform.system() == "Windows"
 DEFAULT_TCP_PORT = 19999
 HOME_ENV = "AGENT_VAULT_HOME"
@@ -71,7 +81,7 @@ def run_dir() -> Path:
 
 CONFIG_ENV = "AGENT_VAULT_CONFIG"
 PINNED_CONTEXT_ENV = "AGENT_VAULT_PINNED_CONTEXT"
-from .configuration_scope import REPO_CONFIG_NAME, bind_service_configuration as bind_service_configuration, configuration_root, configuration_source
+from .configuration_scope import REPO_CONFIG_NAME, bind_service_configuration as bind_service_configuration, configuration_source
 
 
 @dataclass(frozen=True)
@@ -106,8 +116,11 @@ def default_config_path() -> Path:
     return root / "agent-vault" / "config.json"
 
 
-def _global_config_path() -> Path:
-    return Path(os.environ.get(CONFIG_ENV) or default_config_path())
+def _global_config_path(*, invocation_directory: str | None = None) -> Path:
+    selected = Path(os.environ.get(CONFIG_ENV) or default_config_path())
+    if not selected.is_absolute() and invocation_directory is not None:
+        selected = Path(invocation_directory) / selected
+    return selected.absolute()
 
 
 def _global_config_dir() -> Path:
@@ -334,6 +347,7 @@ def resolve_context(
             port=port,
             sources=dict.fromkeys(("vault", "kpdb", "group", "port"), "pinned"),
         )
+    cwd = configuration_root(cwd)
     global_data = load_global_config(strict=True) if strict else load_global_config()
     if strict:
         _validate_config_data(global_data, "global vault configuration")

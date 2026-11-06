@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -579,7 +581,10 @@ def test_router_non_project_slug_omits_project(monkeypatch):
     assert captured == {"slug": "mcp", "project": None, "rest": ["list"]}
 
 
-def test_router_ssh_mesh_status_is_a_project_chdir_verb(monkeypatch):
+@pytest.mark.parametrize(
+    "slug,verb", [("ssh", "mesh-status")],
+)
+def test_router_project_chdir_verb_selects_checkout(monkeypatch, slug, verb):
     """`<repo> ssh mesh-status` pins the child's cwd to the resolved project
     (#2426 candidate 2): agent-ssh's mesh-status/refresh-mesh otherwise
     silently resolve machines.yaml from the caller's raw cwd, ignoring the
@@ -606,14 +611,18 @@ def test_router_ssh_mesh_status_is_a_project_chdir_verb(monkeypatch):
         return _R()
 
     monkeypatch.setattr(_sp, "run", _fake_run)
-    rc = m._route_to_sibling_plugin("ssh", "demo", ["mesh-status"])
+    rc = m._route_to_sibling_plugin(slug, "demo", [verb])
     assert rc == 0
     assert seen["cwd"] == str(Path("/resolved/demo"))
     assert "--project" not in seen["cmd"]  # chdir'd, not forwarded as a flag
     assert "AGENT_WORKTREES_PROJECT_ROUTED" not in (seen["env"] or {})
 
 
-def test_router_ssh_non_chdir_verb_stays_cwd_preserving(monkeypatch):
+@pytest.mark.parametrize(
+    "slug,arguments",
+    [("ssh", ["doctor", "--json"])],
+)
+def test_router_non_chdir_verb_stays_cwd_preserving(monkeypatch, slug, arguments):
     """A non-project `ssh` verb (e.g. `doctor`, `emit-profile`) must stay a
     plain cwd-preserving alias even when --project was supplied: it must not
     chdir (that would silently break a verb's own relative-path arguments,
@@ -641,14 +650,15 @@ def test_router_ssh_non_chdir_verb_stays_cwd_preserving(monkeypatch):
         return _R()
 
     monkeypatch.setattr(_sp, "run", _fake_run)
-    rc = m._route_to_sibling_plugin("ssh", "demo", ["doctor", "--json"])
+    rc = m._route_to_sibling_plugin(slug, "demo", arguments)
     assert rc == 0
     assert seen["cwd"] is None
     assert "--project" not in seen["cmd"]
     assert "AGENT_WORKTREES_PROJECT_ROUTED" not in (seen["env"] or {})
 
 
-def test_router_ssh_unresolvable_project_fails_closed(monkeypatch, capsys):
+@pytest.mark.parametrize("slug,verb", [("ssh", "mesh-status"), ("vault", "unlock")])
+def test_router_unresolvable_project_fails_closed(monkeypatch, capsys, slug, verb):
     """An unresolvable --project fails a matched chdir-verb's routed call
     closed instead of silently running agent-ssh against the caller's
     original cwd (the wrong-project behavior #2426 exists to prevent)."""
@@ -662,12 +672,13 @@ def test_router_ssh_unresolvable_project_fails_closed(monkeypatch, capsys):
                               "project can't be resolved")
 
     monkeypatch.setattr(_sp, "run", _fail_run)
-    rc = m._route_to_sibling_plugin("ssh", "nope", ["mesh-status"])
+    rc = m._route_to_sibling_plugin(slug, "nope", [verb])
     assert rc == 1
     assert "no checkout found" in capsys.readouterr().err
 
 
-def test_main_router_actually_threads_project_for_chdir_slug(monkeypatch):
+@pytest.mark.parametrize("slug,verb", [("ssh", "mesh-status"), ("vault", "unlock")])
+def test_main_router_actually_threads_project_for_chdir_slug(monkeypatch, slug, verb):
     """End-to-end through `m.main(...)`, not a direct `_route_to_sibling_plugin`
     call: a bare unit test on the helper alone previously missed a real bug
     where the router's `<repo> <slug>` dispatch only ever threaded `project`
@@ -680,9 +691,156 @@ def test_main_router_actually_threads_project_for_chdir_slug(monkeypatch):
         lambda slug, project, rest: captured.update(
             slug=slug, project=project, rest=rest) or 0,
     )
-    rc = m.main(["--project", "demo", "ssh", "mesh-status"])
+    rc = m.main(["--project", "demo", slug, verb])
     assert rc == 0
-    assert captured == {"slug": "ssh", "project": "demo", "rest": ["mesh-status"]}
+    assert captured == {"slug": slug, "project": "demo", "rest": [verb]}
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [["unlock"], ["which", "--json"], ["unseal", "example", "--in", "relative.sealed"]],
+)
+def test_vault_router_passes_native_context_without_rewriting_paths(monkeypatch, tmp_path, arguments):
+    import os
+    import subprocess
+
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", "local.json")
+    monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", "winrun")
+    monkeypatch.setenv("AGENT_VAULT_WINDOWS_MOUNT", "windows-mount")
+    monkeypatch.setenv("AGENT_VAULT_CORE_RUN_DIR", "core-run")
+    monkeypatch.setenv("AGENT_VAULT_KEK_DIR", "keks")
+    monkeypatch.setenv("APPDATA", "appdata")
+    monkeypatch.setenv("XDG_CONFIG_HOME", "xdg")
+    monkeypatch.setenv("KPDB", "${VAULT_TEST_DATABASE}")
+    monkeypatch.setenv("AGENT_VAULT_ENDPOINT", "unix:short.sock")
+    monkeypatch.setenv("AGENT_VAULT_CORE_ENDPOINT", "unix:core.sock")
+    monkeypatch.delenv("AGENT_VAULT_NO_SELFPROVISION", raising=False)
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: Path(__file__))
+    monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: tmp_path / "repo")
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, **kwargs)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    before = os.environ.copy()
+    assert m._route_to_sibling_plugin("vault", "demo", arguments) == 0
+    forwarded = ["--configuration-root", str(tmp_path / "repo"), *arguments]
+    assert seen["argv"][-len(forwarded):] == forwarded
+    assert seen["cwd"] is None
+    for name in (
+        "AGENT_VAULT_CONFIG", "AGENT_VAULT_WINDOWS_RUN_DIR", "AGENT_VAULT_WINDOWS_MOUNT",
+        "AGENT_VAULT_CORE_RUN_DIR", "AGENT_VAULT_KEK_DIR", "APPDATA", "XDG_CONFIG_HOME",
+        "KPDB", "AGENT_VAULT_ENDPOINT", "AGENT_VAULT_CORE_ENDPOINT",
+    ):
+        assert seen["env"][name] == before[name]
+    assert seen["env"]["AGENT_VAULT_NO_SELFPROVISION"] == "1"
+    assert seen["env"]["_AGENT_WORKTREES_VAULT_RUNTIME_GUARD"] == "1"
+    assert os.environ["AGENT_VAULT_CONFIG"] == "local.json"
+    assert os.environ == before
+
+
+def test_vault_router_retains_explicit_no_provisioning(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENT_VAULT_NO_SELFPROVISION", "1")
+    monkeypatch.setenv("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", "stale")
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: Path(__file__))
+    monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: tmp_path / "repo")
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert m._route_to_sibling_plugin("vault", "demo", ["ping"]) == 0
+    assert seen["AGENT_VAULT_NO_SELFPROVISION"] == "1"
+    assert "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD" not in seen
+
+
+def test_vault_router_does_not_replay_rejected_native_context(monkeypatch, tmp_path, capsys):
+    import subprocess
+
+    calls = []
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: Path(__file__))
+    monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: tmp_path)
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 2)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert m._route_to_sibling_plugin("vault", "demo", ["unlock"]) == 2
+    assert len(calls) == 1
+    assert calls[0][1]["cwd"] is None
+    assert calls[0][1]["env"]["AGENT_VAULT_NO_SELFPROVISION"] == "1"
+    assert "update agent-vault" in capsys.readouterr().err
+
+
+def test_vault_unlock_native_child_receives_context_without_chdir(monkeypatch, tmp_path):
+    checkout = tmp_path / "selected repository"
+    caller = tmp_path / "home"
+    checkout.mkdir()
+    caller.mkdir()
+    result = tmp_path / "child.json"
+    if sys.platform == "win32":
+        if not (shutil.which("pwsh") or shutil.which("powershell")):
+            pytest.skip("native PowerShell is unavailable")
+        stub = tmp_path / "agent-vault.ps1"
+        destination = str(result).replace("'", "''")
+        stub.write_text(
+            "@{cwd=(Get-Location).ProviderPath; argv=@($args); "
+            "config=$env:AGENT_VAULT_CONFIG; database=$env:KPDB; "
+            "windows_run_dir=$env:AGENT_VAULT_WINDOWS_RUN_DIR; "
+            "endpoint=$env:AGENT_VAULT_ENDPOINT; core_endpoint=$env:AGENT_VAULT_CORE_ENDPOINT} | "
+            f"ConvertTo-Json -Compress | Set-Content -Encoding UTF8 -LiteralPath '{destination}'\n"
+            "exit 7\n",
+            encoding="utf-8",
+        )
+    else:
+        stub = tmp_path / "agent-vault"
+        stub.write_text(
+            "#!/bin/sh\n"
+            f"exec {shlex.quote(sys.executable)} -c "
+            + shlex.quote(
+                "import json, os, sys\n"
+                f"with open({str(result)!r}, 'w') as stream:\n"
+                " json.dump({'cwd': os.getcwd(), 'argv': sys.argv[1:], "
+                "'config': os.environ['AGENT_VAULT_CONFIG'], "
+                "'database': os.environ['KPDB'], "
+                "'windows_run_dir': os.environ['AGENT_VAULT_WINDOWS_RUN_DIR'], "
+                "'endpoint': os.environ['AGENT_VAULT_ENDPOINT'], "
+                "'core_endpoint': os.environ['AGENT_VAULT_CORE_ENDPOINT']}, stream)\n"
+                "sys.exit(7)\n"
+            )
+            + ' "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o700)
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", "local.json")
+    monkeypatch.setenv("KPDB", "chosen.kdbx")
+    monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", "winrun")
+    monkeypatch.setenv("AGENT_VAULT_ENDPOINT", "unix:vault.sock")
+    monkeypatch.setenv("AGENT_VAULT_CORE_ENDPOINT", "unix:core.sock")
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: stub)
+    monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: checkout)
+
+    assert m.main(["--project", "demo", "vault", "unlock"]) == 7
+    receipt = json.loads(result.read_text(encoding="utf-8-sig"))
+    assert Path(receipt["cwd"]) == caller
+    assert receipt["argv"] == ["--configuration-root", str(checkout), "unlock"]
+    assert receipt["config"] == "local.json"
+    assert receipt["database"] == "chosen.kdbx"
+    assert receipt["windows_run_dir"] == "winrun"
+    assert receipt["endpoint"] == "unix:vault.sock"
+    assert receipt["core_endpoint"] == "unix:core.sock"
+    assert Path.cwd() == caller
 
 
 def test_router_derives_from_installed_binstubs(monkeypatch):

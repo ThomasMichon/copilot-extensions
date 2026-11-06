@@ -12,10 +12,308 @@ from agent_procutil import no_window_kwargs
 
 from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
 from .test_bootstrap_driver import native_bootstrap
-from .test_identity_payload_gate import prepare_payload, invoke
+from .test_identity_payload_gate import prepare_payload, prepare_runtime, invoke
 from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
 
 PLUGIN = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_native_cold_contract_query_never_provisions(tmp_path, scoped):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    (home / ".agent-vault.json").write_text('{"enabled": false}', encoding="utf-8")
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
+    })
+    arguments = ["invocation-contract", "--json"]
+    if scoped:
+        arguments = ["--configuration-root", str(home), *arguments]
+    result = invoke(payload, env, home, *arguments)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "schema": "agent-vault.invocation", "version": 1,
+        "capabilities": [], "runtime_prepared": False,
+    }
+    assert not runtime.exists()
+
+
+@pytest.mark.parametrize("environment_database", [False, True])
+def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environment_database):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    project = tmp_path / "selected repository"
+    project.mkdir()
+    (project / ".agent-vault.json").write_text(
+        json.dumps({"enabled": True, "group": "selected"}), encoding="utf-8",
+    )
+    (home / ".agent-vault.json").write_text(
+        json.dumps({"enabled": False, "group": "wrong"}), encoding="utf-8",
+    )
+    (home / "native.json").write_text(
+        json.dumps({"enabled": True, "kpdb": "machine.kdbx"}), encoding="utf-8",
+    )
+    (project / "native.json").write_text(
+        json.dumps({"enabled": False}), encoding="utf-8",
+    )
+    prepare_runtime(runtime, payload)
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
+        "AGENT_VAULT_CONFIG": "native.json",
+        "AGENT_VAULT_NO_SELFPROVISION": "1",
+        "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD": "1",
+    })
+    expected_database = home / "machine.kdbx"
+    if environment_database:
+        env["KPDB"] = "${VAULT_TEST_DATABASE}"
+        env["VAULT_TEST_DATABASE"] = "${VAULT_TEST_LITERAL}/chosen.kdbx"
+        env["VAULT_TEST_LITERAL"] = "must-not-expand-recursively"
+        expected_database = home / "${VAULT_TEST_LITERAL}" / "chosen.kdbx"
+    result = invoke(payload, env, home, "--configuration-root", str(project), "which", "--json")
+    assert result.returncode == 0, result.stdout + result.stderr
+    selected = json.loads(result.stdout)
+    assert selected["group"] == "selected"
+    assert selected["kpdb"] == str(expected_database)
+    (home / "native.json").write_text("{", encoding="utf-8")
+    metadata = invoke(
+        payload, env, home, "--configuration-root", str(project), "invocation-contract", "--json",
+    )
+    assert metadata.returncode == 0, metadata.stdout + metadata.stderr
+    assert json.loads(metadata.stdout)["capabilities"] == ["configuration-root-v1"]
+    assert not (runtime / "run").exists()
+
+
+@pytest.mark.parametrize("enabled,code", [(False, 2), (True, 1)])
+def test_native_cold_configuration_root_respects_scope_and_no_provisioning(tmp_path, enabled, code):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    project = tmp_path / "selected"
+    project.mkdir()
+    (project / ".agent-vault.json").write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
+    (home / ".agent-vault.json").write_text(json.dumps({"enabled": not enabled}), encoding="utf-8")
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
+        "AGENT_VAULT_NO_SELFPROVISION": "1",
+    })
+    result = invoke(payload, env, home, "--configuration-root", str(project), "unlock")
+    assert result.returncode == code, result.stdout + result.stderr
+    assert ("runtime not provisioned" if enabled else "inactive") in result.stderr
+    assert not runtime.exists()
+
+
+def _scoped_first_use_fixture(tmp_path):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    project = tmp_path / "selected repository"
+    project.mkdir()
+    (project / ".agent-vault.json").write_text('{"enabled": true}', encoding="utf-8")
+    (home / "native.json").write_text('{"enabled": true}', encoding="utf-8")
+    (project / "native.json").write_text('{"enabled": false}', encoding="utf-8")
+    report = json.dumps({
+        "status": "ready", "actualMode": "legacy", "desiredMode": "legacy",
+        "legacy": {"root": str(runtime)},
+        "deployment": {
+            "allowPluginPublication": True,
+            "path": str(runtime / "runtime-deployment.json"),
+        },
+    })
+    receipt = tmp_path / "driver.json"
+    driver = payload / "libs" / "update-driver" / "scripts"
+    driver.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        (payload / "scripts" / "installation-context" / "installation-context.ps1").write_text(
+            "Write-Output '" + report.replace("'", "''") + "'\nexit 0\n", encoding="utf-8",
+        )
+        destination = str(receipt).replace("'", "''")
+        (driver / "first-use.ps1").write_text(
+            "param($Root,$Payload,$RuntimeRoot,$Project,[switch]$Wait)\n"
+            "@{project=$Project; config=$env:AGENT_VAULT_CONFIG; "
+            "no_self=$env:AGENT_VAULT_NO_SELFPROVISION; "
+            "guard=$env:_AGENT_WORKTREES_VAULT_RUNTIME_GUARD} | ConvertTo-Json -Compress | "
+            f"Set-Content -Encoding UTF8 -LiteralPath '{destination}'\nexit 37\n",
+            encoding="utf-8",
+        )
+    else:
+        import shlex
+
+        (payload / "scripts" / "installation-context" / "installation-context.sh").write_text(
+            "#!/bin/sh\nprintf '%s\\n' " + shlex.quote(report) + "\n", encoding="utf-8",
+        )
+        (driver / "first-use.sh").write_text(
+            "#!/bin/sh\n"
+            f"exec {shlex.quote(sys.executable)} -c "
+            + shlex.quote(
+                "import json,os,sys\n"
+                f"with open({str(receipt)!r},'w') as stream:\n"
+                " json.dump({'project':sys.argv[1], 'config':os.environ.get('AGENT_VAULT_CONFIG'), "
+                "'no_self':os.environ.get('AGENT_VAULT_NO_SELFPROVISION'), "
+                "'guard':os.environ.get('_AGENT_WORKTREES_VAULT_RUNTIME_GUARD')},stream)\n"
+                "sys.exit(37)\n"
+            )
+            + ' "$4"\n',
+            encoding="utf-8",
+        )
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
+        "AGENT_VAULT_CONFIG": "native.json",
+        "AGENT_VAULT_NO_SELFPROVISION": "1",
+        "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD": "1",
+    })
+    return home, payload, runtime, project, receipt, env
+
+
+def test_native_scoped_first_use_retains_discovery_and_native_file_separately(tmp_path):
+    home, payload, runtime, project, receipt, env = _scoped_first_use_fixture(tmp_path)
+    result = invoke(payload, env, home, "--configuration-root", str(project), "unlock")
+    assert result.returncode == 37, result.stdout + result.stderr
+    captured = json.loads(receipt.read_text(encoding="utf-8-sig"))
+    assert captured["project"] == str(project)
+    assert captured["config"] == str(home / "native.json")
+    assert not captured["no_self"] and not captured["guard"]
+    assert not runtime.exists()
+
+
+@pytest.mark.parametrize("dispatcher_aware", [False, True])
+@pytest.mark.parametrize("operation", ["scope", "contract"])
+@pytest.mark.parametrize("prepared", [False, True])
+def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
+    tmp_path, dispatcher_aware, operation, prepared,
+):
+    import shlex
+
+    home, payload, runtime, project, receipt, env = _scoped_first_use_fixture(tmp_path)
+    if not dispatcher_aware:
+        for suffix in ("ps1", "sh"):
+            gate = payload / "scripts" / f"runtime-gate.{suffix}"
+            gate.write_text(
+                gate.read_text(encoding="utf-8").replace(
+                    "# Configuration root contract: vault-context-v1", "# prior dispatcher",
+                ),
+                encoding="utf-8",
+            )
+    local_bin = tmp_path / "local-bin"
+    engine = PLUGIN.parents[1] / "libs" / "installer-engine"
+    if os.name == "nt":
+        host = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+        command = (
+            "$ErrorActionPreference='Stop'; . " + quote(engine / "installer-engine.ps1") + "; "
+            "function Write-Ok { param([string]$Message) }; "
+            "Write-SimpleBinstub -CommandName agent-vault -ModuleName agent_vault "
+            f"-RuntimeRoot {quote(runtime)} -LocalBin {quote(local_bin)} "
+            f"-InstallBinDir {quote(runtime / 'bin')} -SnapshotInstallerPath 'scripts\\install.ps1' "
+            "-NoSelfProvisionEnv AGENT_VAULT_NO_SELFPROVISION "
+            f"-ResolverPs1Source {quote(payload / 'scripts' / 'resolve-runtime.ps1')} "
+            f"-ResolverShSource {quote(payload / 'scripts' / 'resolve-runtime.sh')}"
+        )
+        build = [host, "-NoProfile", "-NonInteractive", "-Command", command]
+        launch = [host, "-NoProfile", "-NonInteractive", "-File", str(local_bin / "agent-vault.ps1")]
+    else:
+        values = (
+            "agent-vault", "agent_vault", runtime, local_bin, runtime / "bin",
+            "scripts/install.sh", "AGENT_VAULT_NO_SELFPROVISION",
+            payload / "scripts" / "resolve-runtime.ps1", payload / "scripts" / "resolve-runtime.sh",
+        )
+        command = (
+            "set -e; _ok() { :; }; _fail() { printf '%s\\n' \"$*\" >&2; return 1; }; . "
+            + shlex.quote(str(engine / "installer-engine.sh"))
+            + "; write_simple_binstub " + " ".join(shlex.quote(str(value)) for value in values)
+        )
+        build = ["bash", "-c", command]
+        launch = ["bash", str(local_bin / "agent-vault")]
+    built = subprocess.run(
+        build, cwd=home, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
+    (runtime / "payload-dir").write_text(str(payload), encoding="utf-8")
+    if prepared:
+        prepare_runtime(runtime, payload)
+        (project / ".agent-vault.json").write_text(
+            '{"enabled": true, "group": "selected"}', encoding="utf-8",
+        )
+    arguments = (
+        ["--configuration-root", str(project), "which", "--json"]
+        if prepared and operation == "scope" else
+        ["--configuration-root", str(project), "unlock"]
+        if operation == "scope" else ["invocation-contract", "--json"]
+    )
+    result = subprocess.run(
+        [*launch, *arguments], cwd=home, env=env, capture_output=True, text=True,
+        timeout=90, **no_window_kwargs(),
+    )
+    expected = 0 if prepared else (37 if operation == "scope" else 0) if dispatcher_aware else 2
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert receipt.exists() is (not prepared and dispatcher_aware and operation == "scope")
+    if receipt.exists():
+        captured = json.loads(receipt.read_text(encoding="utf-8-sig"))
+        assert captured["project"] == str(project)
+        assert captured["config"] == str(home / "native.json")
+    if prepared and operation == "scope":
+        assert json.loads(result.stdout)["group"] == "selected"
+    if prepared and operation == "contract":
+        assert json.loads(result.stdout)["capabilities"] == ["configuration-root-v1"]
+    if not prepared and dispatcher_aware and operation == "contract":
+        assert json.loads(result.stdout)["runtime_prepared"] is False
+    assert (runtime / "versions").exists() is prepared
+
+
+def test_native_payload_explains_missing_repository_before_unlock(tmp_path):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    (payload / "scripts" / "runtime-activation.py").write_text(
+        "import json\n"
+        "print(json.dumps({'state': 'failed', 'reason': 'repository-context-missing', "
+        "'detail': 'fixture owner has no repository context'}))\n"
+        "raise SystemExit(3)\n",
+        encoding="utf-8",
+    )
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_HOME": str(runtime),
+    })
+    result = invoke(payload, env, home, "unlock")
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "repository context is missing" in result.stderr
+    assert "<repo> vault unlock" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not runtime.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell strict-mode contract")
+@pytest.mark.parametrize("reason", [None, "repository-context-missing"])
+def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path, reason):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
+    failure = {"state": "failed", "detail": "fixture invalid configuration"}
+    if reason:
+        failure["reason"] = reason
+    (payload / "scripts" / "runtime-activation.py").write_text(
+        "import json\n"
+        f"print(json.dumps({failure!r}))\n"
+        "raise SystemExit(3)\n",
+        encoding="utf-8",
+    )
+    script = str(payload / "scripts" / "runtime-activation.ps1").replace("'", "''")
+    project = str(tmp_path).replace("'", "''")
+    python = str(sys.executable).replace("'", "''")
+    command = (
+        "Set-StrictMode -Version 2.0; $ErrorActionPreference = 'Stop'; "
+        f". '{script}'; "
+        f"try {{ Get-VaultRuntimeActivation -Project '{project}' -Python '{python}'; exit 90 }} "
+        "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 3 }"
+    )
+    env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
+    result = subprocess.run(
+        [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+         "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=home, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    if reason:
+        assert "repository context is missing" in result.stderr
+        assert "<repo> vault unlock" in result.stderr
+    else:
+        assert "Reader exit: 3; state: failed" in result.stderr
+        assert "fixture invalid configuration" in result.stderr
+    assert not runtime.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX installer argument validation")
@@ -176,7 +474,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         (slot.parent.parent / "current-version").write_text("1.0.0", encoding="utf-8")
     installed = packages["agent-vault"] / "agent_vault"
     installed.mkdir()
-    for name in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "_peer_launch.py"):
+    for name in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "invocation.py", "_peer_launch.py"):
         shutil.copyfile(PLUGIN / "src" / "agent_vault" / name, installed / name)
     if layout == "service-cwd":
         shutil.copytree(
