@@ -8,7 +8,7 @@
 - **Vision:** [machine heartbeats](../../../visions/telemetry/machine-heartbeats/README.md),
   [user-state carriers](../../../visions/user-state-carriers/README.md)
 - **Umbrella issue:** #10873
-- **Sub-issues:** #10881 (local report/chart consumer)
+- **Sub-issues:** #10881 (local report/chart consumer), #10928 (preference preview)
 
 ## Guiding Intent
 
@@ -111,8 +111,10 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   outcomes separately. Do not reload or restart a running service.
 
 ### Phase 4 - Core preference propagation
-- [ ] Review the [four-domain preference amendment](preferences.md), including
+- [x] Review the [four-domain preference amendment](preferences.md), including
   first-class harness-to-knowledge defaults and machine-local override/adoption.
+- [x] Prove strict explicit-snapshot preview and machine-local mapping selection
+  through the normal CLI, without native adoption or carrier effects.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -224,3 +226,18 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - The linked proposal and its conflict/withdrawal/native-consumer controls await
   review before implementation. Exact adopter folder/account choices remain
   private; the parent effort stays Active.
+
+### 2026-11-06 - Preference amendment reviewed; bounded consumer first
+- #10924 merged after current-head Copilot approval with no findings and green
+  required CI. Pulled forward before code; the parent effort remains Active.
+- Claimed #10928 for strict explicit local snapshots and a read-only normal CLI
+  preview. Machine-local mapping overrides and suppression are projected as
+  preferences, not treated as effective bindings or native identity validation.
+- This first consumer does not persist acceptance, publish carrier files or
+  apply any domain. Native adoption, first-use/platform/carrier qualification
+  and explicit activation remain open, not satisfied by a preview.
+- The contained Windows packet passed 40 focused snapshot, CLI-scope and fresh
+  module/file consumer tests. Ruff F/E9, install contracts, documentation
+  consistency, effort structure and whitespace passed. The subprocess used
+  fresh isolated state, but no installed runtime, Linux native lane, binding
+  transaction or live carrier was exercised.

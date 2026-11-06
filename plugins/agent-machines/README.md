@@ -81,6 +81,10 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
 
 ## What works today
 
+- **Read-only portable preference previews.** `preferences preview` validates
+  explicit local snapshots, revision/conflict controls and machine-specific
+  harness-to-knowledge suggestions. No native apply, binding change or cloud
+  publication occurs. See [the preview contract](docs/portable-preferences.md).
 - **Bounded local telemetry reports.** `health report` projects explicit local
   typed telemetry into 168 UTC-hour buckets and an optional static chart,
   preserving unknown coverage. It starts no collector or periodic job and never

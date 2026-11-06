@@ -230,6 +230,18 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
             continue
         cmdline = _cmdline_for_pid(pid)
         port = _parse_listen_port(cmdline)
+        start_time_before = None
+        if (
+            port is None
+            and active_endpoint is not None
+            and active_endpoint.pid == pid
+            and active_endpoint.process_start_time is not None
+            and active_endpoint.client_host == "127.0.0.1"
+            and 0 < active_endpoint.port < 65536
+        ):
+            start_time_before = _process_start_time(pid)
+            if start_time_before == active_endpoint.process_start_time:
+                port = active_endpoint.port
         entry: dict[str, Any] = {
             "pid": pid,
             "port": port,
@@ -237,8 +249,8 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
             # "active" after PID reuse -- the routing table's active row
             # could retain a now-stale endpoint while an unrelated, later
             # daemon happens to reuse that exact pid on a different port.
-            # An unresolved port (None) never matches, so an unverifiable
-            # candidate is reported as not-active rather than guessed.
+            # A routed port requires a matching birth above; an unresolved
+            # port never matches an unverifiable candidate.
             "active": bool(
                 active_endpoint is not None
                 and active_endpoint.pid == pid
@@ -255,7 +267,8 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
             continue
         # Captured before connecting so the post-connection re-check below
         # can detect a same-pid replacement in the gap.
-        start_time_before = _process_start_time(pid)
+        if start_time_before is None:
+            start_time_before = _process_start_time(pid)
         try:
             client = mux_daemon_cutover.ControlClient(
                 f"http://{routing.format_authority('127.0.0.1', port)}",

@@ -331,6 +331,24 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records the actual complete #6812/#6030 receiving receipts and audited
+`NOT_PLANNED` retirement of #5703/#7305/#6424/#6681 tracking. Original
+descriptions, assignments, unfinished native/installed acceptance and every
+source/resource custodian remain. The complete counting census is827 whole
+OPEN:549 creator-eligible,278 excluded,557 original-cohort and270 inflow.
+Six arrivals and two external departures offset the four campaign retirements;
+verified dispositions are983, still98 above fixed729. #7805 remains OPEN at
+its finite reservation gap; #5898/#7962 planned intake is not yet a disposition.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed delivery of the complete direct update/role plans in #10922.
+The canonical amendments are accepted; actual #6812/#6030 issue receipt and
+complete current eligible readback still precede any subordinate retirement.
+#6796/#6600, #6820 and #7192's specific boundaries remain. The campaign stays
+Active at the latest complete827-open census,98 above fixed729, with979
+verified dispositions and two bounded continuing research scopes.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records reviewed delivery of #10917 and two direct actual-parent studies.
 The complete22:53 PST census is827 whole OPEN:548 creator-eligible,
 279 excluded,561 original-cohort and266 inflow. A new metadata-only arrival

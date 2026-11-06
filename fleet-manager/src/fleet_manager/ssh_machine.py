@@ -72,19 +72,49 @@ async def run(
         return
     config = SSHMachineConfig.from_dict(config.to_dict())
     accept = _consumer(config)
-    from .credential_references import load_service_credentials
+    from .credential_references import load_service_credentials, read_credential_reference
+    from .gateway_contract import GatewayError
     from .gateway_service_caller import ServiceCaller
     from .ssh_directory import SSHDirectoryClient
 
     value = config.to_dict()
-    credentials = load_service_credentials(
-        proof_key_file=absolute(value["proof_key_file"]),
-        access_token_file=absolute(value["access_token_file"]),
-    )
+    if value["version"] == 1:
+        credentials = load_service_credentials(
+            proof_key_file=absolute(value["proof_key_file"]),
+            access_token_file=absolute(value["access_token_file"]),
+        )
+        authentication = {
+            "access_token_callback": credentials.access_token, "proof_key": credentials.proof_key,
+        }
+    else:
+        from joserfc.jwk import ECKey
+        from joserfc.errors import JoseError
+        from cryptography.hazmat.primitives.asymmetric.ec import (
+            EllipticCurvePrivateKey, SECP256R1,
+        )
+
+        try:
+            raw = read_credential_reference(absolute(value["proof_key_file"]))
+            if not raw.lstrip().startswith((
+                b"-----BEGIN PRIVATE KEY-----", b"-----BEGIN EC PRIVATE KEY-----",
+            )):
+                raise ValueError
+            proof_key = ECKey.import_key(raw)
+            signing_key = proof_key.get_op_key("sign")
+            if not isinstance(signing_key, EllipticCurvePrivateKey) or not isinstance(
+                signing_key.curve, SECP256R1,
+            ):
+                raise ValueError
+        except (ValueError, TypeError, JoseError):
+            raise GatewayError("credential-key-unavailable") from None
+        selected = value["authentication"]
+        authentication = {
+            "proof_key": proof_key, "machine_principal": selected["principal"],
+            "machine_audience": selected["audience"], "machine_resource": selected["resource"],
+        }
     caller = ServiceCaller(
         gateway_origin=value["gateway_origin"], gateway_ca=value["gateway_ca"],
-        access_token_callback=credentials.access_token, proof_key=credentials.proof_key,
-        timeout=35,
+        timeout=35, **authentication,
     )
     client = SSHDirectoryClient(caller, namespace=value["namespace"])
     lease = _lease(absolute(value["state_dir"]))

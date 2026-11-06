@@ -3,7 +3,7 @@
   "version": 1,
   "configuration": {
     "schema": "fleet-manager.ssh-client",
-    "versions": [1]
+    "versions": [1, 2]
   },
   "directory": {
     "schema": "agent-ssh.service-directory",
