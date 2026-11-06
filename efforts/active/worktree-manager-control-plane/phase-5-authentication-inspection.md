@@ -165,9 +165,9 @@ operations are unchanged; no ordinary consumer emits the new syntax yet.
 
 Thirty-seven focused controls pass, including the native parser, unchanged private
 registry/sentinel bytes, synthetic credential/API failures, identity mismatch,
-real owned synthetic processes and a real aggregate deadline. The review fix
-also projects runner `RuntimeError` outcomes without swallowing retained
-cleanup errors. Eighty-six legacy scoped-credential controls also pass;
+real owned synthetic processes and a real aggregate deadline. Runner
+`RuntimeError` outcomes are projected without swallowing retained cleanup
+errors. Eighty-six legacy scoped-credential controls also pass;
 twenty additional account-resolution controls retain their earlier evidence.
 The actual built wheel contains the
 exact inspection source, descriptor and preserved existing package data;

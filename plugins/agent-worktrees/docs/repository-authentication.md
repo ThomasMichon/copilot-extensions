@@ -95,7 +95,7 @@ unavailable. Never strip flags or replay a different operation. Older consumers
 retain all prior registration/preference operations; there is no equivalent
 legacy authentication baseline and no old operation is retired by version 1.
 See [service-contract evolution](../../../docs/patterns/service-contract-evolution.md)
-and the [reviewed delivery design](../../../efforts/active/worktree-manager-control-plane/phase-5-authentication-inspection.md).
+and the [delivery design](../../../efforts/active/worktree-manager-control-plane/phase-5-authentication-inspection.md).
 
 ## Focused source validation
 
