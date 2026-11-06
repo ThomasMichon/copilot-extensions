@@ -304,6 +304,9 @@ that namespace before dispatch:
   bounded, logged backoff until their lifetime owner stops them; they catch up
   from the same directory revision. Capacity pressure does not permanently
   retire a connected machine's notification consumer.
+  An outgoing route whose writer has been fenced also returns HTTP 503 while
+  the successor attaches. Its watch retries from the same revision; the writer
+  check remains mandatory, and authentication/authorization refusals stay fatal.
   No cursor or
   per-client event queue is stored; reconnect reads the current snapshot and
   cannot miss a machine merely because a transient notification was lost.

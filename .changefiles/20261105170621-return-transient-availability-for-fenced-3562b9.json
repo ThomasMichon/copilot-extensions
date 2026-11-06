@@ -1,0 +1,9 @@
+{
+  "comment": "Return transient availability for fenced outgoing SSH directory requests so watches retry through handoff",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
