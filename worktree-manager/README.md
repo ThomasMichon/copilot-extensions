@@ -235,6 +235,10 @@ answerability stay unknown; the independently selected worktree/head fence
 controls admission and retires the reader when that selection is invalidated.
 Paginated replacement stages bounded intermediate membership without publishing
 it as current facts; current members remain unknown until replay completes.
+Bootstrap positions must equal the retained head. Delta bases must remain within
+retention, and their delivered positions and pagination flags must agree.
+Global sequence gaps and empty caught-up reads remain valid because unrelated
+owners share the sequence; they do not manufacture local events.
 Already-published rich Agenda work is admitted before optional Bridge startup
 waits. Worktrees and Bridge preparations start independently, including after
 Refresh while Bridge evidence is exhausted. A blocked optional bootstrap cannot

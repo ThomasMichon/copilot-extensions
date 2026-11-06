@@ -165,6 +165,58 @@ def test_null_relationship_identity_is_a_contract_error() -> None:
         MembershipCodec("example", "selected", OWNER).decode(raw(frame))
 
 
+@pytest.mark.parametrize("fault", [
+    "snapshot-behind-head", "base-before-floor", "base-after-head", "position-before-base",
+    "missing-more", "invented-more", "empty-partial",
+])
+def test_membership_replay_cannot_contradict_its_retained_range(fault: str) -> None:
+    frame = delta(2, before=1)
+    if fault == "snapshot-behind-head":
+        frame = snapshot(2)
+        frame["position"] = cursor(1)
+    elif fault == "base-before-floor":
+        frame["retained"]["floor"] = 3
+    elif fault == "base-after-head":
+        frame["base_position"] = cursor(3)
+        frame["position"] = cursor(3)
+        frame["changes"] = []
+    elif fault == "position-before-base":
+        frame["position"] = cursor(0)
+        frame["changes"] = []
+    elif fault == "missing-more":
+        frame["retained"]["head"] = 3
+    elif fault == "invented-more":
+        frame["has_more"] = True
+    else:
+        frame["retained"]["head"] = 3
+        frame["has_more"] = True
+        frame["changes"] = []
+    with pytest.raises(TimelineContractError):
+        MembershipCodec("example", "selected", OWNER).decode(raw(frame))
+
+
+def test_membership_replay_retains_global_sequence_skips_and_empty_current_reads() -> None:
+    codec = MembershipCodec("example", "selected", OWNER)
+    initial = codec.decode(raw(snapshot()))
+    token = codec.token(initial, 1)
+    codec.apply(initial, token)
+    first = delta(3, before=0)
+    first["changes"][0]["id"] = cursor(2)
+    first["retained"]["head"] = 5
+    first["has_more"] = True
+    first = codec.decode(raw(first))
+    assert not json.loads(codec.apply(first, token).facts_json)["members"]
+    assert codec.delta(first, token).events[0].event_id == "membership-change:2"
+    final = delta(5, before=3)
+    final["changes"] = []
+    final = codec.decode(raw(final))
+    assert json.loads(codec.apply(final, token).facts_json)["members"] == [member("idle")]
+    assert not codec.replaying
+    current = deepcopy(final)
+    current["base_position"] = current["position"]
+    assert codec.decode(raw(current)) == current
+
+
 def test_conflicting_native_identity_is_not_hidden_by_a_new_display_epoch() -> None:
     codec, token, window = admitted()
     frame = codec.decode(raw(delta()))
@@ -199,6 +251,7 @@ def named_member(name: str) -> dict:
 
 def replay_page(names: list[str], before: int, *, tombstones: bool, more: bool) -> dict:
     frame = delta(before + len(names), before=before)
+    frame["retained"]["head"] = 128
     frame.update(has_more=more, changes=[{
         **frame["changes"][0], "member": named_member(name), "id": cursor(before + index + 1),
         "operation": "tombstone" if tombstones else "upsert",

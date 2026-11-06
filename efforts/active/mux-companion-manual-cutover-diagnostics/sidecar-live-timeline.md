@@ -211,6 +211,12 @@ records exact-head Windows 120, Linux Companion 117 and root-attention 43
 passing controls. It does not explain the earlier 50 ms read failure or change
 production budgets, retries or cancellation; the reliability gap stays open.
 
+#10848 merged as `16d1c78f5049e52cda978fbf5d93faeae42f8afe`, qualifying
+exact-owner indexed lookups through ordinary writable bootstrap, with unchanged
+passive old-store behavior and read budgets. The same diagnostic readback
+records source-bound HTTP52 capture and current Windows lookup/client proof;
+the separate cold timeout and complete source/native acceptance remain open.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -669,6 +675,14 @@ is inferred from these presentation checks.
   independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
+
+- [x] Bound exact-owner membership work independently of unrelated retained
+  registry size using owner-prepared lookups, while retaining passive
+  non-preparation, malformed legacy JSON handling and old-store VM cutoffs.
+  #10848 qualifies source controls and native Windows SQLite/bootstrap
+  behavior; its unchanged actual-client packet passes 120 cases, separately
+  from the two new controls. This does not close cold scheduling reliability,
+  complete source coverage, native performance or the parent.
 
 - [x] Qualify the isolated Windows PSMux/ConPTY client with the actual private
   Worktrees/managed-Agenda/Bridge source owners, sparse full/narrow views,

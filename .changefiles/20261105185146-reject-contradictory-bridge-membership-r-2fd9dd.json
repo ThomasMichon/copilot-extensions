@@ -1,0 +1,9 @@
+{
+  "comment": "Reject contradictory Bridge membership replay boundaries while preserving global sequence gaps",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

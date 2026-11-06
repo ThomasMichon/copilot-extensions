@@ -201,6 +201,36 @@ def test_actual_canonical_snapshot_and_retirement_decode_without_private_data(na
     assert not json.loads(codec.apply(frame, token).facts_json)["members"]
 
 
+def test_actual_membership_owner_interleaves_global_positions_without_inventing_local_events(
+    native_bridge,
+) -> None:
+    db, source = native_bridge["db"], native_bridge["source"]
+    codec = MembershipCodec("example", "selected", OWNER)
+    initial = codec.decode(raw(source.frame(OWNER, None)))
+    token = codec.token(initial, 1)
+    codec.apply(initial, token)
+    other_owner = "fixture-host/example/other"
+    db.create_session(
+        "other-child", "fixture", None, "/fixture", "local", "starting", 1.0,
+        target_json=json.dumps({"caller_owner_ref": other_owner}),
+    )
+    membership = importlib.import_module("agent_bridge.owner_membership")
+    membership.source_for(native_bridge["manager"], other_owner)
+    db.update_session_status("other-child", "idle", 2.0)
+    source.refresh()
+    db.update_session_status("child", "idle", 3.0)
+    frame = codec.decode(raw(source.frame(OWNER, initial["position"])))
+    event, = codec.delta(frame, token).events
+    assert event.event_id == "membership-change:2"
+    assert json.loads(codec.apply(frame, token).facts_json)["members"][0]["state"] == "idle"
+    db.update_session_status("other-child", "ended", 4.0)
+    empty = codec.decode(raw(source.frame(OWNER, frame["position"])))
+    assert empty["changes"] == [] and empty["position"] != frame["position"]
+    assert empty["retained"]["head"] == 3 and not empty["has_more"]
+    assert not codec.delta(empty, token).events
+    assert codec.apply(empty, token).facts_json == codec.apply(frame, token).facts_json
+
+
 def test_old_running_capability_refuses_before_membership_transport(native_bridge, tmp_path) -> None:
     native_bridge["unsupported"].touch()
 
