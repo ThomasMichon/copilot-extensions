@@ -2333,6 +2333,11 @@ repair contract below owns that choice.
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the
 engine it drives, and writes `~/.copilot-extensions/update/update-status.json`.
+When bootstrap supplies an explicit environment prepared before that run
+started, Manager overlays its run ID, event path and owner for the engine child;
+the original environment and unrelated selection/authentication values remain
+unchanged. The engine participates in that run rather than creating a second
+owner.
 A failed cutover fails the run (`command_failed`, exit 1); the engine's exit
 code is mapped through the shared update exit-code table (0 success, 1
 `command_failed`, 2 usage error, 3 configuration, 4 auth, 5 blocked by a lock,

@@ -1355,17 +1355,21 @@ def show_install_status() -> None:
             f"(checked {python} and {lib})"
         )
 
-    # Wrappers
-    bd = bin_dir()
     if platform.system() == "Windows":
-        wrapper_name = "launch-session.cmd"
+        from . import control_plane_providers, manager_launch_cli
+        provider, error = manager_launch_cli._control_plane_provider_selection(
+            directory=control_plane_providers._machine_control_plane_providers_dir(),
+        )
+        if error or provider is None:
+            output.err(f"Session launch: {error or 'no registered control-plane provider'}")
+        else:
+            output.ok(
+                f"Session launch provider: {provider.provider} ({provider.command[0]}); registration only, runtime not probed"
+            )
+    elif (bin_dir() / "launch-session.sh").exists():
+        output.ok("launch-session.sh deployed")
     else:
-        wrapper_name = "launch-session.sh"
-    p = bd / wrapper_name
-    if p.exists():
-        output.ok(f"{wrapper_name} deployed")
-    else:
-        output.err(f"{wrapper_name} missing")
+        output.err("launch-session.sh missing")
 
     # Binstub
     lb = local_bin()
