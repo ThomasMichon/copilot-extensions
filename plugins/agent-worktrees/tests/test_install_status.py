@@ -12,6 +12,9 @@ from agent_worktrees import config, installer
 
 
 def _configure_status(tmp_path, monkeypatch):
+    from agent_worktrees import manager_launch_cli
+
+    monkeypatch.setattr(manager_launch_cli, "_control_plane_provider_selection", lambda: (None, ""))
     active_python = tmp_path / "versions" / "1.5.3-dev596" / "bin" / "python"
     active_python.parent.mkdir(parents=True)
     active_python.touch()
@@ -67,6 +70,32 @@ def test_install_status_rejects_stale_legacy_package(tmp_path, monkeypatch, caps
     assert "Stale legacy package present" in output
     assert "Package missing: active runtime cannot import agent_worktrees" in output
     assert "Package deployed" not in output
+
+
+@pytest.mark.parametrize("state", ["selected", "absent", "invalid"])
+def test_windows_status_uses_current_control_plane_not_retired_wrapper(tmp_path, monkeypatch, capsys, state):
+    from types import SimpleNamespace
+
+    from agent_worktrees import manager_launch_cli
+
+    _configure_status(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.subprocess, "run", lambda argv, **kwargs: (
+        subprocess.CompletedProcess(argv, 0, stdout="/active/agent_worktrees\n")
+    ))
+    provider = SimpleNamespace(provider="worktree-manager", command=("selected-manager",))
+    monkeypatch.setattr(manager_launch_cli, "_control_plane_provider_selection", lambda: (
+        (provider, "") if state == "selected" else
+        (None, "invalid selected provider") if state == "invalid" else (None, "")
+    ))
+    installer.show_install_status()
+    text = capsys.readouterr().out
+    assert "launch-session.cmd" not in text
+    if state == "selected":
+        assert "selected-manager" in text
+    elif state == "invalid":
+        assert "invalid selected provider" in text
+    else:
+        assert "control-plane provider" in text
 
 
 def test_venv_python_prefers_last_known_good_over_newest_slot(tmp_path, monkeypatch):

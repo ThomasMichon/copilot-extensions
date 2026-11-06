@@ -1,0 +1,17 @@
+{
+  "comment": "Reconcile retained Logger publication, report the current Windows session-launch provider, and preserve Manager update-run identity in prepared engine environments.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
