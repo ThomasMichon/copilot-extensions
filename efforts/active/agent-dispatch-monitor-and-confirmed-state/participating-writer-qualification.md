@@ -157,6 +157,12 @@ mandatory. Unknown responses retain the same assignment and claim.
       relationship call now rereads the durable queue, explicit authority, exact
       audited worker and complete original request. This source seam does not
       qualify the actual CLI/resident/Bridge participant set or close the cohort.
+      Opt-in selected CLI/resident assembly merged in #11047. It retains the
+      original installed command and reobserves the authenticated resident
+      before each relationship call, while requiring both independent callbacks.
+      Bridge's future keyed creation, original continuation journal and other
+      admitted producers remain separate assembly gates. Bounded source controls
+      do not qualify installed participants or the complete cohort.
 - [ ] Integrate ordinary preparation/advancement consumers only after their
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers

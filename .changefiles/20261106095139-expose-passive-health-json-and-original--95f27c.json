@@ -1,0 +1,9 @@
+{
+  "comment": "Expose passive health JSON and original keyed-writer inspection through the existing status CLI with explicit executing-CLI support.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
