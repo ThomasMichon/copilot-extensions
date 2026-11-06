@@ -493,7 +493,9 @@ namespace, receipt, source, generation and same-cell checks, including a fresh
 authority check before execution. Nothing provisions a missing runtime.
 The selected interpreter's resolved parent directory must remain in the owning
 versions root and selected completed slot; the interpreter leaf is not resolved,
-so ordinary POSIX venv links to a base Python remain supported. Snapshot dispatch
+so ordinary POSIX venv links to a base Python remain supported. Both direct-slot
+environments and a slot's nested `.venv` use that enclosing version slot for
+receipt validation and physical-parent containment. Snapshot dispatch
 calls the qualified runtime's existing `capture()` and `guidance()` APIs rather
 than requiring an executable module tail, including last-known-good selection
 of an older completed runtime.

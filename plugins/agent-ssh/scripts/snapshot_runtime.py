@@ -75,20 +75,23 @@ def runtime_command(payload: Path, plugin: str, environment: dict) -> tuple[list
     versions = Path(own["versionsRoot"]) if own is not None else runtime.versions_root(root)
     # Retain the canonical peer-launch physical-parent fence, not the leaf:
     # a normal POSIX venv's python may itself point outside its completed slot.
-    parent = python.parent.resolve()
+    environment_root = python.parent.parent
+    slot = environment_root.parent if environment_root.name == ".venv" else environment_root
+    expected_environment = versions.resolve() / slot.name
+    if environment_root.name == ".venv":
+        expected_environment /= ".venv"
     if (
-        python.parent.parent.parent != versions
-        or parent.parent.parent != versions.resolve()
-        or parent.parent != python.parent.parent.resolve()
+        slot.parent != versions
+        or python.parent.resolve() != expected_environment / python.parent.name
     ):
         raise ValueError("Selected interpreter directory escaped its completed slot")
     if own is not None:
-        _, slot, _ = primitive._runtime_slot_paths(
+        _, selected_slot, _ = primitive._runtime_slot_paths(
             own,
-            python.parent.parent.name,
+            slot.name,
             require_existing=True,
         )
-        if not primitive.paths_equal(slot, python.parent.parent):
+        if not primitive.paths_equal(selected_slot, slot):
             raise ValueError("Selected interpreter escaped its installation")
         # Re-read authority at execution, not a loaded-state/receipt cache.
         durable = root.parents[3]

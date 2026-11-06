@@ -143,12 +143,15 @@ def _slot_command(root, monkeypatch):
     return slot
 
 
-def test_redirected_interpreter_directory_is_refused(tmp_path, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_redirected_interpreter_directory_is_refused(tmp_path, monkeypatch, nested):
     slot = _slot_command(tmp_path / "owner", monkeypatch)
+    environment = slot / ".venv" if nested else slot
+    environment.mkdir(exist_ok=True)
     outside = tmp_path / "outside" / "Scripts"
     outside.mkdir(parents=True)
     (outside / "python.exe").write_text("must not execute")
-    link = slot / "Scripts"
+    link = environment / "Scripts"
     if os.name == "nt":
         result = run_caller_owned(
             [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(link), str(outside)],
@@ -163,10 +166,11 @@ def test_redirected_interpreter_directory_is_refused(tmp_path, monkeypatch):
         launcher.runtime_command(tmp_path, "agent-ssh", {})
 
 
-def test_interpreter_leaf_is_never_resolved(tmp_path, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_interpreter_leaf_is_never_resolved(tmp_path, monkeypatch, nested):
     slot = _slot_command(tmp_path / "owner", monkeypatch)
-    binary = slot / "bin"
-    binary.mkdir()
+    binary = (slot / ".venv" if nested else slot) / "bin"
+    binary.mkdir(parents=True)
     python = binary / "python"
     python.write_text("not executed")
     original = Path.resolve
@@ -181,10 +185,12 @@ def test_interpreter_leaf_is_never_resolved(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX venv interpreter symlink")
-def test_posix_interpreter_leaf_symlink_remains_supported(tmp_path, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_posix_interpreter_leaf_symlink_remains_supported(tmp_path, monkeypatch, nested):
     slot = _slot_command(tmp_path / "owner", monkeypatch)
-    (slot / "bin").mkdir()
-    python = slot / "bin" / "python"
+    binary = (slot / ".venv" if nested else slot) / "bin"
+    binary.mkdir(parents=True)
+    python = binary / "python"
     python.symlink_to(sys.executable)
     argv, _ = launcher.runtime_command(tmp_path, "agent-ssh", {})
     assert argv[0] == str(python)
@@ -279,7 +285,7 @@ def test_selected_peer_purelib_uses_its_minor_not_the_runner_minor(monkeypatch):
     assert f"python3.{runner_minor}/" not in path.as_posix()
 
 
-def _cell(root, monkeypatch, *, host_context=False, legacy=False):
+def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
     original_home = Path.home()
     original_peer_site = None
     original_peer_python = None
@@ -409,16 +415,17 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
                 environment=environment,
             )
         slot = receipt.parent / "versions" / "1.0.0"
+        environment_root = slot / ".venv" if nested else slot
         native_peer = host_context and plugin == "agent-worktrees"
         if native_peer:
             subprocess.run(
-                [str(original_peer_python), "-m", "venv", "--without-pip", str(slot)],
+                [str(original_peer_python), "-m", "venv", "--without-pip", str(environment_root)],
                 check=True,
                 capture_output=True,
                 timeout=30,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
-            site = slot / original_peer_site.relative_to(original_peer_python.parent.parent)
+            site = environment_root / original_peer_site.relative_to(original_peer_python.parent.parent)
             # Preserve the independent peer's installed package/dependency bytes
             # and interpreter ABI instead of mixing in source dependencies.
             shutil.copytree(original_peer_site, site, dirs_exist_ok=True)
@@ -429,8 +436,8 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
         else:
-            venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
-            site = slot / (
+            venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(environment_root)
+            site = environment_root / (
                 "Lib/site-packages"
                 if os.name == "nt"
                 else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
@@ -463,7 +470,7 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
             if (path := payload / "scripts" / name).is_file()
         )
         _compile_native_fixture(
-            slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
+            environment_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
             [site / "agent_worktrees" if native_peer else site, *payload_inputs],
         )
         (slot / ".install-complete.json").write_text(
@@ -744,14 +751,15 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
 
 
 @pytest.mark.timeout(150)
-def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("nested", [False, True])
+def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch, capsys, nested):
     from agent_ssh import _worktrees
 
     home = tmp_path / "home"
     home.mkdir()
     for name in ("HOME", "USERPROFILE", "AGENT_HOME"):
         monkeypatch.setenv(name, str(home))
-    contexts, payloads = _cell(tmp_path / "cell", monkeypatch)
+    contexts, payloads = _cell(tmp_path / "cell", monkeypatch, nested=nested)
     command, environment = launcher.runtime_command(
         payloads["agent-ssh"],
         "agent-ssh",
@@ -801,6 +809,7 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
                 "try:\n"
                 " path,status=_worktrees.state_root(Path.cwd(),json.load(sys.stdin))\n"
                 "except _worktrees.ContextRefused:\n"
+                " import traceback; traceback.print_exc()\n"
                 " raise SystemExit(126)\n"
                 "print(json.dumps([str(path) if path else None,status]))\n",
                 str(Path(command[0]).parent.parent),
@@ -813,7 +822,9 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
             max_stderr_bytes=8192,
         )
         if result.returncode == 126:
-            raise _worktrees.ContextRefused("native optional state-root request refused")
+            raise _worktrees.ContextRefused(
+                f"native optional state-root request refused: {result.stderr}"
+            )
         assert result.returncode == 0, result.stderr
         path, status = json.loads(result.stdout)
         return Path(path) if path else None, status

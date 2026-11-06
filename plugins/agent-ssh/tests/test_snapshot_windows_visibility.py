@@ -146,7 +146,7 @@ def test_desktop_admission_does_not_require_a_focused_window(current_name, acces
 @pytest.mark.skipif(
     os.environ.get("_SSH_VISIBILITY_CHILD") != "1", reason="GUI parent scenario only"
 )
-def test_windowless_native_child_scenario(tmp_path):
+def test_windowless_native_child_scenario(tmp_path, monkeypatch):
     import ctypes
     from ctypes import wintypes
 
@@ -162,7 +162,24 @@ def test_windowless_native_child_scenario(tmp_path):
         "throw 'native visibility acceptance forbids shell fallback'\n",
         encoding="utf-8",
     )
-    samples, captures = [], []
+    samples, captures, contributors = [], [], []
+    run_contributor = native.writer._run_owned_contributor
+
+    def observed_contributor(*args, **kwargs):
+        started = time.monotonic()
+        try:
+            result = run_contributor(*args, **kwargs)
+        except Exception as exc:
+            contributors.append({"seconds": time.monotonic() - started, "error": repr(exc)})
+            raise
+        contributors.append({
+            "seconds": time.monotonic() - started,
+            "returncode": result.returncode,
+            "stderr": result.stderr,
+        })
+        return result
+
+    monkeypatch.setattr(native.writer, "_run_owned_contributor", observed_contributor)
     for _ in range(2):
         started = time.monotonic()
         assert native.writer.write_session_guidance(
@@ -170,7 +187,10 @@ def test_windowless_native_child_scenario(tmp_path):
             home=output,
         )
         samples.append(round(time.monotonic() - started, 3))
-        value = native._snapshot(output)
+        try:
+            value = native._snapshot(output)
+        except StopIteration:
+            pytest.fail(f"Native snapshot was not delivered: {contributors!r}")
         assert value["topology"]["status"] == "available"
         assert value["topology"]["origin"] == "external-state"
         assert value["state_root"] == "bound"
