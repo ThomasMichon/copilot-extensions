@@ -350,3 +350,28 @@ adopter pilot feedback gates subsequent widening.
 - The exact resulting source passed **1 real bounded Windows cross-filesystem
   roundtrip, no skips**; exact owned cleanup confirmed. Source review/CI/merge,
   POSIX native acceptance and separately authorized adoption remain distinct.
+
+### 2026-11-06 — Receiving fixtures corrected; baseline blocker isolated
+- Corrected the paired-carve test doubles for the new receiving-project
+  configuration seam without weakening production validation. All **27**
+  paired-carve controls passed. Updated the actual-knowledge tuple fixture to
+  supply its own receiving configuration and assert its independent allocation
+  root; the **486** receiving/tuple controls passed across the affected packets.
+- Creation-tail expansion passed **139** controls but exposed one unchanged
+  concurrent-output failure:
+  `test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embody`.
+  The isolated test fails both on the candidate and the unchanged pre-feature
+  base `dc1c5fdd26ab0693c181793f0d4ff57bc5eaff6a`, with `JSONDecodeError`
+  from an empty captured JSON string.
+- The parent doctor and child embodiment both enter the process-global
+  `capture_json_output`, which swaps `sys.__stdout__`; the output and embodiment
+  receipt modules are unchanged by this effort. No unrelated runtime output
+  redesign or silent failing-test exception was applied.
+- **Merge remains held** pending bounded triage disposition: stabilize only
+  the concurrent test's parent-report capture while preserving its lifecycle
+  assertions, obtain a separately owned fix, or obtain a repository-approved
+  tracked exception. The recommended smallest scope is the fixture-only
+  correction. Review/CI success alone does not waive this observed failure.
+- The first-flow runtime/real-volume proof remains retained. The source
+  worktree, umbrella and broader effort remain Active; no rollout or real
+  retained-worktree move is implied.
