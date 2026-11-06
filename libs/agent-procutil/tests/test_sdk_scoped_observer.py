@@ -708,3 +708,63 @@ def test_stalled_admission_retires_owned_root_before_blocking_observer_teardown(
         release.set()
         if observer.thread is not None:
             observer.thread.join(1)
+
+
+def test_callback_lock_cannot_delay_root_retirement_or_error_evidence_past_cleanup_budget(
+    root, launch, monkeypatch,
+):
+    from agent_procutil import _windows_caller_owned as native
+
+    observer, api, _, _, _ = root
+    release, entered = threading.Event(), threading.Event()
+    order = []
+    monkeypatch.setattr(native, "time", time)
+    api.windows[20] = (603, 605)
+    api.queue.append((603, 0x8002, 20, 605))
+
+    def blocked_identity(hwnd):
+        assert observer.lock._is_owned()
+        entered.set()
+        assert release.wait(2), "owned callback was not released"
+        return api.windows[hwnd]
+
+    api.window_identity = blocked_identity
+    retire = native.JobHandle.terminate_and_wait
+
+    def retirement(job, timeout):
+        assert entered.is_set() and not release.is_set()
+        order.append("root-retirement")
+        return retire(job, timeout)
+
+    original_close = observer.close
+
+    def closing():
+        order.append("observer-close")
+        return original_close()
+
+    monkeypatch.setattr(native.JobHandle, "terminate_and_wait", retirement)
+    monkeypatch.setattr(observer, "close", closing)
+    start = time.monotonic()
+    cleanup = start + .3
+    try:
+        with pytest.raises(scoped.ObservationBlocked, match="barrier timed out") as caught:
+            with observer:
+                native.spawn(
+                    ["fixture.exe"], before_resume=observer.admit,
+                    command_deadline=start + .08, cleanup_deadline=cleanup,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+        assert time.monotonic() <= cleanup + .15
+        assert order[:2] == ["root-retirement", "observer-close"]
+        assert observer.job.closed and observer.process._handle is None
+        assert caught.value.scoped_observer is observer
+        assert isinstance(caught.value.scoped_observer_cleanup_error, scoped.ScopedCleanupError)
+        evidence = caught.value.scoped_observer_evidence
+        assert evidence["evidence_unknown"] is True and evidence["raw_events"] is None
+        assert evidence["qualified"] is False and evidence["passed"] is False
+        assert not release.is_set() and observer.thread.is_alive()
+    finally:
+        release.set()
+        if observer.thread is not None:
+            observer.thread.join(1)
+            assert not observer.thread.is_alive()

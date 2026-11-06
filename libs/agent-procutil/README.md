@@ -168,8 +168,9 @@ an older `**kwargs` provider cannot silently ignore observer admission.
 Failure uses the original exact-root/Job cleanup and retained-custody errors.
 Calls without the callback retain their existing behavior.
 If a callback exhausts its cleanup deadline, the owner still requests termination
-of its exact Job through the existing non-waiting settlement step. No additional
-verification interval is granted; busy/error retains unconfirmed native custody.
+of its exact Job without querying accounting, closing the Job or waiting again.
+Termination is not an exit proof: this path always retains unconfirmed native
+process/Job custody and never invokes the settlement-success callback.
 
 The separate `tests/sdk_scoped_observer.py` qualification helper composes this
 seam with process-filtered USER32 hooks and an initial owned-thread window query.
@@ -221,6 +222,10 @@ Failed startup admission signals stop and returns immediately to the native
 owner; it does not join the observer while the root is still suspended. The
 outer context performs potentially blocking observer teardown only after the
 native owner's failure settlement, within the original cleanup deadline.
+Failure logging and evidence capture never wait for the observer lock. If a
+stalled callback owns that lock, evidence is explicitly unknown and unqualified,
+with no invented empty raw stream; the original error and live observer retain
+the exact unresolved custody.
 If observer cleanup is also unconfirmed, `scoped_observer_cleanup_error`
 retains that independent failure without replacing the original.
 

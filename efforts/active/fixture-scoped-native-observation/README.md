@@ -212,3 +212,23 @@ proposal neither reintroduces an MCP gate nor authorizes the held extension.
   251 coverage targets and 300-second required-packet budget remain unchanged.
 - No debugger, GUI, calibration, rollout or native fixture execution occurred.
   Independent SDK native qualification and the remaining held work stay open.
+
+### 2026-11-06 - Keep expired retirement and locked evidence unconfirmed
+
+- Tightened the expired callback path to request only exact owned-Job termination.
+  Accounting-only emptiness is not native all-member exit proof: no accounting
+  query, Job close, root wait, success callback or confirmed-cleanup flag follows
+  this request. Original process/Job custody and the operation/native errors are
+  retained; ordinary nonexpired cleanup and the general Job API are unchanged.
+- Failure logging and evidence capture now acquire the observer lock without
+  waiting. A callback stalled under that lock cannot block error return beyond
+  the original cleanup budget. Unknown evidence is explicit and unqualified,
+  with a null raw stream rather than a manufactured empty one; the live observer
+  and original exception retain exact unresolved custody.
+- Synthetic regressions reproduced both defects before correction. The bounded
+  final selection passed 335 tests with no skips and verified cleanup. The locked
+  callback control releases and joins its own portable thread in a finalizer.
+  The SDK native case was collected only; no native effects were executed.
+- Regenerated the admission payload and refreshed footprints through their
+  canonical owners. Refreshed only the changed admitted native-owner source
+  digest; required packet inventory and its 300-second budget are unchanged.

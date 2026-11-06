@@ -105,6 +105,10 @@ def launch(monkeypatch):
             calls.append(("close", handle))
             return True
 
+        def TerminateJobObject(self, handle, code):
+            calls.append(("request-termination", handle))
+            return True
+
         def WaitForSingleObject(self, handle, timeout):
             calls.append(("wait", timeout))
             return 0
@@ -177,10 +181,6 @@ def test_attribute_capability_failure_has_no_create(launch):
 
 def test_post_create_interruption_at_D_retains_exact_streams_job_and_original_cause(launch, monkeypatch):
     launch.kernel.interrupt = True
-    monkeypatch.setattr(
-        native.JobHandle, "try_terminate_and_confirm_empty",
-        lambda job: launch.calls.append("zero-job") or False,
-    )
     error = None
     try:
         native.spawn(["git"], cleanup_deadline=110, stdin=subprocess.DEVNULL,
@@ -194,7 +194,7 @@ def test_post_create_interruption_at_D_retains_exact_streams_job_and_original_ca
     assert error.process.stderr is launch.streams[1] and not error.process.stderr.closed
     assert isinstance(error.__cause__, KeyboardInterrupt)
     assert error.operation_error is error.__cause__
-    assert "zero-job" in launch.calls and error._job_empty_confirmed is False
+    assert ("request-termination", 501) in launch.calls and error._job_empty_confirmed is False
     assert not any(isinstance(event, tuple) and event[0] in {"wait", "terminate"} for event in launch.calls)
 
 
@@ -322,8 +322,8 @@ def test_scoped_admission_without_original_execution_and_cleanup_budget_starts_n
     assert launch.calls == []
 
 
-@pytest.mark.parametrize("empty", [True, False])
-def test_expired_callback_still_requests_exact_owned_job_termination_without_wait_budget(launch, monkeypatch, empty):
+@pytest.mark.parametrize("terminated", [True, False])
+def test_expired_callback_still_requests_exact_owned_job_termination_without_wait_budget(launch, monkeypatch, terminated):
     original = RuntimeError("callback exhausted the original deadline")
     attempts = []
 
@@ -331,27 +331,25 @@ def test_expired_callback_still_requests_exact_owned_job_termination_without_wai
         launch.clock[0] = 111
         raise original
 
-    def nonwaiting(job):
-        attempts.append(job.handle)
-        if empty:
-            job._handle = None
-        return empty
-
-    monkeypatch.setattr(native.JobHandle, "try_terminate_and_confirm_empty", nonwaiting)
-    if empty:
-        with pytest.raises(RuntimeError) as caught:
-            native.spawn(["fixture.exe"], before_resume=expired,
-                         command_deadline=105, cleanup_deadline=110,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        assert caught.value is original
-        assert ("wait", 0) in launch.calls and ("close", 601) in launch.calls
-    else:
-        with pytest.raises(OwnedCleanupError) as caught:
-            native.spawn(["fixture.exe"], before_resume=expired,
-                         command_deadline=105, cleanup_deadline=110,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        assert caught.value.operation_error is original and caught.value.__cause__ is original
-        assert caught.value.process._handle == 601 and caught.value.job.handle == 501
-        assert caught.value._job_empty_confirmed is False
-    assert attempts == [501]
+    logical_queries = []
+    monkeypatch.setattr(
+        native.JobHandle, "try_terminate_and_confirm_empty",
+        lambda job: logical_queries.append(job.handle) or True,
+    )
+    monkeypatch.setattr(
+        launch.kernel, "TerminateJobObject",
+        lambda handle, code: attempts.append((handle, code)) or terminated, raising=False,
+    )
+    settled = []
+    with pytest.raises(OwnedCleanupError) as caught:
+        native.spawn(["fixture.exe"], before_resume=expired, on_settled=lambda: settled.append(True),
+                     command_deadline=105, cleanup_deadline=110,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert caught.value.operation_error is original and caught.value.__cause__ is original
+    assert caught.value.process._handle == 601 and caught.value.job.handle == 501
+    assert caught.value._job_empty_confirmed is False
+    assert not logical_queries and not settled
+    assert not any(isinstance(row, tuple) and row[0] == "wait" for row in launch.calls)
+    assert ("close", 601) not in launch.calls
+    assert attempts == [(501, 1)]
     assert not any(isinstance(row, tuple) and row[0] == "terminate" for row in launch.calls)

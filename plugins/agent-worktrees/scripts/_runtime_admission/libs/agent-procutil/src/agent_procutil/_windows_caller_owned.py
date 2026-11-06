@@ -87,6 +87,7 @@ def _api():
             [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL,
         ),
         "TerminateProcess": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
+        "TerminateJobObject": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
         "CloseHandle": ([wintypes.HANDLE], wintypes.BOOL),
     }
     for name, (arguments, result) in signatures.items():
@@ -543,11 +544,11 @@ def spawn(
                         job.terminate_and_wait(seconds)
                         job_empty_confirmed = True
                     else:
-                        job_empty_confirmed = job.try_terminate_and_confirm_empty()
-                        if not job_empty_confirmed:
-                            raise TimeoutError(
-                                "owned Job termination requested after deadline; exit unconfirmed",
-                            )
+                        if not kernel.TerminateJobObject(job.handle, 1):
+                            raise ctypes.WinError(ctypes.get_last_error())
+                        raise TimeoutError(
+                            "owned Job termination requested after deadline; exit unconfirmed",
+                        )
                     process.wait(max(0.0, cleanup_deadline - time.monotonic()))
                     if failed_preparation or process._thread_handle:
                         raise cleanup_error() from operation_error

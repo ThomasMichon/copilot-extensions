@@ -75,6 +75,8 @@ class ScopedObserver:
         self._cleanup_error: ScopedCleanupError | None = None
         self._retained_pin_error: BaseException | None = None
         self._admission_error: BaseException | None = None
+        self._evidence_unknown: str | None = None
+        self._unrecorded_error: BaseException | None = None
 
     def __enter__(self) -> ScopedObserver:
         if self._context_active or self._close_attempted:
@@ -105,11 +107,18 @@ class ScopedObserver:
                 error.scoped_observer_evidence = self.packet()
 
     def fail(self, error: BaseException) -> None:
-        with self.lock:
+        if not self.lock.acquire(blocking=False):
+            self._unrecorded_error = error
+            self._evidence_unknown = "observer failure log lock unavailable"
+            self.stop.set()
+            return
+        try:
             if len(self.errors) < 64:
                 self.errors.append(f"{type(error).__name__}: {error}")
             else:
                 self.overflow = True
+        finally:
+            self.lock.release()
 
     def _owner(self) -> Any:
         import agent_procutil
@@ -346,11 +355,17 @@ class ScopedObserver:
             raise self._cleanup_error from error
 
     def packet(self) -> dict:
-        with self.lock:
+        if self._evidence_unknown is not None:
+            return self._unknown_packet()
+        if not self.lock.acquire(blocking=False):
+            self._evidence_unknown = "observer evidence lock unavailable"
+            return self._unknown_packet()
+        try:
             qualified = bool(
                 self.sealed and self.settled and self.hooks_closed and self.pins_closed
                 and self.barrier is not None and self.hook_count == 2 and self.pumps > 0
                 and self.max_gap <= self.MAX_GAP and not self.errors and not self.overflow
+                and self._evidence_unknown is None
             )
             return deepcopy({
                 "schema": SCOPED_PROFILE, "case": self.enrollment.case,
@@ -372,6 +387,17 @@ class ScopedObserver:
                 "qualified": qualified,
                 "passed": qualified and not any(event["violation"] for event in self.events),
             })
+        finally:
+            self.lock.release()
+
+    def _unknown_packet(self) -> dict:
+        return {
+            "schema": SCOPED_PROFILE, "case": self.enrollment.case,
+            "epoch": self.enrollment.epoch, "source_digest": self.source_digest,
+            "scope": "sdk-pre-resume-root-only", "evidence_unknown": True,
+            "reason": self._evidence_unknown, "raw_events": None,
+            "qualified": False, "passed": False,
+        }
 
     def require_host(self, *args: Any, **kwargs: Any) -> None:
         raise ObservationBlocked(
