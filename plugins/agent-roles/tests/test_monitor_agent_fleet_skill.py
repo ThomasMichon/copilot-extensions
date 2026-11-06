@@ -156,6 +156,9 @@ def test_dormant_correction_edits_records_only_under_its_own_grant() -> None:
         "A write without readback is unknown, not done",
         "Never infer a correction from metadata",
         "**recommend retirement**",
+        "Only the handoff owner's verified record-only supersede",
+        "makes every existing locator resolve to the replacement",
+        "An ordinary handoff save is not that operation",
     ):
         assert requirement in text, requirement
     assert text.index("## Clear versus ambiguous") < text.index(
@@ -183,4 +186,5 @@ def test_dormant_correction_edits_records_only_under_its_own_grant() -> None:
         "dormant-newly-active",
         "dormant-finalized-open-effort",
         "dormant-unavailable-evidence",
+        "dormant-stale-baton",
     } <= dormant

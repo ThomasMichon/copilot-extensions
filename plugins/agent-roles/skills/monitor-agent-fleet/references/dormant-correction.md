@@ -24,7 +24,16 @@ Write each record only through its existing owner:
 | Canonical effort plan | The effort repository's publication flow, from the monitor's own writable workspace | Append a dated course correction and update the next slice; never rewrite history or the original request |
 | Workspace title, summary or follow-up | The workspace owner's status command | Replace an instruction-shaped, stale or misleading theme with the evidenced root |
 | Adopted agenda cursor | The agenda owner's semantic update with an expected revision | Restore the root, saved return and next action; preserve history and continuations |
-| Pending handoff baton | The handoff owner's save/supersede path | A superseding corrected baton that carries the original request; never edit or consume the old one |
+| Pending handoff baton | Only the handoff owner's verified record-only supersede for that target | A superseding corrected baton that carries the original request; never edit or consume the old one |
+
+A baton is correctable only through a verified, non-activating, record-only
+supersede that targets the dormant owner's handoff and makes every existing
+locator resolve to the replacement. An ordinary handoff save is not that
+operation: it is scoped to the caller's own workspace, and it can add claims,
+abandon older pending handoffs or leave existing tokens resolving to the stale
+baton. Without the verified operation, report the baton correction as advisory
+with **records changed: none**. Where the grant allows, carry the correction in
+the effort or workspace record that the resumer also reads.
 
 Never write the target's checkout, branch, checkpoint or claims. Never
 finalize, abandon, reset, resume, start or message the target, and never change

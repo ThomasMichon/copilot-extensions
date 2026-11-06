@@ -34,7 +34,7 @@ Steering scope (only if explicitly granted; else "none")
 
 Dormant correction scope (only if explicitly granted; else "none")
   Record kinds: <effort plan, workspace title/summary, agenda cursor,
-    pending handoff baton>
+    pending handoff baton (only via a verified record-only supersede)>
   Candidates: <inactive owners active in the observation period; finalized
     workspaces with open efforts included or not>
   Apply mode: <clear corrections direct, ambiguous batched | recommend only>

@@ -75,8 +75,9 @@ and handoff fidelity, classify every wait as required, productive or waste,
 and escalate once when a delivered steer stalls; the watchdog never asks a
 blocking question itself.
 Its separately granted dormant correction mode fixes an inactive owner's
-persisted charter (effort plan, workspace title/summary, agenda cursor or a
-superseding pending baton) through each record's owner. It never messages,
+persisted charter (effort plan, workspace title/summary, agenda cursor or,
+only through a verified record-only supersede, a pending baton) through each
+record's owner. It never messages,
 writes checkouts or claims, finalizes or retires work; live-idle, newly active
 and unknown targets stay unchanged.
 

@@ -174,6 +174,12 @@
       "mode": "dormant-correction",
       "facts": "A real worktree's latest session is a one-turn connectivity probe, and the worktree title was derived from it. Its effort root is clear from the earlier chronology.",
       "expected": "The probe does not define the root. Restore the evidenced root theme through the workspace owner and read it back if the title was not operator-set; keep an operator-set marker and report it as advisory."
+    },
+    {
+      "id": "dormant-stale-baton",
+      "mode": "dormant-correction",
+      "facts": "A dormant worktree's pending handoff baton tells its successor to resume a PR that later merged under another owner. The handoff owner offers only its ordinary save path, and the grant includes batons and effort plans.",
+      "expected": "Do not save a replacement baton: an ordinary save is scoped to the caller and can add claims, abandon handoffs or leave old tokens resolving to the stale baton. Report the baton correction as advisory with records changed: none, and correct the effort plan the resumer also reads through its owner."
     }
   ]
 }
