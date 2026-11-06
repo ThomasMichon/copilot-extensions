@@ -1016,3 +1016,22 @@ migration already works.
   waiver was used. Mandatory native Linux CI, current review, release and
   installed-consumer acceptance remain coordinator gates. #10742 and full
   handover #10486 remain open.
+
+### 2026-11-05 - Source-identical history collapse and single-conflict rebase
+
+- Preserved the published source and raw Git tree before collapsing only the
+  owned private PR history against its original merge-base. The collapsed
+  commit retained the identical tree. Rebase onto the approved current Dev pin
+  required one producer-digest resolution; the non-derived footprint contract
+  remained identical and canonical regeneration retained all source.
+- Authored runtime/parser implementations are unchanged. Upstream installer,
+  Source parsing and lease/interpreter changes were preserved; minimal existing
+  controls passed **146 tests/3 skips**, with verified cleanup. Strict runtime
+  resolution, install contract, F/E9, module caps and whitespace passed.
+  The current dependency guard reports **552 declarations/0 violations**.
+- Current Dev's **4160 nodes**, **596 sources**, coverage targets and original
+  **300-second** unit budget are preserved. No new local whole-packet run or
+  qualification claim was made. Required native Linux CI and current-head
+  review still gate merge; prior-head green checks are not new-head proof.
+  Publication, release and consumer acceptance remain coordinator-owned;
+  #10742 and full handover #10486 remain open.
