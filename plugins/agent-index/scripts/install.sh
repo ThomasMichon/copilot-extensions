@@ -547,7 +547,7 @@ _versioned_activate() {
         _fail "Refusing to activate runtime slot without its target interpreter: $py"
         return 1
     }
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
+    if ! "$py" -B "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
         _fail "Refusing to activate incomplete runtime slot versions/$SRC_VERSION"
         return 1
     fi
@@ -561,7 +561,7 @@ _versioned_activate() {
         _runtime_publication_native_begin receipt_file || return 1
         receipt_args=(--ownership-receipt "$receipt_file")
     fi
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
+    if ! "$py" -B "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
@@ -576,7 +576,7 @@ _versioned_current() {
     local py="$LINK_DIR/bin/python"
     [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || { echo ""; return 0; }
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
+    "$py" -B "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
 }
 
 _versioned_gc() {
@@ -1084,7 +1084,7 @@ _runtime_origin_under() {
     [[ -x "$py" && -d "$slot" ]] || return 1
     origin="$(
         cd "$slot" &&
-        "$py" -I -X utf8 -c \
+        "$py" -I -B -X utf8 -c \
             'from pathlib import Path; import agent_index; print(Path(agent_index.__file__).resolve())'
     2>/dev/null)" || return 1
     [[ -n "$origin" && -f "$origin" ]] || return 1
@@ -1251,7 +1251,7 @@ do_stamp() {
 _test_index_venv() {
     local dir="$1" python="$2" output prefix expected actual
     [[ -x "$python" && -f "$dir/pyvenv.cfg" ]] || return 1
-    output="$("$python" -I -c 'import os, sys; print(os.path.abspath(sys.prefix)); print(int(sys.prefix != sys.base_prefix))' 2>/dev/null)" || return 1
+    output="$("$python" -I -B -c 'import os, sys; print(os.path.abspath(sys.prefix)); print(int(sys.prefix != sys.base_prefix))' 2>/dev/null)" || return 1
     [[ "$output" == *$'\n'* && "${output#*$'\n'}" == 1 ]] || return 1
     prefix="${output%%$'\n'*}"
     [[ "$prefix" == /* ]] || return 1
@@ -1285,8 +1285,8 @@ _new_index_venv() {
 _test_index_server_venv() {
     local dir="$1" python="$2"
     _test_index_venv "$dir" "$python" &&
-        "$python" -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' &&
-        "$python" -I -m agent_index --help >/dev/null &&
+        "$python" -I -B -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' &&
+        "$python" -I -B -m agent_index --help >/dev/null &&
         _runtime_origin_under "$python" "$dir"
 }
 
@@ -1603,8 +1603,7 @@ _ensure_runtime() {
         exit 1
     fi
     # Resolve the host role only for sibling provisioning.
-    install_role="$(_activation_role)"
-    [[ "$install_role" == "unconfigured" ]] && install_role="$(_machine_role)"
+    install_role="$(_required_runtime_role)"
     _ok 'Package installed: agent-index'
 
     if ! _install_server_venv "$install_role" "$py"; then
@@ -1614,13 +1613,12 @@ _ensure_runtime() {
 
     fi
 
-    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" && "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
         local reuse_role
-        reuse_role="$(_activation_role)"
-        [[ "$reuse_role" != unconfigured ]] || reuse_role="$(_machine_role)"
+        reuse_role="$(_required_runtime_role)"
         if [[ "$reuse_role" == host ]] &&
             ! _test_index_server_venv "$VENV_DIR/server" "$VENV_DIR/server/bin/python3"; then
-            _fail 'Immutable source generation lacks its host service closure; select a distinct complete generation'
+            _fail 'Completed runtime lacks its required host service closure; select a distinct complete generation'
             return 1
         fi
     fi
@@ -1629,12 +1627,12 @@ _ensure_runtime() {
         prev_version="$(_versioned_current)"
         if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON" ||
             ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR" ||
-            ! "$VENV_PYTHON" -I -m agent_index --help >/dev/null; then
+            ! "$VENV_PYTHON" -I -B -m agent_index --help >/dev/null; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
         _versioned_mark_complete || exit 1
-        if ! "$VENV_PYTHON" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
+        if ! "$VENV_PYTHON" -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
             _fail "Runtime completion marker was not published for versions/$SRC_VERSION -- not activating"
             exit 1
         fi
@@ -1732,6 +1730,16 @@ _machine_role() {
         esac
     fi
     printf 'unconfigured'
+}
+
+_required_runtime_role() {
+    # Repository client routing does not withdraw machine-wide hosting capability.
+    local machine_role role
+    machine_role="$(_machine_role)"
+    if [[ "$machine_role" == host ]]; then printf host; return 0; fi
+    role="$(_activation_role)"
+    if [[ "$role" == unconfigured ]]; then role="$machine_role"; fi
+    printf '%s' "$role"
 }
 
 _activation_role() {
