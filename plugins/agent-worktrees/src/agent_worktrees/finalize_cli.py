@@ -580,7 +580,11 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
 
     try:
         try:
-            config = cfg.load_config(Path(args.config) if args.config else None)
+            if getattr(args, "repo", None) and getattr(args, "from_branch", None):
+                from .pr_author_cli import load_author_config
+                config = load_author_config(args.config, args.repo)
+            else:
+                config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:
             if use_json:
                 return output._json_error(str(e))

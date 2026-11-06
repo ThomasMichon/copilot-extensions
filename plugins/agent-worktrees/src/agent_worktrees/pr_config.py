@@ -90,6 +90,14 @@ def resolve_repo_config_for_slug(
     checkout-free binding. Other config load failures remain visible and
     block fallback, so malformed or inaccessible project policy is not bypassed.
     """
+    explicit_target = getattr(config, "explicit_pr_target", "")
+    if explicit_target:
+        if repo_slug != explicit_target:
+            return ForeignRepoResolution(None, error="Explicit worker policy addresses another PR target")
+        from .pr_related_binding import resolve_related_binding
+        resolved, name, error = resolve_related_binding(config, repo_slug, include_control_plane=False)
+        return ForeignRepoResolution(resolved, name, error=error)
+
     from . import repos as repos_mod
 
     try:

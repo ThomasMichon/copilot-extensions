@@ -78,6 +78,23 @@ publication/merge grants. Missing publication policy, an ambiguous workspace,
 an endpoint containing credential/query data, or an existing output file
 refuses export.
 
+Existing exports remain read/check-only. To include separately authorized author
+policy, first confirm `operations.worker-policy-export: true` from the selected
+runtime's `pr-author-capabilities --repo <target> --json`, then add
+`--include-author` to `export-config`. This preserves PR enablement, required-PR
+and auto-complete-consent policy, approval requirements and completion options.
+It explicitly excludes self-approval, self-merge roles and policy bypass.
+An explicit disabled policy remains disabled. No publication or merge is
+authorized merely by possessing the file.
+
+The native PR frontend's `author-capabilities` response separately advertises
+`frontend.worker-policy-config: true`. Both that declaration and the selected
+Worktrees peer's `operations.worker-policy-config: true` are required before
+migrating author calls to `--config <delivered-file>`. Older peers keep their
+existing invocation forms; missing support refuses the dependent author action
+without raw forge fallback, automatic update or effectful retry. See
+[native author operations](../../agent-pull-requests/docs/author-operations.md).
+
 Deliver the file using the selected venue's supported input-file transport,
 outside the product checkout. Retain the returned SHA-256 in the task input
 inventory and require the worker to verify the delivered bytes before use.
