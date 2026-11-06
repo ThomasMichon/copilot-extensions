@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 from pathlib import Path
 
 from ._build_info import BUILD_INFO
@@ -55,6 +56,31 @@ def generation_drift(deployed: dict | None, running: dict | None) -> dict:
         "running_slot": running.get("runtime_slot"),
         "installed_slot": deployed.get("runtime_slot"),
     }
+
+
+def lag_evidence(payload_dir: Path, root: Path, running: str | None, payload: str | None,
+                 deployed: dict | None, record: dict | None, versions_equal) -> dict | None:
+    """Keep known package/build drift even if optional slot resolution fails."""
+    if running is None or payload is None:
+        return None
+    from .reconcile_freshness import _resolved_selection, runtime_package_version
+
+    package = runtime_package_version(running)
+    drift = generation_drift(deployed, record)
+    if not versions_equal(package, payload) or drift:
+        return drift
+    if package == running:
+        return None
+    try:
+        selected = _resolved_selection(payload_dir, root)
+    except (OSError, TypeError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return None
+    if (
+        selected and not versions_equal(running, selected)
+        and versions_equal(package, runtime_package_version(selected))
+    ):
+        return {"running_slot": running, "installed_slot": selected}
+    return None
 
 
 def slot_generation(slot: Path) -> str | None:

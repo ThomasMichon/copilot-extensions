@@ -2384,21 +2384,41 @@ def test_running_version_lag_resolves_the_actual_completed_slot(env, monkeypatch
     assert lags[0]["installed_slot"] == selected
 
 
-def test_running_version_lag_keeps_package_drift_when_selection_is_unavailable(env, monkeypatch):
+@pytest.mark.parametrize("error", [ValueError, RuntimeError, subprocess.SubprocessError])
+def test_running_version_lag_keeps_package_drift_when_selection_is_unavailable(env, monkeypatch, error):
     from agent_worktrees import reconcile_freshness
 
     monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "0.4.0-dev10", scope="universal")
     env.deploy_running("agent-bridge", "0.4.0.dev9+repair." + "a" * 32)
+    calls = []
 
     def unavailable(*_args):
-        raise ValueError("unavailable")
+        calls.append(True)
+        raise error("unavailable")
 
     monkeypatch.setattr(reconcile_freshness, "_resolved_selection", unavailable)
     lags = reconcile.running_version_lag(env.repo)
     assert len(lags) == 1
     assert lags[0]["payload"] == "0.4.0-dev10"
+    assert calls == []
+
+
+@pytest.mark.parametrize("error", [ValueError, RuntimeError, subprocess.SubprocessError])
+def test_running_version_lag_treats_failed_selection_as_unknown(env, monkeypatch, error):
+    from agent_worktrees import reconcile_freshness
+
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9+repair." + "a" * 32)
+
+    def unavailable(*_args):
+        raise error("unavailable")
+
+    monkeypatch.setattr(reconcile_freshness, "_resolved_selection", unavailable)
+    assert reconcile.running_version_lag(env.repo) == []
 
 
 def test_running_version_lag_empty_without_settings(env):
