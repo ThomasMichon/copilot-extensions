@@ -574,6 +574,11 @@ def test_mount_inventory_failure_and_unrelated_mounts(tmp_path, monkeypatch):
     raw = b"malformed\n"
     with pytest.raises(ValueError, match="malformed"):
         relocation.transfer._require_no_mounts(root)
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError("native table unavailable")
+    monkeypatch.setattr(Path, "open", unavailable)
+    with pytest.raises(ValueError, match="readable native mount inventory"):
+        relocation.transfer._require_no_mounts(root)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux private mount-namespace qualification")

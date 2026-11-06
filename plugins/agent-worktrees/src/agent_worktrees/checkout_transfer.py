@@ -17,9 +17,12 @@ MAX_BYTES = 1024 * 1024 * 1024
 
 
 def _require_no_mounts(root: Path) -> None:
-    with Path("/proc/self/mountinfo").open("rb") as stream:
-        raw = stream.read(MAX_BYTES // 1024 + 1)
-    if not raw or len(raw) > MAX_BYTES // 1024:
+    try:
+        with Path("/proc/self/mountinfo").open("rb") as stream:
+            raw = stream.read(1024 * 1024 + 1)
+    except OSError as exc:
+        raise ValueError("relocation requires a readable native mount inventory") from exc
+    if not raw or len(raw) > 1024 * 1024:
         raise ValueError("native mount inventory is unavailable or exceeds its budget")
     entries = raw.decode("utf-8", errors="surrogateescape").splitlines()
     if len(entries) > MAX_ENTRIES:

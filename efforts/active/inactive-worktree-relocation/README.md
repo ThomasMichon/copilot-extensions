@@ -464,3 +464,21 @@ adopter pilot feedback gates subsequent widening.
 - The whole feature/umbrella remain Active. Current-head source review/CI/merge,
   retained failed-fixture disposition and the corrected real-volume retry are
   still explicit gates; actual activation and adopter migration remain held.
+
+### 2026-11-06 — Mounted storage and malformed-ledger review controls
+- Made POSIX manifest admission fail closed on missing, malformed or oversized
+  native mount inventories. Root/subtree and file bind mounts are refused
+  independently of device numbers, including escaped mountpoint names.
+  The existing retirement manifest rechecks this before deleting the source;
+  cancellation now inventories its owned stage before deleting that as well.
+- Caught malformed tracking-ledger YAML in the structured move CLI boundary,
+  including original-operation recovery. Negative controls preserve the exact
+  ledger and existing journal and never publish a destination.
+- The focused Windows packet passed **8 controls**. The Linux-only isolated
+  same-device bind-mount control is present but unrun on this host; it requires
+  an admitted unprivileged private mount namespace, never an elevation fallback.
+  POSIX native qualification remains open. Missing Linux mount-table support
+  is an explicit refusal, not an assumption that no mounted data exists.
+- Exact-source lint, the existing module budgets, documentation consistency
+  and the source-history install-contract guard passed. The source umbrella,
+  current-head review/CI/merge and retained-fixture disposition remain open.
