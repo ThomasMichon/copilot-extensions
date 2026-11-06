@@ -133,13 +133,24 @@ def _verified_profile_wheels(
             )
             metadata, unpacked = facts.metadata, facts.unpacked_size
             wheel_is_manager = canonicalize_name(wheel["name"]) == manager
+            environment = record["target"]["environment"]
+            case_insensitive = environment["os_name"] == "nt" or environment["sys_platform"] == "darwin"
+            site_packages = (
+                "Lib/site-packages/" if environment["os_name"] == "nt"
+                else f"lib/python{environment['python_version']}/site-packages/"
+            )
             for member in (*facts.member_hashes, facts.prefix + "RECORD") if check_ownership else ():
                 _check_deadline(deadline)
                 parts = member.split("/")
-                if len(parts) > 2 and parts[0].endswith(".data") and parts[1] in {"purelib", "platlib"}:
-                    member = "/".join(parts[2:])
-                environment = record["target"]["environment"]
-                case_insensitive = environment["os_name"] == "nt" or environment["sys_platform"] == "darwin"
+                if len(parts) > 2 and parts[0].endswith(".data"):
+                    relocated = "/".join(parts[2:])
+                    if parts[1] in {"purelib", "platlib"}:
+                        member = relocated
+                    elif parts[1] == "data":
+                        prefix = site_packages.casefold() if case_insensitive else site_packages
+                        path = relocated.casefold() if case_insensitive else relocated
+                        if path.startswith(prefix):
+                            member = relocated[len(site_packages):]
                 key = member.casefold() if case_insensitive else member
                 parents = []
                 parent = key

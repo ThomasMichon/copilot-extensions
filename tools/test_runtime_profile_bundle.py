@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -134,6 +135,8 @@ def test_existing_output_is_never_replaced(tmp_path, inputs):
     (True, True, False, "metadata-parent"), (True, True, True, "metadata-parent"),
     (True, True, False, "helper-record"), (True, True, True, "helper-record"),
     (True, True, False, "manager-record"), (True, True, True, "manager-record"),
+    (True, True, False, "windows-data"), (True, True, True, "windows-data"),
+    (True, True, False, "posix-data"), (True, True, True, "posix-data"),
 ])
 def test_manager_embedded_file_ownership_is_checked_before_transport(
     tmp_path, inputs, embedded, separate, reverse, layout,
@@ -146,6 +149,10 @@ def test_manager_embedded_file_ownership_is_checked_before_transport(
     elif layout.startswith("darwin"):
         record["target"]["environment"].update(
             os_name="posix", sys_platform="darwin", platform_system="Darwin",
+        )
+    elif layout.startswith("posix"):
+        record["target"]["environment"].update(
+            os_name="posix", sys_platform="linux", platform_system="Linux",
         )
     names = ["copilot_extensions_worktree_manager", *(["agent_procutil"] if separate else [])]
     paths = {}
@@ -166,6 +173,11 @@ def test_manager_embedded_file_ownership_is_checked_before_transport(
             "helper-record": f"{name}-1.0.data/purelib/agent_procutil-1.0.dist-info/RECORD",
             "manager-record": (
                 f"{name}-1.0.data/purelib/copilot_extensions_worktree_manager-1.0.dist-info/RECORD"
+            ),
+            "windows-data": f"{name}-1.0.data/data/Lib/site-packages/agent_procutil/__init__.py",
+            "posix-data": (
+                f"{name}-1.0.data/data/lib/python"
+                f"{record['target']['environment']['python_version']}/site-packages/agent_procutil/__init__.py"
             ),
         }[layout]
         extra = (
@@ -210,6 +222,49 @@ def test_manager_admission_does_not_change_other_application_profiles(tmp_path, 
     ))
     root["sha256"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
     assert build(record, paths, tmp_path / "unchanged-profile.zip")["size"] > 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows wheel data spreading")
+def test_native_windows_data_scheme_overlaps_manager_module(tmp_path, inputs):
+    record, _paths = inputs
+    manager = "copilot_extensions_worktree_manager"
+    paths = {}
+    record["roots"] = []
+    record["wheels"] = []
+    module = "agent_procutil/__init__.py"
+    for name, members in [
+        (manager, {module: b"VALUE = 1\n"}),
+        ("helper", {"helper-1.0.data/data/Lib/site-packages/" + module: b"VALUE = 2\n"}),
+    ]:
+        metadata = f"Metadata-Version: 2.4\nName: {name.replace('_', '-')}\nVersion: 1.0\n\n".encode()
+        path = tmp_path / f"{name}-1.0-py3-none-any.whl"
+        path.write_bytes(wheel_bytes(
+            name=name, prefix=f"{name}-1.0.dist-info/", metadata=metadata, extra=members,
+        ))
+        paths[path.name] = path
+        record["roots"].append(name.replace("_", "-") + "==1.0")
+        record["wheels"].append({
+            "name": name.replace("_", "-"), "version": "1.0", "filename": path.name,
+            "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+            "requires_python": "", "provides_extras": [], "selected_extras": [], "requires_dist": [],
+        })
+    uv = shutil.which("uv")
+    assert uv
+    environment = tmp_path / "native-prefix"
+    commands = [[uv, "--offline", "--no-cache", "venv", "--python", sys.executable,
+                 "--no-python-downloads", str(environment)]]
+    commands.extend([
+        uv, "--offline", "--no-cache", "pip", "install", "--python",
+        str(environment / "Scripts/python.exe"), "--no-index", "--no-deps", str(path),
+    ] for path in paths.values())
+    for command in commands:
+        subprocess.run(
+            command, check=True, capture_output=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    assert (environment / "Lib/site-packages" / module).read_bytes() == b"VALUE = 2\n"
+    with pytest.raises(ProfileError, match="ownership collision"):
+        build(record, paths, tmp_path / "refused-data-overlap.zip")
 
 
 @pytest.mark.parametrize("options", [
