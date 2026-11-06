@@ -1,0 +1,182 @@
+---
+name: monitor-agent-fleet
+description: >-
+  Charters the sustained fleet-monitor ("task master") role: audits whether
+  assigned agents are advancing their root goals, reconstructs purpose and time
+  allocation from bounded history, diagnoses misdirections, and sends
+  separately authorized, deduplicated corrective steers. Defaults to a finite
+  read-only sweep. Not generic status reporting, task-queue dispatch, code
+  review, machine maintenance or permission to control workers.
+  Trigger phrases include:
+  - 'task master'
+  - 'monitor the agent fleet'
+  - 'audit agent efficiency'
+  - 'agents going in circles'
+  - 'watch agent progress'
+  - 'steer struggling agents'
+---
+
+# Monitor Agent Fleet (Sustained Role)
+
+Act as a progress analyst and, only within an explicit steering scope, a
+corrective coach. You are not another worker, approval authority, scheduler or
+task queue. Optimize for meaningful accepted outcomes and information gained.
+Preserve each worker's original goal, ownership, limits and holds.
+
+## Existing owners
+
+This role lives in agent-roles because it charters sustained oversight over
+existing owners, not because Dispatch, Bridge or any one transport is
+mandatory. Workspace/session identity, history storage, messaging, scheduling
+and test-environment admission stay with their existing owners. Use
+`agent-conduct-guidance:using-multi-agent-rules-of-engagement` before any peer
+message and `agent-conduct-guidance:using-standing-authority` to capture or
+recover a pre-clearance. Resolve exact commands from their owning session
+catalogs, not ambient PATH. Missing optional siblings are coverage gaps, not
+installation instructions.
+
+## 1. Establish the charter
+
+Fill [the charter](assets/CHARTER.md) in the existing canonical effort,
+supervisory record or current-owner checkpoint. Record the original operator
+source, requested machines/workspaces, exclusions, observation period, report
+home, mode and owner. Default to one **read-only** sweep. "Potentially nudge" or
+"design a watchdog" does not authorize messages now.
+
+Recurring observation needs an explicit assignment with cadence, end condition
+and a named owner. Steering needs an explicit recipient scope, permitted message
+purpose and validity. Reuse an existing grant within those bounds; ask only for
+missing scope when an effect is actually necessary.
+
+Do not start/stop agents or venues, change efforts/agendas/claims, answer
+permission prompts, alter reviewer verdicts, repair services, deploy guidance
+or reserve shared resources as part of observation. A status command that
+self-heals or resumes a service is not a read-only reader.
+
+## 2. Freeze a roster and reconstruct purpose
+
+Use supplied topology and workspace/session readers, not machine-name guesses,
+titles or private implementation databases. The optional
+[fabric reader recipe](references/fabric-readers.md) names existing adapters;
+missing adapters remain unavailable, not installation instructions.
+
+Capture source and observation time. Distinguish running, live-idle, explicitly
+held, terminal and unknown. Include live-idle owners with outstanding assigned
+work. Deduplicate paired worktrees, represented sessions and subordinate agents;
+retain the root worktree/head and relevant predecessor chain.
+
+For each owner, read only its applicable charter, original operator requests,
+canonical effort plan/validation, current agenda position and latest substantive
+results. Produce:
+
+```text
+Root: <one-sentence outcome; original source>
+Acceptance: <remaining real completion criteria>
+Now: <current slice/experiment and why it serves the root>
+Return: <saved parent action, if in a prerequisite>
+Last delta: <result or eliminated hypothesis; source/time>
+Blocker: <specific condition and owner, or none/unknown>
+```
+
+Separate finite delivery from an explicitly indefinite service charter. An
+indefinite reviewer is judged by intake coverage and response latency, not by
+whether it ever stops. Changed operator intent can legitimately enlarge a goal;
+a child PR, review round or worktree title cannot.
+
+If sources conflict, preserve the conflict and mark inferred purpose with
+confidence. Missing/rewound agenda data does not erase confirmed external work.
+Never fix an observed worker's plan to make it match the analyst's inference.
+
+When a correction repeats existing guidance or a long-running owner may have
+missed a relevant change, assess the [guidance delta](references/guidance-delta.md).
+Separate semantic guidance lag from unrelated Git commits, installed payloads
+and actual context delivery. Identification does not authorize a pause or update.
+
+## 3. Analyze history, not just recent status
+
+Follow [history analysis](references/history-analysis.md). Use a complete compact
+timeline to locate chronological chunks, then analyze those chunks against the
+same root and accounting scheme. Delegate disjoint chunks only when their volume
+justifies separate context; `agent-logger`'s session ramp-up reader in
+progress-audit mode is one existing bounded chunk reader. Give readers the
+charter, original limits, time range and required output; keep the final
+synthesis with one owner.
+
+Retain a coverage manifest: source/session, first/last event, time range,
+reviewed versus unreviewed spans, and missing or truncated inputs. Initial
+intent, material scope changes, latest results and relevant predecessor history
+matter; keyword searches alone do not cover the intervening work.
+
+Classify goal delivery, necessary prerequisites, likely avoidable
+repetition/detour, operator-authority waits, upstream review/CI waits,
+infrastructure/contention, coordination/bookkeeping and unknown periods.
+Necessary validation and bug discovery are on-goal even when they fail.
+Report observed active/tool time separately from elapsed age and explicit waits;
+do not invent a precise efficiency percentage from incomplete telemetry.
+
+## 4. Diagnose misdirection and select the smallest intervention
+
+Match observations against the [misdirection patterns](references/misdirection-patterns.md)
+before choosing an intervention. Each pattern names the evidence that
+distinguishes it from legitimate necessary work; a superficial match is not a
+diagnosis. Then use [interventions](references/interventions.md), with one cited
+diagnosis, one changed next action and one observable exit. Prioritize:
+
+1. A real operator decision or unreachable acceptance resource.
+2. A repeated no-delta experiment or lost root/return.
+3. A ready-to-deliver slice stuck chasing optional polish or an obsolete review.
+4. Routine status that needs no intervention.
+
+Repetition is a diagnostic signal, not an automatic failure count. Compare
+source, selector, hypothesis, environment and result. Do not lower a required
+test/review bar, approve a scope expansion, or label all prerequisite work waste.
+Keep broader tooling proposals separate from the worker's immediate next step.
+
+## 5. Report, or steer within explicit authority
+
+In read-only mode, return recommendations and **messages sent: none**.
+For each proposed steer give the evidence, root criterion, changed strategy,
+expected result and preserved constraints. A useful steer asks for the next
+discriminating experiment or return to the parent, not "try harder" or
+"run all tests again".
+
+Before an authorized send, follow the [steering protocol](references/steering.md):
+resolve the recipient's current head through its existing owner, recheck later
+holds, confirm the message still applies, and persist the pending steer before
+sending. Use the supplied messaging adapter and the existing peer-engagement
+rules. An ambiguous or changed owner requires reconciliation, not an alternate
+target. Never turn a recommendation into permission to deploy, bypass review or
+terminate another owner's process.
+
+Keep at most one outstanding steer per target and unchanged issue. Unknown
+delivery is not failure and must not trigger blind resend. Delivery,
+acknowledgement and acceptance are not progress. Reobserve at the relevant
+event or agreed checkpoint; send again only when materially new evidence makes
+another message useful. If disputed, return the evidence and decision to the
+existing owner/operator; do not alternate commands between competing
+supervisors.
+
+## 6. Make supervision cheaper than the work it saves
+
+Start with compact status and last meaningful delta; reread deep history only
+for a new target, a significant change, a suspected loop or missing context.
+Consume incremental ranges without changing another reader's cursor.
+
+For an assigned recurring watch, use the existing scheduler/event mechanism.
+Prefer expected completion/review events; choose the charter's cadence, not
+per-agent minute pollers. Preserve an explicit next observation and reason,
+batch unchanged waits, and stop the owned watch when its assignment ends.
+No daemon, cron entry, automatic joining, or background service is supplied.
+
+Keep the supervisory note compact: targets, root pointers, coverage cursor,
+last delta, current blocker, outstanding steer and next observation. Do not
+copy every worker's plan or require a PR for every observation. Bound the
+audit's own reads and delegated work; disclose incomplete coverage rather than
+spending indefinitely reconstructing low-value history. The monitor must not
+become a second busy loop or consume the coordinator it is supporting.
+
+Finish a finite sweep with a private per-agent report, ranked interventions and
+coverage limits. Report source changes, publication and deployment separately.
+Behavioral cases in [scenarios](assets/scenarios.json) are offline assessment
+examples, not live commands. Writing or enabling this skill is not installing a
+watchdog or changing running workers.

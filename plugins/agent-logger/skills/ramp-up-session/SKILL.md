@@ -65,6 +65,23 @@ approval and action-time safety checks.
 
 ## Preferred: delegate the ramp-in to a sub-agent
 
+### Progress-audit callers
+
+A supervising coordinator may reuse `agent-logger:session-rampup` with
+`mode: progress-audit` for one bounded chronological history chunk, without
+taking over a live or dormant session. Supply the exact session, root objective
+and acceptance criteria, charter and original limits/holds, observation cutoff,
+assigned range, read/output budget and catalog-resolved `digest_argv0`.
+Supply `ramp_argv0` only if missing evidence needs collation and explicitly
+permit that tool-owned ephemeral write. An unavailable reader is a coverage
+gap, not authority to install or provision one.
+
+That mode returns cited episodes, changed hypotheses/results, explicit waits,
+coverage and unreviewed spans. It never sends nudges, mutates the target or
+infers whole-lifetime efficiency from samples. The coordinator keeps synthesis
+and intervention authority; this is not an automatic fleet-audit trigger.
+The takeover steps below do not apply to that mode.
+
 **Ramping in reads a potentially huge transcript. Do it in a sub-agent, not in
 your own context.** A dormant session can carry hundreds of turns; pulling that
 into the main session defeats the purpose (you'd flood the very context you're
