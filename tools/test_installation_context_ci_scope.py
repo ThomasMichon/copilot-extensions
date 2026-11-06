@@ -118,13 +118,16 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     normal_steps = [step for step in normal["steps"] if "run" in step]
     assert [shlex.split(step["run"]) for step in normal_steps] == [
         ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
+        ["python", "tools/run-plugin-tests.py", "agent-worktrees",
+         "--test-file", "tests/test_repository_continuity.py",
+         "-k", "normal_ssh_setup or setup_status"],
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
          "--ephemeral-native-ssh-setup"],
     ]
     assert not any(step.get("continue-on-error") for step in normal_steps)
-    assert normal_steps[1]["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"
+    assert normal_steps[2]["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"
     expressions = []
-    for step in steps + followthrough + [normal_steps[1]]:
+    for step in steps + followthrough + [normal_steps[2]]:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(

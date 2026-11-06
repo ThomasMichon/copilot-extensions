@@ -63,6 +63,8 @@ def run_contained(
     unreaped = None
     try:
         execution_error = None
+        controller_error = None
+        teardown_complete = False
         try:
             with owner.daemon_test_lifecycle(
                 owner=f"contained-test-runner:{owner.os.getpid()}",
@@ -76,18 +78,25 @@ def run_contained(
                     )
                 ),
             ) as daemon_environment:
-                result = owner._run_contained_process(
-                    command, cwd=cwd, env={**env, **daemon_environment},
-                    sandbox=sandbox, limits=limits,
-                    **({"qualification": qualification} if qualification is not None else {}),
-                    **({"native_application": True} if native_application else {}),
-                )
+                try:
+                    result = owner._run_contained_process(
+                        command, cwd=cwd, env={**env, **daemon_environment},
+                        sandbox=sandbox, limits=limits,
+                        **({"qualification": qualification} if qualification is not None else {}),
+                        **({"native_application": True} if native_application else {}),
+                    )
+                except BaseException as error:
+                    controller_error = error
+                    raise
+            teardown_complete = True
         except BaseException as error:
+            teardown_complete = error is controller_error
             execution_error = error
             raise
         finally:
-            if native_application and any(
-                outcome.status not in ("settled", "missing") for outcome in lifecycle_results
+            if native_application and (
+                not teardown_complete
+                or any(outcome.status not in ("settled", "missing") for outcome in lifecycle_results)
             ):
                 raise owner.UnreapedProcessError(
                     "Native application daemon cleanup remains unsettled."

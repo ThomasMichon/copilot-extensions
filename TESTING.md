@@ -530,7 +530,9 @@ does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
 
 Its further dependent normal-setup jobs prepare the engine's declared test
-dependencies, then run `test_ssh_setup.py` and the whole
+dependencies and run the repository continuity module's `normal_ssh_setup or
+setup_status` controls, including real Git source qualification and required
+request-pin capability. They then run `test_ssh_setup.py` and the whole
 `test_repository_ssh_setup_installed.py` sequence under the same 180-second
 runner/six-minute job limits. The latter builds the engine wheel with its
 packaged Source API and drives the actual Manager/engine handoff into synthetic
@@ -551,7 +553,9 @@ lease, but permits explicit application-daemon escape from caller cleanup
 Jobs/process groups. Bounded descendants remain caller-owned; held daemon
 cleanup fails and retains the sandbox. Ordinary tests still suppress daemon
 escape. Held cleanup retains the sandbox even when the controller raises,
-preserving the original failure as the exception cause.
+preserving the original failure as the exception cause. A teardown exception
+also retains the sandbox when no cleanup results were recorded; a controller
+failure followed by confirmed cleanup keeps its original error.
 This distinction matters because the real Source constructor closes
 an inner cleanup scope before the engine checks the selected host's readiness.
 On Linux, a caller cleanup unit also requires the current user's already-running,

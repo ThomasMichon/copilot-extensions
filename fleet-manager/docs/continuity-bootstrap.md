@@ -258,6 +258,14 @@ enrolling, installing or starting a watch. The normal
 passes the original context/state namespace, never a credential override from
 the request.
 
+The additive `continuity-ssh-setup-pin-v1` capability accepts
+`--expected-request-digest <digest>`. The repository consumer requires this
+capability and carries the inspected digest through subsequent checks and apply.
+Fleet compares it before preparing inputs or following the selected installation
+root, so a request changed during bootstrap cannot redirect configuration writes.
+Direct standalone callers may omit the pin as before; the repository consumer
+never downgrades to that unpinned operation.
+
 The owner-private, bounded16KiB request has exactly these fields:
 
 ```json

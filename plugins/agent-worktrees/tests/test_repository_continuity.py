@@ -95,19 +95,21 @@ def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(sour
     assert calls == [["capabilities"]]
 
 
-@pytest.mark.parametrize("failure", [None, "profile", "changed-request", "installer"])
+@pytest.mark.parametrize("failure", [
+    None, "profile", "changed-request", "installer", "pin-capability", "already-ready",
+])
 def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     source, tmp_path, monkeypatch, failure,
 ):
     from agent_worktrees import repository_ssh_setup as ssh_setup
 
-    context_source(source, {
-        "provider": "local-projection-v1", "source": str(tmp_path / "projection.json"),
-    })
     path = source / setup.DECLARATION
     declaration = json.loads(path.read_text())
     declaration["version"] = 3
-    declaration["contexts"]["harness-a"]["ssh_setup"] = str(tmp_path / "request.json")
+    declaration["contexts"] = {"harness-a": {
+        "provider": "local-projection-v1", "source": str(tmp_path / "projection.json"),
+        "ssh_setup": str(tmp_path / "request.json"),
+    }}
     path.write_text(json.dumps(declaration))
     commit(source)
     selected_setup = setup.inspect(source, URL)
@@ -166,7 +168,10 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         install_application=install,
     )
     monkeypatch.setattr(ssh_setup, "_installer", lambda: owner)
-    monkeypatch.setattr(ssh_setup, "status", lambda *_args, **_kwargs: "install" in events)
+    monkeypatch.setattr(
+        ssh_setup, "status",
+        lambda *_args, **_kwargs: failure == "already-ready" or "install" in events,
+    )
     monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
 
     def runtime(arguments):
@@ -174,8 +179,11 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
             return {"schema": "fleet-manager.capabilities", "version": 1, "capabilities": [
                 continuity.CAPABILITY, "local-projection-v1", ssh_setup.CAPABILITY,
                 "continuity-machine-reference-v1",
+                *([] if failure == "pin-capability" else [ssh_setup.PIN_CAPABILITY]),
             ]}
         if arguments[0] == "ssh-setup":
+            if "--apply" in arguments:
+                assert arguments[arguments.index("--expected-request-digest") + 1] == description["request_digest"]
             events.append("prepare" if "--apply" in arguments else "inspect")
             return description | ({"request_digest": "changed"} if (
                 failure == "changed-request" and "--apply" in arguments
@@ -185,12 +193,16 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         return {"status": "ready", "stage": "connected"}
 
     monkeypatch.setattr(continuity, "_invoke", runtime)
-    if failure is not None:
+    if failure == "already-ready":
+        assert continuity.run(selected_setup, "harness-a", apply=False).status == "ready"
+        assert events.index("source-admission") < events.index("bootstrap")
+        assert "prepare" not in events and "install" not in events
+    elif failure is not None:
         with pytest.raises(setup.SetupError) as refused:
             continuity.run(selected_setup, "harness-a", apply=True)
         assert ("install" in events) == (failure == "installer")
         assert "private" not in str(refused.value)
-        if failure == "profile":
+        if failure in ("profile", "pin-capability"):
             assert "bootstrap" not in events
     else:
         result = continuity.run(selected_setup, "harness-a", apply=True)
@@ -198,10 +210,6 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         assert events.index("source-admission") < events.index("bootstrap")
         assert events.index("bootstrap") < events.index("prepare") < events.index("install")
         assert events.count("install") == 1
-        events.clear()
-        monkeypatch.setattr(ssh_setup, "status", lambda *_args, **_kwargs: True)
-        assert continuity.run(selected_setup, "harness-a", apply=False).status == "ready"
-        assert "prepare" not in events and "install" not in events
 
 
 def test_consumer_selects_its_engine_interpreter_with_bounded_native_custody(monkeypatch) -> None:

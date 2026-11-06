@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import importlib.util
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import sys
 from . import repository_setup as protocol
 
 CAPABILITY = "continuity-ssh-setup-v1"
+PIN_CAPABILITY = "continuity-ssh-setup-pin-v1"
 
 
 def _installer():
@@ -39,6 +41,11 @@ def _description(value: dict) -> dict:
     })
     if value["schema"] != "fleet-manager.continuity-ssh-setup" or type(value["version"]) is not int or value["version"] != 1:
         raise protocol.SetupError("Selected Fleet returned unsupported SSH setup inputs.")
+    if (
+        not isinstance(value["request_digest"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", value["request_digest"]) is None
+    ):
+        raise protocol.SetupError("Selected Fleet returned an invalid SSH request digest.")
     return value
 
 
@@ -125,6 +132,7 @@ def status(description: dict, module, *, require_ready: bool = False) -> bool:
 def run(setup, context, arguments: list[str], description: dict, *, apply: bool):
     from .repository_continuity import _invoke
 
+    arguments = [*arguments, "--expected-request-digest", description["request_digest"]]
     with selected_inputs(description) as (module, selected):
         setup.verify()
         if status(description, module):

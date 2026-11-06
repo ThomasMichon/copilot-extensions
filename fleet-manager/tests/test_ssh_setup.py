@@ -87,6 +87,29 @@ def test_setup_cli_reports_missing_optional_runtime_without_private_diagnostics(
     assert "private diagnostic detail" not in result.err
     assert not Path(document["root"]).exists()
 
+
+def test_setup_cli_pins_inspected_request_before_preparation_or_root_writes(tmp_path, capsys):
+    from fleet_manager.__main__ import main
+
+    request, document, arguments = selected(tmp_path)
+    command = [
+        "ssh-setup", "--request", str(request), "--source", str(arguments["source"]),
+        "--harness", arguments["harness"], "--state-root", str(arguments["state_root"]),
+    ]
+    assert main(command) == 0
+    inspected = json.loads(capsys.readouterr().out)
+    original = Path(document["root"])
+    changed = tmp_path / "other-installation"
+    document["root"] = str(changed)
+    request.write_bytes(canonical(document))
+    assert main([
+        *command, "--expected-request-digest", inspected["request_digest"], "--apply",
+    ]) == 1
+    result = capsys.readouterr()
+    assert not result.out and "continuity-ssh-setup-refused" in result.err
+    assert not original.exists() and not changed.exists()
+
+
 def test_normal_setup_prepares_real_host_inputs_once_without_export_or_lease(tmp_path):
     request, document, arguments = selected(tmp_path)
     identity = arguments["state_root"] / "machine.json"

@@ -185,7 +185,8 @@ refuse version three; never retry as version two or drop the selected role.
 ```
 
 The selected engine first requires the actual Fleet executable's
-`continuity-ssh-setup-v1` and `continuity-machine-reference-v1` capabilities.
+`continuity-ssh-setup-v1`, `continuity-ssh-setup-pin-v1` and
+`continuity-machine-reference-v1` capabilities.
 Public scope/configuration and the exact complete prepared Source/profile
 are checked before bootstrap enrollment. The engine consumes its own packaged
 `prepared-application-install` v1 implementation, not a configurable module,
@@ -193,7 +194,9 @@ ambient installer command, editable checkout or the client-only constructor.
 The profile must contain both `gateway-host` and `ssh-client`.
 
 After the original bootstrap owner establishes outbound access, Fleet prepares
-the v3 reference configuration and the existing Source application installer
+the v3 reference configuration only against the inspected request digest.
+A changed request is refused before preparation or writes at either its old
+or newly selected installation root. The existing Source application installer
 owns construction/activation. Actual selected host status, including authenticated
 directory convergence and its current input fence, establishes readiness.
 An unchanged ready participant avoids installation. Unknown launch state,

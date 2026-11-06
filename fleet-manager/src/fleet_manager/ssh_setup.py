@@ -15,15 +15,26 @@ from .ssh_machine import _consumer
 from .ssh_machine_config import SSHMachineConfig, absolute
 
 CAPABILITY = "continuity-ssh-setup-v1"
+PIN_CAPABILITY = "continuity-ssh-setup-pin-v1"
 SCHEMA = "fleet-manager.continuity-ssh-setup"
 
 
-def describe(request: Path, *, source: Path, harness: str, state_root: Path) -> tuple[dict, SSHMachineConfig]:
+def describe(
+    request: Path, *, source: Path, harness: str, state_root: Path,
+    expected_request_digest: str | None = None,
+) -> tuple[dict, SSHMachineConfig]:
     """Read public setup bindings, not the retained private machine identity."""
     value = decode(read_private_file(absolute(str(request)), 16384))
     record(value, SCHEMA, {
         "snapshot", "root", "selection", "authority", "installation", "ssh",
     })
+    request_digest = digest(value)
+    if expected_request_digest is not None and (
+        not isinstance(expected_request_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", expected_request_digest) is None
+        or expected_request_digest != request_digest
+    ):
+        raise PlanError("SSH setup request differs from the inspected inputs")
     for name in ("snapshot", "root"):
         if ".." in absolute(value[name]).parts:
             raise PlanError("SSH setup requires normalized absolute installation references")
@@ -110,14 +121,18 @@ def describe(request: Path, *, source: Path, harness: str, state_root: Path) -> 
     return {
         "schema": SCHEMA, "version": 1,
         **{name: value[name] for name in ("snapshot", "root", "selection")},
-        "request_digest": digest(value), "host": selection,
+        "request_digest": request_digest, "host": selection,
     }, config
 
 
 def run(
     request: Path, *, source: Path, harness: str, state_root: Path, apply: bool,
+    expected_request_digest: str | None = None,
 ) -> dict:
-    description, config = describe(request, source=source, harness=harness, state_root=state_root)
+    description, config = describe(
+        request, source=source, harness=harness, state_root=state_root,
+        expected_request_digest=expected_request_digest,
+    )
     if apply:
         root = Path(description["root"])
         prepare(root, description["host"], configuration=config)
@@ -136,7 +151,10 @@ def run(
                     stream.write(canonical(expected))
                     stream.flush()
                     os.fsync(stream.fileno())
-        current, _ = describe(request, source=source, harness=harness, state_root=state_root)
+        current, _ = describe(
+            request, source=source, harness=harness, state_root=state_root,
+            expected_request_digest=expected_request_digest,
+        )
         if current != description:
             raise PlanError("SSH setup inputs changed during preparation")
     return description

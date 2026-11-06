@@ -1803,6 +1803,13 @@ jobs:
           version: "0.12.6"
       - name: Prepare the declared engine dependency support
         run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Repository source admission and pinned SSH setup controls
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_repository_continuity.py
+          -k "normal_ssh_setup or setup_status"
       - name: Normal Manager and engine SSH setup
         env:
           COPILOT_EXTENSIONS_SSH_SETUP_NATIVE: "1"

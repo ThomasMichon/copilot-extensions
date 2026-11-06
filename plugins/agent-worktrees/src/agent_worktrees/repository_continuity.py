@@ -68,7 +68,9 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
     if context.ssh_setup is not None:
         from . import repository_ssh_setup as ssh_setup
 
-        if not {ssh_setup.CAPABILITY, "continuity-machine-reference-v1"} <= set(capability["capabilities"]):
+        if not {
+            ssh_setup.CAPABILITY, ssh_setup.PIN_CAPABILITY, "continuity-machine-reference-v1",
+        } <= set(capability["capabilities"]):
             raise protocol.SetupError("Installed Fleet executable lacks selected SSH setup support.")
         ssh_arguments = [
             "ssh-setup", "--request", str(Path(context.ssh_setup).expanduser()),

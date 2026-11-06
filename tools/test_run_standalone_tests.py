@@ -67,9 +67,9 @@ def test_native_ssh_setup_keeps_sandbox_lease_and_original_limits(tmp_path, monk
     assert events == ["run", "released"]
 
 
-@pytest.mark.parametrize("controller_held", [False, True])
+@pytest.mark.parametrize("failure", ["unreaped", "controller-held", "teardown-error"])
 def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
-    tmp_path, monkeypatch, capsys, controller_held,
+    tmp_path, monkeypatch, capsys, failure,
 ):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     root = tmp_path / "fleet-manager"
@@ -95,7 +95,7 @@ def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
         "Lease", (), {"release": lambda self: events.append("released")},
     )())
     arguments = ["fleet-manager", "--timeout", "10"]
-    if controller_held:
+    if failure != "unreaped":
         from contextlib import contextmanager
         from types import SimpleNamespace
 
@@ -113,11 +113,15 @@ def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
             try:
                 yield {}
             finally:
+                if failure == "teardown-error":
+                    raise OSError("cleanup could not inspect the daemon registry")
                 kwargs["cleanup_results"].append(SimpleNamespace(status="held"))
 
         def controller(*args, **kwargs):
             (kwargs["sandbox"] / "still-owned").write_text("preserve")
-            raise owner.ContainmentError("controller failed before result")
+            if failure == "controller-held":
+                raise owner.ContainmentError("controller failed before result")
+            return 0
 
         monkeypatch.setattr(owner, "daemon_test_lifecycle", held_cleanup)
         monkeypatch.setattr(owner, "_run_contained_process", controller)
