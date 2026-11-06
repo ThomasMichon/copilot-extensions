@@ -337,6 +337,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [readiness and finite-closeout journal](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
+records reviewed #11087, #6952's COMPLETED source repair and #6779's separately
+audited NOT_PLANNED retirement beneath OPEN #6917. All technical readiness
+rows and existing custody remain. Two identical complete scans at 12:11:33 PST
+measure 805 whole OPEN and 1,027 audited outcomes, 76 above fixed 729:
+two eligible arrivals exactly outweighed the two campaign departures.
+The campaign remains Active, including original-cohort, inflow and excluded
+identities; the next bounded cohort/completed-work study continues.
+
 The [managed validation cohorts](managed-validation-evidence-cohorts.md)
 record reviewed #11076 and three separately audited NOT_PLANNED tracking
 retirements beneath still-OPEN #6917/#4217, without technical completion
@@ -353,8 +362,8 @@ acceptance. All technical rows and existing source/resource custodians remain;
 those three subordinate trackers retired only after reviewed delivery.
 The later whole #6779 timeout-readiness contract is now directly retained
 in the 13,056-character OPEN #6917 body through MR5/MRV6 and unchanged
-single-writer/fixture custody. Only this fourth tracker still awaits reviewed
-delivery and fresh disposition. Newer source/path metadata is not assumed
+single-writer/fixture custody. This fourth tracker also retired only after
+reviewed delivery and fresh disposition. Newer source/path metadata is not assumed
 semantic repair, and the full native portfolio stays separate.
 
 The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
@@ -2803,6 +2812,12 @@ keeps actual provider checks distinct from reported tests, source definitions,
 release and installed acceptance. Complete original clauses, genuine holds,
 source/resource custody and unit-only required CI remain; sampled progress
 or assignment alone is not a completion or refusal criterion.
+Its older-contract follow-through credits the current session-bound routing
+predicate without conflating it with cause-preserving file lookup, and keeps
+argument fidelity, truthful native startup, Windows pipe acceptance,
+write-time artifact policy, bounded diagnostics and large-response framing
+as distinct finite outcomes. Uninspected alternate surfaces remain unknown;
+no repeated retain comment, source definition or shared theme closes them.
 
 The [release/stamp/inventory study](finite-release-stamp-inventory-contracts.md)
 separates fourteen whole-message, one protected-message, one fresh
