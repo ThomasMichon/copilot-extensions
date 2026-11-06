@@ -330,14 +330,29 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+Six further subordinate trackers consolidate into four existing OPEN parents:
+callback cwd/failure outcomes, post-push head convergence, independent launch
+provenance and source-isolated/recoverable installer artifacts. Complete
+original/refined Plan/Validation and all distinct owners remain; this is
+unfinished tracking intake, not implementation. Two additional finite originals,
+#10304 and #10282, are actually source-complete in merged #10308 and #10506,
+with current production/regression comparison and exact-head review/CI proof.
+The [dated journal](journal/2026/11.05%20finite-callback-artifact-outcomes.md)
+records all eight audited dispositions and the current-source correction.
+Two equal complete nine-page scans at 16:37 PST measure 881 whole OPEN,
+607 creator-eligible, 274 excluded, 597 original-cohort and 284 inflow.
+The eight campaign departures plus one unrelated departure since 890 are
+separate; no arrivals or unrelated-closure credit. Verified dispositions are
+916, the fixed 729 checkpoint remains 152 away and the campaign stays Active.
+
 The [reclamation receiving proposal](../continuous-worktree-reclamation/cohort-contracts.md)
 now carries complete per-original Plan/Validation work and #6620's retained
 trusted-folder lifecycle. #1488/#1666/#1918/#3114/#4101 remain open pending
 their actual owner-acceptance/mapping gates; #6060 remains a separate semantic
 effort with independent pilot/schedule authority. The collection effort stays
 Draft and no implementation or retirement is inferred from this plan.
-This amendment adds no disposition credit or new census; the last complete
-count remains 890 whole OPEN, 161 above the fixed 729 checkpoint.
+That planning-only amendment added no disposition credit or new census.
+Its preceding checkpoint was 890 whole OPEN, 161 above the fixed 729 target.
 
 Eight further subordinate trackers consolidate into eight existing OPEN
 parents for Proactor resource settlement, observed-check supersession,
