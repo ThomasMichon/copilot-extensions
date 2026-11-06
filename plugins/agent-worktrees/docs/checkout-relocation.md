@@ -49,6 +49,10 @@ v1. Missing/malformed operational metadata and immutable creation receipts also
 refuse. These restrictions do not finalize, abandon, clean or rewrite anything.
 They are staged support boundaries, not a permanent exclusion of inactive WIP.
 
+Git-locked worktrees are refused even when their tracking disposition is final.
+Case/slash or normalized permission aliases are refused until their migration is
+qualified; they are not silently left pointing at the removed source.
+
 Only known operational permission/trust paths are rebound through their existing
 serialized file owners. Conversation/store/event/proposal history is never
 globally rewritten. An existing live session database is read narrowly and
@@ -67,7 +71,11 @@ Copy into an exclusively created destination-side stage, verify it, publish the
 destination, repair Git through Git's worktree administration, rebind supported
 permissions and the authoritative record, and verify the real consumer before
 removing the unchanged original. Cross-volume transfer is not an atomic rename.
-No global multi-file pointer transaction is claimed.
+Destination data and recovery/pointer files are flushed before retiring the
+source. Namespace publication uses native write-through replacement on Windows
+and parent-directory synchronization on POSIX. A barrier failure keeps the
+original copy and the journal for recovery. No global multi-file pointer
+transaction is claimed.
 
 Retry the exact original command after an interruption. It recovers that
 operation, not another allocation. Another live or unobservable original caller,

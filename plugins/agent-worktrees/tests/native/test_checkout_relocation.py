@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 from agent_procutil import no_window_kwargs
+from agent_procutil.owned_process import run_caller_owned
 
 from agent_worktrees import checkout_relocation as relocation
 from agent_worktrees import checkout_relocation_state as move_state
@@ -192,10 +193,35 @@ def test_old_published_writer_refuses_move_without_activation_or_data_effects(ch
     assert not move_state.journal_path(checkout.record.yaml_path).exists()
 
 
-def test_access_normalization_keeps_inherit_only_semantics():
-    normalize = relocation.transfer.normalized_ace_flags
-    assert normalize(0x08 | 0x10) != normalize(0x10)
-    assert normalize(0x10) == normalize(0)
+@pytest.mark.skipif(os.name != "nt", reason="native Windows ACE semantics")
+def test_destination_access_keeps_inherit_only_semantics(tmp_path):
+    import ctypes
+    from ctypes import wintypes
+    from agent_procutil import _daemon_instance_owner as owner
+
+    api, kernel = owner._apis()
+    user = owner._current_sids(os.getpid())[0]
+    api.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
+    ]
+    api.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+    api.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+    api.SetFileSecurityW.restype = wintypes.BOOL
+    directories = []
+    for flags in ("OICIIO", "OICI"):
+        path = tmp_path / flags
+        path.mkdir()
+        descriptor = ctypes.c_void_p()
+        sddl = f"D:P(A;;FA;;;{user})(A;{flags};FR;;;{user})"
+        assert api.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, 1, ctypes.byref(descriptor), None,
+        )
+        try:
+            assert api.SetFileSecurityW(str(path), 4 | 0x80000000, descriptor)
+        finally:
+            kernel.LocalFree(descriptor)
+        directories.append(path)
+    assert relocation.transfer._access(directories[0]) != relocation.transfer._access(directories[1])
 
 
 @pytest.mark.parametrize("blocker", ["dirty", "session", "unknown", "open-pr", "claim", "submodule", "git-lock", "foreign-machine", "source-alias", "seed"])
@@ -222,7 +248,8 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
         tracking.save_record(record)
     elif blocker == "source-alias":
         config_path = checkout.copilot / "config.json"
-        config_path.write_text(json.dumps({"trustedFolders": [str(checkout.source).replace("\\", "/").lower()]}))
+        alias = str(checkout.source).replace("\\", "/").lower() if os.name == "nt" else str(checkout.source) + "/."
+        config_path.write_text(json.dumps({"trustedFolders": [alias]}))
     elif blocker == "seed":
         from agent_worktrees import launch_seed_state
 
@@ -327,11 +354,16 @@ def test_changed_allocation_root_retains_real_git_and_ledger_authority(checkout)
 
 def test_actual_cli_parser_process_plan_move_and_post_move_consumer(checkout):
     env = dict(os.environ, AGENT_HOME=str(checkout.home), USERPROFILE=str(checkout.home), HOME=str(checkout.home))
-    command = [sys.executable, "-m", "agent_worktrees", "--project", "sample"]
+    command = [
+        sys.executable, "-c",
+        "import faulthandler,runpy; faulthandler.dump_traceback_later(20,repeat=True); "
+        "runpy.run_module('agent_worktrees',run_name='__main__')",
+        "--project", "sample",
+    ]
     def invoke(*args):
-        result = subprocess.run(
-            [*command, *args], env=env, cwd=checkout.home, text=True,
-            capture_output=True, timeout=60, **no_window_kwargs(),
+        result = run_caller_owned(
+            [*command, *args], env=env, cwd=checkout.home, timeout=60,
+            max_stdout_bytes=1024 * 1024, max_stderr_bytes=64 * 1024,
         )
         assert result.returncode == 0, (result.stdout, result.stderr)
         return json.loads(result.stdout)
