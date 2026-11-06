@@ -68,6 +68,12 @@ one owned hidden line after the configured visible signature:
 <!-- agent-comment:v1 c=11111111-1111-4111-8111-111111111111 w=22222222-2222-4222-8222-222222222222 cn=example-label -->
 ```
 
+Required signature text is kept off opening/closing root fence lines by adding
+paragraph separation when needed; already separated boundaries remain unchanged.
+Backtick and tilde blocks survive repeated preparation, including a configured
+footer without its own leading newline. Overlapping header/footer boundaries
+are ambiguous and refuse rather than preparing a signature-only comment.
+
 An allowed internal source additionally carries `wt=<worktree-stamp>`.
 This is not `agent-worktrees:source`: it cannot refresh PR ownership.
 No root/session/head/encrypted-record history or decorative banner is added.
@@ -86,8 +92,14 @@ a GUID; the actual intent owner must enforce that durable binding.
 
 An intentional edit retains the comment GUID and supplies a fresh write GUID.
 Only the exact current/previous owned trailing marker can be replaced; an
-unowned, foreign, malformed or duplicate outer marker refuses. Closed fenced
-and quoted examples remain authored text. Repeated preparation with the same
+unowned, foreign, malformed or duplicate outer marker refuses. Indented, inline
+or multiline forms of the owned HTML namespace outside protected literal
+examples are noncanonical and refuse, not untracked text beside a new tag.
+Closed fenced, explicit blockquoted and same-line inline-code examples remain
+authored text. A known private worktree stamp from the previous preparation
+cannot be copied into a public edit, even as an example; the caller must
+redact that draft before approval rather than the helper silently deleting it.
+Repeated preparation with the same
 profile/source/IDs is idempotent and does not append another signature or tag.
 Do not pass the resulting tagged body through another generic signature
 decorator afterward.

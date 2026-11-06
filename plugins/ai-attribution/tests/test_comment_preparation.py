@@ -108,11 +108,63 @@ def test_profile_owns_required_signature_and_truthful_review_claim() -> None:
 
 def test_fenced_and_quoted_examples_survive_without_becoming_owned_metadata() -> None:
     example = "<!-- agent-comment:v1 c=example w=example cn=example -->"
-    draft = f"Example:\n\n```html\n{example}\n```\n\n> {example}\n\nAuthored review."
+    draft = f"Example:\n\n```html\n{example}\n```\n\n> {example}\n\nInline `{example}`.\n\nAuthored review."
     result = prepare(draft)
     assert result["body"].startswith("[AI-assisted] " + draft)
-    assert result["body"].count(example) == 2
+    assert result["body"].count(example) == 3
     assert prepare(result["body"], previous=result) == result
+
+
+@pytest.mark.parametrize("layout", [
+    " {marker}", "   {marker}", "\t{marker}", "Inline {marker}",
+    "{marker_compact}", "{marker_spaced}", "{marker_colon}", "{marker_multiline}",
+    "<!-- harmless\nclosed --> {marker}",
+])
+def test_public_edit_refuses_noncanonical_private_outer_marker(layout: str) -> None:
+    first = prepare(context={**CONTEXT, "visibility": "internal"}, source=source("internal"))
+    marker = first["body"].split("\n\n")[-1]
+    changed = layout.format(
+        marker=marker, marker_compact=marker.replace("<!-- ", "<!--"),
+        marker_spaced=marker.replace("<!-- ", "<!--  "),
+        marker_colon=marker.replace("agent-comment:", "agent-comment :"),
+        marker_multiline=marker.replace("<!-- ", "<!--\n "),
+    )
+    with pytest.raises(profile.ProfileError, match="noncanonical"):
+        prepare("Updated review.\n\n" + changed, write_id=EDIT, previous=first)
+
+
+@pytest.mark.parametrize("wrapper", ["`{marker}`", "> {marker}", "```html\n{marker}\n```"])
+def test_public_edit_does_not_republish_known_private_source_in_an_example(wrapper: str) -> None:
+    first = prepare(context={**CONTEXT, "visibility": "internal"}, source=source("internal"))
+    marker = first["body"].split("\n\n")[-1]
+    with pytest.raises(profile.ProfileError, match="private source"):
+        prepare("Updated review.\n\n" + wrapper.format(marker=marker), write_id=EDIT, previous=first)
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~"])
+@pytest.mark.parametrize("footer", ["", "Configured footer.", "\nConfigured footer."])
+def test_signature_keeps_first_and_last_fence_lines_intact(fence: str, footer: str) -> None:
+    settings = profile.validate({"version": 1, "rules": [{"footer": footer}]})
+    draft = f"{fence}text\nSelected code.\n{fence}"
+    first = prepare(draft, profile=settings)
+    assert first["body"].startswith("[AI-assisted] \n\n" + draft)
+    assert first["body"].splitlines().count(fence) == 1
+    if footer and not footer.startswith("\n"):
+        assert fence + "\n\n" + footer in first["body"]
+    assert first["body"].count(comments.PREFIX) == 1
+    assert prepare(first["body"], profile=settings, previous=first) == first
+
+
+@pytest.mark.parametrize("header,footer,draft", [
+    ("[AI-assisted]", "[AI-assisted]", "[AI-assisted]"),
+    ("AI-assisted", "assisted", "AI-assisted"),
+])
+def test_overlapping_signature_boundaries_cannot_hide_a_filler_comment(
+    header: str, footer: str, draft: str,
+) -> None:
+    settings = profile.validate({"version": 1, "rules": [{"header": header, "footer": footer}]})
+    with pytest.raises(profile.ProfileError, match="overlapping"):
+        prepare(draft, profile=settings)
 
 
 @pytest.mark.parametrize("draft", [

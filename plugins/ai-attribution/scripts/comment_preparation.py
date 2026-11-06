@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Mapping, TypedDict, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from attribution_profile import Profile, ProfileError, _object, decorate, load_profile, resolve
+from attribution_profile import Profile, ProfileError, Signature, _object, decorate, load_profile, resolve
 
 PROTOCOL = "agent-forge-comment.preparation/v1"
 SOURCE_PROTOCOL = "agent-worktrees.comment-origin/v1"
 PREFIX = "<!-- agent-comment:"
+_MARKER_CANDIDATE = re.compile(r"<!--\s*agent-comment(?=\s|:)")
+_FENCE_START = re.compile(r" {0,3}(`{3,}|~{3,})")
 MAX_BODY_BYTES = 64 * 1024
 MAX_REQUEST_BYTES = 192 * 1024
 
@@ -94,10 +96,32 @@ def _marker(identity: Identity) -> str:
     return marker
 
 
+def _mask_inline_code(line: str) -> str:
+    runs = list(re.finditer(r"`+", line))
+    result = list(line)
+    index = 0
+    while index < len(runs):
+        opening = runs[index]
+        before = line[:opening.start()]
+        if (len(before) - len(before.rstrip("\\"))) % 2:
+            index += 1
+            continue
+        closing = next(
+            (i for i in range(index + 1, len(runs)) if len(runs[i][0]) == len(opening[0])),
+            None,
+        )
+        if closing is None:
+            index += 1
+            continue
+        result[opening.start():runs[closing].end()] = " " * (runs[closing].end() - opening.start())
+        index = closing + 1
+    return "".join(result)
+
+
 def _outer_markers(draft: str) -> list[str]:
     """Conservative literal boundaries, not a provider renderer or trust parser."""
     fence: tuple[str, int] | None = None
-    html_comment = False
+    html_comment: list[str] | None = None
     markers: list[str] = []
     for line in draft.splitlines():
         if fence is not None:
@@ -105,23 +129,59 @@ def _outer_markers(draft: str) -> list[str]:
             if close and set(close[1]) == {fence[0]} and len(close[1]) >= fence[1]:
                 fence = None
             continue
-        if not html_comment:
-            opening = re.match(r" {0,3}(`{3,}|~{3,})", line)
+        if html_comment is None:
+            if re.match(r" {0,3}>", line):
+                continue
+            opening = _FENCE_START.match(line)
             if opening:
                 fence = opening[1][0], len(opening[1])
                 continue
-            if line.startswith(PREFIX):
-                markers.append(line)
-        for token in re.finditer(r"<!--|-->", line):
+            literal = _mask_inline_code(line)
+        else:
+            literal = line
+        position = 0
+        for token in re.finditer(r"<!--|-->", literal):
+            if html_comment is not None:
+                html_comment.append(literal[position:token.start()])
             if token[0] == "<!--":
-                if html_comment:
+                if html_comment is not None:
                     raise ProfileError("ambiguous nested HTML comment")
-                html_comment = True
-            elif html_comment:
-                html_comment = False
-    if fence is not None or html_comment:
+                html_comment = ["<!--"]
+            elif html_comment is not None:
+                content = "".join(html_comment)
+                if _MARKER_CANDIDATE.match(content):
+                    if "\n" in content or not line.startswith(PREFIX) or line != content + "-->":
+                        raise ProfileError("noncanonical outer comment metadata")
+                    markers.append(line)
+                html_comment = None
+            position = token.end()
+        if html_comment is not None:
+            html_comment.extend((literal[position:], "\n"))
+    if fence is not None or html_comment is not None:
         raise ProfileError("unfinished or ambiguous literal comment boundary")
     return markers
+
+
+def _visible_body(draft: str, signature: Signature) -> str:
+    visible = decorate(draft, signature)
+    header = len(signature["header"]) if signature["header"] and visible.startswith(signature["header"]) else 0
+    footer = len(signature["footer"]) if signature["footer"] and visible.endswith(signature["footer"]) else 0
+    if header + footer > len(visible):
+        raise ProfileError("ambiguous overlapping signature boundaries")
+    core = visible[header:len(visible) - footer]
+    if not core.strip():
+        raise ProfileError("metadata cannot create an empty comment")
+    if not signature["required"]:
+        return visible
+    prefix, suffix = visible[:header], visible[len(visible) - footer:]
+    if prefix and _FENCE_START.match(core) and not prefix.endswith(("\n", "\r")):
+        prefix += "\n\n"
+    if (
+        suffix and not core.endswith(("\n", "\r")) and not suffix.startswith(("\n", "\r"))
+        and re.fullmatch(r" {0,3}(`{3,}|~{3,})[ \t]*", core.splitlines()[-1])
+    ):
+        core += "\n\n"
+    return prefix + core + suffix
 
 
 def _previous(value: object) -> Prepared:
@@ -181,11 +241,11 @@ def prepare(
         draft = draft[:-len(markers[0]) - 2]
     if not draft.strip():
         raise ProfileError("metadata cannot create an empty comment")
-    visible = decorate(draft, signature)
-    header = len(signature["header"]) if signature["header"] and visible.startswith(signature["header"]) else 0
-    footer = len(signature["footer"]) if signature["footer"] and visible.endswith(signature["footer"]) else 0
-    if header + footer <= len(visible) and not visible[header:len(visible) - footer].strip():
-        raise ProfileError("metadata cannot create an empty comment")
+    visible = _visible_body(draft, signature)
+    if old is not None and visibility != "internal":
+        prior_origin = old["identity"]["source"]["origin"]
+        if isinstance(prior_origin, dict) and "worktree" in prior_origin and prior_origin["worktree"] in visible:
+            raise ProfileError("private source stamp remains in a public draft")
     body = visible + "\n\n" + marker
     if len(body.encode("utf-8")) > max_body_bytes or _outer_markers(body) != [marker]:
         raise ProfileError("prepared comment exceeds its bound or literal boundary")
