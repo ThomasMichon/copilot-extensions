@@ -114,6 +114,26 @@ and reliably).
   not suppression of valid later permission/settings/resume reloads; preserve #3944's
   separate repaint consumer.
 
+### Continuing launch-readiness cohort custody
+
+<!-- backlog-reconciliation:7556:startup-readiness-cohort:Coordination -->
+
+- **#3789:** canonical activation-library, consuming-plugin and runtime/source
+  custodians retain the whole read-trust and reverse runtime/activation join.
+  This plan appoints no executor and grants no enablement, install, settings
+  mutation, source handoff or resource release.
+- **#3942:** existing launch/process custodians retain their lanes. Credit
+  later CWD corrections without substituting a guessed pair for the original
+  two unidentified sites; CWD evidence grants no lifecycle/termination authority.
+- **#4097:** installation, payload, runtime-source and publication/activation
+  owners remain. Requirement diagnostics do not grant acquisition, installation,
+  publication or activation; keep guidance availability a separate policy.
+- Preserve every existing participant, bounded claimant, phase and first
+  unresolved gate. The source lanes are independently qualifiable; no new
+  lead, generic acknowledgement, per-lane20/20 or whole-native prerequisite.
+  Actual reviewed delivery and complete current receiving readback precede
+  any separate administrative tracking retirement.
+
 ## Context
 
 This effort is seeded directly from a live investigation this session (see
@@ -413,6 +433,47 @@ owner reassignment, source disposition or claim/resource release.
   remain unestablished; keep #3945 distinct from #3944 single-notification repaint and
   generic startup programme.
 
+### Direct retained launch-readiness contracts
+
+<!-- backlog-reconciliation:7556:startup-readiness-cohort:Plan -->
+
+Agent-recommended additive tracking proposal. Existing phases, checked credit,
+owners, claims and first unresolved gates remain unchanged.
+
+- [ ] **P3789-1:** retain the complete canonical read graph across registry,
+      settings/repo settings, inventory, preservation/backup/equality/existence
+      snapshots, remove and restore. Distinguish genuine FileNotFound from
+      unreadable, malformed or indeterminate input; unknown scans retain prior
+      active state and mutation/restore fails closed without invented empty
+      writes. Preserve marketplace-root, checkout-settings and manifest
+      symlink/reparse/containment boundaries, the real local-remote-name versus
+      expected-URL case, and canonical propagation to every consuming copy.
+- [ ] **P3789-2:** add the reverse join from attributable installed runtime to
+      actual owning plugin/source and effective project/global activation.
+      Distinguish active, intentionally inactive, repo-only, absent, unknown
+      and drift. Payload inventory is not runtime-deployment evidence; starting
+      only from enabled names cannot discover every installed owner. Preserve
+      useful truthful diagnostics without automatic enablement, installation,
+      replacement, settings/permission mutation or an invented live-drift claim.
+- [ ] **P3942-1:** identify the exact two original launch sites without guessing
+      and reconcile them with credited named CWD repairs/shared direct-brokered
+      propagation. Retain the actual remaining source/platform/read-path
+      obligation, durable installation/state/HOME CWD for resident processes,
+      required source environment/absolute inputs and legitimate worktree-bound/
+      synchronous exceptions. Do not revive a replaceable-payload-root rule or
+      reopen completed fixes without a specific remaining gap.
+- [ ] **P4097-1:** map supported launch entries to read-only checks of trusted
+      authoritative repo-required payload version/source and gated-runtime
+      requirements, retaining warn-or-scoped-refusal policy and actionable
+      recovery. Keep ordinary launch pull-free, acquisition consented and
+      publication/activation installation-owned. Distinguish payload/runtime
+      freshness from guidance availability: valid stale guidance is advisory;
+      existing required-instruction delivery gates apply at dependent actions.
+      Ambient delivery remains fail-open and an absent optional session file
+      is a no-op, not a startup blocker. No version/hash attestation gate for
+      copying/using managed instruction files, unconditional install/activation
+      or competing guidance authority is introduced.
+
 ## Validation Plan
 
 - [ ] 20/20 clean full-harness starts: all 3 real extensions (and any others
@@ -554,6 +615,41 @@ owner reassignment, source disposition or claim/resource release.
   supported native/caller tier, keeping actual event/init/seed identity and legitimate
   behavior, component credit, honest unknowns and same custodians. Whole #3303
   20/20/every-host/new ACK gates are not added.
+
+### Global validation for the retained launch-readiness contracts
+
+<!-- backlog-reconciliation:7556:startup-readiness-cohort:Validation -->
+
+Keep these unchecked at each original finite scope and evidence tier. They
+neither replace nor expand the existing full-roster20/20 gate.
+
+- [ ] **G3789-1:** through contained missing/permission/I/O/format cases, verify
+      the entire shared read/mutation/restore graph distinguishes absence
+      from uncertainty, retains prior-active state and performs no destructive
+      invented-empty write. Cover all inherited symlink/reparse and real-format
+      remote-name/URL cases at canonical readers/consumers and their propagation.
+- [ ] **G3789-2:** separately qualify attributable runtime receipts and payload
+      inventory across active, intentional inactivity, repo-only, absent and
+      unknown states. Verify the reverse runtime-to-owner/source/effective-
+      activation join, including installed-but-not-effectively-enabled drift,
+      without inferring deployment from inventory or triggering enable/install.
+- [ ] **G3942-1:** identify and qualify the exact original pair and remaining
+      supported platform/read-path behavior, crediting demonstrated repairs
+      rather than treating a broad sweep as an exact witness. Preserve stable
+      CWD choices and legitimate exceptions, without process termination,
+      global-directory mutation or a replaceable-payload-root requirement.
+- [ ] **G4097-1:** at supported launch entries, qualify truthful repo-required
+      payload/source and runtime mismatch/unknown outcomes and policy-selected
+      warning or scoped refusal. Preserve pull-free inspection/recovery,
+      consent, existing publication/activation ownership and both guidance
+      policies: optional ambient/session delivery fails open, while positively
+      applicable required-action prerequisites retain bounded diagnostics.
+      Do not authenticate managed guidance by hash/version or add a new
+      unconditional installation, startup, native or all-host gate.
+
+Existing roster-derived20/20, turn-aware extension lifetime, hook evidence,
+latency, intended behavior and guard validations remain unchanged. No source
+lane inherits the whole-parent/native gate as a prerequisite to planned intake.
 
 ## Proposal
 
@@ -1029,3 +1125,26 @@ Added direct per-source Plan, actual global Validation and continuing custody ro
 ### 2026-10-28 - Additive retained #3944/#3945 contract proposal
 
 Authored direct per-source Plan, actual global Validation and continuing custody rows from complete original/refined requirements and admitted receiving-document evidence. This entry records a tracking proposal, not a future review, merge, acceptance or source judgment. Existing checked credit and all prior receiving amendments remain at their actual tiers. Normal publication and complete receiving readback precede separate source-specific judgments. No implementation, native experiment, runtime change, owner appointment or claim/resource release is authorized.
+
+### 2026-11-06 - Proposed complete launch-readiness receiving family
+
+<!-- backlog-reconciliation:7556:startup-readiness-cohort:Journal -->
+
+Bounded whole-home research proposes complete #3789 read trust AND the reverse
+installed-runtime/source/effective-activation join, #3942's exact unresolved CWD
+pair, and #4097's read-only pre-launch requirement checks as independent lanes.
+Keep #4102 mux policy and #4118 provenance/Bridge/Picker scope in their existing
+homes. Direct Plan, actual global Validation and continuing custody preserve
+all existing phases, checked credit,20/20 acceptance and bounded claims.
+
+The harness-guidance vision and session-scoped dynamic-guidance pattern were
+read for conformance: ambient delivery remains nonblocking, optional missing
+session files are no-ops, and static managed copies gain no version/hash
+authentication. Existing positively applicable required-action prerequisites
+and explicit repo requirement diagnostics remain distinct, bounded and
+recoverable. This proposal changes no runtime or standing guidance policy.
+
+Normal review/merge, whole current receiving readback and separate source
+judgments still precede administrative retirements. No implementation, native/
+installed proof, source appointment, owner/claim/resource release, actual host,
+settings, permission, process, credential or deployment effect occurred.
