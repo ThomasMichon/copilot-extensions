@@ -18,9 +18,15 @@ from .repos_configuration_sources import ConfigurationError
 
 
 def owner_script(project: str) -> Path:
-    config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+    try:
+        config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+        project_root = Path(config.default_repo.anchor)
+    except KeyError as exc:
+        raise ConfigurationError(
+            "binding-owner-unavailable", "The selected project needs an unambiguous default repository.",
+        ) from exc
     report = resolve_active_plugins(
-        home=cfg._home(), project_root=Path(config.default_repo.anchor),
+        home=cfg._home(), project_root=project_root,
         plugin_names=("harness-knowledge",),
     )
     owners = list(report.active.values())

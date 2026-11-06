@@ -590,6 +590,44 @@ def test_malformed_projects_registry_is_sanitized_native_inspection(native):
     assert tree(native) == before
 
 
+@pytest.mark.parametrize("command", ["catalog", "knowledge-preview"])
+def test_missing_default_repository_is_sanitized_and_read_only(native, command):
+    from agent_worktrees import installer
+
+    project = "multi"
+    config = native / ".multi" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(yaml.safe_dump({
+        "repo_name": project, "repos": {
+            "one": {"anchor": str(native / "repository")},
+            "two": {"anchor": str(native / "knowledge")},
+        },
+    }), encoding="utf-8")
+    installer.projects_yaml_path().write_text(yaml.safe_dump({
+        "schema_version": 2, "projects": {project: {"config_dir": str(config.parent)}},
+    }), encoding="utf-8")
+    before = tree(native)
+    with pytest.raises(KeyError):
+        cfg.load_project_config(project, include_control_plane_related_pr=False).default_repo
+    args = [command, "--context-project", project]
+    if command == "knowledge-preview":
+        args += ["--repository", "sample"]
+    result = cli(*args)
+    value = json.loads(result.stdout)
+    if command == "catalog":
+        assert result.returncode == 0, result.stderr
+        assert value["summary"]["binding_owner"] == "unavailable"
+        assert all(row["knowledge_bindable"] == "false" for row in value["entries"])
+        row = next(row for row in value["entries"] if row["id"] == project)
+        assert row["configuration"]["findings"][0]["code"] == "native-inspection-unavailable"
+    else:
+        assert result.returncode != 0
+        assert value["code"] == "binding-owner-unavailable"
+    assert SECRET not in result.stdout + result.stderr
+    assert "Traceback" not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
 def test_disabled_managed_dropin_does_not_block_valid_preferences(native):
     source = "sample@example-marketplace"
     root = native / "plugin"

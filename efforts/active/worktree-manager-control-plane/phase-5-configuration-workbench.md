@@ -341,6 +341,15 @@ knowledge row, with the full fixture tree unchanged. The affected complete
 native UI flow passed again; the earlier 85-control Manager qualification was
 not repeated for this one-condition native catalog fix.
 
+A later overview identified a missing-default lookup escaping binding-owner
+selection in a multi-repository project. The native `KeyError` is now translated
+at that boundary into a recoverable Configuration refusal, without choosing a
+repository or exposing raw lookup details. Actual unmocked multi-repository
+fixtures cover catalog findings and direct preview refusal with no writes.
+All 103 native Repositories Configuration controls passed on Windows, including
+the existing malformed/unsupported cases, and the affected complete native UI
+flow passed again. F/E9 passed; broader receiving gates remain separate.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no
