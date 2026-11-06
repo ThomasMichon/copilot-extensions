@@ -12,6 +12,7 @@ from dataclasses import replace
 import hashlib
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 
@@ -70,6 +71,7 @@ class API:
         self.kernel = SimpleNamespace(
             GetTickCount64=lambda: 100, GetThreadId=lambda _: 604,
             GetProcessIdOfThread=lambda _: 603,
+            WaitForSingleObject=lambda handle, timeout: 0 if self.exited else 0x102,
             CloseHandle=lambda handle: self.calls.append(("close", handle)) or True,
         )
         self.user = SimpleNamespace(
@@ -365,6 +367,7 @@ def test_message_pump_startup_gap_cannot_qualify_zero(root, monkeypatch):
     observer, api, _, _, _ = root
     observer.pin = api.pin
     observer.initial_thread = 604
+    observer.thread_pin = 802
     ticks = iter([100, 100.6, 100.7])
     monkeypatch.setattr(scoped, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
     observer._run()
@@ -403,7 +406,7 @@ def test_root_mode_refuses_unbounded_or_truncated_native_process_filter(pid):
     assert not api.filters
 
 
-def test_pump_thread_start_failure_releases_pins_before_owner_failure_cleanup(root, monkeypatch):
+def test_pump_thread_start_failure_releases_pins_on_outer_context_cleanup(root, monkeypatch):
     observer, api, _, _, _ = root
 
     class RefusedThread:
@@ -414,7 +417,8 @@ def test_pump_thread_start_failure_releases_pins_before_owner_failure_cleanup(ro
 
     monkeypatch.setattr(scoped.threading, "Thread", lambda **kwargs: RefusedThread())
     with pytest.raises(RuntimeError, match="thread creation refused"):
-        admit(root)
+        with observer:
+            admit(root)
     assert observer.thread is None
     assert ("close", 802) in api.calls and "close-process-pin" in api.calls
     assert observer.pins_closed and not api.filters
@@ -619,3 +623,88 @@ def test_sdk_native_case_requires_driver_enrollment_before_native_binding(select
     expected = pytest.skip.Exception if selection == "absent" else scoped.ObservationBlocked
     with pytest.raises(expected):
         module.sdk_scoped_enrollment.__wrapped__(SimpleNamespace(config=config))
+
+
+def test_owned_thread_enumeration_false_without_callbacks_is_a_valid_empty_result():
+    api = API()
+    api.user.EnumThreadWindows = lambda *args: False
+    assert api.thread_windows(604, 603) == []
+
+
+def test_owned_thread_enumeration_does_not_hide_callback_or_partial_failure():
+    api = API()
+    api.windows[20] = (999, 604)
+    with pytest.raises(scoped.ObservationBlocked, match="identity changed"):
+        api.thread_windows(604, 603)
+    api.windows[20] = (603, 604)
+
+    def incomplete(thread, callback, unused):
+        assert callback(20, unused)
+        return False
+
+    api.user.EnumThreadWindows = incomplete
+    with pytest.raises(scoped.ObservationBlocked):
+        api.thread_windows(604, 603)
+    failure = OSError("native enumeration failed")
+
+    def native_failure(*args):
+        raise failure
+
+    api.user.EnumThreadWindows = native_failure
+    with pytest.raises(OSError) as caught:
+        api.thread_windows(604, 603)
+    assert caught.value is failure
+
+
+@pytest.mark.parametrize("change", ["exited", "rebound"])
+def test_empty_enumeration_cannot_hide_a_changed_held_thread(root, change):
+    observer, api, _, _, _ = root
+
+    def empty(*args):
+        if change == "exited":
+            api.exited = True
+        else:
+            api.kernel.GetProcessIdOfThread = lambda handle: 999
+        return False
+
+    api.user.EnumThreadWindows = empty
+    with pytest.raises(scoped.ObservationBlocked, match="barrier failed"):
+        with observer:
+            admit(root)
+    assert any("thread exited or changed" in error for error in observer.errors)
+    assert not observer.packet()["passed"]
+
+
+def test_stalled_admission_retires_owned_root_before_blocking_observer_teardown(root, launch, monkeypatch):
+    from agent_procutil import _windows_caller_owned as native
+
+    observer, api, _, _, _ = root
+    release = threading.Event()
+    order = []
+    monkeypatch.setattr(native, "time", time)
+    api.pump = lambda: release.wait(1)
+    terminate = native.JobHandle.terminate_and_wait
+
+    def retire(job, timeout):
+        order.append("root-retirement")
+        assert not observer._close_attempted
+        release.set()
+        return terminate(job, timeout)
+
+    monkeypatch.setattr(native.JobHandle, "terminate_and_wait", retire)
+    start = time.monotonic()
+    try:
+        with pytest.raises(scoped.ObservationBlocked, match="barrier timed out"):
+            with observer:
+                native.spawn(
+                    ["fixture.exe"], before_resume=observer.admit,
+                    command_deadline=start + .08, cleanup_deadline=start + .35,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+        assert order == ["root-retirement"]
+        assert observer.job.closed and observer.process._handle is None
+        assert observer.pins_closed and not observer.thread.is_alive()
+    finally:
+        release.set()
+        if observer.thread is not None:
+            observer.thread.join(1)

@@ -538,8 +538,16 @@ def spawn(
             if cleanup_deadline is not None:
                 job_empty_confirmed = False
                 try:
-                    job.terminate_and_wait(remaining(cleanup_deadline))
-                    job_empty_confirmed = True
+                    seconds = cleanup_deadline - time.monotonic()
+                    if seconds > 0:
+                        job.terminate_and_wait(seconds)
+                        job_empty_confirmed = True
+                    else:
+                        job_empty_confirmed = job.try_terminate_and_confirm_empty()
+                        if not job_empty_confirmed:
+                            raise TimeoutError(
+                                "owned Job termination requested after deadline; exit unconfirmed",
+                            )
                     process.wait(max(0.0, cleanup_deadline - time.monotonic()))
                     if failed_preparation or process._thread_handle:
                         raise cleanup_error() from operation_error

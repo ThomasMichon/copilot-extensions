@@ -74,6 +74,7 @@ class ScopedObserver:
         self._close_attempted = False
         self._cleanup_error: ScopedCleanupError | None = None
         self._retained_pin_error: BaseException | None = None
+        self._admission_error: BaseException | None = None
 
     def __enter__(self) -> ScopedObserver:
         if self._context_active or self._close_attempted:
@@ -178,12 +179,14 @@ class ScopedObserver:
             if self.barrier >= deadline:
                 raise ObservationBlocked("scoped subscription barrier expired")
         except BaseException as error:
-            self.fail(error)
+            # Return to native root retirement before any observer join or lock.
+            self._admission_error = error
+            self.stop.set()
             if self.pin is None:
                 self.pin = getattr(error, "process_pin", None)
                 if self.pin is not None:
                     self._retained_pin_error = error
-            self._close_for_exit(error)
+            error.scoped_observer = self
             raise
 
     def event(
@@ -232,8 +235,10 @@ class ScopedObserver:
             self.hooks = hooks
             hooks.start()
             self.hook_count = hooks.count
+            self._require_initial_thread()
             for hwnd in self.api.thread_windows(self.initial_thread, self.pin.pid):
                 self.event(0x8000, hwnd, 0, 0, self.initial_thread, 0, 0)
+            self._require_initial_thread()
             if self.errors or self.hook_count != 2:
                 raise ObservationBlocked("scoped initial coverage failed")
             while True:
@@ -267,6 +272,15 @@ class ScopedObserver:
             if self.ended >= self.execution_deadline:
                 self.fail(ObservationBlocked("scoped observation crossed its execution deadline"))
             self.ready.set()
+
+    def _require_initial_thread(self) -> None:
+        if (
+            not self.thread_pin
+            or self.api.kernel.GetThreadId(self.thread_pin) != self.initial_thread
+            or self.api.kernel.GetProcessIdOfThread(self.thread_pin) != self.pin.pid
+            or self.api.kernel.WaitForSingleObject(self.thread_pin, 0) != 0x102
+        ):
+            raise ObservationBlocked("initial owned thread exited or changed during enumeration")
 
     def finish(self) -> dict:
         from agent_procutil._windows_caller_owned import _job_pids, _job_total, _api
@@ -306,6 +320,8 @@ class ScopedObserver:
             return
         self._close_attempted = True
         try:
+            if self._admission_error is not None:
+                self.fail(self._admission_error)
             self.stop.set()
             if self.thread is not None:
                 self.thread.join(max(0, self.cleanup_deadline - time.monotonic()))

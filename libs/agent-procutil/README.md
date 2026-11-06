@@ -167,6 +167,9 @@ The scoped helper checks the selected owner's explicit seam before launch:
 an older `**kwargs` provider cannot silently ignore observer admission.
 Failure uses the original exact-root/Job cleanup and retained-custody errors.
 Calls without the callback retain their existing behavior.
+If a callback exhausts its cleanup deadline, the owner still requests termination
+of its exact Job through the existing non-waiting settlement step. No additional
+verification interval is granted; busy/error retains unconfirmed native custody.
 
 The separate `tests/sdk_scoped_observer.py` qualification helper composes this
 seam with process-filtered USER32 hooks and an initial owned-thread window query.
@@ -174,6 +177,11 @@ It never calls `EnumWindows` or samples global foreground state. It retains
 duplicates of the launch owner's process/thread handles, derives process birth
 from the held object, and admits the subscription/message-pump barrier before
 resume. The caller must invoke `finish()` after root exit while its original
+The pinned initial thread must remain live and retain its native identity across
+the query. As documented by
+[EnumThreadWindows](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumthreadwindows),
+FALSE with no callbacks is a valid empty result; callback errors, partial
+enumeration and changed/expired native thread identity still refuse qualification. The caller must invoke `finish()` after root exit while its original
 Job is still queryable, then settle the original owner's resources normally.
 Finishing retains the hooks and pump for a full delivery-ceiling interval after
 confirmed root exit, within the original execution budget; insufficient budget,
@@ -209,6 +217,10 @@ Its context exit closes the pump/hooks/pins even when native resume or a later
 launch step fails after successful admission. It propagates the **same original
 exception**, preserving any `OwnedCleanupError` process/Job custody and cause,
 and attaches `scoped_observer` plus `scoped_observer_evidence`.
+Failed startup admission signals stop and returns immediately to the native
+owner; it does not join the observer while the root is still suspended. The
+outer context performs potentially blocking observer teardown only after the
+native owner's failure settlement, within the original cleanup deadline.
 If observer cleanup is also unconfirmed, `scoped_observer_cleanup_error`
 retains that independent failure without replacing the original.
 

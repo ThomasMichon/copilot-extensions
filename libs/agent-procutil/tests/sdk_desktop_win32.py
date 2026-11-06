@@ -263,7 +263,9 @@ class WinAPI(NativeProcessAPI):
         complete = self.user.EnumThreadWindows(thread, visit, 0)
         if errors:
             raise errors[0]
-        self.check(complete, "enumerate one owned thread's windows")
+        # USER32 also returns FALSE for a valid thread with no windows.
+        if not complete and result:
+            raise ObservationBlocked("owned thread window enumeration stopped after callbacks")
         return result
 
     def pump(self) -> None:

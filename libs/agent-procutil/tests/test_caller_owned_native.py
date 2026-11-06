@@ -53,7 +53,8 @@ def test_scoped_observer_managed_root(sdk_scoped_enrollment):
 
     enrollment = sdk_scoped_enrollment
     work_deadline, cleanup_deadline = enrollment.deadline - 2, enrollment.deadline
-    argv = [sys.executable, "-I", "-B", "-c", "raise SystemExit(23)"]
+    fixture_python = getattr(sys, "_base_executable", sys.executable)
+    argv = [fixture_python, "-I", "-B", "-c", "raise SystemExit(23)"]
 
     def remaining(deadline):
         value = deadline - time.monotonic()

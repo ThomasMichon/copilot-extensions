@@ -190,3 +190,25 @@ proposal neither reintroduces an MCP gate nor authorizes the held extension.
   retained and no global environment or dependency-manifest changes. Private
   JUnit, supervisor and exact-command receipts retain the failed prerequisite
   attempt and the successful source qualification.
+
+### 2026-11-06 - Preserve windowless startup and native retirement budget
+
+- Corrected the documented `EnumThreadWindows` empty-thread FALSE result without
+  accepting callback/partial enumeration failures. The original held initial
+  thread must remain live and identity-matched across the query.
+- Admission failure now signals stop and returns to native owner settlement
+  before observer teardown can join a stalled pump. Even an exhausted cleanup
+  deadline requests exact owned-Job termination through the existing non-waiting
+  step, without granting another verification interval. Unconfirmed root/Job
+  custody and original exceptions remain retained independently of the observer.
+- The authored SDK root uses the base interpreter, avoiding a Windows venv
+  redirector's additional child. The case was collected only, not executed.
+- New synthetic regressions reproduced the empty-enumeration and suspended-root
+  defects before the fix. The complete bounded source selection then passed
+  334 tests without skips and confirmed runner cleanup.
+- Canonical payload generation repaired the admission copy; canonical footprint
+  refresh preserved contract semantics. Only two actually changed admitted
+  source bindings were refreshed; the existing 4,239 nodes, 598 sources,
+  251 coverage targets and 300-second required-packet budget remain unchanged.
+- No debugger, GUI, calibration, rollout or native fixture execution occurred.
+  Independent SDK native qualification and the remaining held work stay open.
