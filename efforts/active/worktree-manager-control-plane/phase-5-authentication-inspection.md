@@ -1,6 +1,7 @@
 # Phase 5 - Provider-owned repository authentication inspection
 
-- **Status:** Proposed delivery design; no runtime implementation or acceptance.
+- **Status:** Native provider expansion implemented in source; Manager
+  composition and receiving acceptance remain open.
 - **Parent:** [Configuration Workbench](phase-5-configuration-workbench.md)
 - **Coordination:** #10844, claimed by `shiny-actuator`.
 - **Vision:** [Authentication and onboarding readiness](../../../visions/installer/configurator/README.md#authentication-and-onboarding-readiness).
@@ -50,8 +51,10 @@ unchanged; do not make opening the preference catalog start credential work.
 
 ## Native provider contract to deliver
 
-The following are proposed implementation requirements, not newly shipped
-wire fields or permission for a provider operation:
+The following requirements govern the native provider and later consumer.
+The [native version-1 contract](../../../plugins/agent-worktrees/docs/repository-authentication.md)
+defines the bounded standalone implementation; this is not rollout or
+permission for a live credential observation:
 
 1. Resolve the explicit selected project and canonical repository/provider
    through one strict native registry snapshot. Preserve the selected host
@@ -81,10 +84,10 @@ wire fields or permission for a provider operation:
 6. Preserve the existing registration and preference operations. Do not silently
    widen their effects to avoid defining the separate inspection boundary.
 
-The first implementation review must resolve the exact native read syntax,
-response and immutable-slot support declaration against the executing owner.
-This planning amendment deliberately does not pretend those missing contracts
-are already available.
+The native read syntax, response and package-data support declaration are now
+defined against the executing owner. Consumer migration remains separate:
+it must select that exact immutable runtime before reading support or
+emitting the optional inspection operation.
 
 ## Manager composition
 
@@ -109,9 +112,9 @@ the current progress/cancellation and originating-scope refresh contracts.
 
 ## Dependency-ordered Plan
 
-- [ ] Review this delivery design and reconcile the native read contract and
+- [x] Review this delivery design and reconcile the native read contract and
   selected-runtime support declaration before implementing new caller syntax.
-- [ ] Deliver the standalone provider inspection and focused controls without
+- [x] Deliver the standalone provider inspection and focused controls without
   changing registration, preference, binding or credential-store behavior.
 - [ ] Connect the actual native provider to standing Configuration through the
   current contribution contract; prove navigation, errors and refresh without
@@ -151,3 +154,27 @@ its fresh-install, installed UI and authorized rollout gates.
 This plan does not alter installation/replacement behavior, enrollment, source
 trust, personal state, resource custody or current holds. A plan merge, read-only
 panel or successful API fixture cannot complete those owners' acceptance.
+
+## Native provider source evidence
+
+The provider-first slice adds strict `repos authentication inspect` and
+metadata-only `contract` reads, the wheel-owned version-1 descriptor and a
+bounded GitHub CLI credential/API adapter. It requires an explicitly configured
+account and exact supported host. Registration, preference and binding
+operations are unchanged; no ordinary consumer emits the new syntax yet.
+
+Thirty-seven focused controls pass, including the native parser, unchanged private
+registry/sentinel bytes, synthetic credential/API failures, identity mismatch,
+real owned synthetic processes and a real aggregate deadline. Runner
+`RuntimeError` outcomes are projected without swallowing retained cleanup
+errors. Eighty-six legacy scoped-credential controls also pass;
+twenty additional account-resolution controls retain their earlier evidence.
+The actual built wheel contains the
+exact inspection source, descriptor and preserved existing package data;
+install-contract and documentation guards pass.
+
+These are contained source/package results, not a cold installation, selected
+installed runtime, live credential/backend, Git transport, Manager UI or
+complete authentication/onboarding pass. The Configuration consumer and its
+mixed-runtime/refresh evidence are the next source checkpoint. Broader
+receiving and acquisition acceptance remain with the existing owners.

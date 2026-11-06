@@ -534,6 +534,11 @@ uses the native read/preview/apply CLI to inspect registration, routes, state
 binding and tracked pairs. Its only editable setting is the machine-local
 future-launch Copilot login preference; it does not log in or launch agents.
 
+The standalone [repository authentication inspection](docs/repository-authentication.md)
+separately observes an explicitly configured GitHub account and repository API
+access. It does not acquire credentials or certify Git, Copilot, MCP or complete
+onboarding readiness.
+
 ## Independent Execution Spaces
 
 Native Windows and WSL can register independent execution-space keys without

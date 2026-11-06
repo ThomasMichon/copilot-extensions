@@ -150,4 +150,4 @@ select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_worktrees = ["pre_push.sh"]
+agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json"]
