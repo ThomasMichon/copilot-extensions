@@ -4,16 +4,20 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from types import MappingProxyType
 from typing import TYPE_CHECKING, BinaryIO, Mapping
 
 from runtime_wheel_inspection import PromotionArtifactError, inspect_wheel_facts
 from runtime_wheel_inspection import inspect_wheel as inspect_wheel
 from installer_wheel_inputs import WheelLimits, _check_deadline
 from packaging.utils import canonicalize_name
-from runtime_profile import ProfileError, RuntimeProfile, validate_profile
+from runtime_profile import ProfileError, RuntimeProfile, _reachable, _requirement, validate_profile
 
 if TYPE_CHECKING:
     from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot
+
+MANAGER_ISOLATED = "manager-isolated"
+_MANAGER = "copilot-extensions-worktree-manager"
 
 
 def _archive_digest(archive: BinaryIO, limit: int, deadline: float) -> tuple[str, int]:
@@ -31,6 +35,79 @@ def _archive_digest(archive: BinaryIO, limit: int, deadline: float) -> tuple[str
         digest.update(chunk)
     _check_deadline(deadline)
     return "sha256:" + digest.hexdigest(), size
+
+
+def derive_profile_environments(
+    profile: RuntimeProfile, *, layout: str, deadline: float | None = None,
+) -> Mapping[str, RuntimeProfile]:
+    """Derive closures from a whole profile, without independently approving them."""
+    deadline = time.monotonic() + 120 if deadline is None else deadline
+    _check_deadline(deadline)
+    if layout != MANAGER_ISOLATED or not isinstance(profile, RuntimeProfile):
+        raise ProfileError("unsupported profile environment layout")
+    record = validate_profile(profile.record(), deadline=deadline).record()
+    roots = {"shared": [], "manager": []}
+    for text in record["roots"]:
+        requirement = _requirement(text, deadline)
+        roots["manager" if canonicalize_name(requirement.name) == _MANAGER else "shared"].append(text)
+    if not roots["manager"] or not roots["shared"]:
+        raise ProfileError("manager isolation requires explicit manager and shared roots")
+    wheels = {
+        canonicalize_name(row["name"]): (
+            row, [_requirement(text, deadline) for text in row["requires_dist"]],
+        )
+        for row in record["wheels"]
+    }
+    reachable = {
+        name: _reachable(wheels, selected, record["target"]["environment"], deadline)
+        for name, selected in roots.items()
+    }
+    if (
+        _MANAGER not in reachable["manager"] or _MANAGER in reachable["shared"]
+        or set(reachable["shared"]) | set(reachable["manager"]) != set(wheels)
+    ):
+        raise ProfileError("manager isolation does not preserve the complete root closure")
+    result = {}
+    for name in ("shared", "manager"):
+        wanted = reachable[name]
+        selected_wheels = [
+            row | {"selected_extras": sorted(wanted[canonicalize_name(row["name"])])}
+            for row in record["wheels"] if canonicalize_name(row["name"]) in wanted
+        ]
+        result[name] = validate_profile(
+            record | {"roots": roots[name], "wheels": selected_wheels}, deadline=deadline,
+        )
+    return MappingProxyType(result)
+
+
+def verify_profile_layout(
+    profile: RuntimeProfile, archives: Mapping[str, BinaryIO], *,
+    max_archive_bytes: int, max_unpacked_bytes: int, max_metadata_bytes: int,
+    limits: WheelLimits | None = None, deadline: float | None = None,
+    layout: str | None = None,
+) -> Mapping[str, RuntimeProfile]:
+    """Inspect every selected wheel in its derived environment, without approval."""
+    deadline = time.monotonic() + 120 if deadline is None else deadline
+    if layout is None:
+        verify_profile_wheels(
+            profile, archives, max_archive_bytes=max_archive_bytes,
+            max_unpacked_bytes=max_unpacked_bytes, max_metadata_bytes=max_metadata_bytes,
+            limits=limits, deadline=deadline,
+        )
+        return MappingProxyType({"shared": profile})
+    environments = derive_profile_environments(profile, layout=layout, deadline=deadline)
+    expected = {row["filename"] for row in profile.record()["wheels"]}
+    if set(archives) != expected:
+        raise ProfileError("retained wheel set differs from the exact profile")
+    aggregate = {"archive": max_archive_bytes, "expanded": max_unpacked_bytes, "seen": {}}
+    for selected in environments.values():
+        names = {row["filename"] for row in selected.record()["wheels"]}
+        _verified_profile_wheels(
+            selected, {name: archives[name] for name in names},
+            max_archive_bytes=max_archive_bytes, max_unpacked_bytes=max_unpacked_bytes,
+            max_metadata_bytes=max_metadata_bytes, limits=limits, deadline=deadline, aggregate=aggregate,
+        )
+    return environments
 
 
 def verify_profile_wheels(
@@ -89,7 +166,7 @@ def profile_wheel_inputs(
 def _verified_profile_wheels(
     profile: RuntimeProfile, archives: Mapping[str, BinaryIO], *,
     max_archive_bytes: int, max_unpacked_bytes: int, max_metadata_bytes: int,
-    limits: WheelLimits | None, deadline: float | None,
+    limits: WheelLimits | None, deadline: float | None, aggregate: dict | None = None,
 ) -> list[tuple[str, str, str, str]]:
     if any(type(value) is not int or value <= 0 for value in (
         max_archive_bytes, max_unpacked_bytes, max_metadata_bytes,
@@ -120,14 +197,22 @@ def _verified_profile_wheels(
             archive_limit = min(
                 remaining_archive, limits.max_archive_bytes if limits is not None else remaining_archive,
             )
+            new_wheel = aggregate is not None and filename not in aggregate["seen"]
+            if new_wheel:
+                archive_limit = min(archive_limit, aggregate["archive"])
             digest, size = _archive_digest(archive, archive_limit, deadline)
             if digest != wheel["sha256"]:
                 raise ProfileError("wheel archive digest differs from the exact profile")
             if remaining_unpacked <= 0:
                 raise ProfileError("wheel members exceed the supplied byte budget")
             archive.seek(0)
+            expanded_limit = (
+                min(remaining_unpacked, aggregate["expanded"]) if new_wheel else remaining_unpacked
+            )
+            if expanded_limit <= 0:
+                raise ProfileError("wheel members exceed the aggregate byte budget")
             facts = inspect_wheel_facts(
-                archive, wheel, max_unpacked_bytes=remaining_unpacked,
+                archive, wheel, max_unpacked_bytes=expanded_limit,
                 max_archive_bytes=archive_limit,
                 max_metadata_bytes=max_metadata_bytes, limits=limits, deadline=deadline,
             )
@@ -196,6 +281,14 @@ def _verified_profile_wheels(
             after_digest, after_size = _archive_digest(archive, size, deadline)
             if (after_digest, after_size) != (digest, size):
                 raise ProfileError("wheel archive changed during verification")
+            if aggregate is not None:
+                observed = (digest, size, unpacked)
+                if new_wheel:
+                    aggregate["archive"] -= size
+                    aggregate["expanded"] -= unpacked
+                    aggregate["seen"][filename] = observed
+                elif aggregate["seen"][filename] != observed:
+                    raise ProfileError("shared wheel changed between environments")
             remaining_archive -= size
             remaining_unpacked -= unpacked
             distributions.append((

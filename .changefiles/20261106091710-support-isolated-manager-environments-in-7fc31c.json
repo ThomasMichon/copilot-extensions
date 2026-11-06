@@ -1,0 +1,9 @@
+{
+  "comment": "Support isolated Manager environments in runtime delivery",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
