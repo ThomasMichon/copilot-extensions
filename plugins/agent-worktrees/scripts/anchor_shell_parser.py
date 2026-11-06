@@ -125,6 +125,30 @@ def git_tokens(
     return tokens
 
 
+def _sed_in_place(args: list[str]) -> bool:
+    takes_value = False
+    for arg in args:
+        if takes_value:
+            takes_value = False
+            continue
+        if arg == "--":
+            break
+        if arg in {"--expression", "--file", "--line-length"}:
+            takes_value = True
+            continue
+        if arg == "--in-place" or arg.startswith("--in-place="):
+            return True
+        if not arg.startswith("-") or arg.startswith("--"):
+            continue
+        for index, option in enumerate(arg[1:], 1):
+            if option == "i":
+                return True
+            if option in "efl":
+                takes_value = index == len(arg) - 1
+                break
+    return False
+
+
 def literal_write_targets(seg: str, tool: str, *, syntax: set[str] | None = None) -> list[str]:
     """Extract literal redirect operands and target-bearing shell arguments."""
     tokens = git_tokens(seg, tool, split_redirects=True, syntax=syntax)
@@ -143,12 +167,7 @@ def literal_write_targets(seg: str, tool: str, *, syntax: set[str] | None = None
     if not arguments:
         return targets
     verb, args = arguments[0].lower(), arguments[1:]
-    options = args[:args.index("--")] if "--" in args else args
-    if verb == "sed" and not any(
-        re.match(r"^-[nErzu]*i", arg)
-        or arg == "--in-place" or arg.startswith("--in-place=")
-        for arg in options
-    ):
+    if verb == "sed" and not _sed_in_place(args):
         return targets
     if verb == "dd":
         return targets + [arg[3:] for arg in args if arg.lower().startswith("of=")]

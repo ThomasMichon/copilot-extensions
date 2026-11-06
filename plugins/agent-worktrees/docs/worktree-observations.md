@@ -362,7 +362,11 @@ normalization. Unsupported executable block/control-flow and complex assignment
 shapes conservatively invalidate rather than being asserted read-only. The
 original quote-aware tokenizer reports unquoted block/type syntax for this
 classification, including pipeline/invocation blocks and typed assignments;
-quoted data does not become executable syntax. Ordinary tokenizer callers do
+quoted data does not become executable syntax. Type conservatism applies to
+typed-variable prefixes, not bracketed read paths or ordinary static read
+calls. The original literal reader recognizes clustered in-place `sed` flags
+without treating attached expression/file option values as flags.
+Ordinary tokenizer callers do
 not request that observation and keep their original output. Read-only `sed`
 does not invalidate unless it independently redirects output, while in-place
 forms remain mutations. Batch presence takes precedence over outer shell

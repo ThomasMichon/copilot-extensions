@@ -98,6 +98,13 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     pytest.param("Invoke-Command -ScriptBlock { Set-Content file value }", True, id="invocation-block"),
     pytest.param("Write-Output 'Invoke-Command -ScriptBlock { Set-Content file value }'", False, id="quoted-scriptblock"),
     pytest.param("Write-Output '[string]$result = git commit -m test'", False, id="quoted-type"),
+    pytest.param("sed -sni s/a/b/ file", True, id="clustered-sed"),
+    pytest.param("sed -bnEi s/a/b/ file", True, id="binary-clustered-sed"),
+    pytest.param("sed -neprint file", False, id="attached-sed-expression"),
+    pytest.param("sed -nf -i file", False, id="sed-option-as-file"),
+    pytest.param("Get-Content -LiteralPath file[ab]", False, id="read-bracket-path"),
+    pytest.param("[IO.File]::ReadAllText('file')", False, id="read-type-call"),
+    pytest.param("[string[]]$result = git commit -m test", True, id="typed-array-assignment"),
 ])
 def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
     assert guard.shell_may_mutate(command, "powershell") is mutates
