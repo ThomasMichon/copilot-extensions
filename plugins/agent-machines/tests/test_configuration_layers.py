@@ -1,6 +1,7 @@
 import argparse
 import copy
 import json
+from pathlib import Path
 import pytest
 import yaml
 from configuration_layers import ConfigurationError
@@ -347,6 +348,33 @@ def test_portable_cli_sanitizes_native_owner_refusal(tmp_path, monkeypatch, caps
     assert json.loads(capsys.readouterr().err) == {
         "ok": False, "error": "native-configuration-unavailable",
     }
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("source", ["user", "repository-machine"])
+def test_portable_empty_native_union_refuses_instead_of_skipping_machine_defaults(
+    tmp_path, monkeypatch, source,
+):
+    from agent_machines import preferences
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    (base / ".copilot-extensions" / "agent-machines" / "all" / "native.yaml").unlink()
+    if source == "user":
+        path = discover.user_package_root() / "all" / "native-machine.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(yaml.safe_dump({
+            "schema_version": 4, "package": "native-machine",
+            "manage": {"copilot.settings": {
+                "disposition": "ensure-present", "values": {"model": "native-machine"},
+            }},
+        }), encoding="utf-8")
+    else:
+        write(Path(report["repository_machine_root"]), "native-machine", {
+            "model": "native-machine",
+        })
+    with pytest.raises(preferences.PreferenceError, match="native-defaults-unavailable"):
+        adopt(state)
     assert not target.exists()
 
 

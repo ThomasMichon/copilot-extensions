@@ -396,3 +396,13 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   remained intact with unchanged referent bytes and no lock creation; the real
   two-process ordinary-target serialization/refreshed-write flow still passed.
   Ruff and whitespace passed. Review and exact-source CI remain open.
+
+### 2026-11-06 - Empty native scope refuses portable adoption
+- Refuse `native-defaults-unavailable` when the repository/knowledge requirement
+  union is empty. The existing ordinary-default collector cannot carry native
+  user or repository-machine floors through that empty union; refusing preserves
+  their authority without generating a placeholder requirement.
+- Both empty-scope controls with native user/repository-machine defaults and
+  the supported-scope normal CLI adoption/withdrawal control passed. Ruff and
+  whitespace passed. Empty-union adoption remains unsupported, not silently
+  qualified by these refusal tests. Review and current-head CI remain open.

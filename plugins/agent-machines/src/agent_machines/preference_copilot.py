@@ -43,6 +43,8 @@ def _plan(state: Path, local: Path | None) -> tuple[dict, list, dict, Path]:
     )
     floors = projection["values"].get("copilot", {})
     packages, scope = _collect_reconcile_packages(selectors, machine, identity.accepted)
+    if not packages:
+        raise codec.PreferenceError("native-defaults-unavailable")
     resolved = reconcile.resolve_union(packages, machine, identity.accepted)
     findings = validator.validate(resolved, machine, reconcile.current_platform())
     if validator.has_errors(findings):

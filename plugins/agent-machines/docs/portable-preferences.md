@@ -257,6 +257,10 @@ bootstrap, binding or fallback.
 The native identity resolver supplies the same admitted aliases to discovery
 and layering, including alias-named directories and per-machine overlays.
 Host and guest alias sets remain separate; a different canonical identity refuses.
+An empty repository/knowledge requirement union reports
+`native-defaults-unavailable`: the current native ordinary-default collector
+cannot carry machine-local defaults through an empty union. Adoption refuses
+instead of skipping those sources or manufacturing a requirement package.
 
 Selection retains shared -> matching named-machine -> explicit local preference
 precedence. Only `model` and `effortLevel` enter the native settings owner as
