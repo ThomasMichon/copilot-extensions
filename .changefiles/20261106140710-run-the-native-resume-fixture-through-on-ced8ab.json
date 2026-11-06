@@ -1,0 +1,9 @@
+{
+  "comment": "Run the native Resume fixture through one explicit private PSMux namespace without changing production launchers",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
