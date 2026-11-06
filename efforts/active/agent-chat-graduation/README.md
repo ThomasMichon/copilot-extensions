@@ -493,6 +493,13 @@ shared-multiplex contracts above.
 
 ### 2026-11-06 - Recover image qualification and repair unit admission
 
+- Corrected candidate `10b7379e0bc5779437e02a604badb2e262e64648`
+  passed native Windows acceptance422+2 declared POSIX skips in115.52s
+  under180s, and full498+the same skips in367.58s under600s.
+  Both500-node maps report complete execution and membership
+  `526c150a6fb387a76745a1e89d7a2b07986e4c3238b054e956483fcaa87ede68`.
+  The independent image/template packet passed25 cases in3.08s. Fresh hosted
+  native/image execution, required CI and current-head review remain open.
 - Reconcile the candidate with current Dev without dropping its daemon-instance
   custody or four additional construction-resource parameters. The offline
   image now includes the service's process-utility wheel and a private
