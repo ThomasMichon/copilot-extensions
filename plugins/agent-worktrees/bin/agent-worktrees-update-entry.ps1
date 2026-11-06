@@ -1,6 +1,21 @@
 # Dot-sourced before runtime resolution by the installed and payload front doors.
 $_awUpdateHandled = $false
 $_awUpdateDiagnostic = $false
+$_awUpdateStandalone = $null -ne [Environment]::GetEnvironmentVariable(
+    'AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD'
+)
+if ($_awUpdateStandalone) {
+    $_awUpdatePayload = $env:AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD -ceq '1'
+    $_awUpdateCaller = if ($_awUpdatePayload) {
+        Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\invoke-payload-runtime.ps1'
+    } else { Join-Path $PSScriptRoot 'agent-worktrees.ps1' }
+    Remove-Item Env:AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD -ErrorAction SilentlyContinue
+}
+if ($env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP -ceq '1') {
+    Remove-Item Env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP -ErrorAction SilentlyContinue
+    return
+}
+$_originalUpdateArgs = @($args)
 $_updateArgs = @($args)
 $_updateProject = ''
 $_updateHasProject = $false
@@ -26,11 +41,98 @@ if (@($_updateArgs | Where-Object {
         '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
+# The Git-sh handoff disables conversion only for the native invocation.
+Remove-Item Env:MSYS2_ARG_CONV_EXCL -ErrorAction SilentlyContinue
+if (-not $_updateHasProject) {
+    for ($_index = 1; $_index -lt $_updateArgs.Count; $_index++) {
+        $_argument = $_updateArgs[$_index]
+        if ($_argument -cin @('--project', '-p') -and $_index + 1 -lt $_updateArgs.Count) {
+            $_updateProject = $_updateArgs[$_index + 1]
+            $_updateHasProject = $true
+            break
+        }
+        if ($_argument.StartsWith('--project=')) {
+            $_updateProject = $_argument.Substring(10)
+            $_updateHasProject = $true
+            break
+        }
+    }
+}
+$_probeExcluded = @($_updateArgs | Where-Object {
+    $_ -cin @('--no-project-controller', '--repair-engine') -or $_.StartsWith('--repair-engine=')
+}).Count -gt 0
+$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
+$_probePossible = @('current-version', 'last-known-good', 'versions') |
+    Where-Object { Test-Path -LiteralPath (Join-Path $_runtimeRoot $_) }
+if ($_awUpdatePayload -and (
+    $env:COPILOT_EXTENSIONS_CONTEXT -or
+    (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.copilot-extensions\installation-mode.json'))
+)) { $_probePossible = $true }
+if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
+    if ($_awUpdatePayload) {
+        $_probePayload = Split-Path -Parent (Split-Path -Parent $_awUpdateCaller)
+    } else {
+        $_probePayload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+        if (-not (Test-Path -LiteralPath (Join-Path $_probePayload 'plugin.json') -PathType Leaf)) {
+            $_probePayload = ''
+            try { $_probePayload = ([IO.File]::ReadAllText((Join-Path $_runtimeRoot 'payload-dir'))).Trim() } catch {}
+        }
+    }
+    $_probeHelper = if ($_probePayload) {
+        Join-Path $_probePayload 'scripts\installation-context\shell-caller-owned.ps1'
+    } else { '' }
+    $_probeWorker = if ($_probePayload) {
+        Join-Path $_probePayload 'scripts\update_controller_probe.py'
+    } else { '' }
+    $_controller = ''
+    if ($_probeHelper -and (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -and
+        (Test-Path -LiteralPath $_probeWorker -PathType Leaf)) {
+        $_request = @{
+            host = (Get-Process -Id $PID).Path
+            caller = $_awUpdateCaller
+            project = $_updateProject
+            has_project = $_updateHasProject
+            cwd = (Get-Location).Path
+        }
+        $_previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $_probeOutput = @(& $_probeHelper -Worker $_probeWorker -Request $_request -TimeoutSeconds 30 2>$null)
+            $_probeRc = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $_previousEap }
+        if ($_probeRc -eq 124) {
+            [Console]::Error.WriteLine('[agent-worktrees] controller probe timed out; no update ran.')
+            if ($_awUpdateStandalone) { exit 124 }
+            $_awUpdateHandled = $true
+            $global:LASTEXITCODE = 124
+            return
+        }
+        if ($_probeRc -eq 0) { $_controller = ($_probeOutput -join "`n").Trim() }
+    }
+    if ($_controller) {
+        $_previousSkip = $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP
+        $_previousController = $env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER
+        try {
+            $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP = '1'
+            $env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER = '1'
+            & $_awUpdateCaller @_originalUpdateArgs
+            $_controllerRc = $LASTEXITCODE
+        } finally {
+            if ($null -eq $_previousSkip) {
+                Remove-Item Env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP -ErrorAction SilentlyContinue
+            } else { $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP = $_previousSkip }
+            if ($null -eq $_previousController) {
+                Remove-Item Env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER -ErrorAction SilentlyContinue
+            } else { $env:AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER = $_previousController }
+        }
+        if ($_awUpdateStandalone) { exit $_controllerRc }
+        $_awUpdateHandled = $true
+        $global:LASTEXITCODE = $_controllerRc
+        return
+    }
+}
 $_awUpdateHandled = $true
 $ErrorActionPreference = 'Stop'
-# The Git-sh handoff disables conversion for this native invocation only.
-# Retaining it would also disable Git's own file-transport path conversion.
-Remove-Item Env:MSYS2_ARG_CONV_EXCL -ErrorAction SilentlyContinue
 if ($env:AGENT_WORKTREES_CONTROL_PLANE_PROVIDER -and
     $env:AGENT_WORKTREES_CONTROL_PLANE_PROVIDER -cne 'worktree-manager') {
     throw 'Update bootstrap requires the selected Manager provider.'

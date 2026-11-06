@@ -35,6 +35,10 @@ def extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
         if rest[i] == "--project" and i + 1 < len(rest):
             project, i = rest[i + 1], i + 2
             continue
+        if rest[i].startswith("--project="):
+            project = rest[i].partition("=")[2]
+            i += 1
+            continue
         out.append(rest[i])
         i += 1
     return project, out

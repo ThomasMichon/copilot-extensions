@@ -1386,6 +1386,17 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### `update` results: exit codes, events, and status
 
+A project may opt its ordinary update into a repository-owned Python controller
+with `update_controller: {windows: tools/update.py, linux: tools/update.py}` in
+its repo configuration. The path is relative to that project's anchor. Worktrees
+runs it inside the existing update-driver request and forwards update options;
+an absent or failing configured script fails the request rather than running a
+different updater. Targeted and phase-specific requests keep their existing
+behavior. `--no-project-controller` explicitly selects the standalone suite
+updater instead. The controller owns source selection and must honor configured
+runtime-source policy and any explicit prepared-source input; selection happens
+before Manager acquisition, without changing that policy.
+
 The public command submits a durable request before Manager or standalone
 execution. `--wait` observes it by default; `--detach --json` returns an
 acceptance receipt, and `--request-status <id> --json` is a project-independent

@@ -92,7 +92,10 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     if options.json and not (options.detach or options.request_status or recovery or "--auth-report" in forwarded):
         parser.error("--json requires request inspection, recovery, --detach or --auth-report")
     canonical = argparse.ArgumentParser(prog="worktree-manager update", add_help=False, allow_abbrev=False)
-    for name in ("auto", "force", "no-anchor-sync", "no-prune-pivots", "recreate-venv", "no-manager"):
+    for name in (
+        "auto", "force", "no-anchor-sync", "no-prune-pivots", "recreate-venv",
+        "no-manager", "no-project-controller",
+    ):
         canonical.add_argument("--" + name, action="store_true")
     canonical.add_argument("--project")
     canonical.add_argument("--target")
@@ -333,12 +336,28 @@ def cmd_update_request(rest: list[str]) -> int:
                     options.engine_acquisition_timeout,
                 ):
                     _update_context_directory(os.environ)
+                    from .project_update_controller import handoff
+
+                    controlled = handoff(forwarded)
+                    if controlled is not None:
+                        return controlled
                     if request.spec.backend == "manager" and request.spec.source != _source_key():
                         raise driver.StateError("Manager source changed after submission; submit a new request")
                     custody.assert_owned()
                     from . import __main__ as manager
 
                     return manager._cmd_update(forwarded)
+        from .project_update_controller import handoff
+
+        observer = [
+            "--" + name.replace("_", "-")
+            for name in ("detach", "wait", "supervised_debug", "json")
+            if getattr(options, name)
+        ]
+        with _request_environment(request_context()):
+            controlled = handoff(forwarded, observer=observer)
+        if controlled is not None:
+            return controlled
         if options.target is not None and options.target != "worktree-manager":
             from . import engine_client
             from .runtime_source_config import require_marketplace

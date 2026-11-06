@@ -41,6 +41,12 @@ def test_default_wait_preserves_canonical_update_arguments():
     assert options.request_status is None
 
 
+def test_standalone_controller_override_is_forwarded():
+    flags = ["--no-project-controller", "--force"]
+    _options, forwarded = driver.parse_options(flags)
+    assert forwarded == flags
+
+
 @pytest.mark.parametrize("observer", [[], ["--detach"], ["--supervised-debug"]])
 def test_bootstrap_repair_prefix_survives_durable_observer_normalization(observer):
     arguments = ["--repair-engine", "/fresh/source with spaces", "--project", "example"]
@@ -230,6 +236,7 @@ def test_credential_bearing_source_is_not_written_to_queue(tmp_path, monkeypatch
 def queued(monkeypatch, tmp_path):
     import update_driver
     from worktree_manager import __main__ as manager
+    from worktree_manager import engine_client
 
     seen = {}
     request = SimpleNamespace(
@@ -257,8 +264,147 @@ def queued(monkeypatch, tmp_path):
     monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: seen.update(worker=args))
     monkeypatch.setattr(update_driver, "wait", wait)
     monkeypatch.setattr(driver, "source_identity", lambda: {"repo": "synthetic-source", "ref": "fixed"})
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "")
     monkeypatch.setattr(manager, "_cmd_update", forbidden)
     return seen, request
+
+
+@pytest.mark.parametrize("observer", [
+    [], ["--detach", "--json"], ["--wait"], ["--supervised-debug"],
+])
+@pytest.mark.parametrize("project", [["--project", "example"], ["--project=example"]])
+def test_project_controller_routes_before_manager_source(queued, monkeypatch, observer, project):
+    from worktree_manager import engine_client
+
+    calls = []
+    monkeypatch.setattr(
+        engine_client, "get_value",
+        lambda project, key: "tools/update.py" if (project, key) == (
+            "example", "update-controller",
+        ) else pytest.fail("unexpected controller probe"),
+    )
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda project, args, **kwargs: calls.append((project, args, kwargs)) or 47,
+    )
+    monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
+    assert driver.cmd_update_request([*project, "--force", *observer]) == 47
+    assert calls == [(
+        "example", ["update", "--force", *observer],
+        {"headless": True} if "--detach" in observer else {},
+    )]
+
+
+@pytest.mark.parametrize("root_form", ["default", "relative"])
+def test_project_controller_handoff_freezes_manager_policy_root(
+    queued, monkeypatch, tmp_path, root_form,
+):
+    import os
+    from update_driver import RequestSpec
+    from update_driver.core import automatic_update_refusal
+    from worktree_manager import engine_client
+
+    home = tmp_path / "home"
+    caller = tmp_path / "caller"
+    home.mkdir()
+    caller.mkdir()
+    root = home / ".worktree-manager" if root_form == "default" else caller / "manager"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        "[maintenance]\nautomatic = false\n", encoding="utf-8",
+    )
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json"))
+    if root_form == "default":
+        monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    else:
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
+    seen = []
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+
+    def execute(_project, arguments, **_kwargs):
+        context = {
+            "WORKTREE_MANAGER_ROOT": os.environ.get("WORKTREE_MANAGER_ROOT", ""),
+            "COPILOT_EXTENSIONS_CONTEXT": os.environ["COPILOT_EXTENSIONS_CONTEXT"],
+        }
+        request = RequestSpec(
+            backend="engine", argv=tuple(arguments[1:]), cwd=str(caller),
+            context=tuple(context.items()),
+        )
+        seen.append((context, automatic_update_refusal(request)))
+        return 0
+
+    monkeypatch.setattr(engine_client, "run_engine_passthrough", execute)
+    assert driver.cmd_update_request(["--project", "example", "--auto"]) == 0
+    assert seen[0][0]["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
+    assert "maintenance.automatic is false" in seen[0][1]
+    assert os.environ.get("WORKTREE_MANAGER_ROOT") == (
+        None if root_form == "default" else "manager"
+    )
+
+
+def test_project_controller_preserves_explicit_manager_skip(queued, monkeypatch):
+    from worktree_manager import engine_client
+
+    calls = []
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda project, args, **kwargs: calls.append((project, args)) or 0,
+    )
+    assert driver.cmd_update_request(["--project", "example", "--no-manager", "--force"]) == 0
+    assert calls == [("example", ["update", "--no-manager", "--force"])]
+
+
+@pytest.mark.parametrize("project", [None, "missing"])
+def test_neutral_controller_probe_does_not_block_manager_update(queued, monkeypatch, project):
+    from worktree_manager import engine_client
+
+    def missing_project(*_args):
+        raise engine_client.EngineError("Could not resolve a project for 'get'.")
+
+    seen, _request = queued
+    monkeypatch.setattr(engine_client, "get_value", missing_project)
+    flags = ["--project", project] if project else []
+    assert driver.cmd_update_request(flags) == (1 if project else 6)
+    assert ("spec" in seen) is (project is None)
+
+
+def test_project_controller_routes_borrowed_request_before_manager_source(
+    queued, monkeypatch, tmp_path,
+):
+    import update_driver
+    from worktree_manager import engine_client
+
+    class Custody:
+        request_id = "synthetic-request"
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+    request = SimpleNamespace(
+        state="running",
+        spec=SimpleNamespace(
+            backend="manager", context=(), killswitch_path=None, cwd=str(tmp_path),
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
+    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda project, args, **kwargs: calls.append((project, args)) or 47,
+    )
+    monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
+    assert driver.cmd_update_request(["--project", "example", "--force"]) == 47
+    assert calls == [("example", ["update", "--force"])]
 
 
 def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):

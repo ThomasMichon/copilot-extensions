@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -16,6 +17,427 @@ from test_update_entry import update_entry_case as shared_update_entry_case
 update_entry_case = shared_update_entry_case
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows security/process contract")
+
+_CACHE_PROBE = (
+    "if '-c' in sys.argv:\n"
+    "    print(json.dumps(next(arg.split('=', 1)[1] for arg in sys.argv "
+    "if arg.startswith('pycache_prefix='))))\n"
+    "    raise SystemExit(0)\n"
+)
+
+
+def _use_real_probe_python(monkeypatch):
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"])
+
+
+@pytest.mark.parametrize("project_position", ["before", "after"])
+@pytest.mark.parametrize("front", ["global", "installed-global", "git-sh", "git-bash"])
+@pytest.mark.parametrize("runtime_source", ["marketplace", "git"])
+def test_configured_project_update_routes_before_manager_bootstrap(
+    update_entry_case, native_powershell, monkeypatch, project_position, front, runtime_source,
+):
+    tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
+    manager = home / ".worktree-manager"
+    manager.mkdir()
+    policy = (
+        '[runtime_source]\nchannel = "marketplace"\n'
+        if runtime_source == "marketplace" else
+        '[runtime_source]\nchannel = "exact"\n'
+        'repo = "https://example.invalid/tools.git"\nref = "' + ("a" * 40) + '"\n'
+    )
+    (manager / "config.toml").write_text(policy, encoding="utf-8")
+    runtime = home / ".agent-worktrees"
+    (runtime / "current-version").write_text("selected\n")
+    engine = tmp / "engine.py"
+    engine.write_text(
+        "import json, os, sys\n"
+        + _CACHE_PROBE +
+        "with open(os.environ['ENGINE_CALLS'], 'a', encoding='utf-8') as stream:\n"
+        "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if 'get' in sys.argv:\n"
+        "    print('tools/update.py')\n"
+        "    raise SystemExit(0)\n"
+        "with open(os.environ['ENGINE_ENV'], 'w', encoding='utf-8') as stream:\n"
+        "    json.dump({'msys_excl': os.environ.get('MSYS2_ARG_CONV_EXCL')}, stream)\n"
+        "raise SystemExit(47)\n",
+        encoding="utf-8",
+    )
+    command = tmp / "engine.cmd"
+    command.write_text(f'@"{sys.executable}" -I -S -B "{engine}" %*\n@exit /b %ERRORLEVEL%\n')
+    resolver = runtime / "bin" / "resolve-runtime.ps1"
+    resolver.write_text("$AwPy = '" + str(command).replace("'", "''") + "'\n")
+    monkeypatch.setenv("ENGINE_CALLS", str(tmp / "engine-calls.jsonl"))
+    monkeypatch.setenv("ENGINE_ENV", str(tmp / "engine-env.json"))
+    arguments = (
+        ["--project", "sample", "update", "--force", "--skip-modules", "a b"]
+        if project_position == "before"
+        else ["update", "--force", "--project", "sample", "--skip-modules", "a b"]
+    )
+    if front in ("global", "installed-global"):
+        if front == "installed-global":
+            user_bin = home / ".local" / "bin"
+            user_bin.mkdir(parents=True)
+            for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
+                shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
+            (runtime / "payload-dir").write_text(str(PLUGIN), encoding="utf-8")
+            entry_path = user_bin / "agent-worktrees.ps1"
+        else:
+            entry_path = PLUGIN / "bin" / "agent-worktrees.ps1"
+        entry = str(entry_path).replace("'", "''")
+        harness = tmp / "project-controller-entry.ps1"
+        quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments)
+        harness.write_text(
+            "function Invoke-WebRequest { throw 'Manager bootstrap was started' }\n"
+            f"$forward = @({quoted})\n"
+            f"& '{entry}' @forward\n"
+            "exit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
+        command = [native_powershell, "-NoProfile", "-File", str(harness)]
+    elif front == "git-sh":
+        monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_UPDATE_PAYLOAD", "0")
+        monkeypatch.setenv("MSYS2_ARG_CONV_EXCL", "*")
+        monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
+        command = [
+            native_powershell, "-NoProfile", "-File",
+            str(PLUGIN / "bin" / "agent-worktrees-update-entry.ps1"), *arguments,
+        ]
+    else:
+        from native_shell_support import ShellUnavailable, admit_native_bash, bash_path
+
+        try:
+            bash = admit_native_bash()
+        except ShellUnavailable as error:
+            pytest.skip(str(error))
+        monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
+        command = [
+            bash, bash_path(bash, PLUGIN / "bin" / "agent-worktrees"), *arguments,
+        ]
+    result = subprocess.run(
+        command, capture_output=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 47, result.stdout + result.stderr
+    calls = [
+        json.loads(line)
+        for line in (tmp / "engine-calls.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(calls) == 2, calls
+    assert calls[0][-4:] == ["--project", "sample", "get", "update-controller"]
+    assert calls[1][-len(arguments):] == arguments
+    assert json.loads((tmp / "engine-env.json").read_text(encoding="utf-8"))["msys_excl"] is None
+    assert (manager / "config.toml").read_text(encoding="utf-8") == policy
+
+
+@pytest.mark.parametrize("selection", ["old-engine", "unconfigured", "opt-out"])
+def test_project_controller_probe_preserves_manager_fallback(
+    update_entry_case, native_powershell, monkeypatch, selection,
+):
+    tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
+    runtime = home / ".agent-worktrees"
+    (runtime / "current-version").write_text("selected\n")
+    engine = tmp / "probe.py"
+    engine.write_text(
+        "import json, os, sys\n"
+        + _CACHE_PROBE +
+        "from pathlib import Path\n"
+        "Path(os.environ['PROBE_CALLED']).write_text('called')\n"
+        "raise SystemExit(2 if os.environ['PROBE_MODE'] == 'old-engine' else 0)\n",
+        encoding="utf-8",
+    )
+    command = tmp / "probe.cmd"
+    command.write_text(f'@"{sys.executable}" -I -S -B "{engine}" %*\n@exit /b %ERRORLEVEL%\n')
+    (runtime / "bin" / "resolve-runtime.ps1").write_text(
+        "$AwPy = '" + str(command).replace("'", "''") + "'\n",
+    )
+    monkeypatch.setenv("PROBE_CALLED", str(tmp / "probe-called"))
+    monkeypatch.setenv("PROBE_MODE", selection)
+    entry = str(PLUGIN / "bin" / "agent-worktrees.ps1").replace("'", "''")
+    harness = tmp / "fallback.ps1"
+    extra = "'--no-project-controller'" if selection == "opt-out" else ""
+    harness.write_text(
+        "function Invoke-WebRequest {\n"
+        "  param($Uri, $OutFile, [switch]$UseBasicParsing)\n"
+        "  [IO.File]::WriteAllText($OutFile, 'exit 23')\n"
+        "}\n"
+        f"& '{entry}' --project sample update {extra}\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        capture_output=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert (tmp / "probe-called").exists() is (selection != "opt-out")
+
+
+def test_namespaced_payload_controller_routes_before_manager_bootstrap(
+    update_entry_case, native_powershell, monkeypatch,
+):
+    tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
+    payload = tmp / "payload"
+    (payload / "bin").mkdir(parents=True)
+    (payload / "scripts" / "installation-context").mkdir(parents=True)
+    shutil.copy2(PLUGIN / "bin" / "agent-worktrees-update-entry.ps1", payload / "bin")
+    shutil.copy2(PLUGIN / "scripts" / "invoke-payload-runtime.ps1", payload / "scripts")
+    shutil.copy2(PLUGIN / "scripts" / "update_controller_probe.py", payload / "scripts")
+    for name in ("shell-caller-owned.ps1", "daemon_instance_runtime.pyz"):
+        shutil.copy2(
+            PLUGIN / "scripts" / "installation-context" / name,
+            payload / "scripts" / "installation-context" / name,
+        )
+    runtime = tmp / "namespaced-runtime"
+    runtime.mkdir()
+    context = tmp / "a" / "b" / "c" / "d" / "context.json"
+    context.parent.mkdir(parents=True)
+    context.write_text("{}", encoding="utf-8")
+    engine = tmp / "namespaced-engine.py"
+    engine.write_text(
+        "import json, os, sys\n"
+        "with open(os.environ['ENGINE_CALLS'], 'a', encoding='utf-8') as stream:\n"
+        "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if '-c' in sys.argv:\n"
+        "    print('cache')\n"
+        "    raise SystemExit(0)\n"
+        "if 'get' in sys.argv:\n"
+        "    print('tools/update.py')\n"
+        "    raise SystemExit(0)\n"
+        "raise SystemExit(47)\n",
+        encoding="utf-8",
+    )
+    command = tmp / "namespaced-engine.cmd"
+    command.write_text(f'@"{sys.executable}" -I -S -B "{engine}" %*\n@exit /b %ERRORLEVEL%\n')
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = '" + str(command).replace("'", "''") + "'\n",
+    )
+    (payload / "scripts" / "install.ps1").write_text("throw 'unexpected install'\n")
+    status = {
+        "status": "ready", "reason": "namespaced-active",
+        "actualMode": "namespaced", "desiredMode": "namespaced",
+        "activationGeneration": 1, "installGeneration": 2,
+        "runtimeRoot": str(runtime), "context": str(context),
+        "contextValidation": {"namespaceGeneration": 3, "generation": 2},
+    }
+    script = payload / "scripts" / "installation-context" / "installation-context.ps1"
+    script.write_text(
+        "param($Action,$PayloadRoot,$PluginId,$LegacyRoot,[switch]$WithContextValidation,"
+        "$ExpectedPluginId,$ExpectedPayloadRoot,$Context,$DurableHome)\n"
+        "'" + json.dumps(status).replace("'", "''") + "'\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(context))
+    monkeypatch.setenv("ENGINE_CALLS", str(tmp / "namespaced-engine-calls.jsonl"))
+    entry = str(payload / "scripts" / "invoke-payload-runtime.ps1").replace("'", "''")
+    harness = tmp / "namespaced-entry.ps1"
+    harness.write_text(
+        "function Invoke-WebRequest { throw 'Manager bootstrap was started' }\n"
+        f"& '{entry}' --project sample update --force\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        capture_output=True, timeout=40, **no_window_kwargs(),
+    )
+    assert result.returncode == 47, result.stdout + result.stderr
+    calls = [
+        json.loads(line)
+        for line in (tmp / "namespaced-engine-calls.jsonl").read_text(
+            encoding="utf-8",
+        ).splitlines()
+    ]
+    routed = [args for args in calls if "-m" in args]
+    assert len(routed) == 2, calls
+    assert routed[0][-4:] == ["--project", "sample", "get", "update-controller"]
+    assert routed[1][-4:] == ["--project", "sample", "update", "--force"]
+
+
+@pytest.mark.parametrize("front", ["shell", "driver"])
+def test_controller_probe_timeout_retires_its_descendants(
+    update_entry_case, native_powershell, monkeypatch, front,
+):
+    tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
+    helpers = PLUGIN.parents[1] / "libs" / "agent-procutil" / "tests"
+    monkeypatch.syspath_prepend(str(helpers))
+    from caller_owned_fixture import identity
+    from test_caller_owned_native import PinnedProcess
+
+    payload = tmp / "probe-payload"
+    (payload / "bin").mkdir(parents=True)
+    scripts = payload / "scripts"
+    (scripts / "installation-context").mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees"}', encoding="utf-8")
+    shutil.copy2(PLUGIN / "bin" / "agent-worktrees.ps1", payload / "bin")
+    entry = (PLUGIN / "bin" / "agent-worktrees-update-entry.ps1").read_text(encoding="utf-8")
+    assert entry.count("-TimeoutSeconds 30") == 1
+    (payload / "bin" / "agent-worktrees-update-entry.ps1").write_text(
+        entry.replace("-TimeoutSeconds 30", "-TimeoutSeconds 5"), encoding="utf-8",
+    )
+    shutil.copy2(PLUGIN / "scripts" / "update_controller_probe.py", scripts)
+    for name in ("shell-caller-owned.ps1", "daemon_instance_runtime.pyz"):
+        shutil.copy2(
+            PLUGIN / "scripts" / "installation-context" / name,
+            scripts / "installation-context" / name,
+        )
+    runtime = home / ".agent-worktrees"
+    (runtime / "current-version").write_text("selected\n", encoding="utf-8")
+    slow = tmp / "slow-engine.py"
+    slow.write_text(
+        "import json, os, subprocess, sys, time\n"
+        + _CACHE_PROBE +
+        "from pathlib import Path\n"
+        "sys.path.insert(0, os.environ['PROBE_TEST_HELPERS'])\n"
+        "from caller_owned_fixture import identity\n"
+        "child = subprocess.Popen([sys.executable, '-I', '-S', '-c', "
+        "'import time; time.sleep(30)'], creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        "root = Path(os.environ['PROBE_TEST_ROOT'])\n"
+        "pending = root / 'pending.json'\n"
+        "pending.write_text(json.dumps([identity(), identity(child.pid)]), encoding='utf-8')\n"
+        "pending.replace(root / 'ready.json')\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    command = tmp / "slow-engine.cmd"
+    command.write_text(f'@"{sys.executable}" -I -S -B "{slow}" %*\n@exit /b %ERRORLEVEL%\n')
+    (runtime / "bin" / "resolve-runtime.ps1").write_text(
+        "$AwPy = '" + str(command).replace("'", "''") + "'\n",
+    )
+    monkeypatch.setenv("PROBE_TEST_HELPERS", str(helpers))
+    monkeypatch.setenv("PROBE_TEST_ROOT", str(tmp))
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "-disabled-for-test")
+    if front == "shell":
+        argv = [
+            native_powershell, "-NoProfile", "-File", str(payload / "bin" / "agent-worktrees.ps1"),
+            "--project", "sample", "update",
+        ]
+    else:
+        harness = tmp / "driver-probe.py"
+        paths = [str(Path(entry).resolve()) for entry in sys.path if entry]
+        harness.write_text(
+            "import argparse, sys\n"
+            f"sys.path[:0] = {paths!r}\n"
+            "from agent_worktrees import config, project_update_controller as controller\n"
+            "config.set_active_project('sample')\n"
+            f"controller._probe_command = lambda _project: [sys.executable, '-I', '-S', '-B', {str(slow)!r}]\n"
+            "try:\n"
+            f"    controller.probe_for_submission(argparse.Namespace(), cwd={str(tmp)!r}, timeout=5)\n"
+            "except ValueError as error:\n"
+            "    print(error, file=sys.stderr)\n"
+            "    raise SystemExit(124 if 'probe timed out' in str(error) else 1)\n"
+            "raise SystemExit(1)\n",
+            encoding="utf-8",
+        )
+        argv = [sys.executable, "-I", "-B", str(harness)]
+    process = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+    )
+    pins = []
+    try:
+        deadline = time.monotonic() + 10
+        ready = tmp / "ready.json"
+        while not ready.is_file() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.is_file(), "the controller probe did not start its descendants"
+        pins = [PinnedProcess(row) for row in json.loads(ready.read_text(encoding="utf-8"))]
+        stdout, stderr = process.communicate(timeout=15)
+        assert process.returncode == 124, stdout + stderr
+        deadline = time.monotonic() + 3
+        while not all(pin.gone() for pin in pins) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert all(pin.gone() for pin in pins), "controller probe descendants survived timeout"
+    finally:
+        if process.poll() is None:
+            parent = PinnedProcess(identity(process.pid))
+            try:
+                parent.kill()
+            finally:
+                parent.close()
+            process.wait(timeout=5)
+        for pin in pins:
+            try:
+                pin.kill()
+            finally:
+                pin.close()
+        process.stdout.close()
+        process.stderr.close()
+
+
+@pytest.mark.parametrize("observer", ["default", "supervised"])
+@pytest.mark.parametrize("no_manager", [False, True])
+def test_native_entry_executes_real_controller_under_driver_custody(
+    update_entry_case, native_powershell, monkeypatch, observer, no_manager,
+):
+    from agent_procutil.owned_process import run_installation_owned
+    from agent_procutil.daemon_instances import REGISTRY_ENV, daemon_test_lifecycle
+
+    tmp, home, _resolver = update_entry_case
+    _use_real_probe_python(monkeypatch)
+    runtime = home / ".agent-worktrees"
+    (runtime / "current-version").write_text("selected\n")
+    (runtime / "bin" / "resolve-runtime.ps1").write_text(
+        "$AwPy = '" + sys.executable.replace("'", "''") + "'\n",
+    )
+    anchor = tmp / "project"
+    config = anchor / ".copilot-extensions" / "agent-worktrees"
+    config.mkdir(parents=True)
+    controller = anchor / "tools" / "update.py"
+    controller.parent.mkdir()
+    receipt = tmp / "controller-receipt.json"
+    controller.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "from update_driver import borrowed_custody\n"
+        "with borrowed_custody() as custody:\n"
+        "    custody.assert_owned()\n"
+        f"    Path({str(receipt)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+        "print('controller completed')\n",
+        encoding="utf-8",
+    )
+    (config / "config.yaml").write_text(json.dumps({
+        "update_controller": {"windows": "tools/update.py"},
+    }), encoding="utf-8")
+    (runtime / "projects.yaml").write_text(json.dumps({
+        "projects": {"sample": {"anchor": str(anchor)}},
+    }), encoding="utf-8")
+    (runtime / "repos.yaml").write_text(json.dumps({
+        "repos": {"sample": {"class": "worktree", "windows": str(anchor)}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    entry = str(PLUGIN / "bin" / "agent-worktrees.ps1").replace("'", "''")
+    harness = tmp / "real-controller-entry.ps1"
+    mode = "--supervised-debug" if observer == "supervised" else ""
+    skip = "--no-manager" if no_manager else ""
+    harness.write_text(
+        "function Invoke-WebRequest { throw 'Manager bootstrap was started' }\n"
+        f"& '{entry}' --project sample update {mode} {skip} --force\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    registry = tmp / "daemon-instances"
+    cleanup = []
+    with daemon_test_lifecycle(
+        owner="project-controller-entry-test", registry_root=registry, cleanup_results=cleanup,
+    ) as overlay:
+        for key, value in overlay.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.setenv(REGISTRY_ENV, str(registry))
+        monkeypatch.chdir(anchor)
+        result = run_installation_owned(
+            [native_powershell, "-NoProfile", "-File", str(harness)],
+            timeout=90, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+        )
+    assert all(item.status != "held" for item in cleanup), cleanup
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert json.loads(receipt.read_text(encoding="utf-8")) == (
+        (["--no-manager"] if no_manager else []) + ["--force"]
+    )
+    assert "controller completed" in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(("front", "available"), [
@@ -41,6 +463,7 @@ def test_selected_update_operation_bypasses_native_repair_and_implicit_provision
     capture = tmp / "phase-capture.py"
     capture.write_text(
         "import json, os, sys\n"
+        + _CACHE_PROBE +
         "with open(os.environ['PHASE_ARGUMENTS'], 'w') as stream:\n"
         "    json.dump(sys.argv[1:], stream)\n"
         "raise SystemExit(29)\n",

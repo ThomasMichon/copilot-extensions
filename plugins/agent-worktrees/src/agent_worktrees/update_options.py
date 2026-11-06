@@ -17,6 +17,10 @@ def add_update_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--auto", action="store_true", help="Automatic update: honor the automatic-update hold (default: manual, not forced)")
     p.add_argument("--target", metavar="PLUGIN", help="Update only this installed plugin; no Manager, anchors or unrelated components")
     p.add_argument("--inventory", action="store_true", help="Read installation inventory and supported update contract without installing")
+    p.add_argument(
+        "--no-project-controller", action="store_true",
+        help="Use the standalone suite updater instead of the configured project controller",
+    )
     p.add_argument("--runtime-sources", metavar="JSON", help=argparse.SUPPRESS)
     p.add_argument(
         "--phase", choices=UPDATE_PHASES,
@@ -68,6 +72,8 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
     flags: list[str] = []
     if getattr(args, "auto", False):
         flags.append("--auto")
+    if getattr(args, "no_project_controller", False):
+        flags.append("--no-project-controller")
     if getattr(args, "target", None) is not None:
         flags += ["--target", args.target]
     if getattr(args, "runtime_sources", None) is not None:
