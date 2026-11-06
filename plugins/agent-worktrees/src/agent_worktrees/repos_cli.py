@@ -59,6 +59,8 @@ def _repos_usage() -> None:
     print("                                      Native Configuration inspection and local preference API")
     print("  authentication inspect --context-project NAME --repository NAME [--json]")
     print("                                      Read-only selected GitHub account and API observations")
+    print("  registration inspect --anchor PATH --default-name NAME")
+    print("                                      Read-only unique project/exposure inspection (versioned JSON)")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
     print("  account-for [owner|owner/name|name] Print the resolved gh login (exit 1 if none)")
@@ -180,6 +182,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     if sub == "authentication":
         from .repos_authentication import command
+
+        return command(rest)
+
+    if sub == "registration":
+        from .repos_registration_inspect import command
 
         return command(rest)
 

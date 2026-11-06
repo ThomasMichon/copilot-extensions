@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh qualified HTTP-52 closure evidence for the native registration inspection source.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

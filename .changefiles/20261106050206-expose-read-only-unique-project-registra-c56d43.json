@@ -1,0 +1,9 @@
+{
+  "comment": "Expose read-only unique project registration and exposure inspection without changing registry state.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
