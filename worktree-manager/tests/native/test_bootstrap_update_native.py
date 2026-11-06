@@ -274,7 +274,7 @@ def bootstrap_source(tmp_path_factory):
         "runtime_launchers", "self_install_recovery", "mux_file_lock",
         "engine_client", "agent_plugin_runtime", "picker_review", "engine_posix_process",
         "engine_environment", "worktree_rows_contract", "worktree_observation_contract",
-        "update_orchestration", "update_events",
+        "update_orchestration", "update_events", "project_update_controller",
     ):
         shutil.copy2(SOURCE / "worktree-manager" / "src" / "worktree_manager" / f"{name}.py", package)
     for name in ("bootstrap.ps1", "bootstrap.sh"):
