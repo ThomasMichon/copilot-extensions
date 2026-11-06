@@ -4244,7 +4244,7 @@
         "tools/promotion_unit_tests/test_gh_account_prerequisite.py": "2119a0f2a99998eb02916fe8254382e9d776567851404ecf970999c19cbeada9",
         ".devcontainer/trusted-harness-base/build.py": "add184b7336beabbbcdcb77e39935f42280b7ce45fd2b6084168c34a21601e92",
         ".devcontainer/trusted-harness-base/install.py": "967c4dd76ff3e4b21da251149177ba7511a5776e4786ab9e051acdcaf1503b98",
-        ".devcontainer/trusted-harness-base/tests/test_contract.py": "646fe2b347ad71a377263444baaf0a3d80de994fc593a638bd43d28877441198",
+        ".devcontainer/trusted-harness-base/tests/test_contract.py": "3674e7e0b3f7fdb6b95260b28d78c9a416195735692e9ab8a5e389960015aced",
         "fleet-manager/src/fleet_manager/__init__.py": "77743b7e007c45bfd4b89c830ddc8ca3030758f739d3451f6efb7e1f20eca02d",
         "fleet-manager/src/fleet_manager/artifact_staging.py": "8d520c47ae422d475afe19f44071261152d4ad0e2206ecf81d129f0a2c18c9a7",
         "fleet-manager/src/fleet_manager/artifacts.py": "3d8233f1994c6620b55a664e4c0b6b944beb54263c415be38a22f5af00c5b10d",
