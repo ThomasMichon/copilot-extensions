@@ -100,14 +100,14 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   chart from real existing sink output; preserve loss, invalid and missing data.
 - [x] Prove the existing producer/configured sink -> file -> report/chart
   consumer flow, not only pure aggregation functions.
-- [ ] Pass targeted tests, required review/CI and merge; update reality docs.
+- [x] Pass targeted tests, required review/CI and merge; update reality docs.
 
 ### Phase 3 - Adopter default configuration, no activation
-- [ ] Provide the supported configuration-only setup contract, preserving
+- [x] Provide the supported configuration-only setup contract, preserving
   pre-existing custom sinks and selecting owner-resolved local namespaces.
-- [ ] Have the adopter land its versioned defaults and configure the currently
+- [x] Have the adopter land its versioned defaults and configure the currently
   visible selected Windows machines through existing owners.
-- [ ] Record configured, already-capturing, unavailable and pending-activation
+- [x] Record configured, already-capturing, unavailable and pending-activation
   outcomes separately. Do not reload or restart a running service.
 
 ### Phase 4 - Core preference propagation
@@ -135,9 +135,9 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 
 - [ ] Source: strict bounded input, mixed schema/timestamp units, malformed and
   partial records, tail rotation, loss/unknown accounting and output privacy.
-- [ ] Consumer: real retained sink output reaches the normal report command;
+- [x] Consumer: real retained sink output reaches the normal report command;
   charts reflect observations without inventing uptime or unobserved zeroes.
-- [ ] Statistics: group homogeneous stages, show population/coverage, preserve
+- [x] Statistics: group homogeneous stages, show population/coverage, preserve
   absent durations, and do not qualify unsupported p99 or causal claims.
 - [ ] Operations: no producer-side extra I/O, network, process or writer; measure
   report cost and bound storage, scan work, runtime and scheduled overlap.
@@ -145,7 +145,7 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   including a live process with an unresponsive SSH path and an impaired carrier.
 - [ ] Platforms: portable unit contracts plus isolated Windows/Linux native
   one-shot, scheduling, headlessness and cleanup qualification before enrollment.
-- [ ] Deployment: default configuration round-trip, custom-sink preservation,
+- [x] Deployment: default configuration round-trip, custom-sink preservation,
   real readback, no running-service activation and explicit unavailable hosts.
 - [ ] Preferences: separate typed input, permitted settings only, existing
   validation/precedence and local authority, with visible conflicts rather than
@@ -190,3 +190,23 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   executed in isolated state; native service/carrier activation was not exercised.
 - Ruff F/E9, install contracts, documentation consistency and whitespace pass.
   Code review, required CI, source merge and adopter configuration remain open.
+
+### 2026-11-05 - First implementation merged; configuration-only adoption
+- #10888 merged as `289cb49960c174e7037ea6993c5f8491f562d9b7` after current-head
+  Copilot approval, resolved feedback and green required CI. Review corrections
+  preserve standalone malformed/partial coverage, absolute UTC context and all
+  actual task state transitions without admitting metadata-only events.
+- The final focused report/native packet passed 21 cases. The earlier combined
+  CLI/restore packet passed 37; shared-contract preparation passed 58 tests.
+  #10894 fixed the independently exposed missing HTTP-52 preparation through
+  the existing exact-checkpoint owner, without weakening contract verification.
+- The adopter landed its default declarations and completed the selected
+  Windows configuration-only cohort through the existing setup owner. Independent
+  readback distinguished retained configuration, pre-existing state, unavailable
+  targets and unknown running capture. No service activation, schedule or
+  carrier publication was performed. Exact private deployment details are not
+  part of this public artifact.
+- Phase 4 is next: refine the supported core-preference exchange through the
+  existing configuration engine. Phase 5 retains probe/carrier/native
+  qualification and its explicit activation gate. The effort remains Active;
+  source release availability and installed report adoption are not inferred.
