@@ -1,0 +1,9 @@
+{
+  "comment": "Supply the declared dependency to the isolated Windows Resume fixture",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
