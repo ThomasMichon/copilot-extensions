@@ -94,7 +94,7 @@ will be relabeled as native acceptance.
   driver/hook lane rather than trusting flags or descriptors alone.
 
 ### Phase 4 - Merge and resolution
-- [ ] Complete documentation, contract and performance-impact assessments;
+- [x] Complete documentation, contract and performance-impact assessments;
   land the implementation after review and required CI.
 - [ ] Observe release and any authorized installed adoption needed for the
   acceptance claim; retain uncompleted deployment gates explicitly.
@@ -274,3 +274,28 @@ gap, with no new sandbox, process interception, service, or security guarantee.
   before choosing that path, retaining colon forms and non-target values.
   Regressions cover option-before-path writes and read-only values across
   worktree, reference and delegated postures.
+
+### 2026-11-06 - Implementation merged
+- Implementation #10800 merged as `c92c0fa78a6e045670cb32c9519829c7b10d6af6`
+  after a current-head Copilot review with zero open findings and successful
+  required CI. The option-order packet passed 309 tests and touched-Python
+  lint; generated-hook, unit-manifest and module-cap checks also passed.
+- Release promotion, the authorized current-user installed update and a fresh
+  installed five-control native comparison remain open. The coordination
+  issue and this effort remain active until those acceptance gates resolve.
+- Release run `42142292967` failed its required Windows Resume consumer setup
+  before executing tests. The editable dependency installation exits nonzero;
+  the missing native evidence upload is secondary. Existing issue #10830 owns
+  this blocker, now claimed for diagnosis without weakening or bypassing the
+  gate. Development-checkout setup passes; candidate-layout reproduction is
+  the next diagnostic check, not installed acceptance.
+- A disposable materialized Manager/Bridge pair reproduced conflicting local
+  URLs for their separate vendored `agent-update-driver` copies. The test
+  runner now resolves each consumer graph in a separate retained installation
+  transaction, preserving Bridge's test dependencies and failing preparation
+  without a cache stamp if its supplemental install fails.
+- Twenty-two focused preparation regressions and lint pass. The corrected
+  runner prepared both real materialized payloads in a fresh Python 3.12
+  environment; `uv pip check` confirms all 63 installed packages are compatible.
+  The full native release gate and installed write-guidance acceptance remain
+  open; local setup is not either of those results.

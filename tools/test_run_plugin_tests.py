@@ -724,7 +724,8 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
     assert runner._dep_fingerprint("agent-dispatch") != before
 
 
-def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatch):
+@pytest.mark.parametrize("bridge_fails", [False, True])
+def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatch, bridge_fails):
     manager = tmp_path / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -743,13 +744,25 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
         runner.subprocess, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0),
     )
-    monkeypatch.setattr(
-        runner, "run_uv_install", lambda uv, arguments, **kwargs: calls.append((arguments, kwargs)),
-    )
-    runner._ensure_venv("worktree-manager", "fixture-uv", reinstall=False)
-    arguments, options = calls[0]
+    def install(uv, arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        if kwargs["cwd"] == bridge and bridge_fails:
+            raise subprocess.CalledProcessError(1, ["fixture-uv", *arguments])
+
+    monkeypatch.setattr(runner, "run_uv_install", install)
+    if bridge_fails:
+        with pytest.raises(subprocess.CalledProcessError):
+            runner._ensure_venv("worktree-manager", "fixture-uv", reinstall=False)
+        assert not (runner.VENV_ROOT / "worktree-manager" / ".dep-fingerprint").exists()
+    else:
+        runner._ensure_venv("worktree-manager", "fixture-uv", reinstall=False)
+    assert len(calls) == 2
+    manager_arguments, manager_options = calls[0]
+    assert str(bridge) not in manager_arguments
+    assert manager_options["cwd"] == manager
+    arguments, options = calls[1]
     assert arguments[arguments.index(str(bridge)) - 1] == "-e"
-    assert options["cwd"] == manager and options["trusted_source_roots"] == (tmp_path,)
+    assert options["cwd"] == bridge and options["trusted_source_roots"] == (tmp_path,)
     assert "agent-bridge" not in (manager / "pyproject.toml").read_text()
 
 
