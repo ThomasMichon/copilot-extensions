@@ -331,6 +331,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed merge #10936 and complete actual #5898 receiving/readback
+before #7962's audited `NOT_PLANNED` tracking retirement. Its pending
+human/native/release/explicit-rollout work and every owner remain.
+Six new inflow originals are substantively retained, not closed on historical
+source, pending PRs or similarity. Two identical complete nine-page23:48 PST
+scans measure826 whole OPEN:548 creator-eligible,278 excluded,
+557 original-cohort and269 inflow. Verified dispositions are984,
+still97 above fixed729; the campaign remains Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records the actual complete #6812/#6030 receiving receipts and audited
 `NOT_PLANNED` retirement of #5703/#7305/#6424/#6681 tracking. Original
 descriptions, assignments, unfinished native/installed acceptance and every
