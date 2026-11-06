@@ -18,12 +18,14 @@ from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 from agent_procutil.owned_process import OwnedCleanupError, _run_owned, run_caller_owned
 from update_telemetry.human import current_operation
 from plugin_resolve.execution import (
+    GIT_REPOSITORY_SELECTORS,
     execution_environment,
     execution_executable,
     windows_batch_command,
 )
 from plugin_resolve.inventory import inventory_paths
 from plugin_resolve.payload import plugin_manifest
+from plugin_resolve.plugin_auth import plugin_management_environment, redact_plugin_credentials
 from plugin_resolve.preparation import _failure
 from plugin_resolve.reflection import identity
 from plugin_resolve.registration import _settings_document, strict_json
@@ -41,10 +43,6 @@ _REFUSAL = re.compile(
     r"\b(?:WinError\s+|os\s+error\s+)5\b|\b(?:CERT|ERR_TLS|ERR_SSL)_",
     re.IGNORECASE,
 )
-_GIT_SELECTORS = {
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-}
 _IDENTITY_FIELDS = ("sourceFingerprint", "marketplaceId", "pluginId", "source", "payloadRoot")
 _NATIVE_EXEC = (
     "import json,os,sys;r=json.load(sys.stdin);os.chdir(r['cwd']);"
@@ -320,8 +318,10 @@ def refresh_registered_origin(
             raise ValueError("Registered source definition or identity changed")
         return selected
 
+    child = dict(environment)
     try:
         timeout = acquisition_timeout(environment)
+        deadline = monotonic() + timeout
         revalidate()
         registrations = copy.deepcopy(_registrations(origin.copilot_home))
         verb = "update" if _ledger(origin.copilot_home, origin.source, origin.payload) else "install"
@@ -329,8 +329,11 @@ def refresh_registered_origin(
             raise ValueError("Native Copilot command must be nonempty")
         invocation_cwd = Path.cwd()
         child = execution_environment({
-            key: value for key, value in environment.items() if key not in _GIT_SELECTORS
+            key: value for key, value in environment.items() if key not in GIT_REPOSITORY_SELECTORS
         }, invocation_cwd)
+        child = plugin_management_environment(
+            origin.definition, child, invocation_cwd, timeout=deadline - monotonic(),
+        )
         child["COPILOT_HOME"] = str(origin.copilot_home)
         child["COPILOT_AUTO_UPDATE"] = "false"
         actual_home, _cache = inventory_paths(invocation_cwd, child)
@@ -347,7 +350,6 @@ def refresh_registered_origin(
         scratch = tempfile.TemporaryDirectory(prefix="engine-origin-")
         retained = False
         try:
-            deadline = monotonic() + timeout
             for attempt in range(_SHARING_ATTEMPTS):
                 if attempt:
                     revalidate()
@@ -392,7 +394,7 @@ def refresh_registered_origin(
             if not retained:
                 scratch.cleanup()
         if result.returncode:
-            raise _failure("Native origin acquisition", origin.source, result)
+            raise _failure("Native origin acquisition", origin.source, result, environment=child)
         revalidate()
         if _registrations(origin.copilot_home) != registrations:
             raise ValueError("Native acquisition changed marketplace registrations")
@@ -423,6 +425,10 @@ def refresh_registered_origin(
             raise ValueError("Acquired payload provenance differs from selected origin")
         return actual
     except subprocess.TimeoutExpired as error:
+        if isinstance(error.output, (str, bytes)):
+            error.output = redact_plugin_credentials(error.output, child)
+        if isinstance(error.stderr, (str, bytes)):
+            error.stderr = redact_plugin_credentials(error.stderr, child)
         detail = f"Native acquisition timed out after {error.timeout:g} seconds"
         diagnostics = [str(_error("Registered origin refresh", origin.source, detail))]
         for channel, value in (("stdout", error.stdout), ("stderr", error.stderr)):
@@ -432,6 +438,7 @@ def refresh_registered_origin(
                 diagnostic = _failure(
                     channel, origin.source,
                     SimpleNamespace(returncode=1, stdout="", stderr=value),
+                    environment=child,
                 )
                 diagnostics.append(str(diagnostic)[:190])
         raise RuntimeError("\n".join(diagnostics)) from error

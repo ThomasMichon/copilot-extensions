@@ -792,9 +792,13 @@ def _update_modules(
 
 def _refresh_module_payload(name: str) -> None:
     """Preserve the best-effort refresh contract of standalone module callers."""
+    from .installer_run import InstallerLaunchError
+
     try:
-        result = subprocess.run(
+        result = _auth.run_acquisition(
+            subprocess.run,
             [_resolve_copilot() or "copilot", "plugin", "update", f"{name}@copilot-extensions"],
+            marketplace="copilot-extensions",
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
@@ -805,6 +809,10 @@ def _refresh_module_payload(name: str) -> None:
                 f"Plugin update for {name} returned non-zero "
                 "(continuing with installed version)"
             )
+    except InstallerLaunchError:
+        output.warn(
+            f"Plugin authentication preparation for {name} failed -- continuing with installed version"
+        )
     except OSError as error:
         output.warn(f"{describe_copilot_spawn_error(error)} -- skipping plugin refresh")
     except subprocess.TimeoutExpired:
