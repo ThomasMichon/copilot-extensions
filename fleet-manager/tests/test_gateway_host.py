@@ -243,6 +243,89 @@ def test_ssh_host_preflight_is_inert_and_keeps_provider_token_renewal(tmp_path):
     assert not (root / host.STATE).exists()
 
 
+@pytest.mark.parametrize("scope", ["config", "fragments", "authorization", "sources", "locks"])
+def test_ssh_host_state_is_outside_all_writer_and_derived_scopes(tmp_path, scope):
+    from agent_ssh import gateway_profile, ssh_profile
+
+    root = tmp_path / (
+        gateway_profile._SOURCE_DIR if scope == "sources"
+        else ssh_profile._LOCK_DIR_NAME if scope == "locks" else "i"
+    )
+    selection, value, _, _ = ssh_selected(root)
+    value["state_dir"] = str(tmp_path / "consumer-lease")
+    if scope == "config":
+        value["ssh_config"] = str(root / host.STATE / gateway_host_start.PENDING)
+    elif scope == "fragments":
+        value["config_d"] = str(root / host.STATE / "config.d")
+    elif scope == "authorization":
+        value["authorization_dir"] = str(root / host.STATE / "authorization")
+    else:
+        value["config_d"] = str(tmp_path / "config.d")
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(ValueError, match="outside local writer scopes"):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+@pytest.mark.parametrize("failure", ["missing", "empty", "invalid-utf8", "overlong"])
+def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_path, failure):
+    from fleet_manager.gateway_contract import GatewayError
+    from test_ssh_machine import configured
+
+    root = tmp_path / "i"
+    selection, _, _, _ = ssh_selected(root)
+    value, _, _ = configured(root)
+    token = Path(value["access_token_file"])
+    if failure == "missing":
+        token.unlink()
+    else:
+        token.write_bytes({
+            "empty": b" \n", "invalid-utf8": b"\xff", "overlong": b"x" * 8193,
+        }[failure])
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(GatewayError):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
+def test_ssh_host_refuses_config_replacement_during_preparation_before_consumer(tmp_path, monkeypatch):
+    from fleet_manager import ssh_machine
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    private_directory(root / host.STATE)
+    slot = root / "versions" / "fixture-generation"
+    slot.mkdir(parents=True)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    monkeypatch.setattr(host, "runtime_custody", lambda _root: nullcontext(slot))
+    nonce = "3" * 32
+    host.write_private(root / host.STATE / gateway_host_start.PENDING, {
+        "generation": slot.name, "token": nonce,
+    })
+    original = host.prepare
+
+    def replaced(root, selected):
+        prepared = original(root, selected)
+        host.write_private(Path(selected["configuration"]), value | {
+            "gateway_origin": "https://other.example.test",
+        })
+        return prepared
+
+    async def forbidden(*_args, **_kwargs):
+        pytest.fail("changed startup inputs opened the SSH consumer")
+
+    monkeypatch.setattr(host, "prepare", replaced)
+    monkeypatch.setattr(ssh_machine, "run", forbidden)
+    with pytest.raises(PlanError, match="inputs changed before admission"):
+        asyncio.run(gateway_host_runtime.run(root, nonce))
+    assert not (root / host.STATE / host.RUNTIME).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
 @pytest.mark.parametrize("denied", [False, True])
 @pytest.mark.parametrize("held", [False, True])
 def test_ssh_host_waits_for_complete_directory_and_settles_owned_consumer(tmp_path, monkeypatch, denied, held):

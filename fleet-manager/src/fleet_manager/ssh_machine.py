@@ -67,7 +67,9 @@ def prepare(config: SSHMachineConfig):
     """Validate the selected local writer and credentials without network or writes."""
     config = SSHMachineConfig.from_dict(config.to_dict())
     accept = _consumer(config)
-    from .credential_references import load_service_credentials, read_credential_reference
+    from .credential_references import (
+        load_service_credentials, read_access_token_reference, read_credential_reference,
+    )
     from .gateway_contract import GatewayError
     from .gateway_service_caller import ServiceCaller
     from .ssh_directory import SSHDirectoryClient
@@ -78,6 +80,7 @@ def prepare(config: SSHMachineConfig):
             proof_key_file=absolute(value["proof_key_file"]),
             access_token_file=absolute(value["access_token_file"]),
         )
+        read_access_token_reference(credentials.access_token_file)
         authentication = {
             "access_token_callback": credentials.access_token, "proof_key": credentials.proof_key,
         }

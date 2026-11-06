@@ -153,8 +153,10 @@ async def _run_ssh(root, nonce, slot, selection):
     from .ssh_machine import _settle, run
 
     require_launch(root, slot.name, nonce)
-    config, _ = host.prepare(root, selection)
     startup = host.startup_digest(selection)
+    config, _ = host.prepare(root, selection)
+    if host.startup_digest(selection) != startup:
+        raise PlanError("SSH startup inputs changed before admission")
     birth = process_start_time(os.getpid())
     if birth is None:
         raise PlanError("SSH host native identity is unavailable")

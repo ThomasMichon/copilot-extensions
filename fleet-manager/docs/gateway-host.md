@@ -78,6 +78,9 @@ token/proof or v2 machine-key meaning and provider-owned references. Preflight
 validates the existing local writer scopes and credentials without network,
 lease creation or profile writes. The SSH lease and lifecycle state must be
 separate. No enrollment, credential acquisition or materialization occurs.
+Host lifecycle state is also excluded from all direct and derived writer
+destinations. Token-mode preflight reads and validates the current bounded UTF-8
+token without retaining it; later admissions still reread the provider reference.
 Capability output additively advertises both host configuration versions and
 each role's required extras. Older strict v1 host readers refuse v2; rollback
 must not translate it into Gateway serving or foreground-only success.
@@ -110,6 +113,9 @@ watch and its local lease before releasing the installed runtime retention.
 An unchanged install reuses the same ready owner. Key, local policy, target-login
 identity, CA or configuration changes invalidate reuse; token renewal stays with
 the existing per-admission reference reader and is not a host restart trigger.
+Startup fingerprints bracket input preparation and are rechecked before opening
+the consumer and after convergence, so a replaced configuration cannot be
+published as a different consumer's readiness.
 Selected-generation replacement still observes the existing exact stop and
 lease exclusion. Before opening a watch, the same incoming process allows up
 to the existing ten-second cold-rebind window for an outgoing lease to settle;

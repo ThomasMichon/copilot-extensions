@@ -417,6 +417,19 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
                 (updated_application / "application.json").read_text()
             )["construction"]["runtime_version"]
             shutil.copytree(updated_application, updated_slot)
+            token_candidate = {
+                key: selected for key, selected in value.items() if key != "authentication"
+            } | {"version": 1, "access_token_file": str(root / "absent-token")}
+            for token in (None, b"\xff"):
+                if token is not None:
+                    Path(token_candidate["access_token_file"]).write_bytes(token)
+                host.write_private(Path(selection["configuration"]), token_candidate)
+                failed = await invoke(updated_slot, "install")
+                assert failed.returncode != 0
+                assert (root / "current-version").read_text().strip() == first.name
+                assert (root / "last-known-good").read_text().strip() == first.name
+                host.write_private(Path(selection["configuration"]), value)
+                assert (await status(first))["pid"] == initial["pid"]
             host.write_private(Path(selection["configuration"]), value | {
                 "proof_key_file": str(root / "absent-proof.pem"),
             })

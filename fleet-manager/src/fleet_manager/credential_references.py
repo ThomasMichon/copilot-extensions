@@ -22,6 +22,14 @@ def read_credential_reference(path: Any) -> bytes:
     return raw
 
 
+def read_access_token_reference(path: Path) -> str:
+    raw = read_credential_reference(path)
+    try:
+        return text(raw.decode("utf-8").strip(), 8192)
+    except UnicodeError:
+        raise GatewayError("credential-reference-unavailable") from None
+
+
 @dataclass(frozen=True)
 class ServiceCredentials:
     """An external proof key and fresh access-token source for ServiceConnector.
@@ -36,11 +44,7 @@ class ServiceCredentials:
 
     async def access_token(self) -> str:
         from ._service_caller_native import run_native
-        raw = await run_native(read_credential_reference, self.access_token_file)
-        try:
-            return text(raw.decode("utf-8").strip(), 8192)
-        except UnicodeError:
-            raise GatewayError("credential-reference-unavailable") from None
+        return await run_native(read_access_token_reference, self.access_token_file)
 
 
 _SOURCE_ACCESS_TOKEN_IMPLEMENTATION = ServiceCredentials.access_token

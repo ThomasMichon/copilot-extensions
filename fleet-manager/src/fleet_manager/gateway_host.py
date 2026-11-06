@@ -183,6 +183,13 @@ def prepare(root: Path, selection: dict) -> tuple[object, object]:
         host_state = (root / STATE).resolve()
         if state.is_relative_to(host_state) or host_state.is_relative_to(state):
             raise PlanError("SSH client lease must be separate from host lifecycle state")
+        from agent_ssh.gateway_directory import validate_consumer_state
+
+        value = config.to_dict()
+        validate_consumer_state(
+            host_state, config_d=Path(value["config_d"]), ssh_config=Path(value["ssh_config"]),
+            authorization_dir=Path(value["authorization_dir"]) if value["authorization_dir"] else None,
+        )
         prepare_ssh(config)
         return config, None
     from .gateway_enrollment import EnrollmentPolicy

@@ -65,6 +65,8 @@ changed. Profiles retain the existing route/pin and unrelated-fragment guards.
 In v1, the external PEM proof key and access-token callback retain their existing
 meaning. Access-token contents are reread on each actual admission through the
 existing bounded credential reference.
+Preparation validates that same token's readability and bounded text format,
+without caching it or treating token claims as admission authority.
 
 In v2, replace `access_token_file` with this explicit record:
 
