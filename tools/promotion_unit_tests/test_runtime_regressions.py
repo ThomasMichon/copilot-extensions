@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -76,6 +77,52 @@ def test_native_batch_retains_session_scope_and_valid_calls():
         "cwd": "/synthetic/project", "toolCallId": "write",
         "toolName": "apply_patch", "toolArgs": "patch",
     }]
+
+def test_strict_native_batch_keeps_canonical_scope_and_arguments():
+    payload = {
+        "sessionId": "synthetic-session", "cwd": "/synthetic/cwd",
+        "workingDirectory": "/synthetic/workspace", "tool_input": {"path": "outer"},
+        "toolCalls": [{"id": "write", "name": "edit", "args": '{"path":"target"}'}],
+    }
+    assert forms.tool_events(payload, strict=True) == [{
+        "sessionId": "synthetic-session", "cwd": "/synthetic/cwd",
+        "workingDirectory": "/synthetic/workspace", "tool_input": {"path": "outer"},
+        "toolCallId": "write", "toolName": "edit", "toolArgs": '{"path":"target"}',
+    }]
+    assert forms.native_mutation_targets(
+        payload, write_tools=frozenset({"edit"}), cwd=payload["workingDirectory"],
+    ) == [os.path.join(payload["workingDirectory"], "target")]
+
+
+def test_strict_native_batch_rejects_incomplete_inputs_instead_of_skipping():
+    valid = {"name": "edit", "args": {"path": "one"}}
+    for calls in (
+        None, {}, [], [valid, None], [valid, {"name": []}],
+        [valid, {"name": ""}], [valid, {"name": "edit", "cwd": "/other"}],
+        [valid] * 129,
+    ):
+        with pytest.raises(ValueError):
+            forms.native_mutation_targets(
+                {"toolCalls": calls}, write_tools=frozenset({"edit"}), cwd="/synthetic/workspace",
+            )
+
+
+def test_native_batch_target_limit_is_shared_and_unknowns_keep_workspace():
+    workspace = "/synthetic/workspace"
+    writes = frozenset({"edit", "multi_edit"})
+    assert forms.native_mutation_targets(
+        {"toolCalls": [{"name": "view"}, {"name": "edit", "args": {"path": []}}]},
+        write_tools=writes, cwd=workspace,
+    ) == [workspace]
+    assert forms.native_mutation_targets(
+        {"toolCalls": [{"name": "view"}]}, write_tools=writes, cwd=workspace,
+    ) == []
+    assert forms.native_mutation_targets(
+        {"toolCalls": [
+            {"name": "multi_edit", "args": {"files": [{"path": f"file-{i}"} for i in range(128)]}},
+            {"name": "edit", "args": {"path": "overflow"}},
+        ]}, write_tools=writes, cwd=workspace,
+    ) is None
 
 
 @pytest.mark.parametrize(

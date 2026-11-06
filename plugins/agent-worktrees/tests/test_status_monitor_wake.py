@@ -73,6 +73,8 @@ def test_wake_interruptible_wait_set_from_another_thread_wakes_early():
 def test_kind_wakes_sweep_only_for_post_tool_use_with_targets():
     assert smc._kind_wakes_sweep("nativeToolMutation", ["/some/path"]) is True
     assert smc._kind_wakes_sweep("nativeToolMutation", []) is False
+    assert smc._kind_wakes_sweep("nativeToolBatchMutation", ["/some/path"]) is True
+    assert smc._kind_wakes_sweep("nativeToolBatchMutation", []) is False
     assert smc._kind_wakes_sweep("postToolUse", None) is True  # invalidate-all
     assert smc._kind_wakes_sweep("postToolUse", ["/some/path"]) is True
     assert smc._kind_wakes_sweep("postToolUse", []) is False  # read-only tool call

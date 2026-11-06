@@ -263,8 +263,8 @@ Prepared single native writes (`create`, `edit`, the supported `str_replace`
 variants, `write`, `write_file`, `insert`, `apply_patch`, `new_file` and
 `multi_edit`) share the same shell reminders and late-guidance evaluation.
 They do not request advisory computation from the resident or fall back to
-Python. Shell tools and any payload containing `toolCalls` retain their
-original path; this does not qualify batch or shell-command classification.
+Python. Shell tools and batches outside the supported subset below retain
+their original path; this does not qualify shell-command classification.
 
 The existing hook IPC owner optionally advertises `native-hook-mutation-v1`.
 The shell sends one `nativeToolMutation` notification with the same version,
@@ -294,6 +294,42 @@ Transport completion is not acceptance or fresh-status proof. Lost/rejected
 notices leave the existing periodic/TTL refresh backstop in charge; they are
 not durably queued. These isolated source controls do not establish installed
 composition, cold/cell/POSIX entry or whole-hook throughput acceptance.
+
+### Windows native-batch consumer
+
+The same prepared Windows shell path accepts nonempty `toolCalls` arrays of
+at most 128 calls, each containing only `name`, optional `args` and optional
+`id`. Every name must identify a supported native write or `view`, `rg` or
+`glob`. Single-call arrays stay arrays. A malformed call, unknown tool,
+per-call workspace override, empty batch or excessive call count leaves the
+entire event on its prior path; no supported prefix is sent or evaluated
+separately. The existing 1 MiB event and live prepared-membership bounds remain.
+
+The original receiver separately advertises `native-hook-batch-mutation-v1`.
+One send-only `nativeToolBatchMutation` carries the batch plus the original
+event workspace/session fields, not tool results. The 64 KiB wire limit,
+process-generation/token/deadline validation, combined 50 ms connect/write
+wait, current admission/state lock and no-reply/no-retry semantics are the
+same as single native mutations. New consumers skip the optional notice when
+old discovery advertises only single-write support; they do not reinterpret
+that capability as batch support or fall back to a synchronous request.
+
+Before any effect, the receiver validates every call and uses the existing
+`tool_call_forms.tool_events` normalization. Its existing permissive callers
+remain unchanged; this notification requires the strict complete-batch subset.
+Top-level cwd and argument inheritance retain that owner's semantics.
+The original native extractor gathers unique targets across the batch before
+invalidation. The aggregate limit is 128 targets, not 128 per call; overflow
+or an unavailable target extractor invalidates all segments conservatively.
+Unknown native targets invalidate the event workspace. Read-only batches
+renew idle grace without invalidation or a sweep wake. Accepted writes
+invalidate their targets and use the original mutation wake.
+
+Reminders and late-guidance consumption run once per outer event, not per
+call. No current event is replayed, and a lost notification retains the
+existing refresh backstop rather than asserting fresh status. This source
+consumer does not qualify shell batches, installed behavior, cold/cell/POSIX
+entry, complete hook composition or actual throughput.
 
 ### Prepared Windows membership reuse
 

@@ -18,6 +18,7 @@ _READ_TIMEOUT_S = 1.0
 _RECENT_HOOK_DEMAND_S = 120.0
 READ_DEMAND_CAPABILITY = "read-hook-demand-v1"
 NATIVE_MUTATION_CAPABILITY = "native-hook-mutation-v1"
+NATIVE_BATCH_MUTATION_CAPABILITY = "native-hook-batch-mutation-v1"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
 ]
@@ -93,7 +94,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 if owner is not None and len(raw) <= 2048 and raw.endswith(b"\n"):
                     owner._on_read_demand(request)
                 return
-            if kind == "nativeToolMutation":
+            if kind in {"nativeToolMutation", "nativeToolBatchMutation"}:
                 owner = self.server.owner
                 if owner is not None and len(raw) <= 65536 and raw.endswith(b"\n"):
                     owner._on_native_mutation(request)
@@ -189,7 +190,10 @@ class HookIpcServer:
         return [
             *_CAPABILITIES,
             *([READ_DEMAND_CAPABILITY] if self._read_demand_admitted is not None else []),
-            *([NATIVE_MUTATION_CAPABILITY] if self._native_mutation_decide is not None else []),
+            *(
+                [NATIVE_MUTATION_CAPABILITY, NATIVE_BATCH_MUTATION_CAPABILITY]
+                if self._native_mutation_decide is not None else []
+            ),
         ]
 
     def close(self) -> None:
@@ -271,7 +275,7 @@ class HookIpcServer:
                 ):
                     return
             try:
-                result = self._native_mutation_decide("nativeToolMutation", request["payload"], deadline)
+                result = self._native_mutation_decide(request["kind"], request["payload"], deadline)
             except HookUnavailable:
                 return
             if isinstance(result, dict) and deadline > time.time():

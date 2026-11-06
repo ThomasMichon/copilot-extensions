@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 
 MAX_CALLS = 128
@@ -16,12 +17,20 @@ _PATCH_TARGET = re.compile(
 )
 
 
-def tool_events(payload: dict) -> list[dict]:
+def tool_events(payload: dict, *, strict: bool = False) -> list[dict]:
     if "toolCalls" not in payload:
         return [payload]
     calls = payload["toolCalls"]
     if not isinstance(calls, list) or len(calls) > MAX_CALLS:
         raise ValueError("unsupported tool batch")
+    if strict and (not calls or any(
+        not isinstance(call, dict)
+        or not isinstance(call.get("name"), str)
+        or not call["name"]
+        or set(call) - {"name", "args", "id"}
+        for call in calls
+    )):
+        raise ValueError("incomplete tool batch")
     events = []
     for call in calls:
         if not isinstance(call, dict) or not isinstance(call.get("name"), str):
@@ -69,4 +78,33 @@ def write_targets(tool: str, args: object) -> list[str]:
             if isinstance(patch, str):
                 for match in _PATCH_TARGET.finditer(patch):
                     add(match[1].removesuffix("\r"))
+    return targets
+
+
+def native_mutation_targets(payload: dict, *, write_tools: frozenset[str], cwd: str) -> list[str] | None:
+    """Collect a complete native event's targets before invalidating anything."""
+    events = tool_events(payload, strict=True)
+    if any(
+        not isinstance(event.get("toolName") or event.get("tool_name"), str)
+        or (event.get("toolName") or event.get("tool_name")).lower()
+        not in write_tools | {"view", "rg", "glob"}
+        for event in events
+    ):
+        raise ValueError("unsupported native tool")
+    targets = []
+    for event in events:
+        tool = (event.get("toolName") or event.get("tool_name")).lower()
+        if tool not in write_tools:
+            continue
+        args = event.get("toolArgs") or event.get("tool_input") or {}
+        try:
+            paths = write_targets(tool, args)
+        except ValueError:
+            return None
+        for path in paths or [cwd]:
+            path = path if os.path.isabs(path) else os.path.join(cwd, path)
+            if path not in targets:
+                if len(targets) >= MAX_CALLS:
+                    return None
+                targets.append(path)
     return targets

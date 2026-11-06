@@ -384,7 +384,10 @@ function Send-PostToolReadDemand {
                 }
             )
         }
-        $capability = if ($null -ne $Mutation) { 'native-hook-mutation-v1' } else { 'read-hook-demand-v1' }
+        $batch = $null -ne $Mutation -and $Mutation.Contains('toolCalls')
+        $capability = if ($batch) { 'native-hook-batch-mutation-v1' }
+        elseif ($null -ne $Mutation) { 'native-hook-mutation-v1' }
+        else { 'read-hook-demand-v1' }
         if ($null -eq $Discovery -or $Discovery.hook_transport -cne 'tcp' -or
             $capabilities -isnot [array] -or
             $capabilities -cnotcontains $capability -or
@@ -403,7 +406,7 @@ function Send-PostToolReadDemand {
             deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 + 1.0
         }
         if ($null -ne $Mutation) {
-            $request.kind = 'nativeToolMutation'
+            $request.kind = if ($batch) { 'nativeToolBatchMutation' } else { 'nativeToolMutation' }
             $request.payload = $Mutation
         }
         $bytes = ([Text.UTF8Encoding]::new($false)).GetBytes(
@@ -432,12 +435,28 @@ function Invoke-PreparedPostToolRead {
         $event = ConvertFrom-ManagedWorktreesJson $Raw
         $tool = $event['toolName']
         if (-not $tool) { $tool = $event['tool_name'] }
-        $nativeWrite = $tool -is [string] -and $tool.ToLowerInvariant() -in @(
+        $writeTools = @(
             'create', 'edit', 'str_replace', 'str_replace_editor',
             'str_replace_based_edit_tool', 'write', 'write_file', 'insert',
             'apply_patch', 'new_file', 'multi_edit'
         )
-        if ($event.ContainsKey('toolCalls') -or $tool -isnot [string] -or
+        $nativeBatch = $event.ContainsKey('toolCalls')
+        $nativeWrite = $tool -is [string] -and $tool.ToLowerInvariant() -in $writeTools
+        if ($nativeBatch) {
+            $calls = $event['toolCalls']
+            if ($calls -isnot [Collections.IList] -or $calls.Count -lt 1 -or $calls.Count -gt 128) {
+                return $null
+            }
+            foreach ($call in $calls) {
+                if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
+                    $call['name'].ToLowerInvariant() -notin ($writeTools + @('view', 'rg', 'glob'))) {
+                    return $null
+                }
+                foreach ($key in $call.Keys) {
+                    if ($key -cnotin @('name', 'args', 'id')) { return $null }
+                }
+            }
+        } elseif ($tool -isnot [string] -or
             (-not $nativeWrite -and $tool.ToLowerInvariant() -notin @('view', 'rg', 'glob'))) {
             return $null
         }
@@ -456,8 +475,10 @@ function Invoke-PreparedPostToolRead {
         } else { $env:USERPROFILE }
         $runtime = Get-PreparedWorktreesPath ([IO.Path]::Combine($registryHome, '.agent-worktrees'))
         $discovery = Read-PostToolBoundedJson ([IO.Path]::Combine($runtime, 'status-monitor.lock')) 16384
-        if ($nativeWrite) {
-            $mutation = @{ toolName = $tool; cwd = $cwd; sessionId = $session }
+        if ($nativeWrite -or $nativeBatch) {
+            $mutation = @{ cwd = $cwd; sessionId = $session }
+            if ($nativeBatch) { $mutation.toolCalls = $calls }
+            else { $mutation.toolName = $tool }
             foreach ($name in @('cwd', 'workingDirectory')) {
                 if ($event.ContainsKey($name)) { $mutation[$name] = $event[$name] }
             }
