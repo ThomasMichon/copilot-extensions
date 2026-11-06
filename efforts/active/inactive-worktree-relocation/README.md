@@ -330,3 +330,23 @@ adopter pilot feedback gates subsequent widening.
 - Fresh current-head review and required CI still gate merge. POSIX native
   acceptance, selected-runtime activation, adopter migration and broader
   inactive support remain open.
+
+### 2026-11-06 — Initial access and eligibility qualification
+- Addressed restrictive-directory risk by qualifying access before custody:
+  Windows uses non-mutating access-handle probes; POSIX source directories and
+  their parent must be owned and writable. Required metadata must also be
+  writable. Restrictive cases refuse instead of entering an unfinished move.
+- Pinned the record bytes used to validate eligibility, rather than hashing a
+  later record after slow probes. A new responsibility acquired during planning
+  now refuses before journal publication and remains intact.
+- A full native packet passed **41 controls** with six explicit skips; its
+  additional negative ACL fixture incorrectly assumed a file DELETE deny
+  cannot be granted by parent DELETE_CHILD. Corrected that fixture to test
+  effective source-write and destination-creation denial, not a false platform
+  assumption. The affected packet passed **7 controls** after correction.
+- Unrelated read-only client settings are neither rewritten nor opened for
+  write during durability verification. This was proved through a complete
+  move with byte-identical settings, not a mocked writer.
+- The exact resulting source passed **1 real bounded Windows cross-filesystem
+  roundtrip, no skips**; exact owned cleanup confirmed. Source review/CI/merge,
+  POSIX native acceptance and separately authorized adoption remain distinct.
