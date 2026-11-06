@@ -1,0 +1,9 @@
+{
+  "comment": "Add standalone, bounded repository authentication inspection with selected-runtime support metadata",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
