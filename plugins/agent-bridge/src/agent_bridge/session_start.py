@@ -815,7 +815,9 @@ class _SessionStartMixin:
             if acquisition_launch is None and target.type == "local" and target.worktree_id and acp_sid:
                 from . import worktree_lineage
                 from .acquisition_worktree_writer import lineage_errors
+                from .creation_worktree_writer import observe_native
 
+                observe_native(self._db, session)
                 with lineage_errors():
                     worktree_lineage.register_session(
                         target.worktree_id, acp_sid, pid=session.pid,

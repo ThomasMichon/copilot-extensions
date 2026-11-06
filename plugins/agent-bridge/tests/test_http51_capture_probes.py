@@ -174,6 +174,41 @@ from test_acquisition_writer_inspection import (
     test_cli_negotiates_and_round_trips_optional_inspection_through_http as _inspect_cli_http,
     test_unavailable_retained_command_is_a_structured_read_only_refusal as _inspect_unavailable,
 )
+from test_creation_worktree_writer import (
+    creation_rig as creation_rig, writer_creation as writer_creation,
+    test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses
+    as test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses,
+    test_keyed_creation_writer_retains_original_scope_and_strict_resume
+    as test_keyed_creation_writer_retains_original_scope_and_strict_resume,
+    test_keyed_creation_writer_rehydrates_same_native_without_reselection
+    as test_keyed_creation_writer_rehydrates_same_native_without_reselection,
+    test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate
+    as test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate,
+    test_keyed_creation_writer_reconciles_lost_completion_without_new_native
+    as test_keyed_creation_writer_reconciles_lost_completion_without_new_native,
+    test_keyed_creation_writer_refuses_changed_custody_before_effects
+    as test_keyed_creation_writer_refuses_changed_custody_before_effects,
+    test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal
+    as test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal,
+    test_required_creation_writer_parser_rejects_unsupported_forms
+    as test_required_creation_writer_parser_rejects_unsupported_forms,
+    test_required_creation_writer_client_refuses_unsupported_active_provider
+    as test_required_creation_writer_client_refuses_unsupported_active_provider,
+    test_required_creation_writer_rechecks_capability_after_provider_cutover
+    as test_required_creation_writer_rechecks_capability_after_provider_cutover,
+    test_required_creation_writer_round_trips_through_actual_http_owner
+    as test_required_creation_writer_round_trips_through_actual_http_owner,
+    test_creation_writer_inspection_refuses_changed_owner_without_effects
+    as test_creation_writer_inspection_refuses_changed_owner_without_effects,
+    test_required_creation_writer_inspection_rejects_ignored_legacy_query
+    as test_required_creation_writer_inspection_rejects_ignored_legacy_query,
+    test_keyed_creation_handoff_retains_original_successor_and_seed
+    as test_keyed_creation_handoff_retains_original_successor_and_seed,
+    test_keyed_creation_registration_failure_retains_native_and_dormancy
+    as test_keyed_creation_registration_failure_retains_native_and_dormancy,
+    test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim
+    as test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 inspection_rig = _inspection_fixture
@@ -235,6 +270,12 @@ def test_http51_capture_actual_observations(
     )
     observed["retained_acquisition_writer_inspection"] = (
         health["capabilities"]["retained_acquisition_writer_inspection"]
+    )
+    observed["retained_workspace_creation_writer"] = (
+        health["capabilities"]["retained_workspace_creation_writer"]
+    )
+    observed["retained_workspace_creation_writer_inspection"] = (
+        health["capabilities"]["retained_workspace_creation_writer_inspection"]
     )
     assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)

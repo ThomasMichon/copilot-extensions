@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import sys
 from contextlib import nullcontext
@@ -55,7 +56,10 @@ def boundary(monkeypatch):
 
     root = ROOT / "plugins/agent-bridge/src/agent_bridge"
     module(PACKAGE, __path__=[str(root)])
-    module(f"{PACKAGE}.acquisition_contract", AcquisitionRefused=Refused, AcquisitionRequest=Request)
+    module(
+        f"{PACKAGE}.acquisition_contract", AcquisitionRefused=Refused, AcquisitionRequest=Request,
+        WorktreeWriterRequirement=SimpleNamespace(model_validate=lambda value: requirement),
+    )
     module(f"{PACKAGE}.acquisition_journal", _digest=lambda request: request.delivery_id)
     module(f"{PACKAGE}._peer_launch", ContextRefused=Refused)
     calls = []
@@ -99,11 +103,21 @@ def boundary(monkeypatch):
     writer = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, name, writer)
     spec.loader.exec_module(writer)
+    name = f"{PACKAGE}.creation_worktree_writer"
+    spec = importlib.util.spec_from_file_location(name, root / "creation_worktree_writer.py")
+    assert spec and spec.loader
+    creation = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, creation)
+    spec.loader.exec_module(creation)
     rows = []
-    db = SimpleNamespace(execute_read=lambda *args: rows)
+    creation_rows = []
+    db = SimpleNamespace(execute_read=lambda sql, args: (
+        creation_rows if "workspace_embodiments" in sql else rows
+    ))
     return SimpleNamespace(
         writer=writer, request=Request(requirement), db=db, rows=rows,
-        prefix=prefix, support=support, calls=calls,
+        creation=creation, creation_rows=creation_rows,
+        prefix=prefix, support=support, calls=calls, monkeypatch=monkeypatch,
     )
 
 
@@ -216,7 +230,7 @@ def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch
 
     def read(sql, arguments):
         queries.append((sql, arguments))
-        return b.rows
+        return b.creation_rows if "workspace_embodiments" in sql else b.rows
 
     b.db.execute_read = read
     manager = SimpleNamespace(
@@ -238,8 +252,9 @@ def test_continuation_requires_an_actual_acquisition_owner(boundary, monkeypatch
     else:
         assert finish(pending) is session
         assert effects == [(manager, "original-session", False)]
-    assert len(queries) == 1 and queries[0][1] == (delivery,)
-    assert "LEFT JOIN acquisition_effects" in queries[0][0]
+    assert len(queries) == 2
+    assert "workspace_embodiments" in queries[0][0] and queries[0][1] == ("original-session",)
+    assert "LEFT JOIN acquisition_effects" in queries[1][0] and queries[1][1] == (delivery,)
     assert not b.calls
     assert b.writer.current() is None
 
@@ -443,3 +458,193 @@ def test_handoff_journal_keeps_original_successor_and_native_binding(boundary):
     finish(acquire())
     assert len(writes) == 2
     assert json.loads(stored["data_json"])["_worktree_writer"]["prefix"] == list(b.prefix)
+
+
+@pytest.fixture
+def creation_owner(boundary):
+    b = boundary
+    requirement = b.request.worktree_writer
+    facts = {
+        "target": {"type": "local", "worktree_id": b.request.worktree_id, "project": b.request.project},
+        "options": {"worktree_writer": requirement.model_dump()},
+    }
+    saved = {
+        "id": b.request.worktree_id, "repo": b.request.project,
+        "path": b.request.worktree_path, "creation_nonce": requirement.creation_nonce,
+    }
+    row = {
+        "key_digest": "b" * 64,
+        "facts_digest": hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest(),
+        "session_id": "original-session", "native_session_id": "original-native",
+        "state": "complete", "worktree_json": json.dumps(saved),
+        "runtime_custody_json": None, "creation_facts_json": None,
+        "creation_handoffs_json": None,
+        "creation_writer_json": json.dumps({
+            "version": 1, "facts": facts, "worktree_writer": requirement.model_dump(),
+            "binding": {"version": 1, "prefix": list(b.prefix)},
+        }),
+    }
+    b.creation_rows.append(row)
+    workspace = ModuleType(f"{PACKAGE}.workspace_creation")
+
+    async def verify(project, worktree_id, *, expected):
+        assert b.writer.current().prefix == b.prefix
+        assert (project, worktree_id, expected) == (saved["repo"], saved["id"], saved)
+        b.calls.append(("record", b.prefix))
+        return saved, {}
+
+    workspace._workspace = verify
+    b.monkeypatch.setitem(sys.modules, workspace.__name__, workspace)
+    target = SimpleNamespace(
+        type="local", worktree_id=saved["id"], project=saved["repo"], cwd=saved["path"],
+        venue={b.creation.JOURNAL_KEY: row["key_digest"]},
+        spawn_command=None, container=None, codespace=None, remote_acp=None,
+    )
+    target.to_json = lambda: {key: value for key, value in vars(target).items() if key != "to_json"}
+    session = SimpleNamespace(
+        session_id=row["session_id"], acp_session_id=row["native_session_id"], target=target,
+    )
+    b.row, b.session, b.saved = row, session, saved
+    return b
+
+
+@pytest.mark.parametrize("changed", [None, "pointer", "native", "journal"])
+def test_creation_continuation_retains_original_writer_and_never_recreates(creation_owner, changed):
+    b = creation_owner
+    if changed == "pointer":
+        b.session.target.venue.clear()
+    elif changed == "native":
+        b.session.acp_session_id = "replacement-native"
+    elif changed == "journal":
+        b.creation_rows.clear()
+    effects = []
+
+    async def resume_session(manager, session_id, *, allow_recreate):
+        effects.append((session_id, allow_recreate, b.writer.current().prefix))
+        return b.session
+
+    pending = b.creation.continue_session(
+        SimpleNamespace(_db=b.db), b.session, resume_session,
+        b.session.session_id, (), {"allow_recreate": True},
+    )
+    if changed:
+        with pytest.raises(Refused):
+            finish(pending)
+        assert effects == []
+    else:
+        assert finish(pending) == (True, b.session)
+        assert effects == [("original-session", False, b.prefix)]
+        assert [call[0] for call in b.calls] == ["qualify", "record"]
+    assert b.writer.current() is None
+    assert not any(call[0] == "select" for call in b.calls)
+
+
+@pytest.mark.parametrize("changed", ["facts", "workspace", "runtime-owner", "binding"])
+def test_creation_binding_refuses_changed_original_custody(creation_owner, changed):
+    b = creation_owner
+    if changed == "facts":
+        b.row["facts_digest"] = "c" * 64
+    elif changed == "workspace":
+        b.row["worktree_json"] = json.dumps({**b.saved, "creation_nonce": "replacement"})
+    elif changed == "runtime-owner":
+        b.row["runtime_custody_json"] = "{}"
+    else:
+        document = json.loads(b.row["creation_writer_json"])
+        document["binding"]["prefix"] = []
+        b.row["creation_writer_json"] = json.dumps(document)
+    with pytest.raises(Refused):
+        b.creation._binding(b.row)
+    assert b.calls == []
+
+
+def test_creation_handoff_keeps_original_successor_and_unconfirmed_seed(creation_owner):
+    b = creation_owner
+    writes = []
+
+    def execute(sql, params):
+        if sql.startswith("UPDATE"):
+            b.row["creation_handoffs_json"] = params[0]
+            writes.append(params)
+        return SimpleNamespace(fetchone=lambda: b.row)
+
+    b.db._runtime_transaction = lambda **kwargs: nullcontext(SimpleNamespace(execute=execute))
+
+    async def handoff():
+        async with b.creation.retained(b.db, b.row) as scope:
+            b.writer.handoff_state(b.db, "original-session", create={
+                "successor_id": "original-successor", "seed_prompt": "original seed",
+            })
+            b.writer.handoff_state(
+                b.db, "original-session", stage="seed_delivering", native_session_id="successor-native",
+            )
+            with pytest.raises(Refused):
+                b.writer.handoff_state(b.db, "original-session", create={"successor_id": "replacement"})
+            recovered = b.writer.handoff_state(b.db, "original-session")
+            assert recovered["stage"] == "seed_delivering"
+            assert recovered["successor_id"] == "original-successor"
+            assert recovered["native_session_id"] == "successor-native"
+            assert recovered["seed_prompt"] == "original seed"
+            assert scope.key_digest == b.row["key_digest"]
+
+    finish(handoff())
+    assert len(writes) == 2
+    assert b.writer.current() is None
+
+
+@pytest.mark.parametrize("changed", [
+    None, "native", "transport", "nonce", "journal", "instance", "readiness", "missing-launcher",
+])
+def test_creation_inspection_requalifies_original_owner_without_effects(creation_owner, changed):
+    b = creation_owner
+    generation = [1]
+    ready = [True]
+    instance = ModuleType(f"{PACKAGE}.acquisition_writer_inspection")
+    instance._instance = lambda: {"generation": generation[0], "role": "active"}
+    b.monkeypatch.setitem(sys.modules, instance.__name__, instance)
+    if changed == "native":
+        b.session.acp_session_id = "replacement"
+    elif changed == "transport":
+        b.session.target.remote_acp = {"host": "example"}
+
+    async def record(worktree_id, project, *, command):
+        assert command.keywords == {"owner_prefix": b.prefix}
+        assert (worktree_id, project) == (b.saved["id"], b.saved["repo"])
+        if changed == "journal":
+            b.row["state"] = "launching"
+        elif changed == "instance":
+            generation[0] += 1
+        elif changed == "readiness":
+            ready[0] = False
+        return {
+            "repo": project, "path": b.saved["path"], "status": "active",
+            "creation_nonce": "replacement" if changed == "nonce" else b.saved["creation_nonce"],
+        }
+
+    authority = sys.modules[f"{PACKAGE}.acquisition_authority"]
+    b.monkeypatch.setattr(authority, "read_worktree_record", record, raising=False)
+    if changed == "missing-launcher":
+        async def missing(*args, **kwargs):
+            raise FileNotFoundError("original launcher unavailable")
+        b.monkeypatch.setattr(authority, "worktree_command", missing)
+    name = f"{PACKAGE}.creation_writer_inspection"
+    spec = importlib.util.spec_from_file_location(
+        name, ROOT / "plugins/agent-bridge/src/agent_bridge/creation_writer_inspection.py",
+    )
+    assert spec and spec.loader
+    inspection = importlib.util.module_from_spec(spec)
+    b.monkeypatch.setitem(sys.modules, name, inspection)
+    spec.loader.exec_module(inspection)
+    manager = SimpleNamespace(
+        db=b.db, is_draining=False, get_session=lambda ref: b.session,
+    )
+    pending = inspection.inspect_writer(manager, b.session, lambda: ready[0])
+    if changed:
+        with pytest.raises(Refused):
+            finish(pending)
+    else:
+        observed = finish(pending)
+        assert observed["key_digest"] == b.row["key_digest"]
+        assert observed["native_session_id"] == b.row["native_session_id"]
+        assert observed["worktree_writer"] == b.request.worktree_writer.model_dump()
+    assert not any(call[0] == "select" for call in b.calls)
+    assert b.writer.current() is None

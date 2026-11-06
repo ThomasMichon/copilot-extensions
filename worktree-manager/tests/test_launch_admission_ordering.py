@@ -206,6 +206,27 @@ def test_owner_fixture_preserves_python_code_stdio_arguments_and_exit(
     assert json.loads(result.stdout) == {"args": arguments, "input": "fixture stdin\n"}
 
 
+def test_manager_core_imports_survive_retained_preparation(tmp_path: Path) -> None:
+    env, target, _logs = _fixture(tmp_path)
+    code = (
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path[:0] = sys.argv[1:]\n"
+        "import work_coalescing_singleton as core\n"
+        "assert Path(core.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())\n"
+        "from agent_worktrees.session_shell import main\n"
+        "sys.argv = ['session_shell', '--help']\n"
+        "raise SystemExit(main())\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code, str(ROOT / "plugins/agent-worktrees/src"),
+         str(ROOT / "libs/repository-policy/src")],
+        cwd=target, env=env, text=True, capture_output=True, check=False, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--installation-root" in result.stdout
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
 def test_open_uses_existing_setup_without_install_or_plugin_preflight(tmp_path: Path, shell: str):
     if (shell == "bash" and BASH is None) or (shell == "pwsh" and PWSH is None):

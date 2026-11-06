@@ -237,6 +237,9 @@ UUID alone cannot qualify their later writes.
 
 This is an **agent-proposed implementation refinement** of the same unchecked
 delegated-writer and ordinary-integration items, not an activation decision.
+Its documentation-only refinement was reviewed and merged in #11013; opt-in
+provider/consumer source subsequently merged in #11022. The bounded source
+credit below does not qualify the actual installed participating cohort.
 Ordinary managed ACP startup uses keyed `create` on an already prepared
 workspace, followed by exact `send` and later strict `resume`. Its owner is
 `workspace_creation` and the existing `workspace_embodiments` row, not
@@ -291,22 +294,88 @@ Installation, rollout, allocation and original native-resource holds remain.
 
 ### Keyed-creation slice validation
 
-- [ ] Prove supported new/new and mixed-version refusal through the actual
+- [x] Prove supported new/new and mixed-version refusal through the actual
       parser/client/HTTP owner, including a cutover to an older provider;
       omitted requirements retain legacy behavior.
-- [ ] Exercise the actual keyed creation/strict continuation and delegated
+      #11022 passes the bounded source/ASGI negotiation controls.
+- [x] Exercise the actual keyed creation/strict continuation and delegated
       serializer boundaries on a record with its protected claim and original
       nonce. An ordinary-compatible but unqualified resident cannot receive
       required registration, binding or succession.
-- [ ] Prove same-key response-loss, concurrent replay and new-frontend recovery
+      #11022 passes finite actual parser/serializer controls with fixture build
+      identity and native transport, not installed-runtime acceptance.
+- [x] Prove same-key response-loss, concurrent replay and new-frontend recovery
       retain the original command, workspace, native and first turn; prior
       unpinned rows cannot acquire a new requirement.
+      #11022 passes source SQLite, journal and controlled-transport recovery.
 - [ ] Refuse changed identity/nonce/selection, missing or recreated slots and
       incomplete journal evidence without a replacement allocation, native,
       successor or seed. Preserve registration-pending dormancy.
-- [ ] Prove optional exact-session requalification is read-only and refuses
+      #11022 covers source identity/nonce/journal refusal, unknown successor/seed
+      retention and registration dormancy. Original installed selection and
+      missing/recreated-slot admission remain open under the shared launcher.
+- [x] Prove optional exact-session requalification is read-only and refuses
       changed workspace, journal, readiness or Bridge instance, with no
       reselection or acquisition.
-- [ ] Keep finite actor-free controls in the admitted packet and bounded
+      #11022 passes bounded HTTP/SQLite and actor-free observations.
+- [x] Keep finite actor-free controls in the admitted packet and bounded
       actual-process/transport controls in their existing integration lane.
       Source passes do not close installed/cohort or ordinary lifecycle gates.
+      #11022 passes 4,335 admitted units and a fetchable-source 229-control
+      HTTP-52 capture with separate no-write verification.
+
+## Continuing provider-first slice: original relationship request admission
+
+This is an **agent-proposed source refinement** of the existing independent
+admission and ordinary-integration items, not ordinary construction or activation.
+The first protected workspace relationship precedes keyed Bridge creation.
+`task_events.task_relationship` already owns its original request: workspace,
+reservation, task/generation, audited assignment event, request ID, authority and
+queue identity/recovery. Queue reconciliation currently passes only workspace,
+operation and operation payload to its selected writer; the adapter's independent
+callback receives only workspace and executing-writer identity. A successful
+post-effect receipt comparison cannot replace admission of that original request
+before the first reserve.
+
+1. Add an explicit request-bound path to the existing selected relationship
+   adapter. Queue reconciliation supplies an isolated snapshot of its original
+   audited request, not a reconstructed current task, caller assertion, copied
+   qualification receipt or Bridge acquisition. Keep the existing unbound
+   callable contract compatible for supported legacy injected writers.
+2. The request-aware form requires its independently supplied admission owner.
+   Pass that owner the original request, exact workspace and selected executing
+   identity before participating relationship effects. An unbound call cannot
+   silently drop required request admission. This source boundary supplies
+   context; it does not manufacture an independent successful admission or wire
+   the ordinary coordinator with a no-op callback.
+3. Retain the same request snapshot for reserve/bind and retirement inspect/
+   reserve/close. Refuse mismatched workspace, authority, queue/request identity
+   or conflicting operation facts before owner mutation. Do not mix the original
+   audited event with a later generation's assignment or mutate the caller's
+   request through shared callback dictionaries.
+4. Preserve existing nonce/writer effect-side checks, exact receipt matching,
+   post-I/O queue reconciliation and unknown-outcome custody. Repeated rejection
+   and resubmission continue the original relationship; only completed work or
+   confirmed unassignment followed by queued/no-bound-agent evidence can settle
+   its responsibility. A recovered request must not be recaptured as new work.
+5. Keep original-queue/cohort observation and actual installed-writer admission
+   separate from this context-carrying seam. The ordinary server still constructs
+   no relationship writer. Do not add a queue, registry, service, generic
+   handshake, new Worktrees wire field or preflight on every record save.
+
+### Original-request slice validation
+
+- [ ] Before an original reserve, the independent callback receives the exact
+      retained request and executing writer, with no owner mutation if it refuses.
+- [ ] Replay and retirement use that same audited request; changed workspace,
+      queue/request identity or conflicting operation facts cannot become
+      another assignment. Callback mutation cannot rewrite the original request.
+- [ ] Request-aware admission cannot be bypassed through an unbound call or
+      silently degraded on recovery. Legacy explicit writers retain their
+      existing callable behavior; ordinary construction remains disabled.
+- [ ] Real queue reconciliation retains the protected task relationship through
+      submission/rejection/resubmission and accountable retirement, including an
+      unknown owner response. Keep existing original-event and post-I/O guards.
+- [ ] Retain focused actor-free controls in the admitted packet and bounded
+      queue/owner controls in the integration lane. Actual original-queue,
+      installed-writer and complete-cohort observations remain separate gates.

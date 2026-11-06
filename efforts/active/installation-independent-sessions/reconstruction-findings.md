@@ -170,8 +170,15 @@ retain their implementation authority; filing or linking is not claiming work.
   may reuse bytes without coalescing distinct pending requests. The
   [source journal](<journal/2026/11.06 bootstrap-custody-source.md>) records
   the finite proof and unsupported old-relative-CLI/deleted-cwd case.
-  Verify the containing normal release, then qualify the authorized ordinary
-  installed reconstruction and existing-owner recovery independently. Neither
+  Normal promotion #11007 now supplies the containing release: Main
+  `0dbbdd374e1af0b6443c84cead45102333855da3` admits Dev
+  `2161ab2b11723828c83ad107d8034463774c9870`; all thirteen selected source/test
+  blobs match the repair and complete source/artifact evidence is published.
+  The distinct retained Manager test-preparation repair #11008 is also merged,
+  preserving #10960's independently owned native fixture correction. See the
+  [release and test journal](<journal/2026/11.06 containing-release-and-test-preparation.md>).
+  Qualify the authorized ordinary installed reconstruction and existing-owner
+  recovery independently. Neither
   source success nor a new request identifier settles an interrupted request
   or authorizes replay, manual activation or a host rollout.
 
