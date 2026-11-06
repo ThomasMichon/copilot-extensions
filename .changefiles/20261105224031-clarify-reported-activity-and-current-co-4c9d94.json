@@ -1,0 +1,13 @@
+{
+  "comment": "Clarify reported activity and current concurrency coverage",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

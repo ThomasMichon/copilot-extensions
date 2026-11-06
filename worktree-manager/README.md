@@ -157,6 +157,11 @@ distinct IDs, and reporter/subagent identities occupy separate namespaces.
 Missing, invalid or unknown-event attribution stays with the Bridge reporter.
 An observed start/completion is not current running state or allocated custody;
 parent tool-call metadata remains in Evidence, not an inferred hierarchy link.
+Expanded activity Evidence explicitly keeps current execution and concurrency
+unknown, including when a reported tool has no observed terminal update. The
+[source coverage](../plugins/agent-bridge/docs/session-observations.md#contribution-and-activity-coverage)
+distinguishes live callback reports, retained/replayed records and unsupported
+current-state evidence.
 
 Known Bridge `agent_message` and `agent_thought` occurrences collapse into
 expandable output groups of at most 64 adjacent loaded records from the same
