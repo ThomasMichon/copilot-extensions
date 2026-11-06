@@ -19,14 +19,15 @@ from worktree_manager import source_config
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_manager_runtime_install import (
-    SOURCE, _environment, _prepare_command, _prepare_constructed, _run,
+    SOURCE, _environment, _prepare_command, _prepare_initial_construction, _prepare_materialized_source,
+    _prepare_qualified_construction, _run,
 )
 
 
 def _repository(directory, env):
     repo = directory / "upstream"
     payload = repo / "worktree-manager"
-    si._copy_payload(SOURCE, payload, mark_complete=False)
+    _prepare_materialized_source(payload)
     tools = repo / "tools"
     tools.mkdir()
     for name in json.loads((SOURCE / "packaged-assets.json").read_text())["files"]:
@@ -54,7 +55,7 @@ def _repository(directory, env):
     return repo
 
 
-def _prepare_source_repair(directory, constructed):
+def _prepare_source_candidate(directory, constructed):
     directory.mkdir()
     env = _environment(Path(constructed["directory"]))
     root, previous = (
@@ -114,6 +115,33 @@ def _prepare_source_repair(directory, constructed):
         retained = {path: path.read_bytes() for path in (
             damaged, target / ".install-complete.json", target / ".runtime-input-origins.json",
         )}
+    return {
+        "repo": str(repo), "payload": str(payload), "target": str(target),
+        "acquired_commit": identity.source_commit,
+        "before": {str(path): [content.hex(), device, inode]
+                   for path, (content, device, inode) in before.items()},
+        "commands": {str(path): content.hex() for path, content in commands.items()},
+        "retained": {str(path): content.hex() for path, content in retained.items()},
+    }
+
+
+def _prepare_source_repair(directory, constructed, prepared):
+    env = _environment(Path(constructed["directory"]))
+    root, previous = (Path(constructed[key]) for key in ("root", "slot"))
+    repo, payload, target = (Path(prepared[key]) for key in ("repo", "payload", "target"))
+    before = {Path(path): (bytes.fromhex(record[0]), *record[1:])
+              for path, record in prepared["before"].items()}
+    commands, retained = (
+        {Path(path): bytes.fromhex(content) for path, content in prepared[key].items()}
+        for key in ("commands", "retained")
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(directory)
+        for name in ("HOME", "USERPROFILE", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"):
+            patch.setenv(name, env[name])
+        patch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+        patch.setattr("worktree_manager.mux_daemon_cutover.activate_after_update",
+                      lambda **kw: {"action": "fixture", "slot": str(kw["slot"])})
         diagnostics = io.StringIO()
         with redirect_stderr(diagnostics):
             repaired = si.self_update(root=root, dry_run=False)
@@ -177,7 +205,7 @@ def _prepare_source_repair(directory, constructed):
         assert commands and all(path.read_bytes() == content for path, content in commands.items())
     return {
         "repair": str(repair), "target": str(target), "previous": str(previous),
-        "acquired_commit": identity.source_commit, "acquisition_refused": refused.action == "error",
+        "acquired_commit": prepared["acquired_commit"], "acquisition_refused": refused.action == "error",
         "reused": again.action == "already-current", "selection": si.current_version(root),
         "retained": all(path.read_bytes() == content for path, content in retained.items()),
         "data_preserved": all((path.read_bytes(), path.stat().st_dev, path.stat().st_ino) == record
@@ -196,9 +224,22 @@ def test_source_generation_repair_reuses_exact_selection_and_preserves_default_d
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--prepare", type=Path, required=True)
-    destination = parser.parse_args().prepare
-    print("Manager source acceptance: installed same-package generations", flush=True)
-    constructed = _prepare_constructed(destination / "first", default_data_root=True)
-    print("Manager source acceptance: exact source repair and default-data recovery", flush=True)
-    data = {"source_repair": _prepare_source_repair(destination / "source-repair", constructed)}
-    (destination / "fixtures.json").write_text(json.dumps(data), encoding="utf-8")
+    steps = ("release", "qualified", "source", "repair")
+    parser.add_argument("--prepare-step", choices=steps)
+    args = parser.parse_args()
+    destination = args.prepare
+    receipt = destination / "fixtures.json"
+    data = json.loads(receipt.read_text(encoding="utf-8")) if args.prepare_step not in (None, "release") else {}
+    for step in (args.prepare_step,) if args.prepare_step else steps:
+        print(f"Manager source acceptance: {step} construction", flush=True)
+        if step == "release":
+            data["constructed"] = _prepare_initial_construction(destination / "first", default_data_root=True)
+        elif step == "qualified":
+            data["constructed"] = _prepare_qualified_construction(data["constructed"])
+        elif step == "source":
+            data["source_candidate"] = _prepare_source_candidate(destination / "source-repair", data["constructed"])
+        else:
+            data = {"source_repair": _prepare_source_repair(
+                destination / "source-repair", data["constructed"], data["source_candidate"],
+            )}
+        receipt.write_text(json.dumps(data), encoding="utf-8")

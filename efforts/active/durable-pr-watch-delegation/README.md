@@ -939,6 +939,65 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-05 - Qualify all four real Manager source constructions
+
+- The source contract passed at `4e73aecca7fe744129e5322f489686222b6f05e8`
+  under its approved shared 1,800-second ceiling. Release, qualified-source,
+  source-generation and repair commands all completed; the final pytest
+  assertion passed without skips. The actual native sandbox was removed,
+  with no unsettled-process diagnostic.
+- This preserves real canonical source acquisition/preparation, immutable
+  repair and healthy reuse, retained predecessor bytes, dirty-checkout
+  refusal, global command bytes and default-root configuration/SQLite
+  bytes, file identity and schema continuity across both interpreters.
+- Twenty-five clock/cleanup controls and fatal Python lint passed. The
+  existing source cleanup expectation now accounts for all four construction
+  commands plus the final assertion. Other native contracts and production
+  deadlines remain unchanged.
+- Draft #10671 can now proceed through publication, current-head review and
+  required CI. This is local Windows native/fresh-profile qualification,
+  not Linux source-construction, live-account, serving, image or deployed
+  acceptance. The existing hosted native-launch lane invokes a different
+  runtime contract and is not used as a proxy for this source lane.
+- The complete parent Plan/Validation and existing owners remain active;
+  no rollout, resource-disposal hold or broader completion gate is cleared.
+
+### 2026-11-05 - Retain the source timeout and approve its finite test ceiling
+
+- After #10772, the real release, qualified-source and source constructions
+  completed successfully. Repair then exhausted the remaining 211 seconds
+  of the shared 1,200-second ceiling; final assertions did not run.
+  This credits the caller-relative correction, not full source acceptance.
+- The same four separately contained constructions and final assertions now
+  share an explicitly approved 1,800-second test-only ceiling. Every command
+  receives only the remaining allowance. Production deadlines, test-item
+  limits, source/data witnesses, cleanup and all other contracts are unchanged.
+- The stages use one evolving installation and retained checkpoint state;
+  they are not parallelized or replaced with cached success. Draft #10671
+  and the complete parent Plan/Validation remain open pending real validation.
+  No further budget increase, live update or resource disposal is authorized.
+
+### 2026-11-05 - Remove the caller-relative bootstrap prerequisite
+
+- The finite caller-directory correction merged in #10772 at
+  `f23139f2a9ccfb1821948ac882a5898f1199c5e6`, after current-head Copilot
+  approval and required CI. Its source workspace finalized through native
+  landing checks. It does not replace #10559's whole-bootstrap transaction
+  or retained worker/source-lifetime scope.
+- Thirty-four selected Manager checks exercised real request/child source
+  resolution, unchanged configuration bytes, bounded receipts, automatic
+  holds and legacy Manager-to-engine custody. Construction alone was
+  substituted in the small regression; full source construction is not
+  credited by that result.
+- Draft #10671 now consumes the merged correction on current Dev. Its four
+  separately contained source constructions and final assertions still need
+  qualification under the shared 1,200-second ceiling, unchanged production
+  deadlines, test-item limits and original witnesses.
+- The complete current Plan and Validation Plan were read after the merge.
+  Remaining installed, provider, service/client, image and fleet acceptance
+  stays open; neither this prerequisite nor source-workspace finalization
+  completes the effort or grants rollout.
+
 ### 2026-11-05 - Qualify the first conservative comment-echo leaf
 
 - The optional native outcome now supplies original confirmed response data
@@ -1170,6 +1229,33 @@ callback an implicit credential store.
 - Global body-bearing retention, shared selection/IO, driver qualification,
   full CLI/Dispatch, installed and shadow/pane acceptance remain open. No
   production state, credential, service or action policy changed.
+
+### 2026-11-05 - Preserve bounded source qualification and its runtime dependency
+
+- The test-only source acceptance correction is tracked in #10632. Its four
+  real constructions and final assertions now use separate containment with
+  one approved 1,200-second aggregate deadline; every command receives only
+  the remaining time. Production deadlines, assertion item limits and all
+  other native contracts remain unchanged.
+- Source fixtures now use the canonical source materializer before identity
+  stamping. The legacy bootstrap copy retained a nested editable declaration,
+  which the noneditable constructor correctly projected and then refused as
+  a different assembly. Canonical materialization preserves the complete
+  assembly through retention without relaxing identity validation.
+- Sixteen focused scheduling, exhaustion, failure, retention and unchanged
+  contract-budget controls pass. Fatal Python lint and the installation
+  contract guard pass. Real upstream Git acquisition, source preparation and
+  retained identity also pass without installing a runtime.
+- The full native run passed release and source-qualified construction, then
+  refused acquisition of the caller-relative configured repository after the
+  explicit bootstrap changed its worker directory. Source acquisition,
+  repair and final continuity assertions are not claimed qualified.
+- The existing bootstrap/source-anchor owner in #10559 received the exact
+  non-update bootstrap reproduction. Preserve that runtime ownership rather
+  than opening a competing repair. The source-test patch remains draft until
+  the dependency and full native qualification clear; the parent Plan and
+  installed-adoption exit remain open. No live update or resource disposition
+  is authorized by this source work.
 
 ### 2026-11-04 - Qualify the composed native workspace foreground path
 

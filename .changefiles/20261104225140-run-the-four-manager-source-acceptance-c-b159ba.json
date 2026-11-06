@@ -1,0 +1,9 @@
+{
+  "comment": "Run the four Manager source-acceptance constructions as separately contained steps sharing one 1800-second test budget and materialize source fixtures canonically, preserving all assertions and production limits.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

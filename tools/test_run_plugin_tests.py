@@ -985,7 +985,7 @@ def test_manager_acceptance_cleans_settled_sandbox(
 
     monkeypatch.setattr(acceptance, "run_contained", settled)
     assert acceptance.main() == returncode
-    expected = {"updater": 4, "uninstall": 3}.get(contract, 2) if returncode == 0 else 1
+    expected = {"updater": 4, "uninstall": 3, "source": 5}.get(contract, 2) if returncode == 0 else 1
     assert len(observed) == expected
     assert not any(sandbox.exists() for sandbox in observed)
     assert releases == [True]
@@ -1011,6 +1011,125 @@ def test_manager_acceptance_cleans_sandbox_after_ordinary_exception(manager_acce
     assert releases == [True]
 
 
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
+def test_manager_acceptance_source_contains_each_construction_and_keeps_final_assertions(
+    manager_acceptance, monkeypatch,
+):
+    acceptance, releases = manager_acceptance
+    monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", "source"])
+    clock = [0]
+    monkeypatch.setattr(acceptance.time, "monotonic", lambda: clock[0])
+    observed = []
+
+    def completed(command, **kwargs):
+        observed.append((command, kwargs["limits"].wall_seconds, kwargs["sandbox"]))
+        clock[0] += 240 if "--prepare-step" in command else 10
+        return 0
+
+    monkeypatch.setattr(acceptance, "run_contained", completed)
+    assert acceptance.main() == 0
+    assert [command[-1] for command, _, _ in observed[:-1]] == [
+        "release", "qualified", "source", "repair",
+    ]
+    assert all(command[-2] == "--prepare-step" for command, _, _ in observed[:-1])
+    assert observed[-1][0][-2:] == ["--test-file", "tests/native/test_manager_source_install.py"]
+    assert [limit for _, limit, _ in observed] == [1800, 1560, 1320, 1080, 840]
+    assert len({sandbox for _, _, sandbox in observed}) == 1
+    assert not observed[0][2].exists()
+    assert releases == [True]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
+def test_manager_acceptance_source_does_not_reset_aggregate_deadline(manager_acceptance, monkeypatch):
+    acceptance, releases = manager_acceptance
+    monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", "source"])
+    clock = [0]
+    monkeypatch.setattr(acceptance.time, "monotonic", lambda: clock[0])
+    observed = []
+
+    def completed(command, **kwargs):
+        observed.append((command, kwargs["limits"].wall_seconds, kwargs["sandbox"]))
+        clock[0] += 600
+        return 0
+
+    monkeypatch.setattr(acceptance, "run_contained", completed)
+    assert acceptance.main() == 124
+    assert [command[-1] for command, _, _ in observed] == ["release", "qualified", "source"]
+    assert [limit for _, limit, _ in observed] == [1800, 1200, 600]
+    assert not observed[0][2].exists()
+    assert releases == [True]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("contract,limits", [
+    ("runtime", [300, 290]), ("callbacks", [300, 290]),
+    ("updater", [300, 300, 300, 290]), ("engine-source", [300, 290]),
+    ("uninstall", [300, 300, 290]),
+])
+def test_manager_acceptance_other_contracts_keep_group_limits(
+    manager_acceptance, monkeypatch, contract, limits,
+):
+    acceptance, releases = manager_acceptance
+    monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", contract])
+    clock = [0]
+    monkeypatch.setattr(acceptance.time, "monotonic", lambda: clock[0])
+    observed = []
+
+    def completed(command, **kwargs):
+        observed.append(kwargs["limits"].wall_seconds)
+        clock[0] += 10
+        return 0
+
+    monkeypatch.setattr(acceptance, "run_contained", completed)
+    assert acceptance.main() == 0
+    assert observed == limits
+    assert releases == [True]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("unsettled", [False, True])
+def test_manager_acceptance_source_stops_after_later_failed_construction(
+    manager_acceptance, monkeypatch, capsys, unsettled,
+):
+    acceptance, releases = manager_acceptance
+    monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", "source"])
+    observed = []
+    failure = containment.UnreapedProcessError("injected unsettled source construction")
+
+    def failed(command, **kwargs):
+        observed.append((command, kwargs["sandbox"]))
+        if command[-1] == "source":
+            (kwargs["sandbox"] / "evidence.txt").write_text("construction evidence", encoding="utf-8")
+            if unsettled:
+                raise failure
+            return 124
+        return 0
+
+    monkeypatch.setattr(acceptance, "run_contained", failed)
+    try:
+        if unsettled:
+            with pytest.raises(containment.UnreapedProcessError) as raised:
+                acceptance.main()
+            assert raised.value is failure
+        else:
+            assert acceptance.main() == 124
+        assert [command[-1] for command, _ in observed] == ["release", "qualified", "source"]
+        sandbox = observed[0][1]
+        assert sandbox.exists() is unsettled
+        if unsettled:
+            assert (sandbox / "evidence.txt").read_text(encoding="utf-8") == "construction evidence"
+            assert str(sandbox) in capsys.readouterr().err
+        assert releases == [True]
+    finally:
+        # No process owns this injected-failure fixture.
+        if observed and observed[0][1].exists():
+            shutil.rmtree(observed[0][1])
+
+
 def test_manager_uninstall_native_groups_preserve_existing_contracts_and_bounds():
     source = SCRIPT.with_name("run-manager-runtime-acceptance.py").read_text(encoding="utf-8")
     assignment = next(
@@ -1030,7 +1149,6 @@ def test_manager_uninstall_native_groups_preserve_existing_contracts_and_bounds(
         if contract == "uninstall":
             assert groups[0][1] == [["prepare"]]
             assert groups[1][1][0] == ["python", "-I", "-B", "native", "--exercise", "sandbox"]
-    assert "remaining = 300 - (time.monotonic() - started)" in source
     assert "limits=Limits(wall_seconds=remaining)" in source
 
 
