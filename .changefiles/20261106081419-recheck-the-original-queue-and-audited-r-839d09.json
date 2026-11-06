@@ -1,0 +1,9 @@
+{
+  "comment": "Recheck the original queue and audited request before each relationship owner call",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
