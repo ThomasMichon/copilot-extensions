@@ -31,17 +31,30 @@ designated issue/PR publication need no extra generic permission question when
 the charter covers them. Diagnose a concrete failure read-only before choosing
 a remedy; a slow review is not a failure. Preserve stricter applicable gates.
 
-Maintaining an agent-owned PR is part of that delivery. Rebase onto the target
-branch and resolve understood in-scope conflicts, restore verified source
-attribution and `Co-authored-by` marks, reconcile squash-merge history and
-bookkeeping without losing work, and fix actionable CI findings and rerun the
-affected checks after correction without asking again. Use supported repository
-owner workflows; confirm actual prior merge/content state before reconciliation.
-Preserve authored content and other owners' work, required review and CI,
-explicit holds and revision limits. Unknown prior effects need reconciliation,
-not replay. Ask for intent-changing conflicts or missing authority for
-destructive discard, deployment, access changes or unrelated service repair;
-ordinary PR maintenance does not waive those boundaries.
+An author agent keeps its full context and git history for the PRs it opened, so
+managing its own PRs and the branches it created is part of that delivery and
+never needs an operator approval prompt. That covers rebasing onto the target
+branch, resolving understood in-scope conflicts, pushing or force-pushing its
+own branch (with a lease, through the repository's supported push workflow),
+regenerating derived artifacts with the repository's own generators after a
+rebase, restoring verified source attribution and `Co-authored-by` marks,
+reconciling squash-merge history and bookkeeping without losing work, fixing
+actionable CI findings and rerunning the affected checks, re-requesting review
+and replying to review threads. Confirm actual prior merge/content state before
+reconciliation.
+
+A mechanical rebase or conflict-only push is not a new revision of intent. It
+does not count against any review-round, revision or attempt cap and does not
+spend a pre-clearance; such caps bind intent-changing revisions. Required review
+and CI still apply to the rebased head, including any fresh review the push
+triggers.
+
+Preserve authored content and other owners' work (including commits someone else
+pushed to the branch), required review and CI, and explicit holds. Unknown prior
+effects need reconciliation, not replay. Ask for intent-changing conflicts or
+missing authority for destructive discard, deployment, access changes or
+unrelated service repair; ordinary PR maintenance does not waive those
+boundaries. Branches and PRs the agent did not create stay with their owners.
 
 ## 2. Qualify the effect scope proportionately
 
@@ -162,6 +175,20 @@ outside that area changes.
   with its origin. If the operator accepts the class, the cap of N runs binds
   as granted scope. If the operator picks the alternative, that limit binds.
   Exceeding either needs a real amendment.
+
+### Worked example: rebasing an approved PR
+
+An author agent's PR is approved and green, then a newer target-branch commit
+conflicts with it.
+
+- Anti-pattern: the agent asks the operator to approve the rebase push, then
+  asks again after each rerun, three prompts for one mechanical update.
+- Better: the agent rebases its own branch, resolves the understood conflict,
+  regenerates derived artifacts with the repository's generators, reruns the
+  affected checks and pushes with the supported workflow. It waits for any
+  review the push triggers and for green CI, then continues to merge. The push
+  spends no revision or review-round cap. It asks only if resolving the conflict
+  would change the PR's intent or discard someone else's work.
 
 ## 6. Preserve authority through continuity
 

@@ -87,6 +87,11 @@ def test_skill_and_record_are_discoverable_without_a_runtime():
     "accepted rerun caps",
     "a pin or one-shot limit in the agent's only approving option is its proposal",
     "seek class-level pre-clearance",
+    "managing its own PRs and the branches it created never needs an approval prompt",
+    "push or force-push its own branch",
+    "re-request review and reply to threads",
+    "A mechanical rebase or conflict-only push is not a new revision of intent",
+    "caps bind intent-changing revisions",
 ])
 def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
     assert clause in " ".join(_TEMPLATE.read_text().split())
@@ -136,6 +141,15 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
         "Operator accepts a class-level rerun policy with a run cap",
         "The cap binds as granted scope; ask for an amendment before exceeding it.",
     ),
+    (
+        "Author agent's own approved PR conflicts with its target branch",
+        "Rebase its own branch, resolve the understood conflict, regenerate derived artifacts "
+        "and push without an approval prompt; required review and CI apply to the new head.",
+    ),
+    (
+        "A mechanical rebase or conflict-only push meets a review-round, revision or attempt cap",
+        "Do not count it against the cap; caps bind intent-changing revisions.",
+    ),
 ])
 def test_record_preserves_explicit_decision_cases(situation, required):
     assert f"| {situation} | {required} |" in _RECORD.read_text()
@@ -177,5 +191,19 @@ def test_skill_checks_recorded_grants_and_limit_origin_before_asking():
         "only agent-proposed limits stand in the way",
         "Offer narrower one-shot or revision-pinned options only as clearly labeled alternatives",
         "Worked example: repeated qualification runs",
+    ):
+        assert clause in skill
+
+
+def test_skill_treats_own_pr_maintenance_as_delivery_not_a_new_revision():
+    skill = " ".join(_SKILL.read_text().split())
+    for clause in (
+        "never needs an operator approval prompt",
+        "pushing or force-pushing its own branch",
+        "regenerating derived artifacts",
+        "re-requesting review and replying to review threads",
+        "does not count against any review-round, revision or attempt cap",
+        "Branches and PRs the agent did not create stay with their owners",
+        "Worked example: rebasing an approved PR",
     ):
         assert clause in skill
