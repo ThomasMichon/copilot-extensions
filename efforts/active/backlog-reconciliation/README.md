@@ -331,6 +331,23 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records the bounded #433 wording family proposed directly in the existing
+Active materials inventory under OPEN #5799. Three exact residual statements,
+the original quick plugin scan, credited #561 CLI repair and behavior/API/task
+invariance have direct Plan/global Validation. Released documentation custody,
+unassigned execution and independent previews/reference work remain unchanged.
+Normal review and whole actual receiving readback still precede any separate
+tracking retirement; no module, asset or runtime implementation is claimed.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #11010,133 documentation tests, the24-plugin
+guard and all three delivered blobs. Only its publication child finalized;
+the Active campaign remains93 above fixed729 at the latest complete census.
+The next bounded review considers #433's three wording-only residuals as an
+input to the existing #5799 materials inventory, without claiming that scope
+is adopted, reviving a released participant or appointing an execution lead.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records complete actual [Picker cohort](picker-input-and-row-receiving-cohorts.md)
 intakes under existing OPEN #4183 and #4182. #4175/#4274/#3791 retired
 `NOT_PLANNED` only after whole current receiving readback, retaining all native
