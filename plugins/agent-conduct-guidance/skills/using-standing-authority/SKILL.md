@@ -142,6 +142,36 @@ revision-pinned options only as clearly labeled alternatives. When the same
 operation class would need approval a second time, ask once for class-level
 pre-clearance instead of per invocation.
 
+The same framing applies to every question about how to proceed, whether an
+interactive choice form, a decision packet or a plain question. Before sending
+it, check the options:
+
+- Scope: each option names the real decision or operation class, not only the
+  narrowest next action.
+- Qualifiers: option labels, the recommendation and the default carry no
+  qualifier the agent invented, such as "exact", "one", "only", "single",
+  "just", "read-only", "this time", "once" or a version/revision pin. Use a
+  narrower limit only for a concrete risk the agent can name; state that reason
+  inline and still offer the broader option.
+- Default: the recommended option is the broadest choice that completes the
+  goal within the authority being requested, including routine follow-through:
+  retries after reviewed fixes, rebases, regeneration, re-review and later runs
+  of the same class. When the question could come up again, include a standing
+  or class-level option.
+- Coverage: narrower options sit beside the broad one, never instead of it. If
+  the operator would have to type a free-form answer to get back to normal
+  scope, rewrite the options.
+
+Precision is not narrowing: naming the exact operations, targets, effects and
+limits of the acceptance scope is still required. The check removes scope the
+agent shrank on its own, not detail.
+
+This changes how the question is framed, not how the answer is read. With a
+broader option offered, a narrower pick is operator-chosen and binds as section
+4 describes; record it with that origin. If an earlier question proved too
+narrow for the work, ask once to widen it at class level, citing the earlier
+answer, rather than asking again for each step.
+
 Before a blocking question, build the
 [decision packet](references/decision-preparation.md) from authorized
 investigation, planning and documentation. Preserve the affected branch and
@@ -189,6 +219,33 @@ conflicts with it.
   review the push triggers and for green CI, then continues to merge. The push
   spends no revision or review-round cap. It asks only if resolving the conflict
   would change the PR's intent or discard someone else's work.
+
+### Worked example: framing a how-to-proceed question
+
+Validating an agent's fix requires applying its configuration to a shared test
+environment. That is an effect needing explicit authority, and later reviewed
+fixes may need the environment again.
+
+- Before: the agent asks "Apply exactly this one configuration revision to the
+  test environment, this time only?" with the options "Yes, just once" and
+  "No". Every later fix brings the same question back, and each time the
+  operator has to type a free-form answer such as "apply and re-apply as needed
+  while validating this change" to restore the normal scope.
+- After: the agent asks "How should I validate the fix in the test
+  environment?" with the options:
+  1. (Recommended) Apply the fix's configuration, re-apply after each reviewed
+     fix while validating this change, then restore the baseline.
+  2. Standing: pre-clear applying reviewed configuration to the test
+     environment for the rest of this effort, restoring the baseline after
+     each validation.
+  3. Apply once at the current revision, because a scheduled job uses the
+     environment tonight.
+  4. Do not apply; validate locally only.
+
+  Option 3 is narrower, names its risk and sits beside the broad options. If
+  the operator picks it, that limit binds. When a later fix needs the
+  environment again, the agent asks once to widen the scope at class level,
+  not once per fix.
 
 ## 6. Preserve authority through continuity
 

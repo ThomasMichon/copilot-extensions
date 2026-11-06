@@ -66,6 +66,10 @@ After useful safe work is exhausted, present the packet's recommendation and
 scope choice, not a request to reauthorize the task itself or another incremental
 lever. A real acceptance becomes the original bounded grant and is captured
 immediately through the existing record/checkpoint procedure.
+Frame the packet's options with the skill's question-framing check: the
+recommendation is the broadest option that completes the goal within the
+requested authority, a recurring question gets a standing option, and
+narrower options never replace the broad one.
 
 Avoid repeated unchanged questions. Before asking about an operation class
 again, run the skill's pre-ask self-check; a repeated ask for one class should
