@@ -311,6 +311,23 @@ only. Dispatch has not yet assembled or supplied its independent admission;
 the original first relationship, actual participating owners and complete
 cohort remain separately required.
 
+The ordinary status CLI observation transport subsequently merged in #11055.
+It preserves passive health JSON and carries optional exact-session
+original-writer inspection through the already-negotiated client. Executing-CLI
+support separately declares those status forms and keyed-create requirement
+transport. The 252-control current capture and actor-free units qualify this
+source boundary, not the actual installed owners or complete writer cohort.
+
+The conditional ordinary Dispatch consumer now accepts an explicit original
+writer requirement for a prepared workspace, checks actual CLI/daemon support
+and sends it through keyed creation. It retains that requirement in the existing
+reservation agent facts, rejects removal/replacement/retrofit, and requalifies
+the original exact-session journal before strict resume and a new send.
+A retained journal may still use its qualified original build after dynamic
+selection moves. A governed reservation without its requirement refuses.
+This is source consumer credit only: no ordinary writer factory is installed,
+and independent original-request/complete-cohort assembly remains open.
+
 ### Keyed-creation slice validation
 
 - [x] Prove supported new/new and mixed-version refusal through the actual

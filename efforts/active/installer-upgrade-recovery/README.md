@@ -123,7 +123,7 @@ authorize production updates, recovery mutations or new access.
   state. Internal helper success is not whole-flow acceptance.
 - [ ] Repeat for the selected priority cases, preserving existing construction,
   admission, durable-state and lifecycle owners instead of reimplementing them.
-- [ ] Qualify the bounded read-only project-registration prerequisite under
+- [x] Qualify the bounded read-only project-registration prerequisite under
   #10996/U17 before migrating setup consumers. Compose the canonical repository
   and legacy project registry readers; preserve writers and ordinary routing.
   Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
@@ -2586,3 +2586,54 @@ the qualified `8c79` source. Earlier qualifications retain their own source
 pins and artifacts. Final current-head review/CI, evidence-thread resolution,
 actual merge and containing release remain gates. Caller, local Windows
 historical-seed and installed recovery remain separate unfinished objectives.
+
+### 2026-11-06 - Native registration prerequisite merges after all final gates
+
+Source PR #11003 actually merges at 18:50:38 UTC as
+`82bbc541865e6f5e79d065201dd19190e603dac4`, from exact reviewed head
+`e6715eb2d9fc091c983610b62fd5e89ef5137202`. Final required CI
+`42272970981` passes guards, unit coverage and the required PR gate.
+The exact-head review is Approved at 18:43:52 UTC, with no active findings;
+both review threads are resolved. Reply `4496237579` cites the actual
+combined-source capture and canonical import. No CI gate is bypassed.
+
+The bounded prerequisite qualification item is resolved at the source tier.
+This Plan and Validation Plan are reread; the parent remains Active.
+Containing Dev CI `42274356044` is admitted at the actual merge snapshot;
+release observation remains pending. Earlier successful promotion runs are
+not evidence that this newly merged source is released.
+
+Guarded post-squash sync aborts rather than untangling the old multi-commit
+history in place. With the source merge confirmed by the provider, a clean
+owned branch and exact upstream merge commit verified, the retained merged-
+only branch is advanced to that commit without discarding unmerged work.
+No worktree is finalized. Caller migration, local Windows historical-seed
+qualification, whole-flow and affected-host recovery remain unfinished.
+
+### 2026-11-06 - U17 containing release verified without rollout
+
+Merged-source Dev CI `42274356044` succeeds. Normal promotion
+`42275291989` explicitly admits `82bbc541865e6f5e79d065201dd19190e603dac4`
+against Main `4a6c8e3dc8a479c58eed7796b941ac1efea46590`. Admission,
+frozen composition, real Windows Resume startup, source units, artifact
+construction/attestation, exact-candidate reuse and source-release raw readback
+all succeed. No retry or gate bypass is needed.
+
+Promotion #11071 merges generated candidate
+`565db90d18a042f1c3196105b62538a29228d9f4` at 19:14:41 UTC as Main
+`3a9a766662351a9edde22ea6210caad45bec5a00`. The successful landed-record job
+associates that Main commit with
+`python-artifacts-82bbc541865e6f5e79d065201dd19190e603dac4`.
+The published source archive and manifest exist with immutable SHA-256 assets;
+the released registration reader's Git blob exactly matches the admitted
+source. Worktrees is released as `1.24.510-dev1`. This is source/artifact
+publication, not a local update, deployment or installed-consumer pass.
+
+The bounded U17 source/release leg is delivered. The parent Plan and Validation
+Plan remain Active: selected-case classification, whole-flow incoming readiness,
+current selection and preserved-state proof are still unresolved. Caller
+adoption must compose an independently runnable incoming reader when the old
+runtime cannot answer the versioned request; the old provider must not veto
+incoming construction. Existing construction, registration and routing owners
+retain their mechanisms. Local Windows historical-seed qualification and every
+separate installed-recovery gate remain; no worktree is finalized.

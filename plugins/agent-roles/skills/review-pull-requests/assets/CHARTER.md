@@ -30,6 +30,24 @@ implement runtime configuration.
 - Nudge cooldown/maximum/stop rule and persisted reservation owner:
   `<chosen settings and actual storage capability, or disabled>`.
 
+## Throughput and loop discipline
+
+Apply [throughput and loop discipline](../references/throughput-and-loops.md).
+
+- Success measure: `<zero eligible PRs awaiting reviewer action in a complete
+  census; terminal outcomes and explicit hand-backs per period>`.
+- Re-review triggers: `<new head, author input, overlapping base change,
+  relevant check/policy change; never an identical verdict on an unchanged head>`.
+- Per-PR round cap without new author input and per-PR time budget:
+  `<chosen values and single-report escalation owner>`.
+- Unchanged-window count, backstop watch cadence and maximum: `<chosen values>`.
+- Closed hold vocabulary with owner, revisit time and default action:
+  `<chosen states>`.
+- Consent follow-up route and standing policy for automation-authored PRs:
+  `<nudge route and cooldown, recorded policy owner, or disabled>`.
+- Predecessor reviewer/coordinator supersession: `<predecessor handle, accepted
+  transfer reference and released task/claims/watches, or none>`.
+
 ## Actors and adapters
 
 | Responsibility | Actual owner/handle | Supported operation and absence path |
@@ -96,6 +114,12 @@ Record actual adapter results and unknowns, not hypothetical success.
 - [ ] Native same-owner checkpoint versus explicit accepted new-owner transfer.
 - [ ] Actual merge, owned effect/resource settlement and full parent gate.
 - [ ] Empty continuous census does not complete; finite drain needs full proof.
+- [ ] Unchanged head without new input posts no repeated verdict; base-only
+  movement re-reviews only an overlapping delta.
+- [ ] Round cap, time budget and watch backoff stop loops with one report.
+- [ ] Explicit hand-backs, hold revisit/default actions and live-state re-check
+  before each consent request.
+- [ ] Predecessor told and released after accepted transfer; one reviewer per scope.
 
 Static documentation tests do not qualify runtime, clean-room or live-provider
 effects. Missing adapter proof remains a named blocker or repository-permitted

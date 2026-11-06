@@ -98,6 +98,61 @@ Owned creation also rechecks current task admission immediately before calling
 Bridge, including when hosting lookup retained a workspace but the task became
 held. A keyed recovery receipt cannot authorize a newly held task's launch.
 
+### Conditional ordinary writer consumer
+
+The internal ordinary Bridge caller accepts an explicit `worktree_writer`
+expectation for an already prepared workspace. It is the existing version-1
+Bridge keyed-creation requirement: installed writer identity and original
+creation nonce, not a command, success receipt or cohort permit.
+Ordinary coordinator construction still supplies no relationship writer;
+this conditional consumer does not enable governed assignment or allocation.
+
+Before a qualified first create, the caller uses `version --contracts-json` to
+check the executing CLI's `agent-bridge.cli-contracts/v1` create/status capabilities and reads passive
+running Bridge health. The actual active instance must advertise retained
+keyed-creation/inspection support and select the expected Worktrees build.
+The existing keyed `create --worktree-writer-file -` carries that requirement
+on stdin, without a model prompt. Bridge's existing per-attempt capability
+negotiation and effect-side retained serializer/nonce guards remain mandatory;
+missing support is not permission to retry unpinned.
+
+Before any create request, the requirement is retained against the reservation's
+original creation key through the existing allocation-recording endpoint.
+Its additive reservation field is independent of `agent_info`, which does not
+exist when a successful create reply is lost. Subsequent agent facts must
+match that intent; retries of the same allocation carry it forward.
+The running coordinator advertises `ordinary_writer_requirement_versions: [1]`
+through its existing `pool_placement/v1` descriptor. The conditional caller
+requires that support before owner/native effects; an older provider that
+merely preserves an unknown JSON field cannot establish its retention semantics.
+Storage rejects dropping, changing or retrofitting it and rejects an unqualified
+ordinary agent on a governed reservation. Read-back must preserve it. A retry
+inherits the original requirement even when the caller omits its optional
+argument. Historical unpinned agents are not upgraded in place.
+Keyed recovery still checks executing CLI and active daemon support, but does
+not require the mutable current selection to equal the retained original writer.
+Bridge's original-key journal and effect-side guards decide that recovery;
+the caller never substitutes a worktree-head resume.
+
+Before strict resume or a new send, exact-session full status requests
+`--worktree-writer` and checks the original keyed journal's workspace, native,
+serializer contract, retained requirement and active Bridge instance.
+This path deliberately does not adopt the daemon's newer dynamic Worktrees
+selection: a still-qualified original retained build can continue after that
+selector moves. Without a stored Bridge identity, the caller can only replay
+its original qualified creation key; a workspace head alone cannot authorize
+strict resume. The keyed provider must recover the same original journal or
+refuse, never retrofit an unpinned attempt or create a replacement conversation.
+Read-only recovery of an already delivered native invocation remains available
+without new native effects.
+
+The first protected relationship precedes Bridge creation. Independent original
+queue/request admission, actual resident qualification and accounting for every
+other admitted producer remain separate prerequisites. A future-create
+expectation cannot substitute for them, and a later keyed journal cannot
+retroactively admit that first relationship. No new service, RPC, installer
+replacement veto or per-record-save preflight is introduced.
+
 ## Managed ordinary allocator (opt-in)
 
 `AGENT_DISPATCH_POOL_ALLOCATION` is default **off**, independent of

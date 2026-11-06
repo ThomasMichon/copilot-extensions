@@ -63,6 +63,10 @@ universal prerequisite: use supported provider safeguards, fresh preflight,
 revision binding and official readback without claiming atomicity. The skill
 also supports bounded polling fallback, original-reviewer recovery and
 work-conserving concurrency targets within actual authority and capacity.
+Its loop discipline measures success as zero eligible PRs awaiting reviewer
+action, starts rounds only on new input, never reposts an identical verdict on
+an unchanged head, backs off unchanged watches, hands PRs back explicitly and
+tells and releases a superseded reviewer.
 
 ## Dependencies & assumptions
 
