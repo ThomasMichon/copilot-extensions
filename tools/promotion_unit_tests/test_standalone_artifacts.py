@@ -1,6 +1,7 @@
 """Pure identity, candidate inventory and build-hook refusal controls."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -28,6 +29,7 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
     expired = [False]
     monkeypatch.setattr(local.time, "monotonic", lambda: deadline + 1 if expired[0] else clock())
     calls = []
+    records = []
     descriptor = {"kind": "github", "canonical": "github:example/suite", "ref": ""}
     identities = {
         name: {"plugin": name, "source_commit": "a" * 40, "source_tree": "b" * 40}
@@ -43,22 +45,38 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
         assert (repository, commit, main) == (tmp_path, "a" * 40, "c" * 40)
         assert options == {
             "deadline": deadline, "finalized_main": False, "source_descriptor": None,
+            "projects": ("standalone:worktree-manager", "agent-worktrees"),
         }
         calls.append("compose")
         output.mkdir(parents=True)
-        return {
+        record = {
             "source_commit": commit, "source_tree": "b" * 40,
             "composition": {"main_seed": main, "tree": "e" * 40},
             "source_descriptor": descriptor,
             "projects": {name: {"source": identity} for name, identity in identities.items()},
         }
+        records.append(record)
+        (output / profiles.source_inputs.MANIFEST).write_text(json.dumps(record), encoding="utf-8")
+        return record
 
+    @contextmanager
     def build(output, record, **options):
         assert options == {
             "projects": ("standalone:worktree-manager", "agent-worktrees"),
-            "uv": "selected-uv", "deadline": deadline,
+            "uv": "selected-uv", "deadline": deadline, "retain_toolchain": True,
         }
         calls.append("build")
+        yield record, "retained toolchain"
+
+    def profiles_worker(snapshot, record, output, components, extras, toolchain, **options):
+        assert toolchain == "retained toolchain"
+        assert options == {"uv": "selected-uv", "deadline": deadline}
+        return profiles.prepare_applications(
+            snapshot, output / "profiles", list(components), extras=extras, **options,
+            source_record_sha256=hashlib.sha256(
+                json.dumps(record, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+        )
 
     def profile(snapshot, output, **options):
         name = options["component"]
@@ -69,6 +87,8 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
         calls.append("profile:" + name)
         if name == "agent-worktrees" and phase == "profile-failed":
             raise RuntimeError("profile actor failed")
+        (output / "snapshot").mkdir(parents=True)
+        (output / "snapshot/fixture.txt").write_text(name, encoding="utf-8")
         expired[0] = phase == "expired"
         return {
             "phase": "profile-prepared", "install_ready": True,
@@ -85,7 +105,7 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
             ),
             composition={"main_seed": "c" * 40, "tree": "e" * 40},
             source_descriptor=descriptor,
-            project={"application": "application"},
+            project={"application": "application"}, project_key=name,
         )
         if phase == "earlier-changed" and name == "worktree-manager":
             project.composition = None
@@ -93,13 +113,19 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
 
     monkeypatch.setattr(local.preparation, "_admit", admit)
     monkeypatch.setattr(local, "compose", compose)
-    monkeypatch.setattr(local, "build_projects", build)
+    monkeypatch.setattr(local, "_built_projects", build)
+    monkeypatch.setattr(local, "_prepare_profiles", profiles_worker)
+    monkeypatch.setattr(local, "_reused_applications", lambda *args, **options: None)
     monkeypatch.setattr(profiles, "prepare_registry_lock", profile)
     monkeypatch.setattr(profiles.source_inputs, "project_inputs", inputs)
     lock = tmp_path / "uv.lock"
     lock.write_text("version = 1\n")
     monkeypatch.setattr(profiles.source_inputs, "_member", lambda *args: lock)
-    monkeypatch.setattr(profiles.source_inputs, "_read", lambda _: {"construction": {"retained": True}})
+    monkeypatch.setattr(
+        profiles.source_inputs, "_read",
+        lambda path: records[0] if path.name == profiles.source_inputs.MANIFEST
+        else {"construction": {"retained": True}},
+    )
     monkeypatch.setattr(profiles.source_inputs, "application_inputs", lambda *args: {"retained": True})
     output = tmp_path.parent / (tmp_path.name + "-output")
     options = dict(
@@ -108,7 +134,9 @@ def test_complete_application_portfolio_builds_once_and_publishes_only_after_rea
     if phase == "complete":
         result = local.prepare_applications(tmp_path, "a" * 40, "c" * 40, output, **options)
         assert list(result) == list(identities)
-        assert json.loads((output / "applications.json").read_text()) == result
+        completion = json.loads((output / "applications.json").read_text())
+        assert completion["snapshots"] == result
+        assert set(completion["content"]) == set(result)
         assert calls == [
             "admit", "compose", "build", "profile:worktree-manager", "profile:agent-worktrees",
             "readback:worktree-manager", "verify:worktree-manager",
