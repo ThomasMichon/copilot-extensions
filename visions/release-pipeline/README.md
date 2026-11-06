@@ -218,9 +218,9 @@ a green wrapper, a larger deadline or an ever-growing test gate.
 Promotion runs eligible unit tests and collects coverage once. Conditional PR
 testing uses that bounded unit portfolio. General integration does not rejoin the
 gate through a baseline, preflight or generated-consumer dependency. The separate
-configured-feed construction/launch qualification below is the sole bounded
-exception; it does not change unit eligibility or credit integration coverage as
-unit proof.
+configured-feed construction/launch qualification below and native Windows Resume
+consumer qualification are the two bounded exceptions. Neither changes unit
+eligibility or credits integration coverage as unit proof.
 
 ### configured-feed-construction-and-first-launch
 
@@ -272,7 +272,8 @@ eligible units within the same or smaller budget, instead of accumulating them.
 - No fake or omitted admitted-unit evidence, or removal of byte integrity,
   signing, exact locks, source governance or publication authority.
 - No general end-to-end, actual-Git or multi-process integration-test portfolio
-  in promotion; only the bounded configured-feed construction/launch exception.
+  in promotion; only bounded configured-feed construction/launch and native
+  Windows Resume consumer qualification are exceptions.
 - No implicit authorization for a main repair, stale overwrite, forced tag
   movement or change to independently governed control preservation.
 - No second release channel, competing publisher or separate client provenance
