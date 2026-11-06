@@ -1356,7 +1356,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
     script, env = _fixture(tmp_path, shell)
-    from agent_index import _installation_context as installation
+    from agent_index import _installation_context as installation, _peer_launch
 
     (script.parents[1] / "plugin.json").write_text(
         json.dumps({"name": "agent-index", "version": "9.9.9"}), encoding="utf-8",
@@ -1384,7 +1384,8 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
                 "from agent_index import _peer_launch; "
                 "print(json.dumps(_peer_launch.validate_owner("
                 "'agent-index', Path(sys.argv[2]), sys.argv[3])))",
-                str(script.parents[1] / "src"), str(cell_root), json.dumps(value),
+                str(script.parents[1] / "src"), str(cell_root),
+                value if isinstance(value, str) else json.dumps(value),
             ],
             env=env, capture_output=True, text=True, timeout=20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -1413,7 +1414,8 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         durable_home=tmp_path / "cell", legacy_root=tmp_path / ".agent-index",
         environment=env,
     )
-    admitted = owner_probe(cell)
+    invocation_context = _peer_launch.peer_environment(cell, env)["COPILOT_EXTENSIONS_CONTEXT"]
+    admitted = owner_probe(invocation_context)
     assert admitted.returncode == 0, admitted.stdout + admitted.stderr
     owner = json.loads(admitted.stdout)
     assert owner["invocationGovernance"]["reason"] == "namespaced-active"
@@ -1448,7 +1450,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     )
     env.update(
         {
-            "COPILOT_EXTENSIONS_CONTEXT": json.dumps(cell),
+            "COPILOT_EXTENSIONS_CONTEXT": invocation_context,
             "AGENT_INDEX_ROLE": "host",
             "TEST_CELL_ROOT": str(cell_root),
             "TEST_INSTALLATION_STATUS": json.dumps(

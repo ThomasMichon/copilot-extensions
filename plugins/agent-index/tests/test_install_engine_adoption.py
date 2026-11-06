@@ -51,7 +51,8 @@ def fake_uv(tmp_path: Path, body: str) -> Path:
 
 def construction_bundle(scripts: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
-    for name in ("runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+    shutil.copy2(ENGINE / "runtime_launcher.py", scripts / "runtime_launcher.py")
+    for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
                  "versioned_runtime_construction.py", "versioned_runtime_source.py",
                  "versioned_runtime_publication.py"):
         shutil.copy2(REPO / "libs/versioned-runtime" / name, scripts / name)
