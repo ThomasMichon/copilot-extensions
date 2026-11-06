@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded paired elapsed-clock diagnostics for private membership-read qualification without changing production budgets.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

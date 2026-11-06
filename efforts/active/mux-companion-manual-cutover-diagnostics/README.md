@@ -333,8 +333,8 @@ https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321
   realizes P3/P4 through the existing owner receipts and an optional passive
   comparison. Plan #10865 is merged; #10870 captures optional original/consumer
   identity in source. #10884 supplies the passive independent comparison reader;
-  the Companion consumer remains unimplemented. Legacy identity stays unknown
-  and all original clauses below remain unchanged.
+  #10893 supplies the optional Recovery consumer with 200 isolated controls.
+  Legacy identity stays unknown and all original clauses below remain unchanged.
 
 - [ ] P1. Retain all original four steps and earned source delivery: scoped vision,
   explicit one-call context-handoff force option, one-worktree on-demand existing
@@ -623,6 +623,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       whole S2-S5 and original root gates remain open.
 
 ## Validation Plan
+
+- [x] Independent expected-head H3 optional Recovery consumer: 200 isolated
+      process/codec/Textual controls qualify independent facts, Refresh/reopen,
+      optional rollback/errors, selection/late-result fences and exact
+      native Linux blocked-child cleanup. #10893 merged after current-head
+      independent approval and every required green check; the complete root
+      and five linked contracts were read immediately afterward. Original
+      direct-human/manual/head, installed/native and whole-parent gates remain.
 
 - [x] Independent expected-head H2 passive provider: 171 isolated source
       controls qualify actual consume receipts, raw activation and delivery

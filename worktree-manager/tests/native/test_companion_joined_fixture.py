@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import json
 import os
 from pathlib import Path
@@ -10,16 +11,58 @@ import subprocess
 import sys
 from threading import Event
 from types import SimpleNamespace
+import time
 
 import pytest
 
 from agent_procutil import no_window_kwargs
 from _companion_joined_fixtures import native_state_reader
+from _companion_membership_diagnostics import paired_budgets
+from test_agenda_end_to_end import ROOT
 from test_companion_bridge_codec import OWNER
 from test_companion_bridge_session_source import membership_seed, semantic_peer as semantic_peer
 from test_companion_joined_tmux import source_entrypoint
 from test_companion_joined_psmux import live_reader_pids, owner_commands_settled
 from worktree_manager import agenda_transport, companion_bridge_source, mux_companion
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Actual Windows elapsed-clock comparison")
+def test_native_membership_deadline_reports_paired_clock_quantization(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "plugins/agent-bridge/src"))
+    reader = importlib.import_module("agent_bridge.owner_membership_read")
+    evidence = []
+    deadline = time.perf_counter() + 3
+    for _ in range(16):
+        if time.perf_counter() >= deadline:
+            break
+        samples = []
+        with paired_budgets(reader, samples):
+            budget = reader.ReadBudget()
+            target = samples[0].created_after + 0.049
+            time.sleep(0.045)
+            while time.perf_counter() < target:
+                pass
+            try:
+                budget.check()
+            except reader.ObservationError as exc:
+                assert exc.code == "capture-budget-exhausted"
+        evidence.append(samples[0].evidence())
+    early = [
+        row for row in evidence
+        if row["exhausted"] and row["steps"] <= row["max_steps"]
+        and row["elapsed_max_ms"] < row["limit_ms"]
+    ]
+    assert evidence and all(row["checks"] == 1 for row in evidence)
+    with capsys.disabled():
+        print("native-membership-clock-control=" + json.dumps({
+            "clocks": {
+                name: vars(time.get_clock_info(name)) for name in ("monotonic", "perf_counter")
+            },
+            "trials": evidence, "early_refusals": len(early),
+            "interpretation": "early refusal reproduced" if early else "not reproduced",
+        }), flush=True)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows delete-sharing semantics")
