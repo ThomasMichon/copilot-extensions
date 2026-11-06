@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 import os
 import sys
 
 from . import config
 
 
-def cmd_get(args):
+@dataclass(frozen=True)
+class CredentialRead:
+    code: int
+    value: str | None = None
+    error: str | None = None
+    source: str = "service"
+
+
+def read_credential(args) -> CredentialRead:
     from . import cli
     from .cache import get_cache
 
@@ -18,9 +27,10 @@ def cmd_get(args):
     try:
         cache_entry = config.normalize_entry(entry, config.resolve_context().group)
     except RuntimeError:
-        print("Error: context_invalid; repair configured or pinned vault selection and retry",
-              file=sys.stderr)
-        return 1
+        return CredentialRead(
+            1, error="context_invalid; repair configured or pinned vault selection and retry",
+            source="none",
+        )
     refresh = getattr(args, "refresh", False)
     cache_only = getattr(args, "cache_only", False)
     max_cache_age = getattr(args, "max_cache_age", None)
@@ -39,24 +49,22 @@ def cmd_get(args):
         except (OSError, RuntimeError, ValueError):
             if not pinned:
                 raise
-            print("Error: cache_read_failed; selected protected cache could not be read",
-                  file=sys.stderr)
-            return 1
+            return CredentialRead(
+                1, error="cache_read_failed; selected protected cache could not be read",
+                source="cache",
+            )
         if cached is not None:
-            print(cached)
-            return 0
+            return CredentialRead(0, value=cached, source="cache")
     if cache_only:
         if pinned:
             code = "cache_missing" if cache.enabled else "cache_unavailable"
-            print(f"Error: {code}; selected entry is not available in the protected cache",
-                  file=sys.stderr)
+            error = f"{code}; selected entry is not available in the protected cache"
         else:
-            print(f"Error: {entry} [{field}] not in cache", file=sys.stderr)
-        return 1
+            error = f"{entry} [{field}] not in cache"
+        return CredentialRead(1, error=error, source="cache")
 
     if not cli.ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+        return CredentialRead(1, error="could not start vault service")
 
     request = {
         "action": "get",
@@ -89,16 +97,20 @@ def cmd_get(args):
                 else:
                     cache.put(cache_entry, field, value, int(generation))
     if reconciliation_failed:
-        print(
-            "Error: credential was read, but the persistent cache could not be "
-            "reconciled",
-            file=sys.stderr,
+        return CredentialRead(
+            2, error="credential was read, but the persistent cache could not be reconciled",
         )
-        return 2
     if succeeded:
-        print(value)
-        return 0
+        return CredentialRead(0, value=value)
 
     error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return CredentialRead(1, error=error)
+
+
+def cmd_get(args):
+    result = read_credential(args)
+    if result.code == 0:
+        print(result.value)
+    else:
+        print(f"Error: {result.error}", file=sys.stderr)
+    return result.code

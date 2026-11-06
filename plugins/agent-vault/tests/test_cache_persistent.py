@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import io
+import json
 import threading
 from types import SimpleNamespace
 
@@ -309,6 +311,146 @@ def test_cache_only_migrates_legacy_raw_key_without_service(
     assert capsys.readouterr().out == "offline\n"
     assert persistent.get("A/token", "password") == "offline"
     assert persistent.get("token", "password") is None
+
+
+def test_batch_get_preserves_cached_order_duplicates_and_values(
+    enabled_cache, monkeypatch, capsys,
+):
+    persistent = get_cache()
+    assert persistent.put("Example/one", "password", "line one\nline two")
+    assert persistent.put("Example/two", "username", "")
+    requests = [
+        {"entry": "Example/one"},
+        {"entry": "Example/two", "field": "username"},
+        {"entry": "Example/one", "field": "password"},
+    ]
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(requests)))
+    monkeypatch.setattr(
+        cli, "ensure_service",
+        lambda: pytest.fail("cached batch contacted the service"),
+    )
+
+    assert cli.main(["batch-get"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {"results": [
+        {"entry": "Example/one", "field": "password", "value": "line one\nline two",
+         "ok": True, "source": "cache"},
+        {"entry": "Example/two", "field": "username", "value": "",
+         "ok": True, "source": "cache"},
+        {"entry": "Example/one", "field": "password", "value": "line one\nline two",
+         "ok": True, "source": "cache"},
+    ]}
+
+
+@pytest.mark.parametrize("succeed", [False, True])
+def test_batch_get_refresh_returns_ordered_partial_or_total_failure(
+    enabled_cache, monkeypatch, capsys, succeed,
+):
+    persistent = get_cache()
+    assert persistent.put("Example/one", "password", "stale")
+    calls = []
+
+    def send(request, timeout=None):
+        calls.append(request)
+        if succeed and request["entry"] == "Example/one":
+            return {"ok": True, "value": "fresh"}
+        return {"ok": False, "error": "locked; run agent-vault unlock"}
+
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", send)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps([
+        {"entry": "Example/one"}, {"entry": "Example/two"},
+    ])))
+
+    assert cli.main(["batch-get", "--refresh"]) == (2 if succeed else 1)
+    captured = capsys.readouterr()
+    results = json.loads(captured.out)["results"]
+    assert captured.err == ""
+    assert [row["entry"] for row in results] == ["Example/one", "Example/two"]
+    assert [row["ok"] for row in results] == [succeed, False]
+    assert results[1]["value"] is None
+    assert results[1]["error"] == "locked; run agent-vault unlock"
+    assert len(calls) == 2
+    assert all(call["refresh"] and "allow_prompt" not in call for call in calls)
+    if succeed:
+        assert set(results[0]) == {"entry", "field", "value", "ok", "source"}
+        assert persistent.get("Example/one", "password") == "fresh"
+
+
+def test_batch_get_does_not_publish_unreconciled_refresh_value(
+    enabled_cache, monkeypatch, capsys,
+):
+    persistent = get_cache()
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(persistent, "reconcile_authoritative", lambda *_args: False)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", lambda *_args, **_kw: {
+        "ok": True, "value": "not-published",
+    })
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"Example/one"}]'))
+
+    assert cli.main(["batch-get", "--refresh"]) == 1
+    captured = capsys.readouterr()
+    assert "not-published" not in captured.out + captured.err
+    result = json.loads(captured.out)["results"][0]
+    assert result["ok"] is False
+    assert result["value"] is None
+    assert "could not be reconciled" in result["error"]
+
+
+@pytest.mark.parametrize("payload", [
+    '[{"entry":"Example/one"},{"entry":false}]',
+    '[{"entry":"Example/one","entry":"Example/two"}]',
+    '[{"entry":"Example/one","field":NaN}]',
+    '{"entry":"Example/one"}',
+    '[{"entry":"Example/one","field":""}]',
+    '[{"entry":"Example/one","refresh":true}]',
+])
+def test_batch_get_validates_all_input_before_reads(monkeypatch, capsys, payload):
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(payload))
+    monkeypatch.setattr(
+        cache_mod, "get_cache",
+        lambda: pytest.fail("invalid batch reached credential storage"),
+    )
+
+    assert cli.main(["batch-get"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "invalid batch input" in captured.err
+
+
+def test_batch_get_rejects_unknown_prompt_option(monkeypatch):
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('[{"entry":"Example/one"}]'))
+    monkeypatch.setattr(
+        cache_mod, "get_cache",
+        lambda: pytest.fail("invalid option reached credential storage"),
+    )
+    with pytest.raises(SystemExit) as error:
+        cli.main(["batch-get", "--promtp"])
+    assert error.value.code == 2
+
+
+def test_empty_batch_does_not_open_credential_storage(monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("[]"))
+    monkeypatch.setattr(
+        cache_mod, "get_cache",
+        lambda: pytest.fail("empty batch opened credential storage"),
+    )
+    assert cli.main(["batch-get"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"results": []}
+
+
+def test_get_parser_preserves_existing_handler_and_options(monkeypatch):
+    observed = []
+    monkeypatch.setattr(cli, "cmd_get", lambda args: observed.append(args) or 7)
+    assert cli.main([
+        "get", "Example/one", "username", "--cache-only", "--max-cache-age", "60",
+        "--refresh", "--prompt",
+    ]) == 7
+    args = observed[0]
+    assert (args.entry, args.field, args.max_cache_age) == ("Example/one", "username", 60)
+    assert args.cache_only and args.refresh and args.prompt
 
 
 # ---------------------------------------------------------------------------

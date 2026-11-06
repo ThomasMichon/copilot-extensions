@@ -219,7 +219,7 @@ Supported built-in command groups:
 
 | Area | Commands |
 |------|----------|
-| Entries | `get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
+| Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
 | SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |
@@ -227,6 +227,50 @@ Supported built-in command groups:
 | Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
+
+## Batch reads
+
+`agent-vault batch-get` reads an array of entry/field objects from JSON stdin
+in one CLI process:
+
+```bash
+printf '%s\n' '[{"entry":"Example/service","field":"username"},{"entry":"Example/service"}]' |
+  agent-vault batch-get
+```
+
+`entry` must be a nonempty string; omitted `field` means `password`. Unknown
+properties, duplicate JSON object keys, non-finite numbers and malformed
+requests fail before any credential read. The output is `{"results":[...]}`,
+with one record per request in the original order, including duplicates.
+Successful records have exactly `entry`, `field`, `value`, `ok: true` and
+`source`. Values remain strings, including empty or multiline values; JSON
+escaping does not change them. `source` is `cache` or `service`. Failed records
+have `ok: false`, `value: null`, an error string and the attempted source
+(`cache`, `service` or `none`).
+
+Exit status is `0` when every request succeeds (also for an empty array), `2`
+for a mixture of successes and failures, and `1` when every request fails.
+Invalid input also returns `1`, with stderr diagnostics and no results output.
+Callers must decide whether to accept any values from a partial result.
+Credential values are written only to the requested results stream, not to
+diagnostic output.
+
+Reads reuse ordinary `get` context selection, cache and service transports.
+`--refresh` bypasses cached values and retains authoritative cache
+reconciliation; a reconciliation failure is not a successful result. Batch
+reads never enable interactive prompts. Use the existing explicit unlock
+command if required. The CLI does not create per-entry subprocesses or a new
+daemon protocol; callers may impose one deadline on the whole process.
+
+The selected runtime advertises `batch-get-v1` through the existing
+`agent-vault invocation-contract --json` contract. Check that runtime's
+capability before migrating a caller; a newer payload or package version
+does not prove support. A cold unprepared runtime reports no capabilities,
+and older receivers may not support the metadata query itself. Missing
+support blocks only the new operation: existing `get` syntax remains usable.
+Provider rollout precedes consumer migration; rollback must restore a
+supported baseline or report the unsupported batch requirement without
+guessing, silently issuing separate reads or retrying effectful calls.
 
 ## SSH key preparation and protected installation
 

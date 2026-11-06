@@ -352,7 +352,7 @@ jobs:
           python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
           --test-file tests/test_payload_invocation.py
           --test-file tests/test_runtime_activation.py
-          -k "scheduled_task_launcher_resolves_slot_at_every_run or cold_namespaced_capture"
+          -k "scheduled_task_launcher_resolves_slot_at_every_run or cold_namespaced_capture or native_batch_reads_real_cache_without_service"
           --plugin-timeout 180 --timeout 120 --test-timeout 60
           --junit-dir vault-configuration-critical-junit
       - name: Retain Vault launcher and cold peer results
