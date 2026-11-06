@@ -4,11 +4,11 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs targeting `dev`
 - **Created:** 2026-11-05
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [machine heartbeats](../../../visions/telemetry/machine-heartbeats/README.md),
   [user-state carriers](../../../visions/user-state-carriers/README.md)
 - **Umbrella issue:** #10873
-- **Sub-issues:** source slices are claimed before implementation
+- **Sub-issues:** #10881 (local report/chart consumer)
 
 ## Guiding Intent
 
@@ -90,15 +90,15 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 ### Phase 1 - Reviewed architecture and design
 - [x] Inventory existing sinks, local reports, machine schedulers and overlapping work.
 - [x] Capture the request, separate recommendations and record activation limits.
-- [ ] Review and merge this effort, architecture, design and outage-control matrix.
+- [x] Review and merge this effort, architecture, design and outage-control matrix.
 
 ### Phase 2 - First complete local capture-to-report flow
-- [ ] Claim the bounded source slice and implement an Agent Machines report
+- [x] Claim the bounded source slice and implement an Agent Machines report
   command over existing typed local telemetry, without a new daemon or SDK
   requirement.
-- [ ] Produce 168 hourly, coverage-qualified summaries and a self-contained
+- [x] Produce 168 hourly, coverage-qualified summaries and a self-contained
   chart from real existing sink output; preserve loss, invalid and missing data.
-- [ ] Prove the existing producer/configured sink -> file -> report/chart
+- [x] Prove the existing producer/configured sink -> file -> report/chart
   consumer flow, not only pure aggregation functions.
 - [ ] Pass targeted tests, required review/CI and merge; update reality docs.
 
@@ -172,3 +172,21 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - The operator endorsed Agent Machines propagating core preferences through
   OneDrive and aggregating health/telemetry back. Added the separate preference
   phase without widening activation authority.
+
+### 2026-11-05 - Plan reviewed; first source slice admitted
+- #10877 merged after Copilot approval with no findings and required green CI.
+  Pulled forward onto the reviewed plan before runtime edits.
+- Claimed #10881 for the bounded Agent Machines local report/chart consumer.
+  Existing producer and sink code remains unchanged; no service activation,
+  scheduler enrollment or carrier publication is part of this source slice.
+
+### 2026-11-05 - Local report consumer implemented
+- Implemented the normal Agent Machines report command, bounded typed-event
+  scanner, 168 UTC-hour projection and separate static timing/outcome charts.
+- The managed Windows packet passed 37 focused report/CLI/restore cases after
+  correcting obsolete plain-object package fixtures to real package dataclasses.
+  Final report/native controls passed 15 cases, including added truncated and
+  replaced-input controls. The real retained sink and normal Python module CLI
+  executed in isolated state; native service/carrier activation was not exercised.
+- Ruff F/E9, install contracts, documentation consistency and whitespace pass.
+  Code review, required CI, source merge and adopter configuration remain open.
