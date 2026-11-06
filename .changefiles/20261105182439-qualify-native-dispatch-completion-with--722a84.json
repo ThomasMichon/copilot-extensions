@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify native Dispatch completion with packaged pywin32 hooks and original child diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
