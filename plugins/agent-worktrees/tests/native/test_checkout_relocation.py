@@ -146,6 +146,12 @@ def test_copy_interruption_fences_launch_and_retries_original_operation(checkout
         pytest.fail("an unfinished move must fence a subsequent launch")
     with pytest.raises(ValueError, match="unfinished"):
         tracking.save_record(tracking.load_record(checkout.record.yaml_path))
+    from agent_worktrees import execution_spaces
+
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="unfinished"):
+        execution_spaces.require_record_mutation(
+            tracking.load_record(checkout.record.yaml_path), checkout.config,
+        )
     monkeypatch.setattr(relocation.transfer, "copy", copy)
     assert _move(checkout)["phase"] == "complete"
 

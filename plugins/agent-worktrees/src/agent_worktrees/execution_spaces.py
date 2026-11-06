@@ -296,7 +296,10 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
     ):
         paths.add(cfg.project_dir(repo_name) / "worktrees" / f"{worktree_id}.yaml")
     for path in paths:
-        require_idle(path)
+        try:
+            require_idle(path)
+        except (ValueError, OSError) as exc:
+            raise ExecutionSpaceError(str(exc)) from exc
     require_current_execution_space(config)
     if (
         not getattr(record, "receiving_allocation_present", False)
