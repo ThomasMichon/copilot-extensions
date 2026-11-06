@@ -137,6 +137,7 @@ def _environment(
     mode: str,
     *,
     uv_only: bool = False,
+    external_python: bool = False,
 ) -> dict[str, str]:
     env = os.environ.copy()
     env.pop("COPILOT_PLUGIN_INSTALL_STAGED", None)
@@ -154,6 +155,8 @@ def _environment(
         }
     )
     isolate_installer_environment(env, home, fake_bin, PWSH)
+    if external_python:
+        env["PATH"] += os.pathsep + str(Path(sys._base_executable).parent)
     if not uv_only:
         (fake_bin / "python.cmd").write_text(
             '@"%TEST_BASE_PYTHON%" %*\n@exit /b %ERRORLEVEL%\n', encoding="ascii",
@@ -170,6 +173,7 @@ def _run(
     mode: str,
     force: bool = False,
     uv_only: bool = False,
+    external_python: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     if install == INSTALL:
         payload = fake_bin.parent / "source"
@@ -188,6 +192,7 @@ def _run(
             fake_bin.parent / "fake_uv.py",
             mode,
             uv_only=uv_only,
+            external_python=external_python,
         ),
         text=True,
         stdout=subprocess.PIPE,
@@ -363,21 +368,24 @@ def _construction_calls(case):
     return [line for line in calls if json.loads(line)[0] in ("venv", "pip")]
 
 
-@pytest.mark.parametrize(("action", "footprint"), [
-    ("install", "incomplete"), ("update", "incomplete"), ("update", "file"),
-    ("update", "invalid-selectors"), ("update", "stale-helpers"),
+@pytest.mark.parametrize(("action", "footprint", "force"), [
+    ("install", "incomplete", False), ("install", "incomplete", True),
+    ("update", "incomplete", False), ("update", "file", False),
+    ("update", "invalid-selectors", False), ("update", "stale-helpers", False),
 ])
 def test_normal_entry_repairs_selected_generation_and_reuses_it(
-    tmp_path: Path, action: str, footprint: str,
+    tmp_path: Path, action: str, footprint: str, force: bool,
 ) -> None:
     case = _repair_case(tmp_path, footprint=footprint)
     result = _run(
         INSTALL, action, home=case.home, fake_bin=case.fake_bin, mode="success", uv_only=True,
+        force=force,
     )
     selected = _assert_repair(case, result)
     writes = _construction_calls(case)
     repeated = _run(
         INSTALL, action, home=case.home, fake_bin=case.fake_bin, mode="success", uv_only=True,
+        force=force,
     )
     assert _assert_repair(case, repeated) == selected
     assert _construction_calls(case) == writes
@@ -497,15 +505,18 @@ def test_install_repairs_slot_with_malformed_completion_state(tmp_path: Path) ->
 
 
 @pytest.mark.parametrize(
-    ("mode", "seed_slot", "force"),
+    ("action", "mode", "seed_slot", "force"),
     [
-        ("fail-all", False, False),
-        ("fail-pip", True, False),
-        ("fail-pip", True, True),
+        ("install", "fail-all", False, False),
+        ("install", "fail-pip", True, False),
+        ("install", "fail-pip", True, True),
+        ("provision", "fail-all", False, False),
+        ("provision", "fail-pip", True, False),
     ],
 )
 def test_install_stage_failures_return_nonzero(
     tmp_path: Path,
+    action: str,
     mode: str,
     seed_slot: bool,
     force: bool,
@@ -518,10 +529,13 @@ def test_install_stage_failures_return_nonzero(
         slot.mkdir(parents=True)
         (slot / "partial.txt").write_text("unowned incomplete candidate", encoding="ascii")
 
-    result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode=mode, force=force)
+    result = _run(INSTALL, action, home=home, fake_bin=fake_bin, mode=mode, force=force)
 
     assert result.returncode != 0, result.stdout
     assert "[FAIL]" in result.stdout
+    runtime = home / ".agent-codespaces"
+    assert not (runtime / "current-version").exists()
+    assert not (runtime / "deploy-manifest.json").exists()
     calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
     if mode == "fail-pip":
         assert any(call[:2] == ["pip", "install"] for call in calls), result.stdout
@@ -589,8 +603,36 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
         / "agent-codespaces"
     )
     _copy_plugin_tree(installed)
-    stamped = _run(installed / "scripts" / "install.ps1", "stamp", home=home, fake_bin=fake_bin, mode="success")
-    assert stamped.returncode == 0, stamped.stdout
+    built = _run(
+        installed / "scripts" / "install.ps1", "install",
+        home=home, fake_bin=fake_bin, mode="success",
+    )
+    assert built.returncode == 0, built.stdout
+    runtime = home / ".agent-codespaces"
+    selected = (runtime / "current-version").read_text().strip()
+    slot = runtime / "versions" / selected
+    assert (slot / "Scripts" / "python.exe").is_file()
+    assert (slot / ".install-complete.json").is_file()
+    command = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(home / ".local" / "bin" / "agent-codespaces.ps1"), "--help"],
+        cwd=home, env=_environment(
+            home, fake_bin, fake_bin.parent / "fake_uv.py", "success",
+        ),
+        text=True, capture_output=True, timeout=30, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert command.returncode == 0, command.stdout + command.stderr
+    assert Path(command.stdout.strip()) == slot
+    durable = {
+        runtime / "config.yaml": b"default_idle_timeout: 42\n",
+        runtime / "unknown-user-file.txt": b"retain unclassified state\n",
+    }
+    for path, content in durable.items():
+        path.write_bytes(content)
+    payload_before = {
+        path: path.read_bytes()
+        for path in (installed / "scripts" / "install.ps1", installed / "plugin.json")
+    }
 
     result = _run(
         installed / "scripts" / "install.ps1",
@@ -598,10 +640,14 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
         home=home,
         fake_bin=fake_bin,
         mode="success",
+        external_python=True,
     )
 
     assert result.returncode == 0, result.stdout
-    assert not (home / ".agent-codespaces").exists()
+    assert not slot.exists()
+    assert not (runtime / "current-version").exists()
+    assert all(path.read_bytes() == content for path, content in durable.items())
+    assert all(path.read_bytes() == content for path, content in payload_before.items())
     assert_installer_isolated(fake_bin)
     assert not (home / ".local" / "bin" / "agent-codespaces.ps1").exists()
     assert not (home / ".local" / "bin" / "agent-codespaces.cmd").exists()

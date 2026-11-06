@@ -83,6 +83,18 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+Manager's opt-in `--test-file tests/test_companion_head_observation.py
+--test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
+--allow-explicit-tiers` packet checks optional expected-head declaration/codec
+admission, actual private Worktrees file/task receipt reads through the selected
+process, independent durable/Picker facts and old-caller/new-provider compatibility.
+Real Textual controls cover Refresh/reopen, narrow rendering, separately retained
+lineage, source failures, rollback and late-selection fencing. A native Linux
+pidfd witnesses exact blocked optional-child exit on Escape; other-platform
+skips are not native coverage. These are isolated source/process controls, not
+installed, native performance or the original live manual-cutover acceptance.
+The required unit-only packet is unchanged.
+
 Worktrees' opt-in `--test-file tests/test_handoff_head_observation.py --test-file
 tests/test_lazy_dispatch.py --test-file tests/test_session_lifecycle.py
 --allow-explicit-tiers` packet checks the passive expected-consumer comparison
@@ -3181,6 +3193,18 @@ exact-source-receipt controls live in `tests/test_runtime_generation.py`.
 These Windows source controls do not qualify live service registration,
 CodeSpace connectivity, POSIX execution or installed rollout, and do not enter
 the required unit-only CI packet.
+
+The same packet's `install_stage_failures` selection checks actual nonzero
+`install` and `provision` process exits for venv/package failure, with no
+current selection or deployment manifest. The `install-incomplete-True`
+normal-entry case covers `-Force` repair and healthy repeat reuse.
+`marketplace_staged_uninstall_removes` constructs a real temporary venv through
+the marketplace payload, invokes its generated command, then checks runtime,
+selector and binstub removal while configuration, unknown state and the
+original marketplace entry/manifest remain unchanged. Uninstall receives a
+real external base interpreter, not only construction's fixture CMD wrapper.
+UV package delivery and host-service
+effects remain fixture boundaries; this is not full package or serving proof.
 
 The on-demand Worktrees `tests/test_update_codespaces_recovery.py` packet joins
 the normal collected update orchestration, real currentness probe, bounded
@@ -7054,8 +7078,8 @@ requests or review writes. This catches bundled dependency/import differences
 that an injected unit-test client cannot reproduce.
 
 CI first runs `tools/prepare_bridge_contract_evidence.py` against its explicitly
-selected repository URL. If the exact HTTP-47 capture checkpoint is absent, this
-bounded preparation retains it without moving a branch or changing capture
+selected repository URL. If an exact HTTP-47 through HTTP-52 capture checkpoint
+is absent, this bounded preparation retains it without moving a branch or changing capture
 evidence. Full ordinary history does not include every squash-orphaned commit.
 Missing or malformed checkpoints fail rather than waiving closure validation.
 The targeted tests cover existing and missing objects, exact remote/revision

@@ -131,6 +131,7 @@ def test_each_distinct_required_capture_is_prepared_and_validated(tmp_path, monk
 
 @pytest.mark.parametrize("name", [
     "http50-retained-recovery.json", "http51-standard-native-send.json",
+    "http52-owner-membership.json",
 ])
 def test_new_operation_checkpoint_is_independently_prepared(tmp_path, monkeypatch, name):
     _packet(tmp_path)

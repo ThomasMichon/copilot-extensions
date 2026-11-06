@@ -83,6 +83,15 @@ capacity, authentication, process cleanup or a broader support-floor change.
 
 ## Reconciled existing construction owners
 
+The U9 Windows lifecycle follow-up adds seven standard-budget native controls
+for forced incomplete-generation repair/repeat, direct install/provision
+venv/package failure exits and marketplace uninstall after constructing and
+invoking a real temporary venv. Configuration, unknown state and the original
+marketplace entry/manifest survive removal. UV package delivery remains
+synthetic, and host-service effects remain guarded. This extends source
+consumer coverage only; it does not replace a consuming harness's clean-room
+scenario, installed-host qualification or the parent completion gate.
+
 The unsupported immutable-UV option correction is delivered in #9501, whose
 merge is contained in the actual qualified Dev for #10463. Its exact-head
 Windows/Linux bootstrap and UV lanes are recorded on that original PR, not

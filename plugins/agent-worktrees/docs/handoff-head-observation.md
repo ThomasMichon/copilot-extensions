@@ -112,7 +112,11 @@ There is no cache, timer, TTL, second registry or new persistence.
 Provider support is additive and precedes any Companion adoption. Old callers
 retain their normal listing. New callers must leave unrelated features usable
 when the declaration is missing, malformed, unsupported or rolled back; a
-package version is not support evidence. Consumer adoption remains separate.
+package version is not support evidence. The Manager's optional
+[Recovery consumer](../../../worktree-manager/README.md#in-session-mux-companion)
+uses this declaration at opening and explicit Refresh, through its existing
+cancellable selected-engine boundary. Source adoption does not establish an
+installed runtime or live manual-cutover qualification.
 The source fixtures exercise both actual JavaScript consume paths, refused
 promotion, the real CLI parser/dispatch, and private tracking/receipt files.
 They are not installed/native performance or live manual-cutover evidence.

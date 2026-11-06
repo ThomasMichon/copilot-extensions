@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-machines"
-version = "0.3.87-dev1"
+version = "0.3.88-dev1"
 description = "Portable machine setup and restore for Copilot CLI."
 readme = "README.md"
 license = "MIT"
@@ -26,10 +26,12 @@ dependencies = [
     "agent-remote-login-shell",
     "agent-installer-readiness",
     "agent-installation-context",
+    "agent-process-telemetry",
 ]
 
 [tool.uv.sources]
 agent-configuration-layers = { path = "libs/configuration-layers" }
+agent-process-telemetry = { path = "libs/process-telemetry" }
 agent-remote-login-shell = { path = "libs/remote-login-shell" }
 agent-installer-readiness = { path = "libs/installer-readiness" }
 # Flat-module metadata must remain retained, not an unsupported live editable.
