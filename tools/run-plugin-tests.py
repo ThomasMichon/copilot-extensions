@@ -390,7 +390,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 if reinstall or drifted:
                     arguments.append("--reinstall")
                 run_uv_install(
-                    uv, arguments, cwd=bridge, trusted_source_roots=(REPO,), check=True,
+                    uv, arguments, env=environment, cwd=bridge, trusted_source_roots=(REPO,), check=True,
                 )
         else:
             # Source-only targets and pyproject-less plugins import their

@@ -1197,3 +1197,26 @@ migration already works.
   **4234/598/300**, with dependency guard **567/0** and all other source, review,
   required-CI, lifetime and authorized-acceptance gates intact. #10486, #10742
   and pre-feature adoption holds remain open.
+
+### 2026-11-06 - Secondary preparation preserves the private environment
+
+- The secondary agent-bridge install in worktree-manager preparation omitted
+  the private environment already supplied to the primary install. It now
+  receives the same preparation environment. All three runner `run_uv_install`
+  call sites were audited; primary and source-only preparation already passed
+  it. Resolver/source policy and installation arguments are unchanged.
+- Extended the existing two-install regression for both success and secondary
+  failure. Both install calls must carry private home/config/service roots,
+  containment markers and scrubbed installation-participant context. Both cases
+  failed before the fix on the missing environment; the final focused
+  preparation packet passed **11 tests** with verified cleanup.
+- Canonical admission verification retains **4234 nodes**, **598 sources**,
+  coverage targets and the **300-second** unit budget, with no eligible binding
+  refresh or actor admission needed. F/E9, module caps, strict runtime-resolution,
+  headless source guard, install contract and dependency guard **567/0** passed.
+- Tracked MCP runtime, tests and shared-library bytes are unchanged from the
+  published predecessor. No native or whole-unit packet was repeated; previous
+  native results remain prior-head evidence, not a new current-head CI claim.
+  MCP desktop-gate withdrawal, historical journals and existing holds remain
+  intact. Current-head CI/review, publication and acceptance remain
+  coordinator-owned; full handover and prepared qualification remain open.

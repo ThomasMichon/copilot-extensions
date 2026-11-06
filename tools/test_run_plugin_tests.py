@@ -735,6 +735,10 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
 def test_manager_bridge_is_prepared_only_by_the_test_runner(
     tmp_path, monkeypatch, bridge_fails, cached_editable,
 ):
+    for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
+        monkeypatch.setenv(key, str(tmp_path / "host-state"))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):
+        monkeypatch.setenv(key, "fixture-host-participant")
     manager = tmp_path / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -783,6 +787,15 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(
     assert manager_options["non_editable"] is True
     assert manager_options["cwd"] == manager
     arguments, options = calls[1]
+    for installation in (manager_options, options):
+        environment = installation["env"]
+        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
+            assert Path(environment[key]).is_relative_to(private)
+        assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
+        assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" not in environment
+    assert options["env"] == manager_options["env"]
     assert arguments[arguments.index(str(bridge)) - 1] == "-e"
     assert "non_editable" not in options
     assert options["cwd"] == bridge and options["trusted_source_roots"] == (tmp_path,)
