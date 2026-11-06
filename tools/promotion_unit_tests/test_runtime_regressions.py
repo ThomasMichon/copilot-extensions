@@ -67,6 +67,23 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     }) == ["source.py"]
 
 
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param("git --no-pager status --short", False, id="read"),
+    pytest.param("git -c core.quotepath=false commit -m test", True, id="global-options"),
+    pytest.param("git pull --ff-only", True, id="pull"),
+    pytest.param("git branch new-branch", True, id="branch"),
+    pytest.param("git branch --show-current", False, id="read-branch"),
+    pytest.param("Write-Output $(git fetch origin)", True, id="substitution"),
+    pytest.param("git status > report.txt", True, id="redirect"),
+    pytest.param("Write-Output 'git commit; Set-Content x value'", False, id="quoted"),
+    pytest.param(";".join(["git status"] * 128), False, id="segment-limit"),
+    pytest.param(";".join(["git status"] * 129), True, id="segment-overflow"),
+    pytest.param("Write-Output $(" * 9 + "git status" + ")" * 9, True, id="depth-overflow"),
+])
+def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
+    assert guard.shell_may_mutate(command, "powershell") is mutates
+
+
 def test_native_batch_retains_session_scope_and_valid_calls():
     events = forms.tool_events({
         "sessionId": "synthetic-session", "workingDirectory": "/synthetic/project",

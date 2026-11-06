@@ -99,6 +99,16 @@ the running monitor's real invalidation wake and unadmitted refusal. These are
 isolated source consumers, not installed, complete shell-command or throughput
 acceptance; required exact-source unit CI remains separate.
 
+The same packet's `shell_mutation` selection covers original argument and
+shell/Git parsing, while `registered_native_mutation_is_send_only` includes
+`shell-` cases for single-shell notifications. Real PowerShell 5.1/7 entries
+exercise JSON/raw/fallback arguments, read versus mutation, fast-forward pulls,
+unknown command shapes, missing/old/wrong-generation/closed discovery, wire
+overflow and a non-replying peer. Running-monitor controls prove shell read
+demand does not trigger a mutation sweep and unadmitted events have no effect.
+The portable unit packet additionally exercises the original send-only handler
+and mutation-only parser with synthetic inputs; it is not native evidence.
+
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
 --allow-explicit-tiers` packet checks optional expected-head declaration/codec

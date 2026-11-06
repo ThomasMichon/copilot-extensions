@@ -391,6 +391,37 @@ def _git_subcommand_writes_worktree(subcommand: str) -> bool:
     return bool(separator and prefix in _GIT_WORKTREE_WRITE_SUBCOMMANDS)
 
 
+def shell_may_mutate(command: str, tool: str) -> bool:
+    """Classify post-tool invalidation, not permission to write an anchor."""
+    pending = [(command, 0)]
+    remaining = 128
+    while pending:
+        text, depth = pending.pop()
+        if depth > 8:
+            return True
+        for segment in _shell_segments(text, tool):
+            remaining -= 1
+            if remaining < 0:
+                return True
+            effective = _effective_seg(segment)
+            pending.extend(
+                (child, depth + 1)
+                for child in _shell_command_substitutions(effective, tool)
+            )
+            if _WRITE_CMD_START.match(effective) or _literal_write_targets(effective, tool):
+                return True
+            if not _GIT_START.match(effective):
+                continue
+            subcommand, args, _targets, _overridden = _git_invocation(effective, "", tool)
+            if subcommand == "branch" and _git_branch_invocation_is_readonly(args):
+                continue
+            if subcommand and (
+                subcommand not in _GIT_READ_BUILTINS or subcommand == "fetch"
+            ):
+                return True
+    return False
+
+
 # A command-position directory change (``cd``/``pushd``/``Set-Location``). An
 # in-command ``cd <anchor>`` moves the effective cwd for the *following*
 # segments, so ``cd <anchor>; git commit`` writes the anchor even though the

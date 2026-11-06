@@ -611,6 +611,10 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "missing-discovery", "oversized", "no-reply",
     "batch-structured", "batch-reads", "batch-old-provider", "batch-wrong-generation",
     "batch-closed", "batch-missing-discovery", "batch-oversized", "batch-no-reply",
+    "shell-write", "shell-read", "shell-json-args", "shell-raw-args",
+    "shell-fallback-args", "shell-unknown-args", "shell-pull",
+    "shell-old-provider", "shell-wrong-generation", "shell-closed",
+    "shell-missing-discovery", "shell-oversized", "shell-no-reply",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -624,13 +628,14 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         pytest.skip(f"{shell} is unavailable")
     fixture = prepared_read_event
     batch = case.startswith("batch-")
-    case = case.removeprefix("batch-")
+    shell_event = case.startswith("shell-")
+    case = case.removeprefix("batch-").removeprefix("shell-")
     paths = [str(fixture["home"] / name) for name in ("one", "two")]
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
     invalidated = []
     cache = SimpleNamespace(
         invalidate=lambda path: invalidated.append(path),
-        invalidate_all=lambda: pytest.fail("known paths must retain target scope"),
+        invalidate_all=lambda: invalidated.append("all") if shell_event else pytest.fail("known paths must retain target scope"),
     )
     received, release = threading.Event(), threading.Event()
     notices = []
@@ -667,7 +672,9 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         path = fixture["registry"] / "status-monitor.lock"
         discovery = {**json.loads(path.read_text()), **server.rendezvous()}
         if case == "old-provider":
-            if batch:
+            if shell_event:
+                discovery["hook_capabilities"].remove("shell-hook-mutation-v1")
+            elif batch:
                 discovery["hook_capabilities"].remove("native-hook-batch-mutation-v1")
             else:
                 discovery.pop("hook_capabilities")
@@ -707,6 +714,23 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             payload["workingDirectory"] = payload["cwd"]
             payload["toolArgs"] = {}
             payload["tool_input"] = args
+        if shell_event:
+            args = {"command": "git -c core.quotepath=false --no-pager commit -m test"}
+            if case == "read":
+                args = {"command": "git --no-pager status --short"}
+            elif case == "pull":
+                args = {"command": "git pull --ff-only"}
+            elif case == "unknown-args":
+                args = {"command": ["not-a-command"]}
+            elif case == "oversized":
+                args["padding"] = "x" * 65536
+            payload.update(toolName="powershell", toolArgs=args)
+            if case == "json-args":
+                payload["toolArgs"] = json.dumps(args)
+            elif case == "raw-args":
+                payload["toolArgs"] = args["command"]
+            elif case == "fallback-args":
+                payload.update(toolArgs={}, tool_input=args, workingDirectory=payload["cwd"])
         result = subprocess.run(
             [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
             input=json.dumps(payload), text=True, capture_output=True, timeout=10,
@@ -728,8 +752,12 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             assert len(notices) == 1
             expected = {key: value for key, value in payload.items() if key != "toolResult"}
             assert notices[0]["payload"] == expected
-        assert invalidated == (paths if case in {"structured", "patch"} else [])
-        assert server.has_recent_hook_demand() is (case in {"structured", "patch", "reads"})
+            assert notices[0]["kind"] == (
+                "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
+            )
+        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull"}
+        assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch"} else [])
+        assert server.has_recent_hook_demand() is (writes or case in {"structured", "patch", "reads", "read"})
     finally:
         release.set()
         if stalled is not None:
