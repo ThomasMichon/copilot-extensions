@@ -41,8 +41,11 @@ This is bounded source credit, not admission of the actual installed cohort.
 Original-journal read-only writer inspection subsequently merged in #11001.
 It rechecks the retained serializer, workspace and Bridge instance without
 selecting a replacement; the complete participating cohort remains unqualified.
-Next, bind generation-aware independent admission to those writers and qualify
-ordinary submission consumers,
+Ordinary keyed-creation/singleton continuation compatibility was restored in
+#11012 without treating the shared caller prefix as acquisition-journal custody.
+Next, retain and qualify the actual ordinary keyed-creation writer through
+its existing journal, then bind generation-aware independent admission and
+original-request correlation before ordinary submission consumers,
 then post-stop same-native recovery and the complete running
 lifecycle. No deployment or cleanup permission is implied.
 
