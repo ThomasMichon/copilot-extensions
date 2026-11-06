@@ -2235,3 +2235,31 @@ inspection fixtures remain the qualified source. The next normal same-PR push
 refreshes actual review and required CI for the canonical metadata delta before
 source merge and containing-release observation. No redundant native rerun is
 credited, and the parent/caller/installed gates remain open.
+
+### 2026-11-06 - Preserve accepted upstream inputs during source reconciliation
+
+The generated-evidence head `3a4637641109baf81679d1c9a2ee7b2483a9c39a`
+receives an actual Approve with no active issues. It cannot merge because
+`dev` has advanced and its generated HTTP-52 records conflict; required
+pull-request CI has not been admitted for that conflicted head. The workflow
+is active and the PR remains ready, so this is not treated as an unavailable
+runner or solved by rerunning an older failed head.
+
+The current published base
+`63599c74e559b367df9e674409399db7ea2f90ce` includes legitimate retained-writer
+inspection and continuation-classification changes from #11001/#11012.
+The conflict-safe managed sync first aborts cleanly. The supported owned-branch
+rebase then retains both inspection commits; all 131 conflicts are the known
+generated current contract outputs, not the read implementation. Those exact
+paths are resolved to the published upstream inputs, preserving its new probes
+and immutable provenance rather than selecting the older capture or combining
+incompatible records by hand. No other contributor source is replaced.
+
+The prior 37/37 native and 190-case retained captures remain genuine evidence
+for source `61ed09ec2a`; they are not relabeled as qualification of this
+composed tree. A new exact checkpoint and fresh current-source capture are
+required after reconciliation. Inspection implementation, native fixture and
+qualification-controller equivalence will be checked separately from changed
+shared inputs. Normal same-PR publication, fresh review/CI, source merge and
+containing release remain open; the parent is Active and no installed effect
+or gate bypass is introduced.
