@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
@@ -20,6 +21,106 @@ from plugin_resolve.resolve import resolve_repo_plugins
 from plugin_resolve.conventions import SETTINGS_RELS
 from plugin_resolve.reflection import selection_spec, selection_cli_args
 from plugin_resolve.settings import read_repo_settings
+
+
+@pytest.mark.parametrize("outcome", ["completed", "timeout", "cancelled"])
+def test_credential_lookup_reaps_real_helper_descendants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    from plugin_resolve import plugin_auth
+
+    identity, heartbeat = tmp_path / "helper-pid", tmp_path / "heartbeat"
+    helper = (
+        "import os,time\n"
+        "from pathlib import Path\n"
+        f"Path({str(identity)!r}).write_text(str(os.getpid()))\n"
+        f"path=Path({str(heartbeat)!r})\n"
+        "while True:\n"
+        " path.write_text(str(time.monotonic_ns()))\n"
+        " time.sleep(0.02)\n"
+    )
+    command = (
+        "import subprocess,sys,time\n"
+        "from pathlib import Path\n"
+        f"subprocess.Popen([sys.executable,'-c',{helper!r}],"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        f"while not Path({str(heartbeat)!r}).exists(): time.sleep(0.01)\n"
+        + ("print('password=fixture-value')" if outcome == "completed" else "time.sleep(60)")
+    )
+    if outcome == "cancelled":
+        if os.name == "nt":
+            popen = subprocess.Popen
+
+            def cancelling_popen(*args: Any, **kwargs: Any) -> Any:
+                process: Any = popen(*args, **kwargs)
+                communicate = process.communicate
+
+                def cancel_once(*args: Any, **kwargs: Any) -> Any:
+                    process.communicate = communicate
+                    try:
+                        communicate(*args, **{**kwargs, "timeout": 5})
+                    except subprocess.TimeoutExpired:
+                        assert heartbeat.exists()
+                        raise KeyboardInterrupt
+                    pytest.fail("Credential fixture exited before cancellation")
+
+                process.communicate = cancel_once
+                return process
+
+            monkeypatch.setattr("plugin_resolve.receiver.subprocess.Popen", cancelling_popen)
+        else:
+            def cancel_wait(*args: Any) -> Any:
+                deadline = time.monotonic() + 5
+                while not heartbeat.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert heartbeat.exists()
+                raise KeyboardInterrupt
+
+            monkeypatch.setattr("plugin_resolve.receiver.select.select", cancel_wait)
+
+    def run() -> subprocess.CompletedProcess[str]:
+        return plugin_auth._credential_run(
+            [sys.executable, "-c", command], input="", cwd=tmp_path, env=dict(os.environ),
+            timeout=5 if outcome == "timeout" else 10,
+        )
+
+    if outcome == "completed":
+        result = run()
+        assert result.returncode == 0
+        assert result.stdout.strip() == "password=fixture-value"
+    else:
+        exception = KeyboardInterrupt if outcome == "cancelled" else subprocess.TimeoutExpired
+        with pytest.raises(exception):
+            run()
+
+    assert heartbeat.exists(), "The descendant must really have started"
+    before = heartbeat.read_bytes()
+    time.sleep(0.2)
+    assert heartbeat.read_bytes() == before
+    pid = int(identity.read_text())
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x100000, False, pid)
+        if handle:
+            try:
+                assert kernel.WaitForSingleObject(handle, 0) == 0
+            finally:
+                kernel.CloseHandle(handle)
+    else:
+        status = Path(f"/proc/{pid}/stat")
+        if status.exists():
+            assert status.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+        else:
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
 
 
 def init_checkout(path: Path) -> None:
@@ -324,6 +425,7 @@ def test_reference_requires_opt_in_and_validates_again_before_publication(tmp_pa
 
 
 def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("plugin_resolve.plugin_auth._git_token", lambda *args, **kwargs: None)
     target = tmp_path / "target"
     init_checkout(target)
     calls = []
@@ -356,6 +458,81 @@ def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tm
             Path(environment["VENUE_CALL_LOG"]).read_text().splitlines()] == [
         ["plugin", "install"],
     ]
+
+
+def test_native_installer_uses_github_auth_without_changing_the_launch_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "plugin_resolve.plugin_auth._git_token", lambda *args, **kwargs: "repository-value",
+    )
+    target = tmp_path / "target"
+    init_checkout(target)
+    environment = {
+        **os.environ,
+        "GH_TOKEN": "repository-value",
+        "COPILOT_GITHUB_TOKEN": "inference-value",
+        "VENUE_EXPECTED_GITHUB_TOKEN": "repository-value",
+    }
+    before = dict(environment)
+    origin = {"source": {"source": "github", "repo": "example/synthetic"}}
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
+    result = prepare({
+        "repo": str(target),
+        "plugins": [{"source": "sample@remote", "enable": True, "marketplace": origin}],
+    }, environment=environment, copilot_command=command)
+    assert "sample@remote" in result
+    assert environment == before
+    assert "repository-value" not in (target / ".github" / "copilot" / "settings.local.json").read_text()
+
+
+def test_plugin_failure_redacts_the_exact_opaque_child_credential() -> None:
+    from plugin_resolve.preparation import _failure
+
+    token = "opaque-value-without-a-recognizable-prefix"
+    failure = _failure(
+        "installation", "sample@remote",
+        subprocess.CompletedProcess(["copilot", "plugin", "install"], 1, "", token),
+        environment={"COPILOT_GITHUB_TOKEN": token},
+    )
+    assert token not in str(failure)
+    assert "[redacted]" in str(failure)
+
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_maintenance_timeout_redacts_both_streams_without_changing_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binary: bool,
+) -> None:
+    token = "opaque-repository-value"
+    monkeypatch.setattr("plugin_resolve.plugin_auth._git_token", lambda *args, **kwargs: token)
+    target = tmp_path / "target"
+    init_checkout(target)
+    environment = {**os.environ, "COPILOT_GITHUB_TOKEN": "inference-value"}
+    before = dict(environment)
+    diagnostic = token.encode() if binary else token
+    failure = subprocess.TimeoutExpired(
+        ["synthetic-copilot"], 240, output=diagnostic, stderr=diagnostic,
+    )
+    run = subprocess.run
+
+    def timeout(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if argv[:2] == [sys.executable, "synthetic-copilot"]:
+            assert kwargs["env"]["COPILOT_GITHUB_TOKEN"] == token
+            raise failure
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        prepare({
+            "repo": str(target),
+            "plugins": [{
+                "source": "sample@remote", "enable": True,
+                "marketplace": {"source": {"source": "github", "repo": "example/synthetic"}},
+            }],
+        }, environment=environment, copilot_command=(sys.executable, "synthetic-copilot"))
+    assert caught.value is failure
+    assert failure.output == failure.stderr == (b"[redacted]" if binary else "[redacted]")
+    assert environment == before
 
 
 def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

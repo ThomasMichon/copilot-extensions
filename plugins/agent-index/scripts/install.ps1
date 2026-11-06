@@ -662,7 +662,7 @@ function Test-RuntimeOrigin {
         Set-Location -LiteralPath $Slot
         [IO.Directory]::SetCurrentDirectory($Slot)
         $originOutput = @(
-            & $Python -I -X utf8 -c (
+            & $Python -I -B -X utf8 -c (
                 'from pathlib import Path; import agent_index; ' +
                 'print(Path(agent_index.__file__).resolve())'
             ) 2>$null
@@ -709,7 +709,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Refusing to activate runtime slot without its target interpreter: $py"
         return $false
     }
-    & $py $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
+    & $py -B $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Refusing to activate incomplete runtime slot versions/$SrcVersion"
         return $false
@@ -718,7 +718,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Refusing to activate runtime slot versions/$SrcVersion because agent_index is not importable"
         return $false
     }
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
+    & $py -B $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -736,7 +736,7 @@ function Get-VersionedCurrent {
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
     if (-not $py) { return '' }
-    $out = & $py $vr --root $InstallDir --link-name '.venv' current 2>$null
+    $out = & $py -B $vr --root $InstallDir --link-name '.venv' current 2>$null
     return ("$out").Trim()
 }
 
@@ -1427,7 +1427,7 @@ function Test-IndexVenv {
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg') -PathType Leaf)) { return $false }
     $result = Invoke-NativeCapture {
-        & $Python -I -c 'import sys; print(sys.prefix); print(int(sys.prefix != sys.base_prefix))'
+        & $Python -I -B -c 'import sys; print(sys.prefix); print(int(sys.prefix != sys.base_prefix))'
     }
     $lines = @($result.Output -split '\r?\n')
     if ($result.ExitCode -ne 0 -or $lines.Count -ne 2 -or $lines[1] -ne '1') { return $false }
@@ -1477,13 +1477,13 @@ function Test-IndexServerVenv {
     param([string]$Dir, [string]$Python)
     if (-not (Test-IndexVenv -Dir $Dir -Python $Python)) { return $false }
     $health = Invoke-NativeCapture {
-        & $Python -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server'
+        & $Python -I -B -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server'
     }
     if ($health.ExitCode -ne 0) {
         Write-Warn "Server venv failed host dependency health validation: $($health.Output)"
         return $false
     }
-    $cliHealth = Invoke-NativeCapture { & $Python -I -m agent_index --help }
+    $cliHealth = Invoke-NativeCapture { & $Python -I -B -m agent_index --help }
     if ($cliHealth.ExitCode -ne 0) {
         Write-Warn "Server venv failed CLI health validation: $($cliHealth.Output)"
         return $false
@@ -1693,8 +1693,7 @@ function Install-Runtime {
     if ($LASTEXITCODE -ne 0) { Write-Fail 'dropin-registry install failed'; exit 1 }
     # Both roles have a light primary CLI. Only a host receives a complete
     # sibling service runtime; the durable embedding engine remains explicit.
-    $installRole = Get-ActivationRole
-    if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
+    $installRole = Get-RequiredRuntimeRole
     $pkgSpec = "$PluginDir"
     if ($env:OS -eq 'Windows_NT') {
         $driverPackages = @()
@@ -1734,16 +1733,15 @@ function Install-Runtime {
     }
 
     $prevVersion = ''
-    if ($script:SourceRuntimeIdentity -and $script:RuntimeConstructionReuse) {
-        $reuseRole = Get-ActivationRole
-        if ($reuseRole -eq 'unconfigured') { $reuseRole = Get-MachineRole }
+    if ($script:RuntimeConstructionReuse) {
+        $reuseRole = Get-RequiredRuntimeRole
         if ($reuseRole -eq 'host') {
             $serverDir = Join-Path $VenvDir 'server'
             $serverPython = if ($env:OS -eq 'Windows_NT') {
                 Join-Path $serverDir 'Scripts\python.exe'
             } else { Join-Path $serverDir 'bin/python3' }
             if (-not (Test-IndexServerVenv -Dir $serverDir -Python $serverPython)) {
-                throw 'Immutable source generation lacks its host service closure; select a distinct complete generation'
+                throw 'Completed runtime lacks its required host service closure; select a distinct complete generation'
             }
         }
     }
@@ -1753,7 +1751,7 @@ function Install-Runtime {
         $ErrorActionPreference = 'Continue'
         $slotOk = Test-RuntimeOrigin -Python $VenvPython -Slot $VenvDir
         if ($slotOk) {
-            $cliHealth = Invoke-NativeCapture { & $VenvPython -I -m agent_index --help }
+            $cliHealth = Invoke-NativeCapture { & $VenvPython -I -B -m agent_index --help }
             $slotOk = $cliHealth.ExitCode -eq 0
             if (-not $slotOk) { Write-Warn "Runtime CLI failed health validation: $($cliHealth.Output)" }
         }
@@ -1763,7 +1761,7 @@ function Install-Runtime {
             exit 1
         }
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
-        & $VenvPython (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
+        & $VenvPython -B (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
             exit 1
@@ -1833,6 +1831,15 @@ function Get-MachineRole {
         }
     }
     return 'unconfigured'
+}
+
+function Get-RequiredRuntimeRole {
+    # Repository client routing does not withdraw machine-wide hosting capability.
+    $machineRole = Get-MachineRole
+    if ($machineRole -eq 'host') { return 'host' }
+    $role = Get-ActivationRole
+    if ($role -eq 'unconfigured') { return $machineRole }
+    return $role
 }
 
 function Get-ActivationRole {

@@ -23,6 +23,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from dropin_registry import ScanAuthority
+
 from . import doctor, related, repos, sessions, state_root
 
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
@@ -155,7 +157,7 @@ def _find_using_skills(
             report = active_report
         if report is None:
             return []
-        if report.authority is related.ScanAuthority.INDETERMINATE:
+        if report.authority is ScanAuthority.INDETERMINATE:
             return []
         allowed_scopes = {"global"}
         if project_name:
@@ -267,7 +269,7 @@ def render_briefing(
     lines.append("")
     lines.append("## How to make a change")
     lines.append("")
-    if current_checkout_path:
+    if current_checkout_path and not entry.bound_state_root:
         lines.append(
             f"- You are already in this repo's checkout (`{current_checkout_path}`) "
             "-- work here directly rather than provisioning another venue."
@@ -416,7 +418,18 @@ def write_related_briefings(
         else:
             plugin_anchors = plugin_related_anchors
         topology = related.read_related_grafted(
-            [*plugin_anchors, *[item.anchor for item in anchors]]
+            [
+                *plugin_anchors,
+                *[
+                    related.config_contribution_anchor(
+                        item.anchor, item.origin,
+                        directory_form=getattr(item, "directory_form", False),
+                        source_tier=getattr(item, "tier", None),
+                        state_repo=getattr(item, "state_repo", ""),
+                    )
+                    for item in anchors
+                ],
+            ]
         )
         current_machine = getattr(config, "machine", "") or ""
         current_project = getattr(config, "repo_name", "") or ""

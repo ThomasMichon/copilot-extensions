@@ -112,6 +112,45 @@ def _effect(case, monkeypatch, *, after=None):
     monkeypatch.setattr(origin_api, "_native_acquisition", acquire)
 
 
+def test_registered_origin_uses_repository_auth_only_for_acquisition(case, monkeypatch):
+    from plugin_resolve import plugin_auth
+
+    case.env["COPILOT_GITHUB_TOKEN"] = "inference-value"
+    original = dict(case.env)
+    monkeypatch.setattr(plugin_auth, "_git_token", lambda *args, **kwargs: "repository-value")
+    selected = _select(case)
+    _effect(case, monkeypatch)
+    origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    assert case.calls[0][1]["COPILOT_GITHUB_TOKEN"] == "repository-value"
+    assert case.env == original
+
+
+@pytest.mark.parametrize("outcome", ["completed", "timeout", "timeout-bytes"])
+def test_registered_origin_redacts_opaque_management_credential(case, monkeypatch, outcome):
+    from plugin_resolve import plugin_auth
+
+    token = "opaque-repository-value"
+    monkeypatch.setattr(plugin_auth, "_git_token", lambda *args, **kwargs: token)
+    selected = _select(case)
+    def acquire(argv, *args, **kwargs):
+        if outcome != "completed":
+            diagnostic = token.encode() if outcome == "timeout-bytes" else token
+            raise subprocess.TimeoutExpired(argv, 180, output=diagnostic, stderr=diagnostic)
+        return subprocess.CompletedProcess(argv, 1, "", token)
+
+    monkeypatch.setattr(origin_api, "_native_acquisition", acquire)
+    with pytest.raises(RuntimeError) as caught:
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    assert token not in str(caught.value)
+    assert "[redacted]" in str(caught.value)
+    if outcome != "completed":
+        cause = caught.value.__cause__
+        assert isinstance(cause, subprocess.TimeoutExpired)
+        assert cause.output == cause.stderr == (
+            b"[redacted]" if outcome == "timeout-bytes" else "[redacted]"
+        )
+
+
 @pytest.mark.parametrize("state", ["corrupt-same-version", "whole-payload-missing", "missing-ledger"])
 def test_refresh_registered_origin_rehydrates_stable_true_source(case, monkeypatch, state):
     if state != "missing-ledger":

@@ -1780,3 +1780,184 @@ Registration/state-root readiness is not presented as server-policy proof.
 This is below-altitude guidance repair, not a new provider interface or a
 replacement for #3004's Plan/Validation. No authentication, binding, repository
 creation, policy mutation or live provider publication trial is performed.
+
+### 2026-11-06 - Canonical knowledge-related discovery slice
+
+The guidance correction #10908 merges as `bc9ad742a9` after approval on its
+actual head and all required CI `42173364030`. It does not complete #3004's
+provider/landing preflight; containing release is separate from local rollout.
+
+The next bounded source claim is
+[#1419 comment 6679262258](https://github.com/ThomasMichon/copilot-extensions/issues/1419#issuecomment-6679262258),
+K3/K5 discovery only. #3005 is closed by tracking consolidation into that open
+parent, not by an implemented fix. The `gleaming-forge` K1 feasibility spike,
+K2 overlay precedence, actual K4 write/cleanup lifecycle and all original
+allocation/claim owners remain untouched. This realizes the already accepted
+canonical discovery requirement while retaining the Worktrees vision's native
+allocation and recoverable responsibility boundaries; it adds no lifecycle
+engine or new registry.
+
+Configuration-source selection carries the already resolved external-state
+name into normal related reads. The existing canonical registration owner
+validates identity/path/class without fallback discovery. The synthesized
+projection preserves authored narrative/PR metadata and policy provenance,
+but its knowledge role, local locus and non-delegation win over conflicting
+relationship labels/venues. Read-only list/show/resolve emits explicit
+aligned-worktree policy, never a writable anchor or standalone knowledge-agent
+plan. The topology writer refuses to persist this projection; `related doc`
+does not scaffold a new narrative into the registered knowledge anchor.
+Invalid canonical input is a structured nonzero CLI error or an indeterminate
+acquisition report, not a successful empty listing.
+
+The first local packet fails on seven incomplete test constructors and two
+diagnostic-stream assumptions. Correcting only those fixtures yields nine
+passes in 87.59 seconds. Added ambiguity and actual invalid-class controls
+then expose a real traceback at the new CLI boundary; the targeted correction
+retains nonzero status and returns an actionable JSON/plain error.
+Eight focused controls pass independently, followed by both actual installed
+CLI bare-anchor/linked-worktree controls in 35.34 seconds, 117.50 including
+preparation and cleanup. All 283 existing related/state-root regressions pass
+in 76.13 seconds. The write-back refusal has its own focused regression.
+
+The exact pre-change `d13d1d50b0` source reproduces missing bound knowledge in
+the actual native worktree reader (`bound knowledge missing: []`), a failing
+regression in 26.42 seconds under the original limits. An earlier baseline
+invocation stops before collection due to duplicate timeout-plugin loading;
+a separate bare baseline reaches its unchanged twenty-second child deadline,
+neither credited as a functional reproduction. No deadline, process, memory
+or storage limit is raised. Lint, thirteen install contracts and thirteen
+headless adopters pass after a missing offline lint cache is restored through
+the normal seasoned tool dependency path.
+
+An opt-in `related-knowledge` portfolio uses the existing full-installation
+workflow owner for exact-source Linux/Windows reader qualification, with
+standard runner limits and no change to default/scheduled or required unit
+coverage. It requires both real native entry cases in JUnit, rejecting skipped,
+missing or ambiguous evidence. Current-head review, required CI, external
+qualification, merge and release remain gates; no installed runtime, binding,
+pair, overlay, credential, service or cleanup mutation is selected.
+
+The final native fixture now retains an actual Git knowledge repository and
+checks all three Git/checkout trees plus binding and registry bytes. Both
+entry modes pass in 42.66 seconds, 134.41 including preparation and cleanup.
+The current-checkout briefing override is constrained to retain the aligned
+state policy instead of suggesting direct anchor editing. Its regression and
+the full briefing suite expose seven failures from an obsolete
+`related.ScanAuthority` reference; importing that existing type directly from
+its canonical owner fixes the direct failures and swallowed briefing drops.
+All 48 focused/briefing controls then pass in 3.48 seconds. Another 117
+focused/workflow controls pass in 24.44 seconds, including actual inert child
+success/failure and skipped-native rejection. No failure is dismissed as
+pre-existing, and no policy or test limit is weakened.
+
+Separately, #10908 is verified in normal release #10942, Main
+`1a83c1d250ae8093a47afab1107c3ebb9553a53e`, merged at 08:06:00 UTC.
+Actual admission from `42183304105`, attempt 1, names containing Dev
+`4b5efce814772df02d88de580d8075155c76c15a` and Main base
+`75417ed16ffa55b7dde8628b0c78f0fef50dd786`. All release jobs pass, both
+defining binding-guidance blobs match merge/admitted/Main, and the released
+payload is `harness-knowledge` `0.1.6-dev1`. This release does not install
+anything locally or include the still-unpublished knowledge-related slice.
+
+PR #10956 publishes the slice as head `3207ce155b` after an automatic rebase
+onto `827acd1855`; its new feature/test/workflow bodies remain unchanged.
+Initial required CI `42189687470` rejects the changed admitted
+`related_acquisition.py` fingerprint before unit execution. This is a genuine
+admission omission, not a flake or permission to rerun unchanged input.
+The correction retains the closed source cohort, coverage targets, effect
+guards and 300-second manifest budget, updating only three production bindings
+and their existing pure-unit file while adding five exact actor-free nodes.
+Canonical registry acquisition remains substituted in those models, and its
+real import is lazy when no bound-state metadata exists. Existing fixtures
+now include the actual StateRoot repository-name field. All 157 related
+admission controls pass functionally in 4.46 seconds; full guarded packet and
+revised-head CI/review remain required.
+
+The documented Windows-native full packet executes 4,177 passes but refuses
+qualification because three admitted POSIX filesystem/kernel-lease cases
+intentionally skip on Windows. The 402.68-second run is within that separate
+600-second profile, not the Linux 300-second CI contract. No successful
+unit-evidence packet is claimed, no expected node is dropped and no platform
+marker is spoofed. The exact Linux source-CI packet remains the required
+no-skip proof. Missing `coverage` initially stops before execution; the
+existing CI-declared test toolchain is then restored only in the private
+prepared environment. Native registry acquisition remains outside the pure
+unit frontier, and required revised-head review/CI must still pass.
+
+### 2026-11-06 - Preserve discovery metadata through dependent consumers
+
+Required Linux CI `42194087584` and `42194370472` pass head `830b7d631d`,
+including the unchanged no-skip, 300-second unit admission. Review still finds
+a real integration gap: downstream briefing, session summary and configuration
+inspection turn typed configuration sources into plain strings, while the
+PR-default reader omits their state identity. This loses the metadata needed
+to synthesize an unauthored binding or replace a conflicting authored route.
+
+The actual briefing producer fails both cases before correction. All four
+consumers now retain the existing directory, tier and state markers; no new
+source owner, topology writer or lifecycle operation is added. Both producer
+regressions, the session summary and configuration-inspection regression pass.
+The focused discovery and existing catalog-route packet passes 59 cases;
+the existing PR/session packet passes 44, with eight Bash-only Windows skips.
+The earlier full briefing packet passes 52 cases on the corrected producers.
+
+A broad local dependent-consumer attempt fails, then stops at the ordinary
+30-second item limit in the existing real CLI set/reset flow. A named diagnostic
+also times out in an existing preference-preview child at its unchanged
+15-second limit. Those Windows timing failures are not passing evidence or
+explained away as routing success. No anonymous progress is reused as named
+coverage. The existing opt-in Linux/Windows job now runs the four dependent
+consumer files separately from its native discovery packet, under the same
+standard limits. Both native discovery cases still must execute without skips.
+All 111 workflow controls pass, including actual inert child failure propagation.
+Hosted consumer results remain a merge gate; no timeout increase or CI bypass
+is selected.
+
+The already-admitted `config.py` source binding and its existing acquisition
+fixture are refreshed for this review correction. Five unit failures expose
+the fixture's old two-argument marker stub; it now verifies the retained state
+identity explicitly. All 157 acquisition controls pass after that correction.
+The 4,180-node set, coverage targets, effect guards and 300-second unit budget
+are unchanged. Revised-head required CI, passing review
+and native qualification remain due before merge; containing release and all
+parent acceptance boundaries remain separate.
+
+### 2026-11-06 - Refuse synthesized entries before authored upsert
+
+Review `5798620519` on `1a247aa8e6` confirms the two source-marker findings
+resolved, then identifies a write-back bypass in an existing-key upsert.
+Merging a synthesized entry into an authored object loses the projection
+marker before the writer checks it, allowing projected role/routing to persist.
+The new two-case regression passes insertion refusal but fails existing-key
+refusal against that source.
+
+`upsert_related` now rejects the synthesized input before reading or merging
+authored topology. Both cases preserve the exact authored bytes after refusal.
+All 197 discovery and existing related writer/merge/CLI controls pass in
+35.16 seconds, 132.45 including isolated preparation and cleanup. Ordinary
+authored partial updates retain their existing merge behavior. Source admission
+is unchanged, and the existing module ceiling passes without widening.
+The prior head's CI and resolved findings do not satisfy the new-head review,
+required CI or still-unperformed hosted qualification. No merge or rollout
+is claimed; this parent remains Active.
+
+### 2026-11-06 - Enforce narrative refusal in the owning scaffolder
+
+The next review on `7c4ed5355c` confirms upsert refusal resolved but notes a
+moderate finding not published as an inline thread: direct scaffolder calls
+can bypass the CLI-only guard. Investigation confirms the owning helper can
+create a missing bound-knowledge narrative or force-overwrite an authored one.
+Three actual helper cases fail before correction; reading an existing file
+without forcing already remains read-only.
+
+The refusal now lives in `scaffold_doc` itself. The CLI uses that canonical
+boundary instead of its duplicate guard, preserving existing narrative reads
+while refusing all synthesized creation/forced writes. The four direct helper
+cases check complete harness/knowledge tree bytes. All 203 discovery, existing
+related writer/merge/CLI and actual native Git bare/linked entry cases pass in
+114.22 seconds, 205.36 including preparation and cleanup, with no skips.
+Both native consumers retain their original per-item and child deadlines.
+The existing admitted CLI hash is refreshed for the guard move; the unit node
+set, source cohort, coverage/effect guards and 300-second budget are unchanged.
+Fresh-head review, required CI and hosted discovery/consumer qualification
+remain due. This is source validation, not a live binding, pair or rollout.

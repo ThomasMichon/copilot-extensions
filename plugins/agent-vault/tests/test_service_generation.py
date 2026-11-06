@@ -291,7 +291,7 @@ def test_native_generation_ping_accepts_legacy_full_response(
     assert generation.endpoint_health(endpoint) is response
 
 
-def test_ordinary_ping_retains_current_configuration_and_backend_status(
+def test_contextual_ping_retains_backend_status_and_expiration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_vault import service
@@ -303,10 +303,43 @@ def test_ordinary_ping_retains_current_configuration_and_backend_status(
     monkeypatch.setattr(
         vault.cli, "status", lambda kpdb: calls.append(kpdb) or "locked",
     )
-    response = vault.handle_request({"action": "ping"})
+    response = vault.handle_request({"action": "ping", "kpdb": "fixture.kdbx"})
     assert response["cli"] == "locked"
     assert response["runtime_generation"] == service.PROCESS_GENERATION
     assert calls == ["expiry", "fixture.kdbx"]
+
+
+def test_legacy_ping_uses_the_resident_default_without_an_owner_lookup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from agent_vault import service
+
+    vault = service.VaultService()
+    database = tmp_path / "resident.kdbx"
+    database.touch()
+    monkeypatch.setattr(service, "resolve_kpdb", lambda **kwargs: str(database))
+    vault.initialize()
+
+    def unavailable(**kwargs):
+        pytest.fail("Legacy generation ping repeated the configuration-owner lookup")
+
+    monkeypatch.setattr(service, "resolve_kpdb", unavailable)
+    monkeypatch.setattr(
+        vault.cli, "status",
+        lambda kpdb: "locked" if kpdb == str(database) else "wrong-vault",
+    )
+    response = vault.handle_request({"action": "ping"})
+    assert response["cli"] == "locked"
+    assert response["runtime_generation"] == service.PROCESS_GENERATION
+    selections = iter(("first.kdbx", "second.kdbx"))
+    monkeypatch.setattr(service, "resolve_kpdb", lambda **kwargs: next(selections))
+    selected = []
+    monkeypatch.setattr(
+        vault, "has", lambda kpdb, *args: selected.append(kpdb) or True,
+    )
+    for _ in range(2):
+        assert vault.handle_request({"action": "has", "entry": "fixture"})["exists"]
+    assert selected == ["first.kdbx", "second.kdbx"]
 
 
 CHILD = r"""
@@ -324,6 +357,18 @@ os.environ.update(
 os.environ.pop("AGENT_VAULT_INSTALLATION_ID", None)
 from agent_vault import service, service_generation as generation
 from agent_vault import service_handoff
+if mode == "legacy-health":
+    def legacy_dial(dial):
+        def send(request, *args, **kwargs):
+            request = dict(request)
+            request.pop("health_only", None)
+            (root / "legacy-health.json").write_text(json.dumps({
+                "transport": dial.__name__, "request": request,
+            }))
+            return dial(request, *args, **kwargs)
+        return send
+    service._dial_tcp = legacy_dial(service._dial_tcp)
+    service._dial_unix = legacy_dial(service._dial_unix)
 generation.PROCESS_GENERATION = service.PROCESS_GENERATION = identity
 generation.selected_generation = lambda: (root / "selection").read_text().strip()
 generation.selected = lambda: generation.selected_generation() == identity
@@ -459,7 +504,7 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         fixed_port = reservation.getsockname()[1]
-    old = _start(tmp_path, "newer", fixed_port)
+    old = _start(tmp_path, "newer", fixed_port, "legacy-health" if warm else "normal")
     children = [old]
     old_lifetime = None
     try:
@@ -496,6 +541,11 @@ def test_real_successor_is_ready_before_self_retirement_and_cannot_overlap_write
         stdout, stderr = old.communicate(timeout=10)
         assert old.returncode == 0, stdout + stderr
         old_lifetime.wait_exit(Deadline(1))
+        if warm:
+            assert json.loads((tmp_path / "legacy-health.json").read_text()) == {
+                "transport": "_dial_tcp" if os.name == "nt" else "_dial_unix",
+                "request": {"action": "ping"},
+            }
         _until(lambda: _send(new_port, {"action": "ping"})["accepting_work"], [new])
         assert _send(new_port, {"action": "ping"})["unlocked_vaults"] == (
             [str(durable)] if warm else []

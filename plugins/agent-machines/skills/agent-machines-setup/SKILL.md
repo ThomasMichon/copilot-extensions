@@ -278,6 +278,9 @@ applicability and dry-run gates still apply; malformed module flags are errors.
 Do not automatically opt existing modules in. Sweep no longer blanket-defers for an
 unrelated live worktree session; git fast-forward safety still stays per-repo.
 Neither tier mutates anything when its resolved config is "not opted in."
+The watchdog's local dtssh launcher and host-health checks run only on Windows.
+Linux/WSL reports those steps as `skipped` and still refreshes the outbound
+mesh; this does not verify the Linux/WSL local SSH service.
 
 Opt in by declaring a `self-update` resource in a requirement package (`all/`
 for a fleet default, `machines/<machine>/` for one machine -- an explicit

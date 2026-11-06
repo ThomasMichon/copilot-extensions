@@ -79,7 +79,15 @@ def inspect_project(project: str, workspace: str) -> Inspection:
         sources = state_root.config_source_anchors(config, base_anchor=anchor, cwd=checkout)
         anchors = [
             *related.installed_plugin_related_anchors(),
-            *[related.config_contribution_anchor(s.anchor, s.origin) for s in sources],
+            *[
+                related.config_contribution_anchor(
+                    s.anchor, s.origin,
+                    directory_form=getattr(s, "directory_form", False),
+                    source_tier=getattr(s, "tier", None),
+                    state_repo=getattr(s, "state_repo", ""),
+                )
+                for s in sources
+            ],
         ]
         for source in sources:
             cfg._load_inrepo_config(str(source.anchor), strict=True)

@@ -1,4 +1,4 @@
-"""Expose the original local-resolution units without their subprocess case."""
+"""Expose local-resolution and management-auth units without subprocess cases."""
 
 from __future__ import annotations
 
@@ -29,4 +29,12 @@ for _name, _function in vars(_original).items():
         and _name != "test_import_fails_with_unknown_location_when_init_missing"
     ):
         assert _name not in globals(), f"duplicate original resolution test: {_name}"
+        globals()[_name] = _function
+
+_auth = _load_source(
+    "promotion_plugin_management_auth", LIBRARY / "tests/test_plugin_auth.py",
+)
+for _name, _function in vars(_auth).items():
+    if _name.startswith("test_"):
+        assert _name not in globals(), f"duplicate plugin-auth test: {_name}"
         globals()[_name] = _function

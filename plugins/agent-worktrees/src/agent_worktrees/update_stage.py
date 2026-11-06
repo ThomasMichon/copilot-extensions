@@ -327,12 +327,16 @@ def _run_copilot_update() -> tuple[bool, str]:
     """Run bounded, caller-owned acquisition. Returns (succeeded, output)."""
     from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
     from shutil import which
+    from . import update_auth_context
+    from .installer_run import InstallerLaunchError
 
     if which("copilot") is None:
         return False, "copilot not on PATH"
     try:
-        proc = run_caller_owned(
+        proc = update_auth_context.run_acquisition(
+            run_caller_owned,
             ["copilot", "plugin", "update", _PLUGIN_ID],
+            marketplace="copilot-extensions",
             timeout=_COPILOT_UPDATE_TIMEOUT,
             max_stdout_bytes=1024 * 1024,
             max_stderr_bytes=1024 * 1024,
@@ -341,6 +345,8 @@ def _run_copilot_update() -> tuple[bool, str]:
         return proc.returncode == 0, out.strip()
     except OwnedCleanupError:
         raise
+    except InstallerLaunchError:
+        return False, "copilot plugin authentication preparation failed"
     except subprocess.TimeoutExpired:
         return False, f"copilot plugin update timed out ({_COPILOT_UPDATE_TIMEOUT}s)"
     except (OSError, subprocess.SubprocessError) as e:

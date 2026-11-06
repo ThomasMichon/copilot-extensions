@@ -1,5 +1,5 @@
 """Tiered unattended self-update for agent-machines.
-Two independently scheduled tiers keep a logged-in Windows machine converging
+Two independently scheduled tiers keep a logged-in machine converging
 without an interactive Copilot session:
 * ``watchdog``: ensure the dtssh host launcher process is running
   (``ensure_watchdog``), repair a stale or wedged dtssh host with the same
@@ -9,7 +9,9 @@ without an interactive Copilot session:
   wedged snapshot indefinitely with nothing to notice or repair it), then
   reconcile this machine's outbound reach into the dtssh mesh (re-discover
   live tunnel ids, re-emit the SSH profile, verify every known alias). Any of
-  the three failing stops the run before the next step runs.
+  the three failing stops the run before the next step runs. The local
+  launcher and host checks apply only on Windows; outbound mesh refresh
+  also runs on Linux/WSL.
 * ``sweep``: fast-forward adopted repos, refresh plugin payloads/runtimes, then
   run the maintenance-safe machine restore subset.
 The tiers resolve opt-in from declarative ``self-update`` resources, use one
@@ -512,23 +514,31 @@ def run_tier(
             raise RuntimeError("could not encode the attempt timestamp")
         write_status(home, tier, attempt=attempted_at)
         if tier == WATCHDOG_TIER:
-            steps = ensure_watchdog(
-                process_lister=process_lister,
-                launcher_starter=launcher_starter,
-            )
-            healer = host_healer or (lambda: ensure_dtssh_host_healthy(runner=runner))
-            host_health_step = healer()
-            steps.append(host_health_step)
-            if host_health_step.status == "error":
-                return RunResult(
-                    tier=tier,
-                    status="error",
-                    opted_in=True,
-                    detail=host_health_step.detail,
-                    lock_reclaimed=lock.reclaimed,
-                    attempted_at=attempted_at,
-                    steps=steps,
+            if sys.platform == "win32":
+                steps = ensure_watchdog(
+                    process_lister=process_lister,
+                    launcher_starter=launcher_starter,
                 )
+                healer = host_healer or (lambda: ensure_dtssh_host_healthy(runner=runner))
+                host_health_step = healer()
+                steps.append(host_health_step)
+                if host_health_step.status == "error":
+                    return RunResult(
+                        tier=tier,
+                        status="error",
+                        opted_in=True,
+                        detail=host_health_step.detail,
+                        lock_reclaimed=lock.reclaimed,
+                        attempted_at=attempted_at,
+                        steps=steps,
+                    )
+            else:
+                steps = [
+                    StepResult(
+                        name, "skipped", "local dtssh host checks require Windows"
+                    )
+                    for name in ("dtssh-launcher", "dtssh-host-health")
+                ]
             refresher = mesh_refresher or (lambda: refresh_dtssh_mesh(runner=runner))
             mesh_step = refresher()
             steps.append(mesh_step)
