@@ -24,6 +24,129 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def test_bridge_historical_guards_preserve_selection_and_failure_diagnostics():
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["bridge-contracts-linux"]
+    step = next(
+        value for value in job["steps"]
+        if value.get("name") == "Exercise immutable bytes and historical publication guards"
+    )
+    arguments = shlex.split(step["run"])
+    files = [
+        arguments[index + 1] for index, value in enumerate(arguments)
+        if value == "--test-file"
+    ]
+    assert files == [
+        "tests/test_http48_source_retention.py",
+        "tests/test_http48_capture_guards.py",
+        "tests/test_http47_capture_guards.py",
+    ]
+    assert arguments[arguments.index("-k") + 1] == (
+        "http48 or shared_capture_seed_has_owned_committed_inputs "
+        "or capture_reproducible_real_commit_preserves_history"
+    )
+    assert not set(arguments) & {
+        "--test-timeout", "--timeout", "--plugin-timeout",
+        "--allow-host-state", "--allow-explicit-tiers",
+    }
+    options = shlex.split(step["env"]["PYTEST_ADDOPTS"])
+    assert "-vv" in options and "--durations=20" in options
+    upload = next(
+        value for value in job["steps"]
+        if value.get("name") == "Retain historical publication guard outcomes"
+    )
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == arguments[arguments.index("--junit-dir") + 1]
+    assert not step.get("continue-on-error")
+    names = [value.get("name") for value in job["steps"]]
+    assert (
+        names.index("Independently verify current HTTP-52 controlled source evidence")
+        < names.index(step["name"])
+        < names.index("Validate canonical historical evidence")
+        < names.index("Export only canonical current outputs and source preimages")
+        < names.index("Retain qualified current HTTP-52 outputs")
+    )
+
+
+@pytest.mark.parametrize("outcome", ["passed", "failed", "skipped", "missing", "empty", "duplicate"])
+def test_registration_inspection_portfolio_requires_complete_native_evidence(
+    tmp_path, monkeypatch, outcome,
+):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["registration-inspection-linux"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'registration-inspection'"
+    )
+    assert workflow["jobs"]["registration-inspection-windows"]["steps"] == job["steps"]
+    step = next(value for value in job["steps"] if value.get("id") == "readers")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "run-plugin-tests.py").write_text(f"""import json, sys
+from pathlib import Path
+import xml.etree.ElementTree as ET
+arguments = sys.argv[1:]
+Path("arguments.json").write_text(json.dumps(arguments))
+if {outcome!r} == "failed":
+    sys.exit(17)
+reports = Path(arguments[arguments.index("--junit-dir") + 1])
+reports.mkdir(parents=True)
+root = ET.Element("testsuites")
+suite = ET.SubElement(root, "testsuite")
+names = [
+    "test_actual_neutral_cwd_cli_and_existing_inventory_remain_read_only",
+    "test_native_namespace_selection_and_invalid_context_do_not_use_legacy_state",
+]
+if {outcome!r} == "missing":
+    names.pop()
+if {outcome!r} == "empty":
+    names.clear()
+if {outcome!r} == "duplicate":
+    names.append(names[0])
+for name in names:
+    case = ET.SubElement(suite, "testcase", name=name)
+    if {outcome!r} == "skipped":
+        ET.SubElement(case, "skipped")
+ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
+""", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "job-environment"))
+    body = compile(step["run"], "<registration-inspection-workflow>", "exec")
+    if outcome == "passed":
+        exec(body, {})
+    else:
+        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected):
+            exec(body, {})
+    arguments = json.loads((tmp_path / "arguments.json").read_text())
+    assert arguments[:3] == ["agent-worktrees", "--test-file", "tests/test_registration_inspection.py"]
+    assert not set(arguments) & {"--allow-host-state", "--allow-explicit-tiers", "--timeout", "--plugin-timeout"}
+
+
+@pytest.mark.parametrize("expected", ["", "b" * 40, "a" * 40])
+def test_registration_inspection_source_pin_precedes_execution(monkeypatch, expected):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    step = next(
+        value for value in workflow["jobs"]["registration-inspection-linux"]["steps"]
+        if value.get("name") == "Verify the explicitly selected qualification source"
+    )
+    monkeypatch.setenv("REGISTRATION_INSPECTION_SOURCE", expected)
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setattr(subprocess, "check_output", lambda *_args, **_kwargs: "a" * 40 + "\n")
+    body = compile(step["run"], "<registration-inspection-source>", "exec")
+    if expected == "a" * 40:
+        exec(body, {})
+    else:
+        with pytest.raises(AssertionError):
+            exec(body, {})
+
+
 @pytest.mark.parametrize("outcome", ["passed", "failed", "skipped"])
 @pytest.mark.parametrize("step_id", ["readers", "consumers"])
 def test_related_knowledge_portfolio_requires_native_reader_execution(

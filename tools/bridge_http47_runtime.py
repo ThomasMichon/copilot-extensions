@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 import hashlib
 import json
 import os
@@ -43,16 +44,27 @@ def load_request() -> tuple[Path, dict]:
     return path, request
 
 
-def relative_source(filename: str, proof: dict) -> str | None:
-    normalized = filename.replace("\\", "/")
-    candidates = []
+def _source_locator(proof: dict) -> Callable[[str], str | None]:
+    sources: dict[str, str] = {}
     for path in proof:
         if not path.endswith(".py"):
             continue
         suffix = path.split("/src/", 1)[-1] if "/src/" in path else path
-        if normalized.endswith("/" + suffix):
-            candidates.append((len(suffix), path))
-    return max(candidates)[1] if candidates else None
+        sources[suffix] = max(sources.get(suffix, ""), path)
+
+    def locate(filename: str) -> str | None:
+        remaining = filename.replace("\\", "/")
+        while "/" in remaining:
+            remaining = remaining.split("/", 1)[1]
+            if remaining in sources:
+                return sources[remaining]
+        return None
+
+    return locate
+
+
+def relative_source(filename: str, proof: dict) -> str | None:
+    return _source_locator(proof)(filename)
 
 
 def entry_role(filename: str) -> str | None:
@@ -187,6 +199,7 @@ def install(*, observer: bool = False) -> None:
     for name in early:
         verify_preloaded(sys.modules[name], proof[modules[name]])
         record({"kind": "exec", "source": modules[name], "role": None, "preloaded": True})
+    locate_source = _source_locator(proof)
     checking = False
 
     def audit(event: str, args: tuple) -> None:
@@ -203,7 +216,7 @@ def install(*, observer: bool = False) -> None:
         if event != "exec" or not isinstance(args[0], CodeType):
             return
         code = args[0]
-        source = relative_source(code.co_filename, proof)
+        source = locate_source(code.co_filename)
         role = entry_role(code.co_filename)
         helper = installation_source(code.co_filename) if bind_installation else None
         if source is None and helper is not None:

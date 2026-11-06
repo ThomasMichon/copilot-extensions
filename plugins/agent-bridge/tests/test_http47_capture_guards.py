@@ -124,18 +124,20 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         http["declared_range"].update(current=47, previous_generation=46)
         http["capability_versions"].pop("retained_inbox", None)
         http["capability_versions"].pop("retained_inbox_producer", None)
+        captured_sources = set()
+        for fixture in http["fixtures"]:
+            if fixture["generation"] < 48:
+                captured = json.loads((seed / fixture["path"]).read_bytes()).get(
+                    "captured_from", {},
+                )
+                captured_sources.add((
+                    captured.get("source_path"), captured.get("source_sha256"),
+                ))
         for row in http["source_paths"]:
             if row["path"] == evidence.PREFIX + "protocol.py":
                 row["sha256"] = evidence.digest(protocol.read_bytes())
             elif row["path"] not in evidence.AFFECTED and row["semantic"]:
-                covered = any(
-                    f["generation"] < 48
-                    and (captured := json.loads((seed / f["path"]).read_bytes()).get(
-                        "captured_from", {},
-                    )).get("source_path") == row["path"]
-                    and captured.get("source_sha256") == row["sha256"]
-                    for f in http["fixtures"]
-                )
+                covered = (row["path"], row["sha256"]) in captured_sources
                 if not covered:
                     row.update(semantic=False, non_semantic_reason=(
                         "Disposable HTTP-47 test cohort excludes the later adapter's semantics."
