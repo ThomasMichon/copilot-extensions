@@ -913,6 +913,52 @@ def test_expired_windows_job_requests_termination_without_verification_extension
     assert not qualification.job_zero_observed and not qualification.job_handle_closed
 
 
+@pytest.mark.parametrize("expired,confirmed", [(False, False), (False, True), (True, False)])
+def test_preliminary_accounting_failure_still_retires_owned_job(monkeypatch, expired, confirmed):
+    job = object.__new__(plugin_test_containment._WindowsJob)
+    native_owner = SimpleNamespace(handle=7)
+    job._retirement_owner = native_owner
+    job._handle = 7
+    events = []
+
+    def unavailable():
+        raise plugin_test_containment.ContainmentError("preliminary accounting unavailable")
+
+    job.active_processes = unavailable
+    job._kernel32 = SimpleNamespace(
+        TerminateJobObject=lambda handle, code: events.append(("terminate", handle, code)) or 1,
+    )
+    qualification = SimpleNamespace(
+        boundary=SimpleNamespace(
+            whole_deadline=19 if expired else 100,
+            require=lambda clock: pytest.fail("unavailable accounting cannot qualify"),
+        ),
+        forced_termination=False, job_zero_observed=False, job_handle_closed=False,
+    )
+    monkeypatch.setattr(
+        plugin_test_containment, "time",
+        SimpleNamespace(monotonic=lambda: 20, sleep=lambda seconds: pytest.fail("no extension")),
+    )
+
+    def retire(owner, remaining):
+        assert owner is native_owner and remaining == 5
+        owner._native_retirement = object()
+        events.append(("native-retirement", owner.handle, remaining))
+        if confirmed:
+            owner.handle = None
+            del owner._native_retirement
+            return
+        raise OSError("native exit unconfirmed")
+
+    monkeypatch.setattr(plugin_test_containment, "_retire_windows_job", retire)
+    with pytest.raises(plugin_test_containment.UnreapedProcessError) as error:
+        job.close(qualification=qualification)
+    assert events == ([("terminate", 7, 124)] if expired else [("native-retirement", 7, 5)])
+    assert error.value.job is native_owner and job._handle == (None if confirmed else 7)
+    assert qualification.forced_termination
+    assert not qualification.job_zero_observed and not qualification.job_handle_closed
+
+
 def test_posix_group_waits_until_no_live_members_remain(monkeypatch):
     signals = []
     monkeypatch.setattr(plugin_test_containment.signal, "SIGKILL", 9, raising=False)

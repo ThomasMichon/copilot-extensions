@@ -1035,3 +1035,26 @@ migration already works.
   review still gate merge; prior-head green checks are not new-head proof.
   Publication, release and consumer acceptance remain coordinator-owned;
   #10742 and full handover #10486 remain open.
+
+### 2026-11-05 - Preliminary-accounting cleanup and visibility consent gate
+
+- Two controls reproduced preliminary accounting failure skipping owned cleanup
+  before and after expiry. Unavailable accounting now marks the attempt unclean
+  but continues exact owned retirement or the expired termination request under
+  the original bound. It cannot publish positive settlement flags; unconfirmed
+  native witnesses remain with the same Job owner. Canonical SDK accounting
+  structure reuse removes the duplicate native structure without changing limits.
+- Final containment and pure-owner controls passed **246 tests/2 skips**, with
+  verified cleanup. Strict runtime-resolution, install contract, F/E9, module
+  caps, whitespace and dependency guard **552/0** passed. Only the changed
+  containment unit binding was refreshed; **4160 nodes**, **596 sources**,
+  coverage targets and the **300-second** budget remain unchanged.
+- Actual generated-CMD two-cycle visibility qualification remains open. The
+  qualified SDK observer requires explicit consent for one owned visible
+  calibration control, foreground activation/restoration and retirement.
+  No such control or observer was launched without that consent. Its existing
+  SDK case roster was not widened or relabeled as consumer qualification.
+- The previous argument/stdin and hidden-helper tests are not claimed as that
+  visibility proof. Current native Linux CI, review, visibility qualification,
+  release and consumer acceptance remain coordinator gates; #10742 and full
+  handover #10486 remain open.

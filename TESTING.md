@@ -1854,6 +1854,8 @@ I/O has completed. Unconfirmed retirement retains the same Job witnesses on
 `UnreapedProcessError.job`; it cannot publish successful settlement flags.
 An expired whole bound still requests termination of that exact owned Job,
 without starting another verification interval or claiming settlement.
+Unavailable preliminary accounting remains unclean, but cannot skip the exact
+owned cleanup attempt within the same original bound.
 
 The qualified stage publishes source/scope/origin-bound work-completion evidence
 only after actual candidate and worker exits within the original work cutoff.

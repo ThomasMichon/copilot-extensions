@@ -384,6 +384,7 @@ class _WindowsJob:
     def __init__(self, limits: Limits, *, native_application: bool = False) -> None:
         import ctypes
         from ctypes import wintypes
+        from agent_procutil import _JobBasicAccountingInformation
 
         class _BasicLimit(ctypes.Structure):
             _fields_ = [
@@ -416,18 +417,6 @@ class _WindowsJob:
                 ("JobMemoryLimit", ctypes.c_size_t),
                 ("PeakProcessMemoryUsed", ctypes.c_size_t),
                 ("PeakJobMemoryUsed", ctypes.c_size_t),
-            ]
-
-        class _BasicAccounting(ctypes.Structure):
-            _fields_ = [
-                ("TotalUserTime", wintypes.LARGE_INTEGER),
-                ("TotalKernelTime", wintypes.LARGE_INTEGER),
-                ("ThisPeriodTotalUserTime", wintypes.LARGE_INTEGER),
-                ("ThisPeriodTotalKernelTime", wintypes.LARGE_INTEGER),
-                ("TotalPageFaultCount", wintypes.DWORD),
-                ("TotalProcesses", wintypes.DWORD),
-                ("ActiveProcesses", wintypes.DWORD),
-                ("TotalTerminatedProcesses", wintypes.DWORD),
             ]
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -486,7 +475,7 @@ class _WindowsJob:
             )
         self._kernel32 = kernel32
         self._handle = job
-        self._BasicAccounting = _BasicAccounting
+        self._BasicAccounting = _JobBasicAccountingInformation
         self._ExtendedLimit = _ExtendedLimit
 
     def assign(self, pid: int) -> None:
@@ -520,8 +509,13 @@ class _WindowsJob:
             min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
             if qualification is not None else time.monotonic() + 5.0
         )
+        accounting_error = None
         try:
-            if qualification is not None and self._handle and self.active_processes():
+            try:
+                if qualification is not None and self._handle and self.active_processes():
+                    qualification.forced_termination = True
+            except (Exception, KeyboardInterrupt) as error:
+                accounting_error = error
                 qualification.forced_termination = True
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -534,6 +528,8 @@ class _WindowsJob:
             _retire_windows_job(owner, remaining)
             if owner.handle or getattr(owner, "_native_retirement", None):
                 raise OSError("Windows Job native retirement retained unconfirmed witnesses")
+            if accounting_error is not None:
+                raise OSError("Preliminary Windows Job accounting was unavailable") from accounting_error
         except (Exception, KeyboardInterrupt) as exc:
             raise UnreapedProcessError(
                 f"Windows Job native member exit could not be verified: {exc}", job=owner,
