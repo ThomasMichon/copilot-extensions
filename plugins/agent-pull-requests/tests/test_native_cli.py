@@ -177,7 +177,7 @@ def test_native_status_retains_votes_and_distinct_human_gates(command, monkeypat
     calls = stub(monkeypatch, value)
     assert cli.main(arguments("status", command)) == 0
     assert json.loads(capsys.readouterr().out) == value
-    assert calls == [([command, "pr-watch", "snapshot", "project/repo", "7", "--json"], 20.0)]
+    assert calls == [([command, "pr-watch", "snapshot", "project/repo", "7", "--json"], 60.0)]
 
 
 def test_native_create_delegates_publication_and_claim_once(command, monkeypatch, capsys):

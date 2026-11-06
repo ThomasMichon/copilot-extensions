@@ -1,0 +1,9 @@
+{
+  "comment": "Allow capable native snapshots to complete within one shared bounded 60-second bridge and frontend read budget",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
