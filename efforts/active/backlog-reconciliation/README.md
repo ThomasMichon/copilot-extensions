@@ -330,6 +330,28 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [acquisition/diagnostics adjudication](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records five further audited outcomes: finite documentation and announcement
+completion, two complete startup contracts received by actual OPEN #7116,
+and native-GC diagnostic fidelity received by actual OPEN #8370. The pinned
+announcement remains pinned; every implementation/native/source/resource
+owner and unresolved acceptance remains. Two equal complete20:21 PST scans
+measure843 whole OPEN:565 creator-eligible,278 excluded,565 original-cohort
+and278 inflow. Four eligible arrivals stay metadata-only; three external
+departures earn no credit. Verified dispositions are963, still114 above the
+fixed729 checkpoint. The campaign remains Active with checkbox states unchanged.
+
+The same [owner-fenced journal](<journal/2026/11.05 owner-fenced-cohort-adjudication.md>)
+then audits eleven further tracking retirements: four under actual OPEN
+#6620, six under the real Active fleet effort, and #5574 under the already
+reviewed Active singleton effort. Every product/native/source/resource duty
+and #1918's assignment remain; #3114/#3179 stay OPEN at their specific gates.
+Two equal complete19:28 PST scans measure847 whole OPEN:569 creator-eligible,
+278 excluded,566 original-cohort and281 inflow. Two eligible arrivals remain
+metadata-only and an external departure earns no credit. Verified dispositions
+are958, still118 above the fixed729 checkpoint. The campaign remains Active;
+the next slice qualifies new research supply without releasing actual holds.
+
 The [owner-fenced cohort adjudication](<journal/2026/11.05 owner-fenced-cohort-adjudication.md>)
 audits eighteen subordinate tracking retirements under six existing OPEN
 parents and new daemon parent #10847, preserving every unfinished acceptance
