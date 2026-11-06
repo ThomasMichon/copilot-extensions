@@ -40,6 +40,85 @@ Overlapping request and background refreshes use per-worktree publication
 generations: an older computation may finish its own response, but cannot
 replace a newer generation's cached or durable facts or renew their age.
 
+## On-demand PR associations
+
+Ordinary `worktree-status-bundle` responses add the optional
+`companion_pr_observations` declaration: contract
+`companion-pr-observations-v1`, version 1, option `--pr-associations`, and
+passive snapshot schema `agent-worktrees.pr-snapshot`, version 1.
+This is the executing CLI's support, not the resident's generation or fresh
+provider evidence. Ordinary reads keep their existing six facts and omit
+related-PR binding discovery.
+
+After finding that declaration, a consumer may request
+`worktree-status-bundle --worktree <id> --pr-associations --json`.
+It retains the original cached/core bundle and adds the independently timed
+`facts.pr_associations` fact. The version-1 `agent-worktrees.pr-associations`
+value identifies the exact project, worktree and stored `creation_nonce`,
+with `available`, `complete`, `associations` and `omitted`.
+Each association retains its stored `pr_id`, `pr_revision`, `provider`,
+target `repo`, `number`, `url` and `recorded_state`. Its separate `binding`
+reports `available` and either the registered provider/repository,
+configured `api_base` and effective `endpoint`, or a bounded reason.
+Binding availability means that target can be selected for the existing read;
+it is not authorization, provider reachability or observation freshness.
+
+Discovery projects at most 24 associations, with explicit omissions, within
+the existing 1 MiB body budget, measured using the actual versioned, indented
+stdout envelope and newline. One invocation shares one fresh configuration
+acquisition scope and one strict registry snapshot across association targets.
+Concrete failed configuration acquisitions, including malformed related files,
+suppressed related-overlay failures and failed/malformed/lossy committed inputs,
+cannot qualify fallback bindings. Related-file diagnostics join the active
+configuration acquisition without changing the loader's fallback values or
+legacy exception behavior.
+Classification fails closed: any indeterminate acquisition outcome, including a
+malformed or unreadable installation context and any unrecognized failure
+reason, makes the binding unavailable. Only recognized owner-provenance gaps,
+where a value was acquired but its complete provenance cannot be proven, are
+not configuration value failures.
+It performs no credential/forge read, Git remote discovery,
+Git fetch, service startup or canonical write of its own; the status command's
+existing Git/liveness/bootstrap behavior is unchanged.
+Duplicate YAML keys in record evidence and malformed or duplicate-key registry
+sources remain unavailable; they cannot overwrite earlier evidence into an
+empty success or silently select a related fallback. Hosting inputs use the
+same surrounding-whitespace normalization as the existing snapshot fetch.
+Deployment prefixes remain case-sensitive; repository URL components are
+decoded separately without allowing encoded separators to change their
+boundaries. Both encoded and legacy unescaped ADO repository names are supported.
+Concrete initial/foreign configuration acquisition failures keep bindings
+unavailable even if the loader returns usable defaults. A failed foreign
+target cannot regain availability through the same invocation's cache.
+Malformed `config.d` entries and indeterminate drop-in scans likewise keep
+bindings unavailable, including scans that retain last-known configuration.
+The owning configuration loader's ordinary valid-peer isolation is unchanged.
+Genuinely absent optional registries remain compatible.
+Incomplete owner-provenance diagnostics alone are not a malformed value.
+The record is reread and checked against the selected worktree incarnation and
+again after binding resolution. Changed, malformed, oversized or legacy
+incarnation evidence remains unavailable, not an empty success.
+An exact known empty list needs no binding discovery. Missing/legacy identity,
+duplicate association IDs, incomplete targets and conflicting/unregistered
+bindings cannot qualify a provider read. Configuration failure retains the
+known associations with unavailable bindings.
+If even the unavailable fact cannot fit beside the existing core within the
+body budget, the optional response reports `availability.status: unavailable`
+with reason `association-byte-budget`, without replaying the oversized core.
+The original cache is unchanged; consumers retain independently obtained views
+rather than treating this bounded failure as an empty core.
+Oversized or malformed subject metadata instead yields the bounded
+`association-metadata-overflow` availability reason without reproducing or
+truncating the identity into another subject.
+
+Claims and recorded `open`, `merged`, `closed` or other lifecycle state do not
+establish current provider state, acceptance or claim release. This operation
+does not acquire a snapshot or watch. Consumers using older/rolled-back CLIs
+without the declaration retain their claim-only baseline and unknown PR state;
+they must not guess the new option or fall back to a raw forge client.
+Older readers can ignore the additive declaration/fact. Unknown arguments
+remain rejected, and no existing form is retired.
+
 ## Repository PR census
 
 `pr-sweep <owner/repository> [--fleet] [--include MACHINE/ENV]

@@ -128,6 +128,11 @@ def add_parsers(sub) -> None:
         ),
     )
     sp.add_argument(
+        "--pr-associations",
+        action="store_true",
+        help="Include bounded canonical PR associations and passive target bindings",
+    )
+    sp.add_argument(
         "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
     )
 
@@ -627,6 +632,11 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
         payload=payload,
         fallback=_fallback,
     )
+    from . import companion_pr_associations
+
+    bundle = {**bundle, "companion_pr_observations": companion_pr_associations.declaration()}
+    if getattr(args, "pr_associations", False):
+        bundle = companion_pr_associations.extend_bundle(bundle, project, yaml_path, record)
     output._json_output(bundle)
     return 0
 

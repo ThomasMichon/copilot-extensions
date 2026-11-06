@@ -97,7 +97,14 @@ def test_uses_daemon_when_reachable(monkeypatch, tmp_path):
         argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
     )
     assert rc == 0
-    assert outputs == [{"worktree_id": "wt1", "from": "daemon"}]
+    assert outputs == [{
+        "worktree_id": "wt1", "from": "daemon",
+        "companion_pr_observations": {
+            "contract": "companion-pr-observations-v1", "version": 1,
+            "option": "--pr-associations",
+            "snapshot": {"schema": "agent-worktrees.pr-snapshot", "version": 1},
+        },
+    }]
     assert captured_payload == {"project": "proj", "worktree_id": "wt1", "force": False}
 
 
@@ -210,7 +217,7 @@ def test_native_liveness_refresh_requires_explicit_matching_unconfirmed_bundle(
     assert cli.cmd_worktree_status_bundle(
         argparse.Namespace(worktree_id="wt1", force_refresh=force, json=True),
     ) == 0
-    assert outputs == [bundle]
+    assert {key: value for key, value in outputs[0].items() if key != "companion_pr_observations"} == bundle
 
 
 def test_native_liveness_refresh_refuses_changed_record_identity(monkeypatch, tmp_path):
@@ -303,7 +310,8 @@ def test_falls_back_to_direct_compute_when_daemon_unreachable(monkeypatch, tmp_p
         argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
     )
     assert rc == 0
-    assert outputs == [{"from": "direct-compute"}]
+    assert outputs[0]["from"] == "direct-compute"
+    assert outputs[0]["companion_pr_observations"]["version"] == 1
 
 
 def test_rejects_a_tampered_record_worktree_id_before_any_substitution(monkeypatch, tmp_path):

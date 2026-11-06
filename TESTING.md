@@ -120,6 +120,32 @@ native Bash rather than WSL or skipped prerequisites. The original 30-second
 item, 180-second group and five-second Bash-child bounds remain finite.
 This is source consumer/guard parity, not installed or throughput acceptance.
 
+Worktrees' opt-in `--test-file tests/test_companion_pr_associations.py
+--test-file tests/test_worktree_status_bundle_cli.py --test-file
+tests/test_pr_read_context.py --test-file tests/test_pr_candidate_snapshot.py
+--test-file tests/test_pr_observation_events.py --test-file
+tests/test_pr_config_foreign_repo.py --test-file tests/test_pr_related_binding.py
+--test-file tests/test_worktree_status_compute.py --test-file
+tests/test_lazy_dispatch.py --allow-explicit-tiers` packet exercises the
+declared optional association fact through actual private tracking files and
+current/frozen-prior parser processes. It covers canonical empty versus
+unknown/omitted evidence, scope/incarnation/reassignment, typed record state,
+shared fresh configuration acquisition, independent cached core facts,
+three-provider bindings and unchanged strict parsing. The existing passive
+snapshot supplies a separate effective endpoint; no test acquires real credentials,
+contacts a real forge or starts a real resident. Cleanup remains caller-owned and
+verified. This is isolated source/process qualification, not installed/native
+performance, UI point-read or full live topology acceptance. Required unit-only
+CI is unchanged.
+The focused endpoint regression extension also selects
+`tests/test_pr_observation_credentials.py`, `tests/test_pr_observation.py` and
+`tests/test_providers.py` for actual provider construction over synthetic native
+responses. Duplicate-key private YAML/registry, whitespace-normalized bindings,
+fetch-captured host selection and actual emitted stdout budgets are covered.
+The four publication-fixture gaps tracked in #10408 remain separately scoped;
+their explicit exclusion does not establish an unfiltered provider-suite pass
+or weaken required CI.
+
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
 --allow-explicit-tiers` packet checks optional expected-head declaration/codec

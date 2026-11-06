@@ -399,7 +399,7 @@ def get_snapshot(
     head = str((pr.get("lastMergeSourceCommit") or {}).get("commitId") or "")
     target = str((pr.get("lastMergeTargetCommit") or {}).get("commitId") or "")
     if status in ("completed", "abandoned"):
-        return PRSnapshot(pr_state="closed", merged=status == "completed", head_sha=head, base_sha=target)
+        return PRSnapshot(pr_state="closed", merged=status == "completed", head_sha=head, base_sha=target, endpoint=provider.authority_endpoint(api_base))
     if status != "active":
         raise ProviderError("ADO PR lifecycle state is unavailable")
     if not head:
@@ -521,7 +521,7 @@ def get_snapshot(
                     for index, vote in enumerate(sorted((v for v in votes if v.vote),
                                                        key=lambda v: (v.vote < 0, v.actor_id))))
     return PRSnapshot(
-        pr_state="closed" if status in ("completed", "abandoned") else "open",
+        pr_state="closed" if status in ("completed", "abandoned") else "open", endpoint=provider.authority_endpoint(api_base),
         merged=status == "completed", head_sha=head,
         base_ref=str(pr.get("targetRefName") or "").removeprefix("refs/heads/"),
         base_sha=target,

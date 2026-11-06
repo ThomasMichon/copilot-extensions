@@ -588,7 +588,7 @@ class GiteaProvider:
             if isinstance(lbl, dict) and lbl.get("name")
         )
         return PRSnapshot(
-            pr_state=str(pr.get("state", "")) or "open",
+            pr_state=str(pr.get("state", "")) or "open", endpoint=self.authority_endpoint(api_base),
             merged=bool(pr.get("merged", False)),
             head_sha=str((pr.get("head") or {}).get("sha", "")),
             base_ref=str((pr.get("base") or {}).get("ref", "")), base_sha=str((pr.get("base") or {}).get("sha") or ""),
