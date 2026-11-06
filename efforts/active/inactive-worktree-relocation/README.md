@@ -96,9 +96,9 @@ authorized resources and the existing runner/lease/cleanup boundaries.
 ## Plan
 
 ### Phase 1 — First complete ordinary relocation flow
-- [ ] After proposal review and execution admission, qualify the owner/pointer
+- [x] After proposal review and execution admission, qualify the owner/pointer
   inventory and expose a read-only plan plus an explicit native move operation.
-- [ ] Complete stopped, clean, merged/final ordinary linked-checkout relocation:
+- [x] Complete stopped, clean, merged/final ordinary linked-checkout relocation:
   fenced admission, all-content transfer, Git repair, authoritative rebinding,
   actual consumer verification and journaled interruption/recovery.
 - [ ] Make old/new allocation roots coexist for this flow, retaining project,
@@ -134,7 +134,7 @@ boundaries. It is not a claim that runtime checks have already passed.
 
 - [x] Proposal: effort/vision structure, documentation consistency, public-safety
   audit, actual repository review verdict and required CI before merge.
-- [ ] First flow: real linked Git checkout, stopped-clean acceptance,
+- [x] First flow: real linked Git checkout, stopped-clean acceptance,
   complete transfer and post-move consumers on same and different volumes;
   blockers and injected interruption preserve original/recovery custody.
 - [ ] Mixed roots: existing resume/mutation/publication plus new allocations;
@@ -245,3 +245,23 @@ adopter pilot feedback gates subsequent widening.
 - The source first-flow gate can now proceed through normal code PR, actual
   review verdict, required CI and merge. Selected-runtime activation and an
   adopter pilot remain independently owned; broader inactive support stays open.
+
+### 2026-11-06 — Review corrections qualified
+- Addressed Git lock protection, full initial receiving identity/ledger checks,
+  copied-data and pointer/recovery durability, exited-caller recovery,
+  inherit-only native ACE semantics, permission aliases, genuinely read-only
+  seed inspection and the environment pairing opt-out.
+- Added real separate-process recovery and interruption controls after Git
+  repair, permission update, ledger update, partial source retirement and a
+  failed durability barrier. A native descriptor control distinguishes
+  inherit-only access without mocking past security-descriptor acquisition.
+- The final native/companion/writer packet passed **82 controls, no skips**.
+  It included the bounded real two-filesystem roundtrip after the safety
+  corrections; successful cleanup removed only the owned fixture.
+- The complete multi-process New/plan/apply consumer took 38.84 seconds under
+  observed load, exceeding the runner's default 30-second item budget.
+  Kept finite child custody/deadlines and gave only that combined native item
+  a 120-second budget; no runtime behavior was changed to hide a failure.
+- Source review convergence, required CI and merge remain open. The effort
+  stays Active; selected-runtime activation, actual migration and initial
+  adopter feedback are still separate gates.
