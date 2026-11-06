@@ -51,6 +51,16 @@ their ordinary full ping; new readers accept that response while retaining
 PID, generation and admission checks. Ordinary public ping and strict
 installer configuration/backend readiness keep their existing behavior.
 
+Prior generation observers send ordinary pings without the hint or a vault
+context. Those pings use the resident's default database selected at service
+initialization, not another configuration-owner lookup. Local public clients
+already send their freshly resolved database selection, so their full ping
+continues reporting the caller's current context. A contextless full ping
+reports the resident default until restart. This read-only status snapshot
+does not select a database for credential operations: contextless credential
+requests still resolve configuration freshly, and ordinary ping retains
+password-expiration checks.
+
 The old build observes a different, live, selected build and closes its work
 admission. It settles already-admitted native requests, optionally transfers
 compatible auth state, and retires itself. Its cleanup preserves the successor's

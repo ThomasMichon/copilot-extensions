@@ -8,7 +8,7 @@ import sys
 
 from . import activity, launch_native_observation, native_lifecycle_source, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity, worktree_trust
 from . import config as cfg, hook_ipc, session_context as session_context_mod
-from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
+from . import retained_record_writer, session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
 from .session_title import capture_session_title as _capture_session_title
 
 
@@ -139,19 +139,14 @@ def _session_bind_project_key() -> str:
 
 def add_parsers(sub) -> None:
     sp = sub.add_parser("register-session", help="Register a Copilot session against a worktree")
-    sp.add_argument(
-        "--worktree-id", default=None, help="Worktree ID (resolved from --cwd when omitted)"
-    )
+    sp.add_argument("--retained-record-writer", help="Qualified executing writer and workspace JSON")
+    sp.add_argument("--worktree-id", default=None, help="Worktree ID (resolved from --cwd when omitted)")
     sp.add_argument(
         "--session-id",
         default=None,
         help="Copilot session ID (read from --stdin payload when omitted)",
     )
-    sp.add_argument(
-        "--cwd",
-        default=None,
-        help="Session cwd, used to resolve the worktree when --worktree-id is absent",
-    )
+    sp.add_argument("--cwd", default=None, help="Session cwd, used to resolve the worktree when --worktree-id is absent")
     sp.add_argument(
         "--stdin",
         action="store_true",
@@ -220,6 +215,7 @@ def add_parsers(sub) -> None:
         "bind-session",
         help="Explicitly bind the current Copilot session to a worktree it declares",
     )
+    sp.add_argument("--retained-record-writer", help="Qualified executing writer and workspace JSON")
     sp.add_argument(
         "--worktree-dir",
         dest="worktree_dir",
@@ -337,6 +333,7 @@ def _emit_handoff_claim_stages(
     _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
+@retained_record_writer.command
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked)."""
     wt_id = getattr(args, "worktree_id", None)
@@ -367,7 +364,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     if not session_id:
         return 0
-    if _status_monitor_enabled():
+    if not retained_record_writer.active() and _status_monitor_enabled():
         _ensure_status_monitor()
 
     if not wt_id:
@@ -541,7 +538,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             inside = False
         if not inside:
             upd_path = record.worktree_path
-    if not _register_manager_owned_monitor_session(
+    if not retained_record_writer.active() and not _register_manager_owned_monitor_session(
         wt_id,
         upd_path,
         project=cfg.active_project(),
@@ -599,6 +596,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     return 0
 
 
+@retained_record_writer.command
 def cmd_bind_session(args: argparse.Namespace) -> int:
     """Explicitly bind THIS Copilot session to a worktree it declares (JSON out)."""
     session_id = getattr(args, "session_id", None) or (
@@ -704,7 +702,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         upd_path = tracking.load_record(rec_path).worktree_path if rec_path.exists() else None
     except Exception:
         upd_path = None
-    if not _register_manager_owned_monitor_session(
+    if not retained_record_writer.active() and not _register_manager_owned_monitor_session(
         wt_id,
         upd_path or wdir,
         project=cfg.active_project(),

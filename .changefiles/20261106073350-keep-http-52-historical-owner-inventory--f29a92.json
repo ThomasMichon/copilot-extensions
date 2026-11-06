@@ -1,0 +1,9 @@
+{
+  "comment": "Keep HTTP-52 historical owner inventory tied to its captured tree, not future source additions",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

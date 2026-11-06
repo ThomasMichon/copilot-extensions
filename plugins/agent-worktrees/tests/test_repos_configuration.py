@@ -181,6 +181,43 @@ def test_missing_binding_owner_refuses_without_any_native_configuration_write(na
     assert tree(native) == before
 
 
+@pytest.mark.parametrize("operation", ["identities", "knowledge-resolve", "knowledge-preview"])
+def test_real_cli_portable_knowledge_identity_and_owner_refusal(native, operation):
+    from agent_worktrees import project_state
+
+    path = repos._repos_yaml_path()
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document["repos"]["knowledge"] = {
+        "class": "knowledge", repos._current_platform(): str(native / "knowledge"),
+        "remote": "https://github.com/example/knowledge.git", "account": "selected-account",
+        "default_branch": "main",
+    }
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    harness_id = project_state.canonical_repository_id("sample")
+    knowledge_id = project_state.canonical_repository_id("knowledge")
+    args = ["--context-project", "sample"]
+    if operation != "identities":
+        args += ["--harness-id", harness_id, "--knowledge-id", knowledge_id]
+    before = tree(native)
+    child = cli(operation, *args)
+    result = json.loads(child.stdout)
+    if operation == "knowledge-preview":
+        assert child.returncode == 1
+        assert result["code"] == "binding-owner-unavailable"
+    else:
+        assert child.returncode == 0, child.stderr
+        if operation == "identities":
+            entry = next(entry for entry in result["entries"] if entry["repository"] == "knowledge")
+            assert entry["repository_id"] == knowledge_id and entry["account"] == "selected-account"
+            assert result["capabilities"]["knowledge_preference"] == 1
+        else:
+            assert result["harness"]["repository_id"] == harness_id
+            assert result["knowledge"]["repository_id"] == knowledge_id
+            assert result["status"] == "suggested" and not result["binding_changed"]
+    assert SECRET not in child.stdout + child.stderr
+    assert tree(native) == before
+
+
 def test_missing_binding_owner_catalog_exposes_visible_recovery_without_writes(native):
     source = native / "repository" / ".agent-worktrees" / "config.yaml"
     source.parent.mkdir()
@@ -253,7 +290,8 @@ def test_binding_owner_uses_selected_home_and_project_activation(native, monkeyp
     assert tree(native) == before
 
 
-def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
+@pytest.mark.parametrize("portable", [False, True])
+def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch, portable):
     from agent_procutil import owned_process
     from agent_worktrees import repos_knowledge_configuration as binding
 
@@ -262,11 +300,17 @@ def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
 
     def execute(argv, **kwargs):
         calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, json.dumps({"version": 1}), "")
+        capabilities = {"version": 1}
+        if portable:
+            capabilities["existing_binding_configuration"] = 2
+        return subprocess.CompletedProcess(argv, 0, json.dumps(capabilities), "")
 
     monkeypatch.setattr(owned_process, "run_caller_owned", execute)
     with pytest.raises(ConfigurationError) as caught:
-        binding.invoke("sample", "sample", "apply", "a" * 64)
+        binding.invoke(
+            "sample", "sample", "apply", "a" * 64,
+            **({"portable_resolution": {"execution_machine": "example-worker"}} if portable else {}),
+        )
     assert caught.value.code == "binding-owner-unsupported"
     assert len(calls) == 1 and "--capabilities" in calls[0]
     assert "--configuration" not in calls[0]
@@ -289,8 +333,9 @@ def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native
         script = native / "qualified-binding.py"
         script.write_text("# Owned binding fixture\n", encoding="utf-8")
 
-        def delegated(_path, *, run_name):
+        def delegated(_path, *, run_name, init_globals):
             assert run_name == "__main__"
+            assert callable(init_globals["_NATIVE_BINDING_READ_RUNNER"])
             futures.append(pool.submit(write))
             assert started.wait(2)
             assert not completed.wait(0.1)
@@ -311,6 +356,33 @@ def test_binding_worker_refuses_a_changed_payload_before_execution(native, monke
     with pytest.raises(ConfigurationError) as caught:
         binding._apply_worker("sample", "knowledge", "a" * 64, str(native / "old-owner.py"))
     assert caught.value.code == "binding-owner-changed"
+
+
+def test_native_preview_worker_preserves_read_only_scope_without_a_writer_lock(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_configuration as binding, repos_registry_transaction
+
+    script = native / "qualified-preview.py"
+    script.write_text("# Native preview fixture\n", encoding="utf-8")
+    monkeypatch.setattr(binding, "owner_script", lambda _project: script)
+    monkeypatch.setattr(
+        repos_registry_transaction, "registry_lock",
+        lambda *_args, **_kwargs: pytest.fail("preview took a writer lock"),
+    )
+    previous = sys.argv
+    calls = []
+
+    def delegated(path, *, run_name, init_globals):
+        assert path == str(script) and run_name == "__main__"
+        assert sys.argv[sys.argv.index("--configuration") + 1] == "preview"
+        assert "--preview-token" not in sys.argv
+        assert callable(init_globals["_NATIVE_BINDING_READ_RUNNER"])
+        calls.append(path)
+
+    monkeypatch.setattr(binding.runpy, "run_path", delegated)
+    before = tree(native)
+    binding._preview_worker("sample", "knowledge", str(script))
+    assert calls == [str(script)] and sys.argv is previous
+    assert tree(native) == before
 
 
 def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(native, monkeypatch):
@@ -936,7 +1008,10 @@ def test_preference_edit_does_not_modify_aliased_unselected_data(native, operati
     assert after["repos"]["sample"].get("copilot_account", "") == login
 
 
-def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native):
+@pytest.mark.parametrize("condition", [
+    "present", "missing-sample", "missing-knowledge", "retired", "stale", "absent",
+])
+def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native, condition):
     from agent_worktrees import tracking
 
     registry_path = repos._repos_yaml_path()
@@ -975,58 +1050,41 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
         tracking.save_record(record, path)
         records[name] = path
 
-    for expected in ("present", "stale", "absent"):
-        before = tree(native)
-        result = request("catalog", "--workspace", str(paths["sample"]))
-        assert result.returncode == 0, result.stderr
-        rows = json.loads(result.stdout)["entries"]
-        row = next(row for row in rows if row["id"] == "sample")
-        state = row["configuration"]
-        assert not state["findings"], state["findings"]
-        assert state["binding"]["identity"] == "knowledge"
-        assert state["binding"]["anchor"] == str(native / "knowledge")
-        assert state["binding"]["writable_workspace"] is False
-        assert state["pair"]["status"] == expected
-        if expected == "present":
-            assert state["pair"]["workspace"] == str(paths["knowledge"])
-            assert state["pair"]["writable_workspace"] is True
-        else:
-            assert state["pair"]["writable_workspace"] is False
-        route = next(row for row in rows if row["id"] == "external")
-        assert route["registration"] == "absent" and route["participation"] == "related"
-        assert route["configuration"]["route"]["preferred"] == "codespace"
-        assert route["configuration"]["route"]["editable"] is False
-        assert SECRET not in result.stdout + result.stderr
-        assert tree(native) == before
-        if expected == "present":
-            for missing in paths.values():
-                missing.rmdir()
-                before_missing = tree(native)
-                result = request("catalog", "--workspace", str(paths["sample"]))
-                assert result.returncode == 0, result.stderr
-                state = next(
-                    row["configuration"] for row in json.loads(result.stdout)["entries"]
-                    if row["id"] == "sample"
-                )
-                assert state["pair"]["status"] == "stale"
-                assert state["pair"]["writable_workspace"] is False
-                assert state["pair"]["workspace"] != str(native / "knowledge")
-                assert tree(native) == before_missing
-                missing.mkdir()
-            retired = tracking.load_record(records["knowledge"])
-            retired.status = "finalized"
-            tracking.save_record(retired, records["knowledge"])
-            result = request("catalog", "--workspace", str(paths["sample"]))
-            assert result.returncode == 0, result.stderr
-            state = next(
-                row["configuration"] for row in json.loads(result.stdout)["entries"]
-                if row["id"] == "sample"
-            )
-            assert state["pair"]["workspace_status"] == "finalized"
-            assert state["pair"]["writable_workspace"] is False
-            records["knowledge"].unlink()
-        elif expected == "stale":
+    if condition.startswith("missing-"):
+        paths[condition.removeprefix("missing-")].rmdir()
+    elif condition == "retired":
+        retired = tracking.load_record(records["knowledge"])
+        retired.status = "finalized"
+        tracking.save_record(retired, records["knowledge"])
+    elif condition in {"stale", "absent"}:
+        records["knowledge"].unlink()
+        if condition == "absent":
             records["sample"].unlink()
+    before = tree(native)
+    result = request("catalog", "--workspace", str(paths["sample"]))
+    assert result.returncode == 0, result.stderr
+    rows = json.loads(result.stdout)["entries"]
+    row = next(row for row in rows if row["id"] == "sample")
+    state = row["configuration"]
+    assert not state["findings"], state["findings"]
+    assert state["binding"]["identity"] == "knowledge"
+    assert state["binding"]["anchor"] == str(native / "knowledge")
+    assert state["binding"]["writable_workspace"] is False
+    expected = "present" if condition in {"present", "retired"} else "absent" if condition == "absent" else "stale"
+    assert state["pair"]["status"] == expected
+    assert state["pair"]["writable_workspace"] is (condition == "present")
+    if condition == "present":
+        assert state["pair"]["workspace"] == str(paths["knowledge"])
+    elif condition.startswith("missing-"):
+        assert state["pair"]["workspace"] != str(native / "knowledge")
+    elif condition == "retired":
+        assert state["pair"]["workspace_status"] == "finalized"
+    route = next(row for row in rows if row["id"] == "external")
+    assert route["registration"] == "absent" and route["participation"] == "related"
+    assert route["configuration"]["route"]["preferred"] == "codespace"
+    assert route["configuration"]["route"]["editable"] is False
+    assert SECRET not in result.stdout + result.stderr
+    assert tree(native) == before
 
 
 @pytest.mark.parametrize("mode", ["empty", "populated", "bytes-only"])

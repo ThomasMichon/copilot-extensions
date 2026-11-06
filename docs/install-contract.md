@@ -2207,7 +2207,7 @@ Contained tests retain their test runner's ownership instead of detaching.
 Reachability does not require an advertised `HEAD`: an unborn or dangling default
 branch is not an authentication failure.
 
-A working setup gets no environment overlay. Only failed sources acquire an
+A working Git setup gets no Git command-scope overlay. Only failed sources acquire an
 environment-only Git command-scope overlay, appended after inherited command
 configuration so local helpers cannot override it. Overrides use counted Git
 entries and, when inherited, appended `GIT_CONFIG_PARAMETERS`; the original
@@ -2246,6 +2246,34 @@ activation restoration failures after launch do not erase the usage evidence.
 `CE_UPDATE_AUTH=report-only` applies no credential fix, so
 fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.
 There is no persistent configuration cleanup or cleanup-consent flag.
+
+Plugin-management children also need the selected GitHub credential when the
+saved Copilot inference login lacks marketplace access. For declared public
+GitHub HTTPS sources, the shared `plugin_resolve.plugin_auth` helper asks Git's
+configured credential owner at the execution checkout, preserving command-scope
+credential-router configuration while removing inherited repository selectors.
+It uses a matching public-host `GH_TOKEN` or `GITHUB_TOKEN` only when Git supplies
+no credential. It advertises Git's standard `authtype` capability and accepts
+password or negotiated bearer credentials; a negotiated credential takes
+precedence over legacy username/password fields. An explicit owner refusal,
+unsupported negotiated authentication type or different returned authority is
+not an ambient fallback. Lookups are non-interactive, headless and bounded to
+ten seconds or the caller's shorter remaining budget.
+The existing stdlib process supervisor contains the lookup and its credential
+helper descendants, reaping them on completion, timeout or caller cancellation.
+Lookup-only C-locale diagnostics keep explicit refusals recognizable on localized
+hosts without changing the caller's locale.
+
+Only the maintenance child's copied environment receives `COPILOT_GITHUB_TOKEN`
+and `GH_TOKEN`; ordinary prompts, ACP launches, the parent environment and saved
+logins are unchanged. This covers Bridge/venue preparation, Worktrees acquisition
+and staged refresh, and Manager's registered-origin acquisition without requiring
+an agent-worktrees runtime in standalone consumers. Exact child credentials are
+redacted from returned acquisition diagnostics, including byte-valued timeout
+output. Directory/non-GitHub sources
+retain existing behavior. Worktrees keeps its anonymous-source, held-source,
+`off` and `report-only` decisions; authentication preparation is not evidence that
+an acquisition child launched.
 
 ### Recovery of an adopted standalone Manager
 
@@ -4400,6 +4428,9 @@ approved by the original Release attestation. This command does not obtain
 materials, authorize a profile, sign, upload, install or activate anything.
 It also accepts the existing `--native-lock` and `--offline-wheel-pool`
 selection modes instead of `--guarded-feed`.
+Both this command and `core_native_delivery.py` accept the optional
+`--layout manager-isolated` described below; the default remains the
+single-environment delivery.
 
 `tools/core_native_delivery.py` connects that candidate producer to the
 existing native resolver and delivery owners:
@@ -4566,6 +4597,20 @@ bytes without unpacking or executing them, and yields the original retained
 wheel snapshot plus read-only material handles/paths for the context lifetime.
 The existing wheel inspector verifies the full dependency closure and metadata.
 Byte/file/storage bounds and one deadline cover assembly and readback.
+
+For a core containing the self-contained Worktree Manager wheel, callers can
+select `--layout manager-isolated` on both the transport and delivery commands
+(or pass the same `layout` to their APIs). The envelope uses version 2 and
+retains the unchanged, complete parent profile and wheel set. The reader
+derives a shared closure and a Manager closure from that profile, verifies
+each with the existing wheel inspector, and yields both as
+`DeliverySnapshot.environments` alongside the held wheel snapshot. Every
+parent wheel must belong to at least one derived closure; a shared root cannot
+depend on Manager. Consumers construct each environment from its exact
+snapshot subset, while retaining and independently admitting the parent
+profile. Derived closures are not separately approved profiles. Version 1
+remains the default, and its single-environment collision refusal is unchanged;
+older readers reject version 2, so publishers must migrate consumers first.
 
 This is packaging, not pipeline activation, release approval, acquisition,
 installation, service cutover or license clearance. The existing public

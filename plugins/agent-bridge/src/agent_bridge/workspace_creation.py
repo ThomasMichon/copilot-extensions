@@ -15,7 +15,8 @@ from fastapi import HTTPException
 from repository_policy import AgentHostingError
 
 from .acquisition_authority import read_worktree_record, worktree_command
-from .acquisition_contract import AcquisitionRefused
+from .acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
+from .creation_worktree_writer import bind_target, creation_writer
 from .acquisition_executor import executor
 from .acquisition_store import AcquisitionStore
 from .creation_custody import legacy_creation
@@ -40,6 +41,13 @@ def creation_fact_options(options: dict[str, Any]) -> dict[str, Any]:
         if len(owner_parts) == 3 and all(owner_parts):
             facts["caller_owner_ref"] = owner_scope
     return facts
+
+
+def creation_facts(target: SpawnTarget, prompt: str | None, options: dict[str, Any]) -> dict:
+    return {
+        "target": json.loads(target.to_json()), "prompt": prompt,
+        "options": creation_fact_options(options),
+    }
 
 
 async def allocate_workspace(
@@ -82,6 +90,7 @@ async def start_request(
         session, creation = await start(
             manager, target, key=request.creation_key, prompt=request.creation_prompt,
             provider_instance=request.provider_instance,
+            worktree_writer=request.worktree_writer,
             agent_name=agent_name, caller_id=request.caller_id,
             caller_session_id=request.caller_session_id, mcp_servers=request.mcp_servers,
             copilot_args=request.copilot_args, env_overrides=env or None,
@@ -148,9 +157,11 @@ def _sessionless(
     )
 
 
+@creation_writer
 async def start(
     manager: SessionManager, target: SpawnTarget, *, key: str,
-    prompt: str | None = None, provider_instance: bool = False, **options: Any,
+    prompt: str | None = None, provider_instance: bool = False,
+    worktree_writer: WorktreeWriterRequirement | None = None, **options: Any,
 ) -> tuple[Session, dict[str, Any]]:
     """Persist intent before effects; replay never allocates or starts twice."""
     if provider_instance:
@@ -175,10 +186,9 @@ async def start(
     db = manager.db
     store = AcquisitionStore(db)
     digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
-    facts = {
-        "target": json.loads(target.to_json()), "prompt": prompt,
-        "options": creation_fact_options(options),
-    }
+    facts = creation_facts(target, prompt, {
+        **options, **({"worktree_writer": worktree_writer.model_dump()} if worktree_writer else {}),
+    })
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
     with executor(db, f"creation:{digest}"):
         operation = legacy_creation(db, "workspace", digest, facts_digest)
@@ -263,7 +273,9 @@ async def start(
                     except (AcquisitionRefused, AgentHostingError):
                         store.release_workspace_gate(worktree_id, delivery_id)
                         raise
-                    target = replace(target, worktree_id=worktree_id, cwd=saved["path"], explicit_cwd=True)
+                    target = bind_target(replace(
+                        target, worktree_id=worktree_id, cwd=saved["path"], explicit_cwd=True,
+                    ))
                     from .session_manager import DaemonDrainingError
                     from .local_launch_preparation import LocalLaunchPreparationError
 
@@ -287,6 +299,10 @@ async def start(
                             creation_before_launch=before_launch,
                             **{**options, "caller_id": f"acquisition:{delivery_id}"},
                         )
+                        if worktree_writer is not None and not session.background_recovery_enabled:
+                            raise AcquisitionRefused(
+                                "creation_registration_pending", "original native registration is pending",
+                            )
                     except DaemonDrainingError as exc:
                         _update(db, digest, state="allocated")
                         store.release_workspace_gate(worktree_id, delivery_id)
@@ -359,6 +375,10 @@ async def start(
                     or gates[0]["session_id"] != session.session_id
                 ):
                     raise AcquisitionRefused("launch_gate_held", "another acquisition holds this workspace")
+                if worktree_writer is not None and not session.background_recovery_enabled:
+                    session = await manager.resume_session(
+                        session.session_id, drain=False, allow_recreate=False,
+                    )
                 if not db.reserve_worktree_ownership(worktree_id, session.session_id, now=time.time()):
                     raise AcquisitionRefused("live_holder", "workspace ownership fence refused embodiment")
                 await worktree_command(

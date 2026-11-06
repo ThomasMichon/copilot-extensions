@@ -772,11 +772,13 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(
     assert len(calls) == 2
     manager_arguments, manager_options = calls[0]
     assert str(bridge) not in manager_arguments
-    assert manager_options["cwd"] == manager
     assert "-e" not in manager_arguments
+    assert ("--reinstall" in manager_arguments) is cached_editable
     assert manager_options["non_editable"] is True
+    assert manager_options["cwd"] == manager
     arguments, options = calls[1]
     assert arguments[arguments.index(str(bridge)) - 1] == "-e"
+    assert "non_editable" not in options
     assert options["cwd"] == bridge and options["trusted_source_roots"] == (tmp_path,)
     assert "agent-bridge" not in (manager / "pyproject.toml").read_text()
 

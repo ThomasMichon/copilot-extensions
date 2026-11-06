@@ -117,6 +117,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   through the normal CLI, without native adoption or carrier effects.
 - [x] Prove policy-governed explicit local acceptance/publication, offline
   watermarks, withdrawal and changed-preview refusal without carrier enrollment.
+- [x] Prove native canonical mapping resolution and explicitly confirmed
+  existing-repository binding through the selected owner, without automatic adoption.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -270,3 +272,147 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - This proves explicit local files, not a synchronized provider. No installed
   runtime, Linux native lane, real carrier, native owner adoption, enrollment
   or activation was exercised. Those validation and Phase 4/5 gates stay open.
+
+### 2026-11-06 - Local exchange reviewed and merged
+- #10949 merged as `827acd1855b2728d2a5d48dbf8b04e1f61160230` after current-head
+  Copilot approval, resolved feedback and green required CI.
+- Review corrections reject parent traversal before normalization, consume
+  validated lock/write paths and sync POSIX watermark directories before
+  publication or success, including retries. The path/native packet passed
+  38 tests; the final exchange packet passed 39 after durability controls.
+- Confirmed every changed file matched the squash merge before reconciling
+  local history. Native canonical-ID mapping resolution and explicit adoption
+  are next; the parent effort remains Active. Source release, installed
+  adoption, platform/carrier qualification and activation remain separate gates.
+
+### 2026-11-06 - Native mapping owner implemented and qualified locally
+- Centralized the existing canonical repository-ID codec for legacy/namespaced
+  readers, added exact registered-ID mapping resolution and extended the native
+  existing-binding preview/apply transaction. Existing local bindings remain
+  authoritative; unresolved/ambiguous/stale registrations never use a basename.
+- The focused native/configuration packet passed 37 cases. The final adapter
+  and real selected-payload packet passed 30 after stream-capture qualification.
+  The real first-touch flow used fresh Git roots and a credential-free example
+  provider, committed the pointer through the existing owner and read back
+  registration/state-root readiness. It passed in 41.497 seconds end to end
+  with the original 18/26-second operation budgets unchanged.
+- Diagnosed the actual apply deadline before changing it: repeated cold CLI
+  reads inside the already-locked worker consumed its budget. An optional
+  private read-only adapter now runs the same native handlers/rechecks in
+  process, using the existing real-stdout JSON capture seam. Payload baseline
+  and optional-adapter controls passed with all 73 binding-owner tests.
+- An existing six-call catalog test hit the per-item deadline; its six
+  independent real states now have named cases, identical assertions/process
+  count and unchanged deadlines. Each passed in 3.6-4.9 seconds. Linux native,
+  release/installed adoption, remaining domain adapters and carrier activation
+  are still open; this is source/isolated validation, not a live rollout.
+
+### 2026-11-06 - Native mapping review corrections
+- Refuse malformed/unreadable global, project-local and drop-in binding
+  sources using the native acquisition observations, while retaining missing
+  and explicitly unset source behavior. Supplied empty portable-ID options
+  cannot downgrade to the legacy name-based flow or bypass mixed selectors.
+- The focused Windows binding/parser packet passed 61 cases; 17 knowledge
+  acquisition controls passed after updating their original-owner fixture
+  and typed-error expectations. The actual fresh-root selected-payload
+  preview/apply/readback passed again in 25.16 seconds with unchanged budgets.
+- Corrected a source-guard inventory bug: HTTP-52 completeness now selects
+  its dynamic owner modules from the captured tree rather than future source
+  additions. Its regression and the real 1,044-fixture contract check pass;
+  no historical evidence was rewritten. Ruff and install contracts pass.
+- Required exact-source Linux CI and current-head review remain open.
+  No installed update, binding change, carrier effect or activation occurred.
+
+### 2026-11-06 - Portable scope guarded at pointer commit
+- Carry the confirmed portable resolution into the registry-locked worker and
+  recheck it through the existing pointer-write precondition. Portable apply
+  requires the selected payload's additive precondition capability; older
+  name-based callers retain their version-2 behavior.
+- Normalize effective binding names using the native resolver's whitespace
+  rule before resolution and identity comparison. Existing bindings still win.
+- The focused Windows owner packet passed 79 tests and the binding-payload
+  packet passed 78. Two old-capability refusal controls and the real fresh-root
+  success case passed. The new late-global-machine control exposed a missing
+  structured error receipt; after correction its residual run passed in
+  27.87 seconds, preserving pointer/registry bytes and the original budgets.
+- This is isolated source/first-touch proof, not installed-runtime or Linux
+  native qualification. Review and exact-source CI remain required; other
+  domain adapters, carrier qualification and activation remain open.
+
+### 2026-11-06 - Native mapping owner merged
+- #11017 merged as `5df36fe7ea7135f05f4b17ec35eceb27981901ac` after current-head
+  Copilot approval with no findings, resolved threads and green required CI.
+- Reconciled the four published commits only after confirming 25 changed
+  file blobs and two contribution deltas match the squash merge. Independent
+  upstream evidence additions were preserved.
+- The parent effort remains Active. Next is explicit adoption of typed Copilot
+  scalar floors through the existing configuration/settings owner; no received
+  document becomes a requirement package or activation grant. Release,
+  installed adoption, remaining domain/carrier qualification and activation
+  remain separate gates.
+
+### 2026-11-06 - Explicit Copilot floor adapter
+- Added a separately selected `preferences copilot` preview/apply over local
+  accepted state and policy. Scope is native-owner resolved; typed floors stay
+  below native defaults/live values and enforce constraints. Only the two
+  existing scalar fields reach the settings merge, not arbitrary requirements,
+  other settings, resources, modules, bindings or activation.
+- Confirmation binds accepted/local/policy data, native context and packages,
+  target/live settings and proposed changes. The existing settings writer
+  rechecks the proposal before backup/write; malformed live settings and
+  native-owner refusals remain non-mutating and sanitized.
+- The Windows focused packet passed 123 cases with six platform-specific
+  skips. Final floor/first-touch refusal controls passed 17 cases, followed by
+  the isolated owner-refusal sanitization control. Ruff, install contracts
+  and documentation consistency passed.
+- The positive consumer used the normal in-process CLI, native collector,
+  validator and real settings writer with an explicit native-context fixture.
+  A fresh normal module process proved absent-owner refusal without bootstrap.
+  This is not a configured peer, installed-runtime, native Linux or live-carrier
+  qualification. No installer behavior changed; a full clean-room installation
+  lane was not exercised. Carrier writes and running activation remain held.
+
+### 2026-11-06 - Copilot adapter review corrections
+- Resolve native admitted aliases for the owner-selected logical machine and
+  retain that same set through discovery, layering and token confirmation.
+  Alias-gated packages, directories and overlays preserve enforcement without
+  leaking native-host aliases into guests.
+- Serialize all native settings applies at the shared target, not a preference
+  state directory, across read/merge/recheck/backup/replacement. Previews remain
+  lock-free. A retained local lock is not fleet-state coordination.
+- The Windows correction packet passed 48 cases with six platform-specific
+  skips. Six alias/source/host-guest controls and a real two-process overlapping
+  writer control passed: a stale writer refused, then a refreshed writer
+  preserved both adopted fields and unmanaged state.
+- Current-head review and CI remain required. These source corrections do not
+  activate a carrier, install a runtime or change a running session.
+
+### 2026-11-06 - Stable settings lock identity
+- The settings lock resolves only its parent, preserving the final filename.
+  The existing linked-target check now refuses a symlinked settings file
+  before read/merge/write instead of selecting the referent's lock and then
+  switching lock identities after replacement.
+- Both focused Windows controls passed without skips: a real file symlink
+  remained intact with unchanged referent bytes and no lock creation; the real
+  two-process ordinary-target serialization/refreshed-write flow still passed.
+  Ruff and whitespace passed. Review and exact-source CI remain open.
+
+### 2026-11-06 - Empty native scope refuses portable adoption
+- Refuse `native-defaults-unavailable` when the repository/knowledge requirement
+  union is empty. The existing ordinary-default collector cannot carry native
+  user or repository-machine floors through that empty union; refusing preserves
+  their authority without generating a placeholder requirement.
+- Both empty-scope controls with native user/repository-machine defaults and
+  the supported-scope normal CLI adoption/withdrawal control passed. Ruff and
+  whitespace passed. Empty-union adoption remains unsupported, not silently
+  qualified by these refusal tests. Review and current-head CI remain open.
+
+### 2026-11-06 - Deterministic native scalar contributors
+- The native ordinary-default collector now orders its scalar fields before
+  recording contributors. Set iteration cannot change the manifest digest and
+  spuriously invalidate an unchanged Copilot preview in another process.
+- A forced field-order regression reproduced the original token mismatch.
+  Separate-process CLI preview/apply controls retain native collection,
+  validation and the real settings writer, with fixture-resolved context only.
+  This does not qualify an installed owner or carrier. Review and exact-source
+  CI remain required; the parent effort stays Active.

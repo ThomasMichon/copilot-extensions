@@ -10,6 +10,8 @@ import signal
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
+from pathlib import Path
 
 # The worker owns the kill-on-close Job before it can execute preparation or
 # spawn installers. It inherits containment; no breakaway or durable process.
@@ -81,13 +83,17 @@ finally:
 """
 
 
-def _posix_run(encoded: str, timeout: float) -> tuple[bytes, bytes, int]:
+def _posix_run(
+    encoded: str, timeout: float, *, cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> tuple[bytes, bytes, int]:
     completion, report = os.pipe()
     try:
         keeper = subprocess.Popen(  # headless-guard: allow streamed POSIX-only stdlib receiver
             [sys.executable, "-I", "-S", "-X", "utf8", "-u", "-c", _POSIX_KEEPER, str(report)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             pass_fds=(report,), start_new_session=True,
+            cwd=cwd, env=env,
         )
     except BaseException:
         os.close(completion)
@@ -131,15 +137,19 @@ def _posix_run(encoded: str, timeout: float) -> tuple[bytes, bytes, int]:
     return stdout, stderr, code
 
 
-def supervise(encoded: str, timeout: float) -> None:
-    """Exit only after the receiver and its captured streams have settled."""
+def capture(
+    encoded: str, timeout: float, *, cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> tuple[bytes, bytes, int]:
+    """Run a stdlib program inside a bounded, caller-owned subprocess tree."""
     if os.name != "nt":
-        stdout, stderr, code = _posix_run(encoded, timeout)
+        return _posix_run(encoded, timeout, cwd=cwd, env=env)
     else:
         worker = subprocess.Popen(
             [sys.executable, "-I", "-S", "-X", "utf8", "-u", "-c", _WORKER, str(timeout)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # headless-guard: allow streamed stdlib receiver has no host agent_procutil
+            cwd=cwd, env=env,
         )
         try:
             stdout, stderr = worker.communicate(base64.b64decode(encoded), timeout=timeout)
@@ -148,6 +158,17 @@ def supervise(encoded: str, timeout: float) -> None:
             worker.kill()  # Closing its Job kills installer descendants too.
             stdout, stderr = worker.communicate(timeout=15)
             code = 124
+        except BaseException:
+            if worker.poll() is None:
+                worker.kill()
+            worker.communicate(timeout=15)
+            raise
+        return stdout, stderr, code
+
+
+def supervise(encoded: str, timeout: float) -> None:
+    """Exit only after the receiver and its captured streams have settled."""
+    stdout, stderr, code = capture(encoded, timeout)
     sys.stdout.buffer.write(stdout)
     sys.stderr.buffer.write(stderr)
     if code == 124:

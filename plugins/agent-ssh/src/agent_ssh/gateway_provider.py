@@ -50,27 +50,36 @@ def projection(
     return value
 
 
-def _directory_floor(value: dict, sources: Path) -> tuple[Path, str]:
+def _directory_state(target: dict, controller: str, sources: Path) -> tuple[Path, dict | None]:
     scope = json.dumps({
-        "target": value["target"], "controller": value["controller"],
+        "target": target, "controller": controller,
     }, sort_keys=True).encode("utf-8")
     floor = sources / ("gateway-provider-" + hashlib.sha256(scope).hexdigest() + ".json")
-    accepted = {
-        "version": 1, "target": value["target"], "controller": value["controller"],
-        "directory_revision": value["directory_revision"],
-        "directory_digest": value["directory_digest"],
-    }
+    prior = None
     if floor.exists() or floor.is_symlink():
         prior = json.loads(gateway_profile._read_owned_file(floor))
         if (
-            not isinstance(prior, dict) or set(prior) != set(accepted)
+            not isinstance(prior, dict) or set(prior) != {
+                "version", "target", "controller", "directory_revision", "directory_digest",
+            }
             or type(prior["version"]) is not int or prior["version"] != 1
-            or prior["target"] != accepted["target"] or prior["controller"] != accepted["controller"]
+            or prior["target"] != target or prior["controller"] != controller
             or type(prior["directory_revision"]) is not int or prior["directory_revision"] < 1
             or not isinstance(prior["directory_digest"], str)
             or re.fullmatch(r"[0-9a-f]{64}", prior["directory_digest"]) is None
         ):
             raise ValueError("Gateway provider revision state is invalid; inspect it without resetting it")
+    return floor, prior
+
+
+def _directory_floor(value: dict, sources: Path) -> tuple[Path, str]:
+    accepted = {
+        "version": 1, "target": value["target"], "controller": value["controller"],
+        "directory_revision": value["directory_revision"],
+        "directory_digest": value["directory_digest"],
+    }
+    floor, prior = _directory_state(value["target"], value["controller"], sources)
+    if prior is not None:
         if accepted["directory_revision"] < prior["directory_revision"]:
             raise ValueError("Gateway public directory is older than the accepted revision")
         if (

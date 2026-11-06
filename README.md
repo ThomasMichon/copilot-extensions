@@ -91,6 +91,7 @@ that every feature or platform is supported by every component.
 | [agent-logger](plugins/agent-logger/) | Structured session logs, digests, and configured session synchronization |
 | [context-handoff](plugins/context-handoff/) | Continuity policy, context awareness, and successor-session handoffs |
 | [agent-dispatch](plugins/agent-dispatch/) | Durable task queues, claims, supervision, and declarative worker loops |
+| [agent-roles](plugins/agent-roles/) | Sustained fleet-monitor and PR-review charters, independent of task queues and transports |
 | [agent-index](plugins/agent-index/) | Configured indexing/retrieval with a lightweight client and optional managed host |
 | [agent-machines](plugins/agent-machines/) | Reconcile explicitly declared machine requirements |
 | [agent-vault](plugins/agent-vault/) | Local KeePassXC-backed secrets fetched on demand |

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve keyed creation and singleton continuation outside acquisition writer journals",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

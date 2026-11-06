@@ -3,20 +3,12 @@
 See the [configuration reference](docs/configuration.md) for coordinator
 environment, reusable registrar/identity fields and configuration boundaries.
 
-For an authorized sustained review setup, use
-[setting-up-pr-attention-flow](skills/setting-up-pr-attention-flow/SKILL.md):
-configurable independent lanes, retained per-PR context, repository-specific
-merge policy and existing agent-to-agent communication. The skill supplies
-guidance and synthetic coordination examples, not a new reviewer engine,
-runtime configuration, watcher, scheduler or grant of review/merge authority.
-Missing required authority, bindings or receipts remain explicit adapter
-blockers or permitted manual handoffs. Optional server fencing is not a
-universal prerequisite: use supported provider safeguards, fresh preflight,
-revision binding and official readback without claiming atomicity. The skill
-also supports bounded polling fallback, original-reviewer recovery and
-work-conserving concurrency targets within actual authority and capacity.
+Sustained role charters that may use Dispatch as one adapter, such as
+sustained pull-request review (`agent-roles:review-pull-requests`) and fleet
+progress monitoring (`agent-roles:monitor-agent-fleet`), live in the separate
+`agent-roles` plugin. Dispatch is not required to run them.
 
-Other task and coordination skills:
+Task and coordination skills:
 [agent-dispatch](skills/agent-dispatch/SKILL.md),
 [pick-and-claim](skills/pick-and-claim/SKILL.md),
 [auditing-worktree-conclusions](skills/auditing-worktree-conclusions/SKILL.md),

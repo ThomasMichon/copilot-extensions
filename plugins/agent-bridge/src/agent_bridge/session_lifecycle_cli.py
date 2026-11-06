@@ -230,6 +230,11 @@ def _agent_bridge_installation_context() -> str:
 
 
 def _agent_worktrees_launch_prefix(*, allow_path_fallback: bool = True) -> list[str] | None:
+    from .acquisition_worktree_writer import current
+
+    writer = current()
+    if writer is not None:
+        return list(writer.prefix)
     selection = _agent_worktrees_selection(allow_path_fallback=allow_path_fallback)
     return selection[0] if selection else None
 

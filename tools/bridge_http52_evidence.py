@@ -36,7 +36,22 @@ AFFECTED = (
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
         "session_lifecycle_cli.py", "worktree_writer_observation.py",
+        "acquisition_worktree_writer.py", "acquisition_writer_inspection.py", "acquisition_authority.py",
+        "acquisition_cli.py", "acquisition_contract.py", "acquisition_custody_schema.py",
+        "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
+        "routes/acquisitions.py", "session_handoff.py", "session_resume.py",
+        "session_start.py", "session_core.py", "session_prompts.py", "worktree_head.py", "worktree_lineage.py",
+        "workspace_creation.py", "creation_custody.py", "session_start_models.py",
+        "workspace_creation_cli.py", "service_start_cli.py",
+        "client.py", "routes/sessions.py", "client_session_start.py",
+        "creation_worktree_writer.py", "creation_writer_schema.py",
+        "creation_writer_inspection.py",
         "_peer_launch.py",
+    )),
+    *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
+        "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
+        "session_binding_cli.py", "session_tracking_cli.py",
+        "tracking_session_registration_write.py", "tracking_session_lifecycle_write.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
     "plugins/agent-bridge/extensions/agent-bridge/retained-delivery.mjs",
@@ -54,12 +69,21 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_receiving_bundle.py",
     "plugins/agent-bridge/tests/test_portable_mux_joined.py",
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
+    "plugins/agent-bridge/tests/test_acquisition_runtime.py",
+    "plugins/agent-bridge/tests/test_acquisition_writer_inspection.py",
+    "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
+    "plugins/agent-bridge/tests/test_creation_worktree_writer.py",
+    "plugins/agent-bridge/tests/test_full_session_status_cli.py",
+    "plugins/agent-bridge/tests/test_workspace_creation.py",
+    "plugins/agent-bridge/docs/retained-acquisition-writer.md",
+    "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
     *(path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
+      for plugin in ("agent-codespaces", "agent-worktrees")
       for path in sorted(
-          (Path(__file__).resolve().parents[1] / "plugins/agent-codespaces/src").rglob("*.py"),
+          (Path(__file__).resolve().parents[1] / "plugins" / plugin / "src").rglob("*.py"),
       ) if "__pycache__" not in path.parts),
     *(declaration["canonicalDir"] + "/" + name
       for manifest in ("packaged-assets.json", "launch-wrapper-assets.json")
@@ -70,6 +94,11 @@ EXTRA_PATHS = (
 )
 PROBES = {
     **retained.PROBES,
+    "test_required_creation_writer_cli_carries_requirement_to_actual_client": 4,
+    "test_required_creation_writer_cli_invalid_input_refuses_before_connect": 10,
+    "test_required_creation_writer_cli_rejects_remote_before_connect": 2,
+    "test_writer_status_requires_full_exact_session_before_discovery": 3,
+    "test_writer_status_uses_negotiated_original_observation": 4,
     "test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep": 1,
     "test_private_deadline_uses_precise_elapsed_time_not_coarse_ticks": 3,
     "test_unknown_owner_large_history_has_actual_private_vm_cutoff": 1,
@@ -107,6 +136,36 @@ PROBES = {
     "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
     "test_unknown_or_changed_slot_never_certifies_a_build": 10,
     "test_same_cell_health_rechecks_peer_selection_without_launch": 11,
+    "test_required_writer_round_trips_through_the_existing_http_owner": 1,
+    "test_required_writer_survives_stopped_resume_and_later_acquisition": 2,
+    "test_required_handoff_retry_reuses_original_successor_after_lineage_failure": 4,
+    "test_required_handoff_retains_unknown_effect_without_replacement": 2,
+    "test_required_writer_refuses_provider_type_change_before_persist_or_launch": 5,
+    "test_required_writer_resume_exhaustion_cannot_recreate": 1,
+    "test_required_handoff_retries_registration_on_original_native": 3,
+    "test_required_registration_failure_detaches_before_normal_send": 2,
+    "test_required_queued_send_refusal_keeps_startup_recovery_dormant": 1,
+    "test_required_writer_refuses_before_native_effects": 6,
+    "test_retained_acquisition_and_later_lineage_use_actual_owner_processes": 1,
+    "test_retained_session_receiver_refuses_changed_scope_without_resident_fallback": 12,
+    "test_retained_writer_inspection_cli_http": 3,
+    "test_retained_writer_inspection_unavailable_http": 4,
+    "test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses": 1,
+    "test_keyed_creation_writer_retains_original_scope_and_strict_resume": 1,
+    "test_keyed_creation_writer_rehydrates_same_native_without_reselection": 1,
+    "test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate": 1,
+    "test_keyed_creation_writer_reconciles_lost_completion_without_new_native": 1,
+    "test_keyed_creation_writer_refuses_changed_custody_before_effects": 5,
+    "test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal": 1,
+    "test_required_creation_writer_parser_rejects_unsupported_forms": 6,
+    "test_required_creation_writer_client_refuses_unsupported_active_provider": 4,
+    "test_required_creation_writer_rechecks_capability_after_provider_cutover": 1,
+    "test_required_creation_writer_round_trips_through_actual_http_owner": 1,
+    "test_creation_writer_inspection_refuses_changed_owner_without_effects": 4,
+    "test_required_creation_writer_inspection_rejects_ignored_legacy_query": 1,
+    "test_keyed_creation_handoff_retains_original_successor_and_seed": 2,
+    "test_keyed_creation_registration_failure_retains_native_and_dormancy": 1,
+    "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
@@ -115,11 +174,18 @@ CAPABILITY_VERSIONS = {
     "bridge-session-tool-statistics-v1": 1,
     "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,
     "worktree_record_delegation": 1,
+    "retained_acquisition_worktree_writer": 1,
+    "retained_acquisition_writer_inspection": 1,
+    "retained_workspace_creation_writer": 1,
+    "retained_workspace_creation_writer_inspection": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,
     (*retained.SPEC.capability_floors, ("OWNER_MEMBERSHIP_PROTOCOL_VERSION", 52)),
     scope=SCOPE,
+    closure_prefixes=(
+        "plugins/agent-codespaces/src/", "plugins/agent-worktrees/src/",
+    ),
 )
 encode = common.encode
 digest = common.digest

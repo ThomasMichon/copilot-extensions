@@ -6,7 +6,7 @@
 - **Created:** 2026-11-03
 - **Status:** Active
 - **Umbrella issue:** #10377
-- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451, #9716, #10054, #10499, #10486, #10652, #10653
+- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451, #9716, #10054, #10499, #10486, #10652, #10653, #10996
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
 ## Guiding Intent
@@ -123,6 +123,12 @@ authorize production updates, recovery mutations or new access.
   state. Internal helper success is not whole-flow acceptance.
 - [ ] Repeat for the selected priority cases, preserving existing construction,
   admission, durable-state and lifecycle owners instead of reimplementing them.
+- [ ] Qualify the bounded read-only project-registration prerequisite under
+  #10996/U17 before migrating setup consumers. Compose the canonical repository
+  and legacy project registry readers; preserve writers and ordinary routing.
+  Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
+  ambiguity/collision/read-failure refusal and no mutations through the native
+  CLI boundary. Source release is not caller adoption or installed recovery.
 
 ### Phase 3 - Release and completion
 
@@ -1780,3 +1786,332 @@ Registration/state-root readiness is not presented as server-policy proof.
 This is below-altitude guidance repair, not a new provider interface or a
 replacement for #3004's Plan/Validation. No authentication, binding, repository
 creation, policy mutation or live provider publication trial is performed.
+
+### 2026-11-06 - Canonical knowledge-related discovery slice
+
+The guidance correction #10908 merges as `bc9ad742a9` after approval on its
+actual head and all required CI `42173364030`. It does not complete #3004's
+provider/landing preflight; containing release is separate from local rollout.
+
+The next bounded source claim is
+[#1419 comment 6679262258](https://github.com/ThomasMichon/copilot-extensions/issues/1419#issuecomment-6679262258),
+K3/K5 discovery only. #3005 is closed by tracking consolidation into that open
+parent, not by an implemented fix. The `gleaming-forge` K1 feasibility spike,
+K2 overlay precedence, actual K4 write/cleanup lifecycle and all original
+allocation/claim owners remain untouched. This realizes the already accepted
+canonical discovery requirement while retaining the Worktrees vision's native
+allocation and recoverable responsibility boundaries; it adds no lifecycle
+engine or new registry.
+
+Configuration-source selection carries the already resolved external-state
+name into normal related reads. The existing canonical registration owner
+validates identity/path/class without fallback discovery. The synthesized
+projection preserves authored narrative/PR metadata and policy provenance,
+but its knowledge role, local locus and non-delegation win over conflicting
+relationship labels/venues. Read-only list/show/resolve emits explicit
+aligned-worktree policy, never a writable anchor or standalone knowledge-agent
+plan. The topology writer refuses to persist this projection; `related doc`
+does not scaffold a new narrative into the registered knowledge anchor.
+Invalid canonical input is a structured nonzero CLI error or an indeterminate
+acquisition report, not a successful empty listing.
+
+The first local packet fails on seven incomplete test constructors and two
+diagnostic-stream assumptions. Correcting only those fixtures yields nine
+passes in 87.59 seconds. Added ambiguity and actual invalid-class controls
+then expose a real traceback at the new CLI boundary; the targeted correction
+retains nonzero status and returns an actionable JSON/plain error.
+Eight focused controls pass independently, followed by both actual installed
+CLI bare-anchor/linked-worktree controls in 35.34 seconds, 117.50 including
+preparation and cleanup. All 283 existing related/state-root regressions pass
+in 76.13 seconds. The write-back refusal has its own focused regression.
+
+The exact pre-change `d13d1d50b0` source reproduces missing bound knowledge in
+the actual native worktree reader (`bound knowledge missing: []`), a failing
+regression in 26.42 seconds under the original limits. An earlier baseline
+invocation stops before collection due to duplicate timeout-plugin loading;
+a separate bare baseline reaches its unchanged twenty-second child deadline,
+neither credited as a functional reproduction. No deadline, process, memory
+or storage limit is raised. Lint, thirteen install contracts and thirteen
+headless adopters pass after a missing offline lint cache is restored through
+the normal seasoned tool dependency path.
+
+An opt-in `related-knowledge` portfolio uses the existing full-installation
+workflow owner for exact-source Linux/Windows reader qualification, with
+standard runner limits and no change to default/scheduled or required unit
+coverage. It requires both real native entry cases in JUnit, rejecting skipped,
+missing or ambiguous evidence. Current-head review, required CI, external
+qualification, merge and release remain gates; no installed runtime, binding,
+pair, overlay, credential, service or cleanup mutation is selected.
+
+The final native fixture now retains an actual Git knowledge repository and
+checks all three Git/checkout trees plus binding and registry bytes. Both
+entry modes pass in 42.66 seconds, 134.41 including preparation and cleanup.
+The current-checkout briefing override is constrained to retain the aligned
+state policy instead of suggesting direct anchor editing. Its regression and
+the full briefing suite expose seven failures from an obsolete
+`related.ScanAuthority` reference; importing that existing type directly from
+its canonical owner fixes the direct failures and swallowed briefing drops.
+All 48 focused/briefing controls then pass in 3.48 seconds. Another 117
+focused/workflow controls pass in 24.44 seconds, including actual inert child
+success/failure and skipped-native rejection. No failure is dismissed as
+pre-existing, and no policy or test limit is weakened.
+
+Separately, #10908 is verified in normal release #10942, Main
+`1a83c1d250ae8093a47afab1107c3ebb9553a53e`, merged at 08:06:00 UTC.
+Actual admission from `42183304105`, attempt 1, names containing Dev
+`4b5efce814772df02d88de580d8075155c76c15a` and Main base
+`75417ed16ffa55b7dde8628b0c78f0fef50dd786`. All release jobs pass, both
+defining binding-guidance blobs match merge/admitted/Main, and the released
+payload is `harness-knowledge` `0.1.6-dev1`. This release does not install
+anything locally or include the still-unpublished knowledge-related slice.
+
+PR #10956 publishes the slice as head `3207ce155b` after an automatic rebase
+onto `827acd1855`; its new feature/test/workflow bodies remain unchanged.
+Initial required CI `42189687470` rejects the changed admitted
+`related_acquisition.py` fingerprint before unit execution. This is a genuine
+admission omission, not a flake or permission to rerun unchanged input.
+The correction retains the closed source cohort, coverage targets, effect
+guards and 300-second manifest budget, updating only three production bindings
+and their existing pure-unit file while adding five exact actor-free nodes.
+Canonical registry acquisition remains substituted in those models, and its
+real import is lazy when no bound-state metadata exists. Existing fixtures
+now include the actual StateRoot repository-name field. All 157 related
+admission controls pass functionally in 4.46 seconds; full guarded packet and
+revised-head CI/review remain required.
+
+The documented Windows-native full packet executes 4,177 passes but refuses
+qualification because three admitted POSIX filesystem/kernel-lease cases
+intentionally skip on Windows. The 402.68-second run is within that separate
+600-second profile, not the Linux 300-second CI contract. No successful
+unit-evidence packet is claimed, no expected node is dropped and no platform
+marker is spoofed. The exact Linux source-CI packet remains the required
+no-skip proof. Missing `coverage` initially stops before execution; the
+existing CI-declared test toolchain is then restored only in the private
+prepared environment. Native registry acquisition remains outside the pure
+unit frontier, and required revised-head review/CI must still pass.
+
+### 2026-11-06 - Preserve discovery metadata through dependent consumers
+
+Required Linux CI `42194087584` and `42194370472` pass head `830b7d631d`,
+including the unchanged no-skip, 300-second unit admission. Review still finds
+a real integration gap: downstream briefing, session summary and configuration
+inspection turn typed configuration sources into plain strings, while the
+PR-default reader omits their state identity. This loses the metadata needed
+to synthesize an unauthored binding or replace a conflicting authored route.
+
+The actual briefing producer fails both cases before correction. All four
+consumers now retain the existing directory, tier and state markers; no new
+source owner, topology writer or lifecycle operation is added. Both producer
+regressions, the session summary and configuration-inspection regression pass.
+The focused discovery and existing catalog-route packet passes 59 cases;
+the existing PR/session packet passes 44, with eight Bash-only Windows skips.
+The earlier full briefing packet passes 52 cases on the corrected producers.
+
+A broad local dependent-consumer attempt fails, then stops at the ordinary
+30-second item limit in the existing real CLI set/reset flow. A named diagnostic
+also times out in an existing preference-preview child at its unchanged
+15-second limit. Those Windows timing failures are not passing evidence or
+explained away as routing success. No anonymous progress is reused as named
+coverage. The existing opt-in Linux/Windows job now runs the four dependent
+consumer files separately from its native discovery packet, under the same
+standard limits. Both native discovery cases still must execute without skips.
+All 111 workflow controls pass, including actual inert child failure propagation.
+Hosted consumer results remain a merge gate; no timeout increase or CI bypass
+is selected.
+
+The already-admitted `config.py` source binding and its existing acquisition
+fixture are refreshed for this review correction. Five unit failures expose
+the fixture's old two-argument marker stub; it now verifies the retained state
+identity explicitly. All 157 acquisition controls pass after that correction.
+The 4,180-node set, coverage targets, effect guards and 300-second unit budget
+are unchanged. Revised-head required CI, passing review
+and native qualification remain due before merge; containing release and all
+parent acceptance boundaries remain separate.
+
+### 2026-11-06 - Refuse synthesized entries before authored upsert
+
+Review `5798620519` on `1a247aa8e6` confirms the two source-marker findings
+resolved, then identifies a write-back bypass in an existing-key upsert.
+Merging a synthesized entry into an authored object loses the projection
+marker before the writer checks it, allowing projected role/routing to persist.
+The new two-case regression passes insertion refusal but fails existing-key
+refusal against that source.
+
+`upsert_related` now rejects the synthesized input before reading or merging
+authored topology. Both cases preserve the exact authored bytes after refusal.
+All 197 discovery and existing related writer/merge/CLI controls pass in
+35.16 seconds, 132.45 including isolated preparation and cleanup. Ordinary
+authored partial updates retain their existing merge behavior. Source admission
+is unchanged, and the existing module ceiling passes without widening.
+The prior head's CI and resolved findings do not satisfy the new-head review,
+required CI or still-unperformed hosted qualification. No merge or rollout
+is claimed; this parent remains Active.
+
+### 2026-11-06 - Enforce narrative refusal in the owning scaffolder
+
+The next review on `7c4ed5355c` confirms upsert refusal resolved but notes a
+moderate finding not published as an inline thread: direct scaffolder calls
+can bypass the CLI-only guard. Investigation confirms the owning helper can
+create a missing bound-knowledge narrative or force-overwrite an authored one.
+Three actual helper cases fail before correction; reading an existing file
+without forcing already remains read-only.
+
+The refusal now lives in `scaffold_doc` itself. The CLI uses that canonical
+boundary instead of its duplicate guard, preserving existing narrative reads
+while refusing all synthesized creation/forced writes. The four direct helper
+cases check complete harness/knowledge tree bytes. All 203 discovery, existing
+related writer/merge/CLI and actual native Git bare/linked entry cases pass in
+114.22 seconds, 205.36 including preparation and cleanup, with no skips.
+Both native consumers retain their original per-item and child deadlines.
+The existing admitted CLI hash is refreshed for the guard move; the unit node
+set, source cohort, coverage/effect guards and 300-second budget are unchanged.
+Fresh-head review, required CI and hosted discovery/consumer qualification
+remain due. This is source validation, not a live binding, pair or rollout.
+
+### 2026-11-06 - Knowledge-related source and hosted qualification complete
+
+#10956 merges at 10:53:30 UTC as
+`27af49e7eaa33733a32e43bbb86a541558f74042`. Actual review `5798951079`
+on final head `abcb17534424a180ce93610adc272022becab9a9` has no open code
+findings and requests the native/consumer validation then still pending.
+All three inline findings are corrected and resolved. Required CI
+`42203689201`, `42203911472` and final description-triggered `42205361933`
+pass that unchanged head. The managed merge uses the authorized ordinary
+review-rule exception, not a required-CI bypass.
+
+The existing reviewed opt-in owner runs `42204493016` at that exact head and
+both Linux/Windows jobs succeed. Downloaded JUnit contains 22 successful
+discovery cases on each platform, all 159 dependent consumers on Linux, and
+151 dependent consumers plus eight explicit Bash-only skips on Windows.
+Those eight execute successfully on Linux. Both bare-anchor/linked-worktree
+native entry cases execute uniquely without skips on both platforms.
+
+The two earlier local CLI timeout cases pass with the original limits:
+set/reset takes 2.750 seconds on Linux and 3.875 on Windows; the repository-name
+preference flow takes 1.613 and 2.409 seconds. These are platform consumer
+results, not a local-performance pass. Earlier local failures and refused
+Windows full-unit evidence remain recorded rather than relabeled successful.
+The final local 203-case packet and hosted qualification cover the corrected
+producer, upsert and helper-owned narrative boundaries. No macOS or installed
+host result is inferred.
+
+Post-merge managed sync safely aborts an incremental squash replay conflict.
+The reviewed combined patch and actual squash patch have identical stable ID
+`dfac4b3bdc3fcfe2c7f9dab62d07d7e7bbf28db2`; all seventeen feature, test,
+workflow and journal bodies match. Only shared TESTING and the unit manifest
+also retain peer contributions. A local backup preserves the reviewed tip,
+and skipping only the proven-merged range permits normal managed sync.
+The canonical Plan and Validation Plan are reread and remain Active.
+
+This completes the bounded #1419 K3/K5 source/discovery reservation. Its K1
+feasibility/retrofit, K2 overlay precedence, actual K4 aligned write/cleanup
+and full receiving lifecycle retain their existing owners and acceptance.
+The next gate is normal containing-release observation, separately from
+rollout; this parent is not Done and no worktree is finalized.
+
+The bounded source completion is published and read back on both existing
+coordination threads: [#1419 comment 6683277573](https://github.com/ThomasMichon/copilot-extensions/issues/1419#issuecomment-6683277573)
+and [#10377 comment 6683279947](https://github.com/ThomasMichon/copilot-extensions/issues/10377#issuecomment-6683279947).
+The original K1 feasibility owner is still present; no reservation or broader
+acceptance is cleared by age or by this completion note.
+
+Read-only release-health reconciliation diagnoses older run `42201092834`
+literally: both Windows Resume fixtures fail with missing
+`work_coalescing_singleton`, not a timeout or assumed flake. Existing owner
+#10960 already fixes that isolated fixture and adds a real isolated-session-shell
+regression, merging as `375ed2eb53fead5ee8cd3b0daeeb997382d42623`.
+Normal release #10981 qualifies that exact Dev source and merges as Main
+`4a8e317f0b169c71036acb751dbcd1de221cb0af` at 10:42:43 UTC.
+That is verified resolution of the earlier failure, not this slice's containing
+release: its source precedes #10956. No competing patch or forced retry is
+selected. A bounded read-only observer waits for a merged normal candidate
+whose admitted Dev contains this feature, then still requires actual admission
+and released implementation-byte proof before crediting release.
+
+The bounded twenty-minute observer sees no containing merged release. A new
+actual failure in run `42207277039` is independently inspected across every
+job: source units, unsigned construction and native Windows Resume pass,
+while artifact attestation fails with `InternalError: error retrieving identity
+token` and `CI: no tokens available`. Existing #10990 owns that recorded
+incident. The actual workflow commit declares the required OIDC/attestation
+write permissions; no missing grant or source fix is inferred.
+
+Normal successor `42208938885` then passes its actual attestation job and
+advances to immutable-candidate checks without this workstream forcing a
+retry or changing access. [Diagnosis 6683772491](https://github.com/ThomasMichon/copilot-extensions/issues/10990#issuecomment-6683772491)
+is published and read back. The successor is a later admitted source run,
+not same-input rerun evidence or a completed Main release. A bounded attached
+observer now follows that exact run; admission, final published bytes and
+Main merge still precede containing-release credit. The report stays open
+and signing/authenticity gates remain unchanged.
+
+### 2026-11-06 - Knowledge-related containing release verified
+
+Normal successor `42208938885` completes successfully. Release #10991 actually
+merges at 11:30:48 UTC as Main
+`f921808d2292394abc738149891de4efdc933630`. Its downloaded immutable admission
+names Dev `8073d6b937c20a5ee994c2edda9ab5a48e98b643`, Main base
+`8e2ac72460f6fbb78f9e3bb8e1c403875ad9a3c7`, original producing attempt 1.
+That actual admitted Dev contains #10956's merge, unlike the two older
+normal releases observed earlier.
+
+Every required release gate succeeds, including actual artifact attestation,
+immutable-candidate unit reuse, publication/readback and the head-pinned
+non-administrative Main merge. All fifteen defining production, fixture,
+workflow, skill and README bodies match the source merge, admitted Dev and
+published Main exactly. The released Worktrees payload is `1.24.504-dev1`.
+No native test is rerun merely to restate unchanged-source evidence.
+
+This satisfies U16's source and containing-release observation. It is not an
+installed binding/pair/overlay, general retrofit/write/cleanup, full receiving
+or affected-host recovery result. The earlier failed attestation run remains
+failed and #10990 remains open; a later admitted source succeeding is not
+same-input rerun evidence. No updater, permission change, token fetch, manual
+release or rollout is performed. The parent stays Active with its remaining
+Plan and Validation Plan under their existing owners.
+
+### 2026-11-06 - Native registration inspection prerequisite proposed
+
+Source reconciliation finds a bounded setup-consumer gap under #10996.
+The existing front-door reverse lookup picks the first project mapping and
+suppresses acquisition errors; strict repository inventory does not include
+the complete legacy project-adoption mapping. A setup caller cannot use either
+as proof of unique identity, preserved exposure policy or an unclaimed fresh
+default. Copying their parsers into each caller would create another authority.
+
+U17 proposes one additive, read-only native inspection contract, composed from
+the existing strict repository and project registry owners. Given the selected
+canonical anchor and proposed default name, return the unique registered name
+and authoritative exposure, or the genuinely fresh unclaimed default. Refuse
+ambiguous aliases, inconsistent roots, default-name collisions, malformed or
+unknown acquisition and invalid identity/path/policy data. Retain native
+platform expansion and namespaced installation context; do not discover,
+register, migrate, reconcile commands, clone or start a service.
+
+The proposed version-1 result/error contract is qualified against the selected
+actual CLI, not a package-version guess. A read-only request may discover
+unsupported syntax without effects, but the caller must retain that truthful
+incompatibility rather than retry with safety semantics removed. Expand and
+release the provider first. Consumer migration, cold-entry availability and
+old-runtime recovery remain separate explicit gates, not inferred from a new
+read verb. That migration must acquire/use the independently runnable incoming
+reader through the existing construction owner when the installed receiver
+cannot supply the contract; old capability support must not become a veto of
+an explicit latest-flow replacement.
+
+Focused controls will exercise actual registry acquisition and the real CLI
+parser/process boundary: empty fresh state; a custom alias alongside another
+checkout owning the default name; consistent canonical/legacy entries;
+duplicate aliases and conflicting roots; invalid/unreadable data; explicit
+exposure true/false; platform/root expansion; exact configuration preservation
+and no-effect sentinels. Keep pure work-count/decision controls small; native
+subprocess coverage stays in the explicit contained lane rather than enlarging
+required unit-only CI.
+
+This closes an existing state-preservation/adoption requirement of
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement),
+not a new registration architecture. Existing #356/#8545 acquisition/setup
+writers, #7500 forced-registration preservation, and #4205 family-wide routing
+retain their owners and scope. No writer or ordinary front-door behavior is
+changed by this proposal. Source handle `dusty-contraption` owns only U17.
+The parent remains Active; the proposal clears review before implementation.

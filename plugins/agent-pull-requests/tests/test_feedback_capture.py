@@ -269,13 +269,6 @@ def test_readback_expansion_preserves_null_history_and_all_owner_writes(capture_
         FeedbackCaptures(expected)
     with pytest.raises(ReplayStoreInvalid, match="serving contract unavailable"):
         ConversationStore(store).capabilities(expires_at=expires)
-    from agent_pull_requests.review_feedback import FeedbackInputs
-    refused = execute_review(
-        store, selected, generation, attachment, context_factory=backend.context,
-        checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
-        feedback=FeedbackInputs(generation["id"], (Interest("maintainer", True, "consumer-a"),), 600),
-    )
-    assert refused["feedback"] == {"status": "unavailable", "reason": "capture_layout_unavailable"}
     assert store.path.read_bytes() == unchanged
     assert not backend.calls
     restarted = ReplayStore(store.root, store.namespace, clock=store.clock, service_identity=store.service_identity)

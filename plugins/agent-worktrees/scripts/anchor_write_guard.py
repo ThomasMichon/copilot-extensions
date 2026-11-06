@@ -83,6 +83,7 @@ from anchor_shell_parser import (
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
     git_tokens as _git_tokens,
     literal_write_targets as _literal_write_targets,
+    normalize_post_command as _normalize_post_command,
     shell_command_substitutions as _shell_command_substitutions,
     shell_segments as _shell_segments,
 )
@@ -389,6 +390,54 @@ def _git_subcommand_writes_worktree(subcommand: str) -> bool:
         return True
     prefix, separator, _suffix = subcommand.partition("-")
     return bool(separator and prefix in _GIT_WORKTREE_WRITE_SUBCOMMANDS)
+
+
+def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern | None = None) -> bool:
+    """Classify post-tool invalidation, not permission to write an anchor."""
+    pending = [(command, 0)]
+    remaining = 128
+    scan_budget = [131072]
+    while pending:
+        text, depth = pending.pop()
+        if depth > 8:
+            return True
+        for segment in _shell_segments(text, tool):
+            remaining -= 1
+            if remaining < 0:
+                return True
+            effective = _effective_seg(segment)
+            try:
+                pending.extend(
+                    (child, depth + 1)
+                    for child in _shell_command_substitutions(segment, tool, scan_budget=scan_budget)
+                )
+                effective, data_assignment = _normalize_post_command(
+                    effective, tool, normalize=_effective_seg, scan_budget=scan_budget,
+                )
+            except ValueError:
+                return True
+            if effective is None:
+                return True
+            syntax: set[str] = {"read"} if data_assignment else set()
+            targets = _literal_write_targets(effective, tool, syntax=syntax)
+            if targets or syntax & {"{", "evaluation", "write", "control", "unknown"} or (
+                tool.lower() in {"powershell", "pwsh"} and "[" in syntax and "=" in syntax and "read" not in syntax
+                and re.match(r"^\s*\[[^=\r\n]+\]\s*\$", effective)
+            ):
+                return True
+            if not _GIT_START.match(effective):
+                if effective.strip() and "read" not in syntax and legacy_writes is not None and legacy_writes.search(segment):
+                    return True
+                continue
+            subcommand, args, _targets, _overridden = _git_invocation(effective, "", tool)
+            if subcommand == "branch" and _git_branch_invocation_is_readonly(args):
+                continue
+            if (subcommand is None and legacy_writes is not None and legacy_writes.search(segment)) or (subcommand and (
+                subcommand not in _GIT_READ_BUILTINS or subcommand == "fetch"
+                or any(arg == "--output" or arg.startswith("--output=") for arg in (args[:args.index("--")] if "--" in args else args))
+            )):
+                return True
+    return False
 
 
 # A command-position directory change (``cd``/``pushd``/``Set-Location``). An

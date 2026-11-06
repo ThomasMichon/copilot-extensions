@@ -73,6 +73,24 @@ def resolve_head(worktree_id: str) -> HeadInfo:
     """
     if not worktree_id:
         return _UNKNOWN
+    from .acquisition_worktree_writer import current
+
+    writer = current()
+    if writer is not None:
+        from .acquisition_contract import AcquisitionRefused
+        from .worktree_lineage import _run
+
+        if worktree_id != writer.request.worktree_id:
+            raise AcquisitionRefused("worktree_writer_unconfirmed", "head read changed the original workspace")
+        result = _run(
+            ["--project", writer.request.project, "head-session",
+             "--worktree-id", worktree_id, "--json"],
+            cwd=writer.request.worktree_path, owner_prefix=writer.prefix,
+        )
+        head = parse_head_payload(result.stdout if result else None)
+        if not head.tracked:
+            raise AcquisitionRefused("head_unknown", "retained writer did not resolve the native head")
+        return head
     exe = _agent_worktrees_bin()
     if not exe:
         log.debug("agent-worktrees binstub not found -- head guard fails open")

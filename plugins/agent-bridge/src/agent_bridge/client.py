@@ -687,8 +687,11 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         resp = self._request("GET", "/api/v1/sessions", params=params)
         return resp.get("sessions", []) if resp else []
 
-    def get_session(self, session_id: str) -> dict[str, Any]:
+    def get_session(self, session_id: str, *, worktree_writer: bool = False) -> dict[str, Any]:
         """GET /api/v1/sessions/{id}"""
+        if worktree_writer:
+            from .creation_writer_inspection import get_session
+            return get_session(self, session_id)
         return self._request("GET", f"/api/v1/sessions/{session_id}") or {}
 
     def get_live_session(self, session_id: str) -> dict[str, Any]:

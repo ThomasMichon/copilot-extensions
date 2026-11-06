@@ -9,7 +9,7 @@ from fleet_manager.gateway_service_channel import TransportError
 from fleet_manager.gateway_service_caller import ServiceCaller
 
 from .attention import Attention, Candidate, Cursor, PRKey
-from .attention_read import PROTOCOL, MAX_BATCH, MAX_BATCH_BYTES, validate_after
+from .attention_read import PROTOCOL, HISTORICAL_PROTOCOL, MAX_BATCH, MAX_BATCH_BYTES, validate_after
 from .watch_replay_binding import ReplayBinding
 from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
@@ -21,12 +21,15 @@ class AttentionClient:
 
     def __init__(
         self, caller: ServiceCaller, *, route_prefix: str, binding: ReplayBinding, key: PRKey,
+        historical: bool = False,
     ) -> None:
         ReplayClient(caller, route_prefix=route_prefix, target=binding.target,
                      repo=binding.repo, binding=binding)
-        if type(key) is not PRKey or key.namespace != binding.namespace:
+        if type(key) is not PRKey or key.namespace != binding.namespace or type(historical) is not bool:
             raise ValueError("expected scoped attention identity required")
         self.caller, self.binding, self.key = caller, binding, key
+        self.protocol = HISTORICAL_PROTOCOL if historical else PROTOCOL
+        self.owner_version = 6 if historical else 5
         self.path = route_prefix + "/v1/attention/" + binding.target
         self._capabilities: dict | None = None
         self._epoch = 0
@@ -54,9 +57,15 @@ class AttentionClient:
             ):
                 raise ValueError
             value = json_object(response.body)
-            if value.pop("binding", None) != self.binding.document() or value.get("protocol") != PROTOCOL:
+            if value.pop("binding", None) != self.binding.document():
+                raise ValueError
+            if self.owner_version == 6 and value.get("protocol") == PROTOCOL:
+                raise ReplayClientError("unsupported_attention_contract")
+            if value.get("protocol") != self.protocol:
                 raise ValueError
             return value
+        except ReplayClientError:
+            raise
         except (ValueError, UnicodeError, RecursionError):
             raise ReplayClientError("invalid_attention_response") from None
 
@@ -67,12 +76,14 @@ class AttentionClient:
         value = await self._exchange("capabilities", {})
         if (
             value.get("operations") != ["capabilities", "read"]
-            or value.get("owner_store_versions") != [5]
+            or value.get("owner_store_versions") != [self.owner_version]
             or value.get("max_batch") != MAX_BATCH or type(value.get("max_batch")) is not int
             or value.get("max_batch_bytes") != MAX_BATCH_BYTES
             or value.get("effects") != "none" or value.get("adopts") is not False
             or value.get("acknowledges") is not False
-            or value.get("feedback") != "retained_original_capture"
+            or value.get("feedback") != (
+                "retained_original_readback" if self.owner_version == 6 else "retained_original_capture"
+            )
             or any(type(value.get(name)) is not int or not 1 <= value[name] <= 86400
                    for name in ("max_age_seconds", "aging_seconds"))
         ):

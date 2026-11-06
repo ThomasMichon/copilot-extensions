@@ -4107,43 +4107,44 @@ class _ResidentHookPolicy:
             return {}
         return {"additionalContext": text} if text else {}
 
+    def native_batch_targets(self, payload: dict) -> list[str] | None:
+        from .hook_ipc import HookUnavailable
+
+        forms = self._module("tool_call_forms.py")
+        if forms is None:
+            raise HookUnavailable
+        try:
+            return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
+        except ValueError as exc:
+            raise HookUnavailable from exc
+
     def mutation_targets(self, payload: dict) -> list[str] | None:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
         if tool in _HOOK_WRITE_TOOLS:
             args = payload.get("toolArgs") or payload.get("tool_input") or {}
             cwd = _hook_payload_cwd(payload)
-            if isinstance(args, dict):
-                for key in (
-                    "path",
-                    "file_path",
-                    "filePath",
-                    "filename",
-                    "fileName",
-                    "target_file",
-                    "targetFile",
-                ):
-                    value = args.get(key)
-                    if value:
-                        path = str(value)
-                        if not os.path.isabs(path):
-                            path = os.path.join(cwd, path)
-                        return [path]
-            return [cwd]
+            forms = self._module("tool_call_forms.py")
+            if forms is None:
+                return None
+            try:
+                targets = forms.write_targets(tool, args)
+            except ValueError:
+                return None
+            return [
+                path if os.path.isabs(path) else os.path.join(cwd, path)
+                for path in targets
+            ] or [cwd]
         if tool not in _HOOK_SHELL_TOOLS:
             return []
-        args = payload.get("toolArgs") or payload.get("tool_input") or {}
-        if not isinstance(args, dict):
-            return []
-        command = next(
-            (
-                str(args.get(key) or "")
-                for key in ("command", "cmd", "script", "commandLine", "commandline", "input")
-                if args.get(key)
-            ),
-            "",
-        )
         module = self._module("statelessness_guard.py")
-        return None if module and module._WRITE_VERBS.search(command) else []
+        shell = self._module("anchor_write_guard.py")
+        if module is None or shell is None:
+            return None
+        args = module._as_args(payload.get("toolArgs") or payload.get("tool_input") or {})
+        command = module._pick(args, module.CMD_ARG_KEYS)
+        if command is not None and tool not in {"bash", "sh", "powershell", "pwsh"}:
+            return None if module._WRITE_VERBS.search(command) else []
+        return None if command is None or shell.shell_may_mutate(command, tool, legacy_writes=module._WRITE_VERBS) else []
 
 
 def _resident_hook_decision(
@@ -4157,6 +4158,27 @@ def _resident_hook_decision(
 ) -> dict:
     if kind == "preToolUse":
         return policy.pre(payload)
+
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
+        tool = payload.get("toolName") or payload.get("tool_name")
+        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
+            kind != "nativeToolBatchMutation" and (
+                not isinstance(tool, str) or tool.lower() not in (
+                    _HOOK_SHELL_TOOLS if kind == "shellToolMutation" else _HOOK_WRITE_TOOLS
+                )
+                or "toolCalls" in payload
+            )
+        ):
+            from .hook_ipc import HookUnavailable
+
+            raise HookUnavailable
+        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
+        if targets is None:
+            segment_cache.invalidate_all()
+        else:
+            for target in targets:
+                segment_cache.invalidate(target)
+        return {}
 
     # Stage D: status_updater_cli/session_binding_cli are cluster-free.
     from . import session_binding_cli as _session_binding_cli

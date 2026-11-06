@@ -77,8 +77,8 @@ not reconstructed.
 The current-roster owner also has an optional small file projection for shell
 consumers. It is separate from the selected observation journal and does
 not replace managed-session admission, canonical write receipts or hook policy.
-The Windows read-event consumer below uses it; other ordinary events retain
-their existing execution path.
+The prepared Windows read, native-write and single-shell consumers below use it; other
+ordinary events retain their existing execution path.
 
 The monitor's original passive discovery record advertises
 `hook_facts_version: 2` and `hook_facts_generation`, a process-local publisher
@@ -155,9 +155,9 @@ For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
 prepared-event bound, including outstanding late-guidance watches, evaluation
 has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
-Other tools, installation cells and oversized events
-keep their original entry and behavior; the prepared-event bound must not
-consume mutation events. This is not the complete shell-only transition.
+The native-write subset below shares this shell-safe evaluation. Other tools,
+installation cells and oversized events keep their original entry and
+behavior. This is not the complete shell-only transition.
 
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's
@@ -256,6 +256,155 @@ remain in force. A sent notice is not an acknowledgement, durable delivery,
 fresh-status observation, permission or readiness proof. A missed notice may
 allow ordinary idle expiry; this operation does not recover an absent resident.
 Old callers retain their original request/response semantics with new receivers.
+
+### Windows native-write consumer
+
+Prepared single native writes (`create`, `edit`, the supported `str_replace`
+variants, `write`, `write_file`, `insert`, `apply_patch`, `new_file` and
+`multi_edit`) share the same shell reminders and late-guidance evaluation.
+They do not request advisory computation from the resident or fall back to
+Python. Batches outside the supported subset below retain their original
+path. Single shell events have their separate consumer below.
+
+The existing hook IPC owner optionally advertises `native-hook-mutation-v1`.
+The shell sends one `nativeToolMutation` notification with the same version,
+token, process generation and one-second deadline envelope as read demand,
+plus `payload`. That payload contains only the event's tool name, arguments,
+current admitted workspace and session; tool results are not transmitted.
+The newline-terminated wire is bounded to 64 KiB, with the same combined
+50 ms connect/write wait and no response, retry or uncertain-event replay.
+Absent, old or invalid discovery and an oversized notification skip the
+optional send, not shell advisory evaluation.
+
+The receiver rechecks managed-session membership, current published admission,
+governance and shutdown under the original monitor state lock, with at most
+50 ms lock contention. It rejects batches and non-native tools. Native targets
+come from the guard-owned `tool_call_forms.write_targets`, including every
+structured edit and both patch-move endpoints. Relative paths use the event
+workspace. Unknown targets retain the original workspace invalidation;
+extractor overflow/unavailability conservatively invalidates all segments.
+No new target parser, permission cache or durable mutation store is introduced.
+The same native extraction also corrects the retained request/response path's
+first-target-only invalidation.
+
+Only cache invalidation, the original mutation-triggered sweep wake and recent
+tool idle grace follow acceptance. There is no project discovery, policy,
+advisory reply, recomputation or lifecycle boot in this notification branch.
+Transport completion is not acceptance or fresh-status proof. Lost/rejected
+notices leave the existing periodic/TTL refresh backstop in charge; they are
+not durably queued. These isolated source controls do not establish installed
+composition, cold/cell/POSIX entry or whole-hook throughput acceptance.
+
+### Windows native-batch consumer
+
+The same prepared Windows shell path accepts nonempty `toolCalls` arrays of
+at most 128 calls, each containing only `name`, optional `args` and optional
+`id`. Every name must identify a supported native write or `view`, `rg` or
+`glob`. Single-call arrays stay arrays. A malformed call, unknown tool,
+per-call workspace override, empty batch or excessive call count leaves the
+entire event on its prior path; no supported prefix is sent or evaluated
+separately. The existing 1 MiB event and live prepared-membership bounds remain.
+
+The original receiver separately advertises `native-hook-batch-mutation-v1`.
+One send-only `nativeToolBatchMutation` carries the batch plus the original
+event workspace/session fields, not tool results. The 64 KiB wire limit,
+process-generation/token/deadline validation, combined 50 ms connect/write
+wait, current admission/state lock and no-reply/no-retry semantics are the
+same as single native mutations. New consumers skip the optional notice when
+old discovery advertises only single-write support; they do not reinterpret
+that capability as batch support or fall back to a synchronous request.
+
+Before any effect, the receiver validates every call and uses the existing
+`tool_call_forms.tool_events` normalization. Its existing permissive callers
+remain unchanged; this notification requires the strict complete-batch subset.
+Top-level cwd and argument inheritance retain that owner's semantics.
+The original native extractor gathers unique targets across the batch before
+invalidation. The aggregate limit is 128 targets, not 128 per call; overflow
+or an unavailable target extractor invalidates all segments conservatively.
+Unknown native targets invalidate the event workspace. Read-only batches
+renew idle grace without invalidation or a sweep wake. Accepted writes
+invalidate their targets and use the original mutation wake.
+
+Reminders and late-guidance consumption run once per outer event, not per
+call. No current event is replayed, and a lost notification retains the
+existing refresh backstop rather than asserting fresh status. This source
+consumer does not qualify shell batches, installed behavior, cold/cell/POSIX
+entry, complete hook composition or actual throughput.
+
+### Windows single-shell consumer
+
+Prepared single events for the original shell tool aliases use the same
+in-process reminders and late-guidance evaluation. The original IPC owner
+separately advertises `shell-hook-mutation-v1`; a `shellToolMutation` carries
+the tool, original argument fields, workspace and session, without tool results.
+Native-write support alone is not shell support. The same 1 MiB event,
+64 KiB newline-terminated wire, one-second generation-qualified deadline and
+combined 50 ms connect/write bound apply. Missing/old discovery skips the
+optional send. No reply, interpreter fallback, retry or event replay follows.
+Mixed shell/native batches retain their prior path.
+
+The receiver reuses the original guard argument normalizer, including JSON
+strings and raw command strings. Its mutation-only classifier composes the
+original shell segmentation, substitution, literal-target and Git-option
+parsers. It does not evaluate or cache permission: `pull --ff-only` and `fetch`
+can change observed repository state even though the anchor guard permits them.
+Known Git reads and read-only branch flags do not invalidate or wake a sweep;
+an output-file option before the path delimiter makes an otherwise read-only
+Git command a mutation. PowerShell dot invocation is normalized for the same
+classification, including assignment right-hand commands.
+The original literal reader normalizes module-qualified command names and
+reports known-write occurrence even when the target is unresolved. Explicit
+command-evaluation forms invalidate conservatively; quoted evaluation text
+passed to an ordinary read command remains data.
+Other Git subcommands are conservative mutations. Supported literal writes and
+redirections invalidate globally, retaining the original shell target scope.
+Missing commands/parser support and traversal overflow are conservative too,
+with at most 128 segments, eight nested substitution levels and a shared
+131,072-iteration substitution-scan budget per classification. The existing
+invalidation and wake owners can each classify; this adds no permission memo.
+Quoted literal parentheses are not executable PowerShell grouping; assignment
+right-hand commands retain mutation detection without treating quoted data as
+a command. Substitutions are examined before environment-assignment
+normalization. Unsupported executable block/control-flow and complex assignment
+shapes conservatively invalidate rather than being asserted read-only. The
+original quote-aware tokenizer reports unquoted block/type syntax for this
+classification, including pipeline/invocation blocks and typed assignments;
+quoted data does not become executable syntax. Type conservatism applies to
+typed-variable prefixes, not bracketed read paths or ordinary static read
+calls. The original literal reader recognizes clustered in-place `sed` flags
+without treating attached expression/file option values as flags.
+Ordinary tokenizer callers do
+not request that observation and keep their original output. Read-only `sed`
+does not invalidate unless it independently redirects output, while in-place
+forms remain mutations. Batch presence takes precedence over outer shell
+metadata, preserving the original native-batch request kind. Classification
+remains a heuristic, not execution of an arbitrary shell program or proof that
+external programs cannot write.
+
+Unclassified forms retain the original stateless guard's write heuristic rather
+than being silently declared read-only. Confirmed literal/read forms avoid
+that fallback, and source-bound controls use the actual original pattern.
+Dialect-ambiguous aliases and the not-yet-qualified CMD dialect retain the original occurrence rule entirely;
+the receiver does not guess their dialect. This is conservative compatibility,
+not a new permission decision or an assertion of complete command semantics.
+The original tokenizer treats ordinary braced parameter expansions as data,
+without hiding executable substitutions inside them. Post-only assignment
+normalization distinguishes data values and complete read-expression containers
+from unknown executable forms. Control keywords require a complete command
+token and use the declared dialect, so `Select-String`, `Select-Object` and
+PowerShell's `select` alias are not mistaken for POSIX control flow.
+Parameter, command and arithmetic boundaries share one iterative quote-aware
+matcher. Quoted/escaped closing braces and nested executable forms cannot
+swallow a following command; the same boundary is used by the original
+pre-tool guard and post-tool invalidation. Unknown or unterminated post-tool
+input remains conservative, and the original scan-work limit is unchanged.
+
+Original managed admission, current governance/state locks and idle grace
+remain authoritative. Accepted reads renew demand without mutation wake;
+accepted mutations use the original invalidation and wake. Lost notifications
+retain the original refresh backstop and never certify fresh status. This
+qualifies only the isolated prepared Windows source consumer, not installed
+composition, cold/cell/POSIX entry or actual throughput.
 
 ### Prepared Windows membership reuse
 

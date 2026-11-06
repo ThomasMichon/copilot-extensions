@@ -1742,15 +1742,26 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Selected installed Gateway lifecycle
+        env:
+          PYTEST_ADDOPTS: >-
+            -vv --durations=20
+            -k selected_gateway_application_first_touch_repeat_update_and_stop
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
       - name: Selected host lifecycle and SSH consumer authentication
         env:
           PYTEST_ADDOPTS: >-
-            -k "(test_gateway_host and not distribution) or test_gateway_enrollment
+            -vv --durations=20
+            -k "((test_gateway_host and not distribution) or test_gateway_enrollment
             or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
             or selected_gateway_application_first_touch_repeat_update_and_stop
-            or test_ssh_machine or test_machine_identity"
-        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
-
+            or selected_ssh_application_first_touch_repeat_update_and_stop
+            or test_gateway_host or test_ssh_machine or test_machine_identity or test_credential_references
+            or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment
+            or test_provider_caller_does_not_recreate_a_concurrently_removed_identity)
+            and not selected_gateway_application_first_touch_repeat_update_and_stop
+            and not selected_continuity_ssh_application_first_touch_repeat_update_and_stop"
+        run: python tools/run-standalone-tests.py fleet-manager --timeout 180
   gateway-host-application-windows:
     if: ${{ inputs.pr_artifacts }}
     name: Selected Gateway application (Windows)
@@ -1759,6 +1770,37 @@ jobs:
     env:
       UV_PYTHON: "3.12"
     steps: *gateway-host-application-steps
+
+  gateway-continuity-application-linux:
+    if: ${{ inputs.pr_artifacts }}
+    needs: gateway-host-application-linux
+    name: Selected continuity SSH application (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      UV_PYTHON: "3.12"
+    steps: &gateway-continuity-application-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Selected continuity SSH installed lifecycle
+        env:
+          PYTEST_ADDOPTS: >-
+            -vv --durations=20
+            -k selected_continuity_ssh_application_first_touch_repeat_update_and_stop
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
+
+  gateway-continuity-application-windows:
+    if: ${{ inputs.pr_artifacts }}
+    needs: gateway-host-application-windows
+    name: Selected continuity SSH application (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *gateway-continuity-application-steps
 
   gateway-role-tunnels:
     if: ${{ inputs.pr_artifacts }}

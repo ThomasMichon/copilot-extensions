@@ -125,12 +125,12 @@ Use this bounded read-only resolution pass before filling the charter:
    inherited relative paths against the target checkout. Inspect the selected
    recipe's actual parameters/charter (`recipes describe reviewer` for the
    built-in example above); do not substitute that example for a configured
-   registrar recipe. The [Dispatch configuration reference](../../../docs/configuration.md)
+   registrar recipe. The [Dispatch configuration reference](../../../../agent-dispatch/docs/configuration.md)
    owns composition, source directories and precedence; the
-   [Dispatch skill](../../agent-dispatch/SKILL.md) owns recipe/identity
-   inspection, and the [registrar recipe reference](../../../README.md)
+   [Dispatch skill](../../../../agent-dispatch/skills/agent-dispatch/SKILL.md) owns recipe/identity
+   inspection, and the [registrar recipe reference](../../../../agent-dispatch/README.md)
    ("Registrar `extends:`") owns inheritance. The
-   [registrar discovery reference](../../../docs/spawn-supervisor.md)
+   [registrar discovery reference](../../../../agent-dispatch/docs/spawn-supervisor.md)
    owns plugin-candidate admission. Discovery is not registration, activation
    or proof of a running worker. For native Task/Bridge, resolve role bindings
    through that selected host instead; no Dispatch registrar is required.

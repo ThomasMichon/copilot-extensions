@@ -344,6 +344,9 @@ be discarded (or the cancel signature *persists* across sends). See the
 # Exact full SessionInfo JSON (native/worktree/project/path and readiness facts).
 # Unlike compact status, this reads the full identity without resuming it.
 <agent-bridge catalog argv[0]> status <session-id> --full
+# Optional requalification of that exact session's original keyed writer.
+# Requires both the full-session form and negotiated daemon support.
+<agent-bridge catalog argv[0]> status <session-id> --full --worktree-writer
 
 # Wait for a running session's current turn
 <agent-bridge catalog argv[0]> wait <session-id>
@@ -545,6 +548,8 @@ agent-bridge start --port 9280 --bind 127.0.0.1 # pin a fixed port (default is d
 
 # Health check (also shows the bound URL)
 <agent-bridge catalog argv[0]> status
+# Passive raw health JSON; preserves readiness, draining and capability fields.
+<agent-bridge catalog argv[0]> --json status
 
 # Version
 <agent-bridge catalog argv[0]> version
@@ -555,10 +560,10 @@ agent-bridge start --port 9280 --bind 127.0.0.1 # pin a fixed port (default is d
 
 `version` keeps its plain `agent-bridge <package-version>` output, even with
 global `--json`. Only `version --contracts-json` emits the version-one
-`agent-bridge.cli-contracts` declaration:
+`agent-bridge.cli-contracts` declaration, which includes:
 
 ```json
-{"schema":"agent-bridge.cli-contracts","version":1,"contracts":{"agent-bridge.resume":{"version":1,"capabilities":["exact-worktree-target"]}}}
+{"schema":"agent-bridge.cli-contracts","version":1,"contracts":{"agent-bridge.resume":{"version":1,"capabilities":["exact-worktree-target"]},"agent-bridge.create":{"version":1,"capabilities":["keyed-worktree-writer"]},"agent-bridge.status":{"version":1,"capabilities":["health-json","exact-session-worktree-writer"]}}}
 ```
 
 Select this metadata from the same executable/runtime used for resume, not a
@@ -575,6 +580,17 @@ Callers requiring exact selection must obtain positive support from their
 selected CLI or report the unsupported requirement, including after rollback.
 They must not silently use positional routing or replay an effectful failure
 with older syntax. No ordinary automated caller is migrated by this expansion.
+
+The status contract declares CLI transport only. `--json status` returns the
+existing daemon health object without ensuring or starting it; a successful
+read is not a readiness permit. Human health output is unchanged.
+`status <exact-session-id> --full --worktree-writer` uses the existing negotiated
+[original keyed-writer inspection](../../../docs/retained-acquisition-writer.md#ordinary-keyed-creation).
+Missing daemon support, an ignored query or an unconfirmed original owner fails
+without retrying an unpinned session read. Without the option, full and compact
+session reads keep their previous behavior. Select positive support from the
+executing CLI before requiring these forms; an older CLI's human health line
+or absent declaration is not JSON evidence. No old form is retired.
 
 ### Remote Venue Parity Acceptance
 

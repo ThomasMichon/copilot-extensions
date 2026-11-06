@@ -1,0 +1,9 @@
+{
+  "comment": "Repair retained Manager test construction and preserve installed core imports after preparation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

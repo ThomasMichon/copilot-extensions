@@ -1,4 +1,4 @@
-"""Explicit local preference exchange; no carrier enrollment or native apply."""
+"""Explicit local preference exchange and separately confirmed scalar floors."""
 
 from __future__ import annotations
 
@@ -40,6 +40,12 @@ def add_parser(subparsers) -> None:
         else:
             parser.add_argument("--output", type=Path, required=True, help="exact local publication document")
         parser.set_defaults(func=run_exchange)
+    parser = commands.add_parser("copilot", help="preview or adopt accepted Copilot scalar floors")
+    parser.add_argument("--state-dir", type=Path, required=True, help="local accepted state and policy")
+    parser.add_argument("--local-overrides", type=Path)
+    parser.add_argument("--apply", action="store_true", help="apply only model/reasoning floors through the native owner")
+    parser.add_argument("--expect", default="", help="token from the current native preview")
+    parser.set_defaults(func=run_copilot)
 
 
 def run_preview(args) -> int:
@@ -79,5 +85,27 @@ def run_exchange(args) -> int:
         return 0 if result["eligible"] else 1
     except (preferences.PreferenceError, OSError, TimeoutError) as error:
         reason = str(error) if isinstance(error, preferences.PreferenceError) else "exchange-unavailable"
+        print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
+
+
+def run_copilot(args) -> int:
+    from configuration_layers import ConfigurationError
+    from ._peer_launch import ContextRefused
+    from .manifest import ManifestError
+    from .preference_copilot import adopt
+    from .surfaces._common import SurfaceStateError
+
+    try:
+        result = adopt(
+            args.state_dir, local=args.local_overrides, apply=args.apply, expected=args.expect,
+        )
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        return 0
+    except (
+        preferences.PreferenceError, ConfigurationError, ContextRefused,
+        ManifestError, SurfaceStateError, OSError,
+    ) as error:
+        reason = str(error) if isinstance(error, preferences.PreferenceError) else "native-configuration-unavailable"
         print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
         return 2

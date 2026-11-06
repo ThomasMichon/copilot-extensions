@@ -640,10 +640,13 @@ service runtime locally. Setup writes the selected role without a second
 role-specific engine provision. Noninteractive setup requires an explicit role
 flag. The gate never executes a historical `payload-dir` installer as a
 fallback, because that installer may retain obsolete host-install authority.
-5. The installer-readiness probe is deliberately configuration-empty at session
-start, including for opted-in repositories, so generic launch reconciliation
-does not download packages or start services. Existing explicit installer and
-runtime commands remain available.
+5. Payload-local role discovery uses the same merged repository owner as the
+native CLI, rather than treating a reported base-file path as an explicit
+configuration override. Readiness delegates to the selected runtime's native
+adapter: an unconfigured repository is configuration-empty, a configured client
+can be ready without a local service, and failed configuration/runtime readers
+are failures rather than empty configuration. Probing never provisions packages
+or starts services. Explicit forwarded configuration retains its own scope.
 6. The plugin's own installer/runtime lifecycle now builds, selects,
 readiness-gates, replaces, rolls back, and retains the light host runtime. The
 public `start` / `serve` entry points run the local service directly in the

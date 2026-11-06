@@ -73,6 +73,30 @@ def nested_standalone_export(directory: Path) -> dict:
     return index
 
 
+def inspect_installed_artifact(python, environment, *, versions, resources, primary, component):
+    inspection = environment / "artifact-inspection.json"
+    inspection.write_text(json.dumps({
+        "versions": versions, "resources": resources, "primary": primary, "component": component,
+    }), encoding="utf-8")
+    return _run([
+        str(python), "-I", "-c",
+        "import hashlib,importlib,json,pathlib,sys; "
+        "from importlib.metadata import distribution; "
+        "data=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')); "
+        "versions,resources=data['versions'],data['resources']; "
+        "root=pathlib.Path(sys.prefix).resolve(); "
+        "assert all(distribution(n).version==v and "
+        "pathlib.Path(distribution(n).locate_file('')).resolve().is_relative_to(root) "
+        "for n,v in versions.items()); "
+        "selected=distribution(data['primary']); "
+        "assert all(hashlib.sha256(selected.locate_file(n).read_bytes()).hexdigest()==v "
+        "for n,v in resources.items()); "
+        "module={'fleet-manager':'fleet_manager','pr-service':'agent_pull_requests_service'}.get(data['component']); "
+        "assert module is None or importlib.import_module(module)",
+        str(inspection),
+    ], cwd=environment)
+
+
 def main(*, standalone: bool = False) -> None:
     with tempfile.TemporaryDirectory(prefix="public-toolchain-smoke-") as root:
         directory = Path(root)
@@ -143,22 +167,10 @@ def main(*, standalone: bool = False) -> None:
                     for name, path in injected_resources(component, builder.REPO).items()
                 }
                 primary = next(wheel["name"] for wheel in manifest["wheels"] if wheel["role"] == "standalone")
-                _run([
-                    str(python), "-I", "-c",
-                    "import hashlib,importlib,json,pathlib,sys; "
-                    "from importlib.metadata import distribution; "
-                    "versions,resources=json.loads(sys.argv[1]),json.loads(sys.argv[2]); "
-                    "root=pathlib.Path(sys.prefix).resolve(); "
-                    "assert all(distribution(n).version==v and "
-                    "pathlib.Path(distribution(n).locate_file('')).resolve().is_relative_to(root) "
-                    "for n,v in versions.items()); "
-                    "selected=distribution(sys.argv[3]); "
-                    "assert all(hashlib.sha256(selected.locate_file(n).read_bytes()).hexdigest()==v "
-                    "for n,v in resources.items()); "
-                    "module={'fleet-manager':'fleet_manager','pr-service':'agent_pull_requests_service'}.get(sys.argv[4]); "
-                    "assert module is None or importlib.import_module(module)",
-                    json.dumps(versions), json.dumps(resources), primary, component,
-                ], cwd=directory)
+                inspect_installed_artifact(
+                    python, environment, versions=versions, resources=resources,
+                    primary=primary, component=component,
+                )
         nested = nested_standalone_export(directory) if standalone else None
         print(json.dumps({
             "plugins": [manifest["plugin"] for manifest in manifests if "plugin" in manifest],

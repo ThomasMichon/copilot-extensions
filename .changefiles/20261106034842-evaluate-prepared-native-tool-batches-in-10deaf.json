@@ -1,0 +1,9 @@
+{
+  "comment": "Evaluate prepared native tool batches in PowerShell with bounded send-only invalidation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

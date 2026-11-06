@@ -1,0 +1,9 @@
+{
+  "comment": "Handle prepared native-write hooks with bounded send-only invalidation and canonical multi-target extraction",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

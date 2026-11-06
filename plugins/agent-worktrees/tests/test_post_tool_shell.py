@@ -282,6 +282,7 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("event_case", [
     "mutation", "late-watch", "oversized-mutation", "oversized-late-watch",
+    "batch-shell", "batch-malformed", "batch-empty", "batch-too-many", "batch-call-cwd",
 ])
 def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell, event_case):
     from agent_procutil import no_window_kwargs
@@ -300,6 +301,19 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
         "sessionId": "prepared", "cwd": str(anchor),
         "toolName": "edit" if event_case.endswith("mutation") else "view",
     }
+    if event_case.startswith("batch-"):
+        calls = [{"name": "edit", "args": {"path": "one"}}]
+        if event_case == "batch-shell":
+            calls.append({"name": "powershell", "args": {"command": "git status"}})
+        elif event_case == "batch-malformed":
+            calls.append(None)
+        elif event_case == "batch-empty":
+            calls = []
+        elif event_case == "batch-too-many":
+            calls *= 129
+        elif event_case == "batch-call-cwd":
+            calls.append({"name": "view", "cwd": "other"})
+        payload["toolCalls"] = calls
     if event_case.endswith("late-watch"):
         (session / "local-guidance-watch.json").write_text("{}")
     oversized = event_case.startswith("oversized-")
@@ -347,12 +361,13 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
             )
             assert result.returncode == 0, result.stderr
             assert not result.stderr
-            if event_case == "late-watch":
+            if event_case in {"mutation", "late-watch"}:
                 assert result.stdout == ""
-                assert (session / "local-guidance-watch.json").read_text() == "{}"
+                if event_case == "late-watch":
+                    assert (session / "local-guidance-watch.json").read_text() == "{}"
             else:
                 assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
-        expected = [] if event_case == "late-watch" else [("postToolUse", payload)] * 2
+        expected = [] if event_case in {"mutation", "late-watch"} else [("postToolUse", payload)] * 2
         assert seen == expected
     finally:
         server.close()
@@ -565,6 +580,9 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
         print(f"{shell}/{case}: {result.stderr.strip()}")
         if case in {"old-provider", "missing-discovery", "unadmitted"}:
             assert not notices and not server.has_recent_hook_demand()
+        elif case in {"wrong-generation", "closed", "revoked"} and not received.wait(2):
+            # Delivery is optional; the direct wire controls prove receiver rejection.
+            assert not notices and not server.has_recent_hook_demand()
         else:
             assert received.wait(2), "send-only notification did not reach its receiver"
             assert len(notices) == 1
@@ -572,6 +590,258 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
             assert notices[0]["kind"] == "readHookDemand"
             assert server.has_recent_hook_demand() is (case in {"current", "missing-row"})
         assert calls == [], "a read-demand notice must not run policy, advice or invalidation"
+    finally:
+        release.set()
+        if stalled is not None:
+            stalled.shutdown()
+            stalled.server_close()
+            stalled_thread.join(timeout=2)
+            assert not stalled_thread.is_alive()
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows shell mutation consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "structured", "patch", "old-provider", "wrong-generation", "closed",
+    "missing-discovery", "oversized", "no-reply",
+    "batch-structured", "batch-reads", "batch-old-provider", "batch-wrong-generation",
+    "batch-closed", "batch-missing-discovery", "batch-oversized", "batch-no-reply",
+    "shell-write", "shell-read", "shell-json-args", "shell-raw-args",
+    "shell-fallback-args", "shell-unknown-args", "shell-pull",
+    "shell-old-provider", "shell-wrong-generation", "shell-closed",
+    "shell-missing-discovery", "shell-oversized", "shell-no-reply",
+    "shell-assignment", "shell-literal-assignment", "shell-read-sed",
+    "shell-quoted-parentheses", "batch-shell-metadata",
+    "shell-control-block", "shell-conditional", "shell-bash-assignment",
+    "shell-typed-assignment", "shell-pipeline-block", "shell-invoke-block",
+    "shell-literal-scriptblock",
+    "shell-read-bracket-path", "shell-read-type-call", "shell-sed-cluster",
+    "shell-git-output", "shell-dot-write", "shell-dot-read", "shell-dot-assignment",
+    "shell-evaluation", "shell-module-write", "shell-module-read", "shell-quoted-evaluation",
+    "shell-read-select-string", "shell-read-select-object", "shell-read-expansion",
+    "shell-read-assignment",
+])
+def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
+    from types import SimpleNamespace
+
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import __main__ as main
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    fixture = prepared_read_event
+    batch = case.startswith("batch-")
+    shell_event = case.startswith("shell-")
+    case = case.removeprefix("batch-") if batch else case.removeprefix("shell-")
+    paths = [str(fixture["home"] / name) for name in ("one", "two")]
+    policy = main._ResidentHookPolicy(main._load_hook_client_module())
+    invalidated = []
+    cache = SimpleNamespace(
+        invalidate=lambda path: invalidated.append(path),
+        invalidate_all=lambda: invalidated.append("all") if shell_event else pytest.fail("known paths must retain target scope"),
+    )
+    received, release = threading.Event(), threading.Event()
+    notices = []
+    callback_errors = []
+
+    class Server(HookIpcServer):
+        def _on_native_mutation(self, request):
+            notices.append(request)
+            try:
+                super()._on_native_mutation(request)
+            except Exception as exc:
+                callback_errors.append(repr(exc))
+                raise
+            finally:
+                received.set()
+
+    class NoReply(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(2)
+            raw = b""
+            while not raw.endswith(b"\n") and len(raw) < 65536:
+                chunk = self.request.recv(65536 - len(raw))
+                if not chunk:
+                    break
+                raw += chunk
+            notices.append(json.loads(raw))
+            received.set()
+            assert release.wait(10)
+
+    server = Server(
+        lambda *args: pytest.fail("synchronous request or policy replay"),
+        native_mutation_decide=lambda kind, payload, deadline: main._resident_hook_decision(
+            kind, payload, deadline=deadline, policy=policy, segment_cache=cache,
+        ),
+    )
+    server.start()
+    stalled = None
+    stalled_thread = None
+    try:
+        path = fixture["registry"] / "status-monitor.lock"
+        discovery = {**json.loads(path.read_text()), **server.rendezvous()}
+        if case == "old-provider":
+            if shell_event:
+                discovery["hook_capabilities"].remove("shell-hook-mutation-v1")
+            elif batch:
+                discovery["hook_capabilities"].remove("native-hook-batch-mutation-v1")
+            else:
+                discovery.pop("hook_capabilities")
+        elif case == "wrong-generation":
+            discovery["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.close_admission()
+        elif case == "no-reply":
+            stalled = socketserver.ThreadingTCPServer(("127.0.0.1", 0), NoReply)
+            stalled_thread = threading.Thread(target=stalled.serve_forever)
+            stalled_thread.start()
+            discovery["hook_endpoint"] = f"127.0.0.1:{stalled.server_address[1]}"
+        path.write_text(json.dumps(discovery), encoding="utf-8")
+        if case == "missing-discovery":
+            path.unlink()
+        args = {"edits": [{"path": item} for item in paths]}
+        tool = "multi_edit"
+        if case == "patch":
+            tool = "apply_patch"
+            args = {"input": f"*** Update File: {paths[0]}\n*** Move to: {paths[1]}\n"}
+        elif case == "oversized":
+            args["content"] = "x" * 65536
+        payload = {**fixture["payload"], "toolName": tool, "toolArgs": args, "toolResult": "not transmitted"}
+        if batch:
+            payload.pop("toolName")
+            payload.pop("toolArgs")
+            payload["workingDirectory"] = payload["cwd"]
+            payload["toolCalls"] = [
+                {"id": "read", "name": "view", "args": {"path": "not-a-write"}},
+                {"id": "write", "name": "multi_edit", "args": args},
+                {"name": "apply_patch", "args": f"*** Update File: {paths[0]}\n*** Move to: {paths[1]}\n"},
+                {"name": "edit", "args": json.dumps({"path": paths[1]})},
+            ]
+            if case == "reads":
+                payload["toolCalls"] = payload["toolCalls"][:1]
+            elif case == "shell-metadata":
+                payload["toolName"] = "powershell"
+        elif case == "structured":
+            payload["workingDirectory"] = payload["cwd"]
+            payload["toolArgs"] = {}
+            payload["tool_input"] = args
+        if shell_event:
+            args = {"command": "git -c core.quotepath=false --no-pager commit -m test"}
+            if case == "read":
+                args = {"command": "git --no-pager status --short"}
+            elif case == "pull":
+                args = {"command": "git pull --ff-only"}
+            elif case == "unknown-args":
+                args = {"command": ["not-a-command"]}
+            elif case == "oversized":
+                args["padding"] = "x" * 65536
+            elif case == "assignment":
+                args = {"command": "$result = git -c core.quotepath=false commit -m test"}
+            elif case == "literal-assignment":
+                args = {"command": "$result = 'git commit -m test'"}
+            elif case == "read-sed":
+                args = {"command": "sed -n '1,100p' file.py"}
+            elif case == "quoted-parentheses":
+                args = {"command": 'Write-Output "' + "(" * 20000 + '"'}
+            elif case == "control-block":
+                args = {"command": "& { git commit -m test }"}
+            elif case == "conditional":
+                args = {"command": "if ($true) { Set-Content file value }"}
+            elif case == "bash-assignment":
+                args = {"command": 'result="$(git commit -m test)"'}
+            elif case == "typed-assignment":
+                args = {"command": "[string]$result = git commit -m test"}
+            elif case == "pipeline-block":
+                args = {"command": "1 | % { Set-Content file value }"}
+            elif case == "invoke-block":
+                args = {"command": "Invoke-Command -ScriptBlock { Set-Content file value }"}
+            elif case == "literal-scriptblock":
+                args = {"command": "Write-Output 'Invoke-Command -ScriptBlock { Set-Content file value }'"}
+            elif case == "read-bracket-path":
+                args = {"command": "Get-Content -LiteralPath file[ab]"}
+            elif case == "read-type-call":
+                args = {"command": "[IO.File]::ReadAllText('file')"}
+            elif case == "sed-cluster":
+                args = {"command": "sed -sni s/a/b/ file"}
+            elif case == "git-output":
+                args = {"command": "git diff --output=report.txt"}
+            elif case == "dot-write":
+                args = {"command": ". Set-Content file value"}
+            elif case == "dot-read":
+                args = {"command": ". git status --short"}
+            elif case == "dot-assignment":
+                args = {"command": "$result = . git commit -m test"}
+            elif case == "evaluation":
+                args = {"command": "Invoke-Expression 'Set-Content file value'"}
+            elif case == "module-write":
+                args = {"command": r"Microsoft.PowerShell.Management\Set-Content file value"}
+            elif case == "module-read":
+                args = {"command": r"Microsoft.PowerShell.Management\Get-Content file"}
+            elif case == "quoted-evaluation":
+                args = {"command": "Write-Output \"Invoke-Expression 'Set-Content file value'\""}
+            elif case == "read-select-string":
+                args = {"command": "Select-String -Pattern error -Path file"}
+            elif case == "read-select-object":
+                args = {"command": "Select-Object -Property Name"}
+            elif case == "read-expansion":
+                args = {"command": "Write-Output ${env:USERPROFILE}"}
+            elif case == "read-assignment":
+                args = {"command": "$copy = $value"}
+            payload.update(toolName="powershell", toolArgs=args)
+            if case == "bash-assignment":
+                payload["toolName"] = "bash"
+            if case == "json-args":
+                payload["toolArgs"] = json.dumps(args)
+            elif case == "raw-args":
+                payload["toolArgs"] = args["command"]
+            elif case == "fallback-args":
+                payload.update(toolArgs={}, tool_input=args, workingDirectory=payload["cwd"])
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+            input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+            env=fixture["env"], **no_window_kwargs(),
+        )
+        assert result.returncode == 0 and not result.stdout, result.stderr
+        assert result.stderr.startswith("entry_seconds="), result.stderr
+        print(f"{shell}/{case}: {result.stderr.strip()}")
+        if case == "missing-discovery":
+            assert not fixture["sidecar"].exists()
+        else:
+            assert json.loads(fixture["sidecar"].read_text())["count"] == 1
+        if case in {"old-provider", "missing-discovery", "oversized"}:
+            assert not notices and not server.has_recent_hook_demand()
+        elif case in {"wrong-generation", "closed"} and not received.wait(2):
+            assert not notices
+        else:
+            assert received.wait(2), f"arrived={bool(notices)}, callback_errors={callback_errors}"
+            assert len(notices) == 1
+            expected = {
+                key: value for key, value in payload.items()
+                if key != "toolResult" and not (batch and key == "toolName")
+            }
+            assert notices[0]["payload"] == expected
+            assert notices[0]["kind"] == (
+                "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
+            )
+        assert callback_errors == []
+        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment", "control-block", "conditional", "bash-assignment", "typed-assignment", "pipeline-block", "invoke-block", "sed-cluster", "git-output", "dot-write", "dot-assignment", "evaluation", "module-write"}
+        assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch", "shell-metadata"} else [])
+        assert server.has_recent_hook_demand() is (writes or case in {
+            "structured", "patch", "reads", "read", "literal-assignment", "read-sed",
+            "quoted-parentheses", "shell-metadata",
+            "literal-scriptblock",
+            "read-bracket-path", "read-type-call",
+            "dot-read",
+            "module-read", "quoted-evaluation",
+            "read-select-string", "read-select-object", "read-expansion", "read-assignment",
+        })
     finally:
         release.set()
         if stalled is not None:

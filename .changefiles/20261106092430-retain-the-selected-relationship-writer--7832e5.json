@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the selected relationship writer and independently inspect the current resident before governed effects",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

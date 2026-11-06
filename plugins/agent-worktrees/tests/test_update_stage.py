@@ -22,6 +22,11 @@ import pytest
 from agent_worktrees import update_stage as us
 
 
+@pytest.fixture(autouse=True)
+def _no_marketplace_credentials(monkeypatch):
+    monkeypatch.setenv("CE_UPDATE_AUTH", "off")
+
+
 @pytest.mark.parametrize("code", [0, 7])
 def test_acquisition_uses_bounded_caller_custody_and_actual_exit(monkeypatch, code):
     import shutil

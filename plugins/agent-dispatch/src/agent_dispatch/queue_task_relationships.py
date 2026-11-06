@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import secrets
 import sqlite3
@@ -260,6 +261,25 @@ class QueueTaskRelationshipsMixin:
             )
         return json.loads(row["task_relationship"]) if row is not None else None
 
+    def _admit_original_relationship_request(self, request: dict) -> dict:
+        from .task_obligations import read_snapshot
+
+        snapshot = read_snapshot(
+            self, request["task_id"], assignment_event_id=request["event_id"],
+        )
+        if (
+            self._relationship_authority != request["authority"]
+            or snapshot is None
+            or snapshot["queue_identity"] != request["recovery"]["queue_identity"]
+            or snapshot["assignment"] != {
+                "event_id": request["event_id"],
+                "worker_id": AssignmentWorkspace(**request["workspace"]).worker_id,
+            }
+            or _encoded(snapshot.get("relationship")) != _encoded(request)
+        ):
+            raise TaskError("original queue and audited relationship request are unconfirmed")
+        return snapshot
+
     def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict:
         """Replay the same ground-owner request; never hold SQLite during I/O."""
         value = self.task_relationship(task_id, event_id=event_id)
@@ -274,14 +294,7 @@ class QueueTaskRelationshipsMixin:
         workspace = AssignmentWorkspace(**request["workspace"])
         if value["state"] in {"closed", "absent"}:
             return value
-        from .task_obligations import read_snapshot
-
-        snapshot = read_snapshot(self, task_id, assignment_event_id=request["event_id"])
-        if snapshot is None or snapshot["assignment"] != {
-            "event_id": request["event_id"],
-            "worker_id": workspace.worker_id,
-        }:
-            raise TaskError("original audited task assignment is unconfirmed")
+        snapshot = self._admit_original_relationship_request(request)
         retiring = snapshot["release_outcome"] in {"completed", "unassigned_queued"}
         if retiring and snapshot["release_outcome"] == "unassigned_queued":
             retiring = (
@@ -307,10 +320,15 @@ class QueueTaskRelationshipsMixin:
             ):
                 raise TaskError("original task assignment changed; relationship retained")
         common = {"expected_creation_nonce": workspace.creation_nonce}
+        writer = self._relationship_writer
+        bind_request = getattr(writer, "bind_request", None)
+        if callable(bind_request):
+            writer = bind_request(copy.deepcopy(request))
 
         def write(operation: str, payload: dict, *, phase: str | None = None) -> dict:
+            self._admit_original_relationship_request(request)
             try:
-                result = self._relationship_writer(workspace, operation, {**payload, **common})
+                result = writer(workspace, operation, {**payload, **common})
             except Exception as exc:
                 raise TaskError(
                     "task relationship request is unresolved; reconcile its original assignment"
@@ -320,7 +338,8 @@ class QueueTaskRelationshipsMixin:
             return result
 
         if retiring:
-            receipt = self._relationship_writer(
+            self._admit_original_relationship_request(request)
+            receipt = writer(
                 workspace,
                 "inspect",
                 {

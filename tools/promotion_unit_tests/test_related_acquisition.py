@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -35,7 +36,9 @@ def api(monkeypatch, source_code):
         if child == "related":
             fields.setdefault(
                 "_ConfigContributionAnchor",
-                type("ConfigContributionAnchor", (str,), {"directory_form": False}),
+                type("ConfigContributionAnchor", (str,), {
+                    "directory_form": False, "source_layer": "", "state_repo": "",
+                }),
             )
         module = ModuleType(f"{name}.{child}")
         module.__dict__.update(fields)
@@ -80,7 +83,10 @@ def test_targeted_cli_reuses_selected_sources_and_topology(api, monkeypatch, exp
     selected_config = SimpleNamespace(machine="local")
     machines = {"local": SimpleNamespace(key="local", execution_platform="windows")}
     source_reads = []
-    entry = SimpleNamespace(owner="", summary="", locus=SimpleNamespace(preferred="local"))
+    entry = SimpleNamespace(
+        owner="", summary="", locus=SimpleNamespace(preferred="local"),
+        bound_state_root=False,
+    )
     cfg = api.stub(
         "config", active_project=lambda: "fixture",
         load_config=lambda **kwargs: selected_config,
@@ -138,6 +144,98 @@ def test_targeted_cli_reuses_selected_sources_and_topology(api, monkeypatch, exp
     assert calls == {"sources": 1, "topology": 1}
     assert source_reads == [("base", selected_config)]
     assert captured[0]["current_machine"] == "local"
+
+
+@pytest.fixture
+def bound_projection(api, monkeypatch):
+    class LogicalPath(str):
+        def resolve(self):
+            return self
+
+    @dataclass
+    class Entry:
+        name: str
+        summary: str = ""
+        origin_anchor: str = ""
+        origin_layer: str = ""
+        role: str = ""
+        locus: object = None
+        delegate: str = ""
+        bound_state_root: bool = False
+
+    related = api.stub(
+        "related", RelatedEntry=Entry,
+        Locus=lambda **values: SimpleNamespace(**values),
+    )
+    canonical = SimpleNamespace(repo_class="knowledge")
+    root = LogicalPath("logical-knowledge")
+    calls = []
+
+    def resolve(name):
+        calls.append(name)
+        return canonical, root
+
+    registry = api.stub("repos", resolve_registered_repo=resolve)
+    monkeypatch.setattr(api.related, "Path", LogicalPath)
+    anchor = related._ConfigContributionAnchor("logical-knowledge")
+    anchor.source_layer = "knowledge"
+    anchor.state_repo = "notes"
+    return SimpleNamespace(
+        api=api, entry=Entry, anchor=anchor, canonical=canonical,
+        registry=registry, root=root, calls=calls,
+    )
+
+
+@pytest.mark.parametrize("repo_class", ["knowledge", "worktree"])
+def test_bound_projection_preserves_policy_source_without_native_acquisition(
+    bound_projection, repo_class,
+):
+    fixture = bound_projection
+    fixture.canonical.repo_class = repo_class
+    previous = fixture.entry(
+        name="notes", summary="Existing metadata", role="product",
+        origin_layer="harness", delegate="agent-bridge",
+    )
+    merged = SimpleNamespace(related={"notes": previous})
+    fixture.api.related._synthesize_bound_state([fixture.anchor], merged, None)
+    projected = merged.related["notes"]
+    assert fixture.calls == ["notes"]
+    assert projected is not previous and previous.role == "product"
+    assert projected.role == "knowledge" and projected.locus.preferred == "local"
+    assert projected.delegate == "none" and projected.bound_state_root
+    assert projected.origin_layer == "harness" and projected.summary == previous.summary
+
+
+@pytest.mark.parametrize("fault", ["class", "root", "ambiguous"])
+def test_bound_projection_uncertainty_never_leaves_a_false_positive(
+    bound_projection, fault,
+):
+    fixture = bound_projection
+    anchors = [fixture.anchor]
+    if fault == "class":
+        fixture.canonical.repo_class = "reference"
+    elif fault == "root":
+        fixture.registry.resolve_registered_repo = lambda name: (
+            fixture.canonical, type(fixture.root)("different-root"),
+        )
+    else:
+        other = type(fixture.anchor)("other-source")
+        other.source_layer = "knowledge"
+        other.state_repo = "other-binding"
+        anchors.append(other)
+    observations = []
+    merged = SimpleNamespace(related={
+        "notes": fixture.entry(name="notes"),
+        "unrelated": fixture.entry(name="unrelated"),
+    })
+    fixture.api.related._synthesize_bound_state(anchors, merged, observations)
+    report = fixture.api.related.AcquisitionReport(
+        "bound-state-root", merged, tuple(observations),
+    )
+    assert set(merged.related) == {"unrelated"}
+    assert report.authority is ScanAuthority.INDETERMINATE
+    with pytest.raises(_configuration_sdk.ConfigurationError):
+        fixture.api.related._synthesize_bound_state(anchors, merged, None)
 
 
 def test_entry_uncertainty_survives_complete_activation_without_discarding_positive(api, monkeypatch):
@@ -1120,6 +1218,7 @@ def _knowledge_owner(api, monkeypatch):
     api.load("runtime_paths")
     api.load("machine_registry_acquisition")
     owner = api.load("config")
+    api.load("config_sources")
     launch = Path("synthetic-launch")
     knowledge = Path("synthetic-knowledge")
     launch_file = launch / owner.CANONICAL_INREPO_CONFIG_DIR / "config.yaml"
@@ -1224,7 +1323,7 @@ def test_knowledge_preference_owner_gate_decisions(api, monkeypatch, mode):
     )
     if mode == "invalid-binding":
         assert [(f.reason, f.detail) for f in owned[0].findings] == [
-            ("knowledge-preferences-failed", "AttributeError"),
+            ("knowledge-preferences-failed", "KnowledgeBindingError"),
         ]
     assert api.config.current_observations() is None
 
@@ -1472,7 +1571,11 @@ def _control_plane_owner(api, monkeypatch):
         if state.error == "sources":
             raise PermissionError("private source body")
         return [SimpleNamespace(anchor="control", origin="harness"),
-                SimpleNamespace(anchor="knowledge", origin="knowledge")]
+                SimpleNamespace(anchor="knowledge", origin="knowledge", state_repo="notes")]
+
+    def contribution(anchor, origin, *, state_repo=""):
+        assert state_repo == ("notes" if origin == "knowledge" else "")
+        return f"{origin}:{anchor}"
 
     def graft(anchors):
         calls.append(("graft", tuple(anchors)))
@@ -1485,7 +1588,7 @@ def _control_plane_owner(api, monkeypatch):
     api.stub("machine_identity", configured_machine_binding=lambda *a: "fixture")
     api.stub("related", find_control_plane_anchor=discover, installed_plugin_related_anchors=plugins,
              _anchor_key=lambda anchor: calls.append(("key", anchor)) or anchor,
-             config_contribution_anchor=lambda anchor, origin: f"{origin}:{anchor}", read_related_grafted=graft)
+             config_contribution_anchor=contribution, read_related_grafted=graft)
     sources_module = api.stub("state_root", config_source_anchors=sources)
     owner = _knowledge_owner(api, monkeypatch).owner
     composition = api.load("config_sources")
@@ -2019,7 +2122,9 @@ def original_source_selection(api, monkeypatch):
         calls.append(("knowledge", kwargs))
         if state.failure == "knowledge":
             raise LookupError("private knowledge source body")
-        return SimpleNamespace(requires_external=True, bound=True, path="knowledge")
+        return SimpleNamespace(
+            requires_external=True, bound=True, path="knowledge", repo="knowledge",
+        )
 
     def install_dir():
         calls.append("install")

@@ -13,7 +13,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
-from ..cold_store_views import cold_store_session_info
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -646,6 +645,8 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
             )
 
     if agent_name and is_remote_address(agent_name):
+        if req.worktree_writer is not None:
+            raise HTTPException(422, "retained creation writer requires a local ACP target")
         return await start_remote_session(mgr, req, agent_name)
     if req.remote_session_id is not None:
         raise HTTPException(422, "remote_session_id requires a configured remote ACP target")
@@ -687,7 +688,7 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
             )
         try:
             target = await resolver.resolve_async(
-                agent_name, sender_repo=req.sender_repo, activate=True,
+                agent_name, sender_repo=req.sender_repo, activate=req.worktree_writer is None,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -820,16 +821,10 @@ async def list_sessions(request: Request, status: str | None = None):
 
 
 @router.get("/{session_id}", response_model=SessionInfo)
-async def get_session(session_id: str, request: Request):
-    mgr: SessionManager = request.app.state.session_manager
-    session = mgr.get_session(session_id)
-    if session:
-        return _session_info(session, mgr)
-    # Nothing live -- ask a registered cold-store provider before giving up.
-    cold = await mgr.fetch_cold_store_session(session_id)
-    if cold is not None:
-        return cold_store_session_info(cold)
-    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+async def get_session(session_id: str, request: Request, worktree_writer: bool = False):
+    from ..creation_writer_inspection import session_info
+
+    return await session_info(session_id, request, _session_info, worktree_writer=worktree_writer)
 
 
 @router.get("/{session_id}/transcript")

@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate optional historical readback attention reads without changing v1 defaults",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

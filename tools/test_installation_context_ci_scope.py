@@ -24,6 +24,138 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+@pytest.mark.parametrize("outcome", ["passed", "failed", "skipped"])
+@pytest.mark.parametrize("step_id", ["readers", "consumers"])
+def test_related_knowledge_portfolio_requires_native_reader_execution(
+    tmp_path, monkeypatch, outcome, step_id,
+):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    step = next(
+        value for value in workflow["jobs"]["related-knowledge-linux"]["steps"]
+        if value.get("id") == step_id
+    )
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "run-plugin-tests.py").write_text(
+        f"""import json, sys
+from pathlib import Path
+import xml.etree.ElementTree as ET
+arguments = sys.argv[1:]
+Path("arguments.json").write_text(json.dumps(arguments))
+if {outcome!r} == "failed":
+    sys.exit(17)
+reports = Path(arguments[arguments.index("--junit-dir") + 1])
+reports.mkdir(parents=True)
+root = ET.Element("testsuites")
+suite = ET.SubElement(root, "testsuite")
+for variant in ("bare-anchor", "harness-worktree"):
+    case = ET.SubElement(suite, "testcase",
+        name="test_native_bound_knowledge_discovery_is_read_only[" + variant + "]")
+    if {outcome!r} == "skipped" and variant == "harness-worktree":
+        ET.SubElement(case, "skipped")
+ET.ElementTree(root).write(reports / "native.xml")
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "job-environment"))
+    body = compile(step["run"], "<related-knowledge-workflow>", "exec")
+    if outcome == "passed" or (outcome == "skipped" and step_id == "consumers"):
+        exec(body, {})
+    else:
+        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected):
+            exec(body, {})
+    arguments = json.loads((tmp_path / "arguments.json").read_text())
+    assert arguments[0] == "agent-worktrees"
+    assert ("--allow-explicit-tiers" in arguments) == (step_id == "readers")
+    selected = [
+        arguments[index + 1] for index, value in enumerate(arguments)
+        if value == "--test-file"
+    ]
+    expected = [
+        "tests/test_related_knowledge.py", "tests/native/test_related_knowledge_native.py",
+    ] if step_id == "readers" else [
+        "tests/test_pr_related_binding.py", "tests/test_session_context_registry.py",
+        "tests/test_session_context_companions.py", "tests/test_repos_configuration.py",
+    ]
+    assert selected == expected
+    assert "--allow-host-state" not in arguments
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform):
+    from _pytest.mark.expression import Expression
+
+    root = HERE.parent
+    workflow = yaml.safe_load(
+        (root / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"]["gateway-host-application-" + platform]
+    steps = [step for step in job["steps"] if "run" in step]
+    assert job["timeout-minutes"] == 6 and len(steps) == 2
+    assert [shlex.split(step["run"]) for step in steps] == [
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
+    ]
+    assert not any(step.get("continue-on-error") for step in steps)
+    continuity = workflow["jobs"]["gateway-continuity-application-" + platform]
+    assert continuity["timeout-minutes"] == 6
+    assert continuity["needs"] == "gateway-host-application-" + platform
+    followthrough = [step for step in continuity["steps"] if "run" in step]
+    assert len(followthrough) == 1 and not followthrough[0].get("continue-on-error")
+    assert shlex.split(followthrough[0]["run"]) == [
+        "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
+    ]
+    expressions = []
+    for step in steps + followthrough:
+        arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
+        expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
+    original = Expression.compile(
+        "test_gateway_host or test_gateway_enrollment "
+        "or wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies "
+        "or test_ssh_machine or test_machine_identity or test_credential_references"
+        " or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
+        " or test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
+    )
+    nodes = {
+        path.name + "::" + node.name
+        for path in (root / "fleet-manager" / "tests").rglob("test_*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig")))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")
+    }
+
+    def selected(expression):
+        return {
+            node for node in nodes
+            if expression.evaluate(lambda keyword: keyword.casefold() in node.casefold())
+        }
+
+    groups = [selected(expression) for expression in expressions]
+    assert groups[0] == {
+        "test_gateway_host_distribution.py::test_selected_gateway_application_first_touch_repeat_update_and_stop",
+    }
+    assert groups[0].isdisjoint(groups[1])
+    assert groups[2] == {
+        "test_gateway_host_distribution.py::"
+        "test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop",
+    }
+    assert groups[2].isdisjoint(groups[0] | groups[1])
+    assert groups[0] | groups[1] | groups[2] == selected(original)
+    assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
+    assert (
+        "test_continuity_bootstrap.py::"
+        "test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
+    ) in groups[1]
+    assert (
+        "test_continuity_bootstrap.py::"
+        "test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
+    ) in groups[1]
+
+
 @pytest.mark.parametrize(
     "path",
     [

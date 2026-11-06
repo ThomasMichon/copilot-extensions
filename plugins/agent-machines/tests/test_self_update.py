@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -655,6 +657,106 @@ def test_ensure_dtssh_host_healthy_verification_required_is_changed_not_error(
     step = self_update.ensure_dtssh_host_healthy(runner=runner)
     assert step.status == "changed"
     assert "verification pending" in step.detail
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+@pytest.mark.parametrize("mesh_status", ["ok", "error"])
+def test_watchdog_skips_windows_host_checks_but_retains_mesh_on_non_windows(
+    monkeypatch, tmp_path, platform, mesh_status
+):
+    monkeypatch.setattr(self_update, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    def windows_only(*_args, **_kwargs):
+        pytest.fail("non-Windows watchdog entered a Windows-only host check")
+
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", windows_only)
+    calls = []
+
+    def runner(argv, **_kwargs):
+        calls.append(list(argv))
+        payload = json.dumps({
+            "machines_yaml": "machines.yaml",
+            "detail": "mesh reachable" if mesh_status == "ok" else "unreachable: host-b",
+        })
+        return self_update.CommandResult(
+            list(argv), 0 if mesh_status == "ok" else 1, payload, ""
+        )
+
+    monkeypatch.setattr(self_update_dtssh, "_agent_ssh_argv_prefix", lambda: ["agent-ssh"])
+    result = self_update.run_tier(
+        "watchdog",
+        opted_in=True,
+        process_lister=windows_only,
+        launcher_starter=windows_only,
+        host_healer=windows_only,
+        runner=runner,
+        home=tmp_path,
+    )
+
+    assert result.status == mesh_status
+    assert [step.name for step in result.steps] == [
+        "dtssh-launcher", "dtssh-host-health", "dtssh-mesh-refresh"
+    ]
+    assert [step.status for step in result.steps] == ["skipped", "skipped", mesh_status]
+    assert calls == [["agent-ssh", "refresh-mesh", "--json"]]
+    status = self_update_state.tier_status(tmp_path, "watchdog")
+    assert status.last_attempt == result.attempted_at
+    assert bool(status.last_success) == (mesh_status == "ok")
+    assert not self_update.lock_path("watchdog", tmp_path).exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native Linux CLI consumer")
+@pytest.mark.parametrize("peer_exit", [0, 1])
+def test_native_linux_watchdog_cli_without_windows_environment(tmp_path, peer_exit):
+    home = tmp_path / "home"
+    package_dir = home / ".agent-machines" / "config" / "all"
+    package_dir.mkdir(parents=True)
+    (package_dir / "watchdog.yaml").write_text(json.dumps({
+        "schema_version": 4,
+        "package": "acme/watchdog",
+        "gate": ["box-1"],
+        "manage": {},
+        "resources": [{"type": "self-update", "tier": "watchdog"}],
+    }), encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    peer = bin_dir / "agent-ssh"
+    payload = json.dumps({
+        "machines_yaml": "machines.yaml",
+        "detail": "mesh reachable" if peer_exit == 0 else "unreachable: host-b",
+    })
+    peer.symlink_to(sys.executable)
+    (tmp_path / "refresh-mesh").write_text(
+        "import sys\n"
+        "assert sys.argv[1:] == ['--json']\n"
+        f"print({payload!r})\nraise SystemExit({peer_exit})\n",
+        encoding="utf-8",
+    )
+    env = {
+        key: value for key, value in os.environ.items()
+        if key not in {"LOCALAPPDATA", "COPILOT_EXTENSIONS_CONTEXT", "AGENT_RT_ROOT"}
+    }
+    env.update(
+        HOME=str(home),
+        PATH=str(bin_dir) + os.pathsep + os.defpath,
+        PYTHONPATH=os.pathsep.join(str(path) for path in sys.path if path),
+        PYTHONDONTWRITEBYTECODE="1",
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "agent_machines", "self-update", "run",
+         "--machine", "box-1", "--tier", "watchdog", "--json"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20,
+    )
+    assert completed.returncode == (0 if peer_exit == 0 else 2), completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["opted_in"] is True
+    assert result["status"] == ("ok" if peer_exit == 0 else "error")
+    assert [step["status"] for step in result["steps"]] == [
+        "skipped", "skipped", "ok" if peer_exit == 0 else "error"
+    ]
+    assert bool(result["success_at"]) == (peer_exit == 0)
+    assert not self_update.lock_path("watchdog", home).exists()
 
 
 def test_run_tier_watchdog_appends_host_health_step_before_mesh_refresh(monkeypatch, tmp_path):

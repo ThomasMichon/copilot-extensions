@@ -280,15 +280,13 @@ def _venv_python(name: str) -> Path:
 
 
 def _dep_fingerprint(name: str) -> str:
-    """Bind cached installs to complete canonical/transitive local source bytes."""
+    """Bind cached installs to source bytes and the selected installation shape."""
     fingerprint = dependency_fingerprint(
         name, _plugin_dir(name), REPO,
         (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
     )
     if name == "worktree-manager":
-        fingerprint = hashlib.sha256(
-            ("manager-test-wheel-v1:" + fingerprint).encode("utf-8"),
-        ).hexdigest()
+        return hashlib.sha256(f"{fingerprint}:non-editable-manager-v1".encode()).hexdigest()
     return fingerprint
 
 
@@ -330,10 +328,10 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             raise RuntimeError("uv replaced the leased environment directory")
     if fresh or reinstall:
         if _has_pyproject(name) and name not in SOURCE_ONLY_TEST_TARGETS:
-            # Manager embeds first-party metadata; editable retention rewrites
-            # those src finders. Its wheel keeps the embedded closure intact.
+            # Use the project cwd so uv reads its declared local sources.
             spec = ".[dev]" if _has_dev_extra(name) else "."
             cmd = [uv, "pip", "install", "--python", str(py)]
+            # Manager embeds first-party imports that must outlive retained build inputs.
             cmd.extend([spec] if name == "worktree-manager" else ["-e", spec])
             if name == "agent-index":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
@@ -357,11 +355,11 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 cmd.extend(["--cache-dir", str(venv / ".bootstrap-uv-cache")])
             run_uv_install(
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                **({"non_editable": True} if name == "worktree-manager" else {}),
                 retained_resource_roots=(
                     standalone_build_resources("fleet-manager", source_root=REPO)
                     if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh"} else ()
                 ),
-                **({"non_editable": True} if name == "worktree-manager" else {}),
             )
             if name == "worktree-manager":
                 # Materialized consumers have separate copies of shared libraries;

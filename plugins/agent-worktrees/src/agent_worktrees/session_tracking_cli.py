@@ -11,7 +11,7 @@ from . import config as cfg
 from . import output
 from . import installer as inst
 from . import profile_assignment, sessions, terminal_conclusion, tracking, worktree_identity
-from . import reap_cli, status_monitor_runtime
+from . import reap_cli, retained_record_writer, status_monitor_runtime
 
 
 def _core():
@@ -232,6 +232,7 @@ def add_parsers(sub) -> None:
         "--predecessor", required=True, help="The outgoing session ID (marked handed-off)"
     )
     sp.add_argument("--successor", required=True, help="The incoming session ID (the new head)")
+    sp.add_argument("--retained-record-writer", help="Qualified executing writer and workspace JSON")
     sp.add_argument(
         "--predecessor-state",
         dest="predecessor_state",
@@ -893,6 +894,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
     return 0
 
 
+@retained_record_writer.command
 def cmd_link_succession(args: argparse.Namespace) -> int:
     """Write the durable two-way handoff link and move the head -- JSON out.
 

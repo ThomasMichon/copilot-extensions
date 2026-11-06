@@ -927,6 +927,9 @@ def _load_config_uncached(
     if dropins:
         machine_raw = _deep_merge(dropins, machine_raw)
 
+    from .config_sources import knowledge_binding_value
+    knowledge_repo = knowledge_binding_value(machine_raw, global_raw)
+
     # Resolved top-level fields: machine-local > global > detected.
     platform = (
         machine_raw.get("platform")
@@ -1076,11 +1079,7 @@ def _load_config_uncached(
         repo_name=repo_name,
         repos=repos,
         checkout_free_pr=checkout_free_pr,
-        knowledge_repo=(
-            machine_raw.get("knowledge_repo")
-            or global_raw.get("knowledge_repo")
-            or ""
-        ),
+        knowledge_repo=knowledge_repo,
         copilot_profiles=parsed_profiles,
         profile_assignment=_parse_profile_assignment(
             user_assignment_raw,
@@ -1319,11 +1318,9 @@ def _load_knowledge_overlay_config(
     child failures remain uncertain, and reports are never reusable input data.
     """
     with _config_owner_outcome("knowledge-preferences"):
-        knowledge_repo = (
-            machine_raw.get("knowledge_repo")
-            or global_raw.get("knowledge_repo")
-            or ""
-        ).strip()
+        from .config_sources import knowledge_binding_value
+
+        knowledge_repo = knowledge_binding_value(machine_raw, global_raw).strip()
         if not knowledge_repo:
             return {}
         # Locate the selected launch source using its existing path registry.
@@ -1589,6 +1586,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                 anchors.extend(
                     related.config_contribution_anchor(
                         source.anchor, source.origin,
+                        state_repo=getattr(source, "state_repo", ""),
                         **({
                             "directory_form": getattr(source, "directory_form", False),
                             "source_tier": getattr(source, "tier", None),

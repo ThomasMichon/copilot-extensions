@@ -80,6 +80,40 @@ The selection resolver and packaged peer launcher are semantic HTTP sources. The
 the named capability expectation; HTTP generation 52, prior feature floors,
 all earlier cases and historical packets remain unchanged.
 
+Retained acquisition and executing-session writer controls, followed by seven
+optional inspection CLI/HTTP controls, bring the current HTTP-52 portfolio to
+197 cases. The new inspection capability is independently negotiated without
+changing the HTTP generation. Current, prior and rolled-back providers exercise
+the actual parser and ASGI boundary. The existing finite delegated-process
+control also inspects the original journal's writer and workspace, requiring
+unchanged protected record bytes, journal and resident-call history. These
+are source observations, not installed-provider, native-conversation or
+complete participating-cohort admission.
+Unavailable-launcher controls require structured 409 refusals from both
+retained probes without mutating the original journal.
+
+Ordinary keyed-creation writer controls add 32 cases, bringing the current
+portfolio to 229. They cover schema preparation/passive refusal, original
+workspace-journal custody, strict continuation, frontend rehydration, concurrent
+replay, registration dormancy, unknown handoff-seed retention and optional
+exact-session inspection. The actual Worktrees parser/serializer preserves the
+protected relationship and nonce through creation and succession with an
+unqualified resident reachable. The two creation capabilities are independently
+negotiated within HTTP 52; no acquisition attempt is manufactured. These remain
+source/HTTP/SQLite controls, not installed/native or closed-cohort acceptance.
+
+Sixteen ordinary CLI controls bring the current portfolio to 245 cases.
+The actual parser carries file/stdin writer requirements through the existing
+client and capability fence, while invalid forms refuse before connection.
+This adds no acquisition route, cohort admission or ordinary allocation.
+
+Seven optional full-status CLI controls bring the current portfolio to 252
+cases. They cover required exact/full targeting, current-provider negotiation,
+unsupported providers and ignored optional queries. The existing actual
+keyed-creation HTTP control also joins the real full-status parser and passive
+health JSON. The CLI declaration and status implementation are semantic inputs;
+HTTP generation, service endpoints and historical evidence are unchanged.
+
 The joined portable-mux fixture retains the production native socket-path
 bound. Its isolated physical temporary root must be short enough for that
 bound; a long caller `TMPDIR` can correctly refuse before creating the mocked

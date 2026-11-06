@@ -111,6 +111,7 @@ requires its own applicable authority and is recorded separately.
 - [x] Update reality docs, focused tests and changefiles; retain historical protocol evidence and the required unit-only portfolio. _(#10748; source tiers only)_
 - [ ] Record source, release and installed/native/external results separately; resolve every Plan and Validation Plan item before Done.
 - [ ] Qualify the prerequisite host account/owner callbacks through their existing launchers before retrying the external receiving flow. _(newly observed acceptance prerequisite; agent-recommended source refinement)_
+- [ ] Bound the Vault prerequisite's outgoing credential-writer transition through its existing lifecycle owner after incoming discovery publication; preserve cooperative connections during grace and use native identity/owner-checked cold retirement when handoff cannot settle. _(#11057; closes the existing authoritative-runtime-replacement intent, not a new watchdog or live recovery grant)_
 
 ## Validation Plan
 
@@ -124,6 +125,7 @@ requires its own applicable authority and is recorded separately.
 - [ ] Scoped extension loading, real native mux consumption where available, human takeover and exclusive control retain existing semantics; fake-SDK controls are not native acceptance.
 - [ ] New/prior caller and receiver combinations, provider rollback and missing capability produce a supported result or a specific pre-effect refusal, not blanket guest-suite upgrades.
 - [ ] Focused unit/real local consumer and fresh-environment controls, required source gates, review and CI pass. Record unavailable native/external tiers honestly and obtain effect authority before any live qualification.
+- [ ] For #11057, prove new-endpoint discovery with an existing predecessor connection retained during grace, cooperative and hung retirement, single credential-writer exclusion, native birth/role/installation and reselected-successor refusal, and truthful failure when retirement or incoming readiness cannot be established.
 
 ## Proposal
 
@@ -816,3 +818,99 @@ implementation. The exact support closure follows the consumer trace and tests.
   A raw-file fixture reader discovered during the wider packet now uses its
   canonical delete-sharing reader; publication checks were not weakened.
   This source correction still needs review, release and authorized rollout.
+
+### 2026-11-06 - Native health prerequisite source accepted
+
+- #10974 received exact-head approval with no active issues and all required
+  green CI, then merged as `f12d59b92eb1c0f94a63e694147e42b0d8fe20ec`.
+  The published production/test bytes match the locally tested commit.
+  The managed self-merge exception omitted only the additional code-owner vote.
+- The existing contributor's Windows Resume fixture correction #10960 is
+  separately merged as `375ed2eb53fead5ee8cd3b0daeeb997382d42623`.
+  Preserve that ownership and the required native gate; no competing fix or
+  independent merge of the contributor's PR was performed here.
+- Re-read this effort's Plan and Validation Plan. No receiving/native/external
+  item closes from these prerequisite merges. Observe their actual release,
+  verify the released bytes and complete authorized normal installation before
+  the original single-venue acceptance. The effort and #10636 remain Active.
+
+### 2026-11-06 - Prior-observer compatibility before rollout
+
+- Release `42202812208` completed successfully, including real Windows Resume
+  and exact-source reuse. No ordinary installation was started: a final mixed-
+  direction analysis identified that a prior observer still sends full ping
+  without the new hint, so repeated configuration resolution can prevent it
+  from observing and retiring for its successor.
+- Reopened #10971 for that remaining direction. Contextless full ping now uses
+  the resident default selected at initialization. Local clients already send
+  their freshly resolved context; credential requests without a context still
+  resolve configuration on every request. Ordinary expiration checks remain.
+  Documented the read-only resident-status scope rather than claiming fresh
+  configuration selection for an old contextless ping.
+- The legacy-default regression failed before this correction. The complete
+  generation/settlement/readiness/discovery packet passes 144 cases with one
+  platform skip and a CPython closed-pipe destructor warning. The real warm
+  successor control now uses an old-style observer without the hint; actual
+  retirement, handoff and writer-exclusion assertions remain intact.
+  Local client context changes and fresh credential selections are checked.
+- Ruff, install contract, documentation and whitespace gates pass. This
+  compatibility follow-up still needs review, release and authorized normal
+  installation; it does not close any receiving or parent acceptance item.
+
+### 2026-11-06 - Prior-observer correction accepted
+
+- Review of #10984 identified that its legacy fixture wrapped TCP only.
+  Corrected both TCP and Unix dialers and asserted the actual native transport
+  and hint-free request after original-process retirement. All 28 generation
+  controls pass on Windows; Linux-native execution was not performed here.
+- The corrected head `225897c057cf8c93c2d74524a9a9bf7dd02dceeb` received
+  approval with no active issues, its corrected thread was resolved and every
+  required check passed. #10984 merged as
+  `99f0643336263a9c85f8a1519facb5dd416846bd`. Its provider source matches the
+  locally tested commit. No failed check or change request was bypassed.
+- Re-read the remaining Plan and Validation Plan. Wait for a new release that
+  includes this provider correction, then verify actual source and authorized
+  ordinary installation before resuming the original first-venue acceptance.
+  The earlier successful release does not contain this follow-up.
+
+### 2026-11-06 - Corrected release qualified
+
+- Release run `42208938885` passed native Windows Resume, exact-source reuse,
+  publication and promotion. Main commit
+  `f921808d2292394abc738149891de4efdc933630` contains the expected provider,
+  generation-health and optional-Fleet CLI corrections.
+- The authorized ordinary installation reached a Windows caller-Job
+  breakaway refusal before its finite worker started. Native request
+  inspection retained the pending request and its launch error.
+- The documented foreground-supervised update mode reused that same request
+  and exclusive execution authority. Manager construction and cutover
+  reported success; suite-engine preparation is still running. No substitute
+  service, scheduler, privilege change or caller-cleanup weakening was used.
+- Whole installed and receiving-consumer acceptance remains open. The
+  supported supervised mode does not qualify default durable-worker launch
+  in an externally restrictive caller Job.
+
+### 2026-11-06 - Bounded Vault writer-transition plan
+
+- The supervised whole update completed with exit 1: all runtime modules
+  except Vault passed, and the corrected Pull Requests CLI's actual help
+  command succeeds. Vault's selected incoming endpoint responds promptly
+  but does not admit credential work; its predecessor reports shutdown
+  while remaining alive. These are separate installed outcomes.
+- #11057 reserves the bounded follow-up. Incoming-first new-port publication
+  already reaches the new generation; the remaining veto is the outgoing
+  process/credential-writer gate, not stale discovery routing.
+- Reconcile this slice to
+  [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+  and the [existing cutover pattern](../../../docs/patterns/graceful-daemon-cutover.md).
+  Keep the existing resident/installation owner: publish incoming discovery,
+  offer cooperative handoff and connection grace, then make an identity- and
+  owner-checked bounded cold transition when the predecessor cannot settle.
+  Preserve exclusive credential writes and current-generation selection.
+- This plan changes no wire protocol and introduces no watchdog, periodic
+  reaper or private process-termination mechanism. The synthetic TCP-reset
+  check did not reproduce the old shutdown hang, so its cause remains
+  unproved. Existing source tests do not qualify this new transition.
+- Review this plan before implementation. Live process recovery is not
+  authorized by the source direction; installed rollout and the original
+  first-venue acceptance remain separate gates.

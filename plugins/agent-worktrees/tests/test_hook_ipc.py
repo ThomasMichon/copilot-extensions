@@ -138,6 +138,63 @@ def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
         server.close()
 
 
+@pytest.mark.parametrize("kind", ["nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"])
+def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
+    calls = []
+    server = HookIpcServer(
+        lambda *args: pytest.fail("notification must not use response policy"),
+        native_mutation_decide=lambda *args: calls.append(args) or {},
+    )
+    server.start()
+    try:
+        assert hook_ipc.NATIVE_MUTATION_CAPABILITY in server.capabilities()
+        assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY in server.capabilities()
+        assert hook_ipc.SHELL_MUTATION_CAPABILITY in server.capabilities()
+        request = {
+            "version": 1, "token": server.token, "kind": kind,
+            "hook_generation": server.generation, "deadline": time.time() + 1,
+            "payload": (
+                {"toolCalls": [{"name": "edit", "args": {"path": "one"}}]}
+                if kind == "nativeToolBatchMutation"
+                else {"toolName": "powershell", "toolArgs": '{"command":"git commit -m test"}'}
+                if kind == "shellToolMutation"
+                else {"toolName": "edit", "toolArgs": {"path": "one"}}
+            ),
+        }
+
+        def send(change=None, suffix=b"\n"):
+            value = {**request, "deadline": time.time() + 1, **(change or {})}
+            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+                conn.sendall(json.dumps(value).encode() + suffix)
+                conn.shutdown(socket.SHUT_WR)
+                assert conn.recv(1) == b""
+
+        for change in (
+            {"hook_generation": "b" * 32}, {"token": "wrong"}, {"version": True},
+            {"payload": []}, {"deadline": time.time() - 1}, {"deadline": float("nan")},
+            {"deadline": time.time() + 60}, {"deadline": True}, {"extra": "unknown"},
+            {"payload": {"toolName": "edit", "padding": "x" * 65536}},
+        ):
+            send(change)
+        send(suffix=b"")
+        server.close_admission()
+        send()
+        assert calls == [] and not server.has_recent_hook_demand()
+        server.open_admission()
+        send()
+        assert len(calls) == 1
+        assert calls[0][:2] == (kind, request["payload"])
+        assert server.has_recent_hook_demand()
+        server._native_mutation_decide = None
+        assert hook_ipc.NATIVE_MUTATION_CAPABILITY not in server.capabilities()
+        assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY not in server.capabilities()
+        assert hook_ipc.SHELL_MUTATION_CAPABILITY not in server.capabilities()
+        send()
+        assert len(calls) == 1
+    finally:
+        server.close()
+
+
 def test_send_best_effort_matches_and_rejects_an_explicit_installation_context(
     tmp_path, monkeypatch,
 ):

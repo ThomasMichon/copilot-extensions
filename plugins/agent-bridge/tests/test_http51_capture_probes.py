@@ -140,8 +140,101 @@ from test_worktree_writer_observation import (
     test_same_cell_health_rechecks_peer_selection_without_launch
     as test_same_cell_health_rechecks_peer_selection_without_launch,
 )
+from test_acquisition_runtime import (
+    rig as rig, writer_rig as writer_rig,
+    test_required_writer_round_trips_through_the_existing_http_owner
+    as test_required_writer_round_trips_through_the_existing_http_owner,
+    test_required_writer_survives_stopped_resume_and_later_acquisition
+    as test_required_writer_survives_stopped_resume_and_later_acquisition,
+    test_required_handoff_retry_reuses_original_successor_after_lineage_failure
+    as test_required_handoff_retry_reuses_original_successor_after_lineage_failure,
+    test_required_handoff_retains_unknown_effect_without_replacement
+    as test_required_handoff_retains_unknown_effect_without_replacement,
+    test_required_writer_refuses_provider_type_change_before_persist_or_launch
+    as test_required_writer_refuses_provider_type_change_before_persist_or_launch,
+    test_required_writer_resume_exhaustion_cannot_recreate
+    as test_required_writer_resume_exhaustion_cannot_recreate,
+    test_required_handoff_retries_registration_on_original_native
+    as test_required_handoff_retries_registration_on_original_native,
+    test_required_registration_failure_detaches_before_normal_send
+    as test_required_registration_failure_detaches_before_normal_send,
+    test_required_queued_send_refusal_keeps_startup_recovery_dormant
+    as test_required_queued_send_refusal_keeps_startup_recovery_dormant,
+    test_required_writer_refuses_before_native_effects
+    as test_required_writer_refuses_before_native_effects,
+    test_retained_acquisition_and_later_lineage_use_actual_owner_processes
+    as test_retained_acquisition_and_later_lineage_use_actual_owner_processes,
+)
+from test_worktree_lineage_authority import (
+    test_retained_session_receiver_refuses_changed_scope_without_resident_fallback
+    as test_retained_session_receiver_refuses_changed_scope_without_resident_fallback,
+)
+from test_acquisition_writer_inspection import (
+    rig as _inspection_fixture,
+    test_cli_negotiates_and_round_trips_optional_inspection_through_http as _inspect_cli_http,
+    test_unavailable_retained_command_is_a_structured_read_only_refusal as _inspect_unavailable,
+)
+from test_full_session_status_cli import (
+    test_writer_status_requires_full_exact_session_before_discovery
+    as test_writer_status_requires_full_exact_session_before_discovery,
+    test_writer_status_uses_negotiated_original_observation
+    as test_writer_status_uses_negotiated_original_observation,
+)
+from test_creation_worktree_writer import (
+    test_required_creation_writer_cli_carries_requirement_to_actual_client
+    as test_required_creation_writer_cli_carries_requirement_to_actual_client,
+    test_required_creation_writer_cli_invalid_input_refuses_before_connect
+    as test_required_creation_writer_cli_invalid_input_refuses_before_connect,
+    test_required_creation_writer_cli_rejects_remote_before_connect
+    as test_required_creation_writer_cli_rejects_remote_before_connect,
+    creation_rig as creation_rig, writer_creation as writer_creation,
+    test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses
+    as test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses,
+    test_keyed_creation_writer_retains_original_scope_and_strict_resume
+    as test_keyed_creation_writer_retains_original_scope_and_strict_resume,
+    test_keyed_creation_writer_rehydrates_same_native_without_reselection
+    as test_keyed_creation_writer_rehydrates_same_native_without_reselection,
+    test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate
+    as test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate,
+    test_keyed_creation_writer_reconciles_lost_completion_without_new_native
+    as test_keyed_creation_writer_reconciles_lost_completion_without_new_native,
+    test_keyed_creation_writer_refuses_changed_custody_before_effects
+    as test_keyed_creation_writer_refuses_changed_custody_before_effects,
+    test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal
+    as test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal,
+    test_required_creation_writer_parser_rejects_unsupported_forms
+    as test_required_creation_writer_parser_rejects_unsupported_forms,
+    test_required_creation_writer_client_refuses_unsupported_active_provider
+    as test_required_creation_writer_client_refuses_unsupported_active_provider,
+    test_required_creation_writer_rechecks_capability_after_provider_cutover
+    as test_required_creation_writer_rechecks_capability_after_provider_cutover,
+    test_required_creation_writer_round_trips_through_actual_http_owner
+    as test_required_creation_writer_round_trips_through_actual_http_owner,
+    test_creation_writer_inspection_refuses_changed_owner_without_effects
+    as test_creation_writer_inspection_refuses_changed_owner_without_effects,
+    test_required_creation_writer_inspection_rejects_ignored_legacy_query
+    as test_required_creation_writer_inspection_rejects_ignored_legacy_query,
+    test_keyed_creation_handoff_retains_original_successor_and_seed
+    as test_keyed_creation_handoff_retains_original_successor_and_seed,
+    test_keyed_creation_registration_failure_retains_native_and_dormancy
+    as test_keyed_creation_registration_failure_retains_native_and_dormancy,
+    test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim
+    as test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
+inspection_rig = _inspection_fixture
+
+
+@pytest.mark.parametrize("supported", ["current", "prior", "rollback"])
+def test_retained_writer_inspection_cli_http(inspection_rig, monkeypatch, capsys, supported):
+    _inspect_cli_http(inspection_rig, monkeypatch, capsys, supported)
+
+
+@pytest.mark.parametrize("operation", ["resource-relationship", "record"])
+@pytest.mark.parametrize("failure", [FileNotFoundError, PermissionError])
+def test_retained_writer_inspection_unavailable_http(inspection_rig, monkeypatch, operation, failure):
+    _inspect_unavailable(inspection_rig, monkeypatch, operation, failure)
 
 
 def _membership_transcript_clock(monkeypatch):
@@ -184,6 +277,18 @@ def test_http51_capture_actual_observations(
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
     observed["worktree_record_delegation"] = health["capabilities"]["worktree_record_delegation"]
+    observed["retained_acquisition_worktree_writer"] = (
+        health["capabilities"]["retained_acquisition_worktree_writer"]
+    )
+    observed["retained_acquisition_writer_inspection"] = (
+        health["capabilities"]["retained_acquisition_writer_inspection"]
+    )
+    observed["retained_workspace_creation_writer"] = (
+        health["capabilities"]["retained_workspace_creation_writer"]
+    )
+    observed["retained_workspace_creation_writer_inspection"] = (
+        health["capabilities"]["retained_workspace_creation_writer_inspection"]
+    )
     assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)

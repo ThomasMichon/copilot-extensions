@@ -33,6 +33,7 @@ class SessionStartClientMixin(_Base):
         creation_prompt: str | None = None,
         provider_instance: bool = False,
         remote_session_id: str | None = None,
+        worktree_writer: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -53,6 +54,16 @@ class SessionStartClientMixin(_Base):
         body: dict[str, Any] = {}
         from .remote_acp_config import is_remote_address
 
+        if worktree_writer is not None:
+            from .acquisition_contract import WorktreeWriterRequirement
+
+            if (
+                creation_key is None or not worktree_id or provider_instance
+                or target_dir is not None or remote_session_id is not None or parity_fault is not None
+                or is_remote_address(agent or "") or "://" in (agent or "")
+            ):
+                raise ValueError("worktree_writer requires keyed creation into a prepared local worktree")
+            body["worktree_writer"] = WorktreeWriterRequirement.model_validate(worktree_writer).model_dump()
         if "://" in (agent or ""):
             from .protocol import REMOTE_ACP_TARGETS_PROTOCOL_VERSION
 
@@ -143,7 +154,16 @@ class SessionStartClientMixin(_Base):
         from .protocol import HTTP_PROTOCOL_VERSION
 
         body["protocol_version"] = HTTP_PROTOCOL_VERSION
-        return self._request(
+        send = self._request
+        if worktree_writer is not None:
+            from .client_protocol_floor import protocol_floored_request
+            from .creation_worktree_writer import CAPABILITY
+            from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+            send = protocol_floored_request(
+                self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={CAPABILITY: 1},
+            )
+        return send(
             "POST",
             "/api/v1/sessions/workspace-creations" if creation_key is not None else "/api/v1/sessions",
             body,

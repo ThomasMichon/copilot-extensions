@@ -10,6 +10,10 @@ instead of falling back to create. Legacy unbound/explicit-fresh `create`
 semantics are unchanged. This slice supports **local** CLI and ACP; remote/
 fleet acquisition remains outstanding.
 
+The optional [retained acquisition writer](retained-acquisition-writer.md)
+adds a capability-negotiated version-3 ACP request without changing those
+baseline callers or activating ordinary governed assignment.
+
 ## Request and result
 
 Local ACP launch keeps the ground owner's command representation intact.

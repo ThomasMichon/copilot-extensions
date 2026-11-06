@@ -51,6 +51,7 @@ def fake_uv(tmp_path: Path, body: str) -> Path:
 
 def construction_bundle(scripts: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ENGINE / "runtime_launcher.py", scripts / "runtime_launcher.py")
     for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
                  "versioned_runtime_construction.py", "versioned_runtime_source.py",
                  "versioned_runtime_publication.py"):
@@ -195,6 +196,10 @@ def function(name: str, ext: str) -> str:
         health = function("Test-IndexServerVenv", ext) + "\n"
     elif ext == "sh" and name in ("_install_server_venv", "_ensure_runtime"):
         health = function("_test_index_server_venv", ext) + "\n"
+    if ext == "ps1" and name == "Install-Runtime":
+        health += function("Get-MachineRole", ext) + "\n" + function("Get-RequiredRuntimeRole", ext) + "\n"
+    elif ext == "sh" and name == "_ensure_runtime":
+        health += function("_machine_role", ext) + "\n" + function("_required_runtime_role", ext) + "\n"
     return f". '{source}'\n" + health + start + re.split(next_function, tail, maxsplit=1)[0]
 
 

@@ -99,6 +99,10 @@ def legacy_creation(
         )
         rows = db.execute_read(f"SELECT * FROM {table} WHERE key_digest=?", (digest,))
     row = dict(rows[0])
+    from .creation_worktree_writer import require_journal
+
+    if kind == "workspace":
+        require_journal(row)
     if row["runtime_custody_json"] is not None or row["creation_facts_json"] is not None:
         raise AcquisitionRefused(
             "creation_custody_required",

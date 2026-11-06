@@ -43,6 +43,15 @@ INDEXES = {
 
 def schema_triggers() -> dict[str, tuple[str, str]]:
     triggers = operation_triggers(("acquisition_attempts",))
+    triggers["acquisition_worktree_writer_retained"] = ("acquisition_effects",
+        "CREATE TRIGGER IF NOT EXISTS acquisition_worktree_writer_retained "
+        "BEFORE UPDATE ON acquisition_effects "
+        "WHEN json_type(OLD.data_json,'$._worktree_writer') IS NOT NULL AND ("
+        "NEW.delivery_id IS NOT OLD.delivery_id OR "
+        "json_extract(NEW.data_json,'$._worktree_writer') "
+        "IS NOT json_extract(OLD.data_json,'$._worktree_writer') OR "
+        "json_extract(NEW.data_json,'$._request') IS NOT json_extract(OLD.data_json,'$._request')) "
+        "BEGIN SELECT RAISE(ABORT,'bridge_acquisition_writer_retained'); END")
     for column in ("launch_handoff_json", "launch_started_at", "launch_result_json"):
         name = f"acquisition_{column}_retained"
         triggers[name] = ("acquisition_attempts",

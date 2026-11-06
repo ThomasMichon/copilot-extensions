@@ -34,6 +34,44 @@ cp = _load("control_plane_binding")
 configuration = _load("binding_configuration")
 
 
+def test_private_locked_native_reader_is_optional_and_preserves_return_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = subprocess.CompletedProcess(["native"], 3, '{"bound":false}', "")
+    calls: list[tuple[str, list[str], dict[str, Any]]] = []
+
+    def read(command: str, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command, args, kwargs))
+        return expected
+
+    monkeypatch.setattr(bk, "_NATIVE_BINDING_READ_RUNNER", read, raising=False)
+    monkeypatch.setattr(bk, "_agent_worktrees_command", lambda *_args: pytest.fail("native read spawned"))
+    assert bk._run_agent_worktrees(
+        "native", ["-p", "harness", "state-root", "--json"], cwd="selected", noninteractive=True,
+    ) is expected
+    assert calls == [("native", ["-p", "harness", "state-root", "--json"], {
+        "cwd": "selected", "noninteractive": True,
+    })]
+
+
+@pytest.mark.parametrize("reader", [None, lambda *_args, **_kwargs: None])
+def test_private_native_read_adapter_absence_or_unsupported_operation_keeps_subprocess_baseline(
+    monkeypatch: pytest.MonkeyPatch, reader: Callable[..., subprocess.CompletedProcess[str] | None] | None,
+) -> None:
+    monkeypatch.setattr(bk, "_NATIVE_BINDING_READ_RUNNER", reader, raising=False)
+    monkeypatch.setattr(bk, "_agent_worktrees_command", lambda command, args: [command, *args])
+    expected = subprocess.CompletedProcess(["native"], 0, "{}", "")
+    calls: list[list[str]] = []
+
+    def execute(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return expected
+
+    monkeypatch.setattr(bk.subprocess, "run", execute)
+    assert bk._run_agent_worktrees("native", ["knowledge", "compose-plugins"]) is expected
+    assert calls == [["native", "knowledge", "compose-plugins"]]
+
+
 @pytest.fixture
 def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PairFixture:
     harness = tmp_path / "harness"
@@ -222,6 +260,27 @@ def test_existing_binding_rechecks_preview_without_overwriting_new_state(
     with pytest.raises(RuntimeError, match="preview changed|registration is not ready"):
         configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
     assert (config.read_bytes() if config.exists() else None) == before
+
+
+def test_existing_binding_runs_portable_precondition_inside_pointer_lock(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, *_ = pair
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    config = home / ".harness" / "config.yaml"
+    checks = []
+
+    def changed() -> None:
+        checks.append(True)
+        assert config.with_name(".knowledge-binding.lock").exists()
+        assert not config.exists()
+        raise RuntimeError("portable machine scope changed")
+
+    monkeypatch.setattr(bk, "_NATIVE_BINDING_PRECONDITION", changed, raising=False)
+    with pytest.raises(RuntimeError, match="portable machine scope changed"):
+        configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
+    assert checks == [True] and not config.exists()
 
 
 def test_existing_binding_refuses_registration_changed_during_final_preflight(

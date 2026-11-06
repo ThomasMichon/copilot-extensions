@@ -33,6 +33,7 @@ def api(monkeypatch):
     owner._clock = lambda: clock["mono"]
     owner.generation = "a" * 32
     owner._read_demand_admitted = None
+    owner._native_mutation_decide = None
     owner._read_demand_lock = threading.RLock()
 
     def dispatch(change=None):
@@ -103,6 +104,84 @@ def test_send_only_read_demand_keeps_original_admission_and_expiry(api, case):
     assert api.owner.has_recent_hook_demand() is (case == "current")
     api.clock["mono"] = 120.0
     assert not api.owner.has_recent_hook_demand()
+
+
+@pytest.mark.parametrize("case", [
+    "current", "generation", "closed", "unavailable", "legacy",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+])
+def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, case):
+    _assert_native_mutation_boundary(api, case, "nativeToolMutation")
+
+
+@pytest.mark.parametrize("case", [
+    "current", "generation", "closed", "unavailable", "legacy",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+])
+def test_native_batch_mutation_uses_original_send_only_boundary(api, case):
+    _assert_native_mutation_boundary(api, case, "nativeToolBatchMutation")
+
+
+@pytest.mark.parametrize("case", [
+    "current", "generation", "closed", "unavailable", "legacy",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+])
+def test_shell_mutation_uses_original_send_only_boundary(api, case):
+    _assert_native_mutation_boundary(api, case, "shellToolMutation")
+
+
+def _assert_native_mutation_boundary(api, case, kind):
+    seen = []
+    payload = {"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}}
+    if kind == "nativeToolBatchMutation":
+        payload = {"toolCalls": [{"name": "multi_edit", "args": payload["toolArgs"]}]}
+    elif kind == "shellToolMutation":
+        payload = {"toolName": "powershell", "toolArgs": '{"command":"git pull --ff-only"}'}
+
+    def decide(*args):
+        if case == "unavailable":
+            raise api.module.HookUnavailable
+        if case == "declined":
+            return None
+        seen.append(args)
+        return {}
+
+    def change(request, server, handler):
+        request.clear()
+        request.update(
+            version=1, token="expected", kind=kind,
+            hook_generation=api.owner.generation, deadline=101.0,
+            payload=payload,
+        )
+        api.owner._native_mutation_decide = decide
+        server.decide = lambda *_a: pytest.fail("notification invoked response policy")
+        if case == "generation":
+            request["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.admission_closed = True
+        elif case == "legacy":
+            api.owner._native_mutation_decide = None
+        elif case == "oversized":
+            request["payload"]["padding"] = "x" * 65536
+        elif case == "version":
+            request["version"] = True
+        elif case == "deadline":
+            request["deadline"] = float("nan")
+        elif case == "payload":
+            request["payload"] = []
+        elif case == "revoked":
+            api.owner._read_demand_admitted = lambda: False
+        elif case == "contended":
+            api.owner._read_demand_lock = SimpleNamespace(
+                acquire=lambda *, timeout: False,
+                release=lambda: pytest.fail("unowned lock release"),
+            )
+
+    assert api.dispatch(change) is None
+    assert bool(seen) is (case == "current")
+    assert api.owner.has_recent_hook_demand() is (case == "current")
+    if seen:
+        assert seen[0][:2] == (kind, payload)
 
 
 @pytest.mark.parametrize("case", [

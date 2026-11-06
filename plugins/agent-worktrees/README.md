@@ -875,6 +875,15 @@ the skills below for in-session guidance.
 
 ## Validation
 
+Bound external knowledge repositories are synthesized into related reads without
+committing their names to topology. Their canonical role/local locus is
+read-only discovery; the emitted pair policy never authorizes anchor writes,
+standalone knowledge-agent allocation or cleanup. Existing relationship
+metadata keeps its original policy provenance. See
+[related repos](skills/agent-worktrees-related/SKILL.md) for collision,
+canonical-registration and older-provider behavior. Pair retrofit and actual
+write/finalization lifecycle remain separate native-owner operations.
+
 Fresh-machine install/bootstrap behavior is covered by the repo's clean-room
 rig. The
 [`agent-worktrees-solo`](../../tools/clean-room/scenarios/agent-worktrees-solo)

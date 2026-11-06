@@ -330,6 +330,294 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
+the complete OPEN #6185 parent receiving #6186 as an independent emitter
+convergence/recovery lane. Current source credits actual-start writing,
+fingerprint restart and crash revival while retaining inner conclusion
+progress and actual incident causality. One whole retry source remains
+withheld; original alternatives, all technical acceptance and custody
+remain. #6186 awaits planning review and a separate current-parent audit;
+the last complete whole count is still 802, 73 above fixed 729.
+
+The [caller-pipe study](launch-pipe-and-logger-quality-cohorts.md) records
+reviewed #11054 and #6880's separately audited NOT_PLANNED retirement
+under independently OPEN #5716. All technical lanes and custody remain.
+Two identical complete scans measure 802 whole OPEN and 1,021 audited
+outcomes: the one campaign departure is offset by eligible metadata-only
+arrival #11050, now separately qualified as an in-progress producer-owned
+configuration prerequisite, not a completion candidate. Fixed 729 stays
+73 away; new source studies and actual fleet-reconcile intake continue.
+
+The [caller-pipe study](launch-pipe-and-logger-quality-cohorts.md) now records
+the complete independently OPEN #5716 parent's fourth finite lane, #6880.
+Current source separates root exit from captured-output EOF; the exact
+logger/watchdog/session/daemon regression remains unchecked. Three completed
+source studies retain #7010's native long-path gap, #7136's manifest-only
+cache regression and #8511's nonexclusive default allocation. None supplies
+technical completion, receiving transfer or resource release. Latest complete
+census remains 802 whole OPEN, 73 above fixed 729; planning review and a
+separate current-parent tracking audit precede any #6880 retirement.
+
+The journal records reviewed #11051 delivery of the three audited outcomes
+and completed-work correction. All three current document blobs match the
+reviewed head, the complete published study was read back, and the actual
+campaign Plan/Validation remains Active. Three independent source studies
+continue; the separate captured-output/root-exit contract is qualified for
+current-source assessment, not an accepted transfer or new native execution.
+Latest complete census remains 802 whole OPEN, 73 above fixed 729.
+
+The [anchor/owner study](anchor-and-owner-observation-cohorts.md) now records
+reviewed #11048, two separately audited NOT_PLANNED tracking retirements
+under OPEN #4173/#4619, and #7039's finite completed source correction in
+actual merged #8855. All identity acceptance and source/resource custody
+remain. Complete 09:43 PST scans measure 802 whole OPEN and 1,020 audited
+outcomes, 73 above fixed 729. Three new independent current-source studies
+cover #7010/#7136/#8511 rather than repeating unchanged packet summaries.
+No native execution, implementation or claim/resource release follows;
+the canonical Plan/Validation and fixed checkpoint remain Active.
+
+The [registered-anchor and current-owner observation cohorts](anchor-and-owner-observation-cohorts.md)
+account for twenty complete qualified originals and two independent
+actual OPEN parent intakes: #7689 under #4173 and #7180 under #4619.
+Complete current bodies preserve incumbent scope, direct Plan/global
+Validation, exact record/anchor authority and every existing source/
+resource owner. Both originals stay OPEN pending normal planning review
+and separate disposition. Eighteen other contracts retain finite
+acceptance and actual holds; no new native/installed proof is inferred.
+The journal retains the 805-whole-open/1,017-audit observation and the
+still-Active canonical Plan/Validation and fixed 729 checkpoint.
+
+The journal records reviewed #11045 delivery, complete published
+target-to-delivery readback and separate #6752 NOT_PLANNED tracking
+retirement under OPEN #6394. All mechanical receipt/nudge requirements,
+actual source/publisher custody and the unresolved phase decision remain.
+Complete 09:20 PST scans measure 805 whole OPEN, 1,017 audited dispositions
+and 76 above 729. Three completed studies cover the measured next twenty
+qualified originals without widening source/author boundaries; their
+receiving decisions and any future dispositions remain separate.
+The canonical Plan/Validation and fixed checkpoint remain Active.
+
+The [target-to-delivery and reconcile study](bridge-target-and-reconcile-contracts.md)
+accounts for 24 more whole originals and actual OPEN #6394's complete
+#6752 target-diagnostic intake, preserving mechanical receipt/nudge
+acceptance and the original source owner's unresolved phase decision.
+Twenty-two other contracts retain their finite outcomes and custodians;
+the Fleet reconcile proposal has no invented receiving issue.
+The journal records reviewed #11044 and three separately audited
+NOT_PLANNED tracking retirements. Complete 09:12 PST scans measure
+806 whole OPEN, 1,016 audited dispositions and 77 above 729.
+The canonical Plan/Validation and fixed checkpoint remain Active.
+
+The [pipe lifecycle and Logger quality cohorts](launch-pipe-and-logger-quality-cohorts.md)
+retain 24 complete originals and two additive actual parent intakes:
+#5650 under OPEN #5716, and #6004/#6026 under OPEN #5665. Complete
+current bodies preserve incumbent scope, independent Plan/global Validation,
+native recurrence/type-reuse conditions and actual custodians. Source
+trackers remain OPEN pending reviewed planning delivery and separate
+disposition; no implementation, retry or resource release follows.
+The journal records reviewed #11042 outcome delivery and a further 24
+qualified originals assigned to three disjoint studies. The campaign
+Plan/Validation and fixed whole-queue checkpoint remain Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11039 merge, complete published cohort readback
+and separate #4205/#5003 NOT_PLANNED tracking retirements under OPEN
+#4173/#4619. Every technical lane, original source and actual custodian
+remains; no implementation or claim/resource release is inferred.
+Complete08:51 PST scans measure809 whole OPEN,1013 audited dispositions
+and80 above729. Three new disjoint studies cover the next24 whole contracts;
+the canonical campaign Plan/Validation and fixed checkpoint remain Active.
+
+The [two complete cohort intakes](project-context-and-resource-custody-cohorts.md)
+preserve authoritative project facts/selected-policy delivery under OPEN
+#4173 and persistent custody/exact settlement under OPEN #4619. Complete
+actual bodies were delivered/read back; review still precedes #4205/#5003
+tracking retirement. #4233 retired as stale/not actionable, not completed.
+Complete08:41 PST scans measure811 whole OPEN,1011 audited dispositions
+and82 above729. Existing owners, claims and technical check states remain.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed #11036 delivery and two further disjoint 24-contract studies.
+Fifteen nominated subordinate trackers are already CLOSED and add no credit.
+Two substantive project-context/resource-custody cohort designs and two finite
+source assessments continue; no source, native or custody completion follows.
+Complete08:23 PST scans remain812 whole OPEN,1010 audited dispositions
+and83 above729. Both canonical efforts and the campaign gate remain Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11032 merge, complete canonical startup-root and
+#3303 receiving readback, then separate `NOT_PLANNED` retirement of
+#3789/#3942/#4097. All whole source contracts, old61 check states, new eight
+unchecked rows, original20/20 gate and actual custodians remain. Complete
+08:09 PST scans measure812 whole OPEN,1010 effective audited dispositions
+and83 above729. The campaign and startup effort remain Active; planning
+intake is not implementation, native/installed proof or resource release.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed #11029 delivery and a proposed WHOLE launch-readiness family
+under existing OPEN #3303 and its Active canonical startup effort. Complete
+#3789 read trust AND runtime/activation reverse join, #3942's original CWD
+pair and #4097's pre-launch requirement checks have direct Plan/global
+Validation and unchanged custodians. #4102/#4118 stay separate. This is not
+actual receiving delivery, native proof or retirement; review and whole
+current readback still precede separate source judgments.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11024 delivery, whole #5799/#4053 receiving readback
+and #3941/#4046 `NOT_PLANNED` tracking retirements. All-plugin advice wording
+and generic direct-command lifetimes remain independent unchecked work under
+unchanged custodians. Complete07:33 PST scans measure815 whole OPEN,
+1007 effective audited dispositions and86 above729. Two bounded source
+studies retain actual registry/provenance gaps; whole startup-home fit is
+under independent research, not an accepted transfer or campaign completion.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records proposed direct #3941 all-plugin runtime-advice acceptance under the
+existing materials inventory and a separate #4046 generic-command lane under
+the remote-lifetime parent. Neither is actual receiving delivery or retirement
+yet. The old failed-ACP-start separation remains technical, not a claim that
+Copilot APIs implement generic jobs; complete independent Plan/Validation and
+all current owners remain. Canonical planning review precedes the next effects.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11021 merge, both delivered blobs and continuing
+Active Plan/Validation. Twenty-four following whole-contract reports retain
+source/native and owner boundaries; seven nominated historical subordinate
+trackers are already CLOSED and supply no new credit. Two bounded planned
+fit studies continue for public runtime-advice wording and separate remote
+work lifetimes, without accepting a receiver or changing any source/resource.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records complete actual #2830 receiving/readback and separate `NOT_PLANNED`
+retirement of #2974/#3369. Mux-exit and independent extension research,
+nonblocking dead-session/content advisories, the original blank-mux incident
+and narrow watchdog work retain distinct unchecked acceptance and custodians.
+Complete07:08 PST scans measure817 whole OPEN,1005 effective audited
+dispositions and88 above729. Twenty-four next qualified originals have three
+new disjoint Luna studies; no incident, native or content-recovery fix is claimed.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed #11019 merge, complete two-blob delivery agreement
+and bounded133-test/24-plugin documentation validation. Only its publication
+child finalized; the canonical Active campaign Plan/Validation and fixed729
+whole-queue checkpoint remain open. The next finite study assesses separate
+retirement/recoverable-content lanes without inventing a common incident cause
+or releasing their actual source, session, native and resource custodians.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #2882's finite completed vision reconciliation and #2914's complete
+fallback-transaction intake under existing OPEN #2709. The corrected
+campaign-supplied assignee guard is not an original owner hold; actual
+source/resource custody remains. Public-neutral incident requirements and
+eight direct Plan/Validation rows preserve the unresolved cause and safe
+recovery without republishing private case values. Complete06:55 PST scans
+measure819 whole OPEN,1003 effective audited dispositions and90 above729.
+The campaign remains Active; no runtime or native incident repair is claimed.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed #11014 delivery, complete actual #5799 receiving readback
+and #433's separate `NOT_PLANNED` tracking retirement. Its three wording
+residuals remain unchecked; the primary documentation participant stays
+released and future material execution unassigned. Complete06:41 PST scans
+measure821 whole OPEN,1001 effective audited dispositions and92 above729.
+Twenty-four next eligible originals have independent bounded Luna studies;
+no new implementation, native/installed proof or custody release is inferred.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records the bounded #433 wording family proposed directly in the existing
+Active materials inventory under OPEN #5799. Three exact residual statements,
+the original quick plugin scan, credited #561 CLI repair and behavior/API/task
+invariance have direct Plan/global Validation. Released documentation custody,
+unassigned execution and independent previews/reference work remain unchanged.
+Normal review and whole actual receiving readback still precede any separate
+tracking retirement; no module, asset or runtime implementation is claimed.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #11010,133 documentation tests, the24-plugin
+guard and all three delivered blobs. Only its publication child finalized;
+the Active campaign remains93 above fixed729 at the latest complete census.
+The next bounded review considers #433's three wording-only residuals as an
+input to the existing #5799 materials inventory, without claiming that scope
+is adopted, reviving a released participant or appointing an execution lead.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records complete actual [Picker cohort](picker-input-and-row-receiving-cohorts.md)
+intakes under existing OPEN #4183 and #4182. #4175/#4274/#3791 retired
+`NOT_PLANNED` only after whole current receiving readback, retaining all native
+input, optional progress, demand-gated composition and claimant conditions.
+No new parent, implementation or source/resource release was created.
+Complete06:02 PST scans measure822 whole OPEN,1000 effective audited
+dispositions and93 above729; three own original-cohort departures, no arrivals
+or external departures. The campaign remains Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #11002 and complete delivered-blob agreement.
+#10971's additional direction is now qualified by the author's actual
+four-file execution report as well as the new source/tests; the earlier
+reopen debit remains historical rather than being erased. Complete05:37 PST
+scans measure825 whole OPEN,997 effective audited dispositions and96 above729.
+The twenty-original studies preserve real holders and identify bounded
+current gaps; a naturally related nine-original Picker intake study continues
+without forcing unrelated contracts into arbitrary batch umbrellas.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #4960 retired `NOT_PLANNED` because the current released declared-copy
+contract removes its old hash/version tie branch, not because the historical
+2/5 model result passed a rerun. Actual consumer and five fixed policy blobs
+were checked against published Dev and released Main without misattributing
+the change to a later docs PR. Complete05:06 PST scans measure826 whole OPEN,
+996 effective audited dispositions and97 above729. Twenty next oldest
+qualified originals are in four bounded cohort studies; no new recipient
+receipt, implementation or source/resource release is inferred.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #10975 completed within its merged payload/documentation scope and
+#2567's complete optional executor question received as the
+[lifecycle cohort](derived-state-receiving-cohort.md)'s fifth planned track.
+That duplicate tracker retired `NOT_PLANNED`; the design decision remains
+OPEN and optional. #10971 remains OPEN on its new actual qualification tier,
+not the first fix or mere regression definitions. Complete04:58 PST scans
+measure827 whole OPEN,995 effective audited dispositions and98 above729.
+The structural artifact boundary and common-key adoption remain separate
+retained outcomes, while a current-policy study of #4960 continues.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #10978 and complete delivered-blob agreement.
+The later backstop also found #10971 reopened with a distinct old-requester/
+new-provider compatibility condition. Its earlier closure credit is debited,
+not replayed on the first fix; a new merged slice is under bounded study.
+Complete04:35 PST scans measure828 whole OPEN,993 effective audited
+dispositions and99 above fixed729. A metadata-only excluded arrival and
+one external departure accompany the reopening. #10975's actual merged
+role extraction is also under research. The campaign remains Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #10971 completed against merged #10974 and its focused controls,
+with installed adoption and custody separate. Complete02:43 PST scans measure
+827 whole OPEN,994 audited dispositions and98 above fixed729; the sole
+departure is that own completion. #10978 has an accepted current-head review
+and checks, but managed completion returned a provider error followed by
+`Merge already in progress`; actual terminal observation remains pending.
+The campaign remains Active and that publication obligation is not released.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #10959 completed against merged #10961 and its promised regression
+definitions, without a new installed-runtime gate. The
+[derived-state cohort](derived-state-receiving-cohort.md) records complete
+actual #10968 receipt and three `NOT_PLANNED` retirements, retaining all four
+distinct planned outcomes and source/resource duties. Complete02:30 PST
+scans measure828 whole OPEN,993 audited dispositions and99 above fixed729;
+four campaign departures, no arrivals or external departures. The campaign
+remains Active; tracking consolidation is not cleanup implementation.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed merge #10973 of the actual #1419 intake and four tracking
+retirements. Complete02:14 PST scans measure832 whole OPEN,989 audited
+dispositions and103 above fixed729; two arrivals and no departures explain
+the increase. Five further originals have bounded parallel research, while
+two new author-claimed implementation issues retain their distinct scopes.
+The campaign remains Active; no new closure or source/resource release follows.
+
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records complete actual #1419 receiving/readback and `NOT_PLANNED` retirement
 of #2467/#2475/#3004/#5543 with every original and source/resource duty retained.

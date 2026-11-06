@@ -48,6 +48,22 @@ def _validate_capture(value: dict) -> str:
     return operation_id
 
 
+def readback_references(capture: dict, operation: dict) -> dict:
+    """Body-free bindings only; the protected owner must establish actual readback."""
+    if (
+        any(row["state"] != "confirmed" for row in operation["actions"])
+        or any(row["kind"] == "verdict" for row in operation["intent"]["actions"])
+    ):
+        raise ValueError("readback requires supported confirmed actions")
+    return {
+        "capture_id": _digest({name: value for name, value in capture.items() if name != "readback"}),
+        "receipt_refs": [
+            {"action_id": row["id"], "attempt_id": row["attempt_id"], "receipt_id": _digest(row["receipt"])}
+            for row in operation["actions"]
+        ],
+    }
+
+
 class FeedbackCaptures:
     """Strict detached records; capture admission stays with the protected owner."""
 
@@ -104,19 +120,7 @@ class FeedbackCaptures:
             ):
                 raise ValueError("feedback capture differs from its original review intent")
             if self.protocol == READBACK_PROTOCOL and capture["readback"] is not None:
-                original = {name: value for name, value in capture.items() if name != "readback"}
-                if (
-                    any(row["state"] != "confirmed" for row in operation["actions"])
-                    or any(row["kind"] == "verdict" for row in intent["actions"])
-                    or capture["readback"] != {
-                        "capture_id": _digest(original),
-                        "receipt_refs": [
-                            {"action_id": row["id"], "attempt_id": row["attempt_id"],
-                             "receipt_id": _digest(row["receipt"])}
-                            for row in operation["actions"]
-                        ],
-                    }
-                ):
+                if capture["readback"] != readback_references(capture, operation):
                     raise ValueError("readback proof differs from its original confirmed operation")
 
     def capture_bytes(self) -> int:

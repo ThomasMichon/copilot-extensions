@@ -261,13 +261,18 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
     def _provider_backed_target(target: SpawnTarget) -> bool:
         """Whether a persisted target carries namespace-provider metadata."""
         from .privileged_plugins import CONTEXT_KEY
+        from .acquisition_worktree_writer import DELIVERY_KEY
+        from .creation_worktree_writer import JOURNAL_KEY as CREATION_WRITER_KEY
 
         return any(
             isinstance(value, dict) and bool(value)
             for value in (target.codespace, target.container)
         ) or (
             isinstance(target.venue, dict)
-            and any(key not in {_REQUEST_OVERRIDES_KEY, CONTEXT_KEY} for key in target.venue)
+            and any(
+                key not in {_REQUEST_OVERRIDES_KEY, CONTEXT_KEY, DELIVERY_KEY, CREATION_WRITER_KEY}
+                for key in target.venue
+            )
         )
 
     async def _refresh_provider_target(self, session: Session) -> None:
@@ -289,6 +294,11 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         persisted_venue = (
             persisted.venue if isinstance(persisted.venue, dict) else {}
         )
+        from .acquisition_worktree_writer import DELIVERY_KEY
+        from .creation_worktree_writer import JOURNAL_KEY as CREATION_WRITER_KEY
+
+        writer_keys = {DELIVERY_KEY, CREATION_WRITER_KEY}
+
         overrides = persisted_venue.get(_REQUEST_OVERRIDES_KEY)
         if not isinstance(overrides, dict):
             raise ProviderTargetRefreshError(
@@ -331,7 +341,8 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 *request_copilot_args,
             ],
             venue={
-                **(resolved.venue or {}),
+                **{key: value for key, value in (resolved.venue or {}).items() if key not in writer_keys},
+                **{key: persisted_venue[key] for key in writer_keys if key in persisted_venue},
                 _REQUEST_OVERRIDES_KEY: {
                     **overrides,
                     "env": dict(request_env),
@@ -339,7 +350,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 },
             },
         )
+        from .acquisition_worktree_writer import require_target
         from .provider_creation import assert_resume_placement
+
+        require_target(refreshed)
         assert_resume_placement(self._db, session.session_id, persisted, refreshed)
         session.target = refreshed
         self._db.update_session_target(

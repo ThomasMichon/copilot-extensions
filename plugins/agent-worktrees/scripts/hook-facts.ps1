@@ -372,7 +372,7 @@ function Enter-PostToolCounterLock {
 }
 
 function Send-PostToolReadDemand {
-    param([Collections.IDictionary]$Discovery)
+    param([Collections.IDictionary]$Discovery, [Collections.IDictionary]$Mutation, [switch]$Shell)
     $client = $null
     try {
         $capabilities = $Discovery.hook_capabilities
@@ -384,9 +384,14 @@ function Send-PostToolReadDemand {
                 }
             )
         }
+        $batch = $null -ne $Mutation -and $Mutation.Contains('toolCalls')
+        $capability = if ($Shell) { 'shell-hook-mutation-v1' }
+        elseif ($batch) { 'native-hook-batch-mutation-v1' }
+        elseif ($null -ne $Mutation) { 'native-hook-mutation-v1' }
+        else { 'read-hook-demand-v1' }
         if ($null -eq $Discovery -or $Discovery.hook_transport -cne 'tcp' -or
             $capabilities -isnot [array] -or
-            $capabilities -cnotcontains 'read-hook-demand-v1' -or
+            $capabilities -cnotcontains $capability -or
             $Discovery.hook_generation -isnot [string] -or
             $Discovery.hook_generation -cnotmatch '^[0-9a-f]{32}$' -or
             $Discovery.hook_endpoint -isnot [string] -or
@@ -401,10 +406,16 @@ function Send-PostToolReadDemand {
             hook_generation = $Discovery.hook_generation
             deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 + 1.0
         }
+        if ($null -ne $Mutation) {
+            $request.kind = if ($Shell) { 'shellToolMutation' }
+            elseif ($batch) { 'nativeToolBatchMutation' } else { 'nativeToolMutation' }
+            $request.payload = $Mutation
+        }
         $bytes = ([Text.UTF8Encoding]::new($false)).GetBytes(
-            (ConvertTo-Json -InputObject $request -Compress) + "`n"
+            (ConvertTo-Json -InputObject $request -Depth 100 -Compress) + "`n"
         )
-        if ($bytes.Length -gt 2048) { return }
+        $limit = if ($null -ne $Mutation) { 65536 } else { 2048 }
+        if ($bytes.Length -gt $limit) { return }
         $clock = [Diagnostics.Stopwatch]::StartNew()
         $client = [Net.Sockets.TcpClient]::new()
         if (-not $client.ConnectAsync('127.0.0.1', $port).Wait(50)) { return }
@@ -426,7 +437,33 @@ function Invoke-PreparedPostToolRead {
         $event = ConvertFrom-ManagedWorktreesJson $Raw
         $tool = $event['toolName']
         if (-not $tool) { $tool = $event['tool_name'] }
-        if ($tool -isnot [string] -or $tool.ToLowerInvariant() -notin @('view', 'rg', 'glob')) {
+        $writeTools = @(
+            'create', 'edit', 'str_replace', 'str_replace_editor',
+            'str_replace_based_edit_tool', 'write', 'write_file', 'insert',
+            'apply_patch', 'new_file', 'multi_edit'
+        )
+        $nativeBatch = $event.ContainsKey('toolCalls')
+        $nativeWrite = $tool -is [string] -and $tool.ToLowerInvariant() -in $writeTools
+        $shellTool = -not $nativeBatch -and $tool -is [string] -and $tool.ToLowerInvariant() -in @(
+            'bash', 'sh', 'shell', 'powershell', 'pwsh', 'cmd', 'run', 'run_command',
+            'execute', 'exec', 'terminal'
+        )
+        if ($nativeBatch) {
+            $calls = $event['toolCalls']
+            if ($calls -isnot [Collections.IList] -or $calls.Count -lt 1 -or $calls.Count -gt 128) {
+                return $null
+            }
+            foreach ($call in $calls) {
+                if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
+                    $call['name'].ToLowerInvariant() -notin ($writeTools + @('view', 'rg', 'glob'))) {
+                    return $null
+                }
+                foreach ($key in $call.Keys) {
+                    if ($key -cnotin @('name', 'args', 'id')) { return $null }
+                }
+            }
+        } elseif ($tool -isnot [string] -or
+            (-not $nativeWrite -and -not $shellTool -and $tool.ToLowerInvariant() -notin @('view', 'rg', 'glob'))) {
             return $null
         }
         if ($event.ContainsKey('sessionId')) { $session = $event['sessionId'] }
@@ -444,7 +481,20 @@ function Invoke-PreparedPostToolRead {
         } else { $env:USERPROFILE }
         $runtime = Get-PreparedWorktreesPath ([IO.Path]::Combine($registryHome, '.agent-worktrees'))
         $discovery = Read-PostToolBoundedJson ([IO.Path]::Combine($runtime, 'status-monitor.lock')) 16384
-        Send-PostToolReadDemand -Discovery $discovery
+        if ($nativeWrite -or $nativeBatch -or $shellTool) {
+            $mutation = @{ cwd = $cwd; sessionId = $session }
+            if ($nativeBatch) { $mutation.toolCalls = $calls }
+            else { $mutation.toolName = $tool }
+            foreach ($name in @('cwd', 'workingDirectory')) {
+                if ($event.ContainsKey($name)) { $mutation[$name] = $event[$name] }
+            }
+            foreach ($name in @('toolArgs', 'tool_input')) {
+                if ($event.ContainsKey($name)) { $mutation[$name] = $event[$name] }
+            }
+            Send-PostToolReadDemand -Discovery $discovery -Mutation $mutation -Shell:$shellTool
+        } else {
+            Send-PostToolReadDemand -Discovery $discovery
+        }
         $notice = Get-PostToolLateGuidanceNotice -SessionHome $sessionHome -Session $session -Cwd $cwd
         $result = Invoke-PreparedPostToolReminders -SessionHome $sessionHome -Session $session `
             -Cwd $cwd -SkipCounter:([bool]$notice) -Discovery $discovery

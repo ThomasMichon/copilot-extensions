@@ -63,7 +63,10 @@ class AcquisitionRuntime:
                     raise AcquisitionRefused("acquisition_draining", "bridge is draining")
                 self.manager._active_acquisitions = getattr(self.manager, "_active_acquisitions", 0) + 1
                 try:
-                    return await self._acquire_locked(req, custody=custody)
+                    from .acquisition_worktree_writer import acquisition_writer
+
+                    async with acquisition_writer(self.db, req):
+                        return await self._acquire_locked(req, custody=custody)
                 except AcquisitionRefused as exc:
                     if self.store.journal.refused_before_effect(req):
                         exc.effect = "not_started"
@@ -87,9 +90,15 @@ class AcquisitionRuntime:
 
         admission = original_admission(self, req, custody)
         venue = await verify_dispatch(req, self.resolver)
+        from .acquisition_worktree_writer import retained_document
+
+        writer_binding = retained_document(req)
+        claim_options = {"runtime_admission": admission}
+        if writer_binding is not None:
+            claim_options["worktree_writer"] = writer_binding
         preflight_claim = None
         if not completed and not self.store.pending(req.worktree_id):
-            preflight_claim = self.store.journal.claim(req, runtime_admission=admission)
+            preflight_claim = self.store.journal.claim(req, **claim_options)
         try:
             row, head = await verify_worktree(req)
         except AcquisitionRefused as exc:
@@ -102,7 +111,7 @@ class AcquisitionRuntime:
         venue = await verify_dispatch(req, self.resolver)
         row, head = await verify_worktree(req)
         try:
-            claim = preflight_claim or self.store.journal.claim(req, runtime_admission=admission)
+            claim = preflight_claim or self.store.journal.claim(req, **claim_options)
         except AcquisitionRefused as exc:
             if exc.code != "acquisition_pending":
                 raise
@@ -384,6 +393,17 @@ class AcquisitionRuntime:
         if req.mode == "acp":
             from .acquisition_local_launch import launch
 
+            if req.worktree_writer is not None and decision.conversation:
+                from .acquisition_worktree_writer import require_target
+
+                session = self.manager.get_session(decision.conversation.session_id)
+                if session is None:
+                    raise AcquisitionRefused("worktree_writer_unconfirmed", "original native holder is missing")
+                from .acquisition_worktree_writer import DELIVERY_KEY
+
+                if (session.target.venue or {}).get(DELIVERY_KEY) is None:
+                    raise AcquisitionRefused("worktree_writer_unconfirmed", "native holder has no original writer")
+                require_target(session.target)
             return await launch(self, req, decision, row, target, request_env, custody=custody)
         if decision.acquired == "reused":
             assert decision.conversation and decision.conversation.native_session_id
@@ -444,10 +464,13 @@ class AcquisitionRuntime:
         req: AcquisitionRequest,
         row: dict[str, Any],
     ) -> tuple[Any, dict[str, str]]:
-        return await acquisition_plugins.prepare_target(
+        target, env = await acquisition_plugins.prepare_target(
             self, req, row, target_factory=SpawnTarget, bound_charter=_apply_bound_charter,
             apply_preferences=apply_request_preferences,
         )
+        from .acquisition_worktree_writer import bind_target
+
+        return bind_target(target, req), env
 
     async def _local_preparation_target(
         self, req: AcquisitionRequest, row: dict[str, Any], target: SpawnTarget,
@@ -710,10 +733,12 @@ class AcquisitionRuntime:
             "acquisition_pending", "prepared attempt requires owner reconciliation"
         )
 
-    async def inspect_pending(self, delivery_id: str) -> dict[str, Any]:
+    async def inspect_pending(
+        self, delivery_id: str, *, worktree_writer: bool = False,
+    ) -> dict[str, Any]:
         """Report recovery facts without consuming, launching or delivering."""
         rows = self.db.execute_read(
-            "SELECT a.worktree_id,a.state,e.stage,e.data_json FROM acquisition_attempts a "
+            "SELECT a.worktree_id,a.state,a.request_digest,e.stage,e.data_json FROM acquisition_attempts a "
             "LEFT JOIN acquisition_effects e USING(delivery_id) WHERE a.delivery_id=?",
             (delivery_id,),
         )
@@ -734,7 +759,7 @@ class AcquisitionRuntime:
             "SELECT id,status,acp_session_id FROM sessions WHERE caller_id=?",
             (f"acquisition:{delivery_id}",),
         )
-        return {
+        result = {
             "delivery_id": delivery_id, "state": row["state"],
             "caller_context": {
                 field: value for field, value in data.get("_request", {}).items()
@@ -746,6 +771,21 @@ class AcquisitionRuntime:
             "delivery_admitted": delivery_admitted,
             "recovery": "retry the same request, or allow a current same-task reservation to reconcile",
         }
+        if worktree_writer:
+            from .acquisition_writer_inspection import inspect_writer
+
+            if self.manager.is_draining or not getattr(self.state, "ready", True):
+                raise AcquisitionRefused(
+                    "worktree_writer_unconfirmed", "Bridge is not ready for writer observation",
+                )
+            result["worktree_writer_observation"] = await inspect_writer(
+                self.db, delivery_id, dict(row),
+            )
+            if self.manager.is_draining or not getattr(self.state, "ready", True):
+                raise AcquisitionRefused(
+                    "worktree_writer_unconfirmed", "Bridge readiness changed during writer observation",
+                )
+        return result
 
     async def _reconcile_prior(
         self,

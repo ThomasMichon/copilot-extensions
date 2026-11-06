@@ -216,6 +216,30 @@ Real registered-entry, non-replying-peer, original-receiver and idle-expiry
 controls must prove that composition. Mutation invalidation, optional boot,
 other scopes and whole-hook/throughput acceptance remain separate open gates.
 
+The next finite consumer extends that same prepared Windows shell evaluation
+to recognized single native writes. A separate `native-hook-mutation-v1`
+capability on the original IPC owner admits a bounded send-only event, not an
+advisory/policy request or another lifecycle. The original native target
+extractor supplies every structured-edit and patch-move destination; unknown
+targets and overflow preserve conservative invalidation. The receiver retains
+current-generation, managed-session, publication, governance and drain
+checks, while the shell never waits for a reply or retries uncertain delivery.
+The existing sweep/TTL remains the delivery-loss backstop. Unsupported batch
+and shell classification remain on their prior path, not silently declared complete.
+See the [native-write consumer contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#windows-native-write-consumer).
+
+The next finite consumer accepts a complete bounded batch containing only
+recognized native writes and the already qualified read tools. It reuses the
+original `tool_events` normalization with explicit strict shape admission,
+then collects original native targets before any invalidation. An additive
+`native-hook-batch-mutation-v1` capability prevents an old single-write
+receiver from being mistaken for batch support. Reminders and late guidance
+remain once per outer event; malformed, unknown and mixed-shell batches keep
+their prior path. The original process-generation, admission, governance,
+wire/deadline and no-reply/no-replay bounds remain unchanged. See the
+[native-batch consumer contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#windows-native-batch-consumer).
+This is not shell-command, cold/cell/POSIX, installed or whole-hook acceptance.
+
 The existing `WorktreesRuntime` publishes a small advisory view only after its
 current-roster store accepts a publication. The original project-state owner
 resolves the home: `project_dir(project)/worktrees/<id>/hook-facts/`.

@@ -177,6 +177,55 @@ See the canonical [Worktrees relationship contract](../../agent-worktrees/docs/r
 These conditional adapter controls still do not assemble the real writer
 cohort or activate ordinary coordinator construction.
 
+The opt-in `WorktreeRelationshipWriter.selected(...)` factory retains the
+actual installed Worktrees command before negotiating its executing
+capabilities. Same-cell calls reuse the existing receipt/governance boundary;
+legacy calls recheck legacy ownership before entering the slot-local retention
+bootstrap. Neither form falls back to an ambient executable or adopts a newer
+build after selection. Missing/recreated builds refuse through the original
+pre-import identity check. Ordinary unpinned callers are unchanged.
+
+That factory additionally negotiates `resident_inspect: 1` and performs an
+authenticated `inspect --resident-only` with the original workspace nonce before
+each relationship operation. It validates the returned executing serializer,
+installation, build and resident generation; it never substitutes the direct
+CLI writer. A different compatible resident build can qualify independently,
+and each later operation reobserves its current selection rather than caching
+an earlier readiness result. This costs one additional bounded Worktrees child
+and resident read per relationship operation, not per generic record save.
+The factory still requires both independent admission callbacks. Its CLI and
+resident observations do not qualify Bridge's future keyed creation, its
+original continuation journal or any other participating producer, and cannot
+close the writer cohort or enable ordinary construction.
+
+Queue reconciliation uses the selected adapter's `bind_request` path when
+available, passing an isolated copy of the original audited request before
+reserve or retirement inspection. This path requires the separately supplied
+`admit_request(workspace, writer_identity, request)` callback. It receives fresh
+copies before each relationship operation; callback mutation cannot change the
+retained request or the next operation. A request-aware adapter refuses unbound
+calls, and a bound path without that admission owner cannot silently downgrade.
+Legacy explicit three-argument writer callables remain compatible.
+Each bound callable keeps its own request and confirmed token, checks coherent
+workspace/assignment/authority/recovery facts, and refuses conflicting operation
+payloads before effects. Bind and close accept only the token confirmed by the
+same callable's original reserve or inspect. The original ground-owner receipt
+and post-I/O queue checks remain required. This is an in-process context seam,
+not proof that the assembling owner's original-queue/cohort observation has
+qualified the actual installed writers. It adds no Worktrees wire field or probe.
+
+The queue independently rereads its original task/event snapshot before each
+external relationship call, including retirement inspection and absence
+tombstoning. It compares the durable queue identity, selected local/central
+authority, audited worker and complete original request with type-preserving
+canonical encoding. A changed queue, audit or substituted caller snapshot
+refuses before the next owner call; earlier effects remain accountable to
+that same retained request. These are optimistic reads, not a transaction
+held across external I/O, so the existing post-I/O CAS remains mandatory.
+They add one indexed, task-scoped snapshot per relationship call, with no
+process or wire probe and no preflight on unrelated record saves. This
+original-queue check does not qualify the resident, Bridge or other writers.
+
 The original direct-claim audit event stores one immutable relationship
 request in `task_events.task_relationship`. Allocator placement still claims
 capacity before a workspace exists. A newly governed reservation retains its

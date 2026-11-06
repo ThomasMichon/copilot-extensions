@@ -34,8 +34,37 @@ the shared same-cell execution/observation migration subsequently merged in
 support, changed-selection enforcement and cohort admission stay open.
 Opt-in original-build delegated invocation subsequently merged in #10944;
 that source prerequisite does not qualify the actual participating cohort.
-Next, bind generation-aware independent admission to those writers and qualify
-ordinary submission consumers,
+Opt-in acquisition/continuation retention and qualified executing-session writes
+subsequently merged in #10976. Required registration, binding and succession now
+stay in the qualified serializer rather than an ordinary-version-only resident.
+This is bounded source credit, not admission of the actual installed cohort.
+Original-journal read-only writer inspection subsequently merged in #11001.
+It rechecks the retained serializer, workspace and Bridge instance without
+selecting a replacement; the complete participating cohort remains unqualified.
+Ordinary keyed-creation/singleton continuation compatibility was restored in
+#11012 without treating the shared caller prefix as acquisition-journal custody.
+Opt-in ordinary keyed-creation writer retention and exact-session requalification
+subsequently merged in #11022, using the original embodiment journal and
+preserving strict continuation. This is bounded source credit, not admission
+of the installed Bridge, resident or complete participating cohort.
+Original first-relationship request admission subsequently merged in #11031.
+It carries the original audited request into the independent callback before
+effects; it does not supply independent original-queue or closed-cohort observation.
+Independent queue-owned request revalidation subsequently merged in #11034.
+The source now rereads durable queue/authority/audit/request facts before each
+external relationship call, retaining post-I/O CAS. Actual installed participant
+and complete-cohort observations remain unqualified.
+Ordinary keyed-create CLI requirement transport subsequently merged in #11040,
+including early remote-target refusal and existing per-attempt capability
+negotiation. It carries an independently qualified requirement; it does not
+construct that admission or enable ordinary allocation.
+Opt-in selected CLI and actual resident assembly subsequently merged in #11047.
+It retains the original installed command and reobserves the resident before
+each relationship call, while keeping both independent admission callbacks.
+Bridge's future keyed creation, original continuation journal and other admitted
+writers remain unassembled; the complete cohort is not qualified.
+Next, assemble generation-aware independent admission of those actual owners
+before ordinary submission consumers,
 then post-stop same-native recovery and the complete running
 lifecycle. No deployment or cleanup permission is implied.
 

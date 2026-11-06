@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the qualified acquisition Worktrees writer through recovery and lineage",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

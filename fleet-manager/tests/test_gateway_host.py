@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from functools import lru_cache
+import json
 import os
 from pathlib import Path
 import socket
@@ -190,6 +191,547 @@ def test_only_selected_gateway_extra_enables_existing_installer_callbacks(monkey
     )
     for extras in ((), ("service-gateway",), ("ssh-client",), ("auth",)):
         assert install_callbacks("fleet-manager", extras=extras) == ([], [])
+
+
+def ssh_selected(root):
+    from test_ssh_machine import machine_config
+
+    private_directory(root)
+    value, policy, directory = machine_config(root)
+    local = root.parent / ("ssh-local-" + root.name)
+    local.mkdir()
+    value.update(
+        state_dir=str(local / "state"), authorization_dir=str(local / "ssh" / "authorization"),
+        config_d=str(local / "ssh" / "config.d"), ssh_config=str(local / "ssh" / "config"),
+    )
+    host.write_private(root / "ssh-client.json", value)
+    selection = {
+        "schema": "fleet-manager.gateway-host", "version": 2, "role": "ssh-client",
+        "configuration": str(root / "ssh-client.json"),
+        "authority": "authority-a", "installation": "installation-a",
+    }
+    host.write_private(root / host.CONFIG, selection)
+    return selection, value, policy, directory
+
+
+@pytest.mark.parametrize("change", [
+    {"version": 1}, {"version": True}, {"role": "gateway"},
+    {"configuration": "relative"}, {"policy": "unselected"},
+])
+def test_ssh_host_selection_refuses_unsupported_or_mixed_forms_before_effects(tmp_path, change):
+    selection, value, _, _ = ssh_selected(tmp_path / "i")
+    host.write_private(tmp_path / "i" / host.CONFIG, selection | change)
+    with pytest.raises(PlanError):
+        host.optional_selection(tmp_path / "i")
+    assert not Path(value["state_dir"]).exists()
+    assert not (tmp_path / "i" / host.STATE).exists()
+
+
+def test_ssh_host_preflight_is_inert_and_keeps_provider_token_renewal(tmp_path):
+    from test_ssh_machine import configured
+
+    root = tmp_path / "i"
+    selection, _, _, _ = ssh_selected(root)
+    config, _ = host.prepare(root, host.optional_selection(root))
+    assert config.to_dict()["version"] == 2
+    token_value, _, _ = configured(root)
+    value = config.to_dict() | {
+        "version": 1, "access_token_file": token_value["access_token_file"],
+    }
+    value.pop("authentication")
+    host.write_private(Path(selection["configuration"]), value)
+    host.prepare(root, selection)
+    before = host.startup_digest(selection)
+    Path(value["access_token_file"]).write_text("synthetic-renewed", encoding="ascii")
+    assert host.startup_digest(selection) == before
+    assert not Path(value["state_dir"]).exists()
+    assert not (root / host.STATE).exists()
+    assert not Path(value["config_d"]).exists()
+    value["state_dir"] = str(root / host.STATE / "lease")
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(PlanError, match="separate from host lifecycle state"):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+
+
+def test_continuity_host_uses_owner_revision_without_reading_private_key_storage(tmp_path, monkeypatch):
+    from dataclasses import replace
+    import hashlib
+    from fleet_manager import continuity_bootstrap, credential_references
+    from test_ssh_machine import continuity_config
+
+    root = tmp_path / "i"
+    selection, previous, _, _ = ssh_selected(root)
+    value, _, _, _ = continuity_config(root)
+    for name in ("state_dir", "config_d", "ssh_config", "authorization_dir"):
+        value[name] = previous[name]
+    host.write_private(Path(selection["configuration"]), value)
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda *_args: pytest.fail("continuity host used an external private-key file reader"),
+    )
+    host.prepare(root, selection)
+    before = host.startup_digest(selection)
+    assert host.startup_digest(selection) == before
+    source = continuity_bootstrap.machine_caller_reference
+
+    def changed_reference(*args, **kwargs):
+        reference = source(*args, **kwargs)
+        return replace(
+            reference, revision=hashlib.sha256((reference.revision + "changed").encode()).hexdigest(),
+        )
+
+    monkeypatch.setattr(continuity_bootstrap, "machine_caller_reference", changed_reference)
+    assert host.startup_digest(selection) != before
+    assert not Path(value["state_dir"]).exists()
+    assert not (root / host.STATE).exists()
+    assert not Path(value["config_d"]).exists()
+
+
+@pytest.mark.parametrize("scope", ["config", "fragments", "authorization", "sources", "locks"])
+def test_ssh_host_state_is_outside_all_writer_and_derived_scopes(tmp_path, scope):
+    from agent_ssh import gateway_profile, ssh_profile
+
+    root = tmp_path / (
+        gateway_profile._SOURCE_DIR if scope == "sources"
+        else ssh_profile._LOCK_DIR_NAME if scope == "locks" else "i"
+    )
+    selection, value, _, _ = ssh_selected(root)
+    value["state_dir"] = str(tmp_path / "consumer-lease")
+    if scope == "config":
+        value["ssh_config"] = str(root / host.STATE / gateway_host_start.PENDING)
+    elif scope == "fragments":
+        value["config_d"] = str(root / host.STATE / "config.d")
+    elif scope == "authorization":
+        value["authorization_dir"] = str(root / host.STATE / "authorization")
+    else:
+        value["config_d"] = str(tmp_path / "config.d")
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(ValueError, match="outside local writer scopes"):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+@pytest.mark.parametrize("destination", [
+    host.CONFIG, "ssh-client.json", "current-version", "last-known-good",
+    "versions/candidate/.venv/config",
+])
+def test_ssh_host_preflight_preserves_installation_metadata_from_writer_scope(tmp_path, destination):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    path = root / destination
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"retained installation metadata")
+    host.write_private(Path(selection["configuration"]), value | {"ssh_config": str(path)})
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="outside local writer scopes"):
+        host.prepare(root, selection)
+    assert path.read_bytes() == before
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+@pytest.mark.parametrize("reference", [
+    "configuration", "policy_path", "identity_file", "public_key_file", "proof_key_file",
+])
+def test_ssh_host_preflight_protects_external_input_references_from_writers(tmp_path, reference):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    original = Path(selection[reference] if reference == "configuration" else value[reference])
+    external = tmp_path / "external-input"
+    with os.fdopen(create_private_file(external), "wb") as stream:
+        stream.write(original.read_bytes())
+    if reference == "configuration":
+        selection["configuration"] = str(external)
+    else:
+        value[reference] = str(external)
+    value["ssh_config"] = str(external)
+    host.write_private(Path(selection["configuration"]), value)
+    before = external.read_bytes()
+    with pytest.raises(ValueError, match="outside local writer scopes"):
+        host.prepare(root, selection)
+    assert external.read_bytes() == before
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+def test_ssh_host_preflight_keeps_consumer_lease_outside_installed_slots(tmp_path):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    slot = root / "versions" / "candidate"
+    host.write_private(Path(selection["configuration"]), value | {"state_dir": str(slot)})
+    with pytest.raises(PlanError, match="separate from host lifecycle state"):
+        host.prepare(root, selection)
+    assert not slot.exists()
+    assert not (root / host.STATE).exists()
+
+
+def test_host_configuration_cannot_be_a_consumer_lease(tmp_path):
+    from fleet_manager import ssh_machine
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    state = Path(value["state_dir"])
+    private_directory(state)
+    path = state / ssh_machine.LEASE
+    host.write_private(path, value)
+    selection["configuration"] = str(path)
+    before = path.read_bytes()
+    with pytest.raises(PlanError, match="exclude protected host inputs"):
+        host.prepare(root, selection)
+    assert path.read_bytes() == before
+    assert not (root / host.STATE).exists()
+
+
+@pytest.mark.parametrize("field,kind", [
+    ("config_d", "file"), ("authorization_dir", "file"), ("ssh_config", "directory"),
+    ("config_d", "file-parent"),
+])
+def test_invalid_local_writer_destination_refuses_before_host_selection(tmp_path, field, kind):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    destination = tmp_path / "retained-destination"
+    if kind == "directory":
+        destination.mkdir()
+    else:
+        destination.write_bytes(b"retained owner content")
+    value[field] = str(destination / "child" if kind == "file-parent" else destination)
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(PlanError, match="output path|parent"):
+        host.prepare(root, selection)
+    assert destination.is_dir() if kind == "directory" else destination.read_bytes() == b"retained owner content"
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+@pytest.mark.parametrize("scope", ["sources", "fragment-locks", "root-locks"])
+def test_invalid_derived_writer_directory_refuses_before_host_state(tmp_path, scope):
+    from agent_ssh import gateway_profile, ssh_profile
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    value["ssh_config"] = str(tmp_path / "root-ssh" / "config")
+    destination = {
+        "sources": Path(value["config_d"]).parent / gateway_profile._SOURCE_DIR,
+        "fragment-locks": Path(value["config_d"]).parent / ssh_profile._LOCK_DIR_NAME,
+        "root-locks": Path(value["ssh_config"]).parent / ssh_profile._LOCK_DIR_NAME,
+    }[scope]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"retained owner content")
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(ValueError, match="ordinary directory"):
+        host.prepare(root, selection)
+    assert destination.read_bytes() == b"retained owner content"
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+
+
+def test_invalid_writer_lock_refuses_before_host_or_credential_effects(tmp_path, monkeypatch):
+    from agent_ssh import ssh_profile
+    from fleet_manager import credential_references
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    value["ssh_config"] = str(tmp_path / "separate-root" / "config")
+    lock = Path(value["ssh_config"]).parent / ssh_profile._LOCK_DIR_NAME / "root-config.lock"
+    lock.mkdir(parents=True)
+    retained = lock / "retained"
+    retained.write_bytes(b"existing owner content")
+    host.write_private(Path(selection["configuration"]), value)
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda *_args: pytest.fail("invalid writer lock read credentials"),
+    )
+    with pytest.raises(ValueError, match="lock.*ordinary file"):
+        host.prepare(root, selection)
+    assert retained.read_bytes() == b"existing owner content"
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
+@pytest.mark.parametrize("failure", [
+    "conflicting-root", "conflicting-authorization", "foreign-authorization", "foreign-owner",
+])
+def test_host_preflight_preserves_conflicting_or_unowned_authorization_state(tmp_path, failure):
+    from agent_ssh import gateway_authorization
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    if failure == "conflicting-root":
+        value["ssh_config"] = str(Path(value["config_d"]) / "config")
+    elif failure == "conflicting-authorization":
+        value["authorization_dir"] = value["config_d"]
+    else:
+        selected_authorization = Path(value["authorization_dir"])
+        selected_authorization.parent.mkdir(parents=True, exist_ok=True)
+        path = gateway_authorization._root(selected_authorization)
+        if failure == "foreign-authorization":
+            (path / "retained").write_bytes(b"retained owner content")
+        else:
+            gateway_authorization.atomic_write_text(path / "owner.json", json.dumps({
+                "target": {"machine": "other-machine", "environment": value["environment"]},
+                "controller": value["controller"], "user": "fixture",
+            }))
+            before_owner = (path / "owner.json").read_bytes()
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(ValueError):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    if failure == "foreign-authorization":
+        assert (path / "retained").read_bytes() == b"retained owner content"
+    elif failure == "foreign-owner":
+        assert (path / "owner.json").read_bytes() == before_owner
+
+
+def test_host_requires_current_adapter_before_fingerprinting_credentials(tmp_path, monkeypatch):
+    from agent_ssh import gateway_directory
+    from fleet_manager import credential_references
+
+    root = tmp_path / "i"
+    selection, _, _, _ = ssh_selected(root)
+    monkeypatch.delattr(gateway_directory, "validate_writer_destinations")
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda *_args: pytest.fail("partial adapter read credentials"),
+    )
+    with pytest.raises(ImportError):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+
+
+@pytest.mark.parametrize("failure", [
+    "missing", "empty", "invalid-utf8", "overlong", "space", "non-ascii", "del",
+])
+def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_path, failure):
+    from fleet_manager.gateway_contract import GatewayError
+    from test_ssh_machine import configured
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    token_value, _, _ = configured(root)
+    value = value | {"version": 1, "access_token_file": token_value["access_token_file"]}
+    value.pop("authentication")
+    token = Path(value["access_token_file"])
+    if failure == "missing":
+        token.unlink()
+    else:
+        token.write_bytes({
+            "empty": b" \n", "invalid-utf8": b"\xff", "overlong": b"x" * 8193,
+            "space": b"synthetic invalid", "non-ascii": b"token\xc3\xa9", "del": b"token\x7f",
+        }[failure])
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises(GatewayError):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
+@pytest.mark.parametrize("reference", ["identity_file", "public_key_file", "gateway_ca"])
+def test_ssh_host_preflight_reads_all_fingerprinted_references_before_lifetime_state(tmp_path, reference):
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    value[reference] = str(root / "absent-reference")
+    host.write_private(Path(selection["configuration"]), value)
+    with pytest.raises((OSError, ValueError)):
+        host.prepare(root, selection)
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
+def test_ssh_host_refuses_config_replacement_during_preparation_before_consumer(tmp_path, monkeypatch):
+    from fleet_manager import ssh_machine
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    private_directory(root / host.STATE)
+    slot = root / "versions" / "fixture-generation"
+    slot.mkdir(parents=True)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    monkeypatch.setattr(host, "runtime_custody", lambda _root: nullcontext(slot))
+    nonce = "3" * 32
+    host.write_private(root / host.STATE / gateway_host_start.PENDING, {
+        "generation": slot.name, "token": nonce,
+    })
+    original = host.prepare
+
+    def replaced(root, selected):
+        prepared = original(root, selected)
+        host.write_private(Path(selected["configuration"]), value | {
+            "gateway_origin": "https://other.example.test",
+        })
+        return prepared
+
+    async def forbidden(*_args, **_kwargs):
+        pytest.fail("changed startup inputs opened the SSH consumer")
+
+    monkeypatch.setattr(host, "prepare", replaced)
+    monkeypatch.setattr(ssh_machine, "run", forbidden)
+    with pytest.raises(PlanError, match="inputs changed before admission"):
+        asyncio.run(gateway_host_runtime.run(root, nonce))
+    assert not (root / host.STATE / host.RUNTIME).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
+def test_unconverged_ssh_host_releases_consumer_and_retention_on_deselection(tmp_path, monkeypatch):
+    from fleet_manager import ssh_machine
+    from fleet_manager.ssh_directory import SSHDirectoryClient
+    from test_ssh_machine import reached
+
+    root = tmp_path / "i"
+    _, value, _, _ = ssh_selected(root)
+    private_directory(root / host.STATE)
+    slot = root / "versions" / "fixture-generation"
+    slot.mkdir(parents=True)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    retained = {"released": False}
+
+    @contextmanager
+    def custody(_root):
+        try:
+            yield slot
+        finally:
+            retained["released"] = True
+
+    monkeypatch.setattr(host, "runtime_custody", custody)
+    nonce = "4" * 32
+    host.write_private(root / host.STATE / gateway_host_start.PENDING, {
+        "generation": slot.name, "token": nonce,
+    })
+
+    async def exercise():
+        entered, settled = asyncio.Event(), asyncio.Event()
+
+        async def wait(*_args, **_kwargs):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                settled.set()
+
+        monkeypatch.setattr(SSHDirectoryClient, "wait", wait)
+        task = asyncio.create_task(gateway_host_runtime.run(root, nonce))
+        try:
+            await reached(entered.is_set, task)
+            assert not retained["released"]
+            (root / "current-version").write_text("successor", encoding="utf-8")
+            await asyncio.wait_for(task, 5)
+            assert settled.is_set() and retained["released"]
+            assert not (root / host.STATE / host.RUNTIME).exists()
+            lease = ssh_machine._lease(Path(value["state_dir"]))
+            lease.acquire()
+            lease.release()
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("denied", [False, True])
+@pytest.mark.parametrize("held", [False, True])
+def test_ssh_host_waits_for_complete_directory_and_settles_owned_consumer(tmp_path, monkeypatch, denied, held):
+    from fleet_manager import ssh_machine
+    from fleet_manager.ssh_directory import SSHDirectoryClient
+    from test_gateway_ssh_provider import key
+    from test_ssh_machine import reached, update
+
+    root = tmp_path / "i"
+    selection, value, policy, directory = ssh_selected(root)
+    private_directory(root / host.STATE)
+    slot = root / "versions" / "fixture-generation"
+    slot.mkdir(parents=True)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    monkeypatch.setattr(host, "runtime_custody", lambda _root: nullcontext(slot))
+    nonce = "2" * 32
+    host.write_private(root / host.STATE / gateway_host_start.PENDING, {
+        "generation": slot.name, "token": nonce,
+    })
+
+    async def exercise():
+        incoming, entered = asyncio.Queue(), asyncio.Event()
+        positions = []
+        attempted = asyncio.Event()
+        incumbent = None
+        if held:
+            original_lease = ssh_machine._lease
+            incumbent = original_lease(Path(value["state_dir"]))
+            incumbent.acquire()
+
+            def observed_lease(path):
+                lease = original_lease(path)
+                original_acquire = lease.acquire
+
+                def acquire():
+                    attempted.set()
+                    return original_acquire()
+
+                return SimpleNamespace(acquire=acquire, release=lease.release)
+
+            monkeypatch.setattr(ssh_machine, "_lease", observed_lease)
+
+        async def wait(_client, after, *, seconds=25):
+            positions.append(after)
+            entered.set()
+            return await incoming.get()
+
+        monkeypatch.setattr(SSHDirectoryClient, "wait", wait)
+        if denied:
+            def refuse(_update):
+                raise PermissionError("selected-writer-refused")
+
+            original = ssh_machine._consumer
+
+            def selected_consumer(config):
+                original(config)
+                return refuse
+
+            monkeypatch.setattr(ssh_machine, "_consumer", selected_consumer)
+        task = asyncio.create_task(gateway_host_runtime.run(root, nonce))
+        try:
+            if held:
+                await reached(attempted.is_set, task)
+                assert not entered.is_set() and not (root / host.STATE / host.RUNTIME).exists()
+                incumbent.release()
+                incumbent = None
+            await reached(entered.is_set, task)
+            assert gateway_host_start.inspect(root, selection)["state"] == "launch-unresolved"
+            assert not (root / host.STATE / host.RUNTIME).exists()
+            await incoming.put(update(policy, directory))
+            if denied:
+                with pytest.raises(PermissionError, match="selected-writer-refused"):
+                    await asyncio.wait_for(task, 5)
+                assert not (root / host.STATE / host.RUNTIME).exists()
+                assert positions == [0]
+                return
+            await reached((root / host.STATE / host.RUNTIME).exists, task)
+            status = await asyncio.to_thread(gateway_host_start.inspect, root, selection)
+            assert status["role"] == "ssh-client" and status["ready"] and status["selected"]
+            assert status["revision"] == directory["revision"]
+            assert key(2) in Path(value["authorization_dir"], "authorized_keys.gateway").read_text()
+            record = gateway_host_start._record(root)
+            result = await asyncio.to_thread(gateway_host_start._call, record, "stop")
+            assert not result["ready"]
+            await asyncio.wait_for(task, 5)
+            assert positions == [0, directory["revision"]]
+        finally:
+            if incumbent is not None:
+                incumbent.release()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            lease = ssh_machine._lease(Path(value["state_dir"]))
+            lease.acquire()
+            lease.release()
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("cleanup_confirmed", [False, True])

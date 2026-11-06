@@ -19,7 +19,10 @@ import bridge_http47_runtime as binding
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run_probes(root: Path, proof: dict, vector: dict, *, evidence=evidence) -> dict:
+def run_probes(
+    root: Path, proof: dict, vector: dict, *,
+    evidence=evidence, expected_roles: frozenset[str] = frozenset(),
+) -> dict:
     from agent_procutil.owned_process import run_caller_owned
 
     parent = evidence.safe(root, ".test-venvs", directory=True)
@@ -65,12 +68,12 @@ def run_probes(root: Path, proof: dict, vector: dict, *, evidence=evidence) -> d
         if cases != evidence.PROBES:
             raise ValueError(f"{label} probe portfolio is incomplete or duplicated")
         receipt = binding.verify_interpreters(
-            directory / "interpreters", proof, expected_roles=frozenset(),
+            directory / "interpreters", proof, expected_roles=expected_roles,
             required_sources=evidence.installation.required_sources(
                 evidence.safe(root, evidence.installation.ENTRY).read_bytes(),
             ),
         )
-        if receipt["roles"] != ["observer"]:
+        if receipt["roles"] != ["observer", *sorted(expected_roles)]:
             raise ValueError(f"{label} ASGI observer scope changed")
         if report.is_symlink() or not report.is_file() or report.stat().st_nlink != 1:
             raise ValueError(f"{label} observation report is absent or aliased")

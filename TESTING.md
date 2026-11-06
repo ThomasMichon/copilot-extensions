@@ -83,6 +83,43 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+Worktrees' opt-in `--test-file tests/test_post_tool_shell.py --test-file
+tests/test_hook_ipc.py --test-file tests/test_status_monitor.py
+--allow-explicit-tiers -k "native_mutation or
+registered_post_hook_reuses_original_prepared_membership or
+registered_read_demand_is_send_only or handoff_wake_kind_actually_wakes"`
+packet exercises real registered Windows PowerShell 5.1/7 entries with original
+prepared membership, interpreter/resident traps, structured-edit and patch-move
+invalidation, missing/old/stale/closed discovery and a non-replying peer.
+Native batches additionally cover complete-batch admission, original event/
+target normalization, shared target overflow, read-only idle demand and
+unsupported batches retaining their original registered path.
+Original IPC controls cover exact generation/schema/deadline/wire bounds and
+the running monitor's real invalidation wake and unadmitted refusal. These are
+isolated source consumers, not installed, complete shell-command or throughput
+acceptance; required exact-source unit CI remains separate.
+
+The same packet's `shell_mutation` selection covers original argument and
+shell/Git parsing, while `registered_native_mutation_is_send_only` includes
+`shell-` cases for single-shell notifications. Real PowerShell 5.1/7 entries
+exercise JSON/raw/fallback arguments, read versus mutation, fast-forward pulls,
+unknown command shapes, missing/old/wrong-generation/closed discovery, wire
+overflow and a non-replying peer. Running-monitor controls prove shell read
+demand does not trigger a mutation sweep and unadmitted events have no effect.
+The portable unit packet additionally exercises the original send-only handler
+and mutation-only parser with synthetic inputs; it is not native evidence.
+
+The path-gated, manually dispatchable legacy-monitor native lane also runs
+`test_anchor_write_guard.py -k braced_parameter_boundaries_match_native_bash`
+on Linux and Windows. Nine native Bash controls compare actual expansion and
+command boundaries with pre-tool anchor denial and post-tool invalidation;
+the Git function only prints a marker, so no real commit is attempted.
+Quoted/escaped braces, nested command/arithmetic/parameter forms, backticks,
+ANSI quotes and a read-only control are included. The explicit lane requires
+native Bash rather than WSL or skipped prerequisites. The original 30-second
+item, 180-second group and five-second Bash-child bounds remain finite.
+This is source consumer/guard parity, not installed or throughput acceptance.
+
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
 --allow-explicit-tiers` packet checks optional expected-head declaration/codec
@@ -4749,6 +4786,14 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+Five binding-projection controls in `test_related_acquisition.py` exercise the
+actual synthesis body with logical paths and substituted canonical-registry
+acquisition. They preserve metadata provenance, knowledge/legacy-worktree
+classes and explicit uncertainty without importing the native registry owner
+on unconfigured paths. These actor-free models do not qualify real filesystem,
+registration, pairing or lifecycle effects; the opt-in native reader portfolio
+retains those separate boundaries.
+
 The runner explicitly preserves full parameter IDs, including on pytest 9.2,
 so collection continues to match the exact admitted node inventory.
 
@@ -4874,6 +4919,38 @@ disclosure is independent of daemon availability. The manifest positively
 admits these exact nodes, source closure and production coverage targets.
 This is in-process contract evidence, not installed CLI, native conversation,
 process-exit, transport availability or deployment qualification.
+
+`tools/promotion_unit_tests/test_retained_acquisition_writer.py` exercises
+the real retained writer owner with synthetic journal rows and substituted
+writer selection/process responses. It checks original-prefix recovery,
+incompatible serializer refusal, missing-binding non-recapture, exact workspace
+scope, required lineage error propagation and pre-effect CLI refusal.
+The executing-session controls also check capability-gated original-scope
+arguments, locked receiving-incarnation refusal and scope reset after failure.
+The additional journal control retains the original successor, native identity
+and seed through synthetic database responses, with full-sync intent and
+replacement refusal. Real stopped-session refresh and post-spawn handoff
+recovery are covered by the separate acquisition/runtime packet.
+The exact nodes, source and coverage target are positively admitted in the
+unit-only packet. The separate Bridge acquisition/runtime and lineage controls
+retain actual SQLite and finite source-process effects; their patched build
+identity and synthetic ACP transport do not prove installed/native or closed
+writer-cohort qualification. Required CI starts no new actor.
+The opt-in HTTP-52 capture additionally binds every finite Worktrees fixture
+launch to its committed entrypoint and full source closure. A reachable
+ordinary-verb-compatible resident receives the legacy control but no required
+registration, binding or succession. Those commands reject changed identity,
+nonce, project and path. Capture instrumentation is restored explicitly in the
+fixture after the real owner environment scrub; production routing is unchanged.
+Creation controls in that same actor-free packet distinguish the original
+workspace journal from acquisition attempts, retain strict resume and successor
+seed custody, and requalify exact-session inspection without writer reselection.
+The separate `test_creation_worktree_writer.py` packet covers SQLite schema
+preparation, passive refusal, real HTTP negotiation, frontend rehydration,
+concurrent replay and registration dormancy. Its finite source-process control
+preserves the protected claim and creation nonce through registration, binding
+and succession while the unqualified resident remains reachable. These probes
+are enrolled in the opt-in HTTP-52 capture, not the required actor-free packet.
 
 `tools/promotion_unit_tests/test_namespace_contract.py` joins the actual
 Containers `namespace-list` CLI and `ContainerResolver.list_specs` output to
@@ -5789,6 +5866,13 @@ guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 
+The Manager plugin and standalone test preparers install its application
+non-editably through the normal retained-source policy. Both use the shared
+cache, whose fingerprint binds that installation shape; embedded first-party
+imports must survive private-input cleanup. Other plugin targets and the
+separately prepared Bridge remain editable. Production installation and test
+selection are unchanged.
+
 Worktrees' managed-session admission packet is explicitly selectable:
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
 It uses temporary profiles, real hook subprocesses, both available PowerShell
@@ -6546,6 +6630,19 @@ machine-local sources without resolving an unused state root. Stateless and
 external-state configurations still resolve the knowledge overlay on every
 call, including changed or removed bindings. `config_sources` owns this read
 path; `state_root` re-exports the same types and function for existing callers.
+`tests/test_related_knowledge.py` additionally checks binding-driven related
+synthesis, canonical registration, collisions without policy-trust promotion,
+ambiguous sources and preservation of ordinary self-hosted configuration.
+The opt-in T3 `tests/native/test_related_knowledge_native.py` uses real Git
+bare/linked-worktree fixtures and the installed CLI to exercise list/resolve,
+aligned-only planning, narrative-scaffold refusal and structured nonzero
+canonical-class failure. It allocates no managed pair and preserves both
+repository trees. The `related-knowledge` portfolio in
+`installation-context-full.yml` selects these files on Linux and Windows.
+A separate standard-tier packet checks their dependent PR-binding, session
+context and repository-configuration consumers, including the actual CLI.
+Neither packet extends required unit-only CI or qualifies actual write/cleanup,
+late-binding retrofit or installed rollout.
 The diverged-checkout Git fixtures
 hide only the unrelated CodeSpace CLI from discovery, leaving real Git,
 finalization, status polling and checkout-invalidation assertions intact.
