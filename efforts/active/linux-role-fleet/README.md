@@ -42,6 +42,13 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 
 ## Coordination
 
+- **Direct role cohort receipt:** the [client/onboarding/ARC amendment](cohort-receiving.md)
+  preserves #6424/#6681/#7192's complete distinct Plan/Validation and current
+  owners. Actual parent/Active-effort readback precedes administrative tracking
+  intake; #7192's named-owner transfer condition remains independently open.
+  The #5861-only KEEP convention is not generalized, and no active source,
+  provider, native, release or resource custody transfers.
+
 - **Topology:** One reviewed proposal, then serial independently reviewable slices.
 - **Host (owns PRs):** Campaign owner.
 - **Delegates:** Bounded read-only substrate evidence; no shared edit or Git ownership.
@@ -183,6 +190,10 @@ to deploy, force-stop an old owner, bypass release authentication or erase the
 accepted floor. The isolation and fencing details remain agent-recommended.
 
 ## Plan
+
+- [ ] Complete the [direct role-lifecycle cohort Plan](cohort-receiving.md#direct-plan)
+  through existing client, onboarding and ARC owners, preserving their
+  distinct requirements, current source reservations and original limits.
 
 ### Capacity-grid loadouts and configurable runner amendment
 
@@ -605,6 +616,10 @@ completion, resource release, runtime activation or permission for live rollout.
   an **agent-recommended tracking amendment**, not a new runtime assignment.
 
 ## Validation Plan
+
+- [ ] Satisfy the [direct cohort Validation](cohort-receiving.md#direct-validation)
+  under actual installed/native/provider owners. Planning receipt or tracking
+  retirement is not implementation, live adoption, release or resource proof.
 
 All entries are **agent-recommended implementation gates**.
 
