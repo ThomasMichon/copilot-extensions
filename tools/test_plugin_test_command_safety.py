@@ -325,6 +325,67 @@ def test_shell_mutation_still_allows_an_explicit_absolute_private_transport(monk
     hooks[0]("subprocess.Popen", ("bash", command, tmp_path, {}))
 
 
+@pytest.mark.parametrize("script", [
+    "if true; then tmux kill-session -t fixture; fi",
+    "if kill -TERM -1; then true; fi",
+    "if false; then true; elif kill -TERM -1; then true; fi",
+    "if false; then true; else tmux kill-session -t fixture; fi",
+    "while tmux kill-session -t fixture; do true; done",
+    "until kill -TERM -1; do true; done",
+    "while true; do tmux kill-session -t fixture; done",
+    "! tmux kill-session -t fixture",
+    "(tmux kill-session -t fixture)",
+    "{ tmux kill-session -t fixture; }",
+])
+def test_shell_control_prefixes_cannot_hide_cleanup(tmp_path, monkeypatch, script):
+    command = ["sh", "-c", script]
+    assert safety.command_problem(command, sandbox=tmp_path, environment={})
+    hooks = []
+    monkeypatch.setattr(safety, "_installed", False)
+    monkeypatch.setattr(safety.sys, "addaudithook", hooks.append)
+    safety.install_command_guard(tmp_path)
+    with pytest.raises(safety.UnsafeTestCommand):
+        hooks[0]("subprocess.Popen", ("sh", command, tmp_path, {}))
+
+
+def test_shell_control_prefix_preserves_verified_private_mux(monkeypatch, tmp_path):
+    monkeypatch.setenv(safety.SANDBOX_ENV, str(tmp_path))
+    private = subprocess.list2cmdline(safety.private_mux_args(tmp_path))
+    assert safety.command_problem(
+        ["sh", "-c", f"if true; then tmux {private} has-session; fi"],
+        sandbox=tmp_path, environment={},
+    ) is None
+
+
+@pytest.mark.parametrize("flag", ["-WorkingDirectory", "-wd", "-wo", "/wd"])
+@pytest.mark.parametrize("encoded", [False, True])
+def test_powershell_working_directory_invalidates_relative_scope(
+    monkeypatch, tmp_path, flag, encoded,
+):
+    monkeypatch.setattr(safety, "os", SimpleNamespace(
+        name="posix", environ={}, path=os.path, fsdecode=os.fsdecode,
+    ))
+    for socket, refused in (("mux.sock", True), (str(tmp_path / "mux.sock"), False)):
+        script = "tmux -S '" + socket + "' has-session"
+        body = (
+            ["-ec", base64.b64encode(script.encode("utf-16-le")).decode("ascii")]
+            if encoded else ["-Command", script]
+        )
+        command = ["pwsh", flag, str(tmp_path.parent / "foreign"), *body]
+        assert bool(safety.command_problem(
+            command, sandbox=tmp_path, cwd=tmp_path, environment={},
+        )) is refused
+        hooks = []
+        monkeypatch.setattr(safety, "_installed", False)
+        monkeypatch.setattr(safety.sys, "addaudithook", hooks.append)
+        safety.install_command_guard(tmp_path)
+        if refused:
+            with pytest.raises(safety.UnsafeTestCommand):
+                hooks[0]("subprocess.Popen", ("pwsh", command, tmp_path, {}))
+        else:
+            hooks[0]("subprocess.Popen", ("pwsh", command, tmp_path, {}))
+
+
 @pytest.mark.parametrize("flag", ["-EncodedCommand", "-enc", "-ec", "-e"])
 def test_encoded_powershell_cleanup_is_inspected(tmp_path, flag):
     encoded = base64.b64encode("psmux kill-server".encode("utf-16-le")).decode("ascii")
@@ -403,6 +464,12 @@ def test_shell_helpers_and_generated_script_literals_are_checked(tmp_path, name,
     "subprocess.Popen(['different-argv-zero', '-f', 'fixture'], executable='pkill')",
     "os.execv('psmux', [argv_zero, 'kill-server'])",
     "os.spawnl(0, 'psmux', argv_zero, 'kill-server')",
+    "asyncio.create_subprocess_exec('tmux', 'kill-server')",
+    "asyncio.create_subprocess_exec('sh', '-c', 'pkill -f fixture')",
+    "asyncio.create_subprocess_exec('other', '-f', 'fixture', executable='pkill')",
+    "asyncio.create_subprocess_exec(mux, 'kill-server')",
+    "asyncio.create_subprocess_exec(b'pmux.exe', b'kill-server')",
+    "asyncio.create_subprocess_shell('if kill -TERM -1; then true; fi')",
 ])
 def test_source_exec_and_spawn_signatures_use_the_actual_executable(tmp_path, body):
     source = tmp_path / "child.py"
@@ -416,6 +483,8 @@ def test_source_exec_and_spawn_signatures_use_the_actual_executable(tmp_path, bo
     "os.execl('python', 'python', '-c', 'print(1)')",
     "os.spawnlpe(0, 'python', 'python', '-c', 'print(1)', {})",
     "subprocess.run(args=['sh', '-c', 'command -v agent-worktrees'])",
+    "asyncio.create_subprocess_exec('python', '-c', 'print(1)')",
+    "asyncio.create_subprocess_exec('other', '-c', 'print(1)', executable='python')",
 ])
 def test_source_exec_spawn_and_lookup_controls_are_not_globally_banned(tmp_path, body):
     source = tmp_path / "child.py"
@@ -577,6 +646,49 @@ def test_native_fixture_environment_disables_shell_network_side_effects(tmp_path
     assert environment["POWERSHELL_UPDATECHECK"] == "Off"
     assert "AGENT_BRIDGE_TEST_VALUE" not in environment
     assert Path(environment["USERPROFILE"]).is_relative_to(tmp_path)
+
+
+def test_native_cursor_probe_keeps_the_original_startup_failure(tmp_path, monkeypatch):
+    import ast
+    import json
+    import re
+
+    source = Path(__file__).resolve().parents[1] / "worktree-manager" / "tests" / "native" / "test_warm_picker_lifetime.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in {"_read", "_startup_diagnostics", "_wait"}
+    ]
+    namespace = {
+        "json": json, "re": re, "subprocess": subprocess,
+        "os": SimpleNamespace(name="nt"),
+        "time": SimpleNamespace(monotonic=lambda: 0, sleep=lambda _: None),
+    }
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"), namespace)
+    session = "picker-" + "a" * 24
+    (tmp_path / "owner-debug.json").write_text(json.dumps({
+        "states": [{"slots": [{"session": session, "ready": False}]}],
+    }))
+    tables = iter([{123: ("pwsh.exe", 1)}, {123: ("pwsh.exe", 1), 124: ("python.exe", 123)}])
+    monkeypatch.setitem(sys.modules, "mux_windows_observer", SimpleNamespace(
+        processes=lambda: next(tables), descendants=lambda pid, table: set(table),
+    ))
+    calls = []
+
+    def command(*args, **kwargs):
+        calls.append((args, kwargs))
+        if args[0] == "send-keys":
+            (tmp_path / "slot.json").write_text("{}")
+        return subprocess.CompletedProcess(args, 0, "123:pwsh:0:0" if args[0] == "list-panes" else "", "")
+
+    with pytest.raises(AssertionError) as error:
+        namespace["_wait"](
+            lambda: None, lambda: namespace["_startup_diagnostics"](tmp_path, command), timeout=0,
+        )
+    report = json.loads(str(error.value))
+    assert report["panes"][0]["cursor_response"]["slot_published"] is True
+    assert report["panes"][0]["cursor_response"]["processes"][-1]["name"] == "python.exe"
+    assert calls[-1] == (("send-keys", "-t", session, "-l", "\x1b[1;1R"), {"timeout": 0.5})
 
 
 def test_native_startup_probes_preserve_the_exact_python_command_without_running_it(tmp_path):

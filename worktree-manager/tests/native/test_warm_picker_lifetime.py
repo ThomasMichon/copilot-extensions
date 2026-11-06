@@ -77,6 +77,22 @@ def _startup_diagnostics(root, command):
                     {"pid": pid, "name": table[pid][0], "parent": table[pid][1]}
                     for pid in sorted(descendants(int(pane_pid), table))[:32] if pid in table
                 ]
+                if not slot.get("ready") and any(
+                    entry["name"].lower() == "pwsh.exe" for entry in panes[-1]["processes"]
+                ):
+                    # The deadline has already failed. A CPR response here is
+                    # diagnostic only, never a retry that can pass the test.
+                    response = command("send-keys", "-t", session, "-l", "\x1b[1;1R", timeout=0.5)
+                    time.sleep(1)
+                    after = processes()
+                    panes[-1]["cursor_response"] = {
+                        "returncode": response.returncode,
+                        "processes": [
+                            {"pid": pid, "name": after[pid][0], "parent": after[pid][1]}
+                            for pid in sorted(descendants(int(pane_pid), after))[:32] if pid in after
+                        ],
+                        "slot_published": (root / "slot.json").is_file(),
+                    }
         except (OSError, subprocess.TimeoutExpired) as error:
             panes.append({"session": session, "error": type(error).__name__})
     children = []

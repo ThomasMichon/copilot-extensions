@@ -1506,7 +1506,7 @@ def test_codespaces_partition_failures_and_empty_selections_remain_fail_closed(
 def test_codespaces_partitions_share_the_unchanged_plugin_aggregate(
     codespaces_native_plan, monkeypatch, first_result,
 ):
-    clock = iter([0, 0, 250, 650, 901, 901])
+    clock = iter([0, 0, 0, 250, 650, 901, 901])
     monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     seen = []
     monkeypatch.setattr(

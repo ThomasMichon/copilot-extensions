@@ -308,8 +308,13 @@ def _shell_problem(
     for segment in re.split(r"[\r\n;|&]+", text):
         if not check_mux_scope and not _SOURCE_MARKERS.search(segment):
             continue
+        # These prefixes introduce another command, not an executable named
+        # "then" or "if". Inspect that command with the same scope evidence.
+        segment = segment.strip()
+        while match := re.match(r"^(?:(?:if|then|elif|else|while|until|do|!)(?=\s)|[({])\s*", segment):
+            segment = segment[match.end():]
         try:
-            parts = _tokens(segment.strip())
+            parts = _tokens(segment)
         except UnsafeTestCommand:
             continue  # A separator may be inside a quoted, non-command argument.
         candidates = [parts]
@@ -364,6 +369,14 @@ def _command_problem(
                 break
             if flag == "--" or not flag.startswith(("-", "/")):
                 break
+            if is_powershell and (
+                flag == "-wd" or flag.startswith("-wo") and "-workingdirectory".startswith(flag)
+            ):
+                if index + 1 >= len(parts):
+                    return "cannot inspect a PowerShell working directory without its value"
+                cwd = _UNKNOWN_CWD
+                index += 2
+                continue
             if is_powershell and (
                 flag in {"-e", "-ec"} or flag.startswith("-en") and "-encodedcommand".startswith(flag)
             ):
@@ -478,9 +491,12 @@ def _literal(node: ast.AST | None) -> object:
 
 
 def _source_invocation(node: ast.Call, function: str) -> tuple[object, ast.AST | None]:
-    argument = node.args[0] if node.args else next(
-        (keyword.value for keyword in node.keywords if keyword.arg == "args"), None,
-    )
+    if function == "create_subprocess_exec":
+        argument = ast.List(elts=node.args, ctx=ast.Load())
+    else:
+        argument = node.args[0] if node.args else next(
+            (keyword.value for keyword in node.keywords if keyword.arg == "args"), None,
+        )
     value = _literal(argument)
     if function in _EXEC_VECTOR | _EXEC_LIST | _SPAWN_VECTOR | _SPAWN_LIST:
         index = 1 if function in _SPAWN_VECTOR | _SPAWN_LIST else 0
