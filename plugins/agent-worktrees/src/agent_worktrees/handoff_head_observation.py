@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import stat
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,19 @@ def _record(
             for item in activations
         ):
             raise ObservationFailure("invalid-activation-ledger")
+        for activation in activations:
+            for key in ("started_at", "start_recorded_at"):
+                value = activation.get(key)
+                if isinstance(value, datetime):
+                    value = value.isoformat()
+                if not isinstance(value, str) or not value or len(value) > 64:
+                    raise ObservationFailure("unrecorded-activation-timestamp", unavailable=False)
+                try:
+                    datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    raise ObservationFailure(
+                        "invalid-activation-timestamp", unavailable=False
+                    ) from None
     for handoff in data.get("handoffs") or []:
         segment(handoff.get("token"))
         segment(handoff.get("predecessor"))

@@ -126,10 +126,14 @@ def _receipt(
             "version": 1,
             "metadata": metadata,
             "handoffToken": token,
+            "createdAt": created,
             "predecessorSession": "old",
             "consumerSession": consumer,
             "steps": {"consumeAttempted": True, "taskConsumed": consumed, "promptInjected": False},
-            "stepTimes": {"taskConsumed": consumed_at} if consumed else {},
+            "stepTimes": {
+                "consumeAttempted": created,
+                **({"taskConsumed": consumed_at} if consumed else {}),
+            },
             "consumerIdentity": _identity(consumer) if consumed else None,
             "payload": "PRIVATE PROMPT MUST NOT BE RETURNED",
         }
@@ -560,3 +564,56 @@ def test_conversation_append_does_not_change_picker_presence(
 
     monkeypatch.setattr(provider, "read_expected", appending)
     assert _observe(owner)["status"] == "match"
+
+
+@pytest.mark.parametrize("key", ["started_at", "start_recorded_at"])
+@pytest.mark.parametrize("missing", [None, "absent"])
+def test_missing_recorded_activation_timestamp_cannot_restore_an_older_match(
+    owner: dict[str, Any],
+    key: str,
+    missing: str | None,
+) -> None:
+    _receipt(owner)
+    if key == "started_at":
+        activation = {
+            "ordinal": 2,
+            "started_at": LATER,
+            "start_recorded_at": LATER,
+            "source_identity": "source:new-resume",
+        }
+        owner["record"]["sessions"][1]["activations"].append(activation)
+    else:
+        activation = owner["record"]["sessions"][1]["activations"][0]
+    if missing == "absent":
+        activation.pop(key)
+    else:
+        activation[key] = None
+    _write_record(owner)
+    result = _observe(owner)
+    assert result["status"] == "unknown"
+    assert result["reason"] == "unrecorded-activation-timestamp"
+
+
+@pytest.mark.parametrize("recency", ["checkpoint", "retry"])
+def test_later_task_attempt_with_older_payload_cannot_return_an_earlier_match(
+    owner: dict[str, Any],
+    recency: str,
+) -> None:
+    _receipt(owner)
+    path, raw = _receipt(
+        owner,
+        task=True,
+        consumed=False,
+        created="2025-12-01T00:00:00+00:00",
+    )
+    later_attempt = "2026-01-01T00:03:00+00:00"
+    if recency == "checkpoint":
+        raw["createdAt"] = later_attempt
+        raw["steps"]["consumeAttempted"] = False
+        raw["stepTimes"] = {}
+    else:
+        raw["stepTimes"]["consumeAttempted"] = later_attempt
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    result = _observe(owner)
+    assert result["status"] == "unknown"
+    assert result["reason"] == "newer-incomplete-delivery"

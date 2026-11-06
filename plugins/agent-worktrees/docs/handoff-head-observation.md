@@ -80,6 +80,11 @@ cannot upgrade an older receipt. A completed abort is not consumption.
 The most recent actual consumption supplies the expected identity. Ties,
 newer incomplete deliveries, conflicting mirrors, an unreadable candidate or
 a missing known receipt cannot fall back to an older matching pass.
+Task checkpoint creation and consume-attempt times establish delivery recency
+separately from original payload creation; reusing an old payload does not make
+a later incomplete attempt old. Activation start and recorded-start timestamps
+must both be present in the current record before its compatibility parser
+normalizes anything; skipped or defaulted activation evidence cannot qualify.
 Retained/pruned legacy evidence can therefore conservatively remain unknown.
 This is not a guarantee of complete historical delivery retention.
 

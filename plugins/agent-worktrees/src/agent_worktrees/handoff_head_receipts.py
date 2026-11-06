@@ -41,6 +41,7 @@ class Delivery:
     predecessor: str
     source: str
     created: datetime
+    delivery_at: datetime
     consumed_at: datetime | None
     consumer: str | None
     author_identity: Any
@@ -86,30 +87,36 @@ def _delivery(raw: dict[str, Any], token: str, source: str) -> Delivery:
         if metadata.get("taskId") not in (None, token) or not isinstance(raw.get("steps"), dict):
             raise ObservationFailure("conflicting-task-receipt", unavailable=False)
         consumed = raw["steps"].get("taskConsumed")
+        attempted = raw["steps"].get("consumeAttempted")
         step_times = raw.get("stepTimes") or {}
         if not isinstance(step_times, dict):
             raise ObservationFailure("invalid-consumption-steps", unavailable=False)
         consumed_at = step_times.get("taskConsumed")
         consumer = raw.get("consumerSession")
-        if consumed is True and raw["steps"].get("consumeAttempted") is not True:
+        if type(attempted) is not bool or consumed is True and attempted is not True:
             raise ObservationFailure("invalid-consumption-steps", unavailable=False)
+        delivery_at = timestamp(raw.get("createdAt"))
+        if attempted:
+            delivery_at = max(delivery_at, timestamp(step_times.get("consumeAttempted")))
     else:
         consumed = raw.get("consumed")
         consumed_at = raw.get("consumedAt")
         consumer = raw.get("consumedBySession")
+        delivery_at = timestamp(metadata.get("createdAt"))
     aborted = raw.get("aborted", False)
     if type(consumed) is not bool or type(aborted) is not bool:
         raise ObservationFailure("invalid-consumption-state", unavailable=False)
     actual_consumption = consumed and not aborted
     created = timestamp(metadata.get("createdAt"))
     observed_at = timestamp(consumed_at) if actual_consumption else None
-    if observed_at is not None and observed_at < created:
+    if delivery_at < created or observed_at is not None and observed_at < delivery_at:
         raise ObservationFailure("ambiguous-receipt-order", unavailable=False)
     return Delivery(
         token,
         predecessor,
         source,
         created,
+        delivery_at,
         observed_at,
         segment(consumer) if actual_consumption else None,
         metadata.get("authorIdentity"),
@@ -251,7 +258,7 @@ def read_expected(
     if len(consumed) > 1 and consumed[1].consumed_at == newest.consumed_at:
         raise ObservationFailure("ambiguous-receipt-order", unavailable=False)
     if any(
-        item.consumed_at is None and not item.aborted and item.created >= newest.created
+        item.consumed_at is None and not item.aborted and item.delivery_at >= newest.delivery_at
         for item in deliveries
     ):
         raise ObservationFailure("newer-incomplete-delivery", unavailable=False)
