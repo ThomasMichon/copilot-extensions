@@ -40,7 +40,8 @@ Watchdog thresholds (see references/watchdog-checks.md)
   Open-obligation limits: <unanswered change request, approved without
     consent, unconsumed handoff>
   Delivery bar: <merged | released | deployed and live-verified, per root>
-  Escalation: <two unheeded steers per issue, then one report to owner>
+  Escalation: <one report to owner when a delivered steer stalls past its
+    revisit time or a second steer goes unheeded>
   Unknown-state limit: <consecutive unknown observations before one report>
 
 Holds and later narrowing: <references, newest first>

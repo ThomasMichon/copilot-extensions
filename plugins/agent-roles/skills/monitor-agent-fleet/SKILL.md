@@ -167,8 +167,8 @@ supervisors.
 Steer directly when the correction preserves the root and its constraints.
 Escalate to the operator only for an objective change, new access or spend, a
 destructive or deployment effect, conflicting operator instructions or an
-unsettled handoff deviation, or after two unheeded steers on one issue:
-report once with evidence, a recommended decision and its default. **The
+unsettled handoff deviation, or when a delivered steer stalls past its
+revisit time: report once with evidence, a recommended decision and its default. **The
 watchdog never asks a blocking question**; when unsure, take the least
 intrusive reversible option within the charter and record the judgment. For
 reviewer agents, defer loop rules to `review-pull-requests`' throughput and

@@ -120,6 +120,12 @@
       "mode": "steering-authorized",
       "facts": "A worker asks the operator to raise a validation timeout for the third time. No per-test durations were measured, and the change under test is a short documentation edit.",
       "expected": "One steer: measure per-test durations and run the smallest affected selection once; the original deadline stays the bar. No operator escalation before the steer ladder."
+    },
+    {
+      "id": "delivered-steer-stalled",
+      "mode": "steering-authorized",
+      "facts": "The monitor's one steer to a worker has confirmed delivery. Its revisit time has passed with no progress, no recorded disagreement and no new evidence.",
+      "expected": "No second send on unchanged evidence. Escalate once to the scope owner with the evidence, a recommended decision and its default; if delivery were unknown, reconcile receipts instead."
     }
   ]
 }

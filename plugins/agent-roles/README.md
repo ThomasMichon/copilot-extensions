@@ -70,8 +70,8 @@ tells and releases a superseded reviewer.
 The fleet monitor's watchdog checks inspect each agent's open questions,
 obligations, prerequisite growth, budgets, validation weight, delivery state
 and handoff fidelity, classify every wait as required, productive or waste,
-and escalate once after unheeded steers; the watchdog never asks a blocking
-question itself.
+and escalate once when a delivered steer stalls; the watchdog never asks a
+blocking question itself.
 
 ## Dependencies & assumptions
 

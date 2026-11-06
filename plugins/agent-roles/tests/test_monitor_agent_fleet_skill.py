@@ -89,7 +89,7 @@ def test_watchdog_checks_never_block_and_classify_waits() -> None:
         "**The watchdog never asks a blocking question**",
         "**Classify every wait as required, productive or waste**",
         "A merge is not done when the root needs live behavior",
-        "after two unheeded steers on one issue",
+        "or when a delivered steer stalls past its revisit time",
         "defer loop rules to `review-pull-requests`",
     ):
         assert requirement in skill, requirement
@@ -103,7 +103,8 @@ def test_watchdog_checks_never_block_and_classify_waits() -> None:
         "Never steer an agent to deploy without separate deployment authority",
         "Do not count all waiting as waste",
         "Escalate once, with the evidence, a recommended decision and its default",
-        "never repeat it unchanged",
+        "Never repeat the report unchanged",
+        "neither counts toward escalation nor justifies a resend",
         "../../review-pull-requests/references/throughput-and-loops.md",
     ):
         assert requirement in checks, requirement

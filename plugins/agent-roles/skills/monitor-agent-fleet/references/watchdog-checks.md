@@ -107,13 +107,19 @@ operator instructions, or a handoff whose deviation from the original request
 cannot be settled from the record. Escalate once, with the evidence, a
 recommended decision and its default.
 
-Use one ladder per target and issue:
+Use one ladder per target and issue, keeping the single-outstanding-steer
+rule in [steering](steering.md):
 
 1. One non-blocking steer with a next action, default and revisit time.
-2. If unheeded at the next observation with materially new evidence, one
-   second steer that changes the approach, not a repeat.
-3. After two unheeded steers, one report to the operator or scope owner with
-   evidence and a recommended decision; never repeat it unchanged.
+2. Only with materially new evidence, a second steer that changes the
+   approach, not a repeat. Unchanged evidence never earns another send.
+3. Escalate once to the operator or scope owner, with evidence and a
+   recommended decision, when a steer with confirmed delivery passes its
+   revisit time with no progress and no recorded disagreement, or when a
+   second steer goes unheeded. Never repeat the report unchanged.
+
+A steer whose delivery is unknown is reconciled through the messaging owner's
+receipts first; it neither counts toward escalation nor justifies a resend.
 
 ## Cadence
 
