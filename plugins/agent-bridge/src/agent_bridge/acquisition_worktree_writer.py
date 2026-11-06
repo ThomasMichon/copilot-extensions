@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 import json
+import time
 from typing import Any
 
 from .acquisition_contract import AcquisitionRefused, AcquisitionRequest
@@ -281,6 +282,24 @@ def session_writer(method):
                 kwargs["allow_recreate"] = False
             return await method(manager, session_id, *args, **kwargs)
     return run
+
+
+async def registration_pending(manager: Any, session: Any) -> None:
+    """Keep an unregistered native dormant without abandoning its host."""
+    from .models import SessionStatus
+
+    manager._set_background_recovery_enabled(session, False)
+    try:
+        await manager._detach_host(session, preserve_host=True)
+        if session.client is not None:
+            with contextlib.suppress(Exception):
+                await session.client.shutdown()
+    finally:
+        session.client = None
+        session.status = SessionStatus.STOPPED
+        manager._db.update_session_status(
+            session.session_id, SessionStatus.STOPPED.value, time.time(),
+        )
 
 
 @contextlib.contextmanager

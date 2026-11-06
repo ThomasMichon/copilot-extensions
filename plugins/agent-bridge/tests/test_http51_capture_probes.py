@@ -156,6 +156,8 @@ from test_acquisition_runtime import (
     as test_required_writer_resume_exhaustion_cannot_recreate,
     test_required_handoff_retries_registration_on_original_native
     as test_required_handoff_retries_registration_on_original_native,
+    test_required_registration_failure_detaches_before_normal_send
+    as test_required_registration_failure_detaches_before_normal_send,
 )
 
 ROOT = Path(__file__).resolve().parents[3]

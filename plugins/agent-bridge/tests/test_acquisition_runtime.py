@@ -330,9 +330,9 @@ async def test_required_writer_resume_exhaustion_cannot_recreate(writer_rig, mon
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reattach", [False, True])
+@pytest.mark.parametrize("recovery", ["load", "reattach", "startup"])
 async def test_required_handoff_retries_registration_on_original_native(
-    writer_rig, monkeypatch, reattach,
+    writer_rig, monkeypatch, recovery, tmp_path,
 ):
     from agent_bridge import acquisition_worktree_writer as writer, worktree_lineage
 
@@ -374,18 +374,45 @@ async def test_required_handoff_retries_registration_on_original_native(
     assert rig.db.get_session(successor.session_id)["acp_session_id"] == "native-successor"
     assert not linked and not seed.await_count
 
+    if recovery == "startup":
+        from agent_bridge.session_host.host_index import HostRecord
+
+        recovered = SessionManager(rig.db, session_host_state_dir=str(tmp_path / "hosts"))
+        record = HostRecord(
+            session_id=successor.session_id, port=9000, host_pid=99999998,
+            child_pid=99999999, protocol_version=1,
+        )
+        recovered._host_index.register(record)
+        monkeypatch.setattr(recovered, "_recover_remote_host_records", AsyncMock(return_value=0))
+        monkeypatch.setattr(recovered, "_prune_dead_hosts", lambda: None)
+        monkeypatch.setattr(recovered, "_live_host_records", lambda: [record])
+        attach = AsyncMock(side_effect=AssertionError("unregistered native must stay dormant"))
+        monkeypatch.setattr(recovered, "_reattach_one", attach)
+        assert await recovered.reattach_session_hosts(recover_cold=False) == 0
+        attach.assert_not_awaited()
+        successor = recovered.get_session(successor.session_id)
+        assert successor.status == SessionStatus.STOPPED and successor.client is None
+        assert not successor.background_recovery_enabled
+        assert recovered._host_index.get(successor.session_id) is not None
+        predecessor = recovered.get_session(predecessor.session_id)
+        predecessor.client = rig.client
+        predecessor.status = SessionStatus.IDLE
+        rig.manager = recovered
+        monkeypatch.setattr(recovered, "start_session", start)
+        monkeypatch.setattr(recovered, "submit_prompt", seed)
+
     async def reattach_host(session):
         session.client = rig.client
         session.status = SessionStatus.IDLE
         return True
 
     monkeypatch.setattr(rig.manager, "_try_reattach_live_host", AsyncMock(
-        side_effect=reattach_host if reattach else None, return_value=False,
+        side_effect=reattach_host if recovery != "load" else None, return_value=False,
     ))
     writer_rig.selected.side_effect = AssertionError("original writer cannot be reselected")
     new_count = rig.client.new_session.await_count
     # A failed registration retry still cannot link or replace the successor.
-    if not reattach:
+    if recovery == "load":
         # Registration is retried once per load attempt by the existing ladder.
         monkeypatch.setattr(core, "_MAX_RESUME_ROUNDS", 1)
         from agent_bridge import session_resume
@@ -401,6 +428,66 @@ async def test_required_handoff_retries_registration_on_original_native(
     assert rig.client.new_session.await_count == new_count
     assert linked == ["native-successor"] and seed.await_count == 1
     assert registrations == [("native-successor", ("retained-owner", "original-build"))] * 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["start", "resume"])
+async def test_required_registration_failure_detaches_before_normal_send(
+    writer_rig, monkeypatch, boundary,
+):
+    from agent_bridge import acquisition_worktree_writer as writer, worktree_lineage
+
+    rig, request = writer_rig.rig, writer_rig.request
+    first = await rig.runtime.acquire(request)
+    session = rig.manager.get_session(first.session_id)
+    session.status = SessionStatus.IDLE
+    detach = AsyncMock()
+    rig.client.session_host_client = SimpleNamespace(detach=detach, send_status=AsyncMock())
+    unavailable = [True]
+    registrations = []
+
+    def register(worktree_id, native, **kwargs):
+        assert writer.current().prefix == ("retained-owner", "original-build")
+        registrations.append(native)
+        if unavailable[0]:
+            raise AcquisitionRefused("owner_pending", "registration unavailable")
+        return True
+
+    monkeypatch.setattr(worktree_lineage, "register_session", register)
+    if boundary == "start":
+        rig.client.acp_session_id = "native-successor"
+        with pytest.raises(RuntimeError, match="successor.*failed to start"):
+            await rig.manager.handoff_session(session.session_id, seed=False)
+        session = next(s for s in rig.manager.list_sessions() if s.session_id != first.session_id)
+    else:
+        await rig.manager.stop_session(session.session_id, force=True)
+        detach.reset_mock()
+
+        async def reattach_host(holder):
+            holder.client = rig.client
+            holder.status = SessionStatus.IDLE
+            return True
+
+        monkeypatch.setattr(rig.manager, "_try_reattach_live_host", AsyncMock(side_effect=reattach_host))
+        with pytest.raises(AcquisitionRefused, match="registration unavailable"):
+            await rig.manager.resume_session(session.session_id, drain=False)
+    native = session.acp_session_id
+    assert session.client is None and session.status == SessionStatus.STOPPED
+    assert not session.background_recovery_enabled
+    assert not rig.db.get_session(session.session_id)["background_recovery_enabled"]
+    detach.assert_awaited_once_with(False)
+    turn_count = session.turn_count
+    with pytest.raises(AcquisitionRefused, match="registration unavailable"):
+        await rig.manager.submit_prompt(session.session_id, "Must not run unregistered")
+    assert session.turn_count == turn_count and session.client is None
+    unavailable[0] = False
+    await rig.manager.submit_prompt(session.session_id, "Continue after registration")
+    await session._prompt_task
+    assert session.acp_session_id == native
+    assert session.turn_count == turn_count + 1
+    assert session.background_recovery_enabled
+    assert rig.db.get_session(session.session_id)["background_recovery_enabled"]
+    assert set(registrations) == {native}
 
 
 @pytest.mark.asyncio

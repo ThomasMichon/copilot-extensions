@@ -265,11 +265,14 @@ class _SessionResumeMixin:
 
                 await settle_partial_replacement(self, session)
                 cold_outage = resume_policy(self, session)
-            self._set_background_recovery_enabled(session, acquisition_launch is None)
+            from .acquisition_worktree_writer import current, registration_pending
+
+            self._set_background_recovery_enabled(
+                session, acquisition_launch is None and current() is None,
+            )
             self._clear_disconnected_reattach_retry_state(session_id)
 
-            def register_retained_native() -> None:
-                from .acquisition_worktree_writer import current
+            async def register_retained_native() -> None:
                 from . import worktree_lineage
 
                 if current() is None:
@@ -280,11 +283,9 @@ class _SessionResumeMixin:
                         pid=session.pid, worktree_dir=session.target.cwd,
                     )
                 except Exception:
-                    session.status = SessionStatus.STOPPED
-                    self._db.update_session_status(
-                        session_id, SessionStatus.STOPPED.value, time.time(),
-                    )
+                    await registration_pending(self, session)
                     raise
+                self._set_background_recovery_enabled(session, acquisition_launch is None)
 
             # Prefer reattaching to a surviving Session Host (adopt the running
             # child + its in-flight turn) over a fresh child + load_session, so a
@@ -310,7 +311,7 @@ class _SessionResumeMixin:
                     and (not cold_pending or cold_outage["recovery_phase"] == "registered")
                 ) and await self._try_reattach_live_host(session)
             if reattached:
-                register_retained_native()
+                await register_retained_native()
                 log.info(
                     "Session %s (%s) resumed by reattaching to its live "
                     "Session Host (no respawn)", session_id, session.name,
@@ -442,7 +443,7 @@ class _SessionResumeMixin:
                         )
 
                     session.client = client
-                    register_retained_native()
+                    await register_retained_native()
                     session.status = SessionStatus.IDLE
                     self._db.update_session_status(
                         session_id, SessionStatus.IDLE.value, time.time(),

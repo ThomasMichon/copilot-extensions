@@ -54,8 +54,7 @@ must still be local and match the original workspace before it is persisted
 or launched. Required resume never falls back to creating another conversation,
 even when a caller requests recreation.
 
-Required handoffs
-retain the original successor, native identity, opening seed and progress in
+Required handoffs retain the original successor, native identity, opening seed and progress in
 the same acquisition journal before launch. Post-spawn lineage failures retry
 against that successor, not a new conversation. An unconfirmed start with no
 recoverable holder, changed inputs/native identity or unknown seed outcome
@@ -65,6 +64,11 @@ successor without reseeding.
 A registration failure after native creation leaves that same conversation
 stopped and recoverable. Resume retries registration before reporting success
 or linking a successor, including when it reattaches to a surviving host.
+While registration is pending, background recovery remains durably disabled.
+Failure detaches and clears the frontend client without reaping its host/native,
+so a normal send cannot bypass guarded registration recovery. Startup leaves
+that dormant session stopped; successful guarded registration re-enables its
+ordinary background recovery.
 
 The merged pinned launcher owns retention, current installation governance and
 pre-import checks of the original completion/build identity. Selector movement
