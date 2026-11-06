@@ -145,7 +145,14 @@ def literal_write_targets(seg: str, tool: str) -> list[str]:
         arg = args[index]
         option, separator, value = arg.partition(":")
         option = option.lower()
-        if option in {"-path", "-literalpath", "-filepath", "-destination", "-value", "-inputobject"}:
+        if option in {
+            "-path", "-literalpath", "-filepath", "-destination", "-value", "-inputobject",
+            "-encoding", "-filter", "-include", "-exclude", "-stream", "-delimiter",
+            "-width", "-newname", "-name", "-itemtype", "-type", "-property", "-credential",
+            "-erroraction", "-warningaction", "-informationaction", "-progressaction",
+            "-errorvariable", "-warningvariable", "-informationvariable",
+            "-outvariable", "-outbuffer", "-pipelinevariable",
+        }:
             if not separator and index + 1 < len(args):
                 index += 1
                 value = args[index]

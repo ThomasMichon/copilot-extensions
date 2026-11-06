@@ -266,3 +266,11 @@ gap, with no new sandbox, process interception, service, or security guarantee.
 - The focused guard/parser packet passed 297 tests. The real Windows legacy
   batch cleanup-error control passed in 25.88 seconds, preserving the earlier
   ask and proving retirement of the exact retained lookup child.
+
+### 2026-11-05 - Option-before-path handling
+- The latest review confirmed both previous fixes and identified option values
+  such as `-Encoding utf8` being mistaken for the positional write path.
+- The existing parser now consumes value-taking content/common parameters
+  before choosing that path, retaining colon forms and non-target values.
+  Regressions cover option-before-path writes and read-only values across
+  worktree, reference and delegated postures.
