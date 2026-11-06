@@ -1353,3 +1353,27 @@ an aggregate host sample reports 98% CPU utilization with memory and disk
 headroom. Preserve the production limit and wait for execution capacity before
 one further bounded attempt. This is a pending qualification gate, not a pass,
 an accepted flake, or permission to bypass source evidence, review or CI.
+
+The capacity-admitted full retry passes both actual-owner flows in 171.27
+seconds (189.75 including preparation/cleanup), then the 243-case protocol
+group reaches its unchanged 300-second limit and publishes no evidence. Stop
+the capacity watcher. A named protocol-only diagnostic passes all 243 cases
+in 279.43 seconds (302.36 including preparation/cleanup), with observer and
+record-writer receipts verifying 728 executed sources. These separate results
+do not establish the complete aggregate capture gate.
+
+Twelve real receiving-side refusal controls dominate that protocol trace at
+roughly 9–14 seconds each. Keep their real protection operation, complete
+receiving CLI and resident-fallback trap; replace only the two assertion
+snapshot subprocesses per case with a canonical nonce read and a stronger
+unchanged-record-bytes assertion. This removes 24 assertion-only interpreter
+starts without deleting a receiving command or weakening refusal coverage.
+Full captures now retain named pytest progress and the slowest durations,
+while preserving the quoted JUnit path and every original group/aggregate,
+portfolio and source/receipt check.
+
+All six contained capture-report controls pass in 0.97 seconds, including
+paths with spaces/backslashes, named-output selection, the shared deadline,
+and rejection of missing, duplicate or foreign portfolio entries. Changed
+Python passes F/E9. The next complete capture must qualify this fixture and
+reporting source; the earlier disjoint diagnostic is not substituted.

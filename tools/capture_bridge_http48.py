@@ -61,7 +61,7 @@ def run_probes(
             print(f"{label} bounded probe group {index + 1}/{len(groups)}", flush=True)
             with patch.dict(os.environ, {
                 binding.REQUEST: str(request), binding.REQUEST_SHA: evidence.digest(payload),
-                "PYTEST_ADDOPTS": shlex.quote("--junitxml=" + str(junit)),
+                "PYTEST_ADDOPTS": shlex.quote("--junitxml=" + str(junit)) + " -vv --durations=20",
             }):
                 result = run_caller_owned([
                     sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",

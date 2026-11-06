@@ -32,7 +32,7 @@ def test_capture_report_path_survives_spaces_and_backslashes(tmp_path, monkeypat
 
     def run(argv, **kwargs):
         options = shlex.split(os.environ["PYTEST_ADDOPTS"])
-        assert len(options) == 1
+        assert options[1:] == ["-vv", "--durations=20"]
         report = Path(options[0].removeprefix("--junitxml="))
         report.write_text('<testsuite><testcase name="probe"/></testsuite>')
         request = json.loads(Path(os.environ[capture.binding.REQUEST]).read_bytes())
@@ -74,6 +74,7 @@ def test_capture_groups_share_one_deadline_and_verify_the_complete_portfolio(tmp
         selected = argv[argv.index("-k") + 1]
         observed.append((selected, kwargs["timeout"]))
         options = shlex.split(os.environ["PYTEST_ADDOPTS"])
+        assert options[1:] == ["-vv", "--durations=20"]
         junit = Path(options[0].removeprefix("--junitxml="))
         names = [selected]
         if selected == "protocol":

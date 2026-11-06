@@ -149,6 +149,11 @@ def test_retained_session_receiver_refuses_changed_scope_without_resident_fallba
     from agent_procutil import direct_python
 
     root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins/agent-worktrees/src"))
+    for library in ("lazy-cli-dispatch", "work-coalescing-singleton", "update-telemetry"):
+        monkeypatch.syspath_prepend(str(root / "libs" / library / "src"))
+    from agent_worktrees import tracking
+
     state = tmp_path / "authority"
     state.mkdir()
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
@@ -161,9 +166,11 @@ def test_retained_session_receiver_refuses_changed_scope_without_resident_fallba
         str(root), str(state), "example", "host",
     ]
     snapshot(prefix, "protect")
-    before = snapshot(prefix)
+    record_path = state / "project" / "worktrees" / "host.yaml"
+    before = record_path.read_bytes()
     scope = {
-        "version": 1, "identity": identity, "creation_nonce": before["creation_nonce"],
+        "version": 1, "identity": identity,
+        "creation_nonce": tracking.load_record(record_path).creation_nonce,
         "worktree_id": "host", "project": "example",
         "worktree_path": str(state / "trees" / "host"),
     }
@@ -180,5 +187,5 @@ def test_retained_session_receiver_refuses_changed_scope_without_resident_fallba
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
     assert result.returncode == 1, result.stdout + result.stderr
-    assert snapshot(prefix) == before
+    assert record_path.read_bytes() == before
     assert not (state / "resident-calls").exists()
