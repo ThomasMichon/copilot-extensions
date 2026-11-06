@@ -331,6 +331,46 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #4960 retired `NOT_PLANNED` because the current released declared-copy
+contract removes its old hash/version tie branch, not because the historical
+2/5 model result passed a rerun. Actual consumer and five fixed policy blobs
+were checked against published Dev and released Main without misattributing
+the change to a later docs PR. Complete05:06 PST scans measure826 whole OPEN,
+996 effective audited dispositions and97 above729. Twenty next oldest
+qualified originals are in four bounded cohort studies; no new recipient
+receipt, implementation or source/resource release is inferred.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #10975 completed within its merged payload/documentation scope and
+#2567's complete optional executor question received as the
+[lifecycle cohort](derived-state-receiving-cohort.md)'s fifth planned track.
+That duplicate tracker retired `NOT_PLANNED`; the design decision remains
+OPEN and optional. #10971 remains OPEN on its new actual qualification tier,
+not the first fix or mere regression definitions. Complete04:58 PST scans
+measure827 whole OPEN,995 effective audited dispositions and98 above729.
+The structural artifact boundary and common-key adoption remain separate
+retained outcomes, while a current-policy study of #4960 continues.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #10978 and complete delivered-blob agreement.
+The later backstop also found #10971 reopened with a distinct old-requester/
+new-provider compatibility condition. Its earlier closure credit is debited,
+not replayed on the first fix; a new merged slice is under bounded study.
+Complete04:35 PST scans measure828 whole OPEN,993 effective audited
+dispositions and99 above fixed729. A metadata-only excluded arrival and
+one external departure accompany the reopening. #10975's actual merged
+role extraction is also under research. The campaign remains Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records #10971 completed against merged #10974 and its focused controls,
+with installed adoption and custody separate. Complete02:43 PST scans measure
+827 whole OPEN,994 audited dispositions and98 above fixed729; the sole
+departure is that own completion. #10978 has an accepted current-head review
+and checks, but managed completion returned a provider error followed by
+`Merge already in progress`; actual terminal observation remains pending.
+The campaign remains Active and that publication obligation is not released.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records #10959 completed against merged #10961 and its promised regression
 definitions, without a new installed-runtime gate. The
 [derived-state cohort](derived-state-receiving-cohort.md) records complete
