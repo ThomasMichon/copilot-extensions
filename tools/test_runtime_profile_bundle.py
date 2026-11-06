@@ -132,6 +132,8 @@ def test_existing_output_is_never_replaced(tmp_path, inputs):
     (True, True, False, "windows-parent"), (True, True, True, "windows-parent"),
     (True, True, False, "purelib-parent"), (True, True, True, "purelib-parent"),
     (True, True, False, "metadata-parent"), (True, True, True, "metadata-parent"),
+    (True, True, False, "helper-record"), (True, True, True, "helper-record"),
+    (True, True, False, "manager-record"), (True, True, True, "manager-record"),
 ])
 def test_manager_embedded_file_ownership_is_checked_before_transport(
     tmp_path, inputs, embedded, separate, reverse, layout,
@@ -161,10 +163,17 @@ def test_manager_embedded_file_ownership_is_checked_before_transport(
             "windows-parent": "Agent_Procutil",
             "purelib-parent": f"{name}-1.0.data/purelib/agent_procutil",
             "metadata-parent": f"{name}-1.0.data/purelib/agent_procutil-1.0.dist-info",
+            "helper-record": f"{name}-1.0.data/purelib/agent_procutil-1.0.dist-info/RECORD",
+            "manager-record": (
+                f"{name}-1.0.data/purelib/copilot_extensions_worktree_manager-1.0.dist-info/RECORD"
+            ),
         }[layout]
         extra = (
             {member: b"VALUE = 1\n"}
-            if embedded and name != "agent_procutil" else {}
+            if embedded and (
+                name == "agent_procutil" if layout == "manager-record"
+                else name != "agent_procutil"
+            ) else {}
         )
         path = tmp_path / f"{name}-1.0-py3-none-any.whl"
         path.write_bytes(wheel_bytes(

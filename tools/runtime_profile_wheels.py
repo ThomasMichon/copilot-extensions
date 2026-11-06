@@ -133,7 +133,7 @@ def _verified_profile_wheels(
             )
             metadata, unpacked = facts.metadata, facts.unpacked_size
             wheel_is_manager = canonicalize_name(wheel["name"]) == manager
-            for member in facts.member_hashes if check_ownership else ():
+            for member in (*facts.member_hashes, facts.prefix + "RECORD") if check_ownership else ():
                 _check_deadline(deadline)
                 parts = member.split("/")
                 if len(parts) > 2 and parts[0].endswith(".data") and parts[1] in {"purelib", "platlib"}:
