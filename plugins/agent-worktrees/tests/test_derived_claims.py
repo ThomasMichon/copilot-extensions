@@ -16,6 +16,19 @@ from agent_worktrees import derived_claims as dc
 from agent_worktrees import finalize_obligations, state_root, tracking, worktree_identity
 
 _REAL_TRACKED_FILES = dc._tracked_files
+_REAL_PROCESS_BLOCKER = dc._process_blocker
+
+
+def _link_dir(link: Path, target: Path) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        if os.name != "nt":
+            pytest.skip("cannot create a symlink here")
+        proc = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                              capture_output=True, text=True)
+        if proc.returncode != 0:
+            pytest.skip("cannot create a symlink or junction here")
 
 
 @pytest.fixture
@@ -184,17 +197,42 @@ def test_reclaim_refuses_reparse_point(seeded, capfd, tmp_path):
     victim.mkdir()
     (victim / "precious.txt").write_text("keep")
     link = target / "link"
-    try:
-        os.symlink(victim, link, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        if os.name != "nt":
-            pytest.skip("cannot create a symlink here")
-        proc = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(victim)],
-                              capture_output=True, text=True)
-        if proc.returncode != 0:
-            pytest.skip("cannot create a symlink or junction here")
+    _link_dir(link, victim)
     _assert_refused(seeded, capfd, target, "reparse point")
     assert (victim / "precious.txt").read_text() == "keep"
+
+
+def test_linked_ancestor_refused_for_add_and_reclaim(seeded, capfd):
+    real = seeded.wdir / "real"
+    real.mkdir()
+    _link_dir(seeded.wdir / "alias", real)
+    rc, out = _add(capfd, seeded.wdir / "alias" / "cache")
+    assert rc == 1 and "link or reparse point" in out["error"]
+    assert not (real / "cache").exists()
+    target = seeded.wdir / "owned" / "cache"
+    _add(capfd, target)
+    moved = seeded.wdir / "moved"
+    (seeded.wdir / "owned").rename(moved)
+    _link_dir(seeded.wdir / "owned", moved)
+    _assert_refused(seeded, capfd, target, "link or reparse point")
+    assert (moved / "cache" / dc.MARKER_NAME).exists()
+
+
+def test_reclaim_refuses_reserved_claim_before_deleting(seeded, capfd, monkeypatch):
+    target = seeded.wdir / "cache"
+    _add(capfd, target)
+    monkeypatch.setattr(tracking, "claim_handoff_reservation", lambda rec, claim: "bundle-1")
+    _assert_refused(seeded, capfd, target, "reserved")
+    assert target.is_dir()
+
+
+def test_process_blocker_covers_executables_inside(monkeypatch, tmp_path):
+    from agent_worktrees import procs
+
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda root: None)
+    monkeypatch.setattr(procs, "processes_with_executable_under",
+                        lambda root: [{"pid": 7, "name": "python.exe"}])
+    assert "python.exe(7)" in _REAL_PROCESS_BLOCKER(tmp_path)
 
 
 def test_reclaim_refuses_git_tracked_file(seeded, capfd, monkeypatch):
@@ -207,6 +245,8 @@ def test_reclaim_refuses_git_tracked_file(seeded, capfd, monkeypatch):
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
     subprocess.run([*git, "init", "-q"], cwd=seeded.wdir, check=True)
     subprocess.run([*git, "add", "cache/tracked.txt"], cwd=seeded.wdir, check=True)
+    # An inherited index selector must not hide the checkout's tracked files.
+    monkeypatch.setenv("GIT_INDEX_FILE", str(seeded.wdir.parent / "empty-index"))
     _assert_refused(seeded, capfd, target, "Git-tracked")
     assert (target / "tracked.txt").exists()
 

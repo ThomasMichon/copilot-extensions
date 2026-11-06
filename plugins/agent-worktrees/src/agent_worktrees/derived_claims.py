@@ -97,10 +97,34 @@ def inside_checkout(path: str | os.PathLike[str], checkout: str | os.PathLike[st
     target, root = os.fspath(path), os.fspath(checkout)
     if not root or not _strictly_inside(target, root):
         return False
-    if not _strictly_inside(os.path.realpath(target), os.path.realpath(root)):
+    real_target, real_root = os.path.realpath(target), os.path.realpath(root)
+    if not _strictly_inside(real_target, real_root):
         return False
-    rel = os.path.relpath(os.path.abspath(target), os.path.abspath(root))
-    return ".git" not in {part.lower() for part in Path(rel).parts}
+    for child, parent in ((target, root), (real_target, real_root)):
+        rel = os.path.relpath(os.path.abspath(child), os.path.abspath(parent))
+        if ".git" in {part.lower() for part in Path(rel).parts}:
+            return False
+    return True
+
+
+def linked_ancestor(path: str | os.PathLike[str], checkout: str | os.PathLike[str]) -> str | None:
+    """First existing link/junction/reparse point between ``checkout`` and
+    ``path`` (exclusive of both); such an alias could redirect the target
+    into tracked content or Git metadata, so it is never trusted."""
+    root = Path(os.path.abspath(os.fspath(checkout)))
+    rel = Path(os.path.relpath(os.path.abspath(os.fspath(path)), root))
+    current = root
+    for part in rel.parts[:-1]:
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            return f"{current} (uninspectable: {exc})"
+        if is_reparse(info):
+            return str(current)
+    return None
 
 
 def is_reparse(info: os.stat_result) -> bool:
@@ -195,6 +219,10 @@ def prepare_directory(
         raise DerivedClaimError(
             f"{target} is not inside worktree {worktree_id}'s checkout; not claimed"
         )
+    if link := linked_ancestor(target, checkout):
+        raise DerivedClaimError(
+            f"{target} sits below a link or reparse point ({link}); not claimed"
+        )
     if os.path.lexists(target):
         marker = read_marker(target) if target.is_dir() and not is_reparse(os.lstat(target)) else None
         existing = find_claim(resources, target)
@@ -243,7 +271,7 @@ def _tracked_files(checkout: str, target: Path) -> str | None:
     try:
         proc = git_ops.git(
             "--literal-pathspecs", "ls-files", "-z", "--", rel,
-            cwd=checkout, check=False, timeout=60,
+            cwd=checkout, check=False, timeout=60, isolated_repository=True,
         )
     except Exception as exc:  # noqa: BLE001 - any failure must refuse
         return f"cannot list Git-tracked files ({exc})"
@@ -256,9 +284,38 @@ def _tracked_files(checkout: str, target: Path) -> str | None:
 
 
 def _process_blocker(target: Path) -> str | None:
+    """Refusal reason when a live process works in, or runs an image from,
+    ``target``. Working-directory discovery fails closed when unavailable."""
     from . import procs
 
-    return procs.checkout_retirement_blocker(str(target))
+    if blocker := procs.checkout_retirement_blocker(str(target)):
+        return blocker
+    try:
+        images = procs.processes_with_executable_under(os.path.realpath(target))
+    except OSError as exc:
+        return f"executable inspection unavailable: {exc}; reclaim deferred"
+    if images:
+        names = ", ".join(f"{p.get('name') or '?'}({p['pid']})" for p in images)
+        return f"live process(es) run an executable from it: {names}"
+    return None
+
+
+def _ledger_refusal(record, claim) -> str | None:
+    """Refusal reason when the ledger itself would not accept settling
+    ``claim`` -- checked before deletion so the directory is never removed
+    for a settle that is bound to be refused."""
+    from . import tracking
+    from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
+
+    try:
+        require_project_record_mutation(record)
+    except ExecutionSpaceError as exc:
+        return f"this process may not mutate {record.worktree_id}'s ledger: {exc}"
+    if getattr(record, "status", "") in {"finalizing", "orphaned"}:
+        return f"owner worktree {record.worktree_id} is {record.status}"
+    if reservation := tracking.claim_handoff_reservation(record, claim):
+        return f"claim is reserved by offered handoff bundle {reservation}"
+    return None
 
 
 def reclaim_refusals(record, claim) -> list[str]:
@@ -277,6 +334,10 @@ def reclaim_refusals(record, claim) -> list[str]:
     checkout = getattr(record, "worktree_path", "") or ""
     if not inside_checkout(target, checkout):
         return [f"{target} is not inside worktree {record.worktree_id}'s checkout"]
+    if link := linked_ancestor(target, checkout):
+        return [f"{target} sits below a link or reparse point ({link}); never followed"]
+    if ledger := _ledger_refusal(record, claim):
+        return [ledger]
     try:
         root_info = os.lstat(target)
     except FileNotFoundError:

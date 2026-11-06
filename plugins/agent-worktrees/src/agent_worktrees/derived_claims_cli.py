@@ -72,6 +72,30 @@ def _resolve_owner(args, config) -> tuple[Path | None, str, str | None]:
     return rec_path, wt_id, None
 
 
+def _derived_lock(rec_path: Path, wt_id: str):
+    """Per-owner lock serializing derived add with reclaim's check -> delete
+    -> settle, so a producer cannot recreate a path (with a fresh nonce)
+    between a reclaim's deletion and its settle. Separate from the record
+    lock, which the ledger writer takes for each individual write."""
+    from . import tracking
+
+    return tracking._RecordLock(
+        rec_path.with_name(f"{wt_id}.derived-claims.yaml"), timeout=30.0, require_sidecar=True,
+    )
+
+
+def _locked(args, rec_path: Path, wt_id: str, verb: str, body) -> int:
+    lock = _derived_lock(rec_path, wt_id)
+    try:
+        lock.__enter__()
+    except TimeoutError:
+        return _fail(args, f"{verb}: another derived-claim operation on {wt_id} is in progress; retry")
+    try:
+        return body()
+    finally:
+        lock.__exit__(None, None, None)
+
+
 def stored_ref(args, ref: str) -> str:
     """Map a user-supplied path to the matching derived claim's stored ref.
 
@@ -94,7 +118,7 @@ def stored_ref(args, ref: str) -> str:
 
 def claims_add_derived(args, ref: str) -> int:
     """Create ``ref`` with a marker and journal it as an open derived claim."""
-    from . import claim_history, claims_cli, tracking, tracking_write
+    from . import claims_cli
     from . import config as cfg
 
     config = cfg.load_config()
@@ -110,6 +134,15 @@ def claims_add_derived(args, ref: str) -> int:
     rec_path, wt_id, err = _resolve_owner(args, config)
     if err:
         return _fail(args, f"claims add derived: {err}")
+    return _locked(
+        args, rec_path, wt_id, "claims add derived",
+        lambda: _add_derived_locked(args, rec_path, wt_id, ref),
+    )
+
+
+def _add_derived_locked(args, rec_path: Path, wt_id: str, ref: str) -> int:
+    from . import claim_history, claims_cli, tracking, tracking_write
+
     record = tracking.load_record(rec_path)
     target = dc.canonical_path(ref)
     creator = getattr(args, "derived_creator", None) or "unknown"
@@ -165,12 +198,20 @@ def claims_add_derived(args, ref: str) -> int:
 
 def claims_settle_reclaim(args, ref: str) -> int:
     """Delete exactly one derived claim's directory, then settle the claim."""
-    from . import claim_history, claims_cli, obligations, tracking, tracking_write
     from . import config as cfg
 
     rec_path, wt_id, err = _resolve_owner(args, cfg.load_config())
     if err:
         return _fail(args, f"claims settle --reclaim: {err}")
+    return _locked(
+        args, rec_path, wt_id, "claims settle --reclaim",
+        lambda: _settle_reclaim_locked(args, rec_path, wt_id, ref),
+    )
+
+
+def _settle_reclaim_locked(args, rec_path: Path, wt_id: str, ref: str) -> int:
+    from . import claim_history, claims_cli, obligations, tracking, tracking_write
+
     record = tracking.load_record(rec_path)
     claim = dc.find_claim(record.resources, dc.canonical_path(ref))
     if claim is None:
