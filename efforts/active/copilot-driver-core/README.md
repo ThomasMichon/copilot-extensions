@@ -1335,3 +1335,12 @@ The contained runner succeeds in 131.81 seconds; F/E9 passes. The earlier broad
 334-case selection reached its original 300-second group limit and is not a
 completed-suite result. Guarded flows and the complete 245-case capture still
 owe fresh source-specific evidence before publication.
+
+The guarded acquisition flow still reaches the 90-second limit during its
+handoff, with every completed command returning normally. The operator
+explicitly approves increasing only the two actual-owner cases to 120 seconds
+after reviewing those measurements. The original 300-second group safety
+limit, 600-second Windows aggregate deadline, complete portfolio and all
+source/interpreter/receipt checks remain unchanged. This is a declared
+per-case budget adjustment, not evidence that the earlier 90-second contract
+passed and not authorization for installed or fleet effects.

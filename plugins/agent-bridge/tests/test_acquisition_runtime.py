@@ -783,7 +783,7 @@ async def test_required_cli_writer_is_explicitly_unsupported_before_any_owner_ca
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(90)
+@pytest.mark.timeout(120)
 async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes(rig, tmp_path, monkeypatch):
     import time
 

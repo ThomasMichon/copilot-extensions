@@ -671,7 +671,7 @@ async def test_keyed_creation_registration_failure_retains_native_and_dormancy(w
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(90)
+@pytest.mark.timeout(120)
 async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim(
     rig, tmp_path, monkeypatch,
 ):
