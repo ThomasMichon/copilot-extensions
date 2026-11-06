@@ -165,3 +165,15 @@ def test_truncated_snapshot_is_reported_without_reopening_or_inventing_records()
     assert result["coverage"]["changed_inputs"] == 1
     assert result["coverage"]["accepted_records"] == 1
     assert result["coverage"]["producer_loss"] == "unknown"
+
+
+def test_standalone_chart_distinguishes_invalid_and_partial_input_from_absence():
+    builder = health.HourlyReport(NOW)
+    raw = b"{bad-json}\n" + json.dumps(span()).encode()
+    builder.scan(io.BytesIO(raw), len(raw))
+    result = builder.result(1)
+    result["coverage"].update(oversized_records=2, unsupported_records=3, changed_inputs=4)
+    chart = health_chart.render(result)
+    assert chart != health_chart.render(report([]))
+    assert "malformed 1, partial 1, oversized 2, unsupported 3; changed inputs 4" in chart
+    ElementTree.fromstring(chart)

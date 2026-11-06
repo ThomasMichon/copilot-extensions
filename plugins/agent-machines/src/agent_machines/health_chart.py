@@ -17,7 +17,7 @@ def render(report: dict) -> str:
         for hour in hours for group in hour["groups"] if group["kind"] == "performance"
     })
     maximum = max(counts, default=0) or 1
-    chart_height = 340 + 110 * len(timing_groups)
+    chart_height = 400 + 110 * len(timing_groups)
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="{chart_height}" '
         f'viewBox="0 0 1040 {chart_height}" role="img">',
@@ -52,6 +52,17 @@ def render(report: dict) -> str:
         f'<text x="16" y="309">Scan limited: {str(coverage["scan_limited"]).lower()}; '
         f'unavailable inputs: {coverage["unavailable_inputs"]}. No p99 or uptime claim.</text>',
     )
+    parts.append(
+        f'<text x="16" y="333">Invalid input: malformed {coverage["malformed_records"]}, '
+        f'partial {coverage["partial_records"]}, oversized {coverage["oversized_records"]}, '
+        f'unsupported {coverage["unsupported_records"]}; '
+        f'changed inputs {coverage["changed_inputs"]}.</text>',
+    )
+    parts.append(
+        f'<text x="16" y="357">Excluded records: future {coverage["future_records"]}, '
+        f'expired {coverage["expired_records"]}, group limit {coverage["unrepresented_records"]}; '
+        f'duplicate inputs {coverage["duplicate_inputs"]}.</text>',
+    )
     for row, identity in enumerate(timing_groups):
         values = [
             next((
@@ -62,7 +73,7 @@ def render(report: dict) -> str:
             for hour in hours
         ]
         maximum_ns = max((value for value in values if value is not None), default=0) or 1
-        top = 340 + row * 110
+        top = 400 + row * 110
         label = escape("/".join(identity))
         parts.append(
             f'<text x="16" y="{top}">{label}: observed-success p95; '
