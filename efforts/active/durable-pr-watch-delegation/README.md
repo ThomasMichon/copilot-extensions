@@ -1071,6 +1071,21 @@ callback an implicit credential store.
 
 ### 2026-11-06 - Retain pinned hosted failures and improve peer diagnostics
 
+- A subsequent, explicitly authorized progress-based repair/retest loop passed
+  all fifteen selected watch-owner jobs in run `42296155145` at
+  `fbdd0a9c0b0b71dd9549001e903388c54a465610`, including real fresh-account
+  Linux/Windows upgrades, shipped-cell and peer isolation, lease-only refusal,
+  controller recovery, concurrent upgrades and macOS refusal. Every selected
+  runner completed its owned cleanup; the exact temporary tag was removed
+  after a matching-SHA check and absence readback. This is hosted qualification,
+  not shared-host rollout, the separate Dispatch reproduction or parent completion.
+- Fresh review then found the new timeout wrapper changed the exception type
+  before startup/upgrade diagnostic handlers could catch it. The helper now
+  annotates and rethrows the original timeout; both cutover callers combine
+  captured streams with journal, lifecycle, native-birth and original-exit
+  evidence. Eleven focused controls pass, including both actual diagnostic
+  caller phases. Current-head CI, re-review and hosted qualification of this
+  test-helper correction remain pending under the same bounded repair loop.
 - The separately authorized `watch_owner` run `42279632485` exercised
   #10953's exact candidate `10be300359f85323f012c94fd1124ed50ac70a06`.
   All fifteen disposable jobs reached pytest: five passed and ten failed.

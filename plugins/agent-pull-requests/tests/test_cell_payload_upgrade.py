@@ -128,8 +128,19 @@ def _run(script, arguments, environment, caller, *, timeout):
             timeout=timeout, check=False, **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as error:
-        raise AssertionError(
+        error.add_note(
             f"Owned payload command timed out after {timeout}s: "
+            f"stdout={error.stdout!r}; stderr={error.stderr!r}"
+        )
+        raise
+
+
+def _run_cutover(script, arguments, environment, caller, *, run_root, phase, timeout):
+    try:
+        return _run(script, arguments, environment, caller, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError(
+            f"Owned {phase} timed out: {_cutover_failure_details(run_root)}; "
             f"stdout={error.stdout!r}; stderr={error.stderr!r}"
         ) from error
 
@@ -183,11 +194,45 @@ def test_payload_command_timeout_retains_both_streams(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(subprocess, "run", timed_out)
-    with pytest.raises(AssertionError) as failure:
+    with pytest.raises(subprocess.TimeoutExpired) as failure:
         _run(tmp_path / "scripts" / "init.ps1", [], {}, tmp_path, timeout=5)
-    assert "after 5s" in str(failure.value)
-    assert "partial stdout" in str(failure.value)
-    assert "partial stderr" in str(failure.value)
+    notes = "\n".join(failure.value.__notes__)
+    assert "after 5s" in notes
+    assert "partial stdout" in notes
+    assert "partial stderr" in notes
+
+
+@pytest.mark.parametrize("phase", ["startup", "upgrade"])
+def test_cutover_timeout_retains_caller_evidence_and_both_streams(tmp_path, monkeypatch, phase):
+    (tmp_path / "watch-owner-transaction.json").write_text(json.dumps({
+        "phase": "committed", "exited": [],
+        "successor": {"pid": 42, "startTime": "10", "token": "fixture-private"},
+    }), encoding="utf-8")
+    lifecycle.record(tmp_path, "fixture", detail={"private": "fixture-private"})
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "10")
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, birth: False)
+    timeout_error = subprocess.TimeoutExpired(
+        ["fixture"], 5, output="partial stdout", stderr="partial stderr",
+    )
+
+    def timed_out(*_args, **_kwargs):
+        raise timeout_error
+
+    monkeypatch.setattr(subprocess, "run", timed_out)
+    with pytest.raises(AssertionError) as failure:
+        _run_cutover(
+            tmp_path / "scripts" / "init.ps1", [], {}, tmp_path,
+            run_root=tmp_path, phase=phase, timeout=5,
+        )
+    message = str(failure.value)
+    assert f"Owned {phase} timed out" in message
+    assert "'phase': 'committed'" in message
+    assert "'action': 'fixture'" in message
+    assert "'nativeBirthMatches': True" in message
+    assert "'originalExited': False" in message
+    assert "partial stdout" in message and "partial stderr" in message
+    assert "fixture-private" not in message
+    assert failure.value.__cause__ is timeout_error
 
 
 def test_cutover_failure_details_exclude_private_journal_and_event_fields(tmp_path):
@@ -342,15 +387,10 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         # Once attempted, cleanup inspects/stops through the governed entry even
         # if a caller loses the startup response after the owner commits.
         started = True
-        try:
-            result = _run(
-                command, ["restart", "--json"], environment, caller,
-                timeout=_scenario_remaining(scenario_deadline),
-            )
-        except subprocess.TimeoutExpired as error:
-            raise AssertionError(
-                f"Owned startup timed out: {_cutover_failure_details(run_root)}"
-            ) from error
+        result = _run_cutover(
+            command, ["restart", "--json"], environment, caller,
+            run_root=run_root, phase="startup", timeout=_scenario_remaining(scenario_deadline),
+        )
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout) == {"restarted": True, "was_running": False}
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
@@ -367,15 +407,10 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         assert new_version != old_version
         _refresh_release(payload, new_version)
         # No direct stamp, activation CAS, manual snapshot or runtime edit.
-        try:
-            result = _run(
-                init, [], environment, caller,
-                timeout=_scenario_remaining(scenario_deadline),
-            )
-        except subprocess.TimeoutExpired as error:
-            raise AssertionError(
-                f"Owned upgrade timed out: {_cutover_failure_details(run_root)}"
-            ) from error
+        result = _run_cutover(
+            init, [], environment, caller,
+            run_root=run_root, phase="upgrade", timeout=_scenario_remaining(scenario_deadline),
+        )
         if result.returncode != 0:
             pytest.fail(
                 f"Owned upgrade refused:\n{result.stderr}\n"
