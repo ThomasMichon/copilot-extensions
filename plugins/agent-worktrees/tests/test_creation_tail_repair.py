@@ -851,6 +851,7 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
     parent_reports = []
     original_config, original_dir = cfg.load_config, cfg.project_dir
     original_acquire = repair.fin.FinalizeLock.acquire
+    original_output = repair.output._json_output
     core = handoff_cli._core()
 
     def child_thread():
@@ -869,6 +870,7 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
     def emit(value):
         if child_thread():
             results.append(value)
+            original_output(value)
         else:
             # The child owns the process-global stdout capture while embodying.
             parent_reports.append(value)
