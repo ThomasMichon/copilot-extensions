@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 from dataclasses import replace
 import hashlib
 import json
@@ -196,3 +197,55 @@ def test_reviewed_member_digests_cannot_hide_lexical_bindings(tmp_path: Path, ch
         return
     with pytest.raises(views.SourceViewError, match="nested|conversion binding"):
         views.harness_emitted_inputs(tmp_path, paths)
+
+
+def test_semantic_shape_normalizes_only_empty_optional_host_fields() -> None:
+    original = ast.parse("def sample():\n    return b'value'\n").body[0]
+    original._fields = tuple(name for name in original._fields if name != "type_params")
+    if hasattr(original, "type_params"):
+        delattr(original, "type_params")
+    newer = copy.deepcopy(original)
+    newer._fields = (*newer._fields, "type_params")
+    setattr(newer, "type_params", [])
+    assert views._shape(original) == views._shape(newer)
+    setattr(newer, "type_params", [ast.Name(id="T", ctx=ast.Load())])
+    assert views._shape(original) != views._shape(newer)
+    unknown = copy.deepcopy(original)
+    unknown._fields = (*unknown._fields, "future_semantic_field")
+    setattr(unknown, "future_semantic_field", [])
+    assert views._shape(original) != views._shape(unknown)
+    changed = ast.parse("def sample():\n    return b'changed'\n").body[0]
+    assert views._shape(original) != views._shape(changed)
+
+
+def test_harness_minimum_parser_refuses_newer_nonempty_language_semantics() -> None:
+    with pytest.raises(views.SourceViewError, match="invalid composed source"):
+        views._parse(b"def sample[T](value: T) -> T:\n    return value\n",
+                     "synthetic-newer-language", feature_version=(3, 10))
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", ""])
+def test_emitted_diagnostics_annotate_only_the_current_generated_output(
+    tmp_path: Path, ending: str,
+) -> None:
+    paths, _ = emitted_source(tmp_path)
+    owner = checker._SourceViews(tmp_path, tmp_path / "stage")
+    emitted = owner.add_harness(paths)
+    origin = (paths[0], 110, 110)
+    parent, child = (
+        replace(view, origin=origin, lines=(views.SourceLine(paths[0], 110),))
+        for view in emitted
+    )
+    owner.views = [parent, child]
+    newline = ending or "\n"
+    physical = f"{paths[0]}:110: error: physical"
+    raw = newline.join([
+        f"{parent.output}:1: error: parent", f"{child.output}:1: error: child", physical,
+    ]) + ending
+    mapped = owner.diagnostics(raw)
+    assert mapped.count("[emitted expression range 110-110; portable typing witness]") == 2
+    assert physical + ending == mapped.splitlines(keepends=True)[-1]
+    assert mapped.splitlines(keepends=True)[0].endswith("portable typing witness]" + newline)
+    with pytest.raises(views.SourceViewError, match="outside the composed source map"):
+        parent.diagnostics(f"{parent.output}:2: error: invalid", tmp_path)
+    owner.cleanup()

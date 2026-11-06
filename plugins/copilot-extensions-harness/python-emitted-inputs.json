@@ -7,7 +7,7 @@
         "29165b6fd362e7c04df14ce1074a01b9a414de0d3a6aef8d847dacde0dc6d914",
         "7ed16b22ea54e48019649ee10c762c68c4e4d67861814782593713971c8843f2"
       ],
-      "structure": "5c927dfed8328e1d06cfb4f5019b3702d689b83d8049057c61edcacc85b485cd"
+      "structure": "9819da46f371691fc927bc0d8be495d2d9d9139240df0fb1278f7d88f08ed158"
     },
     {
       "path": "plugins/copilot-extensions-harness/scripts/pretool_killswitch.py",
@@ -15,7 +15,7 @@
         "21d47f7a41fb7a354706e328be06e62c6addc9e6c950a3357b87e1658768a757",
         "3df9093f21f075e734dcc3f37e8a8118aea5b30f4e0104b67573d168203fd760"
       ],
-      "structure": "4e2f42438255d84c3eba9dafcf9b5a09d3b72b768348908ba3b884cb53dea62f"
+      "structure": "43580b694fd00a7d17d704a280513984714feb8c6db53262ad0cdd51cb56ded0"
     },
     {
       "path": "plugins/copilot-extensions-harness/scripts/reviewer_source.py",
@@ -23,7 +23,7 @@
         "0ff1c7be3e472ca14b4ff90751949d870b0d7c1755429dd021f0032a92f427ac",
         "708934267df7189835e648768a34330a19250b6ad0b3f7e7edfb699cacfc03e4"
       ],
-      "structure": "5eb247c1a039c41639f05f29a8216bc42ac1b3ec4b1fd01cee044e51e08c0501"
+      "structure": "cd765ccea9a567a989f9f181e709ea8429fdf59c8668e9bc99619d34a8a076cb"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_contribution_boundary_hook.py",
@@ -31,7 +31,7 @@
         "41a70d5d32249a2e05859ec1a9bc924e12068d4e45719881eb5454934d4691c7",
         "a804ac9bcd0e4d7fc0c76e2ed23ba9ca631acc96e9dd23675ba25618c09b5463"
       ],
-      "structure": "3d5aa91d0ab3cd6cd2809cbd0b2e5b5e7ba4b1cc5cd5babee60e32a919616a56"
+      "structure": "ae8587b154af97afc6d990bf000ab4e07468093dbfe694950ea17c095a0437de"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_contribution_boundary_projection.py",
@@ -39,7 +39,7 @@
         "0a2d094a3b2fa768dfc168a7d7b940b4f7aa83ea082e81b47a0ab455f2d066ce",
         "d05000af7cbea8eacdbcf37d728e90f60742c49edd0ab9ccaaafc6a3e6d62fa7"
       ],
-      "structure": "bd11334fa79aca74806447fed9f5567165ae52e4fdc0ee479934c0580a860b25"
+      "structure": "3091801612daffb177bb43482ee3ba6687ab78e27924ca1a33be276c9693e07d"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -47,7 +47,7 @@
         "66f49cf57e0f7702fee4d7550e156109f67a305551f8fa3fd65ad4351f20a98e",
         "caa9ce083535029b6e98539f41c11ff2325ecbded258c4746b0d7dd21de69100"
       ],
-      "structure": "9b3fc158b67f2afa226aa96e05674f6358e9c397ec4ee9be70c44cc6f6c5674e"
+      "structure": "6d295a84f9f39a53d8db6cc5ac762e55c3ab3bab864fb05e0f0de428335a1bde"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_cross_repo_debug_tracking_projection.py",
@@ -55,7 +55,7 @@
         "5d80eaabcf4ae5ded16e25d2e82fff80b9a8c2d9e743865cc9c3e6acca420cce",
         "93defb50c3cd5033ce492be2f4bdb69d7b4fe8c5f6c4baafbffef7ba39fe20fe"
       ],
-      "structure": "b49291087f71ef2c2948de94329af12a7576f31f2e4cc6e3f7438d3ca3b83b22"
+      "structure": "4f424da6a48bc144cb24b8b3a59fe50bed4b46c24c5d79e033d5193a5b1c24b1"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_evidence.py",
@@ -63,7 +63,7 @@
         "71a9d282b2379e6555a95fc17d702ee35e30c5f604a1d071e2f98b08161806b2",
         "d4c6904826c7b1bca299b9f080ac235531ad77ea91802de02f287c7018bb84d0"
       ],
-      "structure": "c1ef3b779b7e05e477caa988a3515776ef6e1d1673ababe0aaaea0e447cbad5e"
+      "structure": "b1c8cbd25157fa27bd76deba0f0e7ccf236486db7acf7697c0d06af6bdc90ad9"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_native.py",
@@ -71,7 +71,7 @@
         "44e29de624ef6548ef5bba700abcb99d9810dbf5f373243d29d93d4865102a5a",
         "ee33a5bb5b8ad79011a0b3ddd0e90c1c49fff6920b52fee76fe6800974268380"
       ],
-      "structure": "3b4dd4667d1339c633cf6b54f030160ee770a74602d1e2d314fe90fd426ba7e3"
+      "structure": "13301306445f653dcf5f1b8fa7c3eb68f647683234bbd476da002f30c95cef96"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_policy.py",
@@ -79,7 +79,7 @@
         "5c9e8e3686b9c79e9106f66cef834d4ad27cf3f0a36ffe41a7cc3af28ebed044",
         "7b4c3e06eb383ef2899fb405adeb8219f0af2dbc5a0363a13edf16e0b8d0f428"
       ],
-      "structure": "633bfb516f5a4314ef660d7f058e99a6736240a44758ac1a59b91583875b2183"
+      "structure": "2759bb34fe0144d2829866e892d662f93323eecbd08b421639458a2c83ca94af"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_workflow.py",
@@ -87,7 +87,7 @@
         "76fa6f21273bfba45e4d49927dee91280961fdd7cb8cea5c93c5e5330786de19",
         "cd0ff850e326caabf740c401bb7d68e4a44eebcd0e87037a5a55112fd3bc25ca"
       ],
-      "structure": "06f1b30de7d14a0b59b35ed4cca84ac587da87b986899764d9031eea4fc507ce"
+      "structure": "9f6e2928121978240e48ea9e9072ed5afa0db0993e9b7a5bb7f7fbd0cba934a8"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_writer.py",
@@ -95,7 +95,7 @@
         "6ec8641b9c5d469a61609f34517f7dbeae31c562c46ec572f4a70d03e1f218c0",
         "cd0ada2aa29efd7a25ee46dce82e5057d32abf7977b50cc99ba94d7e4e57dba9"
       ],
-      "structure": "a04f36cd5ba30dd592bf525add730979ef41bd49d858e2dfa9827a28c1965ff5"
+      "structure": "e30c2f6494eeaf55c8fa0587352bb9f44bc3ee445c6e8737bbd53397bcab85cc"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_related_provenance.py",
@@ -103,7 +103,7 @@
         "3cc0b76afe56896400c404f16fefec57158dc3596d74487ca930ed366682dd50",
         "87effbaf6e96cf9d809de0cffae156e06e3c00d5284267edc148dad4c28b5fa2"
       ],
-      "structure": "753d3cbbe5dbfcecdb9c5da02499be02baa52a35282ee3103810a7440cadf78e"
+      "structure": "231df82177844f379605fad2056c9abaf6075210a2bd794289f271ac0667447c"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_reviewer_source.py",
@@ -111,7 +111,7 @@
         "7657dfdedac50d21bfbfa7e0c4e9a5a172fd9b5ce76b15a832f9a38be5b7e993",
         "e81acc9a6e4e8b5145ea0dda9f264d53bd889ed575b3a6fb6af092433229ce89"
       ],
-      "structure": "71b0c4a183b1ed7b2bd3a44042b83753c0803f49c19f0b8bd96522a25083c6d4"
+      "structure": "4fddf6e55ce0682a319f0955a5c72a47e7809d612ae669f03af093ac7e98223c"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_session_context_declarations.py",
@@ -119,7 +119,7 @@
         "7b9bfa769ff9ba77db8f6cef97afc4384ab1e827a6074a1d171554d35c1a24ae",
         "9182e3e40387caae21a20d8bd08dfadbb5afb4b3c98037056a56664cd8021647"
       ],
-      "structure": "3e2fbb6b760d21d15f84cb219d7d121fd8bc06f7506fec64b16c36d9229d1961"
+      "structure": "59e3239248b3e4af5b9f255c94977b7c81ea6e5072a1448de1d230b62e11b0af"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_test_runner_containment.py",
@@ -127,7 +127,7 @@
         "a85ee1ef68b6f7b1210acbee5940770a5ac11f1b440dddd112acd46d2e44dff5",
         "d01ec22a319b1a481aacb63bd11d534b775025d3ca82014674e01ccb8c4960dd"
       ],
-      "structure": "5e166c18cd9d6cdc2c505bc7d01a5e3d7650df29ef3b68eb1caacfa6ad25a5b2"
+      "structure": "9eac3a8d9b261295cf1e6b5e32749d36c78ed15fab8e3e2ad991a970617fef43"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_validate_and_promote_projection.py",
@@ -135,7 +135,7 @@
         "222c62850e341a0755adce71148164a4f64f311894a1eb6d371b2a032ade3524",
         "6aea249674ecf5cea9259dfd21b4e4d1e1156d2c62c25ed328e38b886a6a0867"
       ],
-      "structure": "f590ec28d1ccf3b71016c06f658dd30c09de00c42c93756d44db36162ebf4b51"
+      "structure": "a2a2871e22513800d0cf143e2d63836c04650284dd678461aa15aec7a4436d7d"
     }
   ],
   "assets": [
@@ -179,7 +179,7 @@
       "function": "test_git_timeout_reaps_the_actual_child",
       "selector": "python-c",
       "index": 0,
-      "expression": "d0e84818534155d856faeda69d97c1c754b9ee62e4c075f617fbdb2c3e34e27b",
+      "expression": "61c7dfffcc054302839657870c78a1a1d33b8bfde3bfb200bb173e9e9483d836",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "git-timeout",
@@ -198,7 +198,7 @@
       "function": "test_native_hook_process_counts_and_latency",
       "selector": "assignment:audited",
       "index": 0,
-      "expression": "37d01ff20314a5610d07f1bbdc9fc489b474da90b4a4bbd7681bef3648d55c26",
+      "expression": "81a6f2795805e8af058b4629a974815ce0f0506c80cef895664f611e83db67b6",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "audit-hook-observation",
@@ -217,7 +217,7 @@
       "function": "test_hook_exits_with_blocked_file_reader",
       "selector": "assignment:wrapper",
       "index": 0,
-      "expression": "35a593f8691f44b5d58bb18ec0a6fc4be3c7b061b5593db79d02379bb359ae71",
+      "expression": "8fa0616875d51b6350fd77f061aea6a16beb7dfc075e9bae4e346671765b5c07",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "blocked-reader",
@@ -236,7 +236,7 @@
       "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
       "selector": "write-text",
       "index": 0,
-      "expression": "76716fdf01e84e7e6805f4bdfe92abbb3c8dac4a909ba7cd72effab0c327a161",
+      "expression": "3b7275053a1b16a6f05df2309b948b25f834c6f3e17771b7501a29647874185d",
       "origins": {},
       "transport": "windows-write-text-utf8-epoch",
       "role": "crash-negative",
@@ -255,7 +255,7 @@
       "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
       "selector": "write-text",
       "index": 1,
-      "expression": "4922540b64385c492f8fa02c9cefecafc00685030d9851bff76f39d6146033f9",
+      "expression": "7fa23d75e295a03400f2d552c7c2c95b89f0f5973e7714ba8e53403667a4b008",
       "origins": {
         "source": "str(PLUGIN / 'scripts' / 'copilot-mention-guard.py')"
       },
@@ -276,7 +276,7 @@
       "function": "test_run_contained_returns_child_exit_code_and_preserves_output",
       "selector": "python-c",
       "index": 0,
-      "expression": "b0a8ea54377af03531ef3e8e33b317ef3aa9f009d27ce5a7e8031d1e78337d9f",
+      "expression": "8f0302ac51e8ac82c7bf6d0d124587737884627dcd2d38dd32b01d0c50ed210c",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "exit-seven",
@@ -295,7 +295,7 @@
       "function": "test_timeout_reaps_recursive_descendant",
       "selector": "assignment:script",
       "index": 0,
-      "expression": "3d94657b0fff4f289bfc86ec3432682267448f6dbbce583f40b099b01fd65bfc",
+      "expression": "38850e7bc775a5d08d00a4ef56ef14fa809f09c79354820cd505d6420b150836",
       "origins": {
         "pid_file": "tmp_path / 'descendant.pid'"
       },
@@ -316,7 +316,7 @@
       "function": "test_timeout_reaps_descendant_requesting_detachment",
       "selector": "assignment:script",
       "index": 0,
-      "expression": "05084ff8bbfe6f0b682499ee7216e252fcc13348980a5b96364af2207a9dd6fb",
+      "expression": "3d09ea4893a641da68ef1c38a61b7028880e244f3d2d2c1c7ce5269b2f658678",
       "origins": {
         "pid_file": "tmp_path / 'detached-descendant.pid'",
         "procutil_src": "REPO / 'libs' / 'agent-procutil' / 'src'"
@@ -338,7 +338,7 @@
       "function": "test_temp_budget_stops_tree",
       "selector": "assignment:script",
       "index": 0,
-      "expression": "1ca9ca4659602b3c85e49079fe2702e63d201ac6f09a26ad9d2355fc3e5de786",
+      "expression": "0ed9e5c024dca3ec75f790bf57853e1b704ec7eaad7ad73263fc816ed72d71ba",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "temp-budget",
@@ -357,7 +357,7 @@
       "function": "test_process_budget_stops_tree",
       "selector": "assignment:script",
       "index": 0,
-      "expression": "8cbeca9eb92c323e6714c54bb7f998ceb140b9c982dc1d50ba3eb1d1f96f2994",
+      "expression": "3f506db24f1488335a8f54fdd2a7e3c56f391d7c71b7069ca688322ed07f7b93",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "process-budget",
@@ -376,7 +376,7 @@
       "function": "test_memory_budget_stops_tree",
       "selector": "assignment:script",
       "index": 0,
-      "expression": "16ac4ae256b404f0460e2e6de867a6e53f2b0208350492f5fd60cd4a7b46ca2d",
+      "expression": "800b518b8cbcea5717cd7971a7890beeb87e074e7c4edd2f661b10f3b96d22bd",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "memory-budget",
@@ -395,7 +395,7 @@
       "function": "test_injected_pytest_policy_loads_and_enforces_declarations",
       "selector": "write-text",
       "index": 0,
-      "expression": "9de700cd794436666eeeab0777661412189effbae08648f717ea878923752d0b",
+      "expression": "e278e0791a23a24b2f571173ad55301178c7223a2088177e4f02992c8856b774",
       "origins": {},
       "transport": "windows-write-text-utf8-epoch",
       "role": "invalid-policy-epoch",
@@ -414,7 +414,7 @@
       "function": "test_injected_pytest_policy_loads_and_enforces_declarations",
       "selector": "write-text",
       "index": 1,
-      "expression": "71e70a7434263695aacdb0be219937e1087dedb9370d5af65416e76b36386835",
+      "expression": "ae6cf9bcf9490ce32dcfb748e6675cdcc130cfbc9ce3325e7fbe5e7589840b19",
       "origins": {},
       "transport": "windows-write-text-utf8-epoch",
       "role": "valid-policy-epoch",
@@ -433,7 +433,7 @@
       "function": "test_timeout_reaps_recursive_descendant",
       "selector": "nested:script",
       "index": 0,
-      "expression": "3d94657b0fff4f289bfc86ec3432682267448f6dbbce583f40b099b01fd65bfc",
+      "expression": "38850e7bc775a5d08d00a4ef56ef14fa809f09c79354820cd505d6420b150836",
       "origins": {
         "pid_file": "tmp_path / 'descendant.pid'"
       },
@@ -454,7 +454,7 @@
       "function": "test_timeout_reaps_descendant_requesting_detachment",
       "selector": "nested:script",
       "index": 0,
-      "expression": "05084ff8bbfe6f0b682499ee7216e252fcc13348980a5b96364af2207a9dd6fb",
+      "expression": "3d09ea4893a641da68ef1c38a61b7028880e244f3d2d2c1c7ce5269b2f658678",
       "origins": {
         "pid_file": "tmp_path / 'detached-descendant.pid'",
         "procutil_src": "REPO / 'libs' / 'agent-procutil' / 'src'"
@@ -476,7 +476,7 @@
       "function": "test_process_budget_stops_tree",
       "selector": "nested:script",
       "index": 0,
-      "expression": "8cbeca9eb92c323e6714c54bb7f998ceb140b9c982dc1d50ba3eb1d1f96f2994",
+      "expression": "3f506db24f1488335a8f54fdd2a7e3c56f391d7c71b7069ca688322ed07f7b93",
       "origins": {},
       "transport": "nested-parent-constant",
       "role": "nested-process",
@@ -495,7 +495,7 @@
       "function": "test_native_hook_process_counts_and_latency",
       "selector": "startup",
       "index": 0,
-      "expression": "50e19cfab548ee56eeb67bbc01bce640cba8f7f9f90e7b2ecd2e1cc6a592785b",
+      "expression": "6bbd25b89add6f65ab4698b8fb99db9b8fb12e7a5f96f79fc726e2976c8807d4",
       "origins": {},
       "transport": "unicode-python-c",
       "role": "startup",
@@ -532,7 +532,7 @@
         72,
         26
       ],
-      "structure": "3384f673d58eef893da24f87ac2ad41e877c074ffc83a4ba0ffef7c06f8b1489"
+      "structure": "c666b392fce5d1c5c9eb38eaf031044bb48cca9aa5abdaeaeadf120f62158b42"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -543,7 +543,7 @@
         130,
         81
       ],
-      "structure": "3ed581ba83a648812caf0518bf6564e45da8aed560c68846823f0971ffe880d5"
+      "structure": "a7d28bfd035220bf2e91a730335f7c4e6efa602d313647ab4469fb3b43e1b0c6"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -554,7 +554,7 @@
         141,
         81
       ],
-      "structure": "3ed581ba83a648812caf0518bf6564e45da8aed560c68846823f0971ffe880d5"
+      "structure": "a7d28bfd035220bf2e91a730335f7c4e6efa602d313647ab4469fb3b43e1b0c6"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -565,7 +565,7 @@
         216,
         71
       ],
-      "structure": "c7e6a960d8c833a918263186905f87899ed6fc54d36c16ed51c4aa1cfee7a0b3"
+      "structure": "8331083521dc06f889c3ea1cf6b71b8663d3328678f17f0e13020f517c2a35c4"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -576,7 +576,7 @@
         224,
         75
       ],
-      "structure": "cd1a9b321d4e82b96f7b16969f069ed684ebad98b56833719f216cb109596375"
+      "structure": "cedb00f6fd1baab5ccfd253ab6efc9ce2671c261c5510183216a0dba75e59c50"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -587,7 +587,7 @@
         232,
         71
       ],
-      "structure": "c7e6a960d8c833a918263186905f87899ed6fc54d36c16ed51c4aa1cfee7a0b3"
+      "structure": "8331083521dc06f889c3ea1cf6b71b8663d3328678f17f0e13020f517c2a35c4"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -598,7 +598,7 @@
         246,
         58
       ],
-      "structure": "985882ea84daad00e870b8fb74dfe3c0f45808cbd19528ef9d53082a20dd6477"
+      "structure": "0088763a6f0dbc4c1dd6d182338cec52cdd895474c8a874ca1591b6a19c17b23"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -609,7 +609,7 @@
         322,
         67
       ],
-      "structure": "2aa201d5042224df1db12b79e66b95b68a722d01535ea446293751e280026fb0"
+      "structure": "d031408425197c2866cdf3daf1baaaf5fb96d3755a1e75dde7b6a2a31586eeb9"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -620,7 +620,7 @@
         336,
         51
       ],
-      "structure": "d5d5544be949071ca09e1ce96e355af1ffe0864b4ebdc680f6517d1eca4e2b5e"
+      "structure": "21d1963a38b9631d03f4a6e70f5b38a266b707ee7da22c5fb829ff9b0b881175"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -631,7 +631,7 @@
         358,
         61
       ],
-      "structure": "7e8ab18c64f9e1a294c25fe0447dfac3e9b714141155fdbf91c11bea041e4d0b"
+      "structure": "fb412d154ea0e172d502c6510a404242a706566938d9b787914002eb928ec23a"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -642,7 +642,7 @@
         407,
         5
       ],
-      "structure": "fff2cae171983c9aedf061e14a75a445cd9134718f114941dca28d24fe671b7e"
+      "structure": "701a5f3d94b4b17a6189afe5dfda5b4da83a07a11eb69f3ee114188a227755de"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -653,7 +653,7 @@
         419,
         5
       ],
-      "structure": "9118c47173b1e9ed020e213e0f640c7b7a8a80ace0566e58ec8080fc037520d3"
+      "structure": "8841ec469af1abbbbd216af2d7fc3094381b3a88990c3d35012b6e432d8f813a"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -664,7 +664,7 @@
         718,
         56
       ],
-      "structure": "e21ebd522b32c624ce088201e3879a113e548bd92baa9a6ff7f217ede914e136"
+      "structure": "d13593d5b8d9c004a3d9237cede02e9598768e68d09b2518f88408a19f4d23b5"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -675,7 +675,7 @@
         892,
         58
       ],
-      "structure": "225e940403bebf9f106414eb0d5c1d32e7deb1a4bcd55ffeeee466e3a1b9ebc1"
+      "structure": "0323fd78bd2a7504564a10f542b2ccfd6767f5f49c70acc4b64beb118a02e744"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -686,7 +686,7 @@
         921,
         107
       ],
-      "structure": "6fda4ce8c021401ce43669f2681bc50691778218c0b480625ed0233fc4dc3874"
+      "structure": "1ab1d0fc71374dbd9f43fd411847806971f2afef77cb80890f444f9fa550cfef"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -697,7 +697,7 @@
         851,
         69
       ],
-      "structure": "f89f7ffd4c18395a558953a65b5f379e8085a2d5d6d9168c61e455ac1779b5f2"
+      "structure": "b64706cbcd24107bf0d10cbd2e69816cb1fc406289ab970f94a28d003837acda"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -708,7 +708,7 @@
         882,
         74
       ],
-      "structure": "191bc891f73a17b94b4544e7fad91ddd5efd4020924eb8bd3d2c65111ad8d353"
+      "structure": "28fa5ac54160039cf335eea3010505e858a9587dcc2b5c6bf8c32906da0d11c0"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -719,7 +719,7 @@
         917,
         89
       ],
-      "structure": "0563c417250053445f578026b84ee014a05ab72393ddf12f7ceee800a7fc2f7a"
+      "structure": "0739ab3ce92409fce13f61873c8ce43e895900a731effd3d5184265b933d3c08"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -730,7 +730,7 @@
         1054,
         67
       ],
-      "structure": "510cfb6875c9afd53206793a05a85bc9de06537a30db04cf49811d65dabf4267"
+      "structure": "a7fddb122132ab776a79d247fdece1d10d61bc46f6d899d0500b8329296b6fc2"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -741,7 +741,7 @@
         1055,
         90
       ],
-      "structure": "db29791a19006595af4d2dfffa5fcc126e03c60dd8d59fd7b4b400204ce04733"
+      "structure": "686cb78f1f5c0055cbd6a8bf6aa3c86f67d3fe4041730e9950c75b5092b77fc8"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -752,7 +752,7 @@
         912,
         105
       ],
-      "structure": "4794be7398300cc54ef8319bb5c40cf54f72ffc01188f3ed1f89868a575810e2"
+      "structure": "3b6e0592d01d1996014aa6e0b5ca943ffd93ffdfbb8437bf82b917e4b8e5ef7c"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_copilot_mention_guard.py",
@@ -763,7 +763,7 @@
         914,
         32
       ],
-      "structure": "4679848dbf13eeb78a28492810e05590c245e926ea19ab8b5c562c1d86b17ed7"
+      "structure": "3580ad4b278940382cd2074bd4be3814ab03f602de0e9ebfe3b273abc542fe37"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_maintainer_completion_workflow.py",
@@ -774,7 +774,7 @@
         134,
         74
       ],
-      "structure": "0235821b4f2e228441d95993ae340992ff39a6077d9dc04828b2b9f648ba486a"
+      "structure": "692d2ba2a3f62fe06041c1c81fcd82ff7cffc2bfaa69816fabdc765825d15fcf"
     },
     {
       "path": "plugins/copilot-extensions-harness/tests/test_reviewer_source.py",
@@ -785,7 +785,7 @@
         24,
         61
       ],
-      "structure": "aea5dd3a9424673525ce35eb7856c0ba64eec228b4b572e7e0ab527400880d31"
+      "structure": "0956346e99f14cc40c9fca044923e236aa91ee1aca67fd5fbbce331e99ea2496"
     }
   ]
 }

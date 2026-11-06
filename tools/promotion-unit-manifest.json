@@ -4193,7 +4193,12 @@
         "tools/promotion_unit_tests/test_typecheck_emitted.py::test_reviewed_member_digests_cannot_hide_lexical_bindings[function]",
         "tools/promotion_unit_tests/test_typecheck_emitted.py::test_reviewed_member_digests_cannot_hide_lexical_bindings[parameter]",
         "tools/promotion_unit_tests/test_typecheck_emitted.py::test_reviewed_member_digests_cannot_hide_lexical_bindings[import]",
-        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_reviewed_member_digests_cannot_hide_lexical_bindings[module-store]"
+        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_reviewed_member_digests_cannot_hide_lexical_bindings[module-store]",
+        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_semantic_shape_normalizes_only_empty_optional_host_fields",
+        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_harness_minimum_parser_refuses_newer_nonempty_language_semantics",
+        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_emitted_diagnostics_annotate_only_the_current_generated_output[\\n]",
+        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_emitted_diagnostics_annotate_only_the_current_generated_output[\\r\\n]",
+        "tools/promotion_unit_tests/test_typecheck_emitted.py::test_emitted_diagnostics_annotate_only_the_current_generated_output[]"
     ],
     "sources": {
         "libs/repository-policy/src/repository_policy/receiving.py": "9edad82766c227e2f3e2ab0cc919f7d54fe9301e40de36a0414c4ed090140239",
@@ -4513,9 +4518,9 @@
         "tools/_admission_protocol.py": "baa0c1a2af44616eedf02bf678c128fd3c07045bd8e5542d4fe8ece3df54dc21",
         "tools/cache_directory_paths.py": "2a991cb0ec7d3bcf7f658922821271295a87083132238867873eb5393711a87c",
         "tools/typecheck.py": "664229855891f98688bbba66619513af90d259d8c33b19fcad4e567aab57f448",
-        "tools/typecheck_source_views.py": "6f23a450767797002d9401cd48e5260351a65ec1dc0645132edc564cb6fd9a09",
+        "tools/typecheck_source_views.py": "ea29bc9e3f61c79d0c805aafda0347be6cfbaf22bd39fefcdc0c76400024ef97",
         "tools/promotion_unit_tests/test_typecheck.py": "7c69bfb410d226390f03e893de175fa7164c2e7d254a1251ca2978123b3ecef7",
-        "tools/promotion_unit_tests/test_typecheck_emitted.py": "c47f123303e5884832f9ac0b65ce9e03860843f3d983706f43fd4d291012a399",
+        "tools/promotion_unit_tests/test_typecheck_emitted.py": "7aabecbfc9bc1ac09ebcdbfde55558ae2172518db6ab78d86e889f3f5c092b55",
         "tools/accumulate_bumps.py": "8e669617f4cd77418fd49da6928775dd3dc558f0d64ae36dde94f8836da15136",
         "tools/artifact_builder_cli.py": "876bab23db79c4bd7f0fb0a1feb02b573f9549d156d9d783eed9daa9c819a909",
         "tools/artifact_attestation.py": "75aafefab3ff8e11fae93990d943496556d31edcfb4be6413eb072525abbd0fe",

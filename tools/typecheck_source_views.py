@@ -172,10 +172,12 @@ def _read(root: Path, relative: str) -> bytes:
     return path.read_bytes()
 
 
-def _parse(content: bytes, filename: str) -> ast.Module:
+def _parse(
+    content: bytes, filename: str, *, feature_version: tuple[int, int] | None = None,
+) -> ast.Module:
     try:
         compile(content, filename, "exec", dont_inherit=True)
-        return ast.parse(content, filename=filename)
+        return ast.parse(content, filename=filename, feature_version=feature_version)
     except SyntaxError as exc:
         raise SourceViewError(
             f"{filename}:{exc.lineno}: invalid composed source: {exc.msg}"
@@ -294,7 +296,32 @@ def _digest(content: bytes) -> str:
 
 
 def _shape(node: ast.AST) -> str:
-    return _digest(ast.dump(node, include_attributes=False).encode("utf-8"))
+    def semantic(value: object) -> object:
+        if isinstance(value, ast.AST):
+            fields = {}
+            for name, child in ast.iter_fields(value):
+                if (
+                    name == "type_params" and child == []
+                    and isinstance(value, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                ):
+                    continue
+                fields[name] = semantic(child)
+            return {"node": type(value).__name__, "fields": fields}
+        if isinstance(value, list):
+            return [semantic(child) for child in value]
+        if value is None or isinstance(value, (str, bool, int)):
+            return value
+        if isinstance(value, bytes):
+            return {"bytes": value.hex()}
+        if isinstance(value, float):
+            return {"float": value.hex()}
+        if isinstance(value, complex):
+            return {"complex": [value.real.hex(), value.imag.hex()]}
+        if value is Ellipsis:
+            return {"ellipsis": True}
+        raise SourceViewError("Unsupported semantic AST field")
+
+    return _digest(json.dumps(semantic(node), sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
 _WITNESSES = {
@@ -341,7 +368,9 @@ def _emitted_string(node: ast.expr, values: dict[str, str]) -> str:
 
 
 def _witness_positions(text: str, values: dict[str, str]) -> ast.Module:
-    tree = _parse(text.encode("utf-8"), "<portable-harness-typing-witness>")
+    tree = _parse(
+        text.encode("utf-8"), "<portable-harness-typing-witness>", feature_version=(3, 10),
+    )
     sensitive = {"open", "pathlib", "runpy", "sys"}
     for binding in ast.walk(tree):
         if (
@@ -388,13 +417,16 @@ class HarnessProgramView(SourceView):
         self._verify_bytes(root)
 
     def diagnostics(self, text: str, root: Path) -> str:
-        result = super().diagnostics(text, root)
-        path, first, last = self.origin
-        return re.sub(
-            re.escape(path) + ":" + str(first) + r"(:[^\n]*)",
-            lambda match: f"{path}:{first}{match[1]} [emitted expression range {first}-{last}; portable typing witness]",
-            result,
-        )
+        _path, first, last = self.origin
+        result = []
+        for line in text.splitlines(keepends=True):
+            mapped = super().diagnostics(line, root)
+            if mapped != line:
+                body = mapped.rstrip("\r\n")
+                ending = mapped[len(body):]
+                mapped = body + f" [emitted expression range {first}-{last}; portable typing witness]" + ending
+            result.append(mapped)
+        return "".join(result)
 
 
 def _harness_assets(root: Path) -> tuple[str, ...]:
@@ -522,7 +554,7 @@ def harness_emitted_inputs(
         if set(row) != {"path", "sha256", "structure"}:
             raise SourceViewError("Unknown harness member fields")
         content = _read(root, row["path"])
-        tree = _parse(content, row["path"])
+        tree = _parse(content, row["path"], feature_version=(3, 10))
         for node in ast.walk(tree):
             names: tuple[str, ...] = ()
             if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
@@ -657,13 +689,13 @@ def harness_emitted_inputs(
             body = _emitted_string(expression, values)
             if not selector.startswith("nested:"):
                 try:
-                    emitted_tree = _parse(body.encode("utf-8"), path)
+                    emitted_tree = _parse(body.encode("utf-8"), path, feature_version=(3, 10))
                 except SourceViewError as error:
                     raise SourceViewError(f"{row['role']}: {body!r}: {error}") from error
                 if any(isinstance(n, ast.Constant) and n.value == "-c" for n in ast.walk(emitted_tree)):
                     nested_required.add(expression_key)
             if selector.startswith("nested:"):
-                parent = _parse(body.encode("utf-8"), path)
+                parent = _parse(body.encode("utf-8"), path, feature_version=(3, 10))
                 nested = [
                     n.elts[i + 1] for n in ast.walk(parent) if isinstance(n, (ast.List, ast.Tuple))
                     for i, item in enumerate(n.elts[:-1])
@@ -685,7 +717,7 @@ def harness_emitted_inputs(
         elif row["transport"] not in {"unicode-python-c", "quoted-shell-utf8", "nested-parent-constant"}:
             raise SourceViewError("Unknown emitted transport")
         _reject_directives(path, encoded)
-        _parse(encoded, path)
+        _parse(encoded, path, feature_version=(3, 10))
         rendered.append((path, encoded, first, last))
     if covered != _required_harness_programs(trees, declaration["data_writes"]) or nested_required != nested_covered or shell_count != 1:
         raise SourceViewError("Incomplete/extra harness Python producer, nested body or write epoch")
