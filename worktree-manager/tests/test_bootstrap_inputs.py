@@ -136,17 +136,19 @@ def test_moving_revision_is_not_published_or_joined(inputs, monkeypatch):
     assert not list((driver / "bootstrap-inputs").glob("*/worktree-manager"))
 
 
-@pytest.fixture
-def preparation_assets(inputs):
+@pytest.fixture(params=[1, 2])
+def preparation_assets(inputs, request):
     helper, payload, driver = inputs
     tools = payload.parent / "tools"
     tools.mkdir()
     tool = tools / "prepare_runtime_source.py"
     tool.write_text("VALUE = 1\n", encoding="utf-8")
+    version = request.param
     (payload / "packaged-assets.json").write_text(json.dumps({
-        "schema": "copilot-extensions.packaged-assets", "version": 1,
-        "canonicalDir": "tools", "payloadDir": "scripts/runtime-source-tools",
-        "files": [tool.name],
+        "schema": "copilot-extensions.packaged-assets", "version": version,
+        "canonicalDir": "tools" if version == 1 else ".",
+        "payloadDir": "scripts/runtime-source-tools",
+        "files": [tool.name if version == 1 else "tools/" + tool.name],
     }), encoding="utf-8")
     return helper, payload, driver, tool
 
@@ -154,7 +156,8 @@ def preparation_assets(inputs):
 def test_preparation_assets_are_retained_addressed_and_rechecked(preparation_assets):
     helper, payload, driver, tool = preparation_assets
     first, _share = helper.retain(payload, driver)
-    target = Path("scripts/runtime-source-tools") / tool.name
+    declaration = json.loads((payload / "packaged-assets.json").read_text())
+    target = Path(declaration["payloadDir"]) / declaration["files"][0]
     assert (first / target).read_bytes() == tool.read_bytes()
     assert not (payload / target).exists()
     assert helper.retain(payload, driver)[0] == first
@@ -186,4 +189,16 @@ def test_retention_rejects_source_different_from_the_admitted_payload(preparatio
     helper, payload, driver, _tool = preparation_assets
     with pytest.raises(RuntimeError, match="installation source changed before retention"):
         helper.retain(payload, driver, expected_payload_digest="a" * 64)
+    assert not driver.exists()
+
+
+@pytest.mark.parametrize("name", ["../outside", "tools/../outside", "tools//outside", "C:/outside", "tools\\outside"])
+def test_nested_preparation_assets_refuse_unsafe_members_before_retention(inputs, name):
+    helper, payload, driver = inputs
+    (payload / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2,
+        "canonicalDir": ".", "payloadDir": "scripts/runtime-source-tools", "files": [name],
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="asset name"):
+        helper.retain(payload, driver)
     assert not driver.exists()

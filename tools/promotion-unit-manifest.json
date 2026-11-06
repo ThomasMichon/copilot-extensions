@@ -5108,7 +5108,7 @@
         "tools/promotion_unit_tests/test_komodo_repair_authorization.py": "b23393a8b2f9343f7c1004bc98b7f0fbc1030139655376f88a169951d2c209f7",
         "tools/promotion_unit_tests/test_lazy_dispatch.py": "7a206f98c1f7686b83ad5c8fe11a3f801d93e3939c1b8d75294fe4deef5040dd",
         "tools/promotion_unit_tests/test_legacy_version_evidence.py": "741716970463c8ae8bf53cbd7d046faa02450593eb13f88d46984ba821d3668d",
-        "tools/promotion_unit_tests/test_library_versions.py": "137ec3237306e3718e90bb31bf601211a6fc76cb45ad447a5b897f0feb3e615c",
+        "tools/promotion_unit_tests/test_library_versions.py": "8baac77f5c49901427292e656ea478083e5f62e91a8d48e050de6ace43fc65ba",
         "tools/promotion_unit_tests/test_lifecycle.py": "b002067cfec30fda962f3a9546371abfe87957dd9f940593264860b52bcbd728",
         "tools/promotion_unit_tests/test_local_launch_boundary.py": "0095d29f3b8dacbac3265b32130ca6019a13b020a68851715a0c84d69bfa7076",
         "tools/promotion_unit_tests/test_manager_launchers.py": "f31a192e5ad6d54c54964448ecd35579901ec622640ad47684f5733d0cd63707",

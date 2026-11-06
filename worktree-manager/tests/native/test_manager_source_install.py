@@ -28,10 +28,12 @@ def _repository(directory, env, promoted):
     repo = directory / "upstream"
     payload = repo / "worktree-manager"
     si._copy_payload(promoted, payload, mark_complete=False)
-    tools = repo / "tools"
-    tools.mkdir()
-    for name in json.loads((SOURCE / "packaged-assets.json").read_text())["files"]:
-        shutil.copy2(SOURCE.parent / "tools" / name, tools / name)
+    assets = json.loads((SOURCE / "packaged-assets.json").read_text())
+    for name in assets["files"]:
+        relative = Path(assets["canonicalDir"]) / name
+        destination = repo / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SOURCE.parent / relative, destination)
     (payload / "plugin.json").write_text(json.dumps({
         "name": "worktree-manager", "version": si.payload_version(payload),
     }))
