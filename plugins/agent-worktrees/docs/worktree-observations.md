@@ -393,6 +393,11 @@ normalization distinguishes data values and complete read-expression containers
 from unknown executable forms. Control keywords require a complete command
 token and use the declared dialect, so `Select-String`, `Select-Object` and
 PowerShell's `select` alias are not mistaken for POSIX control flow.
+Parameter, command and arithmetic boundaries share one iterative quote-aware
+matcher. Quoted/escaped closing braces and nested executable forms cannot
+swallow a following command; the same boundary is used by the original
+pre-tool guard and post-tool invalidation. Unknown or unterminated post-tool
+input remains conservative, and the original scan-work limit is unchanged.
 
 Original managed admission, current governance/state locks and idle grace
 remain authoritative. Accepted reads renew demand without mutation wake;

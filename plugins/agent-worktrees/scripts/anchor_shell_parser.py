@@ -35,29 +35,109 @@ def git_branch_invocation_is_readonly(args: list[str]) -> bool:
     )
 
 
-def _braced_variable_end(
-    text: str, index: int, tool: str, *, scan_budget: list[int] | None = None,
+def _shell_expression_end(
+    text: str, index: int, prefix: str, tool: str, *, scan_budget: list[int] | None = None,
 ) -> int | None:
-    cursor, depth = index + 2, 1
-    escape = "\\" if tool.lower() in {"bash", "sh"} else "`"
+    posix = tool.lower() in {"bash", "sh"}
+    powershell = tool.lower() in {"powershell", "pwsh"}
+    kind = "parameter" if prefix == "${" else "backtick" if prefix == "`" else "paren"
+    frames: list[tuple[str, str | None]] = [(kind, None)]
+    cursor = index + len(prefix)
+    escape = "\\" if posix else "`"
     while cursor < len(text):
         if scan_budget is not None:
             scan_budget[0] -= 1
             if scan_budget[0] < 0:
                 raise ValueError("shell substitution scan budget exhausted")
-        if text[cursor] == escape and cursor + 1 < len(text):
+        kind, quote = frames[-1]
+        char = text[cursor]
+        if char == escape and cursor + 1 < len(text) and (
+            quote != "'" or kind == "backtick" or powershell and kind == "parameter"
+        ):
             cursor += 2
-        elif text.startswith("${", cursor):
-            depth += 1
+            continue
+        if powershell and kind == "parameter":
+            if text.startswith("${", cursor):
+                frames.append(("parameter", None))
+                cursor += 2
+                continue
+            if char == "}":
+                frames.pop()
+                if not frames:
+                    return cursor + 1
+            cursor += 1
+            continue
+        if kind == "backtick":
+            if char == "`":
+                frames.pop()
+                if not frames:
+                    return cursor + 1
+            cursor += 1
+            continue
+        if quote in {"'", "ansi"}:
+            if powershell and char == "'" and text.startswith("''", cursor):
+                cursor += 2
+                continue
+            if char == "'":
+                frames[-1] = (kind, None)
+            cursor += 1
+            continue
+        if posix and quote is None and text.startswith("$'", cursor):
+            frames[-1] = (kind, "ansi")
             cursor += 2
-        elif text[cursor] == "}":
-            depth -= 1
+            continue
+        if char == "'" and quote is None:
+            frames[-1] = (kind, "'")
             cursor += 1
-            if depth == 0:
-                return cursor
-        else:
+            continue
+        if char == '"':
+            frames[-1] = (kind, None if quote == '"' else '"')
             cursor += 1
+            continue
+        if quote is None and kind == "paren" and (
+            char == "#" and (
+                cursor == 0 or text[cursor - 1].isspace()
+                or text[cursor - 1] in ";|&({}`"
+            )
+        ):
+            end = text.find("\n", cursor)
+            if end < 0:
+                return None
+            if scan_budget is not None:
+                scan_budget[0] -= end - cursor
+                if scan_budget[0] < 0:
+                    raise ValueError("shell substitution scan budget exhausted")
+            cursor = end + 1
+            continue
+        if text.startswith("${", cursor):
+            frames.append(("parameter", None))
+            cursor += 2
+            continue
+        if text.startswith("$(", cursor) or (
+            powershell and quote is None and text.startswith("@(", cursor)
+        ) or posix and quote is None and text[cursor:cursor + 2] in {"<(", ">("}:
+            frames.append(("paren", None))
+            cursor += 2
+            continue
+        if posix and char == "`":
+            frames.append(("backtick", None))
+            cursor += 1
+            continue
+        if quote is None:
+            if kind == "paren" and char == "(":
+                frames.append(("paren", None))
+            elif kind == "paren" and char == ")" or kind == "parameter" and char == "}":
+                frames.pop()
+                if not frames:
+                    return cursor + 1
+        cursor += 1
     return None
+
+
+def _braced_variable_end(
+    text: str, index: int, tool: str, *, scan_budget: list[int] | None = None,
+) -> int | None:
+    return _shell_expression_end(text, index, "${", tool, scan_budget=scan_budget)
 
 
 def _variable_end(text: str, tool: str) -> int | None:
@@ -574,81 +654,27 @@ def shell_command_substitutions(
                 substitution_prefix = seg[index:index + 2]
         if substitution_prefix:
             start = index + len(substitution_prefix)
-            cursor = start
-            depth = 1
-            inner_quote = None
-            while cursor < len(seg):
+            end = _shell_expression_end(seg, index, substitution_prefix, tool, scan_budget=scan_budget)
+            if end is None:
                 if scan_budget is not None:
-                    scan_budget[0] -= 1
-                    if scan_budget[0] < 0:
-                        raise ValueError("shell substitution scan budget exhausted")
-                current = seg[cursor]
-                if (
-                    current == escape
-                    and inner_quote != "'"
-                    and cursor + 1 < len(seg)
-                ):
-                    cursor += 2
-                    continue
-                if current == "'" and inner_quote != '"':
-                    inner_quote = None if inner_quote == "'" else "'"
-                elif current == '"' and inner_quote != "'":
-                    inner_quote = None if inner_quote == '"' else '"'
-                elif lower_tool in {"powershell", "pwsh"} and inner_quote != "'" and seg.startswith("${", cursor):
-                    end = _braced_variable_end(seg, cursor, tool, scan_budget=scan_budget)
-                    if end is None:
-                        if scan_budget is not None:
-                            raise ValueError("unterminated shell variable")
-                        return substitutions
-                    cursor = end
-                    continue
-                elif (
-                    inner_quote != "'"
-                    and (
-                        seg.startswith("$(", cursor)
-                        or (
-                            lower_tool in {"powershell", "pwsh"}
-                            and seg.startswith("@(", cursor)
-                        )
-                    )
-                ):
-                    depth += 1
-                    cursor += 1
-                elif inner_quote is None:
-                    if current == "(":
-                        depth += 1
-                    elif current == ")":
-                        depth -= 1
-                        if depth == 0:
-                            substitutions.append(seg[start:cursor])
-                            if spans is not None:
-                                spans.append((index, cursor + 1))
-                            index = cursor + 1
-                            break
-                cursor += 1
-            else:
-                index += len(substitution_prefix)
+                    raise ValueError("unterminated shell substitution")
+                return substitutions
+            substitutions.append(seg[start:end - 1])
+            if spans is not None:
+                spans.append((index, end))
+            index = end
             continue
         if quote != "'" and lower_tool in {"bash", "sh"} and char == "`":
             start = index + 1
-            cursor = start
-            while cursor < len(seg):
+            end = _shell_expression_end(seg, index, "`", tool, scan_budget=scan_budget)
+            if end is None:
                 if scan_budget is not None:
-                    scan_budget[0] -= 1
-                    if scan_budget[0] < 0:
-                        raise ValueError("shell substitution scan budget exhausted")
-                if seg[cursor] == "\\" and cursor + 1 < len(seg):
-                    cursor += 2
-                    continue
-                if seg[cursor] == "`":
-                    substitutions.append(seg[start:cursor])
-                    if spans is not None:
-                        spans.append((index, cursor + 1))
-                    index = cursor + 1
-                    break
-                cursor += 1
-            else:
-                index += 1
+                    raise ValueError("unterminated shell substitution")
+                return substitutions
+            substitutions.append(seg[start:end - 1])
+            if spans is not None:
+                spans.append((index, end))
+            index = end
             continue
         index += 1
     return substitutions

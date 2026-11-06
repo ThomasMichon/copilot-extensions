@@ -168,6 +168,31 @@ def test_parameter_expansion_is_data_but_its_substitutions_still_execute(command
     assert guard.shell_may_mutate(command, "bash") is mutates
 
 
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param("echo ${value:-'}'}; git commit -m test", True, id="single-quote"),
+    pytest.param('echo ${value:-"}"}; git commit -m test', True, id="double-quote"),
+    pytest.param(r"echo ${value:-\}}; git commit -m test", True, id="escaped-brace"),
+    pytest.param("echo ${value:-$(printf '}')}; git commit -m test", True, id="command"),
+    pytest.param("echo ${value:-$((1 + 2))}; git commit -m test", True, id="arithmetic"),
+    pytest.param("echo ${value:-${other:-'}'}}; git commit -m test", True, id="nested-variable"),
+    pytest.param("echo ${value:-`printf '}'`}; git commit -m test", True, id="backtick"),
+    pytest.param(r"echo ${value:-$'\'}'}; git commit -m test", True, id="ansi-quote"),
+    pytest.param("echo ${value:-'}'}", False, id="read-only"),
+])
+def test_quoted_parameter_braces_cannot_hide_following_mutations(
+    anchor_evidence, tmp_path, command, mutates,
+):
+    assert guard.shell_may_mutate(
+        command, "bash", legacy_writes=stateless._WRITE_VERBS,
+    ) is mutates
+    root, anchors = anchor_evidence
+    decision = guard.decide(
+        {"toolName": "bash", "cwd": str(root), "toolArgs": {"command": command}},
+        env={}, home=tmp_path, anchors=anchors,
+    )
+    assert bool(decision and decision["permissionDecision"] == "deny") is mutates
+
+
 @pytest.mark.parametrize("tool,command,mutates", [
     pytest.param("powershell", "pwsh -Command 'Set-Content file value'", True, id="nested-shell"),
     pytest.param("bash", "command -p git commit -m test", True, id="wrapper-options"),

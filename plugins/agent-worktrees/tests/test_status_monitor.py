@@ -5259,6 +5259,7 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     "nativeToolBatchMutation", "batch-unadmitted", "batch-reads",
     "legacy-batch-shell", "legacy-batch-native", "legacy-batch-read",
     "shellToolMutation", "shell-unadmitted", "shell-read",
+    "shell-bash-quoted-brace",
 ])
 def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, monkeypatch, kind):
     """Wiring-level regression: a real ``handoffWake`` request, dialed through
@@ -5355,12 +5356,17 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         "args": {"path": "one"},
                     }]}
                 legacy = kind.startswith("legacy-batch-")
-                shell = kind in {"shellToolMutation", "shell-unadmitted", "shell-read"}
+                shell = kind in {"shellToolMutation", "shell-unadmitted", "shell-read", "shell-bash-quoted-brace"}
                 if shell:
                     payload.update(
                         toolName="powershell",
                         toolArgs=json.dumps({"command": "git --no-pager status" if kind == "shell-read" else "git -c core.quotepath=false pull --ff-only"}),
                     )
+                    if kind == "shell-bash-quoted-brace":
+                        payload.update(
+                            toolName="bash",
+                            toolArgs={"command": "echo ${value:-'}'}; git commit -m test"},
+                        )
                 if legacy:
                     payload.update(toolCalls=[None, {"name": "powershell"}])
                     if kind == "legacy-batch-shell":
