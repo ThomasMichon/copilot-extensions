@@ -157,7 +157,7 @@ def test_global_frontdoor_keeps_import_cache_outside_the_selected_slot(
     assert cache.parent == Path(python_cache_args(root)[1].split("=", 1)[1]).parent
     assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
     assert {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
-    assert list((root / "cache" / "python").rglob("__main__*.pyc"))
+    assert list(cache.rglob("__main__*.pyc"))
 
 
 @pytest.fixture

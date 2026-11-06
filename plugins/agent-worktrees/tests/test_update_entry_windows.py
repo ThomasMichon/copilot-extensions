@@ -18,6 +18,13 @@ update_entry_case = shared_update_entry_case
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows security/process contract")
 
+_CACHE_PROBE = (
+    "if '-c' in sys.argv:\n"
+    "    print(json.dumps(next(arg.split('=', 1)[1] for arg in sys.argv "
+    "if arg.startswith('pycache_prefix='))))\n"
+    "    raise SystemExit(0)\n"
+)
+
 
 def _use_real_probe_python(monkeypatch):
     monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"])
@@ -45,6 +52,7 @@ def test_configured_project_update_routes_before_manager_bootstrap(
     engine = tmp / "engine.py"
     engine.write_text(
         "import json, os, sys\n"
+        + _CACHE_PROBE +
         "with open(os.environ['ENGINE_CALLS'], 'a', encoding='utf-8') as stream:\n"
         "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         "if 'get' in sys.argv:\n"
@@ -131,7 +139,8 @@ def test_project_controller_probe_preserves_manager_fallback(
     (runtime / "current-version").write_text("selected\n")
     engine = tmp / "probe.py"
     engine.write_text(
-        "import os\n"
+        "import json, os, sys\n"
+        + _CACHE_PROBE +
         "from pathlib import Path\n"
         "Path(os.environ['PROBE_CALLED']).write_text('called')\n"
         "raise SystemExit(2 if os.environ['PROBE_MODE'] == 'old-engine' else 0)\n",
@@ -280,6 +289,7 @@ def test_controller_probe_timeout_retires_its_descendants(
     slow = tmp / "slow-engine.py"
     slow.write_text(
         "import json, os, subprocess, sys, time\n"
+        + _CACHE_PROBE +
         "from pathlib import Path\n"
         "sys.path.insert(0, os.environ['PROBE_TEST_HELPERS'])\n"
         "from caller_owned_fixture import identity\n"
@@ -431,6 +441,7 @@ def test_selected_update_operation_bypasses_native_repair_and_implicit_provision
     capture = tmp / "phase-capture.py"
     capture.write_text(
         "import json, os, sys\n"
+        + _CACHE_PROBE +
         "with open(os.environ['PHASE_ARGUMENTS'], 'w') as stream:\n"
         "    json.dump(sys.argv[1:], stream)\n"
         "raise SystemExit(29)\n",
