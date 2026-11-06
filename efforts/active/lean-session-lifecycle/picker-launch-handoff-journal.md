@@ -938,3 +938,107 @@ its saved installed-update, launch and handoff obligations.
   process-count or latency guarantee, a concurrent-launch singleton proof,
   or whole-update completion. The broader active installer, pending target
   request and all remaining parent Plan/Validation items remain open.
+
+### 2026-11-05 - Requested target update completed; whole-set failures retained
+
+- The original accepted Worktrees target request completes with exit zero
+  and no error; its observer is stopped. The normal owner publishes and serves
+  `1.24.477-dev1`, with selector, deploy manifest, source version and command
+  lifecycle agreeing. Native cutover reports a healthy incoming daemon,
+  committed routing and settled transition; outgoing retirement remains
+  asynchronous and is not claimed complete.
+- Loaded client/feed modules retain the exact already-qualified source
+  identities. A fresh actual catalog JSON invocation exits zero in 4.592
+  seconds with current data, no availability warning and a generation
+  matching authenticated serving health. Unchanged delayed-publication and
+  timeout controls are not rerun merely for a package-number change.
+- The preceding whole update completes with exit one, not a fabricated
+  success. Its five failed components are CodeSpaces and Containers
+  (300-second UV-cache lock waits), Dispatch (published slot but cutover
+  deadline), Vault (access denied replacing its version selector), and Budget
+  Guidance (incomplete-slot cleanup refusal).
+- The Vault selector is not read-only and its current user has FullControl;
+  that metadata does not prove which access/sharing condition caused the
+  earlier replacement failure. The failed-slot helper's Defender suggestion
+  likewise is not a measured cause. No lock is deleted, permissions changed,
+  timeout widened, optional service activated or protected process stopped.
+- Another independently admitted automatic update is already running. Observe
+  its real outcome without adopting its authority or claiming it resolves this
+  effort's whole-set gate. The bounded repair pass remains stopped, the
+  original broader failure remains retained, and launch, singleton and handoff
+  validation are still unfinished.
+
+### 2026-11-05 - Independent update completed; own incoming set still incomplete
+
+- The independently admitted automatic update completes with exit zero and
+  no request error. Its observer is stopped immediately. That operation
+  explicitly excludes CodeSpaces, Containers, Index and Vault under its own
+  machine policy; its success is not acceptance of this effort's requested set.
+- This effort's actual inventory still selects CodeSpaces `0.5.254-dev1`,
+  Containers `0.2.202-dev1` and Vault `0.1.212-dev1`, behind the candidates
+  from the failed whole update. No skipped component is relabeled successful.
+  The historical UV-cache lock owner and Vault selector sharing failure
+  remain unproved; neither timeout tuning nor speculative permission changes
+  supply the missing evidence.
+- Dispatch now selects and serves `0.18.268-dev1`; Budget Guidance selects
+  `0.1.131-dev1`, with the independent installer reporting activation and
+  import verification. Those newer incoming observations supersede the
+  corresponding failed candidates, not their failure history. They do not
+  establish shared-daemon singleton shape or historical outgoing cleanup.
+- Worktrees remains selected and serving on the qualified `1.24.477-dev1`.
+  Manager now selects `0.6.293-dev1`; the prior reader qualification remains
+  evidence for `0.6.291-dev1`, not an unmeasured claim about that newer slot.
+- No new update, guard release, failed-request replay, process termination,
+  lock removal or optional activation is performed. The bounded recovery pass
+  stays ended. Preserve the installed-set continuation and later launch,
+  handoff and measured-completion siblings while resolving the remaining
+  normal-update authority and acceptance boundary.
+- A newly approved single normal update stops at preflight, before submission:
+  another native MCP request is already interrupted with `ParticipantError`
+  and settlement required. Its log records `Native installation changed after
+  driver admission`. A packaged-driver read confirms a saved/current source
+  mismatch and the same addressed MCP root. The exact changed file and
+  historical settlement remain unknown; no guard is released.
+- Sent this distinct pre-installer refusal evidence to #7758's existing
+  ordinary recovery/coalescing owner in
+  [comment 6666242788](https://github.com/ThomasMichon/copilot-extensions/issues/7758#issuecomment-6666242788).
+  Preserve #10499's MCP bootstrap-adoption and #10559's whole-bootstrap
+  retention ownership rather than open a competing implementation. The
+  approved submission is not consumed or silently renewed; the encountered
+  guard is the explicit stop boundary. Whole-set acceptance remains blocked.
+
+### 2026-11-06 - Post-restart incoming observations and routed-port reader
+
+- Another owner released the interrupted MCP guard through operator repair;
+  its failure and unconfirmed historical settlement remain unchanged. No
+  release or new update is performed by this driver. Current runtime payloads
+  and selections now agree, including CodeSpaces, Containers and Vault.
+- The latest broader update still exits one: Vault selects `0.1.219-dev1`
+  but fails its selected-service readiness check. A subsequent existing
+  endpoint responds to ping without version or generation evidence. Preserve
+  that service's separate ownership; a successful ping or selected package
+  is not incoming-generation acceptance or permission to replace it.
+- Manager selects `0.6.307-dev1`. Its installed native reader reports the
+  actual resident as unknown because it has no explicit port argument,
+  although the active routing record carries its port and process birth.
+  The diagnostic correction uses only a loopback route with the same PID
+  and a nonempty birth matching the observed process. Explicit command-line
+  ports retain precedence; owner, root and post-health revalidation remain.
+- Claimed this bounded continuation on #5579 in
+  [comment 6678791116](https://github.com/ThomasMichon/copilot-extensions/issues/5579#issuecomment-6678791116).
+  The contained reader, CLI and native packet passes 40 cases, including
+  routed-port acceptance, post-health replacement and stale/missing/foreign
+  route refusals. Required Python lint and the 13-plugin install contract pass.
+- A read-only corrected-source consumer observes the actual selected daemon
+  ready and active on `0.6.307-dev1` in 0.113 seconds, with subprocess probes
+  forbidden and zero attempts. This changes no installed file or service and
+  is not a latency guarantee or installed correction. Source review, release,
+  actual installed reader and all parent whole-update/launch/handoff gates
+  remain open.
+- The actual Manager JSON CLI consumer also returns ready current-generation
+  data with the corrected source reader and subprocess probes forbidden.
+  Documentation consistency and effort structure pass. A separate optional
+  whole-Manager MyPy probe stops on duplicate `conftest` modules before
+  checking code; the project is explicitly pending, not an admitted strict
+  scope. Preserve that migration limitation rather than claim type acceptance
+  or alter unrelated test discovery in this reader fix.

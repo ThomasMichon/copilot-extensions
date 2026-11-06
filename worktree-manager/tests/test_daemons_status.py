@@ -182,6 +182,79 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
     ]
 
 
+@pytest.mark.parametrize("replaced_during_health", [False, True])
+def test_daemon_statuses_reads_birth_matched_route_without_port_argument(
+    tmp_path, monkeypatch, replaced_during_health
+):
+    root = tmp_path / "root"
+    root.mkdir()
+    table = _active_table(101, 9101)
+    table["active"]["process_start_time"] = "123"
+    birth = ["123"]
+    monkeypatch.setattr(daemons_status, "_iter_status_pids", lambda: {101})
+    monkeypatch.setattr(daemons_status, "_status_pid_matches_root", lambda *a, **k: True)
+    monkeypatch.setattr(daemons_status, "_cmdline_for_pid", lambda pid: "daemon run")
+    monkeypatch.setattr(daemons_status, "_process_start_time", lambda pid: birth[0])
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda *a, **k: True)
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: table)
+    requests = []
+
+    class Client:
+        def __init__(self, base_url, **kwargs):
+            requests.append(base_url)
+
+        def health(self):
+            if replaced_during_health:
+                birth[0] = "124"
+            return {"status": "ready", "version": "0.1.0-dev1"}
+
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", Client)
+
+    result = daemons_status.daemon_statuses(root)[0]
+
+    assert requests == ["http://127.0.0.1:9101"]
+    assert result["port"] == 9101
+    assert result["status"] == ("unverified-owner" if replaced_during_health else "ready")
+    assert ("version" in result) is not replaced_during_health
+
+
+@pytest.mark.parametrize(
+    "route_pid,route_birth,live_birth,owned,bind,port",
+    [
+        (202, "123", "123", True, "127.0.0.1", 9101),
+        (101, None, "123", True, "127.0.0.1", 9101),
+        (101, "123", None, True, "127.0.0.1", 9101),
+        (101, "123", "124", True, "127.0.0.1", 9101),
+        (101, "123", "123", False, "127.0.0.1", 9101),
+        (101, "123", "123", True, "192.0.2.1", 9101),
+        (101, "123", "123", True, "127.0.0.1", 0),
+    ],
+)
+def test_daemon_statuses_never_dials_unqualified_route_without_port_argument(
+    tmp_path, monkeypatch, route_pid, route_birth, live_birth, owned, bind, port
+):
+    root = tmp_path / "root"
+    root.mkdir()
+    table = _active_table(route_pid, port)
+    table["active"].update(process_start_time=route_birth, bind=bind)
+    monkeypatch.setattr(daemons_status, "_iter_status_pids", lambda: {101})
+    monkeypatch.setattr(daemons_status, "_status_pid_matches_root", lambda *a, **k: True)
+    monkeypatch.setattr(daemons_status, "_cmdline_for_pid", lambda pid: "daemon run")
+    monkeypatch.setattr(daemons_status, "_process_start_time", lambda pid: live_birth)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda *a, **k: owned)
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: table)
+
+    def never_dial(*args, **kwargs):
+        pytest.fail("unqualified route must not receive the control token")
+
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", never_dial)
+
+    result = daemons_status.daemon_statuses(root)[0]
+
+    assert result["status"] in {"unknown", "unverified-owner"}
+    assert "version" not in result
+
+
 def test_daemon_statuses_rejects_a_missing_start_time_as_unverified(
     tmp_path: Path, monkeypatch
 ):
