@@ -312,9 +312,7 @@ def test_same_cell_health_rechecks_peer_selection_without_launch(tmp_path, monke
         if "validator" in case:
             primitive = scripts / "installation-context"
             primitive.mkdir()
-            provider = Path(__file__).resolve().parents[2] / "agent-worktrees" / "scripts" / "installation-context"
-            shutil.copyfile(provider / "installation_context.py", primitive / "installation_context.py")
-            (primitive / "_installation_context_base.py").write_text("def broken(:\n", encoding="utf-8")
+            (primitive / "installation_context.py").write_text("def broken(:\n", encoding="utf-8")
 
     def select(*args):
         observed.append(args)
