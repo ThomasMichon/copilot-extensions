@@ -164,7 +164,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         install_application=install,
     )
     monkeypatch.setattr(ssh_setup, "_installer", lambda: owner)
-    monkeypatch.setattr(ssh_setup, "status", lambda *_args: "install" in events)
+    monkeypatch.setattr(ssh_setup, "status", lambda *_args, **_kwargs: "install" in events)
     monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
 
     def runtime(arguments):
@@ -196,7 +196,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         assert events.index("bootstrap") < events.index("prepare") < events.index("install")
         assert events.count("install") == 1
         events.clear()
-        monkeypatch.setattr(ssh_setup, "status", lambda *_args: True)
+        monkeypatch.setattr(ssh_setup, "status", lambda *_args, **_kwargs: True)
         assert continuity.run(selected_setup, "harness-a", apply=False).status == "ready"
         assert "prepare" not in events and "install" not in events
 
@@ -212,6 +212,35 @@ def test_consumer_selects_its_engine_interpreter_with_bounded_native_custody(mon
     assert argv == [sys.executable, "-I", "-m", "fleet_manager", "bootstrap"]
     assert options["max_stdout_bytes"] == options["max_stderr_bytes"] == 16384
     assert options["timeout"] == 30
+
+
+@pytest.mark.parametrize("ready,complete,stage", [
+    (True, True, None), (False, True, "not-running"), (True, False, "incomplete-construction"),
+])
+def test_setup_status_requires_live_convergence_after_installed_receipt(
+    tmp_path, monkeypatch, ready, complete, stage,
+):
+    from agent_worktrees import repository_ssh_setup as ssh_setup
+
+    root = tmp_path / "installation"
+    root.mkdir()
+    (root / "current-version").write_text("0.1.0\n")
+    description = {
+        "root": str(root), "selection": {"runtime_version": "0.1.0", "payload_hash": "a" * 64},
+    }
+    owner = SimpleNamespace(engine=SimpleNamespace(runtime=SimpleNamespace(
+        current_version=lambda *_args: "0.1.0",
+        is_complete=lambda *_args, **_kwargs: complete,
+    )))
+    monkeypatch.setattr(continuity, "_invoke", lambda *_args, **_kwargs: (
+        {"ready": True, "selected": True, "revision": 7} if ready else {"state": "not-running"}
+    ))
+    if stage is None:
+        assert ssh_setup.status(description, owner, require_ready=True)
+    else:
+        assert not ssh_setup.status(description, owner)
+        with pytest.raises(setup.SetupError, match=stage):
+            ssh_setup.status(description, owner, require_ready=True)
 
 
 def test_two_repositories_with_same_context_keep_separate_stable_machine_state(

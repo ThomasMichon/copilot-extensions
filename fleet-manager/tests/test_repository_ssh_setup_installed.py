@@ -273,6 +273,16 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             await asyncio.wait_for(connector.connected.wait(), 3)
             assert not state.exists() and not root.exists()
             first = await manager()
+            if first.returncode and (root / "current-version").exists():
+                try:
+                    observed = await control("status")
+                except AssertionError:
+                    progress("post-install observation: selected host status refused")
+                else:
+                    progress("post-install observation: " + json.dumps({
+                        name: observed.get(name)
+                        for name in ("state", "ready", "selected", "revision", "native_exit_confirmed")
+                    }, sort_keys=True))
             assert first.returncode == 0, first.stdout + first.stderr
             assert "converged its authenticated directory" in first.stdout
             initial = await control("status")

@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -113,6 +114,21 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     normal = workflow["jobs"]["gateway-normal-setup-" + platform]
     assert normal["timeout-minutes"] == 6
     assert normal["needs"] == "gateway-continuity-application-" + platform
+    condition = normal["if"].removeprefix("${{").removesuffix("}}").strip()
+    condition = condition.replace(
+        "needs.gateway-continuity-application-" + platform + ".result", "dependency",
+    ).replace("!cancelled()", "not_cancelled").replace("&&", " and ").replace("||", " or ")
+    for cancelled in (False, True):
+        for diagnostic in (False, True):
+            for full in (False, True):
+                for dependency in ("success", "failure", "skipped", "cancelled"):
+                    selected_mode = eval(condition, {"__builtins__": {}}, {
+                        "not_cancelled": not cancelled, "dependency": dependency,
+                        "inputs": SimpleNamespace(ssh_setup_only=diagnostic, pr_artifacts=full),
+                    })
+                    assert selected_mode == (
+                        not cancelled and (diagnostic or full and dependency == "success")
+                    )
     normal_steps = [step for step in normal["steps"] if "run" in step]
     assert [shlex.split(step["run"]) for step in normal_steps] == [
         ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],

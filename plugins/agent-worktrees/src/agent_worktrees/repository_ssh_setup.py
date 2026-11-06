@@ -86,19 +86,24 @@ def _selected_inputs(description: dict):
         yield module, selected
 
 
-def status(description: dict, module) -> bool:
+def status(description: dict, module, *, require_ready: bool = False) -> bool:
     from .repository_continuity import _invoke
+
+    def unavailable(stage):
+        if require_ready:
+            raise protocol.SetupError("SSH application readiness refused: " + stage + ".")
+        return False
 
     root = Path(description["root"])
     version = description["selection"]["runtime_version"]
     if not (root / "current-version").exists():
-        return False
+        return unavailable("missing-selection")
     if module.engine.runtime.current_version(root) != version:
-        return False
+        return unavailable("different-generation")
     if not module.engine.runtime.is_complete(
         root, version, expect_hash=description["selection"]["payload_hash"],
     ):
-        return False
+        return unavailable("incomplete-construction")
     slot = root / "versions" / version
     python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     result = _invoke(
@@ -107,10 +112,13 @@ def status(description: dict, module) -> bool:
     )
     if result.get("state") == "launch-unresolved":
         raise protocol.SetupError("SSH host launch is unsettled; reconcile its original owner before installation.")
-    return (
-        result.get("ready") is True and result.get("selected") is True
-        and type(result.get("revision")) is int
-    )
+    if result.get("ready") is not True:
+        return unavailable("not-running" if result.get("state") == "not-running" else "not-converged")
+    if result.get("selected") is not True:
+        return unavailable("selection-or-input-mismatch")
+    if type(result.get("revision")) is not int:
+        return unavailable("missing-directory-revision")
+    return True
 
 
 def run(setup, context, arguments: list[str], description: dict, *, apply: bool):
@@ -140,9 +148,9 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
         )
         setup.verify()
         current = _description(_invoke(arguments))
-        if (
-            current != description or not isinstance(receipt, dict) or receipt.get("state") != "installed"
-            or not status(description, module)
-        ):
-            raise protocol.SetupError("SSH application installation has no current converged readiness.")
+        if current != description:
+            raise protocol.SetupError("SSH setup inputs changed during application construction.")
+        if not isinstance(receipt, dict) or receipt.get("state") != "installed":
+            raise protocol.SetupError("Source application installation has no confirmed installed result.")
+        status(description, module, require_ready=True)
         return protocol.Outcome("ready", "Selected SSH application has converged its authenticated directory.")

@@ -47,6 +47,10 @@ on:
         description: Verify first-party PR/Fleet artifacts and the isolated pinned Gateway image
         type: boolean
         default: false
+      ssh_setup_only:
+        description: Run only the bounded normal SSH setup consumer packet on Linux and Windows
+        type: boolean
+        default: false
       dependency_compile:
         description: Exercise retained lock export and existing install seasoning with real UV
         type: boolean
@@ -1786,7 +1790,7 @@ jobs:
     steps: *gateway-continuity-application-steps
 
   gateway-normal-setup-linux:
-    if: ${{ inputs.pr_artifacts }}
+    if: ${{ !cancelled() && (inputs.ssh_setup_only || (inputs.pr_artifacts && needs.gateway-continuity-application-linux.result == 'success')) }}
     needs: gateway-continuity-application-linux
     name: Normal selected SSH setup (Linux)
     runs-on: ubuntu-latest
@@ -1812,7 +1816,7 @@ jobs:
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
 
   gateway-normal-setup-windows:
-    if: ${{ inputs.pr_artifacts }}
+    if: ${{ !cancelled() && (inputs.ssh_setup_only || (inputs.pr_artifacts && needs.gateway-continuity-application-windows.result == 'success')) }}
     needs: gateway-continuity-application-windows
     name: Normal selected SSH setup (Windows)
     runs-on: windows-latest
