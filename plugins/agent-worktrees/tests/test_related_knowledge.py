@@ -164,6 +164,34 @@ def test_synthesized_entry_cannot_be_upserted_into_authored_topology(bound_sourc
     assert related.related_path(harness).read_bytes() == before
 
 
+@pytest.mark.parametrize(("present", "force"), [
+    (False, False), (False, True), (True, False), (True, True),
+])
+def test_synthesized_narrative_scaffolder_cannot_write_the_anchor(
+    bound_source, present, force,
+):
+    harness, knowledge, _registry, _cfg, anchors = bound_source
+    entry = related.get_related_grafted(anchors(), "notes")
+    path = related.doc_abs_path(harness, entry)
+    assert path.is_relative_to(knowledge)
+    if present:
+        path.parent.mkdir(parents=True)
+        path.write_text("Retained authored narrative\n", encoding="utf-8")
+    before = {
+        candidate: candidate.read_bytes() if candidate.is_file() else None
+        for root in (harness, knowledge) for candidate in root.rglob("*")
+    }
+    if present and not force:
+        assert related.scaffold_doc(harness, entry, force=force) == (path, False)
+    else:
+        with pytest.raises(ConfigurationError, match="no narrative is scaffolded"):
+            related.scaffold_doc(harness, entry, force=force)
+    assert {
+        candidate: candidate.read_bytes() if candidate.is_file() else None
+        for root in (harness, knowledge) for candidate in root.rglob("*")
+    } == before
+
+
 def test_current_checkout_briefing_retains_aligned_state_policy(bound_source):
     from agent_worktrees import related_briefing
 

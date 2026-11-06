@@ -681,16 +681,6 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
         if e is None:
             output.err(f"'{name}' is not a related repo. Link it first: related add {name}")
             return 1
-        if e.bound_state_root:
-            path = related.doc_abs_path(anchor, e)
-            if not path.is_file():
-                output.err(
-                    "The bound knowledge relationship is synthesized; no "
-                    "narrative is scaffolded into its registered anchor."
-                )
-                return 1
-            print(path)
-            return 0
         path, created = related.scaffold_doc(anchor, e)
         print(path)
         if created:

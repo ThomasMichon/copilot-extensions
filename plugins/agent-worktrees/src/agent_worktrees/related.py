@@ -1228,6 +1228,15 @@ def scaffold_doc(
     ``force`` is set.
     """
     path = doc_abs_path(anchor, entry)
+    if entry.bound_state_root:
+        if path.is_file() and not force:
+            return (path, False)
+        from configuration_layers import ConfigurationError
+
+        raise ConfigurationError(
+            "The bound knowledge relationship is synthesized; no "
+            "narrative is scaffolded into its registered anchor."
+        )
     if path.exists() and not force:
         return (path, False)
     path.parent.mkdir(parents=True, exist_ok=True)

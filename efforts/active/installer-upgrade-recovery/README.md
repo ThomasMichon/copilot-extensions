@@ -1940,3 +1940,24 @@ is unchanged, and the existing module ceiling passes without widening.
 The prior head's CI and resolved findings do not satisfy the new-head review,
 required CI or still-unperformed hosted qualification. No merge or rollout
 is claimed; this parent remains Active.
+
+### 2026-11-06 - Enforce narrative refusal in the owning scaffolder
+
+The next review on `7c4ed5355c` confirms upsert refusal resolved but notes a
+moderate finding not published as an inline thread: direct scaffolder calls
+can bypass the CLI-only guard. Investigation confirms the owning helper can
+create a missing bound-knowledge narrative or force-overwrite an authored one.
+Three actual helper cases fail before correction; reading an existing file
+without forcing already remains read-only.
+
+The refusal now lives in `scaffold_doc` itself. The CLI uses that canonical
+boundary instead of its duplicate guard, preserving existing narrative reads
+while refusing all synthesized creation/forced writes. The four direct helper
+cases check complete harness/knowledge tree bytes. All 203 discovery, existing
+related writer/merge/CLI and actual native Git bare/linked entry cases pass in
+114.22 seconds, 205.36 including preparation and cleanup, with no skips.
+Both native consumers retain their original per-item and child deadlines.
+The existing admitted CLI hash is refreshed for the guard move; the unit node
+set, source cohort, coverage/effect guards and 300-second budget are unchanged.
+Fresh-head review, required CI and hosted discovery/consumer qualification
+remain due. This is source validation, not a live binding, pair or rollout.
