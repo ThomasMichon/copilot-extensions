@@ -26,6 +26,70 @@ import caller_owned_fixture as fixture
 LIBRARY = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture
+def sdk_scoped_enrollment(request):
+    """Borrow an SDK driver's already-admitted object, never infer effect consent."""
+    from sdk_desktop_observer import ObservationBlocked
+    from sdk_visibility_sources import ScopedEnrollment
+
+    enrollment = getattr(request.config, "_agent_procutil_scoped_enrollment", None)
+    if enrollment is None:
+        pytest.skip("requires an explicit source-admitted SDK scoped native driver")
+    expected = str(Path(__file__).resolve()) + "::test_scoped_observer_managed_root"
+    if type(enrollment) is not ScopedEnrollment or enrollment.case != expected:
+        raise ObservationBlocked("native SDK case requires its exact source-owner enrollment")
+    enrollment.verify()
+    return enrollment
+
+
+@pytest.mark.real_installer_processes
+@pytest.mark.skipif(os.name != "nt", reason="opt-in SDK-owned Windows scoped-root observation")
+def test_scoped_observer_managed_root(sdk_scoped_enrollment):
+    """Exercise one real SDK-owned root; this does not qualify opaque hosts."""
+    from agent_procutil import _windows_caller_owned as native
+    from agent_procutil.owned_process import OwnedCleanupError
+    from sdk_desktop_win32 import WinAPI
+    from sdk_scoped_observer import ScopedObserver
+
+    enrollment = sdk_scoped_enrollment
+    work_deadline, cleanup_deadline = enrollment.deadline - 2, enrollment.deadline
+    argv = [sys.executable, "-I", "-B", "-c", "raise SystemExit(23)"]
+
+    def remaining(deadline):
+        value = deadline - time.monotonic()
+        if value <= 0:
+            raise subprocess.TimeoutExpired(argv, 0)
+        return value
+
+    with ScopedObserver(WinAPI(), enrollment) as observer:
+        process, job = native.spawn(
+            argv, before_resume=observer.admit,
+            command_deadline=work_deadline, cleanup_deadline=cleanup_deadline,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        primary = None
+        try:
+            assert process.wait(timeout=remaining(work_deadline)) == 23
+            while native._job_pids(job.handle):
+                time.sleep(min(.01, remaining(work_deadline)))
+            packet = observer.finish()
+            assert packet["qualified"] and packet["passed"]
+            assert packet["consumer_qualified"] is False
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            try:
+                process.retire_job(job, remaining(cleanup_deadline))
+                process.wait(timeout=remaining(cleanup_deadline))
+                process.close()
+            except BaseException as cleanup:
+                failure = OwnedCleanupError(process, job)
+                failure.operation_error, failure.cleanup_error = primary, cleanup
+                raise failure from (primary if primary is not None else cleanup)
+    assert observer.hooks_closed and observer.pins_closed
+
+
 def _command(argv, *, cwd=None):
     result = subprocess.run(
         argv, cwd=cwd, capture_output=True, text=True, timeout=20,

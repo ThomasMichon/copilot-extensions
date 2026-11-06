@@ -259,3 +259,59 @@ def test_sdk_budget_also_refuses_execution_after_native_setup_cutoff(launch, mon
         )
     assert "resume" not in launch.calls
     assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)
+
+
+@pytest.mark.parametrize("outcome", ["admitted", "refused", "expired", "replacement"])
+def test_scoped_admission_precedes_resume_and_keeps_original_cleanup(launch, outcome):
+    seen = []
+
+    def admission(process, job, deadline, cleanup_deadline):
+        assert process._handle == 601 and process._thread_handle == 602
+        assert process._observation_pending is True
+        assert job is launch.jobs[0] and job.handle == 501
+        assert deadline == 105 and cleanup_deadline == 110
+        native.require_pre_resume_admission(process, job, deadline, cleanup_deadline)
+        assert "resume" not in launch.calls
+        launch.calls.append("admitted")
+        seen.append(process)
+        if outcome == "refused":
+            raise RuntimeError("observer refused")
+        if outcome == "expired":
+            launch.clock[0] = 106
+        return "replacement" if outcome == "replacement" else None
+
+    def spawn():
+        return native.spawn(
+            ["fixture.exe"], command_deadline=105, cleanup_deadline=110,
+            before_resume=admission, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    if outcome == "admitted":
+        process, job = spawn()
+        assert launch.calls.index("admitted") < launch.calls.index("resume")
+        process.close()
+        job.close()
+    else:
+        with pytest.raises((RuntimeError, ValueError, subprocess.TimeoutExpired)):
+            spawn()
+        assert "resume" not in launch.calls
+        assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)
+        assert ("close", 601) in launch.calls
+        assert ("terminate", 4 if outcome == "expired" else 10) in launch.calls
+    assert seen[0]._observation_pending is False
+    assert native._pre_resume_context.get() is None
+
+
+@pytest.mark.parametrize("options", [
+    {"before_resume": True},
+    {"before_resume": lambda *args: None, "command_deadline": 105},
+    {"before_resume": lambda *args: None, "cleanup_deadline": 110},
+    {"before_resume": lambda *args: None, "command_deadline": 105,
+     "cleanup_deadline": 110, "allow_breakaway": True},
+])
+def test_scoped_admission_without_original_execution_and_cleanup_budget_starts_nothing(launch, options):
+    with pytest.raises(ValueError, match="observer admission"):
+        native.spawn(["fixture.exe"], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
+    assert launch.calls == []

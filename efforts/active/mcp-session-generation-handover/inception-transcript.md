@@ -61,3 +61,23 @@ recommendation, not an assertion that the scoped consumer path already exists.
 This direction does not replace the fresh-execution and session-reattachment
 request or grant additional native effects. Any separately granted bounded
 calibration approval retains its original scope and consumption state.
+
+## 2026-11-06 - Withdraw the MCP observer prerequisite
+
+The operator corrected the scope:
+
+> We should disconnect anything to do with MCP from terminal host focus; not sure how that got intertwinced
+
+### Capture validation
+
+The coupling was agent-introduced. MCP generation selection, session preservation
+and owned cleanup do not depend on observer/focus/terminal-host/calibration
+qualification. Those application-specific gates are withdrawn, not validated.
+Generic SDK work is independently tracked by #10925 and
+[its canonical effort](../fixture-scoped-native-observation/README.md).
+
+The earlier observer request remains historical intent for SDK scope, not a
+renewed MCP prerequisite. Existing source work and journals are preserved.
+No prior application-bound calibration approval transfers to the SDK; no native
+effect, debugger implementation/execution or new process graph is authorized by
+this correction or by the source-only decoupling slice.
