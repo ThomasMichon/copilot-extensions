@@ -172,9 +172,14 @@ The required unit-only packet is unchanged.
 
 The Windows Resume consumer packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
-It requires PowerShell 7 and real PSMux, without fallback or prerequisite skips
-on Windows. Four concurrent admitted Resume plans traverse the unchanged
-production launcher, copied pane assets, argument receipt and startup reader,
+It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
+without fallback or prerequisite skips on Windows. A private executable adapter
+adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
+control and cleanup calls use that same namespace. The adapter restores the
+backend's original PATH. Two small native controls cover direct and adapted
+private mux startup. Four concurrent admitted
+Resume plans traverse the unchanged production launcher, copied pane assets,
+argument receipt and startup reader,
 real ConPTY attachment, detach and owned child retirement. Cold Resume starts
 with PSMux prewarming enabled and disabled carry a realistic JSON environment and literal
 33-argument commands. Private engine resolution and finite Copilot setup
