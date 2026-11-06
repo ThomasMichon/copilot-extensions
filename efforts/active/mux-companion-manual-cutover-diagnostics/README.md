@@ -329,6 +329,11 @@ https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321
 
 #### Direct unchecked Plan
 
+- The [independent expected-head source sequence](expected-head-observation.md)
+  realizes P3/P4 through the existing owner receipts and an optional passive
+  comparison. Its reviewed admission precedes implementation; legacy identity
+  stays unknown and all original clauses below remain unchanged.
+
 - [ ] P1. Retain all original four steps and earned source delivery: scoped vision,
   explicit one-call context-handoff force option, one-worktree on-demand existing
   claim/spawn/retire invocation, Companion human Cut over and refreshable previous/new
@@ -599,6 +604,9 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       rejects contradictory membership replay without imposing contiguous
       owner-local sequence numbers. Its 242 source controls do not complete
       history/append-failure, universal-source or native/installed acceptance.
+      #10858 separately qualifies the supported history/live splice and gap
+      criterion through 274 owner/model/actual-three-source controls. It does
+      not extend universal source coverage or the original parent gates.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -626,7 +634,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       duplicate/malformed data and no inferred rendering/custody authority.
       #10855 qualifies 242 source/private-process/Textual controls, including
       actual two-owner sequence gaps. Universal source coverage and the
-      remaining history, native/installed and original parent gates stay open.
+      native/installed and original parent gates stay open.
 
 - [x] Step 7 finite exact-owner read scaling: avoid unrelated-registry scans
       through ordinary writable-bootstrap indexes; preserve read-only and

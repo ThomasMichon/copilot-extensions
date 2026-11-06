@@ -199,12 +199,13 @@ def owner_outcome(start: int | None, source: str) -> None:
     """Complete only the original decision, never its child acquisition or reuse frontier."""
     observations = current_observations()
     if observations is not None and start is not None:
-        uncertain = any(
-            o.stage == source and o.authority is ScanAuthority.INDETERMINATE
-            for o in observations[start:]
-        )
+        uncertain = [
+            o for o in observations[start:]
+            if o.stage == source and o.authority is ScanAuthority.INDETERMINATE
+        ]
         observe(observations, source, source,
-                ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE)
+                ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE,
+                findings=tuple(dict.fromkeys(f for o in uncertain for f in o.findings)))
 
 
 knowledge_call = owner_call

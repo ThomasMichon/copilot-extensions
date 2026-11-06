@@ -1782,6 +1782,10 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
         "self-restoring-resolver", "self-restoring-registry",
     )
     assert owned[-1].authority is (ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE)
+    if mode.startswith("absent") or mode in ("self-restoring-resolver", "self-restoring-registry"):
+        assert {f.reason for f in owned[-1].findings} == {"owner-coverage-unavailable"}
+    elif mode == "registry-failure":
+        assert {f.reason for f in owned[-1].findings} == {"execution-registry-failed"}
     if mode in ("source-failure", "presence-failure", "registry-failure"):
         detail = {
             "source-failure": "PermissionError", "presence-failure": "ValueError",

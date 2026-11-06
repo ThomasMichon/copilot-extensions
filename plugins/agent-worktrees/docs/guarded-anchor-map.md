@@ -34,6 +34,10 @@ The in-repository configuration owner's completion is separate from its child
 input verdicts: confirmed optional absence can publish, while unreadable or
 invalid inputs still withdraw the affected view. All-absent acquisition reports
 remain absent; completion does not manufacture positive input evidence.
+Execution-machine completion likewise retains uncertain child findings without
+upgrading their authority. A configured machine without `machines.yaml` remains
+publishable when only owner provenance is unavailable; an execution-registry
+failure still withdraws the affected view.
 Launch/session preparation updates only that caller's view, not every prepared
 worktree. Initial resident preparation and explicit refresh cover prepared views.
 Managed launch preparation is synchronous before launch. SessionStart reuses
