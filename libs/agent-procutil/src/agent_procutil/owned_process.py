@@ -595,6 +595,7 @@ def _communicate_windows_bounded(
 
 def _run_owned(
     argv: list[str], *, timeout: float | None, input_text: str | bytes | None = None,
+    stdin_stream=None, stdout_stream=None,
     capture: bool = True, inherit_process_group: bool = False,
     capture_limits: tuple[int, int] | None = None, pass_fds: tuple[int, ...] = (),
     confirm_posix_group: bool = False,
@@ -629,6 +630,10 @@ def _run_owned(
         raise ValueError("binary capture requires explicit stream limits")
     if isinstance(input_text, bytes) and not binary:
         raise ValueError("byte stdin requires binary capture")
+    if stdin_stream is not None and input_text is not None:
+        raise ValueError("inherited stdin cannot be combined with supplied input")
+    if stdout_stream is not None and (capture or streaming):
+        raise ValueError("inherited stdout requires uncaptured execution")
     if type(allow_daemon_breakaway) is not bool:
         raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
@@ -664,8 +669,12 @@ def _run_owned(
     try:
         process, job = spawn(
             argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
-            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE if capture or streaming else subprocess.DEVNULL,
+            stdin=stdin_stream if stdin_stream is not None else (
+                subprocess.PIPE if input_text is not None else subprocess.DEVNULL
+            ),
+            stdout=stdout_stream if stdout_stream is not None else (
+                subprocess.PIPE if capture or streaming else subprocess.DEVNULL
+            ),
             stderr=subprocess.PIPE if capture or streaming else subprocess.DEVNULL,
             **({"text": False, "bufsize": 0} if bounded_windows or streaming else {
                 "text": True, "encoding": "utf-8", "errors": "strict",
@@ -875,6 +884,7 @@ def run_caller_owned(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None = None, capture: bool = True,
     input_bytes: bytes | None = None,
+    stdin_stream=None, stdout_stream=None,
     on_settled: Callable[[], None] | None = None,
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
@@ -889,6 +899,8 @@ def run_caller_owned(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=input_text, capture=capture,
         **({"input_bytes": input_bytes} if input_bytes is not None else {}),
+        **({"stdin_stream": stdin_stream} if stdin_stream is not None else {}),
+        **({"stdout_stream": stdout_stream} if stdout_stream is not None else {}),
         on_settled=on_settled,
         **({"cwd": cwd} if cwd is not None else {}),
         **({"env": env} if env is not None else {}),

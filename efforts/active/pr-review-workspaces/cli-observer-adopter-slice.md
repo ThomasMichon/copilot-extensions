@@ -1,8 +1,8 @@
 # CLI-first workspace observer adopter
 
-Parent: [PR Review Workspaces](README.md). This is an **agent-recommended,
-planning-only source proposal**. Review it before implementation. Neither this
-document nor its source publication authorizes configuration adoption,
+Parent: [PR Review Workspaces](README.md). This **agent-recommended source
+contract** cleared review in #10819; its bounded source implementation was
+separately admitted. Neither this document nor its source publication authorizes configuration adoption,
 credentials, installation, serving changes, live PR effects or rollout.
 
 ## Intent and existing owners
@@ -137,14 +137,14 @@ hot-reload or background credential owner.
 
 ## Implementation plan after source admission
 
-- [ ] Review the profile ownership, fixed read-only exposure and finite
+- [x] Review the profile ownership, fixed read-only exposure and finite
   invocation contract before changing the CLI or its source dependencies.
-- [ ] Add the strict optional selector and namespace-safe profile reader under
+- [x] Add the strict optional selector and namespace-safe profile reader under
   the existing PR client/configuration owner; no profile writer or adoption
   command is part of this slice.
-- [ ] Construct only the existing authenticated client/facade chain and retain
+- [x] Construct only the existing authenticated client/facade chain and retain
   current request parsing, capability validation and one-shot source refusal.
-- [ ] Wire finite execution and response/error handling through the current
+- [x] Wire finite execution and response/error handling through the current
   process/transport owners without a new lifetime or retry engine.
 - [ ] Qualify actual CLI invocation and installed dependency composition in
   contained fixtures, then run the normal source/review/typing/CI gates.
@@ -153,25 +153,51 @@ hot-reload or background credential owner.
 
 ## Validation plan
 
-- [ ] Current unbound commands and Python embeddings remain compatible;
+- [x] Current unbound commands and Python embeddings remain compatible;
   missing/foreign profiles and unknown request/configuration fields refuse
   before credential or provider access.
-- [ ] A real CLI process uses the existing authenticated Gateway/PR host and
+- [x] A real CLI process uses the existing authenticated Gateway/PR host and
   native read-owner seam with synthetic credentials/provider output. Fresh CLI
   invocations share the service's generation/cache, not another local store.
-- [ ] Load, no-change sync, dialogue-only change, target/head movement, partial
+- [x] Load, no-change sync, dialogue-only change, target/head movement, partial
   pages and scoped materialization preserve actual IDs, intervals and gaps.
-- [ ] Wrong caller/target/account, revocation and unsupported contracts refuse
+- [x] Wrong caller/target/account, revocation and unsupported contracts refuse
   without endpoint/account fallback or credential export.
-- [ ] Optional events preserve epoch/sequence, bounded pages and unavailable
+- [x] Optional events preserve epoch/sequence, bounded pages and unavailable
   states; reading them never acknowledges or handles a review.
-- [ ] Cancellation/deadline and failed physical cleanup do not report drained,
+- [x] Cancellation/deadline and failed physical cleanup do not report drained,
   release shared owners or hide an uncertain cache/journal commit.
-- [ ] No observation-profile request can reach submission, source fetch,
+- [x] No observation-profile request can reach submission, source fetch,
   mutation, deployment, a new service or an owner/module loader.
-- [ ] First-use/source packaging controls qualify the actual command and its
+- [x] First-use/source packaging controls qualify the actual command and its
   dependencies without treating fixture configuration as live adoption.
 
 The finite source exit is an assessed review, required green CI and honest
 compatibility evidence for this optional observer client. The parent effort's
 real adopter, source, submission, concurrency and operational gates remain open.
+
+## Local source qualification
+
+The optional selector now uses the existing application configuration owner and
+the current legacy/cell admission APIs. It composes ServiceCaller,
+WorkspaceClient and one-shot WorkspaceTools without adopting a backend.
+Borrowed request/output streams remain inside the canonical finite process
+owner; the single 60-second observer deadline includes physical input and
+output. Cleanup failures retain the original retryable owner exception.
+
+The 30 current observer unit controls and six native scenarios are covered
+across the recorded focused packets. Native cases run the actual CLI against
+the existing TLS Gateway and native read-owner seam with synthetic credentials
+and finite provider output. Compatibility, scope/refusal, immutable cache,
+partial observations and events retain their original contracts. Fresh
+first-party wheel composition exercises the installed console command without
+editable source finders; it reuses prepared external dependencies and does not
+qualify fresh third-party acquisition or a real host installer.
+
+Focused borrowed-stream controls, the enforced Linux/Windows type projects,
+dependency-age, install-contract, documentation and touched Python lint checks
+pass. The PR plugin and Procutil remain in their existing pending type
+inventory, not newly certified strict projects. These are local source and
+contained-consumer results, not review acceptance, required CI, release,
+profile adoption or live-provider qualification. The two remaining Plan items
+and the parent's eight Plan/eleven Validation gates remain open.
