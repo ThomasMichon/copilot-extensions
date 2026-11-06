@@ -9527,7 +9527,7 @@ Follow the same contract so it stays safe-by-default and reproducible:
 ## Optional native registration inspection
 
 The `registration-inspection` portfolio in `installation-context-full.yml`
-runs only the focused native registration reader/CLI controls on Linux and
+runs only the focused native registration reader/CLI and incoming bootstrap controls on Linux and
 Windows. Supply the published branch and its exact `source_sha`; both jobs
 verify that commit before testing. The existing bounded runner's process,
 storage and 30/300/900-second item/group/plugin limits are unchanged, and the
@@ -9537,6 +9537,7 @@ The same local selection is:
 
 ```text
 python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_registration_inspection.py
+python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_incoming_registration_inspection.py --test-file tests/native/test_incoming_registration_inspection_native.py --allow-explicit-tiers
 ```
 
 It exercises unique canonical/legacy aliases, preserved exposure/editing mode,
@@ -9545,8 +9546,15 @@ selection and the actual CLI from a neutral directory. Existing repository
 inventory remains a separate old-caller control. Configuration bytes stay
 unchanged; no actual registration, installer, service or authentication provider
 is started. Hosted jobs require both native consumer cases and refuse skipped
-or failed evidence. This does not qualify caller migration, cold incoming
-construction or installed-host recovery.
+or failed evidence. A separate incoming step requires real cold construction
+and the existing reader with an unusable selected predecessor. Both exposure
+choices, a fresh default, ambiguity and an actually unusable incoming UV tool
+run twice, preserving registry, selector, malformed owner and binding bytes.
+This uses the ordinary
+constructor and owned-child cleanup, not installation or service startup.
+The native test retains its 180-second child and 300-second item limits;
+the original reader packet remains separate. These checks do not qualify
+caller migration or installed-host recovery.
 Two focused controls also supply a deliberately lossy normalizer while retaining
 real distinct directories and native file-identity checks. They reject foreign
 selection and inconsistent roots without provisioning a case-sensitive Windows

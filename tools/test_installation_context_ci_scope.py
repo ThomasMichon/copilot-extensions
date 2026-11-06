@@ -71,8 +71,9 @@ def test_bridge_historical_guards_preserve_selection_and_failure_diagnostics():
 
 
 @pytest.mark.parametrize("outcome", ["passed", "failed", "skipped", "missing", "empty", "duplicate"])
+@pytest.mark.parametrize("step_id", ["readers", "incoming"])
 def test_registration_inspection_portfolio_requires_complete_native_evidence(
-    tmp_path, monkeypatch, outcome,
+    tmp_path, monkeypatch, capsys, outcome, step_id,
 ):
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
@@ -82,7 +83,21 @@ def test_registration_inspection_portfolio_requires_complete_native_evidence(
         "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'registration-inspection'"
     )
     assert workflow["jobs"]["registration-inspection-windows"]["steps"] == job["steps"]
-    step = next(value for value in job["steps"] if value.get("id") == "readers")
+    step = next(value for value in job["steps"] if value.get("id") == step_id)
+    required_names = (
+        [
+            "test_actual_neutral_cwd_cli_and_existing_inventory_remain_read_only",
+            "test_native_namespace_selection_and_invalid_context_do_not_use_legacy_state",
+        ] if step_id == "readers" else [
+            "test_closed_source_retains_native_inputs_and_application_through_reader",
+            *(
+                "test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state[" + scenario + "]"
+                for scenario in (
+                    "alias-disabled", "alias-enabled", "fresh", "ambiguous", "preparation-failure",
+                )
+            ),
+        ]
+    )
     tools = tmp_path / "tools"
     tools.mkdir()
     (tools / "run-plugin-tests.py").write_text(f"""import json, sys
@@ -91,21 +106,20 @@ import xml.etree.ElementTree as ET
 arguments = sys.argv[1:]
 Path("arguments.json").write_text(json.dumps(arguments))
 if {outcome!r} == "failed":
+    print("runner failure progress", flush=True)
+    print("runner failure reason", file=sys.stderr, flush=True)
     sys.exit(17)
 reports = Path(arguments[arguments.index("--junit-dir") + 1])
 reports.mkdir(parents=True)
 root = ET.Element("testsuites")
 suite = ET.SubElement(root, "testsuite")
-names = [
-    "test_actual_neutral_cwd_cli_and_existing_inventory_remain_read_only",
-    "test_native_namespace_selection_and_invalid_context_do_not_use_legacy_state",
-]
+names = {required_names!r}
 if {outcome!r} == "missing":
     names.pop()
 if {outcome!r} == "empty":
     names.clear()
 if {outcome!r} == "duplicate":
-    names.append(names[0])
+    names.append(names[-1])
 for name in names:
     case = ET.SubElement(suite, "testcase", name=name)
     if {outcome!r} == "skipped":
@@ -114,6 +128,7 @@ ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
 """, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("REGISTRATION_INSPECTION_REPORTS", str(tmp_path / "runner-temp"))
     monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "job-environment"))
     body = compile(step["run"], "<registration-inspection-workflow>", "exec")
     if outcome == "passed":
@@ -122,9 +137,20 @@ ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
         expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
         with pytest.raises(expected):
             exec(body, {})
+    if outcome == "failed":
+        captured = capsys.readouterr()
+        assert "runner failure progress" in captured.out
+        assert "runner failure reason" in captured.err
     arguments = json.loads((tmp_path / "arguments.json").read_text())
-    assert arguments[:3] == ["agent-worktrees", "--test-file", "tests/test_registration_inspection.py"]
-    assert not set(arguments) & {"--allow-host-state", "--allow-explicit-tiers", "--timeout", "--plugin-timeout"}
+    expected_file = (
+        "tests/test_registration_inspection.py"
+        if step_id == "readers" else "tests/test_incoming_registration_inspection.py"
+    )
+    assert arguments[:3] == ["agent-worktrees", "--test-file", expected_file]
+    assert ("--allow-explicit-tiers" in arguments) == (step_id == "incoming")
+    assert not set(arguments) & {"--allow-host-state", "--timeout", "--plugin-timeout"}
+    if step_id == "incoming":
+        assert "tests/native/test_incoming_registration_inspection_native.py" in arguments
 
 
 @pytest.mark.parametrize("expected", ["", "b" * 40, "a" * 40])
