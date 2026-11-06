@@ -359,6 +359,14 @@
       "level": "pending"
     },
     {
+      "name": "lib-copilot-driver-core",
+      "include": [
+        "libs/copilot-driver-core"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
       "name": "agent-bridge",
       "include": [
         "plugins/agent-bridge"
@@ -434,6 +442,14 @@
       "name": "agent-pull-requests",
       "include": [
         "plugins/agent-pull-requests"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-remote-driver",
+      "include": [
+        "plugins/agent-remote-driver"
       ],
       "exclude": [],
       "level": "pending"

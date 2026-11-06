@@ -93,7 +93,7 @@ All defaults/types below come from `ServiceConfig` and its nested models:
 | `session_host_stale_reap_seconds` | Integer `0` (age bound disabled). |
 | `graceful_cancel_settle_seconds`, `cancel_turns_on_redeploy` | Integer `45`, boolean false; restart alone remains a transport event by default. |
 | `idle_reap_ttl_seconds`, `idle_reap_sweep_seconds` | Integers `600`, `120`; sweep has native 30-second floor. |
-| `session_host_unexpected_reap_seconds`, `session_host_active_reap_seconds` | Integers `60`, `1800`; existing native child custody remains required. |
+| `session_host_unexpected_reap_seconds`, `session_host_active_reap_seconds` | Integers `60`, `1800` for supported legacy Hosts; new core ACP Hosts do not expire from disconnect/status alone. Existing native child custody remains required. |
 | `live_stall_interrupt_after_s` | Integer `900`; nonpositive disables threshold-based interruption. |
 | `session_modes` | Native `SessionModes` object; see `preference_models.py` and existing machine-config session-mode section. |
 | `remote_acp`, `remote_acp_bindings`, `remote_acp_auth_sources` | Maps of target/binding/approval objects from `remote_acp_config.py`; protected remote relationship and credential-custody inputs. |

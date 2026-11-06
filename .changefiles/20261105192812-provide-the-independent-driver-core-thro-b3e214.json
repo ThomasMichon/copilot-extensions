@@ -1,0 +1,9 @@
+{
+  "comment": "Provide the independent Driver core through ordinary shared-library dependencies",
+  "changes": [
+    {
+      "plugin": "libs/copilot-driver-core",
+      "type": "patch"
+    }
+  ]
+}

@@ -141,7 +141,7 @@ new authority or ownership behavior requires a separate proposal.
 - First-touch uses the real source runtime resolver under an isolated empty home,
   not an installed runtime or provisioner. Deadline expiry remains honestly
   unavailable. Native success uses a controlled CLI child, not a live service.
-- `python tools/check-install-contract.py`: all 13 runtime plugins conform.
+- `python tools/check-install-contract.py`: all 13 then-current runtime plugins conform.
   The Python plugin runner rejects `.mjs` selectors by contract; these tests use
   the existing Node test runner directly. Python 3.9 cannot run repository tooling;
   the already-installed Python 3.11 ran the contract and changefile tools.

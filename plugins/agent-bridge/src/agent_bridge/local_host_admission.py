@@ -30,7 +30,10 @@ def context_fields(owner: LocalLaunchOwner, argv: list[str], cwd: str) -> dict:
 
 
 @contextmanager
-def child_database(value: dict, *, cwd: str, session_id: str, argv: list[str] | None):
+def child_database(
+    value: dict, *, cwd: str, session_id: str, argv: list[str] | None,
+    parent_pid: int | None = None,
+):
     from .db import Database
 
     try:
@@ -41,7 +44,7 @@ def child_database(value: dict, *, cwd: str, session_id: str, argv: list[str] | 
         raise RuntimeCustodyError("Malformed original local child context") from exc
     stat = Path(installation.database).stat()
     if (
-        os.getppid() != producer.pid
+        (os.getppid() if parent_pid is None else parent_pid) != producer.pid
         or process_start_time(producer.pid) != producer.process_start
         or producer_id(installation.document(), admission.epoch, producer) != admission.producer
         or [stat.st_dev, stat.st_ino] != value["database_identity"]
@@ -66,13 +69,16 @@ def child_database(value: dict, *, cwd: str, session_id: str, argv: list[str] | 
 
 def require_child_admission(
     raw: str, *, cwd: str, session_id: str, argv: list[str] | None = None,
+    parent_pid: int | None = None,
 ) -> None:
     value = decode(raw)
     if value.get("operation") == "workspace-creation":
         from .creation_launch_owner import require_child_admission as require_creation
 
-        require_creation(value, cwd=cwd, session_id=session_id, argv=argv)
+        require_creation(value, cwd=cwd, session_id=session_id, argv=argv, parent_pid=parent_pid)
     else:
         from .acquisition_host_admission import require_child_admission as require_acquisition
 
-        require_acquisition(encode(value), cwd=cwd, session_id=session_id, argv=argv)
+        require_acquisition(
+            encode(value), cwd=cwd, session_id=session_id, argv=argv, parent_pid=parent_pid,
+        )

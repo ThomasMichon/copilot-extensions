@@ -19,7 +19,12 @@ This is the reviewed-before-code implementation proposal, not runtime support.
 
 Agent recommendation: retain the `agent-remote-driver` namespace for this
 refactor, with an independently buildable Python core alongside the existing
-JavaScript extension. Reuse the repository's wheel/application-project model
+JavaScript extension. The Python implementation is the canonical
+`libs/copilot-driver-core` distribution, consumed by Bridge and the Driver
+application connector through ordinary first-party library references. This
+preserves the existing materializer and build owner's library attribution,
+rather than introducing sibling-plugin source dependencies.
+Reuse the repository's wheel/application-project model
 for ordinary installation and its compact receiving-archive mechanism for
 hoisting the same canonical code and assets. The plugin remains a connector;
 the app must run without plugin enablement.
@@ -44,7 +49,12 @@ launch-bound connection from its selected extension. Both reach one Session
 Host broker; SDK adaptation is a backend edge, not another conversation.
 
 Preserve the existing TCP/frame contract for supported retained participants
-while expanding the core's ACP-compatible HTTP/TCP support provider-first.
+while expanding the core's ACP-compatible WebSocket/TCP support provider-first.
+Use the existing public `acp.v1` WebSocket JSON-RPC convention. HTTP/SSE alone
+is not ACP interoperability; do not introduce a parallel envelope protocol.
+The ordinary locked application carries the WS dependency and its metadata;
+the compact dependency-free receiving archive remains TCP-only and advertises
+that limitation. Neither artifact may claim the other's transport support.
 Expose actual support from the executing app and running broker, separately
 from package versions. New consumers select support before launch effects.
 Strict unknown-argument and required-policy refusal remain.

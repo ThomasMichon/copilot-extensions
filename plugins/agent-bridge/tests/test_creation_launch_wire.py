@@ -12,6 +12,7 @@ import sys
 from unittest.mock import AsyncMock
 
 import pytest
+from agent_procutil._interpreter import physical_executable
 from zdd.diagnostics import process_start_time
 
 from agent_bridge import session_manager as core, workspace_creation as workspace
@@ -115,8 +116,10 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
             assert resolved.env == {
                 "SYNTHETIC_BASE": "preserved", "SYNTHETIC_OVERRIDE": "new", "SYNTHETIC_EXTRA": "added",
             }
+        interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+        assert interpreter is not None
         return [
-            sys.executable, "-u", str(peer), str(db.db_path), str(audit), delivery, mode,
+            interpreter, "-u", str(peer), str(db.db_path), str(audit), delivery, mode,
         ], resolved.cwd, dict(resolved.env)
 
     monkeypatch.setattr(workspace, "worktree_command", command)
@@ -257,6 +260,10 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
             assert session._native_turn_transport is None
             assert manager._host_index.get(session.session_id).host_pid == handles[0].host_pid
         argv = handles[0].proc.args
+        assert argv[1:3] == ["-I", "-S"]
+        assert any(Path(arg).suffix == ".pyz" for arg in argv)
+        assert "agent_bridge.session_host" not in argv
+        assert json.loads(Path(handles[0].state_file).read_text())["lifetime_policy"] == "acp"
         assert float(argv[argv.index("--active-reap-seconds") + 1]) == 0
         assert float(argv[argv.index("--unexpected-reap-seconds") + 1]) == 0
         assert not ordinary_registrations

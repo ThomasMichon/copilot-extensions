@@ -1,0 +1,13 @@
+{
+  "comment": "Extract the independent headless Session Host core and preserve Bridge receiving compatibility",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

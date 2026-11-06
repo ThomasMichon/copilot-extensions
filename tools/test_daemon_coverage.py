@@ -99,9 +99,17 @@ def test_rebased_profile_parser_and_removed_logger_bootstraps_are_classified():
 
 def test_session_host_direct_serve_is_the_admitted_startup_owner():
     census = json.loads(Path(__file__).with_name("daemon-coverage.json").read_text(encoding="utf-8"))
-    key = "b:session_host/host.py::SessionHost.serve"
+    key = "cd:session_host/host.py::SessionHost.serve"
     assert census["entrypoints"][key] == "agent-bridge-session-host"
-    assert census["admission_owners"]["b:session_host/host.py"] == [key]
+    assert census["admission_owners"]["cd:session_host/host.py"] == [key]
+
+
+def test_independent_driver_library_listener_cannot_escape_the_census(tmp_path):
+    fixture(tmp_path, "pass\n")
+    source = tmp_path / "libs/copilot-driver-core/src/agent_remote_driver/host.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("async def serve(loop):\n    await loop.create_server(factory)\n")
+    assert any("host.py::serve::create_server" in problem for problem in GUARD.verify(tmp_path))
 
 
 def test_ssh_source_start_is_resident_with_its_real_admitted_foreground(tmp_path):

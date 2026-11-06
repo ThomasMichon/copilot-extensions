@@ -1990,7 +1990,7 @@ The attached construction protocol rechecks completion even after initial reuse
 admission, so a later detected mutable installation cannot receive a successful
 completion reply. New unpublished failures still use owned candidate cleanup.
 The canonical implementation and construction adapter are synchronized to all
-13 runtime plugins, Manager and the shared driver.
+13 then-current runtime plugins, Manager and the shared driver.
 
 The new static matrix plus existing Bridge versioned-runtime regression selection
 passed 169 cases with 22 explicit platform skips in 136.60 seconds. Additional

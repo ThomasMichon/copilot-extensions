@@ -1154,6 +1154,8 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     real_popen = subprocess.Popen
 
     def _fake_popen(argv, **kwargs):
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
         # Run the crash script instead of the real
         # `-m agent_bridge.session_host` entry point, keeping every other
         # kwarg (stdin/stdout/stderr redirection, env, cwd, creationflags)
@@ -1190,6 +1192,8 @@ def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
     spawned: dict[str, subprocess.Popen] = {}
 
     def _fake_popen(argv, **kwargs):
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
         proc = real_popen([sys.executable, str(hang_script)], **kwargs)
         spawned["proc"] = proc
         return proc
@@ -1258,7 +1262,7 @@ def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
             pytest.fail("grandchild never reported its pid")
         child_pid = int(marker.read_text().strip())
 
-        monkeypatch.setattr(launcher, "contained_test_mode", lambda: False)
+        monkeypatch.setattr(launcher._core, "contained_test_mode", lambda: False)
         launcher._kill_host_process_tree(proc, expected_identity)
         proc.wait(timeout=5)
 
@@ -1297,10 +1301,10 @@ class TestKillHostProcessTreeIdentityGuard:
             os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
         )
         monkeypatch.setattr(
-            launcher, "contained_test_mode", lambda: False,
+            launcher._core, "contained_test_mode", lambda: False,
         )
         monkeypatch.setattr(
-            "zdd.diagnostics.process_start_time", lambda pid: None,
+            launcher._core, "process_start_time", lambda pid: None,
         )
 
         proc = MagicMock()
@@ -1326,10 +1330,10 @@ class TestKillHostProcessTreeIdentityGuard:
             os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
         )
         monkeypatch.setattr(
-            launcher, "contained_test_mode", lambda: False,
+            launcher._core, "contained_test_mode", lambda: False,
         )
         monkeypatch.setattr(
-            "zdd.diagnostics.process_start_time",
+            launcher._core, "process_start_time",
             lambda pid: "a-different-identity",
         )
 
@@ -1354,10 +1358,10 @@ class TestKillHostProcessTreeIdentityGuard:
             os, "killpg", lambda pgid, sig: killpg_calls.append((pgid, sig)),
         )
         monkeypatch.setattr(
-            launcher, "contained_test_mode", lambda: False,
+            launcher._core, "contained_test_mode", lambda: False,
         )
         monkeypatch.setattr(
-            "zdd.diagnostics.process_start_time",
+            launcher._core, "process_start_time",
             lambda pid: "the-original-identity",
         )
 
@@ -2946,9 +2950,10 @@ async def test_launch_session_host_process_owns_child(
     try:
         assert handle.child_pid > 0 and handle.port > 0
         assert osutil_pid_alive(handle.host_pid)
+        assert handle.nonce and handle.nonce not in repr(handle)
 
         c = await SessionHostClient.connect(port=handle.port)
-        hello = await c.attach(0)
+        hello = await c.attach(0, nonce=handle.nonce.encode())
         assert hello.child_pid == handle.child_pid
         await c.write(b'{"prompt":"go"}\n')
         seqs = []
@@ -3128,7 +3133,7 @@ async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch, hosted_
 
     monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)
     # Don't arm a kill-on-close job on the pytest process for an in-process host.
-    monkeypatch.setattr(launcher, "apply_host_survival", lambda: None)
+    monkeypatch.setattr(launcher._core, "apply_host_survival", lambda: None)
 
     state_file = tmp_path / "state.json"
     task = asyncio.create_task(run_agent_session_host(
@@ -3180,7 +3185,9 @@ def test_session_host_bundle_preserves_procutil_and_portable_receiver_closures(t
         for module in bundle._PROCUTIL_MODULES:
             assert "agent_procutil/" + module in names
         assert contents.read("agent_bridge/hosting_policy.py") == (
-            Path(bundle.__file__).with_name("receiver_policy.py").read_bytes()
+            Path(bundle.agent_remote_driver.__file__).parent.joinpath(
+                "session_host", "receiver_policy.py",
+            ).read_bytes()
         )
         procutil_root = Path(bundle.agent_procutil.__file__).resolve().parent
         for module in bundle._PROCUTIL_MODULES:
@@ -3623,6 +3630,8 @@ def test_containment_reaps_real_session_host_tree(tmp_path, capfd, hosted_worksp
         "time.sleep(60)"
     )
     env = isolated_environment(os.environ, tmp_path / "sandbox")
+    # Cache writes must not trip the limit before the Host and trigger exist.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     rc = run_contained(
         [sys.executable, "-c", script],
         cwd=tmp_path,
@@ -3640,6 +3649,7 @@ def test_containment_reaps_real_session_host_tree(tmp_path, capfd, hosted_worksp
     assert rc == 124
     assert "temporary-storage limit exceeded" in capfd.readouterr().err
     assert pid_file.is_file(), "session host did not report its process tree"
+    assert (tmp_path / "sandbox" / "trigger.bin").is_file()
     pids = json.loads(pid_file.read_text(encoding="ascii"))
     deadline = time.monotonic() + 5
     while any(osutil_pid_alive(pid) for pid in pids.values()) and time.monotonic() < deadline:

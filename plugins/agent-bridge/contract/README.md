@@ -824,6 +824,16 @@ including the joined-session observer and delivery producer.
 
 ## Re-attesting the current preference-authority vectors
 
+The standalone Driver extraction keeps framing generation 1 and the existing
+consent/refusal semantics. Its current authority closure names the canonical
+`agent_remote_driver` modules in `libs/copilot-driver-core`, including the
+executable entrypoint, client, receiving and legacy adapters, and live startup
+admission. The staged-role closure and digest-sensitivity tests cover those
+members. This is an explicit current-vector closure revision for review, not
+permission for the capture tool to accept arbitrary closure changes. Historical
+vectors remain unchanged; independently retained old components keep their
+original source-bound digests rather than being relabeled as the new core.
+
 After committing the authority source, run from the repository root:
 
 ```text
@@ -847,11 +857,15 @@ even without a framing-version bump. Refresh those three current captures with
 this tool; do not relax their live-digest assertions or re-attest unrelated
 HTTP packets to accommodate that bounded change.
 
-Only the three current `wrapper-authority-v1`, `wrapper-exec` and
-`wrapper-consent` fixtures and their registry hashes/provenance are written.
-The registry keeps its existing indentation; a focused capture must not reformat
-unrelated contract records. Historical fixtures remain unchanged.
-Review these four outputs; do not replace
+The three current `wrapper-authority-v1`, `wrapper-exec` and `wrapper-consent`
+fixtures are re-observed. Two fixed current fixtures, `messages` and
+`wrapper-settings-reader`, permit source-only relocation to their canonical
+core files only when both the Git blob and SHA-256 equal the prior capture.
+Their non-provenance payloads remain unchanged; relocation is not a new runtime
+observation. No other fixture is writable. Registry hashes/provenance use the
+canonical codec without reformatting unrelated records. Historical fixtures
+and their legacy source registrations remain unchanged.
+Review these six outputs and any immutable provenance chunks; do not replace
 the captured commit with a guessed future publication commit. A squash may make
 the genuine capture commit unavailable: the checker treats historical commit
 lookup as opportunistic, verifies a resolvable blob against its SHA-256, and
