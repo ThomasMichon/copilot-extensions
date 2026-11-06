@@ -3170,6 +3170,18 @@ These Windows source controls do not qualify live service registration,
 CodeSpace connectivity, POSIX execution or installed rollout, and do not enter
 the required unit-only CI packet.
 
+The same packet's `install_stage_failures` selection checks actual nonzero
+`install` and `provision` process exits for venv/package failure, with no
+current selection or deployment manifest. The `install-incomplete-True`
+normal-entry case covers `-Force` repair and healthy repeat reuse.
+`marketplace_staged_uninstall_removes` constructs a real temporary venv through
+the marketplace payload, invokes its generated command, then checks runtime,
+selector and binstub removal while configuration, unknown state and the
+original marketplace entry/manifest remain unchanged. Uninstall receives a
+real external base interpreter, not only construction's fixture CMD wrapper.
+UV package delivery and host-service
+effects remain fixture boundaries; this is not full package or serving proof.
+
 The on-demand Worktrees `tests/test_update_codespaces_recovery.py` packet joins
 the normal collected update orchestration, real currentness probe, bounded
 installer process/receipt owner and guarded Codespaces producer. Run
