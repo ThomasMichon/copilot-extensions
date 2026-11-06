@@ -6445,6 +6445,17 @@ machine-local sources without resolving an unused state root. Stateless and
 external-state configurations still resolve the knowledge overlay on every
 call, including changed or removed bindings. `config_sources` owns this read
 path; `state_root` re-exports the same types and function for existing callers.
+`tests/test_related_knowledge.py` additionally checks binding-driven related
+synthesis, canonical registration, collisions without policy-trust promotion,
+ambiguous sources and preservation of ordinary self-hosted configuration.
+The opt-in T3 `tests/native/test_related_knowledge_native.py` uses real Git
+bare/linked-worktree fixtures and the installed CLI to exercise list/resolve,
+aligned-only planning, narrative-scaffold refusal and structured nonzero
+canonical-class failure. It allocates no managed pair and preserves both
+repository trees. The `related-knowledge` portfolio in
+`installation-context-full.yml` selects only these files on Linux and Windows;
+it does not extend required unit-only CI or qualify actual write/cleanup,
+late-binding retrofit or installed rollout.
 The diverged-checkout Git fixtures
 hide only the unrelated CodeSpace CLI from discovery, leaving real Git,
 finalization, status polling and checkout-invalidation assertions intact.

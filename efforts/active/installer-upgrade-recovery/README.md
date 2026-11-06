@@ -1780,3 +1780,81 @@ Registration/state-root readiness is not presented as server-policy proof.
 This is below-altitude guidance repair, not a new provider interface or a
 replacement for #3004's Plan/Validation. No authentication, binding, repository
 creation, policy mutation or live provider publication trial is performed.
+
+### 2026-11-06 - Canonical knowledge-related discovery slice
+
+The guidance correction #10908 merges as `bc9ad742a9` after approval on its
+actual head and all required CI `42173364030`. It does not complete #3004's
+provider/landing preflight; containing release is separate from local rollout.
+
+The next bounded source claim is
+[#1419 comment 6679262258](https://github.com/ThomasMichon/copilot-extensions/issues/1419#issuecomment-6679262258),
+K3/K5 discovery only. #3005 is closed by tracking consolidation into that open
+parent, not by an implemented fix. The `gleaming-forge` K1 feasibility spike,
+K2 overlay precedence, actual K4 write/cleanup lifecycle and all original
+allocation/claim owners remain untouched. This realizes the already accepted
+canonical discovery requirement while retaining the Worktrees vision's native
+allocation and recoverable responsibility boundaries; it adds no lifecycle
+engine or new registry.
+
+Configuration-source selection carries the already resolved external-state
+name into normal related reads. The existing canonical registration owner
+validates identity/path/class without fallback discovery. The synthesized
+projection preserves authored narrative/PR metadata and policy provenance,
+but its knowledge role, local locus and non-delegation win over conflicting
+relationship labels/venues. Read-only list/show/resolve emits explicit
+aligned-worktree policy, never a writable anchor or standalone knowledge-agent
+plan. The topology writer refuses to persist this projection; `related doc`
+does not scaffold a new narrative into the registered knowledge anchor.
+Invalid canonical input is a structured nonzero CLI error or an indeterminate
+acquisition report, not a successful empty listing.
+
+The first local packet fails on seven incomplete test constructors and two
+diagnostic-stream assumptions. Correcting only those fixtures yields nine
+passes in 87.59 seconds. Added ambiguity and actual invalid-class controls
+then expose a real traceback at the new CLI boundary; the targeted correction
+retains nonzero status and returns an actionable JSON/plain error.
+Eight focused controls pass independently, followed by both actual installed
+CLI bare-anchor/linked-worktree controls in 35.34 seconds, 117.50 including
+preparation and cleanup. All 283 existing related/state-root regressions pass
+in 76.13 seconds. The write-back refusal has its own focused regression.
+
+The exact pre-change `d13d1d50b0` source reproduces missing bound knowledge in
+the actual native worktree reader (`bound knowledge missing: []`), a failing
+regression in 26.42 seconds under the original limits. An earlier baseline
+invocation stops before collection due to duplicate timeout-plugin loading;
+a separate bare baseline reaches its unchanged twenty-second child deadline,
+neither credited as a functional reproduction. No deadline, process, memory
+or storage limit is raised. Lint, thirteen install contracts and thirteen
+headless adopters pass after a missing offline lint cache is restored through
+the normal seasoned tool dependency path.
+
+An opt-in `related-knowledge` portfolio uses the existing full-installation
+workflow owner for exact-source Linux/Windows reader qualification, with
+standard runner limits and no change to default/scheduled or required unit
+coverage. It requires both real native entry cases in JUnit, rejecting skipped,
+missing or ambiguous evidence. Current-head review, required CI, external
+qualification, merge and release remain gates; no installed runtime, binding,
+pair, overlay, credential, service or cleanup mutation is selected.
+
+The final native fixture now retains an actual Git knowledge repository and
+checks all three Git/checkout trees plus binding and registry bytes. Both
+entry modes pass in 42.66 seconds, 134.41 including preparation and cleanup.
+The current-checkout briefing override is constrained to retain the aligned
+state policy instead of suggesting direct anchor editing. Its regression and
+the full briefing suite expose seven failures from an obsolete
+`related.ScanAuthority` reference; importing that existing type directly from
+its canonical owner fixes the direct failures and swallowed briefing drops.
+All 48 focused/briefing controls then pass in 3.48 seconds. Another 117
+focused/workflow controls pass in 24.44 seconds, including actual inert child
+success/failure and skipped-native rejection. No failure is dismissed as
+pre-existing, and no policy or test limit is weakened.
+
+Separately, #10908 is verified in normal release #10942, Main
+`1a83c1d250ae8093a47afab1107c3ebb9553a53e`, merged at 08:06:00 UTC.
+Actual admission from `42183304105`, attempt 1, names containing Dev
+`4b5efce814772df02d88de580d8075155c76c15a` and Main base
+`75417ed16ffa55b7dde8628b0c78f0fef50dd786`. All release jobs pass, both
+defining binding-guidance blobs match merge/admitted/Main, and the released
+payload is `harness-knowledge` `0.1.6-dev1`. This release does not install
+anything locally or include the still-unpublished knowledge-related slice.

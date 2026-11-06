@@ -286,7 +286,54 @@ def grafted(anchors, observations=None):
                 entry.origin_layer = "repository"
             entry.origin_plugin = origin.plugin_name if isinstance(origin, r._PluginContributionAnchor) else ""
             merged.related[name] = entry
+    _synthesize_bound_state(anchors, merged, observations)
     return merged
+
+
+def _synthesize_bound_state(anchors, merged, observations):
+    from configuration_layers import ConfigurationError
+
+    from . import related as r, repos
+
+    selected = {
+        (anchor.state_repo, str(anchor))
+        for anchor in anchors
+        if isinstance(anchor, r._ConfigContributionAnchor)
+        and anchor.source_layer == "knowledge" and anchor.state_repo
+    }
+    if not selected:
+        return
+    try:
+        normalized = {(name, Path(path).resolve()) for name, path in selected}
+        if len(normalized) != 1:
+            raise ConfigurationError("bound knowledge related source is ambiguous")
+        name, source = next(iter(normalized))
+        registered, root = repos.resolve_registered_repo(name)
+        if registered.repo_class not in {"knowledge", "worktree"} or root != source:
+            raise ConfigurationError(
+                "bound knowledge related source does not match canonical "
+                "worktree-capable registration"
+            )
+    except (OSError, ValueError, RuntimeError) as error:
+        if observations is None:
+            raise ConfigurationError(
+                "bound knowledge related source is unavailable: " + str(error)
+            ) from error
+        for name, _source in selected:
+            merged.related.pop(name, None)
+            failed(observations, name, "bound-state-root", "knowledge-unavailable",
+                   type(error).__name__)
+        return
+    previous = merged.related.get(name)
+    entry = previous or r.RelatedEntry(
+        name=name, summary="Bound knowledge/state repository",
+        origin_anchor=str(root), origin_layer="knowledge",
+    )
+    merged.related[name] = replace(
+        entry, role="knowledge", locus=r.Locus(preferred="local"),
+        delegate="none", bound_state_root=True,
+    )
+    observe(observations, name, "bound-state-root", ScanAuthority.COMPLETE)
 
 
 def read_related_grafted_report(anchors: list[str | Path]) -> AcquisitionReport[RelatedConfig]:
@@ -322,6 +369,7 @@ def source_anchors(
             r.config_contribution_anchor(
                 s.anchor, s.origin, directory_form=getattr(s, "directory_form", False),
                 source_tier=getattr(s, "tier", None),
+                state_repo=getattr(s, "state_repo", ""),
             )
             for s in srcs if s.anchor
         ]
