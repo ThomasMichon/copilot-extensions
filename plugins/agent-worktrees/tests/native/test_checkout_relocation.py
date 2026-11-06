@@ -48,7 +48,16 @@ def _fixture_home(tmp_path, request):
 
 @pytest.fixture
 def checkout(tmp_path, monkeypatch, request):
+    from plugin_test_command_safety import private_mux_args
+
     tmp_path = _fixture_home(tmp_path, request)
+    mux_args = private_mux_args(tmp_path)
+    run = subprocess.run
+    def private_mux_run(argv, *args, **kwargs):
+        if isinstance(argv, (list, tuple)) and argv and Path(argv[0]).stem.casefold() in {"tmux", "psmux"}:
+            argv = [argv[0], *mux_args, *argv[1:]]
+        return run(argv, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "run", private_mux_run)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
     monkeypatch.setattr(permissions, "_copilot_dir", lambda: tmp_path / ".copilot")
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path / ".copilot" / "session-state")
@@ -527,7 +536,6 @@ def test_malformed_ledger_returns_structured_cli_refusal(checkout, monkeypatch, 
         def interrupted(*args):
             raise OSError("injected copy interruption")
         with monkeypatch.context() as injection:
-            injection.setattr(relocation, "_stopped", lambda *args: None)
             injection.setattr(relocation.transfer, "copy", interrupted)
             with pytest.raises(OSError, match="injected"):
                 _move(checkout)
