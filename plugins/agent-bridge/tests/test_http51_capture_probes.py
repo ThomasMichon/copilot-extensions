@@ -129,6 +129,8 @@ from test_worktree_writer_observation import (
     as test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot,
     test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts
     as test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts,
+    test_unknown_or_changed_slot_never_certifies_a_build
+    as test_unknown_or_changed_slot_never_certifies_a_build,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
