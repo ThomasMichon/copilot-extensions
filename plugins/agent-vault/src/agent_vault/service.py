@@ -51,6 +51,7 @@ from .service_connections import VaultConnections, settle_owned
 from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration
 from .service_handoff import supported_versions
 from .winpipe import pipe_send
+from .winpipe import pipe_absent as pipe_absent
 from .winpipe import start_pipe_server as start_pipe_server
 
 # Service inactivity timeout (0 = never, set via --persistent)

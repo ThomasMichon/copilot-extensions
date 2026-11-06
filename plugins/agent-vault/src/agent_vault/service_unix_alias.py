@@ -51,6 +51,7 @@ class UnixAlias:
             "pid": os.getpid(), "birth": birth_identity(os.getpid()),
             "device": identity[0], "inode": identity[1],
         }
+        self.record.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         descriptor, pending = tempfile.mkstemp(prefix=".unix-owner-", dir=self.record.parent)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:

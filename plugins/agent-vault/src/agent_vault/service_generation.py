@@ -175,6 +175,8 @@ class ServiceGeneration:
         self.writer_predecessor_retirement = "not-requested"
         self.unix_alias = UnixAlias(self.root, api.SOCKET_PATH)
         self.owned_sockets: dict[str, tuple[int, int]] = {}
+        self.legacy_pipe_bound = False
+        self.legacy_tcp_bound = False
 
     def _take_writer(self) -> bool:
         if self.has_writer:
@@ -306,6 +308,23 @@ class ServiceGeneration:
         pending.write_text(str(os.getpid()), encoding="utf-8")
         pending.replace(path)
 
+    def _publish_writer_pid(self) -> bool:
+        try:
+            self.publication.acquire()
+        except AlreadyRunningError:
+            return False
+        try:
+            endpoint = read_endpoint(self.root)
+            if not (
+                selected() and endpoint and endpoint.pid == os.getpid()
+                and endpoint.installation_id == installation_id()
+            ):
+                return False
+            self._write_pid()
+            return True
+        finally:
+            self.publication.release()
+
     def _record_socket(self, path: str) -> None:
         identity = socket_identity(path)
         if identity is None:
@@ -327,7 +346,14 @@ class ServiceGeneration:
             ):
                 return False
             await self._bind_legacy_aliases()
-            return not self.socket or self.api.SOCKET_PATH in self.owned_sockets
+            return bool(
+                (not self.socket or self.api.SOCKET_PATH in self.owned_sockets)
+                and (not self.pipe or self.pipe == self.api.PIPE_PATH or self.legacy_pipe_bound)
+                and (
+                    not self.requested_port or self.port == self.requested_port
+                    or self.legacy_tcp_bound
+                )
+            )
         finally:
             self.publication.release()
 
@@ -355,18 +381,23 @@ class ServiceGeneration:
                 self._record_socket(api.SOCKET_PATH)
             except OSError:
                 log.warning("Legacy Unix alias unavailable; generation discovery remains active")
-        if self.pipe and self.pipe != api.PIPE_PATH:
-            legacy = Endpoint("pipe", api.PIPE_PATH)
-            if not await asyncio.to_thread(api.connect_probe, legacy):
+        if self.pipe and self.pipe != api.PIPE_PATH and not self.legacy_pipe_bound:
+            if await asyncio.to_thread(api.pipe_absent, api.PIPE_PATH):
                 try:
-                    self.pipes.extend(await api.start_pipe_server(
+                    servers = await api.start_pipe_server(
                         api.PIPE_PATH, self.connections.callback("pipe"),
-                    ))
+                    )
+                    self.pipes.extend(servers)
+                    self.legacy_pipe_bound = bool(servers)
                 except Exception:
                     log.warning("Legacy pipe alias unavailable; generation discovery remains active")
-        if self.requested_port and self.port != self.requested_port:
+        if (
+            self.requested_port and self.port != self.requested_port
+            and not self.legacy_tcp_bound
+        ):
             try:
                 await self._tcp(self.requested_port)
+                self.legacy_tcp_bound = True
             except OSError:
                 log.warning("Legacy TCP alias unavailable; generation discovery remains active")
 
@@ -449,8 +480,9 @@ class ServiceGeneration:
             return
         if not self.hooks_started:
             await self.close_handoff()
+            if not self._publish_writer_pid():
+                return
             self.service._runtime_can_work = True
-            self._write_pid()
             context = self.api.resolve_context()
             self.api.get_registry().run_startup(
                 self.service,
@@ -461,8 +493,7 @@ class ServiceGeneration:
             )
             self.hooks_started = True
         if not self.aliases_after_exit:
-            aliases_ready = await self._legacy_aliases()
-            self.aliases_after_exit = aliases_ready and (previous_exited or self.previous is None)
+            self.aliases_after_exit = await self._legacy_aliases()
 
     async def _retire(self) -> None:
         if self.retiring is None:

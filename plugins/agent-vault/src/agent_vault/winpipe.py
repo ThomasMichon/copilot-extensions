@@ -64,6 +64,16 @@ def _kernel32():
     return k32
 
 
+def pipe_absent(pipe_path: str) -> bool:
+    """Only native not-found proves absence; busy and denied remain occupied."""
+    if not IS_WINDOWS:
+        return False
+    kernel = _kernel32()
+    if kernel.WaitNamedPipeW(pipe_path, 1):
+        return False
+    return kernel.GetLastError() == 2
+
+
 def pipe_send(pipe_path: str, request: dict, timeout: float | None = 5.0) -> dict | None:
     """Send a newline-framed JSON request over a Windows named pipe; parse reply.
 

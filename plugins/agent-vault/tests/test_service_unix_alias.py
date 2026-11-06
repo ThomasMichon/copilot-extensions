@@ -39,6 +39,14 @@ def test_alias_owner_is_independent_of_primary_generation(owner, monkeypatch, st
     assert calls == [(os.getpid(), "native-birth")]
 
 
+def test_first_fixed_bind_creates_its_absent_run_directory(owner):
+    root = owner.record.parent / "absent-run"
+    first = alias.UnixAlias(root, owner.path)
+    assert not root.exists()
+    first.publish()
+    assert first.read()["pid"] == os.getpid()
+
+
 @pytest.mark.parametrize("change", ("installation", "path", "birth", "pid", "identity", "oversize", "json"))
 def test_untrusted_or_replaced_alias_record_cannot_authorize_unlink(
     owner, monkeypatch, change,
@@ -127,3 +135,100 @@ def test_alias_publication_rechecks_selection_under_the_publication_lease(
     monkeypatch.setattr(controller, "_bind_legacy_aliases", bind)
     assert asyncio.run(controller._legacy_aliases()) is current
     assert events == (["bind"] if current else [])
+
+
+@pytest.mark.parametrize("unavailable", ("pipe", "tcp"))
+def test_partial_restoration_retries_only_unbound_transports(tmp_path, monkeypatch, unavailable):
+    from agent_vault import service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "PIPE_PATH", "fixed.pipe")
+    monkeypatch.setattr(service, "pipe_absent", lambda _: True)
+    monkeypatch.setattr(generation, "selected", lambda: True)
+    monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(
+        pid=os.getpid(), installation_id=generation.installation_id(),
+    ))
+    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(
+        callback=lambda _: object(),
+    ), [], [])
+    controller.pipe = "suffixed.pipe"
+    controller.port, controller.requested_port = 123, 456
+    calls = {"pipe": 0, "tcp": 0}
+
+    async def pipe(*_):
+        calls["pipe"] += 1
+        return [] if unavailable == "pipe" and calls["pipe"] == 1 else [object()]
+
+    async def tcp(port):
+        assert port == 456
+        calls["tcp"] += 1
+        if unavailable == "tcp" and calls["tcp"] == 1:
+            raise OSError("fixture port occupied")
+
+    monkeypatch.setattr(service, "start_pipe_server", pipe)
+    monkeypatch.setattr(controller, "_tcp", tcp)
+    assert not asyncio.run(controller._legacy_aliases())
+    assert asyncio.run(controller._legacy_aliases())
+    assert calls == {"pipe": 2 if unavailable == "pipe" else 1, "tcp": 2 if unavailable == "tcp" else 1}
+
+
+@pytest.mark.parametrize("available,error,expected", (
+    (True, 0, False), (False, 2, True), (False, 5, False),
+    (False, 121, False), (False, 231, False),
+))
+def test_named_pipe_absence_requires_native_not_found(monkeypatch, available, error, expected):
+    from agent_vault import winpipe
+
+    monkeypatch.setattr(winpipe, "IS_WINDOWS", True)
+    monkeypatch.setattr(winpipe, "_kernel32", lambda: SimpleNamespace(
+        WaitNamedPipeW=lambda path, timeout: available,
+        GetLastError=lambda: error,
+    ))
+    assert winpipe.pipe_absent("fixture.pipe") is expected
+
+
+def test_writer_admission_waits_for_serialized_pid_publication(tmp_path, monkeypatch):
+    from agent_vault import service
+    from single_instance_lease import AlreadyRunningError
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "selected", lambda: True)
+    monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(
+        pid=os.getpid(), installation_id=generation.installation_id(),
+    ))
+    state = {"blocked": True, "held": False}
+    events = []
+
+    class Publication:
+        def acquire(self):
+            if state["blocked"]:
+                raise AlreadyRunningError(tmp_path / "publication.lock", 123)
+            state["held"] = True
+
+        def release(self):
+            state["held"] = False
+
+    vault = SimpleNamespace(_runtime_can_work=False)
+    controller = generation.ServiceGeneration(vault, SimpleNamespace(), [], [])
+    controller.publication = Publication()
+    controller.has_writer = True
+
+    def publish():
+        assert state["held"] and not vault._runtime_can_work
+        events.append("pid")
+
+    monkeypatch.setattr(controller, "_write_pid", publish)
+    monkeypatch.setattr(service, "resolve_context", lambda: SimpleNamespace(
+        kpdb=None, group=None, vault_name=None,
+    ))
+    monkeypatch.setattr(service, "get_registry", lambda: SimpleNamespace(
+        run_startup=lambda *_: events.append("startup"),
+    ))
+    asyncio.run(controller.tick())
+    assert not vault._runtime_can_work and not controller.hooks_started and not events
+    state["blocked"] = False
+    asyncio.run(controller.tick())
+    assert vault._runtime_can_work and controller.hooks_started
+    assert events == ["pid", "startup"]

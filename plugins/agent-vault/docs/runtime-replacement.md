@@ -38,7 +38,12 @@ publishes it through the existing native-transport rendezvous. TCP can use an
 ephemeral port while the predecessor owns the legacy port. After acquiring work
 custody, the new daemon restores available legacy aliases without deleting a
 foreign listener. If work custody transfers before the old process exits, it
-retries those aliases once the predecessor's exit is observed.
+retries those aliases until each configured transport is restored. An older
+generation can release writer custody yet retain its transports after the
+discovery predecessor exits. Completion requires actual fixed TCP and named-pipe
+binds, not Unix-path readiness on Windows. A bounded native pipe-presence check
+treats only not-found as absent; busy, denied and unknown outcomes preserve the
+incumbent. Successfully restored transports are not rebound on later retries.
 
 One shared OS lease, keyed by the durable Vault home, excludes concurrent
 credential work across generations. A published endpoint can answer health
@@ -74,6 +79,10 @@ request can reactivate the donor. Its cleanup preserves the successor's
 endpoint and PID publication. Confirmed retirement commits forward even if the
 successor subsequently disappears; it does not reactivate a displaced writer.
 A candidate failure before publication leaves the incumbent's route intact.
+Writer-admission PID publication shares the same lease as cleanup and rechecks
+selection/discovery. Contention leaves admission closed until a later tick
+publishes successfully, preventing Windows replacement races with the donor's
+PID-file reader.
 
 The selected incoming service's existing lifecycle tick grants the captured
 predecessor thirty seconds from discovery publication for cooperative work,
@@ -135,6 +144,8 @@ original process-exit gate. No CLI syntax or auth-payload version is retired.
 Each fixed Unix bind atomically records its installation, native owner birth
 and socket device/inode in a private `legacy-unix-owner.json` under the run
 directory. A suffixed primary does not overwrite that separate owner record.
+The first bind creates an absent run directory before writing the record;
+it does not depend on later discovery publication to create that directory.
 It is pathname custody only, never another retirement target. Legacy fixed-primary
 owners can also be captured before exit; unknown ownership leaves the alias
 untouched without blocking incoming discovery.
@@ -188,6 +199,11 @@ expiration preservation. Endpoint-derived fixture requests use the advertised
 native transport, including Unix-only discovery; explicit fixed TCP requests
 remain TCP controls. Linux controls also cover successive cold replacements
 and a fixed alias held by the older writer in a three-generation chain.
+The Windows retained-transport control lets the discovery predecessor exit
+while an older process has released writer custody but still owns its listeners.
+After that older listener's controlled exit, fixed TCP and named-pipe requests
+both reach the selected generation. Portable controls cover absent run-directory
+creation, partial restoration and native not-found versus busy/denied results.
 These are not installed whole-suite adoption evidence.
 
 Native pinned cold retirement is implemented for Windows and Linux. macOS

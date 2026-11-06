@@ -1021,3 +1021,37 @@ implementation. The exact support closure follows the consumer trace and tests.
   module-size and shared-contract checks pass. All forty admitted strict
   projects pass both declared type targets; Vault's pending type migration
   is not implicitly qualified.
+
+### 2026-11-06 - First-touch and retained-transport review corrections
+
+- The next review confirmed independent Unix ownership and transport-aware
+  fixtures, then found first-touch record creation before the run directory
+  exists and premature Windows alias completion. Kept #11072 draft rather
+  than merge the otherwise-green head.
+- An absent-directory regression reproduced the first-touch failure. The
+  private owner writer now creates that directory before its temporary file.
+- A real Windows three-generation control reproduced the fixed TCP retry
+  stopping after the discovery predecessor exits while an older service,
+  having released writer custody, still retains its transports. Completion
+  now requires each configured transport's actual bind, retaining successful
+  binds across retries. A native bounded presence check replaces the generic
+  unprobed pipe result; only not-found permits a new fixed-pipe bind.
+- Native fixed TCP and named-pipe requests both reconnect after the older
+  listener's controlled exit. Portable controls also preserve busy, denied and
+  unknown presence results, and exercise independently partial restoration.
+- Retained native diagnostics exposed a PID-publication/cleanup race on
+  Windows, not an expired backend hold: replacement could collide with the
+  donor's PID-file reader. Writer-admission PID publication now shares the
+  publication lease and rechecks selection/discovery. Contention keeps
+  credential admission closed. Both a deterministic contention control and
+  real backend settlement pass.
+- The backend fixture preloads successor imports before its unchanged
+  eight-second held-work budget. Actual activation and retirement still occur
+  while the real backend is held. Failure output now retains bounded owned
+  process/log diagnostics and an explicit fixture-expiry marker.
+- The final affected packet passes 265 tests with three platform skips and
+  named per-case evidence retained. A CPython closed-pipe destructor warning
+  remains visible; no held-cleanup diagnostic occurs. Earlier EOF and timeout
+  outcomes remain in the retained reports rather than being erased by retries.
+  Linux/macOS, installer clean-room, installed whole-update and external
+  receiving acceptance remain separate. No live process was changed.

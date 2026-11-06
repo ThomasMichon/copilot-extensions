@@ -631,7 +631,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 root, identity, port, mode = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
-if mode in {"hung-cleanup", "hung-work", "bounded-successor", "passive-legacy", "backend-work"}:
+if mode in {"hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "passive-legacy", "backend-work"}:
     sys.path.insert(0, str(root / "versions" / identity))
 os.environ.update(
     AGENT_VAULT_HOME=str(root), AGENT_VAULT_RUN_DIR=str(root / "run"),
@@ -643,7 +643,7 @@ os.environ.pop("AGENT_VAULT_INSTALLATION_ID", None)
 from agent_vault import service, service_generation as generation
 from agent_vault import service_handoff
 from agent_vault import service_predecessor
-if mode == "bounded-successor":
+if mode in {"bounded-successor", "prepared-successor"}:
     service_predecessor.GRACE_SECONDS = 3
 if mode == "legacy-receiver":
     read = service_handoff.read_frame
@@ -695,6 +695,7 @@ sys.stdin.read()
 deadline = time.monotonic() + 8
 while not (root / "backend.release").exists():
     if time.monotonic() >= deadline:
+        (root / "backend.expired").touch()
         raise RuntimeError("Owned backend fixture was not released")
     time.sleep(.01)
 (root / "backend.finished").touch()
@@ -736,6 +737,13 @@ if mode == "fail":
         raise OSError("fixture listener construction failed")
     asyncio.start_server = fail
 async def main():
+    if mode == "prepared-successor":
+        (root / (identity + ".prepared")).touch()
+        deadline = time.monotonic() + 15
+        while not (root / (identity + ".start")).exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Owned successor fixture was not started")
+            await asyncio.sleep(.02)
     async def stop_owned():
         while not (root / (identity + ".stop")).exists():
             await asyncio.sleep(.02)
@@ -845,7 +853,10 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
     }
     source = (
         root / "versions" / identity / "agent_vault" / "service.py"
-        if mode in {"hung-cleanup", "hung-work", "bounded-successor", "passive-legacy", "backend-work"}
+        if mode in {
+            "hung-cleanup", "hung-work", "bounded-successor", "prepared-successor",
+            "passive-legacy", "backend-work",
+        }
         else Path(generation.__file__).with_name("service.py")
     )
     return spawn_instance(
@@ -859,9 +870,17 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
 def _settle(root: Path, processes: list[subprocess.Popen]) -> list[str]:
     (root / "backend.release").touch()
     for identity in ("newer", "middle", "older"):
+        (root / (identity + ".start")).touch()
         (root / (identity + ".release")).touch()
         (root / (identity + ".stop")).touch()
-    return ["".join(process.communicate(timeout=10)) for process in processes]
+    outputs = ["".join(process.communicate(timeout=10)) for process in processes]
+    for output in outputs:
+        if output:
+            print("Owned generation output:", output[-8192:])
+    for path in root.glob("*.log"):
+        print(path.name, path.read_text(encoding="utf-8", errors="replace")[-8192:])
+    print("Owned backend fixture expired:", (root / "backend.expired").exists())
+    return outputs
 
 
 def _capture_process(pid: int) -> PeerProcess:
@@ -1072,6 +1091,73 @@ def test_successive_cold_replacements_recover_the_fixed_unix_alias(tmp_path: Pat
         _settle(tmp_path, children)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows legacy TCP restoration")
+def test_windows_alias_retries_after_discovery_exit_while_older_transport_survives(
+    tmp_path: Path,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_vault.winpipe import pipe_send
+
+    for identity in ("newer", "middle", "older"):
+        shutil.copytree(
+            Path(generation.__file__).parent, tmp_path / "versions" / identity / "agent_vault",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        fixed_port = reservation.getsockname()[1]
+    (tmp_path / "selection").write_text("newer")
+    durable = tmp_path / "fixture.kdbx"
+    durable.write_bytes(b"fixture durable bytes")
+    old = _start(tmp_path, "newer", fixed_port, "hung-cleanup")
+    children = [old]
+    try:
+        _until(lambda: _endpoint(tmp_path) is not None, children)
+        first = _endpoint(tmp_path)
+        assert first["transport"] == "pipe"
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            pending = worker.submit(
+                _send, fixed_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
+            )
+            _until(lambda: (tmp_path / "newer.entered").exists(), children)
+            (tmp_path / "selection").write_text("middle")
+            middle = _start(tmp_path, "middle", fixed_port, "passive-legacy")
+            children.append(middle)
+            _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"]}, children)
+            second = _endpoint(tmp_path)
+            (tmp_path / "newer.release").touch()
+            assert pending.result(timeout=10)["ok"]
+            _until(lambda: (tmp_path / "cleanup.entered").exists(), children)
+            _until(lambda: _send(_target(second), {"action": "ping"})["accepting_work"], children)
+        (tmp_path / "selection").write_text("older")
+        new = _start(tmp_path, "older", fixed_port, "bounded-successor")
+        children.append(new)
+        _until(
+            lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, first["pid"], second["pid"]},
+            [new],
+        )
+        incoming = _endpoint(tmp_path)
+        _until(lambda: _send(_target(incoming), {"action": "ping"})["accepting_work"], [new])
+        middle.communicate(timeout=3)
+        assert middle.returncode == 0 and old.poll() is None
+        with socket.socket() as occupied:
+            with pytest.raises(OSError):
+                occupied.bind(("127.0.0.1", fixed_port))
+        time.sleep(1.1)  # Allow two real lifecycle ticks after discovery-owner exit.
+        (tmp_path / "newer.stop").touch()
+        old.communicate(timeout=3)
+        assert old.returncode == 0
+        _until(lambda: _serving(fixed_port, incoming["pid"]), [new], timeout=4)
+        _until(
+            lambda: (pipe_send(first["endpoint"], {"action": "ping"}, timeout=.25) or {}).get("pid")
+            == incoming["pid"],
+            [new], timeout=4,
+        )
+        assert durable.read_bytes() == b"fixture durable bytes"
+    finally:
+        _settle(tmp_path, children)
+
+
 def test_failed_successor_does_not_remove_or_stop_the_incumbent(tmp_path: Path) -> None:
     (tmp_path / "selection").write_text("newer")
     old = _start(tmp_path, "newer", 0)
@@ -1120,6 +1206,10 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
         initial = _endpoint(tmp_path)
         old_pid, old_port = initial["pid"], _target(initial)
         lifetime = _capture_process(old_pid)
+        if old_mode == "backend-work":
+            new = _start(tmp_path, "older", 0, "prepared-successor")
+            children.append(new)
+            _until(lambda: (tmp_path / "older.prepared").exists(), children)
         with ThreadPoolExecutor(max_workers=1) as worker:
             pending = worker.submit(
                 _send, old_port, {"action": "has", "kpdb": str(durable), "entry": "fixture"},
@@ -1128,8 +1218,11 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
             if old_mode == "backend-work":
                 _until(lambda: (tmp_path / "backend.entered").exists(), children)
             (tmp_path / "selection").write_text("older")
-            new = _start(tmp_path, "older", 0, "bounded-successor")
-            children.append(new)
+            if old_mode == "backend-work":
+                (tmp_path / "older.start").touch()
+            else:
+                new = _start(tmp_path, "older", 0, "bounded-successor")
+                children.append(new)
             _until(lambda: (_endpoint(tmp_path) or {}).get("pid") not in {None, old_pid}, children)
             incoming = _endpoint(tmp_path)
             port, pid = _target(incoming), incoming["pid"]
@@ -1156,6 +1249,7 @@ def test_native_hung_predecessor_preserves_grace_then_excludes_only_its_writer(
                 assert not _send(port, {"action": "ping"})["accepting_work"]
                 assert not (tmp_path / "backend.finished").exists()
                 assert not (tmp_path / "older.entered").exists()
+                assert not (tmp_path / "backend.expired").exists(), "Eight-second backend fixture expired"
                 (tmp_path / "backend.release").touch()
                 assert pending.result(timeout=5)["ok"]
                 assert (tmp_path / "backend.finished").exists()
