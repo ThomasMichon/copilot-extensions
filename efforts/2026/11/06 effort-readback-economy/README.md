@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/efforts`)
 - **Branch(es):** per-slice worktree branches into `dev`
 - **Created:** 2026-11-06
-- **Status:** Active
+- **Status:** Done
 - **Umbrella issue:** #11143
 
 ## Guiding Intent
@@ -92,7 +92,7 @@ The measurement categories and caveats are in [measurement.md](measurement.md).
   `--since`.
 - [x] Running the digest on a large existing effort README produces a summary
   under 10% of the README's size.
-- [ ] Plugin suite passes through the bounded runner; docs-consistency and
+- [x] Plugin suite passes through the bounded runner; docs-consistency and
   projection checks pass.
 
 ## Journal
@@ -111,3 +111,14 @@ The measurement categories and caveats are in [measurement.md](measurement.md).
 - Filed #11148 for restructuring the oversized READMEs (Phase 3).
 - Efforts suite: 488 passed, 35 skipped. Docs and version consistency pass.
   The last Validation item closes when the PR merges with CI green.
+
+### 2026-11-06 — Merged and archived
+- #11149 merged into `dev` after four Copilot review rounds and green CI.
+  Review fixes: journal entries from an extracted `journal.md` are listed with
+  file and line and sorted by date; fences close only on a matching delimiter;
+  repeated headings stay distinct under `--since`; git probes ignore inherited
+  repository selectors and read NUL-delimited paths; non-UTF-8 consoles get
+  escaped output instead of a crash.
+- Efforts suite: 496 passed, 35 skipped. Same-day split journal files order by
+  file name, which matches the one-file-per-day convention.
+- Phase 3 (restructuring the oversized READMEs) continues in #11148.

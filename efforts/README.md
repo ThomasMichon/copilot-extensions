@@ -168,13 +168,13 @@ rewriting historical journal evidence or treating a source merge as rollout.
 | [Persistent Installer Diagnostics](active/persistent-installer-diagnostics/README.md) | Draft; durable native attempt logs and non-blocking upstream coordination | #8370; independent diagnostics delivery, separately qualified #6859 continuation |
 | [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
 | [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Active; proposal merged, native adapters and Windows/Linux execution proof before inheritance remain open | #5708; preserves #7069/#6987/#5839/#7057 owners |
-| [Effort Readback Economy](active/effort-readback-economy/README.md) | Active; digest helper and targeted-readback guidance | #11143 |
 
 
 ## Completed effort index
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Effort Readback Economy](2026/11/06%20effort-readback-economy/README.md) | Done; effort digest helper and targeted-readback guidance merged in #11149 after review and required CI | #11143; README restructuring continues in #11148; no rollout |
 | [Repository Write Guidance](2026/11/06%20repository-write-guidance/README.md) | Done; native write guidance reviewed, released and installed as Worktrees 1.24.493-dev1; all five actual native controls and owned fixture cleanup passed | #10778 retains immediate archive, native focus/worktree/claim and issue settlement; broader latency qualification stays #7935; no fleet rollout |
 | [Copilot Driver Core Vision](2026/11/05%20copilot-driver-core-vision/README.md) | Done; coherent core-app, broker, caller and lifetime vision merged in #10768 after approval and required CI | #10765 retains implementation and acceptance; existing component owners retained, no extraction or rollout |
 | [Embody Session State](2026/11/05%20embody-session-state/README.md) | Done for source scope; truthful native-state receipts and optional bounded observation merged in #10749 after review and required CI | #10745 retains archive, focus/worktree and issue settlement; normal promotion #3336 and authorized adoption separate, no rollout |
