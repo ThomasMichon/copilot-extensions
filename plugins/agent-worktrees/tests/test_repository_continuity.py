@@ -95,7 +95,7 @@ def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(sour
     assert calls == [["capabilities"]]
 
 
-@pytest.mark.parametrize("failure", [None, "profile", "changed-request"])
+@pytest.mark.parametrize("failure", [None, "profile", "changed-request", "installer"])
 def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     source, tmp_path, monkeypatch, failure,
 ):
@@ -150,6 +150,8 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         assert options["expected_version"] == selection["runtime_version"]
         assert options["expected_hash"] == selection["payload_hash"]
         events.append("install")
+        if failure == "installer":
+            raise subprocess.CalledProcessError(1, ["private-source-path"], stderr="private diagnostic")
         return {"state": "installed"}
 
     owner = SimpleNamespace(
@@ -184,9 +186,10 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
 
     monkeypatch.setattr(continuity, "_invoke", runtime)
     if failure is not None:
-        with pytest.raises(setup.SetupError):
+        with pytest.raises(setup.SetupError) as refused:
             continuity.run(selected_setup, "harness-a", apply=True)
-        assert "install" not in events
+        assert ("install" in events) == (failure == "installer")
+        assert "private" not in str(refused.value)
         if failure == "profile":
             assert "bootstrap" not in events
     else:

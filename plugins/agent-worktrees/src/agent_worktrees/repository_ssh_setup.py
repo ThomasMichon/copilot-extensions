@@ -7,6 +7,7 @@ import importlib.util
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 from . import repository_setup as protocol
@@ -48,7 +49,7 @@ def selected_inputs(description: dict):
             yield selected
     except protocol.SetupError:
         raise
-    except (ImportError, ValueError, RuntimeError, OSError):
+    except (ImportError, ValueError, RuntimeError, OSError, subprocess.SubprocessError):
         raise protocol.SetupError(
             "Selected SSH Source/profile setup refused or has an unsettled outcome; preserve its original inputs."
         ) from None

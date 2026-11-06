@@ -107,6 +107,15 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         with capfd.disabled():
             print(message, flush=True)
 
+    if sys.platform == "linux":
+        from agent_procutil.linux_daemon_scope import caller_unit
+
+        progress("native lifetime prerequisites: " + json.dumps({
+            "caller_cleanup_unit": caller_unit() is not None,
+            "runtime_bus": (Path(os.environ["XDG_RUNTIME_DIR"]) / "bus").is_socket(),
+            "native_user_bus": (Path("/run/user") / str(os.getuid()) / "bus").is_socket(),
+            "bus_address_selected": bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS")),
+        }, sort_keys=True))
     tmp_path = tmp_path_factory.mktemp("n")
     prepared = os.environ.get("COPILOT_EXTENSIONS_TEST_VENV_ROOT")
     assert prepared, "normal SSH lane requires the runner's explicit environment locator"
@@ -277,6 +286,20 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             assert not state.exists() and not root.exists()
             first = await manager()
             if first.returncode and (root / "current-version").exists():
+                log = root / host.STATE / "host.log"
+                if log.is_file():
+                    with log.open("rb") as stream:
+                        content = stream.read(16384)
+                    progress("post-install native log markers: " + json.dumps({
+                        name: marker in content
+                        for name, marker in {
+                            "bus_connection_failure": b"Failed to connect",
+                            "missing_runtime_endpoint": b"No medium found",
+                            "systemd_scope": b"systemd",
+                            "permission_refused": b"Permission denied",
+                            "traceback": b"Traceback",
+                        }.items()
+                    }, sort_keys=True))
                 try:
                     observed = await control("status")
                 except AssertionError:

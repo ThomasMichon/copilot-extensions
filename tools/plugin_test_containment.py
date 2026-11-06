@@ -55,7 +55,7 @@ sys.path.insert(
 )
 try:
     from agent_procutil import no_window_kwargs
-    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle
+    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle as daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
 
@@ -925,92 +925,15 @@ def run_contained(
     native_application: bool = False,
 ) -> int:
     """Run an owned test tree; interactive tests require an explicit lease policy."""
-    if type(native_application) is not bool:
-        raise ValueError("native application testing must be explicitly selected")
-    if native_application:
-        temporary = os.environ.get("RUNNER_TEMP")
-        if (
-            qualification is not None
-            or os.environ.get("GITHUB_ACTIONS") != "true"
-            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
-            or not temporary or not Path(temporary).is_absolute()
-            or not sandbox.resolve().is_relative_to(Path(temporary).resolve())
-            or os.environ.get(CONTAINED_ENV) == "1"
-        ):
-            raise ContainmentError("Native application testing requires its disposable hosted CI owner.")
-        env = dict(env)
-        # Native application daemons use their production escape, with the
-        # runner-renewed test lease below retaining independent cleanup custody.
-        env.pop(CONTAINED_ENV, None)
-    lifecycle_results: list[Any] = []
-    if qualification is not None:
-        if os.name != "nt":
-            raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
-        if limits != Limits(wall_seconds=WORK_SECONDS):
-            raise QualificationError("Native qualification must preserve the original process, memory and poll limits.")
-        qualification.validate(sandbox, time.monotonic)
-    environment_snapshot = _read_registry_environment()
-    if qualification is not None:
-        qualification.boundary.require(time.monotonic, work=True)
-    unreaped = None
-    try:
-        with daemon_test_lifecycle(
-            owner=f"contained-test-runner:{os.getpid()}",
-            registry_root=sandbox.resolve() / "daemon-instances",
-            purpose=daemon_purpose,
-            lease=daemon_lease,
-            **(
-                {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
-                if qualification is not None else (
-                    {"cleanup_results": lifecycle_results} if native_application else {}
-                )
-            ),
-        ) as daemon_environment:
-            result = _run_contained_process(
-                command,
-                cwd=cwd,
-                env={**env, **daemon_environment},
-                sandbox=sandbox,
-                limits=limits,
-                **({"qualification": qualification} if qualification is not None else {}),
-                **({"native_application": True} if native_application else {}),
-            )
-        if native_application and any(
-            outcome.status not in ("settled", "missing") for outcome in lifecycle_results
-        ):
-            raise UnreapedProcessError("Native application daemon cleanup remains unsettled.")
-        if qualification is not None:
-            qualification.boundary.require(time.monotonic)
-            qualification.lifecycle_settled = all(
-                outcome.status in ("settled", "missing") for outcome in lifecycle_results
-            )
-    except UnreapedProcessError as exc:
-        unreaped = exc
-        raise
-    finally:
-        try:
-            if qualification is not None:
-                qualification.boundary.require(time.monotonic)
-            changed = _registry_environment_drift(environment_snapshot)
-            if changed:
-                print(
-                    "[HOST-STATE] contained test changed persistent Windows "
-                    f"environment state; detected without rollback: {', '.join(changed)}",
-                    file=sys.stderr,
-                )
-        except BaseException as audit_error:
-            if unreaped is None:
-                raise
-            raise UnreapedProcessError(
-                f"{unreaped}; environment audit also failed: "
-                f"{type(audit_error).__name__}: {audit_error}"
-            ) from unreaped
-    if changed:
-        return 125
-    if qualification is not None:
-        qualification.registry_unchanged = True
-        qualification.require_settled(time.monotonic)
-    return result
+    if __package__:
+        from .plugin_test_lifecycle import run_contained as run
+    else:
+        from plugin_test_lifecycle import run_contained as run
+    return run(
+        sys.modules[__name__], command, cwd=cwd, env=env, sandbox=sandbox, limits=limits,
+        daemon_purpose=daemon_purpose, daemon_lease=daemon_lease,
+        qualification=qualification, native_application=native_application,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
