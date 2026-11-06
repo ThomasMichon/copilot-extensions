@@ -74,7 +74,10 @@ Selected folders persist with ordinary named volumes at `/home/vscode` and
 disposable image PID 1; `/run` is tmpfs and is not persisted. Initialization
 refuses a non-PID-1 launch or an initially non-private root mount. Systemd's
 later namespace-local propagation changes do not authorize host-shared mounts.
-`/run` must be a mountpoint. This image is for operational tidiness, control
+`/run` must be a non-symlink mountpoint, and an existing `/run/systemd` must
+not be a symlink. Systemd creates its ordinary runtime directory; startup does
+not self-bind-mount it or require it to be a separate mountpoint.
+This image is for operational tidiness, control
 and scale-out, not a host-security product. Do not add mount-pin or LSM work
 here.
 Image-root APT update services/timers are masked: root package changes
@@ -255,6 +258,9 @@ deterministic context, age boundaries, pre-launch/failure receipts, same-daemon
 worker binding and OCI integrity. Persistence tests exercise actual file/link
 operations with simulated UID/GID/mode and key-generation boundaries, including
 partial/foreign/linked state refusal and byte preservation.
+The entrypoint is also executed with simulated system commands to prove ordinary
+`/run` startup reaches systemd without a self-bind or mount pin, while missing
+mounts and linked runtime paths still refuse before initialization.
 They do not claim an image build or native service readiness.
 
 The qualified Gateway Docker/Buildx lane must build the published source
@@ -287,13 +293,7 @@ the declared capability profile. Systemd/user-DBus service readiness is therefor
 prove a suitable confined cgroup profile; do not silently add privileged mode,
 unconfined security profiles or host cgroup binds to turn this into a pass.
 
-The explicit `fleet_manager.host_profile` bootstrap is the owning candidate
-for the fixed `fleet-manager-trusted-systemd-v1` enforcing profile. A consuming
-controller must independently admit that host operation, inspect its status on
-the selected engine host, and launch with
-`--security-opt apparmor=fleet-manager-trusted-systemd-v1` and the private
-cgroup namespace. Image startup never installs host policy. The initial policy
-grants the existing cgroup remount and pinned systemd namespace/credential
-operations at fixed runtime paths, not arbitrary filesystems or bind mappings;
-parser-only validation is not native service qualification. See the
-[host bootstrap contract](../../fleet-manager/docs/host-profiles.md).
+Host-profile selection and admission belong to the deployment owner, including
+the private cgroup namespace and required cgroup remount. This recipe does not
+install host policy or select a default security-profile opt-out. Host policy
+parser checks alone do not qualify native systemd or user-service readiness.

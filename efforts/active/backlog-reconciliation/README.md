@@ -330,6 +330,60 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+now audits six further outcomes: #10316, #9679 and #9561 are finite source
+completions; #7206 is tracking-subsumed under OPEN #63, and #5990/#6692
+under OPEN #4130 after full direct receipt and whole body/discussion readback.
+Actual source, native, effect, assignee and active-effort custody remains.
+Two equal complete21:11 PST scans measure835 whole OPEN:556 creator-eligible,
+279 excluded,561 original-cohort and274 inflow. Two arrivals remain
+metadata-only; verified dispositions are972, still106 above fixed729.
+Eight additional pair studies retain real independent/status boundaries;
+the feasible #5898 expansion is not accepted or a new retirement credit.
+
+The same [acquisition/diagnostics journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records reviewed merge #10892 and five further cross-cutting studies.
+Ordinary guidance delivery, generation recovery, family activation, complete
+supervisor configuration, PR continuation and automatic admission retain
+their distinct source/consumer obligations. Source-token status conventions
+are being distinguished from actual custodian conditions before receiving
+amendments; a source-only automatic-producer closeout is separately traced.
+Eight further pair studies are assigned. No new disposition or custody
+release is credited; the campaign remains Active at the dated839-open census.
+
+The same [acquisition/diagnostics journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #10887, then two further audited tracking
+retirements: #5686 under expanded OPEN #5549 and #9323 under expanded OPEN
+#9295. Complete independent Plan/Validation lanes and source/resource owners
+remain; neither is an implemented fix. The distinct finite #10737 source
+request is actually completed by merged #10738 without absorbing broader
+#3421 or adding an installed-runtime gate. Two equal complete20:39 PST scans
+measure839 whole OPEN:561 creator-eligible,278 excluded,564 original-cohort
+and275 inflow. Verified dispositions are966, still110 above fixed729.
+An external departure earns no credit; Active checkbox states stay unchanged.
+
+The [acquisition/diagnostics adjudication](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records five further audited outcomes: finite documentation and announcement
+completion, two complete startup contracts received by actual OPEN #7116,
+and native-GC diagnostic fidelity received by actual OPEN #8370. The pinned
+announcement remains pinned; every implementation/native/source/resource
+owner and unresolved acceptance remains. Two equal complete20:21 PST scans
+measure843 whole OPEN:565 creator-eligible,278 excluded,565 original-cohort
+and278 inflow. Four eligible arrivals stay metadata-only; three external
+departures earn no credit. Verified dispositions are963, still114 above the
+fixed729 checkpoint. The campaign remains Active with checkbox states unchanged.
+
+The same [owner-fenced journal](<journal/2026/11.05 owner-fenced-cohort-adjudication.md>)
+then audits eleven further tracking retirements: four under actual OPEN
+#6620, six under the real Active fleet effort, and #5574 under the already
+reviewed Active singleton effort. Every product/native/source/resource duty
+and #1918's assignment remain; #3114/#3179 stay OPEN at their specific gates.
+Two equal complete19:28 PST scans measure847 whole OPEN:569 creator-eligible,
+278 excluded,566 original-cohort and281 inflow. Two eligible arrivals remain
+metadata-only and an external departure earns no credit. Verified dispositions
+are958, still118 above the fixed729 checkpoint. The campaign remains Active;
+the next slice qualifies new research supply without releasing actual holds.
+
 The [owner-fenced cohort adjudication](<journal/2026/11.05 owner-fenced-cohort-adjudication.md>)
 audits eighteen subordinate tracking retirements under six existing OPEN
 parents and new daemon parent #10847, preserving every unfinished acceptance

@@ -64,7 +64,8 @@ def test_cli_peer_prefix_uses_immutable_snapshot_not_management_payload(
     result = _probe((installation, runtime, python, library), script=_PREFIX)
     assert result.returncode == 0, result.stderr
     prefix = json.loads(result.stdout)
-    assert prefix[:5] == [str(python), "-B", "-I", "-X", "utf8"]
+    assert prefix[:5] == [str(python), "-I", "-B", "-X", "utf8"]
+    assert prefix[:5].count("-B") == 1
     assert Path(prefix[5]) == (
         installation.plugin_root / "snapshots" / runtime.snapshot_id
         / "src" / "agent_pull_requests" / "_peer_launch.py"

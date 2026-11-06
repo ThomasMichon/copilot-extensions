@@ -96,6 +96,26 @@ against HTTP-52 source or relabel its observations as a new generation.
 
 ## Lossless provenance layout
 
+### Source-only POSIX artifact transport
+
+The existing `Installation context full` workflow's `bridge-http52-capture`
+portfolio runs the canonical writer, a separate no-write execution, and the
+unchanged contract guard on Ubuntu. Supply `source_sha` equal to the dispatch's
+published immutable revision; no arbitrary command or alternate source is
+accepted. The ordinary `bridge-contracts` portfolio and its historical checks
+remain unchanged. Each capture stage retains a ten-minute outer bound.
+
+`tools/bridge_http52_artifact.py export` emits only current-generation outputs,
+new content-addressed provenance chunks, and a source/input/hash manifest.
+It never exports raw requests, logs, journals, environment or credentials.
+Before materializing, verify the workflow run's repository, successful stages,
+head SHA and artifact digest through the repository-scoped GitHub client.
+Then use `materialize --source-commit <same-sha> --artifact-dir <download>
+--manifest-sha256 <verified-manifest-digest>`. The adapter rejects extra files,
+foreign heads and changed preimages, and calls the existing native publication
+owner for lock, backup, no-replace CAS, registry-last and readback validation.
+It does not execute downloaded code or replace the capture/verification gates.
+
 The shared reader in `tools/agent_bridge_contract_registry.py` accepts the
 legacy version-1 registry and the version-2 provenance layout. Version 2 retains
 each contract's ordered historical prefix in immutable JSON chunks under

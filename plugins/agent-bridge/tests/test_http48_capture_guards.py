@@ -48,6 +48,10 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) ->
     http = evidence.contract(registry)
     http["source_paths"] = [row for row in http["source_paths"] if row["path"] in evidence.AFFECTED]
     assert {row["path"] for row in http["source_paths"]} == set(evidence.AFFECTED)
+    # Reconstruct the historical owners only in this composed publication fixture.
+    for row in http["source_paths"]:
+        row.pop("current_path", None)
+        row.update(semantic=True, non_semantic_reason=None)
     http["fixtures"] = []
     http["provenance"] = http["provenance"][:1]
     http["evidence_window"]["generations"] = [evidence.GENERATION]
@@ -95,8 +99,11 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) ->
     commit = commit_fixture(root, f"Synthetic HTTP-{evidence.GENERATION} publication-guard cohort")
     monkeypatch.setattr(evidence.previous.git_evidence, "REPO", root)
     evidence.previous.git_evidence.prefetch_sources([])
-    yield root, commit
-    evidence.previous.git_evidence.prefetch_sources([])
+    try:
+        yield root, commit
+    finally:
+        evidence.previous.git_evidence.prefetch_sources([])
+        old_guards.remove_fixture(root)
 
 
 def expected(root: Path, evidence) -> dict:

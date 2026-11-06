@@ -50,6 +50,15 @@ def _invoke(tmp_path, action, scenario):
     local_bin = tmp_path / "local-bin"
     local_bin.mkdir()
     askpass = local_bin / "vault-askpass"
+    python = tmp_path / "runtime-python"
+    python.write_text(
+        "#!/bin/sh\n" + (
+            "exit 7\n" if scenario == "context-capture" else
+            "printf '%s\\n' " + shlex.quote(str(tmp_path)) + " "
+            + shlex.quote(str(tmp_path / "selected.json")) + "\n"
+        ), encoding="utf-8",
+    )
+    python.chmod(0o755)
     if scenario in ("askpass-directory", "askpass-symlink"):
         if scenario == "askpass-symlink":
             collision = tmp_path / "askpass-collision"
@@ -81,7 +90,7 @@ SOCKET_PATH="$RUN_DIR/fixture.sock"
 PIPE_PATH=fixture-pipe
 PID_FILE="$RUN_DIR/fixture.pid"
 LOG_FILE="$INSTALL_DIR/logs/fixture.log"
-LINK_PYTHON=/fixture/runtime-not-executed
+LINK_PYTHON={shlex.quote(str(python))}
 INSTALLATION_ID=""
 SERVICE_SUFFIX=""
 PORT_ENV_LINE=""
@@ -133,7 +142,7 @@ if {action}; then exit 0; else exit 19; fi
 
 
 @pytest.mark.parametrize("action", ["do_install", "do_update"])
-@pytest.mark.parametrize("scenario", ["mkdir", "unit-directory", "unit-symlink", "unit-temp", "unit-write", "unit-rename"])
+@pytest.mark.parametrize("scenario", ["mkdir", "unit-directory", "unit-symlink", "unit-temp", "unit-write", "unit-rename", "context-capture"])
 def test_conditional_service_publication_failure_blocks_reconcile_and_success(tmp_path, action, scenario):
     result, target, commands = _invoke(tmp_path, action, scenario)
     assert result.returncode == 19, result.stdout + result.stderr
@@ -162,7 +171,8 @@ def test_conditional_service_publication_preserves_documented_best_effort(tmp_pa
         assert "--user daemon-reload" in commands
         assert "--user enable agent-vault-fixture.service" in commands
         assert "--user restart agent-vault-fixture.service" in commands
-        assert "ExecStart=/fixture/runtime-not-executed" in target.read_text()
+        assert f"ExecStart={tmp_path / 'runtime-python'}" in target.read_text()
+        assert f'Environment="AGENT_VAULT_CONFIG={tmp_path / "selected.json"}"' in target.read_text()
         assert (
             f'-X "pycache_prefix={tmp_path / "runtime/cache/python"}/unsealed-${{INVOCATION_ID}}" '
             "-m agent_vault.service --foreground --persistent --handoff-stdin"

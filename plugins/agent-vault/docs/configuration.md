@@ -51,6 +51,8 @@ The same completion-gated owner lookup therefore applies to payload activation
 and provisioned readiness/client reads.
 Reader failures retain their exception class and up to four function/line
 locations, without exception text, configuration values or source paths.
+Same-cell configuration reads disable bytecode writes in both peer-launch
+interpreter hops; caller cache settings alone do not protect immutable slots.
 Windows activation errors also retain the reader's exit code and readiness
 state, so an installer refusal remains distinguishable from inactive readiness.
 Activation does not load extension configuration providers or treat invocation
@@ -66,6 +68,21 @@ Installer re-execution retains the invoking project through the existing
 Relative native configuration-file selectors resolve against that invoking
 project, even after the installer self-stages in HOME. The Windows no-task
 start fallback also executes the CLI from the preserved project.
+Residents retain a separate, owner-resolved configuration source through
+`agent_vault.service --configuration-root`. The launcher qualifies and retains
+the caller's native discovery directory before switching to state cwd; generated
+Scheduled Task and systemd launchers persist that explicit source too.
+This keeps worktree/subdirectory configuration distinct from the native owner's
+base. Persistent launchers also retain the selected absolute `AGENT_VAULT_CONFIG`
+path. Windows discovery capture uses ASCII JSON for Unicode-safe transport;
+the dynamic Task launcher probes the selected runtime's argument support and
+does not pass the new option to retained older parsers.
+Resident reads re-query the native owner from that source rather than treating
+the state directory as a repository. The option does not change process cwd,
+database custody, activation precedence or strict owner/configuration refusals.
+The source is not an activation snapshot: a newly launched resident rechecks
+current opt-in before service admission, including revocation after its caller's
+check. Read-only ping and explicit stop/export controls retain their own gates.
 Activation accepts the selected completed runtime's interpreter and uses
 ambient Python discovery only for a cold payload. This does not bypass the
 canonical installation-context owner's independent bootstrap prerequisites;

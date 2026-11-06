@@ -5075,10 +5075,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
-    from . import agenda_cli, owner_observation_cli, record_cli, worktree_data_cli
+    from . import agenda_cli, handoff_head_observation, owner_observation_cli, record_cli, worktree_data_cli
 
     agenda_cli.add_parsers(sub)
     owner_observation_cli.add_parsers(sub)
+    handoff_head_observation.add_parsers(sub)
     worktree_data_cli.add_parsers(sub)
     resolve_cli.add_parsers(sub)
     from . import launch_attempt_inspection
@@ -5328,6 +5329,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'handoffs-check': ('handoff_cli', 'cmd_handoffs_check'),
     'handoff-cutover-trigger': ('handoff_cli', 'cmd_handoff_cutover_trigger'),
     'head-session': ('session_tracking_cli', 'cmd_head_session'),
+    'handoff-head-observation': ('handoff_head_observation', 'cmd_observation'),
     'history-digest': ('session_metadata_cli', 'cmd_history_digest'),
     'hygiene': ('maintenance_cli', 'cmd_hygiene'),
     'install': ('installation_cli', 'cmd_install'),
@@ -5988,7 +5990,7 @@ def _load_full_command_surface() -> None:
     from . import update_launch_cli
 
     from .session_observations_cli import cmd_session_attention, cmd_session_observations
-    from . import agenda_cli, owner_observation_cli, worktree_data_cli
+    from . import agenda_cli, handoff_head_observation, owner_observation_cli, worktree_data_cli
     COMMAND_MAP = {
         "worktree-data-read": worktree_data_cli.cmd_worktree_data,
         "worktree-data-allocate": worktree_data_cli.cmd_worktree_data,
@@ -6107,6 +6109,7 @@ def _load_full_command_surface() -> None:
         "doctor": cmd_doctor,
         "hygiene": cmd_hygiene,
         "list-sessions": cmd_list_sessions,
+        "handoff-head-observation": handoff_head_observation.cmd_observation,
         "head-session": cmd_head_session,
         "record": cmd_record,
         "worktree-lineage": cmd_worktree_lineage,

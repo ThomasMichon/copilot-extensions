@@ -18,7 +18,7 @@ import sys
 import tarfile
 import time
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Callable, cast
 import unittest
 from unittest import mock
 import uuid
@@ -207,15 +207,55 @@ class ContractTests(unittest.TestCase):
             "path=pathlib.Path(sys.argv[2]); "
             "exec('while not path.exists(): time.sleep(0.01)')"
         )
-        started = time.monotonic()
-        with self.assertRaises(subprocess.TimeoutExpired):
-            builder.execute([sys.executable, "-B", "-c", parent, descendant, str(pid_file)],
-                            timeout=1)
+        execute_contained = builder.execute_contained
+        started = 0.0
+
+        def after_startup(
+            command: list[str],
+            argv: list[str],
+            timeout: float,
+            assign: Callable[[subprocess.Popen[str]], None],
+            terminate: Callable[[], None] | None,
+            **flags: Any,
+        ) -> str:
+            def assign_and_wait(process: subprocess.Popen[str]) -> None:
+                nonlocal started
+                assign(process)
+                # Release the existing Windows gate only after Job assignment.
+                if process.stdin is not None:
+                    process.stdin.write("1")
+                    process.stdin.flush()
+                    process.stdin.close()
+                deadline = time.monotonic() + 30
+                while not pid_file.exists():
+                    if time.monotonic() >= deadline:
+                        self.fail(
+                            "Descendant fixture startup did not reach its PID marker"
+                        )
+                    time.sleep(0.01)
+                started = time.monotonic()
+
+            return cast(
+                str,
+                execute_contained(
+                    command, argv, timeout, assign_and_wait, terminate, **flags
+                ),
+            )
+
+        # Interpreter startup is not the descendant-pipe timeout under test.
+        with mock.patch.object(builder, "execute_contained", side_effect=after_startup):
+            with self.assertRaises(subprocess.TimeoutExpired) as caught:
+                builder.execute(
+                    [sys.executable, "-B", "-c", parent, descendant, str(pid_file)],
+                    timeout=1,
+                )
+        self.assertEqual(caught.exception.timeout, 1)
         self.assertLess(time.monotonic() - started, 5)
         pid = int(pid_file.read_text())
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
+
             kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
             kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             kernel.OpenProcess.restype = wintypes.HANDLE
@@ -790,19 +830,16 @@ class ContractTests(unittest.TestCase):
         self.assertIn('findmnt -n -o PROPAGATION /', entry)
         self.assertIn('!= private', entry)
         self.assertIn("python3 /opt/trusted-harness/recipe/install.py --runtime", entry)
-        pins = [
+        stages = [
             "if ! mountpoint -q /run || [ -L /run ] || [ -L /run/systemd ]; then",
-            "install -d -m 755 /run/systemd",
-            "mount --bind /run/systemd /run/systemd",
-            "if ! mountpoint -q /run/systemd; then",
             'for path in /home/vscode /workspaces; do',
             "python3 /opt/trusted-harness/recipe/install.py --runtime",
             "exec /lib/systemd/systemd",
         ]
-        for pin in pins:
-            self.assertIn(pin, entry)
-        self.assertEqual([entry.index(pin) for pin in pins],
-                         sorted(entry.index(pin) for pin in pins))
+        for stage in stages:
+            self.assertIn(stage, entry)
+        self.assertEqual([entry.index(stage) for stage in stages],
+                         sorted(entry.index(stage) for stage in stages))
         self.assertNotIn("chown -R", entry)
         self.assertNotIn("rm -rf", entry)
         self.assertIn(
@@ -827,6 +864,80 @@ class ContractTests(unittest.TestCase):
              "apt-daily-upgrade.service", "apt-daily-upgrade.timer"),
             calls,
         )
+
+    def test_entrypoint_uses_ordinary_run_without_mount_pin(self) -> None:
+        bash = shutil.which("bash")
+        if os.name == "nt":
+            git = shutil.which("git")
+            candidate = Path(git).parents[1] / "bin" / "bash.exe" if git else None
+            bash = str(candidate) if candidate and candidate.is_file() else None
+        if not bash:
+            self.skipTest("A native Bash interpreter is required")
+        script = r"""
+id() { if [[ "$*" == "-g vscode" || "$*" == "-u vscode" ]]; then echo 1000; else echo 0; fi; }
+findmnt() { echo private; }
+mountpoint() {
+    printf 'mountpoint %s\n' "$*"
+    [[ "$2" != "$MISSING" && ( "$2" == /run || "$2" == /home/vscode || "$2" == /workspaces ) ]]
+}
+[() {
+    if [[ "$1" == "$$" && "$2" == '!=' && "$3" == 1 ]]; then return 1; fi
+    if [[ "$1" == -L ]]; then [[ "$2" == "$LINK" ]]; return; fi
+    builtin [ "$@"
+}
+install() { printf 'install %s\n' "$*"; }
+mount() { printf 'mount %s\n' "$*"; }
+python3() { printf 'python3 %s\n' "$*"; }
+function /usr/sbin/sshd() { printf 'sshd %s\n' "$*"; }
+exec() { printf 'exec %s\n' "$*"; }
+source "$1" /lib/systemd/systemd
+"""
+        flags: dict[str, Any] = (
+            {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")}
+            if os.name == "nt"
+            else {}
+        )
+        for missing, link in (
+            ("", ""),
+            ("/run", ""),
+            ("", "/run"),
+            ("", "/run/systemd"),
+            ("/home/vscode", ""),
+            ("/workspaces", ""),
+        ):
+            with self.subTest(missing=missing, link=link):
+                result = subprocess.run(
+                    [
+                        bash,
+                        "--noprofile",
+                        "--norc",
+                        "-c",
+                        script,
+                        "entrypoint-test",
+                        (ROOT / "entrypoint.sh").as_posix(),
+                    ],
+                    env={**os.environ, "MISSING": missing, "LINK": link},
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    **flags,
+                )
+                self.assertEqual(
+                    result.returncode, 65 if missing or link else 0, result.stderr
+                )
+                self.assertNotIn("mount --bind", result.stdout)
+                self.assertNotIn("mountpoint -q /run/systemd", result.stdout)
+                if missing or link:
+                    self.assertNotIn("python3 ", result.stdout)
+                    self.assertNotIn("exec ", result.stdout)
+                else:
+                    self.assertIn(
+                        "python3 /opt/trusted-harness/recipe/install.py --runtime",
+                        result.stdout,
+                    )
+                    self.assertIn("sshd -t", result.stdout)
+                    self.assertIn("mount -o remount,rw /sys/fs/cgroup", result.stdout)
+                    self.assertIn("exec /lib/systemd/systemd", result.stdout)
 
 
 class RuntimePersistenceTests(unittest.TestCase):

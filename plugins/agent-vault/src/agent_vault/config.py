@@ -71,7 +71,7 @@ def run_dir() -> Path:
 
 CONFIG_ENV = "AGENT_VAULT_CONFIG"
 PINNED_CONTEXT_ENV = "AGENT_VAULT_PINNED_CONTEXT"
-REPO_CONFIG_NAME = ".agent-vault.json"
+from .configuration_scope import REPO_CONFIG_NAME, bind_service_configuration as bind_service_configuration, configuration_root, configuration_source
 
 
 @dataclass(frozen=True)
@@ -253,7 +253,7 @@ def _discover_repo_config(
     *,
     strict: bool = False,
 ) -> tuple[Path | None, dict[str, Any]]:
-    start = Path(cwd or os.getcwd()).resolve()
+    start = Path(configuration_root(cwd)).resolve()
     if start.is_file():
         start = start.parent
     for directory in (start, *start.parents):
@@ -305,7 +305,7 @@ def _ext_config(cwd: str | None) -> dict[str, Any]:
     except Exception:
         return {}
     try:
-        return get_registry().collect_config(cwd)
+        return get_registry().collect_config(configuration_source(cwd))
     except Exception:
         return {}
 
