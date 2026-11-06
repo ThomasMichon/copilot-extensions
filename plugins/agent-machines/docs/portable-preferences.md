@@ -1,4 +1,4 @@
-# Portable preference previews
+# Portable preference exchange
 
 `agent-machines preferences preview` reads explicit local JSON snapshots and
 projects typed defaults for a supplied machine/harness scope. It does **not**
@@ -7,9 +7,14 @@ apply configuration, change bindings, discover packages, run modules, install
 software or activate services/schedules. All domains report
 `native-owner-required`; a suggestion is not an effective binding.
 
+`preferences accept` and `preferences publish` add explicit local transactions,
+each read-only until `--apply --expect <preview-token>` is supplied. Acceptance
+stores data, not domain configuration; publication replaces only a selected local
+file. Neither command discovers or enrolls a cloud carrier.
+
 The [reviewed Phase 4 plan](../../../efforts/active/machine-health-heartbeats/preferences.md)
-owns the remaining exchange/adoption and carrier qualification work. This command
-is the first read-only consumer, not a claim that those future capabilities exist.
+owns the remaining native adoption and carrier qualification work. Local exchange
+does not establish installed adoption, synchronization health or peer receipt.
 
 ## Snapshot
 
@@ -123,8 +128,8 @@ winner or automatic reconciliation.
 
 Complete new snapshots may withdraw defaults by omitting them. Withdrawal
 does not undo a binding or other configured effect, and local overrides remain.
-An unknown chain requires future explicit reconciliation; this command cannot
-accept it. No returned revision or digest is application authority.
+An unknown chain requires explicit reconciliation; `preview` cannot accept it.
+No returned revision or digest is native-application authority.
 
 Exit `0` means candidate data is eligible for further **preview**, not adopted.
 Exit `1` means unavailable/conflicting/stale candidate; JSON still reports the
@@ -133,3 +138,103 @@ reason-code diagnostic that does not echo the synchronized document.
 Inputs must be regular local files, not links/reparse points or device streams.
 Cloud-placeholder compatibility and real carrier publication/receipt remain
 unqualified; a local file pass is not OneDrive qualification.
+
+## Explicit local acceptance and publication
+
+Prepare a dedicated **unsynchronized local state directory** for one exchange
+namespace. Place a strict `policy.json` there:
+
+```json
+{
+  "schema": "agent-machines.preferences.policy",
+  "version": 1,
+  "publisher": "example-publisher",
+  "participant": "example-receiver",
+  "domains": ["copilot", "telemetry", "repositories", "maintenance"]
+}
+```
+
+The configured publisher is an administrative role, not an election,
+authentication or execution consent. Only a participant matching `publisher`
+may publish. Readers may accept only the expected publisher's complete snapshots.
+`domains` is a nonempty, nonduplicated subset of the four domain names; any
+unpermitted domain, including a named-machine fragment, blocks the candidate.
+The policy has the codec's size/depth limits and rejects unknown fields.
+Changing it is an explicit local configuration operation, not a synchronized
+instruction to change roles. Use distinct local state directories for distinct
+namespaces; never place these state directories in the synchronized carrier.
+
+```text
+agent-machines preferences accept --input <received.json> --state-dir <local-state> --machine <logical-id> --harness <canonical-id>
+agent-machines preferences publish --input <complete-candidate.json> --state-dir <publisher-local-state> --output <exact-local-document.json>
+```
+
+Both commands emit `agent-machines.preferences.exchange`, version `1`, with
+`operation`, `status`, `eligible`, a `preview_token`, candidate/local-watermark
+revisions, policy and separate effect booleans. Acceptance also emits the same
+scoped projection used by `preview`. To commit, repeat the exact command with
+`--apply --expect <preview-token>`. The token binds normalized paths, policy,
+candidate, local watermark, publication target content, scope, override content
+and reconciliation flags. Apply rereads these under a five-second bounded native
+**local** writer lock. Changed inputs require a fresh preview; tokens do not
+grant native configuration or binding authority.
+
+Acceptance writes only `accepted.json` inside the supplied state directory.
+`--local-overrides` and `--conflict` have the preview meanings. Repeated identical
+revision/content is `unchanged` and does not rewrite acceptance. Older revisions,
+same-revision conflicts, wrong publishers and known provider conflicts refuse.
+`--full-snapshot` explicitly previews a parent-gap reconciliation; it may accept
+a newer complete snapshot or initialize a missed chain, never roll back a
+revision or bypass a conflict. Publisher/same-revision conflict reconciliation
+is not implemented; do not edit the watermark to guess a winner.
+Offline inputs preserve the last-accepted projection and local overrides.
+A narrowed policy blocks newly received unpermitted domains; prior accepted
+data is retained, not an authorization to apply excluded domains.
+
+Publication uses a separate `publication.json` local watermark, never
+`accepted.json`. This records **publication intent**, not receipt: it is written
+before the exact output file is atomically replaced. A failed output replacement
+reports `publication-pending`; preview and retry the identical complete snapshot.
+Even if the output vanishes or an older replica returns, the local watermark
+prevents rollback. A foreign publisher, newer output or same-revision conflict
+refuses; an untracked output chain is not silently adopted. Publisher transfer
+and recovery of lost local publication state remain explicit future
+reconciliation work, not permission for another participant to take over.
+
+Files are written as complete same-directory temporary files, flushed before
+atomic replacement, with bounded output and temporary-file cleanup. On POSIX,
+the local watermark directory is synced before publication or success, including
+unchanged/retry paths. A failure reports `state-sync-pending` and does not
+publish; refresh the preview and retry. This is not a qualification of Windows
+or synchronized-provider crash durability. The local
+`exchange.lock` is retained for OS writer serialization, not synchronized or
+used as a fleet claim. Existing directory chains, inputs, outputs and state
+files must be ordinary nonlinked paths; aliases among the selected files refuse.
+Parent-traversal (`..`) components refuse before normalization, including in
+`--state-dir`, so inspected paths and actual lock/write targets cannot diverge.
+Write parent directories must already exist; an unavailable received directory
+still projects the accepted snapshot as offline data. Output replacement is local publication
+only: `remote_receipt` stays `not-observed`, and publication does not prove a
+provider received or preserved it. There is no distributed compare-and-swap;
+concurrent provider changes/conflict-copy detection require the future qualified
+carrier adapter, not an mtime winner or a synchronized lock.
+
+Exit `0` means eligible preview or completed local transaction, `1` means a
+blocked/unavailable preview, and `2` means invalid input, changed confirmation,
+refused apply or unavailable transaction. Inspect `applied` and
+`local_published`, not exit code alone. Failures after publication intent can
+leave that watermark advanced; no cross-file or cross-domain atomicity is claimed.
+All outcomes retain `configuration_applied: false` and `binding_changed: false`.
+
+### CLI compatibility
+
+These are additive, explicitly selected provider operations; no existing
+consumer begins calling them automatically. The original `preferences preview`
+syntax, version-1 snapshot/projection schema and exit meanings are unchanged.
+Discover commands with `preferences --help` on the **selected runtime** before
+using acceptance/publication; an older runtime may support only `preview`.
+Missing support means exchange is unavailable, not permission to copy state
+manually, relax parsing or replay a different effectful operation.
+Provider rollback preserves the read-only preview baseline. Local policy and
+exchange output have their own strict version-1 schemas, independent of package
+versions; no retirement window is opened by this additive change.
