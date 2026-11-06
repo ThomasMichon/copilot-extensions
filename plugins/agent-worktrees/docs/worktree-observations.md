@@ -152,12 +152,12 @@ requirements are not supplied by these files.
 
 The ordinary PowerShell entry loads the library in the same shell.
 For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
-prepared-event bound and without an outstanding late-guidance watch, evaluation
+prepared-event bound, including outstanding late-guidance watches, evaluation
 has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
-Other tools, installation cells, oversized events and late-guidance watches
+Other tools, installation cells and oversized events
 keep their original entry and behavior; the prepared-event bound must not
-consume mutation or watched events. This is not the complete shell-only transition.
+consume mutation events. This is not the complete shell-only transition.
 
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's
@@ -197,7 +197,28 @@ Derived paths reject reparse components. Registered-entry tests use the real
 membership, binding and current-row publishers, with interpreter/resident
 traps, and distinguish hook-entry time from shell-process startup.
 These isolated source controls do not establish installed, ACP/model,
-POSIX, complete mutation/late-guidance or whole-hook throughput acceptance.
+POSIX, complete mutation or whole-hook throughput acceptance.
+
+After prepared admission, late-guidance notification is independent of the
+binding locator and current-row files. It consumes only the original session
+watch (8 KiB), request (256 KiB) and publication revision (4 KiB), with depth-8
+decoding and the same canonical local-path restriction. Pending requests retain
+their watch unless the native process probe establishes that the recorded PID
+is absent/exited. Inaccessible, malformed, out-of-range or live/reused process
+identities remain unknown; this probe does not establish incarnation ownership.
+Terminal requests must complete at or after the watch's start. Partial/failure,
+possible changes and later publication revisions retain the original fallback,
+repair, restart/new-context and no-model-admission wording.
+
+Windows shell and retained Python consumers atomically rename an eligible watch
+to a unique same-directory consumption path. Only the winner with the evaluated
+snapshot emits a notice. A replacement is restored without overwriting a newer
+watch; a superseded claimed snapshot is removed. Failed restoration without a
+replacement preserves the claimed file rather than discarding it. This is
+best-effort advisory consumption, not durable delivery or a new preparation
+store; interruption after consumption can still lose a notice. A notice skips
+disposition accounting, even when enabled; reminder opt-out never suppresses
+late guidance, and independent bind advice still runs when its own facts exist.
 
 ### Prepared Windows membership reuse
 

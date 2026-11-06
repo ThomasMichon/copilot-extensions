@@ -160,7 +160,7 @@ function Read-PostToolHookFacts {
 }
 
 function Read-PostToolBoundedJson {
-    param([string]$Path, [int]$Limit)
+    param([string]$Path, [int]$Limit, [ref]$Snapshot)
     $stream = $null
     $reader = $null
     try {
@@ -178,6 +178,7 @@ function Read-PostToolBoundedJson {
         }
         if ($count -gt $Limit) { return $null }
         $text = ([Text.UTF8Encoding]::new($false, $true)).GetString($bytes, 0, $count)
+        if ($null -ne $Snapshot) { $Snapshot.Value = $text }
         if ($PSVersionTable.PSVersion.Major -ge 6) {
             $reader = [Newtonsoft.Json.JsonTextReader]::new([IO.StringReader]::new($text))
             $reader.CloseInput = $true
@@ -201,6 +202,126 @@ function Read-PostToolBoundedJson {
         if ($null -ne $reader) { $reader.Dispose() }
         if ($null -ne $stream) { $stream.Dispose() }
     }
+}
+
+function Remove-PostToolLateWatch {
+    param([string]$Path, [string]$Snapshot)
+    $claimed = $Path + '.consuming-' + [Guid]::NewGuid().ToString('N')
+    try {
+        [IO.File]::Move($Path, $claimed)
+        try {
+            $current = $null
+            $null = Read-PostToolBoundedJson $claimed 8192 ([ref]$current)
+            if (-not [string]::Equals($current, $Snapshot, [StringComparison]::Ordinal)) {
+                return $false
+            }
+            [IO.File]::Delete($claimed)
+            return $true
+        } finally {
+            if ([IO.File]::Exists($claimed)) {
+                try { [IO.File]::Move($claimed, $Path) } catch {
+                    if ([IO.File]::Exists($Path)) {
+                        # A newer watch supersedes the claimed snapshot; never overwrite it.
+                        [IO.File]::Delete($claimed)
+                    }
+                }
+            }
+        }
+    } catch {}
+    return $false
+}
+
+function Test-PostToolWorkerGone {
+    param($Owner)
+    try { $ownerMap = ConvertTo-PostToolFactMap $Owner } catch { return $false }
+    if (($ownerMap['pid'] -isnot [int] -and $ownerMap['pid'] -isnot [long]) -or
+        $ownerMap['pid'] -le 0 -or $ownerMap['pid'] -gt [int]::MaxValue -or
+        $ownerMap['start_time'] -isnot [string]) { return $false }
+    $process = $null
+    try {
+        $process = [Diagnostics.Process]::GetProcessById([int]$ownerMap['pid'])
+    } catch {
+        # A valid absent PID is distinct from access denial or another unknown failure.
+        return ($_.Exception.InnerException -is [ArgumentException])
+    }
+    try { return $process.HasExited } catch { return $false } finally { $process.Dispose() }
+}
+
+function Get-PostToolLateGuidanceNotice {
+    param([string]$SessionHome, [string]$Session, [string]$Cwd)
+    try {
+        if ($Session -cnotmatch '^[A-Za-z0-9_-]{1,128}$') { return $null }
+        $path = [IO.Path]::Combine($SessionHome, 'local-guidance-watch.json')
+        $snapshot = $null
+        $watch = Read-PostToolBoundedJson $path 8192 ([ref]$snapshot)
+        if ($null -eq $watch -or $watch['version'] -ne 1 -or
+            $watch['root'] -isnot [string] -or $watch['metadata'] -isnot [string]) { return $null }
+        $root = Get-PreparedWorktreesPath $watch['root']
+        if (-not [string]::Equals($Cwd, $root, [StringComparison]::OrdinalIgnoreCase) -and
+            -not $Cwd.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $null }
+        $metadata = Get-PreparedWorktreesPath $watch['metadata']
+        $state = Read-PostToolBoundedJson ([IO.Path]::Combine($metadata, 'request.json')) 262144
+        if ($null -eq $state -or $state['version'] -ne 1 -or
+            -not [string]::Equals($state['root'], $watch['root'], [StringComparison]::Ordinal)) { return $null }
+        if ($state['phase'] -cin @('spawning', 'queued', 'running')) {
+            if (-not (Test-PostToolWorkerGone $state['owner'])) { return $null }
+            $result = @{ status = 'failed'; counts_known = $false }
+        } else {
+            if ($state['phase'] -cnotin @('done', 'failed')) { return $null }
+            foreach ($value in @($watch['started_at'], $state['completed_at'])) {
+                if (($value -isnot [int] -and $value -isnot [long] -and
+                     $value -isnot [double] -and $value -isnot [decimal]) -or
+                    [double]::IsNaN([double]$value) -or [double]::IsInfinity([double]$value)) { return $null }
+            }
+            if ($state['completed_at'] -lt $watch['started_at']) { return $null }
+            $result = ConvertTo-PostToolFactMap $state['result']
+        }
+        $status = $result['status']
+        if ($status -cnotin @('ready', 'partial', 'skipped', 'failed', 'timeout')) { return $null }
+        if (-not (Remove-PostToolLateWatch $path $snapshot)) { return $null }
+        $latest = $null
+        $publication = Read-PostToolBoundedJson ([IO.Path]::Combine($metadata, 'publication.json')) 4096
+        if ($null -ne $publication -and $publication['version'] -eq 1 -and
+            [string]::Equals($publication['root'], $watch['root'], [StringComparison]::Ordinal) -and
+            $publication['revision'] -is [string] -and
+            $publication['revision'] -cmatch '^[0-9a-f]{32}$') { $latest = $publication['revision'] }
+        $revision = if ($latest) { $latest } else { $result['publication_revision'] }
+        $restart = $result['restart_required'] -is [bool] -and $result['restart_required']
+        $changed = $restart -or ($revision -is [string] -and $revision -and
+            -not [string]::Equals($revision, $watch['publication_revision'], [StringComparison]::Ordinal))
+        if ($status -cin @('failed', 'timeout')) {
+            if ($changed) {
+                return '[local-guidance] Backup refresh failed after possible file changes. ' +
+                    'Retain reviewed fallback and repair preparation. Restart/new context is required ' +
+                    'before discovering refreshed guidance; file changes are not proof of model admission.'
+            }
+            return '[local-guidance] Backup refresh failed; retain reviewed fallback. Model admission is unknown.'
+        }
+        if ($changed) {
+            $coverage = if ($status -ceq 'partial') { 'partially refreshed' } else { 'refreshed' }
+            $description = if ($restart) {
+                "Static guidance files $coverage after session discovery."
+            } elseif ($status -ceq 'partial') {
+                'Static guidance preparation is incomplete after a possible late file change.'
+            } else { 'Static guidance was revalidated after a possible late file change.' }
+            if ($latest -and -not [string]::Equals(
+                $latest, $result['publication_revision'], [StringComparison]::Ordinal
+            )) {
+                $description = if ($status -ceq 'partial') {
+                    'Static guidance preparation is incomplete; files may have changed after its last validation.'
+                } else { 'Static guidance may have changed after its last validation; reprepare it first.' }
+            }
+            $fallback = if ($status -ceq 'partial') { 'Retain reviewed fallback for unresolved sources. ' } else { '' }
+            return "[local-guidance] $description " +
+                'Restart/new context is required to discover the refreshed guidance; ' +
+                'this is file publication, not proof of model admission. ' +
+                $fallback + 'Do not restart automatically; preserve current work first.'
+        }
+        if ($status -ceq 'partial') {
+            return '[local-guidance] Backup refresh is incomplete; retain reviewed fallback. Model admission is unknown.'
+        }
+        return '[local-guidance] Backup verified unchanged guidance; no new model admission is asserted.'
+    } catch { return $null }
 }
 
 function Get-PostToolPositiveInt {
@@ -265,14 +386,27 @@ function Invoke-PreparedPostToolRead {
         if ($session -isnot [string] -or
             $session -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { return ,@{} }
         $sessionHome = [IO.Path]::Combine($env:USERPROFILE, '.copilot', 'session-state', $session)
-        $watch = [IO.Path]::Combine($sessionHome, 'local-guidance-watch.json')
-        $null = Get-PreparedWorktreesPath $watch
-        if ([IO.File]::Exists($watch)) { return $null }
         if (-not (Test-PreparedManagedWorktreesSession -Raw $Raw)) { return ,@{} }
         if ($event.ContainsKey('cwd')) { $cwd = $event['cwd'] }
         elseif ($event.ContainsKey('workingDirectory')) { $cwd = $event['workingDirectory'] }
         else { $cwd = $env:COPILOT_PROJECT_DIR }
         $cwd = Get-PreparedWorktreesPath $cwd
+        $notice = Get-PostToolLateGuidanceNotice -SessionHome $sessionHome -Session $session -Cwd $cwd
+        $result = Invoke-PreparedPostToolReminders -SessionHome $sessionHome -Session $session `
+            -Cwd $cwd -SkipCounter:([bool]$notice)
+        if ($notice) {
+            $text = if ($result.additionalContext) { $notice + "`n`n" + $result.additionalContext } else { $notice }
+            return ,@{ additionalContext = $text }
+        }
+        return ,$result
+    } catch {
+        return ,@{}
+    }
+}
+
+function Invoke-PreparedPostToolReminders {
+    param([string]$SessionHome, [string]$Session, [string]$Cwd, [switch]$SkipCounter)
+    try {
         $binding = Read-PostToolBoundedJson ([IO.Path]::Combine($sessionHome, 'worktree-binding.json')) 16384
         if ($null -eq $binding -or $binding['sessionId'] -isnot [string] -or
             -not [string]::Equals($binding['sessionId'], $session, [StringComparison]::Ordinal)) {
@@ -309,7 +443,8 @@ function Invoke-PreparedPostToolRead {
         $counterLock = $null
         try {
             $null = Get-PreparedWorktreesPath $sidecar
-            if (([string]$env:AGENT_WORKTREES_NUDGE).Trim().ToLowerInvariant() -notin @('0', 'off', 'false', 'no')) {
+            if (-not $SkipCounter -and
+                ([string]$env:AGENT_WORKTREES_NUDGE).Trim().ToLowerInvariant() -notin @('0', 'off', 'false', 'no')) {
                 $counterLock = Enter-PostToolCounterLock ([IO.Path]::Combine($stateHome, $worktree + '.lock'))
                 if ($null -eq $counterLock) {
                     # Contention is advisory; the independent bind reminder still runs.

@@ -47,6 +47,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -259,6 +260,30 @@ def _publication_revision(directory: Path, root: str) -> str:
     return ""
 
 
+def _consume_late_watch(path: Path, snapshot: bytes) -> bool:
+    if os.name != "nt":
+        path.unlink()
+        return True
+    claimed = path.with_name(path.name + ".consuming-" + uuid.uuid4().hex)
+    try:
+        path.rename(claimed)
+        try:
+            with claimed.open("rb") as stream:
+                if stream.read(8193) != snapshot:
+                    return False
+            claimed.unlink()
+            return True
+        finally:
+            if claimed.exists():
+                try:
+                    claimed.rename(path)
+                except FileExistsError:
+                    # A newer watch supersedes the claimed snapshot; never overwrite it.
+                    claimed.unlink()
+    except OSError:
+        return False
+
+
 def _late_guidance_notice(payload: dict, home: Path) -> str | None:
     session_id = payload.get("sessionId")
     if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
@@ -267,7 +292,11 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
     try:
         if not watch_path.is_file() or watch_path.stat().st_size > 8192:
             return None
-        watch = json.loads(watch_path.read_text(encoding="utf-8"))
+        with watch_path.open("rb") as stream:
+            snapshot = stream.read(8193)
+        if len(snapshot) > 8192:
+            return None
+        watch = json.loads(snapshot.decode("utf-8"))
         if (
             watch.get("version") != 1
             or not Path(payload.get("cwd") or "").resolve().is_relative_to(Path(watch["root"]).resolve())
@@ -291,7 +320,8 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
         status = result.get("status")
         if status not in ("ready", "partial", "skipped", "failed", "timeout"):
             return None
-        watch_path.unlink()
+        if not _consume_late_watch(watch_path, snapshot):
+            return None
         latest = _publication_revision(metadata, watch["root"])
         revision = latest or result.get("publication_revision")
         changed = result.get("restart_required") is True or (
