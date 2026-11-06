@@ -213,3 +213,16 @@ def test_invalid_forwarded_context_refuses_before_runtime_selection(selected, mo
     captured = capsys.readouterr()
     assert "context is invalid or inactive" in captured.err
     assert pointer not in captured.err and captured.out == ""
+
+
+@pytest.mark.parametrize("value", ["null", "[]", "false"])
+def test_explicit_malformed_engine_argv_refuses_before_runtime_selection(
+    selected, monkeypatch, capsys, value,
+):
+    monkeypatch.setattr(
+        agent_plugin_runtime, "resolve_installed_plugin_command",
+        lambda *args, **kwargs: pytest.fail("malformed handoff selected a runtime"),
+    )
+    assert ui.main(["--engine-argv", value, "sample"]) == 1
+    captured = capsys.readouterr()
+    assert "engine command is invalid" in captured.err and captured.out == ""

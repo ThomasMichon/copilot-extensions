@@ -16,6 +16,12 @@ detail cards. Cards retain the target, registry revision, observation time,
 failure stage and unobserved capabilities. Git/GCM transport, write permission,
 CodeSpaces, MCP and Copilot are not verified by this API observation.
 
+Personal GitHub sign-in is not an upfront setup or first-run prerequisite.
+Defer any such prompt until requested work touches a repository that requires
+that account. Installing public tooling, the host alone or an unavailable
+optional observation does not establish that need; independently required
+target-specific credentials remain with their own provider.
+
 The section uses the existing version-1 Configuration list/card shell. Opening
 Profiles or another section does not run its authentication read. Visiting or
 refreshing Authentication performs one bounded native inspection; retained
@@ -43,6 +49,8 @@ runtime resolution or invocation. It preserves Manager's engine precedence:
 an in-process choice wins, while an explicit environment command takes priority
 over an inherited engine handoff. A rejected context never falls through to a
 different legacy installation.
+An explicitly supplied malformed engine command, including JSON `null`, is a
+read error before runtime selection rather than permission to use a default.
 
 ## Installation and Updates
 

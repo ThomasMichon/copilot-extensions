@@ -103,6 +103,11 @@ knowledge or starts workers. Pending, stale, unavailable and unsupported
 observations remain visible; only a fresh applicable read can enable a
 corresponding executable action.
 
+Personal GitHub authentication is not an upfront public-foundation or first-run
+prerequisite. Defer that prompt until requested repository work requires that
+account. An installed tool, host name or unavailable optional observation does
+not establish the need; required target-specific credentials keep their owners.
+
 Inspection may display the correct owner's supported next step. An executable
 acquisition action is a later separately defined provider/account operation,
 not part of this first read-only slice. Until then, show its limitation rather
@@ -188,7 +193,7 @@ limitations. Manager verifies selected interpreter/module and slot-local support
 before a single native read. No new payload pivot, CLI operation, universal
 authentication schema or executable acquisition action is added.
 
-Thirty-nine native provider controls and twenty-one Manager compatibility controls
+Thirty-nine native provider controls and twenty-four Manager compatibility controls
 pass. Twenty-nine Configuration controls pass, including the actual production
 UI and process boundary to private-venv legacy and Windows namespaced fixtures
 running the real native parser, registry reader and projection with only their
@@ -213,6 +218,9 @@ must not override an explicit environment command. The adapter now forwards and
 validates context through the existing Manager restoration owner and preserves
 the native engine-selection precedence. The real namespaced list process retains
 its selected context/interpreter; malformed context refuses before selection.
+An additional explicit-JSON-null handoff regression was also demonstrated red
+and corrected: supplied malformed commands refuse before selection, while an
+omitted argument retains ordinary engine resolution.
 
 These are contained source/fixture results, not a cold product installation,
 selected installed-runtime qualification, native performance budget, live

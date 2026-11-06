@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             engine = json.loads(args.engine_argv) if args.engine_argv is not None else None
         except ValueError:
             raise InspectionError("The selected engine command is invalid.") from None
-        if engine is not None and (
+        if args.engine_argv is not None and (
             not isinstance(engine, list) or not engine
             or any(not isinstance(item, str) or not item for item in engine)
         ):

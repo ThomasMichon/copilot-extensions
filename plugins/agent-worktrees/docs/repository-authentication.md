@@ -66,6 +66,10 @@ Consumers retain the target/revision/time with the result, visibly mark a prior
 result stale while refreshing or after selection changes, and never enable
 credential acquisition or first-task admission solely from this observation.
 The optional Manager Configuration consumer adds no executable sign-in action.
+Personal GitHub authentication is not an upfront onboarding prerequisite:
+requested repository work must actually require that account before an
+acquisition prompt. Public tooling acquisition and this optional observation
+are not proof of such a requirement.
 The native response also carries `configuration: {entries, summary}`: the
 provider-owned version-1 list/card projection. Its cards retain the target,
 revision, time, stage and limitations rather than equating an unavailable
