@@ -89,3 +89,24 @@ This separates the ordinary-installer publication decision from prepared
 application qualification, tracked separately in #10742 under #7028. Full
 adopted-session reattachment and whole-effort completion remain required; no
 build-feed trust or rollout approval is implied.
+
+## 2026-11-06 - MCP qualification independent of desktop observation
+
+The operator clarified:
+
+> We should disconnect anything to do with MCP from terminal host focus; not sure how that got intertwinced
+
+### Capture validation
+
+This supersedes the earlier agent-recommended coupling of MCP qualification to
+desktop observation. MCP source, release and acceptance must not wait for an
+observer, focus/window calibration, Terminal-host attribution or debugger
+qualification. Those application-specific conditions are withdrawn, not passed.
+Generic SDK work is independently tracked in
+[#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925), not
+reproduced here or made an MCP dependency.
+
+Functional stdio, runtime selection, exit and exact-owned cleanup, required
+source/review/CI gates and authorized installed-consumer acceptance remain.
+This is not a global validation waiver, an SDK qualification claim or permission
+to consume the unused, held calibration approval.

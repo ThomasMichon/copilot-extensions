@@ -9,6 +9,7 @@
 - **Umbrella issue:** #10486
 - **Related issues:** #9716, #10377
 - **Realization defects:** #10652 (incoming completion gate), #6389 (fresh serving convergence), #10653 (unsafe forced cutover)
+- **Independent SDK observation work:** [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925); not an MCP prerequisite
 - **Resident configuration correction:** #10951 (qualified caller context)
 - **Separate prepared qualification:** #10742 under campaign #7028; not the ordinary-installer slice's publication gate
 
@@ -41,6 +42,15 @@ observation. Observer, host-attribution and calibration requirements were an
 agent-introduced coupling and are withdrawn from this effort. They do not gate
 incoming publication, handover, source acceptance, release or installed MCP
 acceptance.
+
+MCP source qualification, release and acceptance have no desktop-quiet,
+observer, focus/window-calibration, Terminal-host attribution or debugger
+prerequisite. The application-specific observation conditions formerly proposed
+here are **withdrawn, not passed**. Generic SDK observation work is independently
+deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925);
+it cannot delay MCP. Functional stdio, runtime-selection, exit and exact-owned
+cleanup evidence remains required, as do source admission, review, required CI
+and authorized installed-consumer acceptance. No global validation rule is waived.
 
 ## Participants
 
@@ -99,8 +109,8 @@ The settled requirement is fresh-call generation selection **and** preserved
 session reattachment, not merely an old-host drain. The operator's exact request
 and reattachment selection are retained in
 [inception-transcript.md](inception-transcript.md).
-The later observer-scope request and explicit withdrawal of its MCP coupling are
-captured there separately. Neither changes the fresh-execution and
+The later observer-scope request and superseding withdrawal of MCP observation
+gates are captured there separately; neither replaces the fresh-execution and
 session-reattachment objective.
 
 ## Scope Approvals
@@ -130,7 +140,8 @@ of what was attempted, not active MCP requirements. Generic SDK requirements
 have one canonical owner:
 [Fixture-Scoped Native Observation](../fixture-scoped-native-observation/README.md)
 (#10925). Functional generation selection, protocol/session preservation and
-owned-process cleanup remain this effort's requirements.
+owned-process cleanup remain this effort's requirements. Debugger conditions
+are also withdrawn; no original calibration approval is transferred or consumed.
 
 ## Plan
 
@@ -176,21 +187,22 @@ named tracked objective before the whole effort is Done.
 
 ### Resident configuration-context correction
 
-- [x] Correct #10951: transport the caller's configuration root and bridge
-  binding to the resident consumer, independently resolve the qualified owner,
-  and preserve direct/resident preference parity without process-global cwd or
-  environment changes. Refuse missing/mismatched context and isolate concurrent
-  callers; updated callers retain a pre-effect direct fallback with unsupported
-  old providers. Source correction #10969 is merged, not released or installed
-  acceptance, and does not close #10951/#10486.
-- [ ] Verify release/promotion of the merged resident configuration-context
-  correction; a source merge does not make the selected runtime live.
-- [ ] Perform separately authorized installed primary-consumer acceptance of
-  that correction. This remains open independently of release and SDK observation.
+- [x] **Source merged:** #10951 correction landed through #10969 at
+  `4cecd3fe3f677041e0beb0118397b2deb18b3227`: transport the caller's configuration
+  root and bridge binding to the resident consumer, independently resolve the
+  qualified owner, and preserve direct/resident preference parity without
+  process-global cwd or environment changes. Refuse missing/mismatched context
+  and isolate concurrent callers; unsupported peers retain a pre-effect direct fallback.
+- [ ] **Release open:** verify promotion of the source correction; a source
+  merge is not a released or running provider.
+- [ ] **Authorized primary-consumer acceptance open:** verify installed
+  direct/resident parity against the actual primary configuration owner.
 
-The context correction is not transparent migration of legacy clients. Legacy
-old callers reaching a new provider without context receive an explicit
-rejection and need an updated client or `--no-serve`.
+Old clients that omit the versioned caller-root context are not transparently
+compatible with the updated resident protocol. Update the affected client or
+use its direct `--no-serve` path where supported. New-client fallback to an old
+provider occurs before application effects; it is not transparent legacy
+handover. Preserve held sessions and the separate pre-feature adoption hold.
 
 ### Phase 3 - Session-preserving handover and independent retirement
 
@@ -216,9 +228,12 @@ rejection and need an updated client or `--no-serve`.
 
 ### Phase 4 - Qualification, release and acceptance
 
-- [x] Deferred to `#10925`: SDK-owned observation contract, source foundation and
-  independent qualification. This resolves ownership only; it is not MCP
-  validation and does not wait for the SDK objective to finish.
+- [x] **Deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925):**
+  generic SDK observation design and qualification, independently of MCP.
+  This transfers tracking; it does not claim that SDK work passed.
+- [x] **WITHDRAWN, NOT PASSED:** MCP-specific observer enrollment, focus/window
+  calibration, Terminal-host attribution and debugger qualification conditions.
+  None is an MCP source, release or acceptance prerequisite.
 - [ ] Run focused protocol and real-process regression controls on supported
   Windows and POSIX boundaries, plus practical clean-room install qualification.
 - [ ] Update owning reality docs, contract declarations and per-plugin
@@ -227,6 +242,21 @@ rejection and need an updated client or `--no-serve`.
   acceptance. Record old-client preservation separately from actual reattachment.
 - [ ] Resolve every plan and validation gate, or transfer an explicitly blocked
   legacy adoption item to its named tracked owner, before closing this effort.
+
+### Withdrawn MCP observation conditions and independent SDK deferral
+
+- [x] **Deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925):**
+  generic SDK acquisition, native identity/coverage, source-bound admission and
+  observer qualification. Its implementation and validation remain independently
+  owned; this effort does not reproduce that plan or claim its completion.
+- [x] **WITHDRAWN, NOT PASSED:** the application-specific generated-CMD
+  desktop/window/focus, Terminal-host, calibration and debugger conditions.
+  Functional two-cycle stdio/runtime-selection/exit and exact-owned cleanup
+  remain applicable without any desktop-observation prerequisite.
+
+Git and the append-only journal preserve the earlier proposal as history, not
+as an active MCP contract. The unused calibration approval remains held; this
+withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 
 ## Validation Plan
 
@@ -271,9 +301,19 @@ rejection and need an updated client or `--no-serve`.
   automatic inhibition and never authorizes state-holder termination.
 - [ ] Actual consumer evidence distinguishes source qualification, released
   payload, selected runtime and the generation that handles a tool call.
-- [x] Deferred to `#10925`: Generic SDK scoped-acquisition, identity/admission,
-  coverage and cleanup validation. Application-specific generated-CMD observation
-  and calibration conditions are withdrawn scope, not completed validation.
+- [x] **Deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925):**
+  SDK fixture-scoped acquisition and self-profile compatibility validation;
+  not an MCP result or prerequisite.
+- [x] **Deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925):**
+  SDK owned-window/focus, native-identity, descendant and host-attribution
+  validation; no pass is claimed here.
+- [x] **Deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925):**
+  SDK observation coverage, event delivery and observer-cleanup qualification;
+  independently tracked, not passed by this effort.
+- [x] **WITHDRAWN, NOT PASSED:** MCP-specific scoped desktop evidence,
+  focus/window calibration, foreground restoration, Terminal-host attribution
+  and debugger conditions. The actual generated-CMD functional two-cycle and
+  owned-cleanup controls remain required without those conditions.
 
 ## Proposal
 
@@ -1134,3 +1174,26 @@ migration already works.
   no whole local unit packet or Windows-native substitute was run. Publication,
   release and consumer acceptance remain coordinator-owned. #10742, full
   handover #10486 and pre-feature adoption holds remain open.
+
+### 2026-11-06 - Prospective MCP desktop gates withdrawn
+
+- Corrected the active metadata, guiding intent, coordination, Plan and
+  Validation Plan: MCP source, release and acceptance do not depend on observer,
+  focus/window-calibration, Terminal-host or debugger qualification. The
+  application-specific conditions are **withdrawn, not passed**. Generic SDK
+  observation items are explicitly deferred to the existing public #10925;
+  no SDK plan or implementation is duplicated here.
+- Historical journal text is retained verbatim. Earlier descriptions of an MCP
+  observation prerequisite are history, not surviving prospective gates.
+  The unused calibration approval remains held; no effects are authorized.
+- Marked #10951's source correction **merged** through #10969 at
+  `4cecd3fe3f677041e0beb0118397b2deb18b3227`. Promotion/release and authorized
+  installed primary-consumer acceptance remain open. Old clients lacking the
+  caller-root protocol need an updated client or supported direct `--no-serve`
+  path; this is not transparent legacy handover.
+- This is documentation-only after the qualified code reconciliation. The
+  **74** pure, **11** preparation and **4** native results are unchanged;
+  no native or whole-unit packet was repeated. Source admission remains
+  **4234/598/300**, with dependency guard **567/0** and all other source, review,
+  required-CI, lifetime and authorized-acceptance gates intact. #10486, #10742
+  and pre-feature adoption holds remain open.
