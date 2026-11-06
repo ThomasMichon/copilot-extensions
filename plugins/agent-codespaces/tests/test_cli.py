@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import types
 from unittest.mock import patch
@@ -10,6 +11,12 @@ import pytest
 
 
 from agent_codespaces.__main__ import main
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_cli_parser_dependencies():
+    # Keyring's lazy imports may probe Windows before a command runs.
+    importlib.import_module("agent_codespaces.authorize")
 
 
 def test_relay_listening_detects_open_and_closed_ports():
