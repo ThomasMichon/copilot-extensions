@@ -148,6 +148,12 @@
       "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
       "version": "0.1.0-dev1",
       "source": "plugins/agent-conduct-guidance"
+    },
+    {
+      "name": "agent-roles",
+      "description": "Sustained agent role charters over existing owners: a fleet monitor (task master) for progress audits and separately authorized corrective steers, and a pull-request reviewer role with independent lanes. Guidance-only, with no task queue, scheduler, daemon or required companion plugin.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/agent-roles"
     }
   ]
 }

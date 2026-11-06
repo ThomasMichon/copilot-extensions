@@ -1,0 +1,17 @@
+{
+  "comment": "Separate sustained role charters from Dispatch; add fleet misdirection runbooks and bounded history audits",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

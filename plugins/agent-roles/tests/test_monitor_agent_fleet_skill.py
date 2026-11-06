@@ -1,0 +1,65 @@
+"""Static role contracts; these checks do not qualify live steering."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+PLUGIN = Path(__file__).resolve().parents[1]
+SKILL = PLUGIN / "skills" / "monitor-agent-fleet"
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def test_monitor_is_discoverable_without_activating_supervision() -> None:
+    text = _read(SKILL / "SKILL.md")
+    frontmatter = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    assert frontmatter is not None
+    assert f"name: {SKILL.name}\n" in frontmatter.group(1)
+    description = frontmatter.group(1).split("description: >-", 1)[1]
+    assert 0 < len(description) <= 1024
+    assert len(text[frontmatter.end():].splitlines()) < 500
+    assert "task master" in description
+    assert "Default to one **read-only** sweep" in text
+    assert "**messages sent: none**" in text
+    assert "does not authorize messages now" in text
+    assert "not because Dispatch, Bridge or any one transport is" in text
+    assert "Writing or enabling this skill is not installing a" in text
+    assert "Static documentation tests do not qualify runtime" in _read(
+        SKILL / "assets" / "CHARTER.md"
+    )
+
+
+def test_steering_preserves_current_owner_and_unknown_effects() -> None:
+    text = " ".join(_read(SKILL / "references" / "steering.md").split())
+    for requirement in (
+        "explicit steering scope",
+        "later hold, narrowing or revocation",
+        "current head session",
+        "changed head requires reconciliation",
+        "one outstanding steer per key",
+        "If persistence fails, do not send",
+        "never by blind resend",
+        "send another only for materially new evidence",
+    ):
+        assert requirement in text, requirement
+    assert text.index("## Before sending") < text.index("## Sending")
+    assert text.index("**Persist first.**") < text.index("## Sending")
+    assert "Steer a reviewer's verdict" in text
+
+
+def test_offline_scenarios_have_distinct_evidence_and_explicit_modes() -> None:
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert "never execute" in scenarios["purpose"]
+    cases = scenarios["cases"]
+    ids = [case["id"] for case in cases]
+    assert cases and len(ids) == len(set(ids))
+    for case in cases:
+        assert case["mode"] in {"read-only", "steering-authorized"}
+        assert case["facts"].strip() and case["expected"].strip()
+    assert {case["mode"] for case in cases} == {
+        "read-only", "steering-authorized",
+    }

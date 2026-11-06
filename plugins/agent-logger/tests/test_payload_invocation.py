@@ -112,6 +112,36 @@ def test_rampup_guidance_uses_effort_as_durable_intent() -> None:
     assert "do not pass the caller's local `effort_argv0` through" in skill
 
 
+def test_progress_audit_has_a_separate_bounded_read_only_branch() -> None:
+    agent = (PLUGIN / "agents" / "session-rampup.agent.md").read_text(
+        encoding="utf-8"
+    )
+    branch = agent.split("## Progress-audit mode", 1)[1].split(
+        "## Takeover/cleanup budget", 1
+    )[0]
+    text = " ".join(branch.split())
+    for requirement in (
+        "original limits/holds",
+        "observation cutoff",
+        "assigned chronological range",
+        "read/output budget",
+        "exact `digest_argv0`",
+        "only when the caller permits tool-owned ephemeral collation",
+        "Missing collation permission or command means missing evidence",
+        "Read assigned chronological chunks fully within budget",
+        "record the exact unreviewed span",
+        "No whole-lifetime efficiency claim from a sampled range",
+        "messages sent: none",
+        "skip the takeover/cleanup procedure below",
+    ):
+        assert requirement in text, requirement
+    assert agent.index("## Progress-audit mode") < agent.index("## Procedure")
+    skill = (PLUGIN / "skills" / "ramp-up-session" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "`mode: progress-audit`" in skill
+
+
 @pytest.mark.parametrize(
     ("module", "command"),
     [
