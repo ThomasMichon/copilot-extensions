@@ -4360,7 +4360,7 @@
         "fleet-manager/src/fleet_manager/observations.py": "78febd64ed7408a7ec5c677763b053c0bc152f6038f7a58f49c3bbd5fb552a46",
         "fleet-manager/src/fleet_manager/operations.py": "bfdb591ecea896a07c8895ff394b99393ea256de9608c81ff51e352f5ba46719",
         "fleet-manager/src/fleet_manager/planning.py": "2f5f85665490121a1a8ffdd9c8d5f0bbdf08fadbeb858dd86035f138f6a6f4f5",
-        "fleet-manager/src/fleet_manager/private_state.py": "1467056cd80e728bcf2a793b71b83de95e92bacff248b946356894cac0f2c23f",
+        "fleet-manager/src/fleet_manager/private_state.py": "efbf40e7c4a52a365626252b5f635b3ae6decbacc31cda38e969b4edd05abc88",
         "fleet-manager/src/fleet_manager/release.py": "9ceddc9b3efd1df5c9f8dabaf18ff3c7b24f469fcd464198fbddee6f7bb70a9e",
         "fleet-manager/src/fleet_manager/release_auth.py": "ed2ba53fdc3e988af3bfb56bf7e4eb9578cbc6107118ea327dbda1281ab648bc",
         "fleet-manager/src/fleet_manager/release_selection.py": "67238a64f87e5f11a1123e40c9739f4bd267499785e149b9233684dd7a47fe84",

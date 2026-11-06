@@ -97,7 +97,15 @@ def _closure(first_party, output, *, extras="gateway-host"):
     return archives
 
 
-def prepared_application(tmp_path, wheel, monkeypatch, *, extras="gateway-host"):
+@pytest.fixture
+def progress(capfd):
+    def report(message):
+        with capfd.disabled():
+            print(message, flush=True)
+    return report
+
+
+def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gateway-host"):
     started = time.monotonic()
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     import local_install_profile as native
@@ -132,7 +140,7 @@ def prepared_application(tmp_path, wheel, monkeypatch, *, extras="gateway-host")
             result = build(source.parent / package.relative_to(PROJECT.parent), package_output)
             assert result.returncode == 0, result.stderr
             first_party[engine._package_name(package)] = next(package_output.glob("*.whl"))
-    print(f"fixture source wheels: {time.monotonic() - started:.2f}s", file=sys.__stdout__, flush=True)
+    progress(f"fixture source wheels: {time.monotonic() - started:.2f}s")
     archives = _closure(first_party, output, extras=extras)
     version = engine.runtime_source.payload_package_version(source, "fleet-manager")
     source_hash = engine.runtime_source.assembly_hash(source)
@@ -186,7 +194,7 @@ def prepared_application(tmp_path, wheel, monkeypatch, *, extras="gateway-host")
         )
     initial = native.source_inputs.select_project(snapshot, "fleet-manager")
     updated = native.source_inputs.select_project(updated_snapshot, "fleet-manager")
-    print(f"fixture applications prepared: {time.monotonic() - started:.2f}s", file=sys.__stdout__, flush=True)
+    progress(f"fixture applications prepared: {time.monotonic() - started:.2f}s")
     return (
         snapshot, snapshot / initial.project["application"],
         updated_snapshot / updated.project["application"],
@@ -194,9 +202,11 @@ def prepared_application(tmp_path, wheel, monkeypatch, *, extras="gateway-host")
 
 
 @pytest.mark.client_distribution_full
-def test_selected_gateway_application_first_touch_repeat_update_and_stop(tmp_path_factory, wheel, monkeypatch):
+def test_selected_gateway_application_first_touch_repeat_update_and_stop(
+    tmp_path_factory, wheel, monkeypatch, progress,
+):
     tmp_path = tmp_path_factory.mktemp("g")
-    snapshot, application, updated_application = prepared_application(tmp_path, wheel, monkeypatch)
+    snapshot, application, updated_application = prepared_application(tmp_path, wheel, monkeypatch, progress)
     root = tmp_path / "i"
     selection = select_host(root)
     original_config = (root / host.CONFIG).read_bytes()
@@ -230,8 +240,7 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(tmp_pat
         )
         started = time.monotonic()
         result = run([*launcher, *arguments], cwd=home, env=clean, timeout=90)
-        print(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s",
-              file=sys.__stdout__, flush=True)
+        progress(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
     def status(slot):
@@ -309,7 +318,9 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(tmp_pat
 
 
 @pytest.mark.client_distribution_full
-def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_factory, wheel, monkeypatch):
+def test_selected_ssh_application_first_touch_repeat_update_and_stop(
+    tmp_path_factory, wheel, monkeypatch, progress,
+):
     from aiohttp import web
     from cryptography.hazmat.primitives import serialization
     from fleet_manager.gateway_service_connector import ServiceConnector
@@ -323,7 +334,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
 
     tmp_path = tmp_path_factory.mktemp("s")
     snapshot, application, updated_application = prepared_application(
-        tmp_path, wheel, monkeypatch, extras="gateway-host,ssh-client",
+        tmp_path, wheel, monkeypatch, progress, extras="gateway-host,ssh-client",
     )
     root = tmp_path / "i"
     selection, value, policy, directory = ssh_selected(root)
@@ -377,8 +388,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(tmp_path_fa
         )
         started = time.monotonic()
         result = await asyncio.to_thread(run, [*launcher, *arguments], cwd=home, env=clean, timeout=90)
-        print(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s",
-              file=sys.__stdout__, flush=True)
+        progress(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
     async def status(slot):
