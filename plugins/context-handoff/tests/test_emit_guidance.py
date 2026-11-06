@@ -179,6 +179,9 @@ def test_bash_preserves_adjacent_agent_worktrees_command_catalog() -> None:
 def test_bash_own_only_mode_excludes_adjacent_catalog() -> None:
     context = _context(_run_native("--own-only"))
     assert context.startswith("[owner: context-handoff@")
+    assert "Confirm mutation success; new_context binds the snapshot" in context
+    assert "Follow host ordering" in context
+    assert "Verify persistence/snapshot binding" not in context
     assert "agent-worktrees session command catalog" not in context
     assert len(context.encode("utf-8")) < 2048
 

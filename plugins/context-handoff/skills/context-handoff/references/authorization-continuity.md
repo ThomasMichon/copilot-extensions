@@ -37,7 +37,10 @@ with the parent gate, live obligations and exactly one next action.
 If the offered generator supports `authorization_evidence`, pass compact
 references and exact applicable scope/limits after persisting the originals.
 Its 8192-UTF-8-byte carrier may be reused by emergency drafts, but the cache is
-not a durable grant or current-authority evaluator. Reconnect/refork loses the
+not a native checkpoint size limit, durable grant or current-authority evaluator.
+Native artifact read projections and storage use their own host contracts;
+compress the representation, not approval scope or unresolved obligations.
+Reconnect/refork loses the
 in-module cache; recover the existing checkpoint/effort record and supply its
 evidence again without asking for new permission. Empty input explicitly
 clears that carrier. Older generators remain compatible: include the section

@@ -218,12 +218,19 @@ export function nativePressurePrompt(usage, level, observation) {
   return `[Context Handoff -- native] Context utilization is ${usage.utilization} ` +
     `(${usage.tokens}); ${level} checkpoint boundary reached. Native context ` +
     `continuity is selected (${observation.reason}; offered tools ${observation.availability}). ` +
-    "Use get_context_remaining and the context-handoff skill's native checkpoint flow. " +
+    "Follow the host's offered native tools and built-in checkpoint instructions; " +
+    "use the context-handoff skill for selection and recovery. " +
     "Preserve the parent objective/completion gate, current slice, unresolved requests, " +
     "decisions, original approval evidence/limits and current holds/revocations, " +
     "live background/external obligations, and exactly one next action in " +
-    "session_artifacts under the current owner's expected revision. Verify the checkpoint " +
-    "and host-required snapshot binding before terminal new_context; do not call a raw clear. " +
+    "a compact session_artifacts checkpoint under the host's actual revision contract. " +
+    "Keep essential content within its complete-read budget in UTF-8 bytes, not an assumed " +
+    "storage limit; never overwrite from a truncated projection as if complete. " +
+    "Confirm persistence from the mutation result; read/stat only when the host requires " +
+    "it or content/outcome needs verification. Honor the host's single-mutation ordering " +
+    "when rollover is imminent, without repeated contraction or verification loops. " +
+    "The current terminal new_context binds the private snapshot itself; do not invent " +
+    "a snapshot argument or call a raw clear. " +
     "After rollover read the bound checkpoint and refresh durable guidance. " +
     "If tools are unavailable, diagnose and use explicit mode-governed custom recovery; " +
     "a policy cap or partial persistence error is not permission for another session or " +

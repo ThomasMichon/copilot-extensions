@@ -6,8 +6,9 @@ applyTo: "**"
 
 Select native context-only continuity first when `contextManagementTools` is
 enabled or all four native context tools are offered without explicit false.
-Use the current owner's verified revision-bound `session_artifacts` checkpoint
-and terminal `new_context`, preserving the parent gate, original approval
+Follow the host's built-in checkpoint cadence, revision and terminal ordering;
+do not add a competing verification loop. Use the current owner's
+`session_artifacts` checkpoint and terminal `new_context`, preserving the parent gate, original approval
 evidence/limits, current holds, live obligations and one
 next action; refresh durable guidance afterward. Unknown metadata is not proof
 of unavailable support. The custom transfer instructions below apply to actual

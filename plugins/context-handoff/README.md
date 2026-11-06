@@ -42,6 +42,17 @@ checkpoint. Explicit custom save/trigger/consume remain available in every mode;
 policy caps and partial persistence failures never authorize blind alternate
 sessions. Host emergency compaction is unchanged.
 
+Native checkpoint cadence and persistence belong to the host's built-in
+instructions. Record meaningful changes, not every call; short tasks need no
+checkpoint initialization. Keep essential recovery content within the offered
+complete-read budget, measured as UTF-8 bytes when the contract uses bytes.
+An 8,000-byte artifact read projection is not a storage/write ceiling.
+Successful mutation receipts establish their returned revision; additional
+read/stat calls serve the host's replacement contract, content verification or
+uncertain outcomes, not an unconditional verification loop. Follow the host's
+single-mutation ordering when rollover is imminent. The current `new_context`
+tool binds the private snapshot itself.
+
 This plugin is intentionally **process-manager agnostic**. It tracks context
 pressure, teaches the rules of engagement for continuation, stores durable
 handoff batons, and can **signal that a handoff pickup is requested**. It does

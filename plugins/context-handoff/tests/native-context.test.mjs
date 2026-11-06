@@ -124,6 +124,24 @@ test("observer rechecks changes, bounds failures and retains flag on unknown", a
   assert.match((await disabled.observe("/repo")).warnings[0], /explicit settings opt-out/);
 });
 
+test("native pressure defers checkpoint persistence and ordering to the host", () => {
+  for (const level of ["soft", "hard"]) {
+    const prompt = nativePressurePrompt(
+      { utilization: "70%", tokens: "700/1000" }, level,
+      { reason: "setting-enabled", availability: "unknown" });
+    assert.match(prompt, new RegExp(`${level} checkpoint boundary`));
+    assert.match(prompt, /built-in checkpoint instructions/);
+    assert.match(prompt, /complete-read budget in UTF-8 bytes, not an assumed storage limit/);
+    assert.match(prompt, /never overwrite from a truncated projection as if complete/);
+    assert.match(prompt, /Confirm persistence from the mutation result/);
+    assert.match(prompt, /single-mutation ordering when rollover is imminent/);
+    assert.match(prompt, /new_context binds the private snapshot itself/);
+    assert.doesNotMatch(prompt, /Verify the checkpoint and host-required snapshot binding/);
+    assert.match(prompt, /original approval evidence\/limits/);
+    assert.match(prompt, /exactly one next action/);
+  }
+});
+
 test("real extension event path suppresses force and resets only root windows", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-extension-"));
   try {
@@ -140,6 +158,7 @@ test("real extension event path suppresses force and resets only root windows", 
         env: { ...process.env, COPILOT_HOME: root, HOME: root, USERPROFILE: root,
           COPILOT_AGENT_SESSION_ID: "" },
       });
+
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
