@@ -133,7 +133,12 @@ The actual expanded OPEN #6917 body, 13,056 characters, was verified and read
 in full. It retains the whole original #6779 description beside additive
 MR5/MRV6 and explicit coordination; every technical row remains unchecked.
 The original parent, earlier preparation lanes, assignments and discussions
-remain. At this intake #6779 remains OPEN pending reviewed documentary
-delivery and a separately audited tracking disposition.
+remain. #11087 subsequently merged as
+`b3f0bb38fad944a83d6fda02137a037f0990efa5` after exact-head approval,
+nine complete successful pre-merge contexts and zero threads. All five
+reviewed/merged/current document blobs matched. Only then #6779 retired
+NOT_PLANNED under independently OPEN #6917, audit 248, with its original
+body, title, assignment and prior discussion unchanged. This settles separate
+tracking, not timeout readiness, native acceptance or source/resource custody.
 
 See the [campaign](README.md) for the continuing Plan and Validation Plan.
