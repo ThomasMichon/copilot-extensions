@@ -4107,6 +4107,17 @@ class _ResidentHookPolicy:
             return {}
         return {"additionalContext": text} if text else {}
 
+    def native_batch_targets(self, payload: dict) -> list[str] | None:
+        from .hook_ipc import HookUnavailable
+
+        forms = self._module("tool_call_forms.py")
+        if forms is None:
+            raise HookUnavailable
+        try:
+            return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
+        except ValueError as exc:
+            raise HookUnavailable from exc
+
     def mutation_targets(self, payload: dict) -> list[str] | None:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
         if tool in _HOOK_WRITE_TOOLS:
@@ -4152,16 +4163,18 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind == "nativeToolMutation":
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
-        if (
-            not isinstance(tool, str) or tool.lower() not in _HOOK_WRITE_TOOLS
-            or "toolCalls" in payload
+        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
+            kind == "nativeToolMutation" and (
+                not isinstance(tool, str) or tool.lower() not in _HOOK_WRITE_TOOLS
+                or "toolCalls" in payload
+            )
         ):
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        targets = policy.mutation_targets(payload)
+        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:

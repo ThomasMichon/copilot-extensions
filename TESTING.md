@@ -91,9 +91,12 @@ registered_read_demand_is_send_only or handoff_wake_kind_actually_wakes"`
 packet exercises real registered Windows PowerShell 5.1/7 entries with original
 prepared membership, interpreter/resident traps, structured-edit and patch-move
 invalidation, missing/old/stale/closed discovery and a non-replying peer.
+Native batches additionally cover complete-batch admission, original event/
+target normalization, shared target overflow, read-only idle demand and
+unsupported batches retaining their original registered path.
 Original IPC controls cover exact generation/schema/deadline/wire bounds and
 the running monitor's real invalidation wake and unadmitted refusal. These are
-isolated source consumers, not installed, complete shell/batch or throughput
+isolated source consumers, not installed, complete shell-command or throughput
 acceptance; required exact-source unit CI remains separate.
 
 Manager's opt-in `--test-file tests/test_companion_head_observation.py

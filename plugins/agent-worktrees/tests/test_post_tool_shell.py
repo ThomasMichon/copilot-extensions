@@ -282,6 +282,7 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("event_case", [
     "mutation", "late-watch", "oversized-mutation", "oversized-late-watch",
+    "batch-shell", "batch-malformed", "batch-empty", "batch-too-many", "batch-call-cwd",
 ])
 def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell, event_case):
     from agent_procutil import no_window_kwargs
@@ -300,6 +301,19 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
         "sessionId": "prepared", "cwd": str(anchor),
         "toolName": "edit" if event_case.endswith("mutation") else "view",
     }
+    if event_case.startswith("batch-"):
+        calls = [{"name": "edit", "args": {"path": "one"}}]
+        if event_case == "batch-shell":
+            calls.append({"name": "powershell", "args": {"command": "git status"}})
+        elif event_case == "batch-malformed":
+            calls.append(None)
+        elif event_case == "batch-empty":
+            calls = []
+        elif event_case == "batch-too-many":
+            calls *= 129
+        elif event_case == "batch-call-cwd":
+            calls.append({"name": "view", "cwd": "other"})
+        payload["toolCalls"] = calls
     if event_case.endswith("late-watch"):
         (session / "local-guidance-watch.json").write_text("{}")
     oversized = event_case.startswith("oversized-")
@@ -595,6 +609,8 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
 @pytest.mark.parametrize("case", [
     "structured", "patch", "old-provider", "wrong-generation", "closed",
     "missing-discovery", "oversized", "no-reply",
+    "batch-structured", "batch-reads", "batch-old-provider", "batch-wrong-generation",
+    "batch-closed", "batch-missing-discovery", "batch-oversized", "batch-no-reply",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -607,6 +623,8 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
     if not executable:
         pytest.skip(f"{shell} is unavailable")
     fixture = prepared_read_event
+    batch = case.startswith("batch-")
+    case = case.removeprefix("batch-")
     paths = [str(fixture["home"] / name) for name in ("one", "two")]
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
     invalidated = []
@@ -649,7 +667,10 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         path = fixture["registry"] / "status-monitor.lock"
         discovery = {**json.loads(path.read_text()), **server.rendezvous()}
         if case == "old-provider":
-            discovery.pop("hook_capabilities")
+            if batch:
+                discovery["hook_capabilities"].remove("native-hook-batch-mutation-v1")
+            else:
+                discovery.pop("hook_capabilities")
         elif case == "wrong-generation":
             discovery["hook_generation"] = "b" * 32
         elif case == "closed":
@@ -670,7 +691,19 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         elif case == "oversized":
             args["content"] = "x" * 65536
         payload = {**fixture["payload"], "toolName": tool, "toolArgs": args, "toolResult": "not transmitted"}
-        if case == "structured":
+        if batch:
+            payload.pop("toolName")
+            payload.pop("toolArgs")
+            payload["workingDirectory"] = payload["cwd"]
+            payload["toolCalls"] = [
+                {"id": "read", "name": "view", "args": {"path": "not-a-write"}},
+                {"id": "write", "name": "multi_edit", "args": args},
+                {"name": "apply_patch", "args": f"*** Update File: {paths[0]}\n*** Move to: {paths[1]}\n"},
+                {"name": "edit", "args": json.dumps({"path": paths[1]})},
+            ]
+            if case == "reads":
+                payload["toolCalls"] = payload["toolCalls"][:1]
+        elif case == "structured":
             payload["workingDirectory"] = payload["cwd"]
             payload["toolArgs"] = {}
             payload["tool_input"] = args
@@ -682,6 +715,10 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         assert result.returncode == 0 and not result.stdout, result.stderr
         assert result.stderr.startswith("entry_seconds="), result.stderr
         print(f"{shell}/{case}: {result.stderr.strip()}")
+        if case == "missing-discovery":
+            assert not fixture["sidecar"].exists()
+        else:
+            assert json.loads(fixture["sidecar"].read_text())["count"] == 1
         if case in {"old-provider", "missing-discovery", "oversized"}:
             assert not notices and not server.has_recent_hook_demand()
         elif case in {"wrong-generation", "closed"} and not received.wait(2):
@@ -692,7 +729,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             expected = {key: value for key, value in payload.items() if key != "toolResult"}
             assert notices[0]["payload"] == expected
         assert invalidated == (paths if case in {"structured", "patch"} else [])
-        assert server.has_recent_hook_demand() is (case in {"structured", "patch"})
+        assert server.has_recent_hook_demand() is (case in {"structured", "patch", "reads"})
     finally:
         release.set()
         if stalled is not None:
