@@ -34,10 +34,11 @@ class WtDetailsScreen(ModalScreen[None]):
         Binding("enter", "close", show=False),
     ]
 
-    def __init__(self, rec, *, engine=None) -> None:
+    def __init__(self, rec, *, engine=None, doctor=False) -> None:
         super().__init__()
         self._rec = rec
         self._engine = engine
+        self._doctor = doctor
         assets = rec.get("asset_hints") or {}
         self._details = list(assets.get("details") or [])
         self._loading = bool(assets.get("details_available")) or needs_descendant_details(
@@ -84,6 +85,8 @@ class WtDetailsScreen(ModalScreen[None]):
         rec = self._rec
         raw = rec.get("raw") or {}
         text = Text()
+        if self._doctor:
+            text.append("Doctor · read-only worktree diagnostics\n\n", style="bold")
         text.append(f"{rec.get('title') or '(untitled)'}\n", style="bold")
         path = raw.get("path") or raw.get("worktree_path") or ""
         if path:
@@ -107,6 +110,12 @@ class WtDetailsScreen(ModalScreen[None]):
         if relation and relation != "unbound":
             text.append(f"\nrelation  {relation}\n", style=C_DIM)
         coverage = claim_coverage(rec)
+        if self._doctor:
+            for notice in coverage:
+                text.append(f"\n⚠ {notice}", style="yellow")
+            if rec.get("session_head_mismatch"):
+                text.append("\n⚠ Session head mismatch; inspect Sessions.", style="yellow")
+            text.append("\nNo resources are released or repaired by this inspection.\n", style=C_DIM)
         if coverage:
             text.append(
                 "\n Claim coverage: selected worktree's last loaded projection; "

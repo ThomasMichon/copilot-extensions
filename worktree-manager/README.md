@@ -19,6 +19,16 @@ plugins. It is the one piece that must work *before* the plugins do.
 > [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
 > [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
+## Picker notices and diagnostics
+
+The Picker reserves two fixed notice rows for Knowledge setup and cached-source
+refresh status. Updates to these notices do not insert entries into the worktree
+list or move its selection. Claim-coverage warnings appear as a compact warning
+icon; impacted worktrees offer **Doctor** in Actions for read-only diagnostics
+and full claim inspection. Inspection does not repair or release resources.
+Re-homed resources without a worktree row retain the compact `o: Doctor`
+footer shortcut to their existing inspection screen.
+
 ## Staged launch prompts
 
 Launch prompts require a freshly confirmed cold target. A confirmed live target

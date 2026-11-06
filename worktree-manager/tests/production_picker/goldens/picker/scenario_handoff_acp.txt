@@ -6,6 +6,8 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
+
+
   ID     STATE      AGE    USED   LIVE       LENGTH    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 ☐ h002   ACTIVE     8h     8h     ACP          -s 3t
@@ -15,8 +17,6 @@
       Ready for a successor
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
-
-
 
 
 

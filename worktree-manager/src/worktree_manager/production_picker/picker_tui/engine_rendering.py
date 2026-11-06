@@ -7,8 +7,8 @@ from textual.app import ComposeResult
 from machine_transport import split_machine_environment
 
 from .deferred_row import DeferredRow
-from .engine_helpers import C_BAND, C_BTN_SEL, C_DIM, C_DISABLED, C_ENV, C_FAINT, C_HINT, C_HINT_ON, C_LABEL, C_LOAD, C_META, C_PULSE, C_READY, C_SECTION, C_SPIN, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, C_WARN, VERSION, VRow, _size_mb
-from .engine_regions import _PickerButtons, _PickerMachine, _PickerNativeData, _PickerPivots, _PickerSegment, _PickerStickyHeader
+from .engine_helpers import C_BAND, C_BTN_SEL, C_DIM, C_DISABLED, C_ENV, C_FAINT, C_HINT, C_HINT_ON, C_LABEL, C_LOAD, C_META, C_PULSE, C_READY, C_SECTION, C_SPIN, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, VERSION, VRow, _size_mb
+from .engine_regions import _PickerButtons, _PickerMachine, _PickerNativeData, _PickerNotices, _PickerPivots, _PickerSegment, _PickerStickyHeader
 
 from .engine_navigation_rendering import PickerNavigationRenderingMixin
 from .engine_footer import PickerFooterMixin
@@ -38,6 +38,8 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
         sel = self.sel
         if self._kind() == "worktrees":
             self.worktrees_view.build_chrome(add, width, sel)
+            for line in self.worktrees_view.notice_lines():
+                add(line)
             self.worktrees_view.build_data(add, width, sel, deferred=deferred)
         elif self._kind() == "maintenance":
             self.maintenance_view.build(add, width, sel)
@@ -122,6 +124,9 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
         view = self._current_view()
         chrome, add_c = make_sink()
         view.build_chrome(add_c, width, use_sel)
+        if view is self.worktrees_view:
+            for line in view.notice_lines():
+                add_c(line)
         data, add_d = make_sink()
         view.build_data(add_d, width, use_sel)
         self._split_cache = (key, (chrome, data))
@@ -422,19 +427,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
                 if not compact:
                     t.append(" loading", style=C_LOAD)
         if self._kind() == "worktrees" and self._orphans:
-            # worktree-claims-transitive-finalization Phase 4 item 2: a
-            # re-homed obligation awaiting ``claims cleanup`` has no
-            # worktree row of its own, so it is surfaced here instead --
-            # local-machine-only (never fleet-aggregated, see
-            # ``_poll_orphan_state``), hence the explicit "local" qualifier
-            # so this is never mistaken for a cross-machine count. Kept in
-            # the compact form too (never just "⚠N"): a narrow terminal
-            # dropping either the scope or the 'o' key would read as a
-            # possible fleet count, or make the modal undiscoverable.
-            n = len(self._orphans)
-            t.append(f"  ⚠{n} local obligation(s) · o" if compact
-                      else f"  ⚠ {n} local re-homed obligation(s) · o details",
-                      style=C_WARN)
+            t.append("  ⚠", style="yellow")
         return t
     def _top_pad(self, W, more_above, scrolled):
         left = f"▲ {scrolled} more above" if more_above else "▲"
@@ -534,6 +527,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
         yield _PickerSegment(self, "chrome", id="nf-chrome")
         yield _PickerMachine(self, id="nf-machine")
         yield _PickerButtons(self, id="nf-buttons")
+        yield _PickerNotices(self, id="nf-notices")
         # NF5-5 (#88): the native OptionList data body is the only remaining
         # body path, with a pinned section header above it (hidden until
         # scrolled).
@@ -585,7 +579,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
     # in-list move (`sel[0]` staying `"L"` throughout) can never flip either.
     _NAV_SEGMENTS = ("nf-body-data", "nf-footer")
     _ALL_NF_SEGMENTS = ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
-                         "nf-buttons", "nf-body-data", "nf-footer")
+                         "nf-buttons", "nf-notices", "nf-body-data", "nf-footer")
     _CAUSE_SEGMENTS = {"pulse": _PULSE_ONLY_SEGMENTS, "nav": _NAV_SEGMENTS}
 
     def _refresh_nf_segments(self, cause: str | None = None) -> None:
@@ -601,7 +595,22 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
         any other value is treated the same as ``None`` (refresh everything)
         rather than silently skipping segments for an un-audited cause.
         """
+        if not getattr(self, "_nf_mounted", False):
+            return
         seg_ids = self._CAUSE_SEGMENTS.get(cause, self._ALL_NF_SEGMENTS)
+        notice_state = (
+            self._kind(),
+            tuple(self.worktrees_view.notice_lines()) if self._kind() == "worktrees" else (),
+        )
+        if notice_state != getattr(self, "_notice_state", None):
+            if "nf-notices" not in seg_ids:
+                seg_ids = (*seg_ids, "nf-notices")
+            self._notice_state = notice_state
+        orphan_hint = self._kind() == "worktrees" and bool(self._orphans)
+        if orphan_hint != getattr(self, "_orphan_hint", False):
+            if "nf-footer" not in seg_ids:
+                seg_ids = (*seg_ids, "nf-footer")
+            self._orphan_hint = orphan_hint
         # A replacement read can settle without changing rows or the global busy state.
         if getattr(self, "_registered_refresh_note", None) is not None:
             from .registered_scopes import refresh_footer
@@ -616,6 +625,8 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
                 if isinstance(w, _PickerNativeData):
                     w.refresh_data()
                 else:
+                    if isinstance(w, _PickerNotices):
+                        w.display = self._kind() == "worktrees"
                     w.refresh()
             except Exception:
                 pass
