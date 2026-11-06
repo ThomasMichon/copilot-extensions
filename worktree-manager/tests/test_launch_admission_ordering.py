@@ -206,6 +206,22 @@ def test_owner_fixture_preserves_python_code_stdio_arguments_and_exit(
     assert json.loads(result.stdout) == {"args": arguments, "input": "fixture stdin\n"}
 
 
+def test_resume_owner_fixture_imports_session_shell_in_isolated_python(tmp_path: Path) -> None:
+    from native.test_resume_pane_startup import OWNER as resume_owner
+
+    env, target, _logs = _fixture(tmp_path)
+    env["TEST_SOURCE_ROOT"] = str(ROOT)
+    owner = tmp_path / "owner.py"
+    owner.write_text(resume_owner, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-I", str(owner), "-I", "-m", "agent_worktrees.session_shell", "--help"],
+        cwd=target, env=env, text=True, capture_output=True, check=False, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--installation-root" in result.stdout
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
 def test_open_uses_existing_setup_without_install_or_plugin_preflight(tmp_path: Path, shell: str):
     if (shell == "bash" and BASH is None) or (shell == "pwsh" and PWSH is None):

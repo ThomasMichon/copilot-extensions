@@ -5836,6 +5836,11 @@ guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 
+The Manager test environment installs its application non-editably through the
+normal retained-source policy. Its embedded first-party imports must survive
+cleanup of the private build inputs. Other targets retain editable development
+installs; this changes neither production installation nor test selection.
+
 Worktrees' managed-session admission packet is explicitly selectable:
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
 It uses temporary profiles, real hook subprocesses, both available PowerShell
