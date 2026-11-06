@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import ast
+import argparse
 import importlib.util
 import sys
 from contextlib import nullcontext
@@ -14,6 +16,18 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "promotion_relationship_request"
+
+
+def load_configured_admission(monkeypatch):
+    qualified = f"{PACKAGE}.assignment_admission"
+    spec = importlib.util.spec_from_file_location(
+        qualified, ROOT / "plugins/agent-dispatch/src/agent_dispatch/assignment_admission.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, qualified, module)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -113,6 +127,97 @@ def boundary(monkeypatch):
         admitted=admitted, Refused=Refused, module=owner_module, monkeypatch=monkeypatch,
         relationships=relationships,
     )
+
+
+@pytest.mark.parametrize("selection", [
+    (None, None), ("", "local"), (None, "local"), ("policy:factory", None),
+    ("policy:factory", "legacy"), ("policy..module:factory", "local"),
+])
+def test_configured_admission_never_imports_absent_or_invalid_selection(boundary, selection):
+    b = boundary
+    module = load_configured_admission(b.monkeypatch)
+
+    def forbidden(*args):
+        raise AssertionError("selection cannot import an admission owner")
+
+    b.monkeypatch.setattr(module.importlib, "import_module", forbidden)
+    if selection == (None, None):
+        assert module.configured_writer(*selection) is None
+    else:
+        with pytest.raises(ValueError):
+            module.configured_writer(*selection)
+
+
+def test_configured_admission_carries_both_actual_independent_owners(boundary):
+    b = boundary
+    module = load_configured_admission(b.monkeypatch)
+    policy = ModuleType("promotion_policy")
+    admission = module.RelationshipAdmission(
+        b.writer.admit_workspace, b.writer._admit_request,
+    )
+    policy.factory = lambda: admission
+    b.monkeypatch.setitem(sys.modules, policy.__name__, policy)
+    selected = []
+
+    def retain(**kwargs):
+        selected.append(kwargs)
+        return b.make(kwargs["admit_request"])
+
+    b.monkeypatch.setattr(b.module.WorktreeRelationshipWriter, "selected", retain)
+    writer = module.configured_writer("promotion_policy:factory", "local")
+    bound = writer.bind_request(b.request)
+    assert bound(b.workspace, "inspect", {"request_id": "original-request", "allow_missing": True})["absent"]
+    assert len(b.admitted) == 1
+    assert selected == [{
+        "admit_workspace": admission.admit_workspace, "admit_request": admission.admit_request,
+    }]
+    policy.factory = lambda: True
+    with pytest.raises(ValueError, match="independent admission owners"):
+        module.configured_writer("promotion_policy:factory", "local")
+    assert len(selected) == 1
+
+
+def test_actual_serve_command_preserves_admission_selection(boundary):
+    b = boundary
+    path = ROOT / "plugins/agent-dispatch/src/agent_dispatch/coordinator_cli.py"
+    command = next(
+        node for node in ast.parse(path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_cmd_serve"
+    )
+    command.decorator_list = []
+    configured = SimpleNamespace(
+        token=None, port=9847, db_path="/queue", sweep_interval=0,
+        pool_publication_enabled=False, relationship_admission="policy:factory",
+        relationship_authority="local",
+    )
+    calls = []
+    for name, attributes in {
+        "logging_setup": {"configure_file_logging": lambda *args: None},
+        "server": {
+            "CoordinatorAlreadyLiveError": RuntimeError,
+            "serve": lambda cfg, **kwargs: calls.append((cfg, kwargs)),
+        },
+    }.items():
+        stub = ModuleType(f"{PACKAGE}.{name}")
+        stub.__dict__.update(attributes)
+        b.monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    scope = {
+        "argparse": argparse,
+        "__name__": f"{PACKAGE}.coordinator_cli", "__package__": PACKAGE,
+        "_config": SimpleNamespace(
+            load_config=lambda: configured, resolve_control_token=lambda: None,
+        ),
+        "_config_class": lambda: SimpleNamespace,
+        "_resolve_serve_host": lambda *args: "127.0.0.1",
+        "_reroot_serve_cwd": lambda: None,
+    }
+    exec(compile(ast.Module(body=[command], type_ignores=[]), str(path), "exec"), scope)
+    args = SimpleNamespace(token=None, port=None, db=None, passive=True, force=False)
+    assert scope["_cmd_serve"](args) == 0
+    cfg, flags = calls[0]
+    assert cfg.relationship_admission == configured.relationship_admission
+    assert cfg.relationship_authority == configured.relationship_authority
+    assert flags == {"passive": True, "force": False}
 
 
 @pytest.mark.parametrize(
