@@ -110,6 +110,7 @@ requires its own applicable authority and is recorded separately.
 - [x] Document supported caller/receiver combinations, retained-host recovery and rollback using actual selected capabilities rather than package-version equality. _(source contracts and controlled combinations documented in #10748; native/installed tiers remain unqualified)_
 - [x] Update reality docs, focused tests and changefiles; retain historical protocol evidence and the required unit-only portfolio. _(#10748; source tiers only)_
 - [ ] Record source, release and installed/native/external results separately; resolve every Plan and Validation Plan item before Done.
+- [ ] Qualify the prerequisite host account/owner callbacks through their existing launchers before retrying the external receiving flow. _(newly observed acceptance prerequisite; agent-recommended source refinement)_
 
 ## Validation Plan
 
@@ -687,3 +688,46 @@ implementation. The exact support closure follows the consumer trace and tests.
   Existing source approval does not authorize shared updates, restart,
   guest-suite installation or interference with retained sessions. Preserve
   the Active effort and obtain only missing effect scope before live work.
+
+### 2026-11-05 - Installed readiness and host callback prerequisite
+
+- The promoted mux source reached a selected, healthy Bridge runtime.
+  Post-installer HTTP health and the selected CLI independently confirmed the
+  incoming version, relay readiness and portable receiving capabilities.
+  This is local installed readiness, not a complete receiving flow.
+- The first external read-only attempt failed at namespace resolution before
+  a worker was created. Independent native provider commands returned valid
+  resolver output; a scoped retry exposed an unavailable Worktrees account
+  snapshot. No token value, guest code change or model result was inspected.
+- The existing account callback returned valid output after 13.5 seconds,
+  exceeding its unchanged ten-second caller budget. The legacy global
+  launcher selected a fresh bytecode namespace on every invocation despite
+  the canonical helper qualifying that completed runtime for installed reuse.
+- Applied that existing helper to the PowerShell and POSIX global front doors,
+  preserving older-helper fallback, immutable runtime bytes and existing
+  account/owner/deadline semantics. Six native front-door controls pass.
+  A separate actual read-only callback comparison retained all samples:
+  current launcher 7.91 seconds; proposed source launcher 4.30 then 3.97.
+  Host load and filesystem caches were not reset; this is measured source-entry
+  evidence, not a latency baseline, installed correction or successful retry.
+- Source gates, public review/CI, release and authorized normal installation
+  of this prerequisite remain open. The receiving effort remains Active.
+
+### 2026-11-06 - Lossless native cache selection
+
+- Expanded the real front-door fixture with a Unicode profile and forced
+  CRLF stdout. Its native PowerShell resolver uses UTF-8 with a BOM, and the
+  cache-parent assertion compares actual filesystem identity rather than
+  unequal ordinary/extended Windows path spellings.
+- The qualified old-source control reproduced four PowerShell failures:
+  decoded paths no longer addressed the intended cache directory. Both
+  Git Bash controls passed; this did not reproduce a Git Bash CRLF defect.
+- Selector replies now carry ASCII-safe JSON. PowerShell decodes the string
+  directly; POSIX uses a separate read-only binary decoder, retaining
+  Unicode, embedded newlines and native path bytes without shell evaluation.
+  The corrected packet passes all nine cases, including original
+  old-helper fallback, repeated cache reuse and immutable-slot preservation.
+- Corrected-source actual account callback samples returned the full existing
+  JSON shape in 2.90 and 2.76 seconds without diagnostics. Earlier samples
+  remain above; this is still insufficient for tail/baseline qualification.
+  Updated-head review, CI, release, installation and live receiving remain open.

@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse canonical installed bytecode evidence in legacy management launchers without changing account checks or caller deadlines",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
