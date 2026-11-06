@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -210,3 +212,62 @@ def test_since_keeps_duplicate_headings_distinct(tmp_path: Path) -> None:
 
     assert deleted["sections"] == []
     assert deleted["removed_sections"] == ["E > Plan > Follow-up"]
+
+
+def test_since_ignores_inherited_repository_selectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    folder = repo / "effort"
+    readme = _write(folder)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "base")
+    readme.write_text(README + "### 2026-11-05 — More\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+    since = digest_mod.build_digest(folder, since="HEAD")["since"]
+
+    assert [e["file"] for e in since["files"]] == ["effort/README.md"]
+
+
+def test_since_reports_non_ascii_and_renamed_paths(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q")
+    folder = tmp_path / "effort"
+    _write(folder)
+    (folder / "old.md").write_text("same content\n" * 20, encoding="utf-8")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    _git(tmp_path, "mv", "effort/old.md", "effort/renamed-é.md")
+    (folder / "notes-é.md").write_text("new\n", encoding="utf-8")
+
+    files = digest_mod.build_digest(folder, since="HEAD")["since"]["files"]
+
+    assert {(e["status"][:1], e["file"]) for e in files} == {
+        ("R", "effort/renamed-é.md"),
+        ("?", "effort/notes-é.md"),
+    }
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_non_utf8_stdout_does_not_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_json: bool
+) -> None:
+    folder = tmp_path / "effort"
+    _write(folder, "# E\n\n## Plan\n\n### Phase 3 … ✅ landed\n- [ ] item ✅\n")
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    assert digest_mod.main([str(folder)] + (["--json"] if as_json else [])) == 0
+    stream.flush()
+    out = buffer.getvalue().decode("cp1252")
+    if as_json:
+        assert json.loads(out)["open_items"][0]["text"] == "item ✅"
+    else:
+        assert "item \\u2705" in out

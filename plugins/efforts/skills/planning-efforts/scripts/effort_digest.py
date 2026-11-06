@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -216,7 +217,30 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
         encoding="utf-8",
         errors="replace",
         check=False,
+        env={k: v for k, v in os.environ.items() if k not in _GIT_SELECTORS},
     )
+
+
+# Inherited repository selectors would override ``-C`` and probe another checkout.
+_GIT_SELECTORS = frozenset(
+    {
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+    }
+)
+
+
+def _relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        raise DigestError(f"{path} is outside git checkout {root}") from None
 
 
 def changes_since(readme: Path, sections: list[Section], rev: str) -> dict:
@@ -228,17 +252,23 @@ def changes_since(readme: Path, sections: list[Section], rev: str) -> dict:
     root = Path(top.stdout.strip()).resolve()
     if _git(root, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").returncode != 0:
         raise DigestError(f"unknown git revision: {rev}")
-    folder_rel = folder.relative_to(root).as_posix()
-    readme_rel = readme.resolve().relative_to(root).as_posix()
+    folder_rel = _relative(folder, root)
+    readme_rel = _relative(readme.resolve(), root)
 
     files = []
-    diff = _git(root, "diff", "--name-status", rev, "--", folder_rel)
-    for line in diff.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) >= 2:
-            files.append({"status": parts[0], "file": parts[-1]})
-    untracked = _git(root, "ls-files", "--others", "--exclude-standard", "--", folder_rel)
-    files.extend({"status": "?", "file": name} for name in untracked.stdout.splitlines() if name)
+    # NUL-delimited records keep non-ASCII paths unquoted; renames and copies
+    # carry a source and a destination path.
+    records = _git(root, "diff", "-z", "--name-status", rev, "--", folder_rel).stdout.split("\0")
+    index = 0
+    while index < len(records) and records[index]:
+        status = records[index]
+        width = 2 if status[:1] in ("R", "C") else 1
+        paths = records[index + 1 : index + 1 + width]
+        if paths:
+            files.append({"status": status, "file": paths[-1]})
+        index += 1 + width
+    untracked = _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", folder_rel)
+    files.extend({"status": "?", "file": name} for name in untracked.stdout.split("\0") if name)
 
     old = _git(root, "show", f"{rev}:{readme_rel}")
     # Match by heading path, keeping repeated sibling headings as distinct
@@ -354,7 +384,14 @@ def main(argv: list[str] | None = None) -> int:
     except DigestError as error:
         print(f"effort_digest: {error}", file=sys.stderr)
         return 2
-    sys.stdout.write(json.dumps(digest, indent=2, ensure_ascii=False) + "\n" if args.json else render(digest))
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+    utf8 = encoding == "utf8"
+    if not utf8 and hasattr(sys.stdout, "reconfigure"):
+        # Escape headings the console code page cannot represent instead of crashing.
+        sys.stdout.reconfigure(errors="backslashreplace")
+    sys.stdout.write(
+        json.dumps(digest, indent=2, ensure_ascii=not utf8) + "\n" if args.json else render(digest)
+    )
     return 0
 
 
