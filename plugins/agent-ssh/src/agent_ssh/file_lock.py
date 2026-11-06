@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+
+
+def validate_lock_file(path: Path) -> None:
+    """Check existing lock-file kinds without opening, creating or acquiring them."""
+    if not os.path.lexists(path):
+        return
+    info = path.lstat()
+    if (
+        not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+        or getattr(info, "st_file_attributes", 0) & 0x400
+        or getattr(info, "st_reparse_tag", 0)
+    ):
+        raise ValueError("SSH writer lock must be an ordinary file with one link")
 
 
 @contextmanager

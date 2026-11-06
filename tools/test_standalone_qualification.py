@@ -30,6 +30,45 @@ def test_fleet_client_portfolio_is_manual_exact_source_and_native_only():
     assert workflow["permissions"] == {"contents": "read"}
 
 
+def test_installed_artifact_inspection_consumes_large_resource_map_and_checks_last_member(tmp_path):
+    import hashlib
+    import os
+    from pathlib import Path
+    import sys
+    from promotion_python_artifacts import PromotionArtifactError
+    from smoke_public_toolchain import _run, inspect_installed_artifact
+
+    environment = tmp_path / "consumer"
+    _run([sys.executable, "-m", "venv", "--without-pip", str(environment)], cwd=tmp_path)
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = Path(_run([
+        str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
+    ], cwd=tmp_path).strip())
+    metadata = site / "inspection_fixture-1.0.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: inspection-fixture\nVersion: 1.0\n", encoding="utf-8",
+    )
+    files = site / "fixture"
+    files.mkdir()
+    content = b"synthetic packaged resource"
+    digest = hashlib.sha256(content).hexdigest()
+    resources = {}
+    for index in range(1000):
+        name = f"fixture/member-{index:04}.txt"
+        (site / name).write_bytes(content)
+        resources[name] = digest
+    assert len(json.dumps(resources)) > 32767
+    arguments = {
+        "versions": {"inspection-fixture": "1.0"}, "resources": resources,
+        "primary": "inspection-fixture", "component": "fixture",
+    }
+    inspect_installed_artifact(python, environment, **arguments)
+    (site / name).write_bytes(b"changed last resource")
+    with pytest.raises(PromotionArtifactError, match="AssertionError"):
+        inspect_installed_artifact(python, environment, **arguments)
+
+
 @pytest.mark.parametrize("fault", [None, "source", "consumer", "skipped"])
 def test_fleet_client_requests_preserve_bounds_and_require_complete_native_reports(
     tmp_path, monkeypatch, capsys, fault,
