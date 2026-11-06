@@ -352,14 +352,10 @@ def test_changed_allocation_root_retains_real_git_and_ledger_authority(checkout)
     assert not retained_checkout.matches(fixture.record, fixture.config)
 
 
+@pytest.mark.timeout(120)
 def test_actual_cli_parser_process_plan_move_and_post_move_consumer(checkout):
     env = dict(os.environ, AGENT_HOME=str(checkout.home), USERPROFILE=str(checkout.home), HOME=str(checkout.home))
-    command = [
-        sys.executable, "-c",
-        "import faulthandler,runpy; faulthandler.dump_traceback_later(20,repeat=True); "
-        "runpy.run_module('agent_worktrees',run_name='__main__',alter_sys=True)",
-        "--project", "sample",
-    ]
+    command = [sys.executable, "-m", "agent_worktrees", "--project", "sample"]
     def invoke(*args):
         result = run_caller_owned(
             [*command, *args], env=env, cwd=checkout.home, timeout=60,
