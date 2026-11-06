@@ -165,7 +165,7 @@ def test_copy_interruption_fences_launch_and_retries_original_operation(checkout
     assert checkout.source.exists() and not checkout.destination.exists()
     journal = move_state.read(checkout.record.yaml_path)
     assert journal["phase"] == "copying"
-    with pytest.raises(ValueError, match="unfinished"), worktree_lifecycle.guard(checkout.record.yaml_path):
+    with pytest.raises(TimeoutError, match="unfinished"), worktree_lifecycle.guard(checkout.record.yaml_path):
         pytest.fail("an unfinished move must fence a subsequent launch")
     with pytest.raises(ValueError, match="unfinished"):
         tracking.save_record(tracking.load_record(checkout.record.yaml_path))

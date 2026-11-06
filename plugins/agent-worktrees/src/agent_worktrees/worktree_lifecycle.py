@@ -31,7 +31,10 @@ def guard(path: Path, *, timeout: float = 3.0, relocation: bool = False):
         if not relocation:
             from .checkout_relocation_state import require_idle
 
-            require_idle(path)
+            try:
+                require_idle(path)
+            except (ValueError, OSError) as exc:
+                raise TimeoutError(f"Worktree relocation blocks lifecycle mutation: {exc}") from exc
         yield
     finally:
         lease.release()
