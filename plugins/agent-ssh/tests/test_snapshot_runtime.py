@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import compileall
 import json
 import hashlib
 import os
@@ -211,6 +210,24 @@ def _purelib(python, *, scheme=None):
     return path
 
 
+def _compile_native_fixture(python, paths):
+    result = run_caller_owned(
+        [str(python), "-I", "-m", "compileall", "-q", *(str(path) for path in paths)],
+        timeout=30,
+        max_stdout_bytes=8192,
+        max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_native_fixture_compilation_does_not_use_the_runner_cache(tmp_path, monkeypatch):
+    source = tmp_path / "module.py"
+    source.write_text("value = 'native fixture'\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "pycache_prefix", str(tmp_path / "runner-cache"))
+    _compile_native_fixture(Path(sys.executable), [source])
+    assert list((tmp_path / "__pycache__").glob("module.*.pyc"))
+
+
 def _older_snapshot_slot():
     root = Path.home() / ".agent-ssh"
     slot = root / "versions" / "0.9.0"
@@ -220,11 +237,8 @@ def _older_snapshot_slot():
         ignore=shutil.ignore_patterns(".install-complete.json", "__pycache__"),
     )
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    legacy = (_PLUGIN / "src" / "agent_ssh" / "session_snapshot.py").read_bytes()
-    legacy = (
-        legacy.replace(b"\r\n", b"\n").split(b'\nif __name__ == "__main__":', 1)[0].rstrip()
-        + b"\n"
-    )
+    legacy = (_PLUGIN / "tests" / "fixtures" / "session_snapshot_legacy.py.txt").read_bytes()
+    legacy = legacy.replace(b"\r\n", b"\n")
     # Exact released snapshot module from 75424b8, before its executable tail.
     assert hashlib.sha256(legacy).hexdigest() == (
         "d8dfe999045d24b4fa9517f1e32f3a74d56233b5d3c90086da1cfb0920068098"
@@ -414,20 +428,6 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
                 site / "agent_worktrees",
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
-            subprocess.run(
-                [
-                    str(slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")),
-                    "-I",
-                    "-m",
-                    "compileall",
-                    "-q",
-                    str(site / "agent_worktrees"),
-                ],
-                check=True,
-                capture_output=True,
-                timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
         else:
             venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
             site = slot / (
@@ -449,6 +449,10 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
                         shutil.copyfile(package, site / package.name)
             paths = [str(p) for p in sys.path if "site-packages" in p]
             (site / "snapshot-fixture.pth").write_text("\n".join(paths) + "\n", encoding="utf-8")
+        _compile_native_fixture(
+            slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
+            [site / "agent_worktrees" if native_peer else site, payload / "scripts", payload / "src"],
+        )
         (slot / ".install-complete.json").write_text(
             json.dumps(
                 {
@@ -460,8 +464,6 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
             encoding="utf-8",
         )
         (receipt.parent / "current-version").write_text("1.0.0", encoding="utf-8")
-        if not native_peer:
-            compileall.compile_dir(site, quiet=1)
         contexts[plugin] = receipt
         payloads[plugin] = payload
     if not legacy:
