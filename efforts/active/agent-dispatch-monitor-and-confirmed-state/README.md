@@ -58,6 +58,11 @@ Ordinary keyed-create CLI requirement transport subsequently merged in #11040,
 including early remote-target refusal and existing per-attempt capability
 negotiation. It carries an independently qualified requirement; it does not
 construct that admission or enable ordinary allocation.
+Opt-in selected CLI and actual resident assembly subsequently merged in #11047.
+It retains the original installed command and reobserves the resident before
+each relationship call, while keeping both independent admission callbacks.
+Bridge's future keyed creation, original continuation journal and other admitted
+writers remain unassembled; the complete cohort is not qualified.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running

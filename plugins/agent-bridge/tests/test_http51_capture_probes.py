@@ -174,6 +174,12 @@ from test_acquisition_writer_inspection import (
     test_cli_negotiates_and_round_trips_optional_inspection_through_http as _inspect_cli_http,
     test_unavailable_retained_command_is_a_structured_read_only_refusal as _inspect_unavailable,
 )
+from test_full_session_status_cli import (
+    test_writer_status_requires_full_exact_session_before_discovery
+    as test_writer_status_requires_full_exact_session_before_discovery,
+    test_writer_status_uses_negotiated_original_observation
+    as test_writer_status_uses_negotiated_original_observation,
+)
 from test_creation_worktree_writer import (
     test_required_creation_writer_cli_carries_requirement_to_actual_client
     as test_required_creation_writer_cli_carries_requirement_to_actual_client,

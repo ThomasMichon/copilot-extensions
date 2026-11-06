@@ -74,6 +74,54 @@ uncertain-delivery responsibilities. No new allocation, owner transfer,
 native execution, tracer, process/daemon stop or service change is granted.
 Every technical row remains unchecked.
 
+### Fourth finite lane: POSIX root exit before captured-output EOF
+
+The actual OPEN #5716 now also directly receives #6880's complete original
+in a 16,874-character body. Its title now describes caller-owned pipe
+lifecycle across platforms. The original Windows objective, PT1-PT6 and
+PTV1-PTV6 remain verbatim; source descriptions, old discussion, assignments
+and implementation/lifetime custodians are preserved. This is a fourth
+independently progressable lane, not a common-cause claim or a dependency
+on finishing all Windows transport work.
+
+Current Dev `ffae8cca2efcc97be0d893fda2849ce5ceac222c` binds
+`installer_run.py` to blob `4d8108b523be985519171ec72e671512f7ea32d1`,
+its tests to `091e4852b45b44ee611f0ed0d140de3ecd06c17a`, and shared
+`streaming.py` to `90094cca272ad34ac2b7d7a06cca3de5d36552fd`.
+The ordinary runner now waits with `wait_for_eof=False`; the observer polls
+root exit independently, then the runner retires its owned tree before
+finishing/delivering output. The original `communicate` ordering claim is
+historical, not an accurate description of that current route.
+
+The watchdog-descendant test still omits a logger. Captured-timeout,
+log-failure and sink controls do not establish the exact root-124,
+inherited-output, delayed-publication regression. Strict POSIX execution
+also has its own declared group owner; it is not substituted for the
+original session/regrouped-child/legitimate-daemon boundary. No test,
+installer, synthetic subprocess or installed-runtime probe was executed.
+
+- [ ] PT7 - Establish independent root-124 observation and prompt remaining
+  owned-session retirement through the existing runner/actual consumer;
+  preserve current source correction, change code only for a demonstrated
+  residual, and never replace the case with outer-timeout/no-logger proof.
+- [ ] PT8 - Keep identity/pidfd validation, regrouped descendants, receipt
+  judgment and legitimate detached daemons. Preserve each declared strict
+  owner rather than treating group membership as whole-session evidence.
+- [ ] PTV7 - With a logger, inherit captured streams, attempt delayed
+  publication before the outer deadline, then assert prompt watchdog
+  failure, exact owned-descendant termination and no marker/slot.
+- [ ] PTV8 - Retain session/regrouped-child, PID reuse/detachment, legitimate
+  daemon and receipt controls. Original synthetic ordering is not execution
+  of the production installer; no full-machine stress or rollout is added.
+- [ ] PTV9 - Keep all four original finite acceptance lanes separately
+  attributable, without a shared-cause or all-platform release gate.
+
+The complete current accepted parent was read back before planning
+publication. #6880 stays OPEN pending reviewed delivery and a separate
+fresh tracking disposition. All technical rows and source/process/
+Connection Owner/worker/receipt/reservation/uncertain-delivery custody stay
+with their existing owners; no process termination or deployment is granted.
+
 ## Logger rescue transactions and repeated helper types
 
 #5665's actual complete 25,472-character body preserves its 18,424-character
