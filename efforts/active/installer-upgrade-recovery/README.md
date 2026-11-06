@@ -6,7 +6,7 @@
 - **Created:** 2026-11-03
 - **Status:** Active
 - **Umbrella issue:** #10377
-- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451, #9716, #10054, #10499, #10486, #10652, #10653
+- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451, #9716, #10054, #10499, #10486, #10652, #10653, #10996
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
 ## Guiding Intent
@@ -123,6 +123,12 @@ authorize production updates, recovery mutations or new access.
   state. Internal helper success is not whole-flow acceptance.
 - [ ] Repeat for the selected priority cases, preserving existing construction,
   admission, durable-state and lifecycle owners instead of reimplementing them.
+- [ ] Qualify the bounded read-only project-registration prerequisite under
+  #10996/U17 before migrating setup consumers. Compose the canonical repository
+  and legacy project registry readers; preserve writers and ordinary routing.
+  Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
+  ambiguity/collision/read-failure refusal and no mutations through the native
+  CLI boundary. Source release is not caller adoption or installed recovery.
 
 ### Phase 3 - Release and completion
 
@@ -2063,3 +2069,49 @@ failed and #10990 remains open; a later admitted source succeeding is not
 same-input rerun evidence. No updater, permission change, token fetch, manual
 release or rollout is performed. The parent stays Active with its remaining
 Plan and Validation Plan under their existing owners.
+
+### 2026-11-06 - Native registration inspection prerequisite proposed
+
+Source reconciliation finds a bounded setup-consumer gap under #10996.
+The existing front-door reverse lookup picks the first project mapping and
+suppresses acquisition errors; strict repository inventory does not include
+the complete legacy project-adoption mapping. A setup caller cannot use either
+as proof of unique identity, preserved exposure policy or an unclaimed fresh
+default. Copying their parsers into each caller would create another authority.
+
+U17 proposes one additive, read-only native inspection contract, composed from
+the existing strict repository and project registry owners. Given the selected
+canonical anchor and proposed default name, return the unique registered name
+and authoritative exposure, or the genuinely fresh unclaimed default. Refuse
+ambiguous aliases, inconsistent roots, default-name collisions, malformed or
+unknown acquisition and invalid identity/path/policy data. Retain native
+platform expansion and namespaced installation context; do not discover,
+register, migrate, reconcile commands, clone or start a service.
+
+The proposed version-1 result/error contract is qualified against the selected
+actual CLI, not a package-version guess. A read-only request may discover
+unsupported syntax without effects, but the caller must retain that truthful
+incompatibility rather than retry with safety semantics removed. Expand and
+release the provider first. Consumer migration, cold-entry availability and
+old-runtime recovery remain separate explicit gates, not inferred from a new
+read verb. That migration must acquire/use the independently runnable incoming
+reader through the existing construction owner when the installed receiver
+cannot supply the contract; old capability support must not become a veto of
+an explicit latest-flow replacement.
+
+Focused controls will exercise actual registry acquisition and the real CLI
+parser/process boundary: empty fresh state; a custom alias alongside another
+checkout owning the default name; consistent canonical/legacy entries;
+duplicate aliases and conflicting roots; invalid/unreadable data; explicit
+exposure true/false; platform/root expansion; exact configuration preservation
+and no-effect sentinels. Keep pure work-count/decision controls small; native
+subprocess coverage stays in the explicit contained lane rather than enlarging
+required unit-only CI.
+
+This closes an existing state-preservation/adoption requirement of
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement),
+not a new registration architecture. Existing #356/#8545 acquisition/setup
+writers, #7500 forced-registration preservation, and #4205 family-wide routing
+retain their owners and scope. No writer or ordinary front-door behavior is
+changed by this proposal. Source handle `dusty-contraption` owns only U17.
+The parent remains Active; the proposal clears review before implementation.
