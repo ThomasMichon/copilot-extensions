@@ -4922,7 +4922,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/native_arguments.py": "39fe58f667513b04e9a5ad6fca3cea0e9fac8a97e202a7c838b012c937ea870d",
         "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py": "eaa2eb00a19e6c60dac772cdb1de9d928e1b8a523d313cbe13321fdca80c57f3",
         "plugins/agent-worktrees/src/agent_worktrees/process_launcher.py": "efaa36d0a673c5ff08bd02a099140498e351632de4b2a684ad1b440531fd4e05",
-        "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "67b9b3e6c1abf944911a838aecbb8cbc4fe9b7c0d7eceacada5c03886ec7a067",
+        "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "80a6c88f6063956265e2c1cfef330927ddf9f96dd6ebfd75196c264a9e08c407",
         "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py": "06c1207b66a96025cebfba5e9daecdaa73942fc53c0ecd9e7551681e14c41372",
         "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "d5d73c9dd496881250dcb54b5cd56dd3dc482d4eb4cd55c08d21c97f0e95efee",
         "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "dd6cd097d87144624a462a2f789336b3e0cacea4e1b00c531a78b9f0f2026506",
