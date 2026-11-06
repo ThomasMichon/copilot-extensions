@@ -61,6 +61,6 @@ context-clear events as window boundaries:
 
 ## Digest check
 
-[`effort_digest.py`](../../../plugins/efforts/skills/planning-efforts/scripts/effort_digest.py)
+[`effort_digest.py`](../../../../plugins/efforts/skills/planning-efforts/scripts/effort_digest.py)
 text output on the eight largest active READMEs in this repository at the time
 (226–387 KB) was 1–9% of each README's size (2.7–35 KB).
