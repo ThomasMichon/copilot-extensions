@@ -40,6 +40,12 @@ Resolve exact commands from their owning session catalogs, not ambient PATH.
 Missing optional siblings do not require installing them: an existing host
 adapter can serve the same bounded role if its actual contract qualifies.
 
+This skill owns the multi-reviewer coordination contract: census, eligibility,
+concurrency, lane refill and coordinator responsibilities. A selected reviewer
+charter owns one PR's judgment and same-PR follow-ups, including its permitted
+publication/readback. Do not copy the loop policy into that charter or turn a
+single reviewer into a second coordinator.
+
 Read [setup and adapters](references/setup-and-adapters.md),
 [coordination and recovery](references/coordination-and-recovery.md) and
 [communication](references/communication.md) when performing the corresponding

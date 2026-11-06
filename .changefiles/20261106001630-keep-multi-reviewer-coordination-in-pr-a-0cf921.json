@@ -1,0 +1,9 @@
+{
+  "comment": "Keep multi-reviewer coordination in PR attention flow and distinguish returned results from active lanes",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
