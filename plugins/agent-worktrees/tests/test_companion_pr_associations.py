@@ -694,3 +694,150 @@ def test_whitespace_binding_matches_actual_provider_fetch(
         snapshot, "example/repository", 7, provider, padded
     )
     assert wire["endpoint"] == binding["endpoint"]
+
+
+@pytest.mark.parametrize(
+    "provider,endpoint,url",
+    [
+        (
+            "gitea",
+            "https://forge.example/CaseRoot",
+            "https://forge.example/caseroot/example/repository/pulls/7",
+        ),
+        (
+            "azure-devops",
+            "https://forge.example/CaseRoot",
+            "https://forge.example/caseroot/example/_git/repository/pullrequest/7",
+        ),
+    ],
+)
+def test_deployment_prefix_case_is_not_repository_case(
+    source, monkeypatch, provider, endpoint, url
+):
+    monkeypatch.setattr(
+        config,
+        "_control_plane_related_pr_map",
+        lambda: {
+            "target": {
+                "provider": provider,
+                "repository": "example/repository",
+                "api_base": endpoint,
+            },
+        },
+    )
+    entry = source.read([_pr(provider=provider, url=url)])["associations"][0]
+    assert entry["binding"]["reason"] == "url-binding-mismatch"
+    same_prefix = url.replace("/caseroot/", "/CaseRoot/")
+    assert source.read([_pr(provider=provider, url=same_prefix)])["associations"][0]["binding"][
+        "available"
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "Project%20Name/_git/Repo%20Name/pullrequest/7",
+        "Project Name/_git/Repo Name/pullrequest/7",
+    ],
+)
+def test_ado_components_support_encoded_and_legacy_names(source, monkeypatch, path):
+    monkeypatch.setattr(
+        config,
+        "_control_plane_related_pr_map",
+        lambda: {
+            "target": {
+                "provider": "azure-devops",
+                "repository": "Project Name/Repo Name",
+                "api_base": "https://dev.azure.com/example",
+            },
+        },
+    )
+    entry = source.read(
+        [
+            _pr(
+                provider="azure-devops",
+                repo="Project Name/Repo Name",
+                url="https://dev.azure.com/example/" + path,
+            )
+        ]
+    )["associations"][0]
+    assert entry["binding"]["available"]
+
+
+def test_encoded_separator_does_not_create_a_new_component(source, monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "_control_plane_related_pr_map",
+        lambda: {
+            "target": {
+                "provider": "azure-devops",
+                "repository": "Project Name/Repo Name",
+                "api_base": "https://dev.azure.com/example",
+            },
+        },
+    )
+    entry = source.read(
+        [
+            _pr(
+                provider="azure-devops",
+                repo="Project Name/Repo Name",
+                url="https://dev.azure.com/example/Project%2FName/_git/Repo%20Name/pullrequest/7",
+            )
+        ]
+    )["associations"][0]
+    assert entry["binding"]["reason"] == "url-binding-mismatch"
+
+
+def test_malformed_initial_config_cannot_qualify_its_defaults(source, monkeypatch):
+    from agent_worktrees import config_acquisition
+
+    path = source.path.parent / "config.yaml"
+    path.write_text("repos: [\n")
+
+    def load(**kwargs):
+        config_acquisition.yaml_value(path)
+        return SimpleNamespace(repo_name="sample", default_repo=object(), repos={})
+
+    monkeypatch.setattr(config, "load_config", load)
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is False for entry in entries)
+    assert path.read_text() == "repos: [\n"
+
+
+def test_malformed_foreign_config_remains_failed_after_cached_default_load(source, monkeypatch):
+    from agent_worktrees import config_acquisition, config_cache
+
+    path = source.path.parent / "foreign.yaml"
+    path.write_text("pr: [\n")
+    reads = []
+    repo = config.RepoConfig(anchor="", worktree_root="", pr=config.PRConfig(provider="github"))
+
+    def load(name):
+        reads.append(name)
+        config_acquisition.yaml_value(path)
+        return SimpleNamespace(repos={name: repo})
+
+    monkeypatch.setattr(
+        config, "load_project_config", lambda name: config_cache.memoize_in_scope(load, name)
+    )
+    monkeypatch.setattr(
+        repos,
+        "list_repos",
+        lambda **kwargs: [
+            SimpleNamespace(name="foreign", remote="https://github.com/example/repository.git"),
+        ],
+    )
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is False for entry in entries)
+    assert reads == ["foreign"] and path.read_text() == "pr: [\n"
+
+
+def test_opaque_owner_provenance_is_not_a_configuration_value_failure(source, monkeypatch):
+    from agent_worktrees import config_acquisition
+
+    def load(**kwargs):
+        config_acquisition.opaque_source("legacy-config-owner")
+        return SimpleNamespace(repo_name="sample", default_repo=object(), repos={})
+
+    monkeypatch.setattr(config, "load_config", load)
+    assert source.read([_pr()])["associations"][0]["binding"]["available"]

@@ -232,3 +232,30 @@ exercise actual duplicate-key files, fetch construction with synthetic native
 responses and emitted stdout rather than mocking beyond those boundaries.
 R1 still awaits independent review of the revised head, required checks and
 actual merge/readback; R2 and every original parent acceptance remain open.
+
+### 2026-11-06 - R1 scope and configuration follow-through
+
+The subsequent review resolved the original six findings and identified three
+additional concrete gaps in unchanged source: deployment-prefix case folding,
+encoded ADO repository components and configuration failures hidden by usable
+defaults. The review's summary said no open issues, but its three
+Medium-severity recommendations still needed substantive resolution.
+
+Deployment prefixes now compare exactly; repository components decode
+independently and cannot introduce encoded path separators. Encoded and legacy
+unescaped names retain their original component identity. The association
+consumer captures the configuration owner's existing acquisition outcomes for
+both initial and foreign reads. Concrete value failures keep target bindings
+unavailable, including later associations that would otherwise reuse cached
+defaults; opaque owner-provenance uncertainty is not falsely treated as a
+malformed value.
+
+The affected four-file packet passed 122 controls without skips, with verified
+cleanup, including the eight added scope/configuration controls. Earlier
+581-control source qualification and the exact 4175-node actor-free unit
+qualification remain separately recorded, not summed or relabelled as a new
+unfiltered packet. The unit source admission correction changes only the
+existing stdout source binding, not its nodes, targets or deadline.
+R1 still needs a fresh independent verdict and green checks on the revised
+head, actual merge and immediate whole-parent readback. R2 and all original
+acceptance remain open; no installed, daemon, model or head action occurred.

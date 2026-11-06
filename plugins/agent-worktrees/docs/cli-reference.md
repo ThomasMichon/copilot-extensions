@@ -73,6 +73,13 @@ Duplicate YAML keys in record evidence and malformed or duplicate-key registry
 sources remain unavailable; they cannot overwrite earlier evidence into an
 empty success or silently select a related fallback. Hosting inputs use the
 same surrounding-whitespace normalization as the existing snapshot fetch.
+Deployment prefixes remain case-sensitive; repository URL components are
+decoded separately without allowing encoded separators to change their
+boundaries. Both encoded and legacy unescaped ADO repository names are supported.
+Concrete initial/foreign configuration acquisition failures keep bindings
+unavailable even if the loader returns usable defaults. A failed foreign
+target cannot regain availability through the same invocation's cache.
+Incomplete owner-provenance diagnostics alone are not a malformed value.
 The record is reread and checked against the selected worktree incarnation and
 again after binding resolution. Changed, malformed, oversized or legacy
 incarnation evidence remains unavailable, not an empty success.

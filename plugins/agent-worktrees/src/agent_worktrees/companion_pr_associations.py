@@ -7,10 +7,10 @@ import stat
 import time
 from collections import Counter
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from . import config as cfg
-from . import output, pr_config, providers, tracking
+from . import config_acquisition, output, pr_config, providers, tracking
 from .config_cache import ConfigCacheSession
 from .inrepo_config_source import resolution_budget
 from .strict_yaml import load_strict_yaml_document
@@ -95,18 +95,41 @@ def _url_matches(url: str, provider: str, endpoint: str, repo: str, number: int)
         )
     base = urlsplit(endpoint)
     prefix = base.path.rstrip("/")
+    path = parsed.path.rstrip("/")
+    if (
+        parsed.scheme != base.scheme
+        or parsed.netloc.lower() != base.netloc.lower()
+        or not path.startswith(prefix + "/")
+    ):
+        return False
+    components = [unquote(part, errors="strict") for part in path[len(prefix) + 1 :].split("/")]
+    if any("/" in part or "\\" in part or not _text(part) for part in components):
+        return False
     if provider == "gitea":
-        return (
-            parsed.scheme == base.scheme
-            and parsed.netloc.lower() == base.netloc.lower()
-            and parsed.path.rstrip("/").lower() == f"{prefix}/{repo}/pulls/{number}".lower()
+        expected = [*repo.split("/"), "pulls", str(number)]
+    else:
+        project, repository = repo.split("/")
+        expected = [project, "_git", repository, "pullrequest", str(number)]
+    return [part.lower() for part in components] == [part.lower() for part in expected]
+
+
+def _config_failed(observations) -> bool:
+    """Reject value failures, not incomplete owner-provenance diagnostics."""
+    return any(
+        observation.stage == "config-yaml"
+        and observation.authority is config_acquisition.ScanAuthority.INDETERMINATE
+        or any(
+            finding.reason
+            in {
+                "unreadable-source",
+                "invalid-shape",
+                "invalid-registry-source",
+                "registry-helper-unavailable",
+                "migration-failed",
+            }
+            for finding in observation.findings
         )
-    project, repository = repo.split("/")
-    return (
-        parsed.scheme == base.scheme
-        and parsed.netloc.lower() == base.netloc.lower()
-        and parsed.path.rstrip("/").lower()
-        == f"{prefix}/{project}/_git/{repository}/pullrequest/{number}".lower()
+        for observation in observations
     )
 
 
@@ -237,17 +260,34 @@ def extend_bundle(
         entries, omitted = _project(raw_entries)
         if entries:
             with ConfigCacheSession().scope(), resolution_budget(reuse_snapshots=True):
-                try:
-                    config = cfg.load_config(
-                        path=cfg.project_dir(project) / "config.yaml", project=project
-                    )
-                except Exception:
+                with config_acquisition.capture_config_observations() as initial:
+                    try:
+                        config = cfg.load_config(
+                            path=cfg.project_dir(project) / "config.yaml", project=project
+                        )
+                    except Exception:
+                        config = None
+                if _config_failed(initial):
                     config = None
+                failed_targets = set()
                 for entry in entries:
                     if "binding" not in entry:
-                        try:
-                            entry["binding"] = _binding(config, entry)
-                        except Exception:
+                        if config is None or entry["repo"] in failed_targets:
+                            entry["binding"] = {
+                                "available": False,
+                                "reason": "target-binding-unavailable",
+                            }
+                            continue
+                        with config_acquisition.capture_config_observations() as observed:
+                            try:
+                                entry["binding"] = _binding(config, entry)
+                            except Exception:
+                                entry["binding"] = {
+                                    "available": False,
+                                    "reason": "target-binding-unavailable",
+                                }
+                        if _config_failed(observed):
+                            failed_targets.add(entry["repo"])
                             entry["binding"] = {
                                 "available": False,
                                 "reason": "target-binding-unavailable",
