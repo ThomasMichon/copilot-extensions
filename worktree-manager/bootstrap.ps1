@@ -418,8 +418,9 @@ if (-not $HaveGit -and -not $InstallSource) {
 }
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
-if ($InstallSource) {
-    $PayloadParent = Join-Path $InstallSource 'source'
+if ($InstallSource -and $PSScriptRoot -and
+    (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'scripts\runtime_install.py') -PathType Leaf)) {
+    $PayloadParent = Split-Path -Parent $PSScriptRoot
 } elseif ($HaveGit) {
     New-Item -ItemType Directory -Force -Path $Staging | Out-Null
     if (-not (Test-Path (Join-Path $Staging '.git'))) {

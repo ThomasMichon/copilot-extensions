@@ -362,8 +362,9 @@ def _windows_console_stream(stream: TextIO | None) -> bool:
 
 def _dispatch_manager(
     command: list[str], *, handoff: dict[str, str] | None = None, wait_for_exit: bool = False,
+    cwd: str | None = None,
 ) -> int:
-    if os.name == "nt" or handoff or wait_for_exit:
+    if os.name == "nt" or handoff or wait_for_exit or cwd is not None:
         console = os.name == "nt" and any(
             _windows_console_stream(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)
         )
@@ -372,6 +373,7 @@ def _dispatch_manager(
             **({"creationflags": 0 if console else subprocess.CREATE_NO_WINDOW}
                if os.name == "nt" else {}),
             **({"env": {**os.environ, **handoff}} if handoff else {}),
+            **({"cwd": cwd} if cwd is not None else {}),
         )
         try:
             return process.wait()
@@ -774,19 +776,20 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
         str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
         "-m", "worktree_manager", *command,
     ]
-    from worktree_manager.update_driver_cli import handoff_environment
+    from worktree_manager.update_driver_cli import handoff_environment, request_source_anchor
     from worktree_manager.update_python_path import finish_update
     from update_driver import participant_environment
 
     handoff = handoff_environment(command)
     owned_without_handoff = not handoff and bool(participant_environment())
+    selected = {"cwd": request_source_anchor()} if args.update_participant else {}
     with runtime.retention_lease(args.root, slot.name):
         if handoff:
-            result = _dispatch_manager(invocation, handoff=handoff)
+            result = _dispatch_manager(invocation, handoff=handoff, **selected)
         elif owned_without_handoff:
-            result = _dispatch_manager(invocation, wait_for_exit=True)
+            result = _dispatch_manager(invocation, wait_for_exit=True, **selected)
         else:
-            result = _dispatch_manager(invocation)
+            result = _dispatch_manager(invocation, **selected)
     return result if args.update_participant else finish_update(command, result)
 
 

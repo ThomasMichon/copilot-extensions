@@ -95,6 +95,7 @@ if __name__ == "__main__" and "--update-participant" not in sys.argv and "update
 '''
 
 SUITE = '''
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -115,6 +116,19 @@ sys.path[:0] = [
 ]
 from update_driver import participant_environment
 from single_instance_lease.operation import OperationLock, OperationLockedError
+
+prior = payload / "src" / "worktree_manager"
+if (prior / "update_driver_cli.py").is_file():
+    import worktree_manager
+
+    for name in ("source_config", "update_driver_cli"):
+        spec = importlib.util.spec_from_file_location(
+            "worktree_manager." + name, prior / (name + ".py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        setattr(worktree_manager, name, module)
+        spec.loader.exec_module(module)
 
 if sys.argv[3] != "update":
     assert not participant_environment()
@@ -161,6 +175,8 @@ with runtime_install._installation_custody() as custody:
         return 0 if successful.exists() and successful.read_text() == request.id else 23
 
     from worktree_manager import update_driver_cli
+    if (prior / "update_driver_cli.py").is_file():
+        assert Path(update_driver_cli.__file__) == prior / "update_driver_cli.py"
 
     manager = ModuleType("worktree_manager.__main__")
     manager._cmd_update = body
@@ -333,7 +349,10 @@ def bootstrap(tmp_path, bootstrap_source):
     tools.mkdir()
     python = str(Path(sys._base_executable).resolve())
     if os.name == "nt":
-        (tools / "uv.ps1").write_text(f"'{python.replace(chr(39), chr(39) * 2)}'\n", encoding="utf-8")
+        (tools / "uv.ps1").write_text(
+            f"'{python.replace(chr(39), chr(39) * 2)}'\n$global:LASTEXITCODE = 0\n",
+            encoding="utf-8",
+        )
         command = [
             host, "-NoProfile", "-NonInteractive", "-File",
             str(source / "worktree-manager" / "bootstrap.ps1"),
@@ -367,8 +386,11 @@ def bootstrap(tmp_path, bootstrap_source):
         streams.append(stream)
         output = log.with_suffix(".out").open("wb")
         streams.append(output)
-        invocation = [*command, command_name, *arguments]
-        if install_source is not None or direct:
+        invocation = [
+            *command, *(["--install-source", str(install_source)] if install_source is not None else []),
+            command_name, *arguments,
+        ]
+        if direct:
             invocation = [
                 python, "-I", "-S", "-B", str(scripts / "runtime_install.py"),
                 "--root", str(root),
@@ -399,14 +421,6 @@ def bootstrap(tmp_path, bootstrap_source):
         yield root, source, driver, start, effects
     finally:
         (root / "release-suite").touch()
-        for log in sorted(tmp_path.glob("caller-*.log")):
-            print(f"{log.name}:\n{log.read_text(encoding='utf-8')}", file=sys.stderr)
-            print(log.with_suffix(".out").read_text(encoding="utf-8"), file=sys.stderr)
-        if driver.exists():
-            for record in core.status(root=driver):
-                print(f"{record.id}: {record.state} {record.error}", file=sys.stderr)
-                if record.log_path.exists():
-                    print(record.log_path.read_text(encoding="utf-8"), file=sys.stderr)
         for process in callers:
             try:
                 process.wait(timeout=20)
@@ -415,6 +429,14 @@ def bootstrap(tmp_path, bootstrap_source):
                 process.wait(timeout=5)
         for stream in streams:
             stream.close()
+        for log in sorted(tmp_path.glob("caller-*.log")):
+            print(f"{log.name}:\n{log.read_text(encoding='utf-8')}", file=sys.stderr)
+            print(log.with_suffix(".out").read_text(encoding="utf-8"), file=sys.stderr)
+        if driver.exists():
+            for record in core.status(root=driver):
+                print(f"{record.id}: {record.state} {record.error}", file=sys.stderr)
+                if record.log_path.exists():
+                    print(record.log_path.read_text(encoding="utf-8"), file=sys.stderr)
         assert sentinel.read_bytes() == b"retained shared staging"
 
 
@@ -744,7 +766,7 @@ def test_native_inherited_anchor_selects_acquisition_instead_of_cwd_decoy(bootst
     assert Path(effects()[1]["source_repo"]) == selected
 
 
-def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_code(bootstrap):
+def test_native_shell_controller_runs_a_prepared_source_without_new_bootstrap_code(bootstrap):
     root, source, driver, start, effects = bootstrap
     scripts = source / "worktree-manager" / "scripts"
     sys.path.insert(0, str(scripts))
@@ -754,6 +776,15 @@ def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_
     old = snapshot / "source" / "worktree-manager"
     (old / "src").mkdir(parents=True)
     (old / "src" / "old_application.py").write_text("VALUE = 1\n", encoding="utf-8")
+    prior = old / "src" / "worktree_manager"
+    prior.mkdir()
+    # Actual pre-anchor modules from 4e63a7ca09f8c04769e8ff4c4fd2421b44eca5d0.
+    for name in ("source_config", "update_driver_cli"):
+        shutil.copyfile(
+            SOURCE / "worktree-manager" / "tests" / "fixtures" / "bootstrap-prior-cli" / f"{name}.py",
+            prior / f"{name}.py",
+        )
+    (root / "config.toml").write_text('[source]\nrepo="source"\nref="main"\n', encoding="utf-8")
     (old / "pyproject.toml").write_text(
         '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.0.0"\n',
         encoding="utf-8",
@@ -775,6 +806,9 @@ def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_
     }), encoding="utf-8")
     caller, log = start("--project", "sample", install_source=snapshot, acquisition_budget="600")
     _eventually(
+        lambda: "Update request " in log.read_text(encoding="utf-8"), processes=(caller,),
+    )
+    _eventually(
         lambda: any(row["phase"] == "suite-start" for row in effects()), processes=(caller,),
     )
     request, = core.status(root=driver)
@@ -789,6 +823,7 @@ def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_
     assert core.status(request.id, root=driver).state == "completed"
     assert [row["phase"] for row in effects()] == ["manager", "suite-start", "suite-end"]
     assert effects()[1]["acquisition_budget"] == "600.0"
+    assert effects()[1]["source_repo"] == str(source)
     assert not (old / "scripts").exists()
 
 

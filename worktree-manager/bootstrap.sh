@@ -217,8 +217,12 @@ if [ "$have_git" -eq 0 ] && [ -z "$install_source" ]; then
 fi
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
-if [ -n "$install_source" ]; then
-    payload_parent="$install_source/source"
+controller_dir=""
+if [ -n "$install_source" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    controller_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+fi
+if [ -n "$controller_dir" ] && [ -f "$controller_dir/scripts/runtime_install.py" ]; then
+    payload_parent="$(dirname -- "$controller_dir")"
 elif [ "$have_git" -eq 1 ]; then
     mkdir -p "$STAGING"
     if [ ! -d "$STAGING/.git" ]; then

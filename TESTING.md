@@ -733,8 +733,17 @@ bodies use finite fixtures with a minimal declared source graph and a real
 native venv. It covers equivalent pending coalescing, separate active arrivals
 and arguments, changed SDK inputs, preserved nonzero whole-operation results and birth-pinned loss of the
 waiting Python caller. A prepared legacy payload without bootstrap scripts
-separately exercises current-controller compatibility and a saved acquisition
-budget. The caller-loss case uses a relative configured source through real
+separately exercises the actual native shell entry, current-controller
+compatibility and a saved acquisition budget. Explicit prepared inputs are
+application data: the shells keep their executing controller when its full
+payload is available, otherwise acquire the controller through their normal
+source path, rather than execute bootstrap code from the prepared application.
+The prepared fixture carries the actual prior, pre-anchor CLI and source locator.
+The selected application starts in the saved submission directory, so that prior
+CLI's relative-source check matches the current controller's admitted source.
+That actual-shell control observes queue admission for up to 20 seconds, then
+suite startup for up to another 20 seconds, within the unchanged 90-second case.
+The caller-loss case uses a relative configured source through real
 acquisition, participant validation and the suite's source locator.
 An independent case verifies that detached acceptance removes only that caller's acquisition
 checkout while the retained worker continues to its recorded final result.

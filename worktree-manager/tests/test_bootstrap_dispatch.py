@@ -45,8 +45,10 @@ def test_posix_update_participant_waits_until_its_borrowed_manager_exits(monkeyp
     monkeypatch.setattr(installer.subprocess, "Popen", launch)
     assert installer._dispatch_manager(
         ["/selected/python", "-m", "manager"], handoff={"custody": "witness"},
+        cwd="/saved/submission",
     ) == 23
     assert seen[0]["env"] == {"fixture": "value", "custody": "witness"}
+    assert seen[0]["cwd"] == "/saved/submission"
     assert "creationflags" not in seen[0]
 
 

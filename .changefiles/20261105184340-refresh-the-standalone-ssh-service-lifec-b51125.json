@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the standalone SSH service lifecycle archive with retained worker import-root propagation.",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}
