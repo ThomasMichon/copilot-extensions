@@ -162,6 +162,78 @@ def test_trusted_binding_accepts_exact_pending_candidate(qualified_binding):
         worktree_record=tracking._load_record_uncached(record_path),
     )
     assert result["creationNonce"] == "subject-incarnation"
+    assert "sessionActivation" not in result
+
+
+def test_trusted_binding_captures_current_exact_non_head_activation(
+    qualified_binding: tuple[Path, WorktreeRecord, Path],
+) -> None:
+    record_path, snapshot, _ = qualified_binding
+    current = tracking._load_record_uncached(record_path)
+    entry = current.session_entry("sid-subject")
+    entry.activations[-1].source_identity = "native:subject"
+    save_record(current, record_path)
+
+    result = handoff_diagnostics.stamp_session_state_worktree_binding(
+        "sid-subject", "wt-subject", worktree_record=snapshot,
+    )
+
+    assert result["sessionActivation"] == {
+        "version": 1,
+        "ordinal": 1,
+        "startedAt": entry.activations[-1].started_at,
+        "startRecordedAt": entry.activations[-1].start_recorded_at,
+        "sourceIdentity": "native:subject",
+    }
+
+
+@pytest.mark.parametrize("unqualified", [
+    "legacy", "ambiguous", "ended", "pruned", "saturated", "duplicate-source",
+    "multiple-open", "duplicate-ordinal",
+])
+def test_trusted_binding_omits_unqualified_activation(
+    qualified_binding: tuple[Path, WorktreeRecord, Path], unqualified: str,
+) -> None:
+    record_path, _, session_dir = qualified_binding
+    current = tracking._load_record_uncached(record_path)
+    entry = current.session_entry("sid-subject")
+    activation = entry.activations[-1]
+    activation.source_identity = "native:subject"
+    if unqualified == "legacy":
+        activation.source_identity = None
+    elif unqualified == "ambiguous":
+        activation.source_ambiguous = True
+    elif unqualified == "ended":
+        activation.ended_at = activation.started_at
+    elif unqualified == "pruned":
+        entry.pruned_sources = ["native:subject"]
+    elif unqualified == "saturated":
+        entry.source_history_saturated = True
+    elif unqualified == "duplicate-source":
+        entry.activations.insert(0, replace(
+            activation, ordinal=0, ended_at=activation.started_at,
+        ))
+    elif unqualified == "multiple-open":
+        entry.activations.append(replace(
+            activation, ordinal=2, source_identity="native:other",
+        ))
+    else:
+        entry.activations.insert(0, replace(
+            activation, source_identity="native:other", ended_at=activation.started_at,
+        ))
+    save_record(current, record_path)
+    (session_dir / "worktree-binding.json").write_text(json.dumps({
+        "sessionActivation": {"sourceIdentity": "stale"},
+    }))
+
+    result = handoff_diagnostics.stamp_session_state_worktree_binding(
+        "sid-subject", "wt-subject",
+        worktree_record=tracking._load_record_uncached(record_path),
+    )
+
+    assert result["creationNonce"] == "subject-incarnation"
+    assert "sessionActivation" not in result
+    assert json.loads((session_dir / "worktree-binding.json").read_text()) == result
 
 
 @pytest.mark.parametrize("invalid", [

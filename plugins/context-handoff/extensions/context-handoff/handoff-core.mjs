@@ -35,6 +35,7 @@ import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
 import { observeResidentReceipt } from "./resident-receipt-client.mjs";
 import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
+import { captureHandoffIdentity } from "./handoff-identity.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -1502,6 +1503,7 @@ export function makeHandoffMetadata(
     worktree,
     worktreeDir: wtDir,
     stateDir,
+    authorIdentity: captureHandoffIdentity(sid, worktree),
     createdAt: new Date().toISOString(),
   };
 }
@@ -1863,6 +1865,9 @@ export function markFileHandoffConsumed(path, record, sid) {
     consumed: true,
     consumedAt: record.consumedAt || new Date().toISOString(),
     consumedBySession: sid || record.consumedBySession || null,
+    ...(!record.consumed ? {
+      consumerIdentity: captureHandoffIdentity(sid, record.worktree),
+    } : {}),
   };
   writeJsonAtomic(path, consumed);
   return consumed;
@@ -2272,6 +2277,7 @@ export function writeSessionStateHandoff(
     worktree: stored.metadata?.worktree || null,
     worktreeDir: stored.metadata?.worktreeDir || null,
     stateDir: stored.metadata?.stateDir || null,
+    authorIdentity: stored.metadata?.authorIdentity || null,
     title: stored.metadata?.title || "",
     seed,
     promptText,
@@ -2297,7 +2303,10 @@ export function writeSessionStateHandoff(
 
 export function markSessionStateHandoffConsumed(
   predecessorSessionId,
-  { consumedBySession = null, handoffId = null, aborted = false, abortReason = null } = {},
+  {
+    consumedBySession = null, handoffId = null, aborted = false, abortReason = null,
+    consumerIdentity = null,
+  } = {},
 ) {
   if (!predecessorSessionId) return null;
   const found = readSessionStateHandoff(predecessorSessionId);
@@ -2311,6 +2320,7 @@ export function markSessionStateHandoffConsumed(
     consumed: true,
     consumedAt: current.consumedAt || new Date().toISOString(),
     consumedBySession: consumedBySession || current.consumedBySession || null,
+    ...(!current.consumed && !aborted ? { consumerIdentity } : {}),
     ...(aborted ? { aborted: true, abortReason: abortReason || current.abortReason || null } : {}),
   };
   writeJsonAtomic(found.path, consumed);
@@ -2624,6 +2634,7 @@ export function consumeDispatchHandoffTask(
       if (fromConsume.metadata) decoded.metadata = fromConsume.metadata;
       checkpoint.payload = decoded.text;
       checkpoint.metadata = decoded.metadata;
+      checkpoint.consumerIdentity = captureHandoffIdentity(sid, decoded.metadata?.worktree);
       checkpointStep(checkpoint, "taskConsumed");
     } catch (error) {
       const predecessorSessionId = decoded.metadata?.sessionId || checkpoint.predecessorSession || null;
@@ -2647,7 +2658,7 @@ export function consumeDispatchHandoffTask(
   const predecessorSessionId = decoded.metadata?.sessionId || checkpoint.predecessorSession || null;
   markSessionStateHandoffConsumed(
     predecessorSessionId,
-    { consumedBySession: sid, handoffId: taskId },
+    { consumedBySession: sid, handoffId: taskId, consumerIdentity: checkpoint.consumerIdentity || null },
   );
   safePromoteHead(
     promoteHead,
@@ -2686,7 +2697,7 @@ export function consumeFileHandoff(
   const predecessorSessionId = record.sessionId || null;
   markSessionStateHandoffConsumed(
     predecessorSessionId,
-    { consumedBySession: sid, handoffId: record.id },
+    { consumedBySession: sid, handoffId: record.id, consumerIdentity: record.consumerIdentity || null },
   );
   safePromoteHead(promoteHead, cwd, record.worktree || null, predecessorSessionId, sid, record.id);
   return {
