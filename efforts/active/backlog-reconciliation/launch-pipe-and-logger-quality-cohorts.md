@@ -245,3 +245,34 @@ context, identity, listing or background work. Their actual original
 alternatives, native versus source tiers, deadlines, dormant triggers and
 source/resource owners remain. All 24 requested originals are accounted for.
 The fixed whole-queue checkpoint and canonical campaign remain Active.
+
+## Two further finite source studies
+
+Current Dev `1593247e201523cb404c0df442e85e4865e2e899` independently
+binds #6407's exact-record repair module, its tests and the Bridge charter
+consumer. Actual #6555/#6421 merges, exact-head approval and successful
+rollups are credited; inspected published-tag/main repair and charter
+blobs match those admitted current bodies. The writer body and one whole
+provider description remain withheld without subset retry. Different
+writer OIDs do not establish its released behavior, and neither merged
+source nor the inspected tag supplies the original released-runtime
+exact-record repair plus full consumer acceptance. That real gate remains
+OPEN with the existing owner; no repair or record inspection is requested.
+
+At the same Dev pin, #6917's runner still stops general independent file
+groups on ordinary assertion exit 1. Sticky-failure continuation applies
+only when the group has a non-null partition selector; the real contained
+failure-then-pass regression substitutes that narrow plan. Its definitions
+were read, not executed. Actual #6909 merge is credited, not substituted
+for broader ordinary-group acceptance; its description and #7255's whole
+description remain withheld. #7269 and current CI retain unit-only required
+PR testing with integration in separate periodic/manual lanes. Preserve
+the accepted original integrator's single-writer custody, all existing
+limits and immediate fatal/containment/resource/timeout refusal; do not
+restore old full/native suites as required PR or promotion gates.
+
+Both complete reports and admission records were consumed after actual
+completion, and the coordinator independently rechecked the claimed
+provider merge/approval/check tiers without rereading assigned source.
+No tests, product imports, native/installed acceptance, tracker mutation,
+implementation, source/resource release or runtime operation occurred.
