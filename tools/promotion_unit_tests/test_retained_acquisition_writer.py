@@ -17,6 +17,86 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "promotion_retained_writer"
 
 
+def test_creation_cli_forwards_validated_writer_without_changing_creation(boundary):
+    import argparse
+    import io
+
+    b = boundary
+    cli = importlib.import_module(f"{PACKAGE}.workspace_creation_cli")
+    parser = argparse.ArgumentParser()
+    cli.add_arguments(parser)
+    args = parser.parse_args(["--creation-key", "original-key", "--worktree-writer-file", "-"])
+    args.worktree_id, args.target, args.json = "workspace-original", "example@local", True
+    requirement = b.request.worktree_writer.model_dump()
+    b.monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(requirement)))
+    validated = cli.validate_arguments(args)
+    output = []
+
+    def module(name, **attributes):
+        value = ModuleType(name)
+        value.__dict__.update(attributes)
+        b.monkeypatch.setitem(sys.modules, f"{PACKAGE}.{name}", value)
+        return value
+
+    module("client", BridgeClientError=RuntimeError)
+    module("protocol", PROVIDER_CREATION_PROTOCOL_VERSION=36, WORKSPACE_CREATION_PROTOCOL_VERSION=34)
+    module(
+        "__main__", _get_caller_session_id=lambda: None, _worktrees_get=lambda _field: None,
+        _startup_request_timeout=lambda: 30, _connection_identity=lambda *_args: {},
+        _json_out=output.append,
+    )
+    module(
+        "session_start_cli", _read_agent_inventory=lambda _client: {},
+        _prepare_sender_preference=lambda *_args, **_kwargs: SimpleNamespace(project="example"),
+    )
+    module(
+        "session_targeting_cli", _companion_seed_prompt=lambda prompt: prompt,
+        _hold_protocol_floor=lambda *_args: None, _resolve_prompt=lambda *_args, **_kwargs: None,
+        _write_session_id_file=lambda *_args: pytest.fail("no output file requested"),
+    )
+    calls = []
+
+    def start(**kwargs):
+        calls.append(kwargs)
+        return {
+            "session_id": "original-session",
+            "creation": {
+                "status": "complete", "native_session_id": "original-native",
+                "worktree": {"id": args.worktree_id, "path": "/example/workspace"},
+            },
+        }
+
+    client = SimpleNamespace(
+        start_session=start, get_session=lambda _session: {"status": "idle", "turn_count": 0},
+    )
+    cli.create(args, client, caller_id=None, worktree_writer=validated)
+    assert calls[0]["worktree_writer"] == requirement
+    assert calls[0]["creation_key"] == "original-key" and calls[0]["worktree_id"] == args.worktree_id
+    assert output[0]["connection"]["native_session_id"] == "original-native"
+    cli.create(args, client, caller_id=None)
+    assert "worktree_writer" not in calls[1]
+
+
+@pytest.mark.parametrize("changes,text", [
+    ({"creation_key": None}, "{}"), ({"worktree_id": None}, "{}"),
+    ({"provider_instance": True}, "{}"), ({"cli": True}, "{}"),
+    ({"target_dir": "/elsewhere"}, "{}"), ({"prompt_file": "-"}, "{}"),
+    ({"prompt": "-"}, "{}"), ({}, "not json"),
+])
+def test_creation_cli_refuses_invalid_writer_before_client(boundary, changes, text):
+    import io
+
+    cli = importlib.import_module(f"{PACKAGE}.workspace_creation_cli")
+    args = SimpleNamespace(**{
+        "creation_key": "original-key", "worktree_id": "workspace-original",
+        "worktree_writer_file": "-", **changes,
+    })
+    boundary.monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+    with pytest.raises(SystemExit) as failure:
+        cli.validate_arguments(args)
+    assert failure.value.code == 2
+
+
 def finish(coroutine):
     try:
         coroutine.send(None)

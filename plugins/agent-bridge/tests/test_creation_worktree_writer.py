@@ -348,6 +348,105 @@ def test_required_creation_writer_rechecks_capability_after_provider_cutover():
     assert posts == [("POST", "/api/v1/sessions/workspace-creations")]
 
 
+@pytest.mark.parametrize("from_file", [False, True])
+@pytest.mark.parametrize("supported", [False, True])
+def test_required_creation_writer_cli_carries_requirement_to_actual_client(
+    monkeypatch, tmp_path, capsys, from_file, supported,
+):
+    import io
+    import sys
+    from agent_bridge import __main__ as core, session_start_cli, session_targeting_cli
+
+    requirement = {
+        "version": 1,
+        "identity": {"installation_root": "/owner", "runtime_generation": "a" * 32},
+        "creation_nonce": "original-allocation",
+    }
+    text = json.dumps(requirement)
+    path = tmp_path / "requirement.json"
+    if from_file:
+        path.write_text(text, encoding="utf-8")
+    else:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+    args = core.build_parser().parse_args([
+        "--json", "create", "example@local", "--creation-key", "original-key",
+        "--worktree-id", "worktree-a", "--worktree-writer-file", str(path) if from_file else "-",
+    ])
+    client = BridgeClient("http://fixture", token="fixture", connect_grace=0)
+    monkeypatch.setattr(client, "daemon_supports", lambda _floor: True)
+    posts = []
+
+    def request(method, endpoint, *values, **kwargs):
+        if endpoint == "/health":
+            return {
+                "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
+                "capabilities": {creation.CAPABILITY: 1} if supported else {},
+            }
+        if method == "POST":
+            assert endpoint == "/api/v1/sessions/workspace-creations"
+            posts.append(values[0])
+            return {
+                "session_id": "bridge-original",
+                "creation": {
+                    "status": "complete", "native_session_id": "native-original",
+                    "worktree": {"id": "worktree-a", "path": "/workspace"},
+                },
+            }
+        assert endpoint == "/api/v1/sessions/bridge-original"
+        return {"status": "idle", "turn_count": 0}
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(core, "_get_client", lambda: client)
+    monkeypatch.setattr(core, "_caller_id_for", lambda _args: None)
+    monkeypatch.setattr(core, "_get_caller_session_id", lambda: None)
+    monkeypatch.setattr(core, "_worktrees_get", lambda _field: None)
+    monkeypatch.setattr(core, "_connection_identity", lambda *_args: {})
+    monkeypatch.setattr(session_start_cli, "_read_agent_inventory", lambda _client: {})
+    monkeypatch.setattr(
+        session_start_cli, "_prepare_sender_preference",
+        lambda *_args, **_kwargs: SimpleNamespace(project="example"),
+    )
+    if not supported:
+        with pytest.raises(BridgeClientError) as failure:
+            session_targeting_cli._cmd_create(args)
+        assert failure.value.status == 426 and posts == []
+        return
+    session_targeting_cli._cmd_create(args)
+    assert len(posts) == 1
+    assert posts[0]["worktree_writer"] == requirement
+    assert posts[0]["creation_key"] == "original-key" and posts[0]["worktree_id"] == "worktree-a"
+    assert json.loads(capsys.readouterr().out)["connection"]["native_session_id"] == "native-original"
+
+
+@pytest.mark.parametrize("options,text", [
+    ([], "{}"),
+    (["--creation-key", "original"], "{}"),
+    (["--creation-key", "original", "--worktree-id", "w", "--provider-instance"], "{}"),
+    (["--creation-key", "original", "--worktree-id", "w", "--cli"], "{}"),
+    (["--creation-key", "original", "--worktree-id", "w", "--target-dir", "/elsewhere"], "{}"),
+    (["--creation-key", "original", "--worktree-id", "w", "--prompt-file", "-"], "{}"),
+    (["--creation-key", "original", "--worktree-id", "w", "-"], "{}"),
+    (["--creation-key", "original", "--worktree-id", "w"], "not json"),
+    (["--creation-key", "original", "--worktree-id", "w"], "{}"),
+    (["--creation-key", "original", "--worktree-id", "w"], "[]"),
+])
+def test_required_creation_writer_cli_invalid_input_refuses_before_connect(
+    monkeypatch, options, text,
+):
+    import io
+    import sys
+    from agent_bridge import __main__ as core, session_targeting_cli
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+    monkeypatch.setattr(core, "_get_client", lambda: pytest.fail("invalid writer must not connect"))
+    args = core.build_parser().parse_args([
+        "create", "example@local", *options, "--worktree-writer-file", "-",
+    ])
+    with pytest.raises(SystemExit) as failure:
+        session_targeting_cli._cmd_create(args)
+    assert failure.value.code == 2
+
+
 def test_required_creation_writer_round_trips_through_actual_http_owner(writer_creation, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

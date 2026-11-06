@@ -101,6 +101,15 @@ remote, CLI and allocate-new forms refuse before effects. The client
 negotiates the named capability on every transport attempt within HTTP 52.
 Unpinned requests retain their existing behavior.
 
+The ordinary CLI carries this requirement with
+`create <target> --creation-key <key> --worktree-id <id> --worktree-writer-file <path>`.
+The UTF-8 file contains the strict requirement object above; `-` reads it from
+stdin. Requirement stdin cannot also supply the prompt. Invalid JSON, unsupported
+creation forms and conflicting stdin refuse before connecting to the daemon.
+The existing client negotiates the capability on each attempt and never retries
+without the requirement. Omitting the option preserves ordinary unpinned behavior.
+This transport does not independently admit the writer or close its cohort.
+
 This route does **not** create an acquisition attempt. Its original
 `workspace_embodiments` row atomically retains the creation facts, workspace
 incarnation, requirement and provider-selected pinned writer before native

@@ -102,6 +102,11 @@ unqualified resident reachable. The two creation capabilities are independently
 negotiated within HTTP 52; no acquisition attempt is manufactured. These remain
 source/HTTP/SQLite controls, not installed/native or closed-cohort acceptance.
 
+Fourteen ordinary CLI controls bring the current portfolio to 243 cases.
+The actual parser carries file/stdin writer requirements through the existing
+client and capability fence, while invalid forms refuse before connection.
+This adds no acquisition route, cohort admission or ordinary allocation.
+
 The joined portable-mux fixture retains the production native socket-path
 bound. Its isolated physical temporary root must be short enough for that
 bound; a long caller `TMPDIR` can correctly refuse before creating the mocked
