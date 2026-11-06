@@ -152,6 +152,7 @@ async def test_ordinary_install_publishes_without_predecessor_extinction(
 
     private = tmp_path_factory.mktemp("in")
     environment = isolated_environment(os.environ, private / "profile")
+    assert environment.get("OS") == "Windows_NT"
     root = Path(environment["USERPROFILE"]) / ".agent-mcp"
     environment.pop("AGENT_MCP_HOME", None)
     environment.pop("AGENT_MCP_NO_VERSION_REAP", None)
@@ -159,6 +160,7 @@ async def test_ordinary_install_publishes_without_predecessor_extinction(
     data = root
     bin_dir = Path(environment["USERPROFILE"]) / ".local" / "bin"
     environment.update(
+        COMPUTERNAME="fixture-machine",
         AGENT_MCP_INSTALL_DIR=str(root), AGENT_MCP_NO_SERVE="", AGENT_MCP_NO_ENSURE_SERVE="",
         AGENT_MCP_NO_MULTIPLEX="", AGENT_MCP_NO_SELFPROVISION="1",
         COPILOT_EXTENSIONS_HUMAN_UTF8="", PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],

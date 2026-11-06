@@ -1307,3 +1307,36 @@ migration already works.
   was performed. Current-head CI/review and release/installed acceptance remain
   coordinator-owned; full handover, prepared qualification and adoption holds
   remain open.
+
+### 2026-11-06 - Preserve merged SDK lifetime source; ordinary witness blocked
+
+- Final fetch completed normally and exposed actual conflicts with merged SDK
+  source `407f5d7c7d0cca8081cb2c3572e9797436bf39b4`. Reconciled the two MCP
+  effort documents and producer-only footprint conflicts without altering either
+  historical journal. Upstream SDK code/tests/docs and the canonical MCP
+  caller-lifetime archive remain exact; optional pre-resume admission and expired
+  Job unconfirmed-custody behavior were not replaced by older code.
+- The MCP footprint's non-derived revision **36** contract was identical;
+  canonical owner regeneration covers the actual merged scripts/source.
+  Auth/netrc/preparation checks passed **45 tests** against the new SDK, with
+  verified cleanup. Current **4525/621/300** admission and dependency guard
+  **567/0** remain qualified; owning source/doc/contract guards passed.
+- The archive/native-owner closure change justified the existing private MCP
+  functional controls, not a whole-unit rerun. Initial probes omitted Windows
+  platform and diagnostic metadata from the outer synthetic environment:
+  missing `OS` selected a POSIX interpreter path; missing `COMPUTERNAME` later
+  failed manifest writing. Those failed packets remain failures. The generated
+  CMD fixture now checks platform metadata and its actual private CMD file;
+  ordinary fixtures use a generic diagnostic machine name.
+- The two generated-CMD controls passed after correcting the platform input.
+  With the diagnostic input supplied, both ordinary variants completed incoming
+  installation/publication but failed their retained warm-reuse assertion:
+  two successful account-a calls reported different upstream PIDs.
+  This is **unqualified**, not silently credited as direct-fallback acceptance.
+  Context equivalence versus fixture-environment differences is unresolved;
+  no assertion, challenge, deadline or lifetime rule was weakened, and no
+  further native retry was attempted.
+- Cleanup was verified for each failed packet. All work remains private/source
+  only, without GUI/observer/debugger or production operations. The coordinator
+  retains this concrete ordinary-witness diagnosis/acceptance decision together
+  with publication, current-head CI/review and release/installed verification.

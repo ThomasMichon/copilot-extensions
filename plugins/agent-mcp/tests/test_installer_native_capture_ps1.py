@@ -147,6 +147,7 @@ def test_generated_cmd_uses_marker_owner_and_preserves_stdin(tmp_path, complete)
     host = shutil.which("pwsh")
     assert host
     environment = isolated_environment(os.environ, tmp_path / "profile")
+    assert environment.get("OS") == "Windows_NT"
     home = tmp_path / "p'q"
     root = home / ".agent-mcp"
     local_bin = home / ".local" / "bin"
@@ -176,6 +177,7 @@ def test_generated_cmd_uses_marker_owner_and_preserves_stdin(tmp_path, complete)
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert generated.returncode == 0, generated.stdout + generated.stderr
+    assert (local_bin / "agent-mcp.cmd").is_file()
     modules = tmp_path / "modules"
     package = modules / "agent_mcp"
     package.mkdir(parents=True)
