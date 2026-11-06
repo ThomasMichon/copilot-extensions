@@ -53,6 +53,24 @@ $GatePython = Get-Command python -ErrorAction SilentlyContinue
 if (-not $GatePython) { $GatePython = Get-Command py -ErrorAction SilentlyContinue }
 $EffectiveResolver = Join-Path $PSScriptRoot 'resolve_effective_config.py'
 
+function Write-Readiness([string]$State, [string]$Detail) {
+    [ordered]@{
+        schema = 'copilot-extensions.module-readiness'
+        version = 1
+        module = 'agent-index/runtime'
+        state = $State
+        detail = $Detail
+    } | ConvertTo-Json -Compress
+}
+
+function Stop-ConfigurationFailure {
+    if ($Command -eq 'installer-readiness') {
+        Write-Readiness 'failed' 'Effective repository configuration could not be read.'
+    }
+    [Console]::Error.WriteLine('[agent-index] effective repository configuration could not be read.')
+    exit 1
+}
+
 function Write-Inactive {
     [ordered]@{
         schema = 'agent-index.lifecycle'
@@ -66,18 +84,7 @@ function Write-Inactive {
 }
 
 if (-not $GatePython -or -not (Test-Path -LiteralPath $EffectiveResolver -PathType Leaf)) {
-    if ($Command -eq 'installer-readiness') {
-        [ordered]@{
-            schema = 'copilot-extensions.module-readiness'
-            version = 1
-            module = 'agent-index/runtime'
-            state = 'configuration-empty'
-            detail = 'No effective repository configuration is available; session startup remains non-mutating.'
-        } | ConvertTo-Json -Compress
-        exit 0
-    }
-    Write-Inactive
-    exit $(if ($Command -in @('status', '__session-stamp')) { 0 } else { 2 })
+    Stop-ConfigurationFailure
 }
 try {
     $effectiveCwd = if ($env:AGENT_INDEX_REPO) {
@@ -85,12 +92,22 @@ try {
     } else {
         (Get-Location).Path
     }
-    $Effective = (& $GatePython.Source -E -X utf8 $EffectiveResolver `
-        --cwd $effectiveCwd 2>$null | Out-String | ConvertFrom-Json -ErrorAction Stop)
+    $effectiveJson = (& $GatePython.Source -E -X utf8 $EffectiveResolver `
+        --cwd $effectiveCwd 2>$null | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw 'Effective configuration reader failed' }
+    $Effective = $effectiveJson | ConvertFrom-Json -ErrorAction Stop
+    if ($Effective.schema -cne 'agent-index.effective-config' -or
+        $Effective.version -ne 1 -or $Effective.opted_in -isnot [bool]) {
+        throw 'Invalid effective configuration response'
+    }
 } catch {
-    $Effective = $null
+    Stop-ConfigurationFailure
 }
-if (-not $Effective -or -not $Effective.opted_in) {
+if (-not $Effective.opted_in) {
+    if ($Effective.reason -notin @(
+        'repository-unavailable', 'repository-config-absent',
+        'external-state-root-config-absent'
+    )) { Stop-ConfigurationFailure }
     if ($Command -eq 'installer-readiness') {
         [ordered]@{
             schema = 'copilot-extensions.module-readiness'
@@ -104,9 +121,7 @@ if (-not $Effective -or -not $Effective.opted_in) {
     Write-Inactive
     exit $(if ($Command -in @('status', '__session-stamp')) { 0 } else { 2 })
 }
-if ($Effective.config) {
-    $env:AGENT_INDEX_EFFECTIVE_CONFIG = [string]$Effective.config
-}
+# A reported base path is provenance, not an explicit merged-config override.
 if ($Effective.repo_root) {
     $env:AGENT_INDEX_REPO = [string]$Effective.repo_root
 } elseif ($Effective.source -ceq 'forwarded') {
@@ -452,8 +467,6 @@ if (
 }
 
 function Get-ConfiguredRole {
-    $role = if ($env:AGENT_INDEX_ROLE) { $env:AGENT_INDEX_ROLE.Trim().ToLowerInvariant() } else { '' }
-    if ($role -in @('host', 'client')) { return $role }
     $machine = if ($env:AGENT_INDEX_MACHINE) {
         $env:AGENT_INDEX_MACHINE
     } else {
@@ -465,12 +478,19 @@ function Get-ConfiguredRole {
         $resolverArgs += @('--data-b64', $env:AGENT_INDEX_CONFIG_DATA_B64)
     } elseif ($env:AGENT_INDEX_EFFECTIVE_CONFIG) {
         $resolverArgs += @('--config', $env:AGENT_INDEX_EFFECTIVE_CONFIG)
+    } elseif ($env:AGENT_INDEX_REPO) {
+        $resolverArgs += @('--repo', $env:AGENT_INDEX_REPO)
     }
     if ($resolverArgs.Count -gt 6) {
-        $resolved = (& $GatePython.Source @resolverArgs 2>$null | Select-Object -Last 1)
+        $resolved = (& $GatePython.Source @resolverArgs 2>$null | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Activation role reader failed' }
         $role = ("$resolved").Trim().ToLowerInvariant()
         if ($role -in @('host', 'client')) { return $role }
+        if ($role -ne 'unconfigured') { throw 'Invalid activation role response' }
+        if ($env:AGENT_INDEX_REPO) { return $null }
     }
+    $role = if ($env:AGENT_INDEX_ROLE) { $env:AGENT_INDEX_ROLE.Trim().ToLowerInvariant() } else { '' }
+    if ($role -in @('host', 'client')) { return $role }
     $config = if ($env:AGENT_INDEX_CONFIG) { $env:AGENT_INDEX_CONFIG } else { Join-Path $Root 'config.yaml' }
     if (Test-Path -LiteralPath $config -PathType Leaf) {
         $match = Select-String -LiteralPath $config -Pattern '^\s*(?:role|engine)\s*:\s*["'']?([A-Za-z]+)' -ErrorAction SilentlyContinue |
@@ -676,16 +696,6 @@ function Write-RuntimeUnavailable([string]$RuntimeState, [string]$ConfiguredRole
     } | ConvertTo-Json -Compress -Depth 3
 }
 
-function Write-Readiness([string]$State, [string]$Detail) {
-    [ordered]@{
-        schema = 'copilot-extensions.module-readiness'
-        version = 1
-        module = 'agent-index/runtime'
-        state = $State
-        detail = $Detail
-    } | ConvertTo-Json -Compress
-}
-
 function Test-SetupChoice {
     for ($i = 0; $i -lt $InvocationArgs.Count; $i++) {
         $arg = [string]$InvocationArgs[$i]
@@ -877,7 +887,8 @@ function Invoke-AgentIndexRuntime {
 }
 
 $Python = Resolve-ReadyRuntime
-$Role = Get-ConfiguredRole
+try { $Role = Get-ConfiguredRole }
+catch { Stop-ConfigurationFailure }
 $RuntimeState = Get-RuntimeState $Python
 
 switch ($Command) {
@@ -901,8 +912,13 @@ switch ($Command) {
         exit $LASTEXITCODE
     }
     'installer-readiness' {
-        Write-Readiness 'configuration-empty' 'agent-index runtime activation is explicit; session startup does not provision packages or start services.'
-        exit 0
+        if ($Python) { Invoke-AgentIndexRuntime; exit $LASTEXITCODE }
+        if (-not $Role) {
+            Write-Readiness 'configuration-empty' 'No indexer is designated for the current repository.'
+            exit 0
+        }
+        Write-Readiness 'failed' 'The configured agent-index runtime is unavailable; no service was started.'
+        exit 1
     }
     'role' {
         if (-not $Role) {

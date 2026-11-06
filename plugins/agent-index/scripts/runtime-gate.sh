@@ -31,40 +31,53 @@ case "$COMMAND" in __cell-bootstrap|__cell-service-ensure) exit 0 ;; esac
 PY_GATE="$(command -v python3 || command -v python || true)"
 EFFECTIVE_RESOLVER="$SCRIPT_DIR/resolve_effective_config.py"
 
+_emit_readiness() {
+    local state="$1" detail="$2"
+    printf '{"detail":"%s","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"%s","version":1}\n' \
+        "$detail" "$state"
+}
+
+_configuration_failure() {
+    if [ "$COMMAND" = installer-readiness ]; then
+        _emit_readiness failed 'Effective repository configuration could not be read.'
+    fi
+    printf '%s\n' '[agent-index] effective repository configuration could not be read.' >&2
+    exit 1
+}
+
 _emit_inactive() {
     printf '%s\n' \
         '{"configured":false,"opted_in":false,"plugin":"agent-index","running":false,"schema":"agent-index.lifecycle","schema_version":1,"state":"inactive"}'
 }
 
 if [ -z "$PY_GATE" ] || [ ! -f "$EFFECTIVE_RESOLVER" ]; then
-    if [ "$COMMAND" = installer-readiness ]; then
-        printf '%s\n' \
-            '{"detail":"No effective repository configuration is available; session startup remains non-mutating.","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"configuration-empty","version":1}'
-        exit 0
-    fi
-    _emit_inactive
-    case "$COMMAND" in status|__session-stamp) exit 0 ;; esac
-    exit 2
+    _configuration_failure
 fi
 EFFECTIVE_JSON="$("$PY_GATE" -E -X utf8 "$EFFECTIVE_RESOLVER" \
-    --cwd "${AGENT_INDEX_REPO:-$PWD}" 2>/dev/null || true)"
-EFFECTIVE_FIELDS=()
-while IFS= read -r field; do
-    EFFECTIVE_FIELDS[${#EFFECTIVE_FIELDS[@]}]="$field"
-done < <(
+    --cwd "${AGENT_INDEX_REPO:-$PWD}" 2>/dev/null)" || _configuration_failure
+EFFECTIVE_FLAT="$(
     printf '%s' "$EFFECTIVE_JSON" | "$PY_GATE" -E -X utf8 -c '
 import json, sys
-try:
-    value = json.load(sys.stdin)
-except Exception:
-    value = {}
+value = json.load(sys.stdin)
+if (not isinstance(value, dict) or value.get("schema") != "agent-index.effective-config"
+        or value.get("version") != 1 or type(value.get("opted_in")) is not bool):
+    raise SystemExit(1)
 print("1" if value.get("opted_in") else "0")
 print(value.get("config") if isinstance(value.get("config"), str) else "")
 print(value.get("repo_root") if isinstance(value.get("repo_root"), str) else "")
 print(value.get("source") if isinstance(value.get("source"), str) else "")
+print(value.get("reason") if isinstance(value.get("reason"), str) else "")
 '
-)
+)" || _configuration_failure
+EFFECTIVE_FIELDS=()
+while IFS= read -r field; do
+    EFFECTIVE_FIELDS[${#EFFECTIVE_FIELDS[@]}]="$field"
+done <<<"$EFFECTIVE_FLAT"
 if [ "${EFFECTIVE_FIELDS[0]:-0}" != 1 ]; then
+    case "${EFFECTIVE_FIELDS[4]:-}" in
+        repository-unavailable|repository-config-absent|external-state-root-config-absent) ;;
+        *) _configuration_failure ;;
+    esac
     if [ "$COMMAND" = installer-readiness ]; then
         printf '%s\n' \
             '{"detail":"No effective .agent-index/config.yaml or repo-local agent-index overlay opts this repository in; session startup remains non-mutating.","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"configuration-empty","version":1}'
@@ -74,8 +87,7 @@ if [ "${EFFECTIVE_FIELDS[0]:-0}" != 1 ]; then
     case "$COMMAND" in status|__session-stamp) exit 0 ;; esac
     exit 2
 fi
-[ -n "${EFFECTIVE_FIELDS[1]:-}" ] &&
-    export AGENT_INDEX_EFFECTIVE_CONFIG="${EFFECTIVE_FIELDS[1]}"
+# A reported base path is provenance, not an explicit merged-config override.
 [ -n "${EFFECTIVE_FIELDS[2]:-}" ] &&
     export AGENT_INDEX_REPO="${EFFECTIVE_FIELDS[2]}"
 if [ "${EFFECTIVE_FIELDS[3]:-}" = forwarded ]; then
@@ -336,20 +348,24 @@ fi
 
 _configured_role() {
     local role=""
-    role="$(printf '%s' "${AGENT_INDEX_ROLE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
-    case "$role" in host|client) printf '%s' "$role"; return 0 ;; esac
     local machine="${AGENT_INDEX_MACHINE:-$(hostname -s 2>/dev/null || true)}"
     local args=(--machine "$machine")
     if [ -n "${AGENT_INDEX_CONFIG_DATA_B64:-}" ]; then
         args+=(--data-b64 "$AGENT_INDEX_CONFIG_DATA_B64")
     elif [ -n "${AGENT_INDEX_EFFECTIVE_CONFIG:-}" ]; then
         args+=(--config "$AGENT_INDEX_EFFECTIVE_CONFIG")
+    elif [ -n "${AGENT_INDEX_REPO:-}" ]; then
+        args+=(--repo "$AGENT_INDEX_REPO")
     fi
     if [ "${#args[@]}" -gt 2 ]; then
         role="$("$PY_GATE" -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" \
-            "${args[@]}" 2>/dev/null || true)"
+            "${args[@]}" 2>/dev/null)" || return 2
         case "$role" in host|client) printf '%s' "$role"; return 0 ;; esac
+        [ "$role" = unconfigured ] || return 2
+        [ -z "${AGENT_INDEX_REPO:-}" ] || return 0
     fi
+    role="$(printf '%s' "${AGENT_INDEX_ROLE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    case "$role" in host|client) printf '%s' "$role"; return 0 ;; esac
     local config="${AGENT_INDEX_CONFIG:-$ROOT/config.yaml}"
     if [ -f "$config" ]; then
         role="$(sed -n 's/^[[:space:]]*\(role\|engine\)[[:space:]]*:[[:space:]]*["'\'']\?\([A-Za-z]*\)["'\'']\?.*/\2/p' "$config" | head -n1 | tr '[:upper:]' '[:lower:]')"
@@ -357,7 +373,7 @@ _configured_role() {
     case "$role" in
         host|engine|server|indexer) printf '%s' host ;;
         client|none|consumer) printf '%s' client ;;
-        *) return 1 ;;
+        *) return 0 ;;
     esac
 }
 
@@ -478,12 +494,6 @@ _emit_runtime_unavailable() {
     local runtime_state="$1" role="$2"
     printf '%s\n' \
         '{"configured":true,"plugin":"agent-index","role":"'"$role"'","running":false,"runtime":{"state":"'"$runtime_state"'"},"schema":"agent-index.lifecycle","schema_version":1,"setup_required":false,"state":"runtime_unavailable","version":"'"$(_version)"'"}'
-}
-
-_emit_readiness() {
-    local state="$1" detail="$2"
-    printf '{"detail":"%s","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"%s","version":1}\n' \
-        "$detail" "$state"
 }
 
 _setup_has_choice() {
@@ -658,7 +668,7 @@ _restore_setup_role() {
 }
 
 _resolve_ready_runtime
-ROLE="$(_configured_role 2>/dev/null || true)"
+ROLE="$(_configured_role)" || _configuration_failure
 RUNTIME_STATE="$(_runtime_state)"
 
 case "$COMMAND" in
@@ -679,8 +689,13 @@ case "$COMMAND" in
         exec "$AGENT_RT_PY" -I -X utf8 -m agent_index "$@"
         ;;
     installer-readiness)
-        _emit_readiness configuration-empty 'agent-index runtime activation is explicit; session startup does not provision packages or start services.'
-        exit 0
+        if [ -n "${AGENT_RT_PY:-}" ]; then exec "$AGENT_RT_PY" -I -X utf8 -m agent_index "$@"; fi
+        if [ -z "$ROLE" ]; then
+            _emit_readiness configuration-empty 'No indexer is designated for the current repository.'
+            exit 0
+        fi
+        _emit_readiness failed 'The configured agent-index runtime is unavailable; no service was started.'
+        exit 1
         ;;
     role)
         if [ -z "$ROLE" ]; then

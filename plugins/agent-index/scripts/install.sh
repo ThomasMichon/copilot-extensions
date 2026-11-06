@@ -1603,8 +1603,7 @@ _ensure_runtime() {
         exit 1
     fi
     # Resolve the host role only for sibling provisioning.
-    install_role="$(_activation_role)"
-    [[ "$install_role" == "unconfigured" ]] && install_role="$(_machine_role)"
+    install_role="$(_required_runtime_role)"
     _ok 'Package installed: agent-index'
 
     if ! _install_server_venv "$install_role" "$py"; then
@@ -1614,13 +1613,12 @@ _ensure_runtime() {
 
     fi
 
-    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" && "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
         local reuse_role
-        reuse_role="$(_activation_role)"
-        [[ "$reuse_role" != unconfigured ]] || reuse_role="$(_machine_role)"
+        reuse_role="$(_required_runtime_role)"
         if [[ "$reuse_role" == host ]] &&
             ! _test_index_server_venv "$VENV_DIR/server" "$VENV_DIR/server/bin/python3"; then
-            _fail 'Immutable source generation lacks its host service closure; select a distinct complete generation'
+            _fail 'Completed runtime lacks its required host service closure; select a distinct complete generation'
             return 1
         fi
     fi
@@ -1732,6 +1730,16 @@ _machine_role() {
         esac
     fi
     printf 'unconfigured'
+}
+
+_required_runtime_role() {
+    # Repository client routing does not withdraw machine-wide hosting capability.
+    local machine_role role
+    machine_role="$(_machine_role)"
+    if [[ "$machine_role" == host ]]; then printf host; return 0; fi
+    role="$(_activation_role)"
+    if [[ "$role" == unconfigured ]]; then role="$machine_role"; fi
+    printf '%s' "$role"
 }
 
 _activation_role() {

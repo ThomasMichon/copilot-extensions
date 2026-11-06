@@ -44,6 +44,9 @@ DEFAULT_FAKE_RUNTIME = (
     "'role':None,'running':False,'runtime':{'state':'ready'}}))\n"
     "elif command in ('version', '--version'):\n"
     "    print('9.9.9')\n"
+    "elif command == 'installer-readiness':\n"
+    "    print(json.dumps({'schema':'copilot-extensions.module-readiness','version':1,"
+    "'module':'agent-index/runtime','state':'configuration-empty','detail':'unconfigured fixture'}))\n"
 )
 
 

@@ -17,6 +17,34 @@ import pytest
 from test_install_engine_adoption import environment, function, run_ps
 
 
+@pytest.mark.parametrize("machine_role,repository_role,expected", [
+    ("host", "client", "host"),
+    ("client", "client", "client"),
+    ("unconfigured", "host", "host"),
+    ("unconfigured", "unconfigured", "unconfigured"),
+])
+def test_required_companion_role_preserves_machine_capability(
+    tmp_path, machine_role, repository_role, expected,
+):
+    root = tmp_path / "runtime-role"
+    root.mkdir()
+    (root / "config.yaml").write_text(f"role: {machine_role}\n", encoding="utf-8")
+    result = run_ps(tmp_path, (
+        function("Get-MachineRole", "ps1") + function("Get-RequiredRuntimeRole", "ps1")
+        + f"""
+$InstallDir = '{root}'
+$NoService = $true
+Remove-Item Env:AGENT_INDEX_ROLE -ErrorAction SilentlyContinue
+Remove-Item Env:AGENT_INDEX_CONFIG -ErrorAction SilentlyContinue
+function Get-ActivationRole {{ return '{repository_role}' }}
+Write-Output ("required:" + (Get-RequiredRuntimeRole))
+if ((Get-ActivationRole) -ne '{repository_role}') {{ throw 'repository routing changed' }}
+"""
+    ))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"required:{expected}" in result.stdout
+
+
 @pytest.mark.parametrize("failure,expected", [("service-files", 17), ("environment", 2)])
 def test_shell_cutover_propagates_setup_failure_inside_or_list(tmp_path, failure, expected):
     bash = (

@@ -1693,8 +1693,7 @@ function Install-Runtime {
     if ($LASTEXITCODE -ne 0) { Write-Fail 'dropin-registry install failed'; exit 1 }
     # Both roles have a light primary CLI. Only a host receives a complete
     # sibling service runtime; the durable embedding engine remains explicit.
-    $installRole = Get-ActivationRole
-    if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
+    $installRole = Get-RequiredRuntimeRole
     $pkgSpec = "$PluginDir"
     if ($env:OS -eq 'Windows_NT') {
         $driverPackages = @()
@@ -1734,16 +1733,15 @@ function Install-Runtime {
     }
 
     $prevVersion = ''
-    if ($script:SourceRuntimeIdentity -and $script:RuntimeConstructionReuse) {
-        $reuseRole = Get-ActivationRole
-        if ($reuseRole -eq 'unconfigured') { $reuseRole = Get-MachineRole }
+    if ($script:RuntimeConstructionReuse) {
+        $reuseRole = Get-RequiredRuntimeRole
         if ($reuseRole -eq 'host') {
             $serverDir = Join-Path $VenvDir 'server'
             $serverPython = if ($env:OS -eq 'Windows_NT') {
                 Join-Path $serverDir 'Scripts\python.exe'
             } else { Join-Path $serverDir 'bin/python3' }
             if (-not (Test-IndexServerVenv -Dir $serverDir -Python $serverPython)) {
-                throw 'Immutable source generation lacks its host service closure; select a distinct complete generation'
+                throw 'Completed runtime lacks its required host service closure; select a distinct complete generation'
             }
         }
     }
@@ -1833,6 +1831,15 @@ function Get-MachineRole {
         }
     }
     return 'unconfigured'
+}
+
+function Get-RequiredRuntimeRole {
+    # Repository client routing does not withdraw machine-wide hosting capability.
+    $machineRole = Get-MachineRole
+    if ($machineRole -eq 'host') { return 'host' }
+    $role = Get-ActivationRole
+    if ($role -eq 'unconfigured') { return $machineRole }
+    return $role
 }
 
 function Get-ActivationRole {

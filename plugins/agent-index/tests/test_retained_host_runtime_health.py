@@ -66,6 +66,7 @@ def venv(path: Path, *, host: bool = False) -> tuple[Path, Path]:
 @pytest.mark.parametrize(("role", "corruption"), [
     ("host", "server"), ("host", "dependency"), ("host", "none"), ("client", "server"),
     ("host", "cli"), ("client", "cli"), ("host", "server-cli"),
+    ("machine-host-client", "server"),
 ])
 def test_retained_host_health_gates_publication(
     source, tmp_path: Path, ext: str, role: str, corruption: str,
@@ -133,7 +134,7 @@ def test_retained_host_health_gates_publication(
     reader_before = {reader: reader.read_bytes() for reader in readers}
     completion = (candidate / ".install-complete.json").read_bytes()
     env = FIXTURES._FIXTURES.environment(tmp_path)
-    env["AGENT_INDEX_ROLE"] = role
+    env["AGENT_INDEX_ROLE"] = "host" if role == "machine-host-client" else role
     paths = [str(Path(BASE).parent), str(Path(executable).resolve().parent)]
     if os.name == "nt":
         system = Path(env["SYSTEMROOT"])
@@ -177,7 +178,7 @@ function Write-Fail {{ param($Msg) throw $Msg }}
 {definitions}
 function Get-BootstrapPython {{ return '{BASE}' }}
 function Get-IndexUv {{ return $null }}
-function Get-ActivationRole {{ return 'unconfigured' }}
+function Get-ActivationRole {{ return '{"client" if role == "machine-host-client" else "unconfigured"}' }}
 function Invoke-VersionedGc {{ param($KeepPrev) }}
 function Get-GitInfo {{ param($Path) return @{{commit='unknown'; branch='unknown'; dirty=$false}} }}
 Initialize-SourceRuntime
@@ -215,7 +216,7 @@ _fail() {{ printf '%s\\n' "$*" >&2; }}
 _bootstrap_python() {{ printf '%s' '{BASE}'; }}
 _find_python() {{ printf '%s' '{BASE}'; }}
 _ensure_uv() {{ :; }}; _ensure_uv_index() {{ :; }}
-_activation_role() {{ printf unconfigured; }}
+_activation_role() {{ printf '{"client" if role == "machine-host-client" else "unconfigured"}'; }}
 _versioned_gc() {{ :; }}
 _initialize_source_runtime
 _ensure_runtime
@@ -225,7 +226,7 @@ _ensure_runtime
     result = subprocess.run(
         argv, env=env, capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
     )
-    if corruption == "cli" or (role == "host" and corruption != "none"):
+    if corruption == "cli" or (role in {"host", "machine-host-client"} and corruption != "none"):
         assert result.returncode != 0, result.stdout + result.stderr
         assert token in result.stdout + result.stderr
         after = {name: (root / name).read_bytes() if (root / name).exists() else None for name in names}
