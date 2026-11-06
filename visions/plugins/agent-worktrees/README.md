@@ -454,6 +454,26 @@ Execution legs from different Copilot products and hosting technologies can bind
 to the same worktree model without agent-worktrees learning their launch or
 interaction mechanics.
 
+### identity-preserving-checkout-relocation
+
+An operator can deliberately relocate an inactive managed checkout, including
+across storage volumes, without changing its durable worktree or conversation
+identity, responsibility, relationships or source-control state. All actual
+checkout content survives, including staged, unstaged, untracked and ignored
+work. Inactive work-in-progress is not abandonment or finalization.
+
+Relocation preserves the owning lifecycle and execution authorities, requires
+qualified inactivity, and rebinds operational locations through their owners
+without rewriting historical evidence indiscriminately. Interrupted moves
+remain recoverable without premature data removal or replacement allocation;
+unsupported preservation or owner semantics produce an actionable refusal.
+
+Allocation defaults govern new workspaces, not the validity of retained ones.
+Existing worktrees remain usable at their authoritative locations when old and
+new allocation roots coexist, including paired repositories with independent
+roots. Recovery retains an interrupted allocation's original intent rather
+than silently creating another workspace from changed defaults.
+
 ### replay-safe-workspace-allocation
 
 Allocating a worktree creates an execution space, not a conversation. Every
