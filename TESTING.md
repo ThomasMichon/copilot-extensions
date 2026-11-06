@@ -2478,6 +2478,14 @@ execution. POSIX tmux targeting remains unchanged. Portable controls cover the
 compatible pairs, mixed-version refusal, replacement, bare names, stale native
 identity and the unchanged operation deadline; they are not native integration
 qualification.
+The next reviewed Windows run passes all startup controls, the synthetic-owner
+client and pane-lifetime control, and reaches the actual joined client's
+post-Escape exit wait. That wait remains a failure: its original diagnostic
+queried the already-departed observer pane and obscured which cleanup condition
+was unmet. A phase-specific diagnostic now reports retained observer/reader
+handles, live birth-qualified owner commands and Bridge subscription counts
+without querying a dead pane. The unchanged cleanup assertions and 15-second
+deadline remain the acceptance gate.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

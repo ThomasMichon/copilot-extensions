@@ -120,7 +120,9 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                 path = peer["checkout"].parent / "native-state.json"
                 return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
-            def wait_for(condition: Callable[[], bool]) -> None:
+            def wait_for(
+                condition: Callable[[], bool], describe: Callable[[], dict[str, Any]] | None = None,
+            ) -> None:
                 deadline = time.monotonic() + 15
                 while time.monotonic() < deadline:
                     assert not client.exited(client.process.process), client.output.decode("utf-8", "replace")
@@ -130,7 +132,8 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                         return
                     time.sleep(.025)
                 pytest.fail(json.dumps({
-                    "screen": screen(), "state": app_state(),
+                    "observation": describe() if describe is not None else {"screen": screen()},
+                    "state": app_state(),
                     "client": client.output.decode("utf-8", "replace"),
                     "cli_started": started.read_text() if started.exists() else None,
                     "bridge_failure": (
@@ -252,7 +255,22 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                 wait_for(lambda: mux("display-message", "-p", "-t", session, "#{pane_id}") == cli)
                 wait_for(lambda: client.exited(observer_handle)
                          and all(client.exited(handle) for handle in readers)
-                         and peer["settled"]() and semantic_peer["session"].subscriber_count == 0)
+                         and peer["settled"]() and semantic_peer["session"].subscriber_count == 0,
+                         describe=lambda: {
+                             "phase": "reader-and-observer-exit",
+                             "observer_exited": client.exited(observer_handle),
+                             "readers_exited": {
+                                 reader: client.exited(pinned[reader]) for reader in sorted(reader_pids)
+                             },
+                             "owner_commands_settled": peer["settled"](),
+                             "live_owner_commands": [
+                                 child for child in map(json.loads, peer["trace"].read_text().splitlines())
+                                 if locks.pid_alive(child["pid"])
+                                 and locks.process_start_time(child["pid"]) == child["birth"]
+                             ],
+                             "bridge_subscribers": semantic_peer["session"].subscriber_count,
+                             "bridge_held_connections": semantic_peer["counts"]["held"],
+                         })
                 client.send(b"joined-return\r")
                 wait_for(lambda: "CLI RECEIVED joined-return" in mux("capture-pane", "-p", "-t", cli))
                 assert mux("display-message", "-p", "-t", cli, "#{pane_pid}") == pid

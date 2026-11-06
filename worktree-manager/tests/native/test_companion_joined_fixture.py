@@ -161,6 +161,37 @@ def test_native_client_deadline_is_checked_after_the_blocking_poll(
             namespace["wait_for"](observe)
 
 
+def test_native_cleanup_timeout_does_not_query_the_departed_observer(tmp_path: Path) -> None:
+    source = ast.parse(Path(__file__).with_name("test_companion_joined_psmux.py").read_text())
+    wait = next(node for node in ast.walk(source)
+                if isinstance(node, ast.FunctionDef) and node.name == "wait_for")
+    clock = [0.0]
+
+    def departed_screen() -> str:
+        raise AssertionError("observer pane no longer exists")
+
+    def not_settled() -> bool:
+        clock[0] = 15.0
+        return False
+
+    namespace = {
+        "time": SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda _delay: None),
+        "client": SimpleNamespace(
+            process=SimpleNamespace(process=1), output=b"", read_error=None, exited=lambda _handle: False,
+        ),
+        "peer": {"failures": []}, "semantic_peer": {
+            "failures": [], "diagnostic": tmp_path / "absent",
+        },
+        "screen": departed_screen, "app_state": lambda: {}, "started": tmp_path / "absent",
+        "cli_pid": None, "json": json, "pytest": pytest,
+    }
+    exec(compile(ast.Module(body=[wait], type_ignores=[]), "<native cleanup wait>", "exec"), namespace)
+    with pytest.raises(pytest.fail.Exception, match='"observer_exited": true'):
+        namespace["wait_for"](not_settled, describe=lambda: {
+            "observer_exited": True, "owner_commands_settled": False, "bridge_subscribers": 1,
+        })
+
+
 @pytest.mark.parametrize("observed_at", [14.9, 15.0, 16.0])
 def test_startup_comparison_cannot_accept_a_late_banner(observed_at: float) -> None:
     source = ast.parse(Path(__file__).with_name(
