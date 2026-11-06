@@ -5988,6 +5988,30 @@ JUnit output retains individual cold/warm samples and visibility counts, not a
 tail-latency or installed-runtime qualification. This does not enroll the
 subprocess packet in required unit-only CI or change runner budgets.
 
+The `prepared_cell_membership` selection in that packet stamps real selected
+cells through the original resolver, publishes the original linked-worktree
+association, then traps interpreter lookup in PowerShell 5.1 and 7. It covers
+current reuse, changed install/payload bytes including restored-size/mtime
+controls, missing namespace/content witnesses, conflicting payload selection,
+wrong registry scope and incomplete older associations under the unchanged
+30-second item and 10-second child bounds. Legacy prepared controls remain
+separate compatibility evidence. These are isolated native membership checks,
+not installed or complete cell-hook qualification.
+The seven actor-free producer/adapter controls in
+`tools/promotion_unit_tests/test_prepared_cell_membership.py` cover fresh
+publication, one-time upgrade without input/Git replay and unchanged-view
+no-op, reuse of the original validated bytes with exactly one resolution,
+older-SDK, opaque-witness and oversized-source fallback using injected owner/filesystem
+boundaries; they belong in unit CI,
+not the native subprocess inventory.
+
+The path-gated `prepared-membership-native.yml` workflow separately requires
+both Windows shells for the selected-cell controls and exercises real stamped
+producer isolation on Linux. The incomplete-association control reaches the
+actual original admission CLI and its caller-watch helper, then verifies the
+one-time prepared-view upgrade. It remains under the same item/child bounds;
+missing native prerequisites are failures in the selected hosted lane.
+
 The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction
 holders before/after witness publication and during restoration. Worktrees'

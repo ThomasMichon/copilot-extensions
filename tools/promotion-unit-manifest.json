@@ -1,6 +1,24 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_original_membership_producer_preserves_inputs_and_upgrades_only_missing_cell_view[fresh]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_original_membership_producer_preserves_inputs_and_upgrades_only_missing_cell_view[old-association]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_original_membership_producer_preserves_inputs_and_upgrades_only_missing_cell_view[old-declared-paths]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_original_membership_producer_preserves_inputs_and_upgrades_only_missing_cell_view[current-association]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[current]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[older-sdk]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[oversized]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[opaque-witness]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[opaque-roots]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[directory-source]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[unknown-source]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[opaque-declarations]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[duplicate-declarations]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[missing-getter]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[alias-payload]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[alias-plugin]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[alias-namespace]",
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_registry_capture_borrows_validated_bytes_without_a_second_resolution[resolver-error]",
         "tools/promotion_unit_tests/test_relationship_request_admission.py::test_configured_admission_never_imports_absent_or_invalid_selection[selection0]",
         "tools/promotion_unit_tests/test_relationship_request_admission.py::test_configured_admission_never_imports_absent_or_invalid_selection[selection1]",
         "tools/promotion_unit_tests/test_relationship_request_admission.py::test_configured_admission_never_imports_absent_or_invalid_selection[selection2]",
@@ -4559,6 +4577,12 @@
         "tools/promotion_unit_tests/test_relationship_request_admission.py::test_unbound_and_missing_request_owner_cannot_silently_downgrade"
     ],
     "sources": {
+        "tools/promotion_unit_tests/test_prepared_cell_membership.py": "0d46c2ef80b1507fb8f80beda2a903f25c4dda86ca38974d8ccd6bbdf1905be5",
+        "plugins/agent-worktrees/scripts/managed_session.py": "373989e7c6c72b629f9e3e48093077ae758752bb16c7989a5589ec2febe2e09e",
+        "plugins/agent-worktrees/scripts/execution_platform.py": "d04e459a34cba4d21d73cbdea6f22a1635f2a8ef504d98c6b4482c60aea2344a",
+        "plugins/agent-worktrees/scripts/managed_project_identity.py": "243d7b35f15f319309441565c230882f64dcaf14c7fc51c48b8038c1a39a9a5b",
+        "plugins/agent-worktrees/scripts/remote_identity.py": "11778aadb9ef93d8c45c68bffd325c7e07c3ef956812c24eb75c4ba1d79122ba",
+        "plugins/agent-worktrees/scripts/guarded_anchor_map.py": "19e5b15f8f90dc503f1dea0947ae451a82937bcb1fffa85ebbd1410d15e4cb7f",
         "libs/repository-policy/src/repository_policy/receiving.py": "9edad82766c227e2f3e2ab0cc919f7d54fe9301e40de36a0414c4ed090140239",
         "libs/copilot-driver-core/src/agent_remote_driver/session_host/receiver_policy.py": "ca26364821860e4cf86b1cb42b3a95720ee451f82336c38beb1f4505747c124a",
         "tools/promotion_unit_tests/test_portable_receiving_policy.py": "8e9985a82dabac55cba1eee87683561cdbf6a2c0b533146f9c88c2a9122b5ad5",
@@ -4860,7 +4884,7 @@
         "plugins/agent-worktrees/scripts/anchor_write_guard.py": "cf354630e43adfc9e04cd86f3f5d0461bba9aeedb2d9edf85083c19c3f170d69",
         "plugins/agent-worktrees/scripts/statelessness_guard.py": "b126e1ef0fc96d93476b8b25ae471b3e14034d0a31184f88ef958b0f1255f02b",
         "plugins/agent-worktrees/scripts/tool_call_forms.py": "84b965519ed2ed89b46070babdda235d4ccaa8dc54e862df96b0faba91b90d8b",
-        "plugins/agent-worktrees/scripts/registry_root.py": "380691bd9191b695b7590e90322a258ee83f3007d3f27e5bd432a7d59a6e21e3",
+        "plugins/agent-worktrees/scripts/registry_root.py": "ae0cf831dba7c2c47e45d5f6b33ed82c9a81db0e249f2d541d3a740d17c897b1",
         "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "9e2f0fa59647df7fc1c8e136562f39830b807b36e8fa5e222b34325b6902c08d",
         "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py": "5aabbae888c445b882dac787e5695f5e59905799c2e2a2303a8c5ea05df976ff",
         "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py": "3ab0b5b960d1b0ac1ca7b52f80c7aace2a81db43f4a15b79aec1aaab85463fe3",
@@ -5450,7 +5474,9 @@
         "plugins/agent-dispatch/src/agent_dispatch/assignment_relationship_owner.py",
         "plugins/agent-dispatch/src/agent_dispatch/assignment_workspace.py",
         "plugins/agent-dispatch/src/agent_dispatch/queue_task_relationships.py",
-        "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py"
+        "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py",
+        "plugins/agent-worktrees/scripts/managed_session.py",
+        "plugins/agent-worktrees/scripts/registry_root.py"
     ],
     "max_seconds": 300
 }

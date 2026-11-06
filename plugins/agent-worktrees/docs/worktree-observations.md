@@ -422,13 +422,68 @@ Membership remains distinct from permission, head custody and liveness.
 The read is capped at 1 MiB plus one overflow byte, 256 witnesses, 4,096
 characters per path and 128 path components. Only canonical local Windows
 paths without reparse components are eligible. Missing, changed, malformed,
-oversized, installation-cell, UNC and alias observations retain the existing
+oversized, unsupported-cell, UNC and alias observations retain the existing
 owner admission path. Cold reconstruction still uses that original path.
 This is validated warm-path reuse, not a complete shell-only hook transition
 or a replacement for installation-context validation. Registered post-tool
 tests compose the actual owner association, unchanged shell entry and private
 resident with interpreter lookup trapped; their synthetic project/provider
 does not establish installed, ACP/model or whole-hook throughput acceptance.
+
+#### Prepared installation-cell membership
+
+After the original installation-context resolver validates an explicitly
+selected cell, the same membership producer adds an optional `installation`
+observation to its version-1 association. That observation has version 1,
+the resolved `namespaceReceipt`, `installReceipt`, `payloadRoot`, `cellRoot`
+and `pluginRoot` paths, an explicit `sourceKind`, three `declaredPaths`,
+exactly three `files` digests, and seven `roots`
+entries retaining each receipt-declared lexical path and its resolved path. The original
+registry adapter borrows receipt digests from the SDK's active validated-read
+scope and the manifest digest from its original payload read; it does not
+re-read or re-validate those documents to manufacture evidence. It captures the
+declared roots during the original SDK's root resolution, not another invocation.
+It also captures the SDK's original string reads for receipt `payload.root`,
+`pluginRoot` and `namespaceReceipt`. Each must occur exactly once and directly
+match its validated canonical result; aliases, dot segments and incomplete
+capture retain original admission without a second path resolution or receipt read.
+The original
+sources also witness both receipts, the selected roots and manifest.
+Membership publication adds
+no permission, current-runtime assertion or installation operation.
+Only original validated GitHub, Git URL and opaque namespace identities qualify.
+Directory namespaces retain original admission, including stable-ID directory
+sources: prepared reuse does not duplicate their source normalization or assume
+an external directory's identity remains unchanged. Older observations missing
+the explicit source eligibility cannot qualify.
+
+The Windows reader requires that complete observation, exact selected context
+and payload, the canonical same-cell/plugin layout, every mandatory source
+witness and all original ownership/input checks before reusing membership.
+All three `declaredPaths` must be present, still canonical and unlinked, and
+match their selected paths. Older observations missing them cannot qualify.
+Every declared root and its lexical ancestors must remain canonical and unlinked,
+including roots not used by project membership. Missing directories may be
+created normally; root existence is not cached, so publishing the association
+into an initially absent cache does not invalidate its own observation.
+It neither parses receipts itself nor runs the resolver in shell. Each of
+the three witnessed files is read in process with a 1-MiB-plus-overflow-byte
+bound and compared to the original validated content digest, so restored
+size/timestamps cannot hide changed receipt or manifest bytes. The existing
+association's 1-MiB/256-witness/path bounds are unchanged. Inherited payload
+conflicts, changed or missing witnesses and incomplete older associations refuse reuse.
+The original resolver still owns cold or incompatible admission. On a valid
+old association it can publish the additive view without Git/registry traversal;
+an unchanged complete association needs no rewrite.
+
+New producers remain compatible with old readers, which ignore the additive
+field and retain their old cell path. New readers use an old producer's
+association only after its original resolver supplies the required observation;
+they never infer cell support from the schema number alone. An older SDK
+without validated-read capture support supplies no prepared cell observation,
+and retains its normal original-owner admission. This qualifies
+prepared native Windows membership, not complete cell post-tool dispatch,
+shell-only cold reconstruction, installed hooks or composed throughput.
 
 ## Qualified resident native saves
 
