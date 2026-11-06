@@ -81,6 +81,7 @@ from plugin_test_containment import (
     partition,
     run_contained,
 )
+from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -563,10 +564,18 @@ def run_plugin(
         _ensure_venv(name, uv, reinstall=reinstall)
         print(f"[PASS] {name} (prepared)")
         return 0
+    plugin_started = time.monotonic()
+    try:
+        check_test_sources(_plugin_dir(name) / "tests")
+    except UnsafeTestCommand as error:
+        print(f"[FAIL] {name}: {error}", file=sys.stderr)
+        return 2
+    if time.monotonic() - plugin_started >= plugin_timeout:
+        print(f"[LIMIT] {name}: source preflight exhausted the plugin budget", file=sys.stderr)
+        return 124
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
-    plugin_started = time.monotonic()
     report_directory = None
     if junit_dir is not None:
         report_directory = junit_dir.expanduser().resolve() / name
