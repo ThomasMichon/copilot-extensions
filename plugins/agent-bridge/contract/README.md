@@ -80,6 +80,16 @@ The selection resolver and packaged peer launcher are semantic HTTP sources. The
 the named capability expectation; HTTP generation 52, prior feature floors,
 all earlier cases and historical packets remain unchanged.
 
+Retained acquisition and executing-session writer controls, followed by three
+optional inspection CLI/HTTP controls, bring the current HTTP-52 portfolio to
+193 cases. The new inspection capability is independently negotiated without
+changing the HTTP generation. Current, prior and rolled-back providers exercise
+the actual parser and ASGI boundary. The existing finite delegated-process
+control also inspects the original journal's writer and workspace, requiring
+unchanged protected record bytes, journal and resident-call history. These
+are source observations, not installed-provider, native-conversation or
+complete participating-cohort admission.
+
 The joined portable-mux fixture retains the production native socket-path
 bound. Its isolated physical temporary root must be short enough for that
 bound; a long caller `TMPDIR` can correctly refuse before creating the mocked
