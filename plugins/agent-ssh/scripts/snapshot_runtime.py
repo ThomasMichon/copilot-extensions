@@ -210,20 +210,6 @@ def worktrees_command(owner: Path, own: dict | None) -> tuple[list[str], dict]:
         primitive = sys.modules["_owner_installation_context"]
         root = Path(own["pluginRoot"])
         durable = root.parents[3]
-        active = peer._active_context(
-            primitive,
-            Path(own["installReceipt"]),
-            durable,
-            "agent-ssh",
-            Path(own["cellRoot"]),
-            dict(os.environ),
-        )
-        if (
-            any(active.get(key) != own.get(key) for key in active)
-            or peer._governance(primitive, active, durable, dict(os.environ))
-            != own["invocationGovernance"]
-        ):
-            raise ValueError("Caller installation changed before optional lookup")
         receipt = Path(own["cellRoot"]) / "plugins" / "agent-worktrees" / "install.json"
         if not receipt.parent.exists():
             raise FileNotFoundError("Optional peer is absent")
@@ -241,6 +227,21 @@ def worktrees_command(owner: Path, own: dict | None) -> tuple[list[str], dict]:
             "agent-worktrees",
             environment,
         )
+        # The request worker admitted the caller before resolution; fence changes now.
+        active = peer._active_context(
+            primitive,
+            Path(own["installReceipt"]),
+            durable,
+            "agent-ssh",
+            Path(own["cellRoot"]),
+            dict(os.environ),
+        )
+        if (
+            any(active.get(key) != own.get(key) for key in active)
+            or peer._governance(primitive, active, durable, dict(os.environ))
+            != own["invocationGovernance"]
+        ):
+            raise ValueError("Caller installation changed during optional runtime resolution")
     # The selected runtime imports only the existing owner resolution APIs,
     # including its normal cwd/project discovery, not the broad CLI composition.
     command[-2:] = [str(owner / "scripts" / "snapshot_worktrees.py")]

@@ -17,6 +17,11 @@ from types import SimpleNamespace
 import pytest
 from agent_procutil.owned_process import run_caller_owned
 
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+
 _PLUGIN = Path(__file__).resolve().parents[1]
 _REPO = _PLUGIN.parents[1]
 
@@ -107,6 +112,46 @@ def test_missing_completed_runtime_cannot_fall_back_to_running_interpreter(tmp_p
     monkeypatch.setattr(launcher, "load", lambda *_: Primitive())
     with pytest.raises(FileNotFoundError, match="completed runtime"):
         launcher.runtime_command(tmp_path, "agent-ssh", {})
+
+
+@pytest.mark.parametrize("changed", ["generation", "governance"])
+def test_optional_runtime_selection_revalidates_caller_binding(tmp_path, monkeypatch, changed):
+    root = tmp_path / "durable" / "marketplaces" / "sample" / "plugins" / "agent-ssh"
+    cell = root.parent.parent
+    (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
+    own = {
+        "pluginRoot": str(root), "cellRoot": str(cell),
+        "installReceipt": str(root / "install.json"), "generation": 1,
+        "invocationGovernance": {"actualMode": "namespaced"},
+    }
+    active = {key: value for key, value in own.items() if key != "invocationGovernance"}
+    governance = dict(own["invocationGovernance"])
+    calls = []
+
+    def context(_primitive, _receipt, _durable, plugin, _cell, _environment):
+        calls.append(plugin)
+        return dict(active) if plugin == "agent-ssh" else {"payloadRoot": str(tmp_path)}
+
+    peer = SimpleNamespace(
+        _active_context=context,
+        _governance=lambda *_args: dict(governance),
+        peer_environment=lambda *_args: {},
+    )
+    monkeypatch.setattr(launcher, "load", lambda *_args: peer)
+    monkeypatch.setitem(sys.modules, "_owner_installation_context", object())
+
+    def runtime(*_args):
+        calls.append("runtime")
+        if changed == "generation":
+            active["generation"] = 2
+        else:
+            governance["actualMode"] = "legacy"
+        return ["python", "-m", "agent_worktrees"], {}
+
+    monkeypatch.setattr(launcher, "runtime_command", runtime)
+    with pytest.raises(ValueError, match="Caller installation changed"):
+        launcher.worktrees_command(tmp_path, own)
+    assert calls[-2:] == ["runtime", "agent-ssh"]
 
 
 def _slot_command(root, monkeypatch):
@@ -285,6 +330,42 @@ def test_selected_peer_purelib_uses_its_minor_not_the_runner_minor(monkeypatch):
     assert f"python3.{runner_minor}/" not in path.as_posix()
 
 
+def _fixture_source_roots(source):
+    pending, visited = [source], set()
+    while pending:
+        project = pending.pop().resolve()
+        if project in visited:
+            continue
+        assert project.is_relative_to(_REPO)
+        visited.add(project)
+        manifest = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+        if (project / "src").is_dir():
+            yield project / "src"
+        for origin in manifest.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            if isinstance(origin, dict) and "path" in origin:
+                pending.append(project / origin["path"])
+
+
+def test_native_fixture_selects_transitive_declared_sources_without_unrelated_trees(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setitem(globals(), "_REPO", tmp_path)
+    for name, dependency in (
+        ("caller", "dependency"), ("dependency", "transitive"),
+        ("transitive", "caller"), ("unrelated", None),
+    ):
+        project = tmp_path / name
+        (project / "src").mkdir(parents=True)
+        (project / "pyproject.toml").write_text(
+            f'[tool.uv.sources]\nselected = {{path = "../{dependency}"}}\n'
+            if dependency else "",
+            encoding="utf-8",
+        )
+    assert set(_fixture_source_roots(tmp_path / "caller")) == {
+        tmp_path / name / "src" for name in ("caller", "dependency", "transitive")
+    }
+
+
 def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
     original_home = Path.home()
     original_peer_site = None
@@ -446,7 +527,7 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
         # source roots on sys.path (which has very different native I/O cost).
         ignore = shutil.ignore_patterns("__pycache__")
         if not native_peer:
-            for source_root in (payload / "src", *(_REPO / "libs").glob("*/src")):
+            for source_root in _fixture_source_roots(source):
                 for package in source_root.iterdir():
                     if package.is_dir():
                         shutil.copytree(

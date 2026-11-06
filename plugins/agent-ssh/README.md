@@ -504,7 +504,9 @@ The optional Worktrees read runs its existing cwd/project discovery,
 configuration and state-root semantics through its owning
 `state_root_request.resolve()` API inside its own validated runtime. A single
 request shares a canonical binding and revalidates before returning; no
-authority survives between callbacks. Older peers missing the API are
+authority survives between callbacks. Optional runtime selection also revalidates
+the SSH caller's receipt and invocation governance before returning a launch
+command, refusing changes made during peer resolution. Older peers missing the API are
 unavailable. Legacy
 lookup uses the existing qualified installed-inventory API; no `payload-dir`
 marker is required for an already completed runtime. Legacy source/snapshot
@@ -551,6 +553,8 @@ timeout cleanup while Win32 enumerates visible windows and foreground changes.
 The fixture requires the native adapter and makes shell fallback fail closed.
 Disposable fixtures precompile package and used payload Python inputs with their
 selected isolated interpreter, not the runner's redirected bytecode cache.
+Source materialization follows each plugin's declared transitive local
+dependencies instead of copying unrelated repository libraries.
 Their measurements do not qualify cold-cache startup.
 Set `AGENT_SSH_NATIVE_CALLER` plus the runner's host-state flags to reuse an
 existing configured external-state caller; otherwise the lane constructs a
