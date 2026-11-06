@@ -138,6 +138,7 @@ def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
 
 @pytest.mark.parametrize("metadata", (
     {"admitted": True}, {"_admitted": True}, {"_admission_ticket": {"accepted": True}},
+    {"health_only": True},
 ))
 def test_public_request_cannot_forge_retired_lifecycle_admission(
     monkeypatch: pytest.MonkeyPatch, metadata: dict,
@@ -226,6 +227,88 @@ def test_unix_health_deadline_covers_connect(monkeypatch: pytest.MonkeyPatch) ->
     assert events == [("timeout", .25), ("connect", "/fixture/vault.sock")]
 
 
+@pytest.mark.parametrize("accepting", (False, True))
+def test_native_generation_ping_does_not_resolve_configuration_or_backend(
+    monkeypatch: pytest.MonkeyPatch, accepting: bool,
+) -> None:
+    from agent_vault import service
+    from agent_vault.rendezvous import Endpoint
+    from agent_vault.service_connections import VaultConnections
+
+    vault = service.VaultService()
+    vault._runtime_can_work = accepting
+
+    def unavailable(*args, **kwargs):
+        pytest.fail("Native generation health entered configuration or backend work")
+
+    monkeypatch.setattr(service, "resolve_kpdb", unavailable)
+    monkeypatch.setattr(vault, "_check_password_ttl", unavailable)
+    monkeypatch.setattr(vault.cli, "status", unavailable)
+
+    async def exercise() -> None:
+        connections = VaultConnections(vault, service.handle_client)
+        server = await asyncio.start_server(
+            connections.callback("tcp"), "127.0.0.1", 0,
+        )
+        endpoint = Endpoint(
+            "tcp", f"127.0.0.1:{server.sockets[0].getsockname()[1]}",
+            pid=os.getpid(), installation_id=generation.installation_id(),
+        )
+        try:
+            response = await asyncio.to_thread(generation.endpoint_health, endpoint)
+            assert generation.valid_generation_health(response)
+            assert response["pid"] == os.getpid()
+            assert response["accepting_work"] is accepting
+            assert "cli" not in response
+        finally:
+            await connections.close([server], [], lambda: None)
+
+    asyncio.run(exercise())
+
+
+def test_native_generation_ping_accepts_legacy_full_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import service
+    from agent_vault.rendezvous import Endpoint
+
+    response = {
+        "ok": True, "pid": 123, "generation_protocol": generation.PROTOCOL,
+        "runtime_generation": "fixture-generation", "accepting_work": True,
+        "cli": "locked",
+    }
+
+    def legacy_ping(request, host, port, timeout):
+        assert request["action"] == "ping"
+        assert timeout == .25
+        return response
+
+    monkeypatch.setattr(service, "_dial_tcp", legacy_ping)
+    endpoint = Endpoint(
+        "tcp", "127.0.0.1:12345", pid=123,
+        installation_id=generation.installation_id(),
+    )
+    assert generation.endpoint_health(endpoint) is response
+
+
+def test_ordinary_ping_retains_current_configuration_and_backend_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import service
+
+    calls = []
+    vault = service.VaultService()
+    monkeypatch.setattr(vault, "_check_password_ttl", lambda: calls.append("expiry"))
+    monkeypatch.setattr(service, "resolve_kpdb", lambda **kwargs: "fixture.kdbx")
+    monkeypatch.setattr(
+        vault.cli, "status", lambda kpdb: calls.append(kpdb) or "locked",
+    )
+    response = vault.handle_request({"action": "ping"})
+    assert response["cli"] == "locked"
+    assert response["runtime_generation"] == service.PROCESS_GENERATION
+    assert calls == ["expiry", "fixture.kdbx"]
+
+
 CHILD = r"""
 import asyncio, hashlib, json, os, sys, time
 from pathlib import Path
@@ -294,10 +377,8 @@ asyncio.run(main())
 
 
 def _endpoint(root: Path) -> dict | None:
-    try:
-        return json.loads((root / "run" / "endpoint.json").read_text())
-    except (OSError, ValueError):
-        return None
+    endpoint = generation.read_endpoint(root / "run")
+    return endpoint.to_record() if endpoint is not None else None
 
 
 def _port(endpoint: dict) -> int:

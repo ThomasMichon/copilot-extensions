@@ -77,7 +77,7 @@ def decode(raw: bytes) -> dict:
     return value
 
 
-def read(path: Path, *, optional=False, local=False) -> dict | None:
+def read(path: Path, *, optional=False, local=False, validator=None) -> dict | None:
     descriptor = None
     try:
         before = path.lstat()
@@ -103,7 +103,8 @@ def read(path: Path, *, optional=False, local=False) -> dict | None:
             after = os.fstat(stream.fileno())
         if (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             raise PreferenceError("input-changed")
-        return validate_local(decode(raw)) if local else validate(decode(raw))
+        check = validator or (validate_local if local else validate)
+        return check(decode(raw))
     except FileNotFoundError as error:
         if optional:
             return None
@@ -196,6 +197,25 @@ def validate_local(value) -> dict:
     return deepcopy(value)
 
 
+def validate_policy(value) -> dict:
+    _object(value, required=("schema", "version", "publisher", "participant", "domains"))
+    if (
+        value["schema"] != "agent-machines.preferences.policy"
+        or type(value["version"]) is not int or value["version"] != 1
+    ):
+        raise PreferenceError("unsupported-schema")
+    _identifier(value["publisher"])
+    _identifier(value["participant"])
+    domains = value["domains"]
+    if (
+        not isinstance(domains, list) or not 1 <= len(domains) <= len(_DOMAINS)
+        or any(not isinstance(domain, str) or domain not in _DOMAINS for domain in domains)
+        or len(set(domains)) != len(domains)
+    ):
+        raise PreferenceError("invalid-policy-domains")
+    return deepcopy(value)
+
+
 def digest(value: dict) -> str:
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return hashlib.sha256(raw).hexdigest()
@@ -217,7 +237,10 @@ def _overlay(target, source, origin, provenance):
                 provenance[f"{domain}.{field}"] = origin
 
 
-def preview(candidate, accepted, *, publisher, machine, harness, local=None, conflict=False) -> dict:
+def preview(
+    candidate, accepted, *, publisher, machine, harness, local=None,
+    conflict=False, full_snapshot=False,
+) -> dict:
     """Project supplied scope only; native identity and adoption remain separate."""
     _identifier(publisher)
     _identifier(machine)
@@ -248,7 +271,9 @@ def preview(candidate, accepted, *, publisher, machine, harness, local=None, con
             status = "pending"
     elif candidate["parent"] is not None:
         status = "parent-gap"
-    usable = status in {"unaccepted", "pending", "unchanged"}
+    if full_snapshot and status == "parent-gap":
+        status = "full-snapshot"
+    usable = status in {"unaccepted", "pending", "unchanged", "full-snapshot"}
     snapshot = candidate if usable else accepted
     selected, provenance = {}, {}
     if snapshot is not None:

@@ -777,3 +777,42 @@ implementation. The exact support closure follows the consumer trace and tests.
 - #10812 remains merged but unreleased. Next: observe the existing owner's
   correction and successful promotion, verify actual release bytes, then use
   the authorized installation and original single-venue acceptance path.
+
+### 2026-11-06 - Callback release verified; ordinary update prerequisite repair
+
+- The release preparation corrections in #10843 and #10856 passed promotion
+  `42155377340`. Verified the actual released launcher bytes before an
+  authorized installation. The installed account callback returned valid JSON
+  without diagnostics in 4.22 seconds, within its unchanged ten-second budget.
+  This is one installed observation, not a latency baseline or receiving proof.
+- The ordinary update terminated unsuccessfully at separate Pull Requests CLI
+  health and Vault selected-service readiness gates. Neither payload delivery
+  nor other successful runtime phases was reported as whole-update success.
+- Reserved #10959 for the generic optional-Fleet import defect. Three real CLI
+  subprocess controls reproduce help/version failure before the fix. Deferring
+  attention implementation imports preserves execution semantics and keeps
+  the existing installed-health rejection intact. The focused CLI/attention/
+  native-health packet passes 56 cases; Ruff and install contract pass.
+- #10961 received approval on its exact published head, passed required CI and
+  merged as `fdc4794ecb45b3f861b7e01120ccd7cfa745bbe2`. It still requires actual
+  release and installation. This architecture-neutral prerequisite does not
+  close the receiving effort or its native/external acceptance controls.
+- Release run `42191934746` failed both real Windows Resume variants before
+  pane acknowledgement because `work_coalescing_singleton` was unavailable.
+  Existing contributor PR #10960 owns that fixture correction. Supplied the
+  matching failure evidence there rather than creating a competing repair;
+  required native qualification remains intact.
+- Re-read the complete effort after the source merge. Next: verify the actual
+  corrected release and normal installation result, then resume the same
+  authorized first-venue receiving acceptance. No native Copilot, mux lifetime,
+  sparse/old guest or complete external flow has been accepted.
+- A separate selected-generation readiness discrepancy is reserved in #10971:
+  the native 250 ms ping inherited repeated configuration-owner resolution
+  from ordinary backend ping. A lightweight optional hint separates lifecycle
+  metadata from configuration/backend work without raising the deadline or
+  changing public ping. The actual TCP controls reproduce the old failure;
+  27 corrected generation controls pass, including legacy response acceptance,
+  ordinary ping, real successor retirement and writer exclusion.
+  A raw-file fixture reader discovered during the wider packet now uses its
+  canonical delete-sharing reader; publication checks were not weakened.
+  This source correction still needs review, release and authorized rollout.

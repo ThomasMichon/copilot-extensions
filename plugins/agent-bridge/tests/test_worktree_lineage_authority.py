@@ -112,3 +112,30 @@ async def test_selected_owner_registration_and_succession_preserve_protected_rec
     assert {item["ref"] for item in after["resources"] if item["kind"] == "session"} == {
         "local/example/host#native-one", "local/example/host#native-two",
     }
+
+
+@pytest.mark.asyncio
+async def test_retained_command_is_used_for_qualification_and_later_lineage(
+    selected_owner: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = tuple(selected_owner)
+    snapshot(selected_owner, "protect")
+    before = snapshot(selected_owner)
+    monkeypatch.setattr(acquisition, "_agent_worktrees_launch_prefix", lambda: pytest.fail("reselected owner"))
+    monkeypatch.setattr(lineage, "_agent_worktrees_launch_prefix", lambda: pytest.fail("reselected owner"))
+    capabilities = await acquisition.worktree_command(
+        ["resource-relationship", "capabilities", "--json"], None, owner_prefix=prefix,
+    )
+    assert capabilities["writer_contract"]
+    checkout = str(tmp_path / "authority" / "trees" / "host")
+    assert lineage.register_session("host", "native-one", worktree_dir=checkout, owner_prefix=prefix)
+    assert lineage.register_session("host", "native-two", worktree_dir=checkout, owner_prefix=prefix)
+    assert lineage.link_succession(
+        "host", "native-one", "native-two", worktree_dir=checkout, owner_prefix=prefix,
+    )
+    assert lineage.note_handoff("host", "native-one", worktree_dir=checkout, owner_prefix=prefix)
+    assert lineage.session_role("host", "native-two", worktree_dir=checkout, owner_prefix=prefix)["is_head"]
+    assert lineage.history_digest("host", worktree_dir=checkout, owner_prefix=prefix)
+    after = snapshot(selected_owner)
+    assert after["resources"][:len(before["resources"])] == before["resources"]
+    assert after["creation_nonce"] == before["creation_nonce"]

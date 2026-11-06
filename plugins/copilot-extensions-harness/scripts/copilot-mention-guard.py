@@ -31,9 +31,10 @@ import json
 import os
 import re
 import shlex
-import sys
-import time
+import sys as sys
+import time as time
 from pathlib import Path
+from typing import cast
 
 DECISION_BUDGET_SECONDS = 1.5
 
@@ -490,14 +491,14 @@ def _extract_body_text(
             result = _extract_input_json_body(tokens[index + 1], deadline, cwd=cwd)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
-            parts.append(result)
+            parts.append(cast(str, result))
             index += 2
             continue
         if token.startswith("--input="):
             result = _extract_input_json_body(token[len("--input=") :], deadline, cwd=cwd)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
-            parts.append(result)
+            parts.append(cast(str, result))
             index += 1
             continue
         # ``gh api ... -f body=VALUE`` / ``-F body=@path`` / ``-F body=@-``
@@ -579,7 +580,7 @@ def command_publishes_copilot_mention(
             # inspected before the command runs -- fail closed rather than
             # silently pass an unverifiable publish through.
             return "unscannable"
-        if MENTION.search(body_text):
+        if MENTION.search(cast(str, body_text)):
             return "mention"
     return None
 

@@ -171,6 +171,8 @@ def test_attach_does_not_swallow_bytes_after_ack(tmp_path):
 
     def _serve_once():
         conn, _ = srv.accept()
+        conn.recv(4096)  # consume the capability ping
+        conn.sendall(b'{"ok":true,"pong":true,"configuration_context":1}\n')
         conn.recv(4096)  # consume the attach request
         # Send the ack AND an unsolicited notification back-to-back, so a
         # read-ahead on the ack line would swallow the notification.

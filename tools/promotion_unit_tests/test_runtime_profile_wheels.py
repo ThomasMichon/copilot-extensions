@@ -420,7 +420,7 @@ def test_final_hash_deadline(monkeypatch):
     filename = list(wheels)[-1]
     stream = ExpiringEOF(wheels[filename].getvalue())
     wheels[filename] = stream
-    original = runtime_profile_wheels.inspect_wheel
+    original = runtime_profile_wheels.inspect_wheel_facts
 
     def inspection(*args, **kwargs):
         result = original(*args, **kwargs)
@@ -428,7 +428,7 @@ def test_final_hash_deadline(monkeypatch):
             final_rehash[0] = True
         return result
 
-    monkeypatch.setattr(runtime_profile_wheels, "inspect_wheel", inspection)
+    monkeypatch.setattr(runtime_profile_wheels, "inspect_wheel_facts", inspection)
     with pytest.raises(ProfileError):
         _verify(profile, wheels, deadline=1)
     assert final_rehash[0] and now[0] == 2

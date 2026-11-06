@@ -1,5 +1,5 @@
 """Immutable Manager inputs retain source and constructor custody."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import base64
 import hashlib
 import json
@@ -123,8 +123,156 @@ def test_source_input_discovery_has_no_installation_or_old_runtime_dependency(mo
     assert refusal.value.code == 2
 
 
-def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(snapshot, monkeypatch):
+def test_current_bootstrap_uses_its_driver_to_install_a_legacy_source(snapshot, monkeypatch):
     installer = self_install._runtime_installer()
+    import bootstrap_update
+
+    selected = inputs.select(snapshot)
+    observed = []
+    driver = object()
+    monkeypatch.setattr(
+        installer, "_execution_driver", lambda payload: observed.append(payload) or driver,
+    )
+    monkeypatch.setattr(installer, "_automatic_bootstrap_refusal", lambda args: None)
+    monkeypatch.setattr(installer, "_installation_custody", lambda: nullcontext(None))
+
+    def execute(args, actual_driver, *, source_digest):
+        assert actual_driver is driver and args.payload == selected.payload
+        assert args.install_source == snapshot and len(source_digest) == 64
+        return 23
+
+    monkeypatch.setattr(bootstrap_update, "execute", execute)
+    assert installer.main([
+        "--root", str(snapshot / "installed"), "--install-source", str(snapshot),
+        "--", "update", "--supervised-debug",
+    ]) == 23
+    assert observed == [SCRIPTS.parent]
+    assert not (selected.payload / "scripts").exists()
+
+
+@pytest.mark.parametrize("shell", ["ps1", "sh"])
+def test_standalone_prepared_updates_acquire_separate_controllers(snapshot, tmp_path, shell):
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_procutil.owned_process import run_caller_owned
+    from test_bootstrap_ps1 import _fake_tools, _source_repo
+
+    host = shutil.which("pwsh" if shell == "ps1" else "bash")
+    if host is None or (shell == "sh" and os.name == "nt"):
+        pytest.skip("native bootstrap shell unavailable")
+    repo = _source_repo(tmp_path)
+    root = tmp_path / "manager"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        '[source]\nrepo=' + json.dumps(repo.as_posix()) + '\nref="main"\n', encoding="utf-8",
+    )
+    staging = root / "staging"
+    staging.mkdir()
+    sentinel = staging / "unrelated"
+    sentinel.write_bytes(b"preserved staging")
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    bootstrap = standalone / ("bootstrap." + shell)
+    shutil.copy2(SCRIPTS.parent / bootstrap.name, bootstrap)
+    tools = tmp_path / "tools"
+    _fake_tools(tools, uv_exit=0, python_exit=17)
+    git = shutil.which("git")
+    assert git is not None
+    if os.name == "nt":
+        (tools / "git.ps1").write_text(
+            "$forwarded=@($args)\n"
+            "if ($forwarded -contains 'fetch') {\n"
+            "  $source=[Array]::IndexOf($forwarded,"
+            "'https://github.com/ThomasMichon/copilot-extensions.git')\n"
+            "  if ($source -lt 0) { throw 'unexpected controller source' }\n"
+            "  $forwarded[$source]=$env:FIXTURE_CONTROLLER_SOURCE\n"
+            "}\n"
+            f"& '{git.replace(chr(39), chr(39) * 2)}' @forwarded\nexit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
+    else:
+        import shlex
+
+        (tools / "git").write_text(
+            "#!/usr/bin/env bash\nforwarded=(\"$@\")\n"
+            "for ((i=0;i<${#forwarded[@]};i++)); do\n"
+            "  if [[ ${forwarded[i]} == fetch ]]; then\n"
+            "    for ((j=i+1;j<${#forwarded[@]};j++)); do\n"
+            "      if [[ ${forwarded[j]} == -- ]]; then\n"
+            "        forwarded[j+1]=$FIXTURE_CONTROLLER_SOURCE; break\n"
+            "      fi\n    done\n  fi\ndone\n"
+            f"exec {shlex.quote(git)} \"${{forwarded[@]}}\"\n", encoding="utf-8",
+        )
+        (tools / "git").chmod(0o755)
+    record = tmp_path / "record.py"
+    record.write_text(
+        "import json,os\nfrom pathlib import Path\n"
+        "root=Path(os.environ['WORKTREE_MANAGER_ROOT'])\n"
+        "output=root/('caller-'+os.environ['FIXTURE_CALLER']+'.json')\n"
+        "output.write_text(json.dumps({'cwd':str(Path.cwd())}))\n"
+        "raise SystemExit(17)\n", encoding="utf-8",
+    )
+    if os.name == "nt":
+        (tools / "fake-python.cmd").write_text(
+            f'@"{sys.executable}" "{record}" %*\r\n', encoding="utf-8",
+        )
+    else:
+        import shlex
+
+        (tools / "fake-python").write_text(
+            f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(record))} "$@"\n',
+            encoding="utf-8",
+        )
+    command = [host]
+    if shell == "ps1":
+        command += ["-NoProfile", "-NonInteractive", "-File"]
+    command += [str(bootstrap), "--install-source", str(snapshot), "update"]
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = {
+        **os.environ, "WORKTREE_MANAGER_ROOT": str(root),
+        "HOME": str(profile), "USERPROFILE": str(profile),
+        "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
+        "FIXTURE_CONTROLLER_SOURCE": str(repo), "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+    }
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        callers = [
+            pool.submit(
+                run_caller_owned, command, env={**environment, "FIXTURE_CALLER": str(index)},
+                timeout=20, max_stdout_bytes=65536, max_stderr_bytes=65536,
+            )
+            for index in range(2)
+        ]
+        results, errors = [], []
+        for index, caller in enumerate(callers):
+            try:
+                results.append(caller.result())
+            except subprocess.TimeoutExpired as error:
+                errors.append(f"caller-{index}: {error}\n{error.output!r}\n{error.stderr!r}")
+        assert not errors, "\n".join(errors)
+    for result in results:
+        assert result.returncode == 17, result.stdout + result.stderr
+    acquired = [
+        Path(json.loads((root / f"caller-{index}.json").read_text())["cwd"])
+        for index in range(2)
+    ]
+    assert acquired[0] != acquired[1]
+    assert all(path.parent.parent.parent == root / "bootstrap-acquisition" for path in acquired)
+    assert sentinel.read_bytes() == b"preserved staging"
+
+
+@pytest.mark.parametrize("failure", [None, "source", "context"])
+def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
+    snapshot, monkeypatch, failure,
+):
+    installer = self_install._runtime_installer()
+    from worktree_manager import update_driver_cli
+
+    current_source = ["admitted-source"]
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: current_source[0])
+    caller = snapshot / "caller"
+    caller.mkdir()
+    monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", str(caller))
     selected = inputs.select(snapshot)
     root = snapshot / "installed"
     slot = root / "versions" / selected.identity.runtime_version
@@ -142,6 +290,10 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
         assert options["_local_packages"] == ("copilot-extensions-worktree-manager",)
         assert options["_application"] == app
         assert options["_transactional_activation"] is True
+        if failure == "source":
+            current_source[0] = "changed-source"
+        elif failure == "context":
+            caller.rmdir()
         options["_before_publish"]()
         options["_after_activate"](slot)
         return SimpleNamespace(action="installed", slot=str(slot))
@@ -150,8 +302,17 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
     args = SimpleNamespace(
         payload=selected.payload, root=root, install_source=snapshot,
         skip_instance_reconcile=True, repair_update=False, recover_adopted=None,
-        source_digest=None,
+        source_digest=None, admitted_source="admitted-source",
     )
+    if failure:
+        error = RuntimeError if failure == "source" else ValueError
+        with pytest.raises(error):
+            installer._install_payload(
+                args, wheel_inputs=wheels, local_packages=("copilot-extensions-worktree-manager",),
+                application=app,
+            )
+        assert activated == []
+        return
     assert installer._install_payload(
         args, wheel_inputs=wheels, local_packages=("copilot-extensions-worktree-manager",),
         application=app,

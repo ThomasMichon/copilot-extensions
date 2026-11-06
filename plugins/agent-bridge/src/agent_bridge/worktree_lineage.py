@@ -31,6 +31,8 @@ via its opening turn instead):
 Every operation selects the same Worktrees owner prefix and scrubbed environment
 as acquisition; an explicit installation refusal cannot use a global fallback.
 This shared selection alone does not qualify the selected record writer.
+An explicit caller may retain a pinned owner prefix through qualification and
+pass it to subsequent operations; ordinary callers keep dynamic selection.
 
 Every write and read is **fail-open**: an unavailable owner, an untracked worktree,
 a timeout, or a non-zero exit degrades to a no-op (writes) or ``None`` (reads) so
@@ -56,7 +58,9 @@ log = logging.getLogger("agent_bridge.worktree_lineage")
 # long (fail-open on timeout, exactly like the head read).
 _LINEAGE_TIMEOUT_S = 10.0
 
-def _run(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str] | None:
+def _run(
+    args: list[str], cwd: str | None = None, *, owner_prefix: tuple[str, ...] | None = None,
+) -> subprocess.CompletedProcess[str] | None:
     """Shell ``agent-worktrees <args>`` fail-open; return the completed process
     or ``None`` when the selected owner is unavailable / the call could not run.
 
@@ -69,7 +73,7 @@ def _run(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess
     # resolver; fall back to the daemon's cwd when the dir is unknown.
     run_cwd = cwd if (cwd and os.path.isdir(cwd)) else None
     try:
-        prefix = _agent_worktrees_launch_prefix()
+        prefix = _agent_worktrees_launch_prefix() if owner_prefix is None else owner_prefix
         if not prefix:
             log.debug("agent-worktrees owner unavailable -- lineage operation skipped")
             return None
@@ -104,6 +108,7 @@ def register_session(
     pid: int | None = None,
     pane: str | None = None,
     worktree_dir: str | None = None,
+    owner_prefix: tuple[str, ...] | None = None,
 ) -> bool:
     """Register an ACP session into the ground layer (idempotent; fail-open).
 
@@ -132,12 +137,13 @@ def register_session(
         args += ["--pid", str(pid)]
     if pane:
         args += ["--pane", pane]
-    proc = _run(args, cwd=worktree_dir)
+    proc = _run(args, cwd=worktree_dir, owner_prefix=owner_prefix)
     return bool(proc and proc.returncode == 0)
 
 
 def link_succession(
     worktree_id: str, predecessor: str, successor: str, *, worktree_dir: str | None = None,
+    owner_prefix: tuple[str, ...] | None = None,
 ) -> bool:
     """Record a handoff in the ground layer: predecessor ``handed-off`` +
     successor becomes the derived head, in one atomic write (fail-open).
@@ -153,7 +159,7 @@ def link_succession(
         "--predecessor", predecessor,
         "--successor", successor,
         "--json",
-    ], cwd=worktree_dir)
+    ], cwd=worktree_dir, owner_prefix=owner_prefix)
     return bool(proc and proc.returncode == 0)
 
 
@@ -164,6 +170,7 @@ def note_handoff(
     task: str | None = None,
     *,
     worktree_dir: str | None = None,
+    owner_prefix: tuple[str, ...] | None = None,
 ) -> bool:
     """Mirror a handoff into the worktree record's session-tagged history
     (``kind=handoff``); ``session_id`` is the predecessor. Fail-open."""
@@ -178,7 +185,7 @@ def note_handoff(
         args += ["--title", title]
     if task:
         args += ["--task", task]
-    proc = _run(args, cwd=worktree_dir)
+    proc = _run(args, cwd=worktree_dir, owner_prefix=owner_prefix)
     return bool(proc and proc.returncode == 0)
 
 
@@ -187,6 +194,7 @@ def note_handoff(
 
 def session_role(
     worktree_id: str, session_id: str, *, worktree_dir: str | None = None,
+    owner_prefix: tuple[str, ...] | None = None,
 ) -> dict | None:
     """Return the ground-layer role envelope for ``session_id`` (fail-open).
 
@@ -202,7 +210,7 @@ def session_role(
         args += ["--worktree-dir", worktree_dir]
     else:
         args += ["--worktree-id", worktree_id]
-    proc = _run(args, cwd=worktree_dir)
+    proc = _run(args, cwd=worktree_dir, owner_prefix=owner_prefix)
     if not proc or proc.returncode != 0:
         return None
     try:
@@ -218,6 +226,7 @@ def history_digest(
     limit: int = 8,
     *,
     worktree_dir: str | None = None,
+    owner_prefix: tuple[str, ...] | None = None,
 ) -> str | None:
     """Return the worktree's recent session-tagged history digest (fail-open)."""
     if not worktree_id:
@@ -229,7 +238,7 @@ def history_digest(
         args += ["--worktree-id", worktree_id]
     if session_id:
         args += ["--session-id", session_id]
-    proc = _run(args, cwd=worktree_dir)
+    proc = _run(args, cwd=worktree_dir, owner_prefix=owner_prefix)
     if not proc or proc.returncode != 0:
         return None
     text = (proc.stdout or "").strip()

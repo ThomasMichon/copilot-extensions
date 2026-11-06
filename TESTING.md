@@ -717,6 +717,125 @@ observes the finished files rather than restamping their inventory identities.
 the actual UV stage entry; its native POSIX controls are separate from Windows
 execution and the required unit-only CI packet.
 
+The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
+and for relevant PR paths on Linux and Windows. Its native/PATH local packet is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
+Hosted acceptance runs complementary behavioral and full-retention selections
+in separate jobs on each platform; no case is removed from acceptance. The
+behavioral jobs also run `tests/test_update_python_path.py` with fake registry
+state to check waited completion, excluded observer modes and publication failures.
+They select the source-anchor-loss dispatch controls and standalone prepared-source
+acquisition controls from `test_bootstrap_dispatch.py` and `test_install_source.py`
+without adding those files' unrelated cases to this acceptance packet.
+They also check first-touch private queue directories, addressed reuse for
+unshared source inputs and distinct real pending submissions using the same
+retained controller. The permissions control reads actual POSIX modes under
+umask `022` or protected Windows DACL flags. Old UUID-named snapshots are not
+deleted or migrated, and storage is not claimed bounded across distinct inputs.
+Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
+is unchanged. Local workers may use smaller serial selections when the complete
+packet exceeds their available capacity; that is not a full-packet passing claim.
+The real shell acquisition, canonical freezing, queue, finite worker, runtime
+adapter and borrowed participant remain intact; only constructor and suite
+bodies use finite fixtures with a minimal declared source graph and a real
+native venv. It covers equivalent pending coalescing, separate active arrivals
+and arguments, changed SDK inputs, preserved nonzero whole-operation results and birth-pinned loss of the
+waiting Python caller. A prepared legacy payload without bootstrap scripts
+separately exercises the actual native shell entry, current-controller
+compatibility and a saved acquisition budget. Explicit prepared inputs are
+application data: the shells keep their executing controller when its full
+payload is available, otherwise acquire the controller through their normal
+source path, rather than execute bootstrap code from the prepared application.
+The prepared fixture carries the actual prior, pre-anchor CLI and source locator.
+The selected application starts in the saved submission directory when it still
+exists, so that prior CLI's relative-source check matches the current controller's
+admitted source. If that directory disappears before process creation, dispatch
+falls back to the retained installation root without losing the source-anchor
+environment. Real `_finish()` subprocess controls cover current relative sources,
+prior absolute sources and deletion at the process-creation boundary. A missing
+interpreter with a live directory is not retried. A prior CLI's relative-source
+resolver still requires its original directory; it cannot honor the newer anchor
+environment, and that unsupported combination is not claimed as passing.
+The standalone prepared-source shell control launches two concurrent callers,
+verifies distinct per-invocation controller checkouts and
+preserves unrelated shared staging. It exercises normal controller acquisition
+without a sibling payload; only the selected interpreter body is a finite fixture.
+That actual-shell control observes queue admission for up to 20 seconds, then
+suite startup for up to another 20 seconds, within the unchanged 90-second case.
+The caller-loss case uses a relative configured source through real
+acquisition, participant validation and the suite's source locator.
+An independent case verifies that detached acceptance removes only that caller's acquisition
+checkout while the retained worker continues to its recorded final result.
+The detached control runs twice and observes native Windows windows and focus
+changes without weakening the enclosing test lifecycle. Its first result is
+nonzero and its second succeeds; neither the detached observer nor its participant
+may run successful PATH aftercare. Only a successful waiting caller finalizes
+using its original observer arguments, with publication failure propagated.
+The ordinary two-request control records exactly one such finalization.
+The detached control's first acceptance wait allows 60 seconds; the second
+remains 20 seconds. Behavioral cases retain
+their 90-second limit, including fixtures and teardown. Bounded stderr
+breadcrumbs retain fixture-setup costs and queue-stage elapsed times even when
+a hard pytest timeout prevents normal teardown diagnostics.
+After the first pending receipt, equivalent and distinct
+callers acquire concurrently within the unchanged 40-second finite suite hold.
+The pending callers mix explicit wait and detached JSON observation. Observer
+modes remain local, while the durable installation recipe contains only
+forwarded installation arguments and a normalized selected acquisition budget.
+Source fixtures initialize one committed template, then use independent copies
+and Git indexes per case. Generated tool caches are excluded; the selected
+preparation source must still pass the real pristine-source check.
+An ordinary two-request control delays only the second executor entry until
+the successful first caller has removed its acquisition checkout, then runs the
+canonical executor and verifies retained process-utility imports and both results.
+Its second request uses the actual detached bootstrap to acquire changed SDK
+inputs while the first worker continues from its original retained controller.
+It observes committed admission for up to 60 seconds before its unchanged
+20-second suite-start observation, within the original case and job limits.
+The second detached caller also has a 60-second exit wait; consumer waits and
+the case and job limits remain unchanged.
+A separate inherited-anchor case distinguishes the configured relative source
+from an equally named repository under the shell's working directory.
+Its caller wait allows 60 seconds within the unchanged 90-second case and
+five-minute job limits; production timeouts remain unchanged.
+Actual installed-CLI admission and queue draining separately preserve a
+caller-relative active hold across differing source/worker directories, allowing
+manual work while inhibiting automatic work. Real directory-link-plus-parent
+anchors qualify filesystem normalization where supported; unavailable native
+Windows symlinks are explicit skips, not passes.
+Authentication inspection retains valid caller-stdout JSON without
+installation, and request controls preserve an interrupted fence until explicit
+recovery outside the install transaction. A POSIX-only non-update entry resolves source dependencies without creating a
+queue. Runner-owned containment
+and daemon-instance leases retain cleanup. This is source-boundary evidence,
+not full-graph performance, escape from a caller-owned cleanup Job, actual
+runtime installation, installed rollout or migration of an existing queue.
+A separate full-repository retention control records real input count, bytes
+and blocking retention time as test properties and hosted log output. Its fixed
+180-second case ceiling is separate from the 90-second behavioral limit. The
+five-minute retention job still includes setup and cleanup, and a ceiling
+overrun remains a failure requiring diagnosis, not automatic budget growth.
+Calibration of a 3,330-file, approximately 50.8 MB closure completed in 102.58
+and 113.92 seconds on a CPU-contended Windows control. Inventory took about a
+second; first source and retained-copy reads dominated, while later reads were
+substantially faster. These measurements justify headroom for the complete
+verification cost, not a production latency guarantee or a security-scanner
+attribution. Source growth or repeated overruns require rechecking input volume,
+phase costs and host capacity before changing the limit.
+It exercises canonical
+freezing/readback against the complete declared Manager/SDK graph, not the
+full acquisition/installation latency of an ordinary update.
+The source-preparation control removes its disposable acquisition checkout,
+then executes the retained controller's real preparer against a clean selected
+Dev source and validates the resulting payload and source identity.
+Required unit-only CI does not gain these process controls.
+The actor-free bootstrap packet additionally submits a caller-relative Manager
+source, removes the submitting directory, and validates/acquires its locator
+from the retained controller directory. The saved source anchor does not change
+the runner's retained working directory; changed source policy still refuses.
+Installed CLI admission separately exercises an inherited source anchor distinct
+from both the submitting directory and the worker's directory.
+
 The optional `agent-worktrees --test-file tests/test_update_write_activity_native.py
 --allow-explicit-tiers` packet uses private synthetic Windows writers under the
 real strict Job and finite stream owner. It distinguishes useful silent writes,
@@ -4635,6 +4754,12 @@ so collection continues to match the exact admitted node inventory.
 
 Packet input readers use bounded chunks while retaining the original byte cap
 and overflow sentinel; a tiny file must not allocate the full evidence limit.
+`test_hook_demand.py` exercises the original IPC handler with in-memory streams:
+completed tool replies and capability-qualified send-only read demand preserve
+the same monotonic idle grace. Generation, admission, malformed and expired
+notifications cannot renew it or invoke policy. Actual sockets, the final
+idle-check/drain interleaving and Windows shell delivery remain in the explicit
+Worktrees consumer packet, not this actor-free inventory.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
 once per test session, then execute that code in fresh per-case module globals.
 They do not share module state, results, provider observations or qualification
@@ -5682,6 +5807,15 @@ integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/
 --allow-explicit-tiers` covers POSIX FD progress, absolute deadlines, cancellation
 and unverified cleanup. These explicit native packets do not expand required
 unit-only CI, and skips are not native platform qualification.
+
+The actor-free `tests/test_resident_configuration.py` selection executes the
+native configuration consumer and qualified owner-report reader with a synthetic
+peer transport. It compares direct and resident call/attach loading from a
+neutral daemon directory, concurrent repository/source isolation, relative and
+directory-marketplace declarations, missing/mismatched context refusal, and
+pre-effect direct fallback against legacy or invalid capability replies.
+It does not qualify an installed daemon, native desktop behavior or session
+handover. Existing transport/lifecycle tests remain separately selectable.
 
 Agent MCP's focused home-binding lane is:
 

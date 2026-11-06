@@ -637,6 +637,7 @@ def ensure_worker(
     worker_argv: tuple[str, ...] | list[str], *, root: Path | None = None,
     cwd: Path | None = None, env: Mapping[str, str] | None = None,
     startup_timeout: float = 15,
+    python_bootstrap_root: Path | None = None,
 ):
     """Launch a trusted pinned product worker; its entry point must call drain."""
     from agent_procutil import spawn_daemon
@@ -662,6 +663,8 @@ def ensure_worker(
             argv, cwd=cwd or root, log_path=root / "worker.log",
             env_overrides={**(env or {}), "UPDATE_DRIVER_STARTUP": token},
             console_children=True, breakaway=True, contained_fallback=False,
+            **({"python_bootstrap_root": python_bootstrap_root}
+               if python_bootstrap_root is not None else {}),
         )
         deadline = time.monotonic() + startup_timeout
         while not receipt.is_file():

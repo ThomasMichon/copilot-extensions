@@ -65,6 +65,79 @@ def test_dynamic_loopback_endpoint_roundtrip(tmp_path):
         server.close()
 
 
+def test_read_demand_uses_original_idle_grace_without_policy_or_reply():
+    calls = []
+    server = HookIpcServer(
+        lambda *args: calls.append(args) or {}, read_demand_admitted=lambda: True,
+    )
+    clock = [0.0]
+    server._clock = lambda: clock[0]
+    server.start()
+    try:
+        endpoint = server.rendezvous()
+        assert hook_ipc.READ_DEMAND_CAPABILITY in endpoint["hook_capabilities"]
+        request = {
+            "version": 1, "token": server.token, "kind": "readHookDemand",
+            "hook_generation": endpoint["hook_generation"], "deadline": time.time() + 1,
+        }
+        with socket.create_connection(server.server.server_address, timeout=1) as conn:
+            conn.sendall(json.dumps(request).encode() + b"\n")
+            assert conn.recv(1) == b""
+        assert calls == []
+        assert server.has_recent_hook_demand()
+        clock[0] = 120
+        assert not server.has_recent_hook_demand()
+    finally:
+        server.close()
+
+
+def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
+    calls = []
+    admitted = [True]
+    server = HookIpcServer(
+        lambda *args: calls.append(args) or {},
+        read_demand_admitted=lambda: admitted[0],
+    )
+    server.start()
+    try:
+        request = {
+            "version": 1, "token": server.token, "kind": "readHookDemand",
+            "hook_generation": server.generation, "deadline": time.time() + 1,
+        }
+
+        def send(change=None, *, oversized=False, newline=True):
+            value = {**request, "deadline": time.time() + 1, **(change or {})}
+            raw = json.dumps(value).encode()
+            if oversized:
+                raw += b" " * 2048
+            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+                conn.sendall(raw + (b"\n" if newline else b""))
+                conn.shutdown(socket.SHUT_WR)
+                assert conn.recv(1) == b""
+            assert not server.has_recent_hook_demand()
+            assert calls == []
+
+        for change in (
+            {"hook_generation": "b" * 32}, {"token": "wrong"},
+            {"deadline": time.time() - 1}, {"deadline": time.time() + 60},
+            {"deadline": float("nan")}, {"deadline": True}, {"deadline": "later"},
+            {"version": True}, {"payload": {"toolName": "edit"}},
+        ):
+            send(change)
+        send(oversized=True)
+        send(newline=False)
+        server.close_admission()
+        send()
+        server.open_admission()
+        admitted[0] = False
+        send()
+        server._read_demand_admitted = None
+        assert hook_ipc.READ_DEMAND_CAPABILITY not in server.rendezvous()["hook_capabilities"]
+        send()
+    finally:
+        server.close()
+
+
 def test_send_best_effort_matches_and_rejects_an_explicit_installation_context(
     tmp_path, monkeypatch,
 ):

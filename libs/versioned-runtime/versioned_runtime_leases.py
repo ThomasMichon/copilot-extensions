@@ -268,12 +268,18 @@ def _windows_private_lease_file(
         kernel.CloseHandle(token)
 
 
-def windows_private_created_file(path: Path) -> int:
-    """Create a new owner-bound file without changing its containing directory."""
+def _native_path(path: Path) -> Path:
+    if os.name != "nt":
+        return Path(path)
     value = os.path.abspath(path)
     if not value.startswith("\\\\?\\"):
         value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
-    target = Path(value)
+    return Path(value)
+
+
+def windows_private_created_file(path: Path) -> int:
+    """Create a new owner-bound file without changing its containing directory."""
+    target = _native_path(path)
     return _windows_private_lease_file(
         target.parent, target.parent, target.name, create_new=True, protect_directory=False,
     )

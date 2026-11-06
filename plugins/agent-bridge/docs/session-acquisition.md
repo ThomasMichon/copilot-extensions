@@ -316,6 +316,22 @@ resident preserves a protected relationship and workspace nonce. Governed
 assignment still requires independent qualification of the actual participants;
 legacy lineage success alone grants no admission or cleanup authority.
 
+An explicit assembling caller can use `_agent_worktrees_pinned_selection()`
+to retain `(owner_prefix, installation_root, python)` once. Pass that same
+tuple prefix to `acquisition_authority.worktree_command` and the lineage
+helpers through `owner_prefix`, including the capability call that qualifies
+the writer. Later operations recheck installation ownership/governance but
+use the same immutable Worktrees slot and its existing retention bootstrap,
+not the current selector. The retained command binds the original completion
+record and build-generation UUID; verification under the existing lease occurs
+before site imports, so recreating the same version pathname is a refusal.
+Legacy ownership still rejects an installation-cell
+tombstone; missing retention support refuses without PATH or runtime fallback.
+Ordinary acquisition/lineage callers do not opt in automatically. This source
+seam does not establish a resident cohort, change fail-open lineage returns,
+or authorize allocation; the assembling owner must retain its original
+workspace identity and verify every required write rather than ignoring failure.
+
 The existing `/health` response additionally advertises
 `capabilities.worktree_record_delegation: 1` and a `worktree_record_writer`
 object with `installation_root` and optional `runtime_generation`. Observation and execution share the canonical
@@ -360,7 +376,8 @@ selection; only the active process is relevant, and its generation is the
 existing routing counter, not a new build UUID. A changed slot or delegated
 root or selected build invalidates that observation. A slot UUID describes the
 selected build, not a live executing response or a pinned future launch; the
-execution trampoline still resolves again when invoked. Older receivers omit these additive fields;
+ordinary execution trampoline still resolves again when invoked. The explicit
+pinned-prefix path above is separate from health observation. Older receivers omit these additive fields;
 they keep baseline health/acquisition behavior but cannot satisfy this optional
 qualification. No ordinary caller is activated by this provider expansion.
 

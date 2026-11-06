@@ -169,6 +169,24 @@ def test_required_refusal_controls_are_present() -> None:
     )
 
 
+def test_loop_owner_separates_backlog_capacity_and_returned_results() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    coordination = " ".join(_read(
+        SKILL / "references" / "coordination-and-recovery.md"
+    ).split())
+    assert "This skill owns the multi-reviewer coordination contract" in skill
+    assert "charter owns one PR's judgment and same-PR follow-ups" in skill
+    for requirement in (
+        "eligibility population and priority order separate from concurrency",
+        "returned handle is not an active reviewer",
+        "Consume returned results and refill eligible vacancies",
+        "a returned result alone neither releases a claim",
+        "nor permits replay of an uncertain write",
+        "blocks independent reviews only where a concrete dependency exists",
+    ):
+        assert requirement in coordination, requirement
+
+
 def test_guidance_resolution_separates_contexts_and_uses_existing_owners() -> None:
     skill = " ".join(_read(SKILL / "SKILL.md").split())
     setup = " ".join(_read(

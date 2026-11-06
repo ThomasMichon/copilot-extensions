@@ -42,7 +42,11 @@ failure, never invent a tool. The extension reports its selection and, by
 default (`native_pressure: defer`), sends no automatic pressure prompts: the
 host's own checkpoint cadence governs, and the extension's usage estimate is
 not authoritative for host-managed windows. With `native_pressure: nudge` it
-substitutes native checkpoint pressure prompts instead. Explicit new-owner/process handoffs remain
+substitutes native checkpoint pressure prompts instead. Config edits reload
+mid-session; the operator's `/handoff-pressure` command pauses or retunes
+pressure for one session. Call the `handoff_pressure` tool only when the
+operator asks you to quiet nudges (it can pause or raise thresholds, never
+lower them), never to postpone a needed handoff. Explicit new-owner/process handoffs remain
 available in every mode. The remaining custom quiesce/sync/save/trigger flow is
 for actual responsibility transfer or diagnosed unsupported-native recovery,
 not a mandatory response to native token pressure.

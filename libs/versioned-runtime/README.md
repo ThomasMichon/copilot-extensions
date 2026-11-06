@@ -91,6 +91,22 @@ copies are optional byte-equality comparisons in a checkout; outside it, the
 complete sdist family is required.
 Wheel/sdist byte-equality tests and wheel RECORD bind the generated resource to the package
 artifact. Plugin bootstrap scripts remain self-contained.
+
+Manager additionally declares its embedded first-party inputs in the standard
+flat `first-party-core` dependency group, retaining canonical source mappings.
+The same build owner uses setuptools discovery/package-directory mappings for
+ordinary import roots, copies declared data and notices, and retains full library
+inputs in `_first_party/` inside the sdist. Libraries do not gain separate
+dist-info or runtime receipts. Static third-party runtime metadata and native
+source/member validation remain independent. This wheel uses an isolated
+application environment; profile admission refuses overlapping wheel ownership.
+Archived `_first_party/` inputs take precedence over neighboring checkout
+libraries. Reinitializing Manager's editable build retains the same admitted
+package mappings while still refusing a different application's import root.
+For embedded Manager builds, the standard package and wheel-staging copy hooks
+use at most four workers and settle them before returning or propagating failure.
+Other consumers, namespace exclusions and dry-run behavior retain the stock path.
+
 The index staging adapter uses only its own installed resource, never a
 repository/plugin/PATH fallback; editable/source-only installation is not an
 installer runtime. Fleet's artifact delivery and client resource diagnostics
@@ -264,7 +280,8 @@ slot (`slot(clean_incomplete=True)` instead raises), without waiting for an
 installer or deleting its lock file. Only the thread that already owns
 construction can clean its own unfinished slot without reacquiring construction;
 its GC/toss operations still preserve that build. Do not clean a slot while
-holding its shared retention lease.
+holding its shared retention lease. Windows removal uses extended-length paths
+for deep package trees without changing these ownership or link guards.
 Activation takes shared target retention before selector publication, so it
 cannot publish a target deleted after an earlier existence probe. Current and
 last-known-good references are protected by GC/toss, including incomplete

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import runpy
 import sys
@@ -22,7 +23,9 @@ def normalize_python_command(command: list[str]) -> tuple[list[str], dict[str, s
     return [executable, *command[1:]], environment
 
 
-def leased_python_command(command: list[str]) -> tuple[list[str], dict[str, str]]:
+def leased_python_command(
+    command: list[str], *, bootstrap_root: str | os.PathLike[str] | None = None,
+) -> tuple[list[str], dict[str, str]]:
     name = Path(command[0]).name.lower()
     if not (name.startswith("python") or name in ("pypy", "pypy3")):
         raise ValueError("leased opaque executables require their native startup admission")
@@ -39,10 +42,18 @@ def leased_python_command(command: list[str]) -> tuple[list[str], dict[str, str]
             raise ValueError("unsupported leased Python invocation")
     if index >= len(command):
         raise ValueError("leased Python invocation requires an entrypoint")
+    root = Path(__file__).resolve().parent.parent
+    if bootstrap_root is not None:
+        root = Path(bootstrap_root)
+        if not root.is_absolute():
+            raise ValueError("leased Python bootstrap root must be absolute")
+        root = root.resolve(strict=True)
+        if not (root / "agent_procutil" / "_daemon_instance_child.py").is_file():
+            raise ValueError("leased Python bootstrap root must contain agent_procutil")
     normalized, environment = normalize_python_command(command)
     return [
         normalized[0], *command[1:index], "-c", _BOOTSTRAP,
-        str(Path(__file__).resolve().parent.parent), *command[index:],
+        str(root), *command[index:],
     ], environment
 
 

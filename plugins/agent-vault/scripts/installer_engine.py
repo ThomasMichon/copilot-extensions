@@ -241,16 +241,23 @@ def _source_files(
 def freeze_inputs(
     plugin: Path, destination: Path, *, deadline: float | None = None,
     on_progress: Callable[[], None] | None = None,
+    additional_plugins: tuple[Path, ...] = (),
 ) -> FrozenInputs:
     """Copy and verify all local package inputs before admitting a numbered build.
 
     The caller owns a fresh destination outside the input trees. Relative package
     layout is preserved, so transitive ``tool.uv.sources`` paths remain attributable.
     Numbered construction consumes these copies non-editably, never a live checkout.
+    A complete operation may retain additional applications in the same closure.
     """
     if deadline is not None:
         _check_deadline(deadline)
-    roots = _package_roots(plugin)
+    if not isinstance(additional_plugins, tuple):
+        raise ValueError("Additional frozen applications must be an immutable tuple")
+    applications = (plugin, *additional_plugins)
+    roots = tuple(sorted({
+        package for application in applications for package in _package_roots(application)
+    }))
     plugin = plugin.resolve(strict=True)
     common = Path(os.path.commonpath(roots))
     destination = destination.resolve()
@@ -295,7 +302,13 @@ def freeze_inputs(
                     on_progress()
         frozen_roots = tuple(destination / root.relative_to(common) for root in roots)
         frozen_plugin = destination / plugin.relative_to(common)
-        if _package_roots(frozen_plugin) != tuple(sorted(frozen_roots)):
+        frozen_applications = tuple(
+            destination / application.resolve(strict=True).relative_to(common)
+            for application in applications
+        )
+        if tuple(sorted({
+            package for application in frozen_applications for package in _package_roots(application)
+        })) != tuple(sorted(frozen_roots)):
             raise RuntimeError("Runtime dependency graph changed while freezing inputs")
         after_files = _source_files(roots, **progress)
         if after_files != files:

@@ -188,10 +188,33 @@ and a version-2 advisory row; the canonical recorded head is separate from
 the listing/resume target. The original reminder window/reset and bind cooldown
 remain in their existing sidecars. Missing observations are a shell-safe
 advisory no-op, not a blocking interpreter or resident recovery dependency.
-Late-guidance watches, mutations, installation cells and POSIX retain their
+Mutations, installation cells and POSIX retain their
 previous paths pending their complete consumer checkpoints. This does not close
 the whole-hook, cold admission, notification or throughput gates.
 See the [consumer contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#windows-read-event-consumer).
+
+The Windows read-event consumer also evaluates the original late-guidance
+watch/request/publication contract after prepared admission, independently of
+row-fact availability. Pending/unknown owners retain the watch; correlated
+terminal or definitely absent-worker results preserve the original advisory
+wording. Shell and retained Python consumers share atomic snapshot-checked
+one-time consumption, including replacement preservation. A notice suppresses
+only disposition accounting, not independent binding advice. Native tests
+exercise the registered entry and competing consumers in both Windows shells.
+This does not qualify installed behavior, complete hook composition or throughput.
+
+The next additive read-event checkpoint separates idle demand from advisory
+evaluation. The existing IPC owner advertises `read-hook-demand-v1` and its own
+process generation before a prepared Windows reader sends a notification.
+That compact message renews only the original recent-tool idle grace; it
+cannot classify mutations, run policy/advice, wake recomputation or start a
+resident. The shell reads no reply and shares a 50 ms connect/write wait;
+unsupported discovery skips it, and uncertain delivery never causes replay.
+The [optional read-demand contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#optional-read-demand)
+defines wire bounds, source selection, live admission and upgrade/rollback.
+Real registered-entry, non-replying-peer, original-receiver and idle-expiry
+controls must prove that composition. Mutation invalidation, optional boot,
+other scopes and whole-hook/throughput acceptance remain separate open gates.
 
 The existing `WorktreesRuntime` publishes a small advisory view only after its
 current-roster store accepts a publication. The original project-state owner

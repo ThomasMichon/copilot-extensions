@@ -22,6 +22,7 @@ from agent_pull_requests.attention_acquisition import AttentionInputs
 from agent_pull_requests.attention_client import AttentionClient
 from agent_pull_requests.attention_read import AttentionReader, AttentionUnavailable
 from agent_pull_requests.conversation_store import ConversationStore
+from agent_pull_requests.feedback_capture_store import FeedbackCaptureStore
 from agent_pull_requests.review_feedback import FeedbackInputs
 from agent_pull_requests.watch_gateway import WatchGateway, WatchScopeBinding
 from agent_pull_requests.watch_replay import ConsumerScope
@@ -107,6 +108,23 @@ def test_cli_client_gateway_restart_preserves_bytes_and_independent_legacy_watch
     with pytest.raises(ReplayStoreInvalid, match="serving contract unavailable"):
         ConversationStore(store).capabilities(expires_at=expires)
     assert store.path.read_bytes() == before
+
+
+def test_expanded_readback_owner_is_not_advertised_as_v5_attention(
+    feedback_environment: tuple, reading: tuple, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    store, _, _, _, backend, _, expires, _ = feedback_environment
+    reader, gateway, client, caller, _ = reading
+    FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    before = store.path.read_bytes()
+    with pytest.raises(ReplayStoreInvalid, match="requires adopted owner v5"):
+        reader.execute("capabilities", {}, expires_at=expires, checkpoint=lambda: None)
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"limit":16,"after":null}')))
+    assert cli.main(["attention", "read", "--request", "-"], attention_host=client) == 3
+    capsys.readouterr()
+    assert caller.calls == ["/v1/attention/project/capabilities"]
+    assert not backend.calls and store.path.read_bytes() == before
+    asyncio.run(gateway.drain(timeout=1))
 
 
 def test_unclassified_self_echo_is_unavailable_only_for_captured_consumer(

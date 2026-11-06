@@ -28,7 +28,7 @@ if str(_SCRIPTS) not in sys.path:
 import troubleshooting_index as tix  # noqa: E402
 
 
-def test_projection_declaration_shape():
+def test_projection_declaration_shape() -> None:
     declaration = json.loads(_DECLARATION.read_text(encoding="utf-8"))
     by_id = {p["id"]: p for p in declaration["projections"] if isinstance(p, dict)}
     assert "validate-and-promote-triage" in by_id
@@ -42,7 +42,7 @@ def test_projection_declaration_shape():
     assert projection["legacyMarkers"] == []
 
 
-def test_template_is_reviewable_static_fallback():
+def test_template_is_reviewable_static_fallback() -> None:
     content = _TEMPLATE.read_text(encoding="utf-8")
     assert content.startswith('---\napplyTo: "**"\n---\n')
     assert "validate-and-promote" in content
@@ -58,12 +58,12 @@ def test_template_is_reviewable_static_fallback():
         assert forbidden not in content
 
 
-def test_troubleshooting_index_declares_category():
+def test_troubleshooting_index_declares_category() -> None:
     declaration = json.loads(_TROUBLESHOOTING_INDEX.read_text(encoding="utf-8"))
     by_id = {c["id"]: c for c in declaration["categories"] if isinstance(c, dict)}
     assert "validate-and-promote-failure" in by_id
 
 
-def test_troubleshooting_category_is_covered_by_the_static_projection():
+def test_troubleshooting_category_is_covered_by_the_static_projection() -> None:
     uncovered = {c.id for c in tix.uncovered_categories(_PLUGIN)}
     assert "validate-and-promote-failure" not in uncovered

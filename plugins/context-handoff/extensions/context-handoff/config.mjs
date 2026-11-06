@@ -167,7 +167,7 @@ export function parseThresholdConfig(text, source = CONFIG_RELATIVE_PATH) {
   );
 }
 
-function mergeThresholdConfigs(...layers) {
+export function mergeThresholdConfigs(...layers) {
   const merged = { ...DEFAULT_THRESHOLDS };
   for (const layer of layers) {
     if (!layer) continue;
@@ -230,6 +230,17 @@ async function loadConfigLayerAsync(configPath) {
     path: configPath,
     ...parseContextHandoffConfig(await readFile(configPath, "utf-8"), configPath),
   };
+}
+
+// Candidate config layer paths (user first, then repo), whether or not the
+// files currently exist. The extension watches these for live reloads.
+export async function contextHandoffConfigPathsAsync(startDir, options = {}) {
+  const repositoryRoot = await findRepositoryRootAsync(startDir);
+  const home = options.homeDir ?? homedir();
+  return [
+    home ? join(home, USER_CONFIG_RELATIVE_PATH) : null,
+    repositoryRoot ? join(repositoryRoot, CONFIG_RELATIVE_PATH) : null,
+  ].filter(Boolean);
 }
 
 export function defaultConfig(configPath = null) {

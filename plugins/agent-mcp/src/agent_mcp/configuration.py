@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
@@ -13,18 +14,23 @@ from configuration_layers import ConfigurationError, compose, read_source
 from . import _peer_launch
 from .home import default_home_dir
 
+if TYPE_CHECKING:
+    from .config import BridgeConfig
+
 FIELDS = {"timeout", "retries", "idle_timeout"}
 RELPATH = Path(".copilot-extensions") / "agent-mcp" / "bridges"
 
 
-def load_native_config(name_or_path: str):
+def load_native_config(
+    name_or_path: str, *, repository_root: Path | None = None,
+) -> BridgeConfig:
     """Keep public loader callbacks native and late-bound during composition."""
     from . import config as native
 
-    path = native.resolve_config_path(name_or_path)
+    path = native.resolve_config_path(name_or_path, repository_root=repository_root)
     data = native._read_file(path)
     machine = native._machine_overlay(data, path)
-    ordinary = compose_preferences(data, path, machine)
+    ordinary = compose_preferences(data, path, machine, repository_root=repository_root)
     data = native._deep_merge(data, machine)
     if ordinary is not None:
         data.update(ordinary["values"])
@@ -142,10 +148,13 @@ def _source(root: str, relative: Path) -> dict | None:
     return None
 
 
-def compose_preferences(data: dict, selected_path: Path, machine_values: dict) -> dict | None:
+def compose_preferences(
+    data: dict, selected_path: Path, machine_values: dict, *,
+    repository_root: Path | None = None,
+) -> dict | None:
     from .config import _overlay_id
 
-    report = owner_report(Path.cwd())
+    report = owner_report(repository_root if repository_root is not None else Path.cwd())
     if report is None:
         return None
     context = context_from_owner(report)

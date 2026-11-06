@@ -10,17 +10,30 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from ._peer_launch import ContextRefused
-from .session_lifecycle_cli import _agent_worktrees_environment, _legacy_worktrees_runtime_prefix
+from .session_lifecycle_cli import (
+    _agent_worktrees_environment, _legacy_worktrees_owner_root, _legacy_worktrees_runtime_prefix,
+)
+from ._peer_launch import retained_runtime_prefix
 
 
 def main() -> int:
     try:
         if len(sys.argv) < 2:
             raise ContextRefused("missing bridge installation root")
-        prefix = _legacy_worktrees_runtime_prefix(Path(sys.argv[1]))
+        arguments = sys.argv[2:]
+        if arguments[:1] == ["--pinned-runtime"]:
+            if len(arguments) < 4 or arguments[2] != "--runtime-identity":
+                raise ContextRefused("missing pinned runtime interpreter or original build identity")
+            root = _legacy_worktrees_owner_root(Path(sys.argv[1]))
+            prefix = retained_runtime_prefix(
+                root, Path(arguments[1]), "agent_worktrees", runtime_identity=arguments[3],
+            )
+            arguments = arguments[4:]
+        else:
+            prefix = _legacy_worktrees_runtime_prefix(Path(sys.argv[1]))
         if not prefix:
             raise ContextRefused("completed worktree owner runtime is unavailable")
-        command = [*prefix, *sys.argv[2:]]
+        command = [*prefix, *arguments]
         environment = _agent_worktrees_environment()
         if os.name != "nt":
             os.execve(command[0], command, environment)

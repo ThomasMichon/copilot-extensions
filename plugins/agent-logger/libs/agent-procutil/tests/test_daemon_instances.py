@@ -14,6 +14,63 @@ from agent_procutil.daemon_instances import (
 from agent_procutil import _daemon_instance_store as store
 
 
+@pytest.mark.parametrize("retained", [False, True])
+def test_leased_python_bootstraps_from_selected_source(tmp_path, monkeypatch, retained):
+    from agent_procutil import _daemon_instance_child as child
+
+    root = tmp_path / "retained" / "src"
+    package = root / "agent_procutil"
+    package.mkdir(parents=True)
+    (package / "_daemon_instance_child.py").write_text("pass\n", encoding="utf-8")
+    monkeypatch.setattr(child, "normalize_python_command", lambda command: (command, {}))
+    command = ["python", "-I", "-S", "-m", "fixture", "argument"]
+    rewritten, _ = child.leased_python_command(
+        command, bootstrap_root=root if retained else None,
+    )
+    expected = root if retained else Path(child.__file__).resolve().parent.parent
+    assert rewritten[:5] == ["python", "-I", "-S", "-c", child._BOOTSTRAP]
+    assert rewritten[5:] == [str(expected), "-m", "fixture", "argument"]
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_invalid_leased_python_bootstrap_refuses_before_launch(tmp_path, relative):
+    from agent_procutil._daemon_instance_child import leased_python_command
+
+    root = Path("relative") if relative else tmp_path
+    with pytest.raises(ValueError, match="bootstrap root"):
+        leased_python_command(["python", "-c", "pass"], bootstrap_root=root)
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_public_daemon_wrapper_forwards_bootstrap_root_to_leased_launch(
+    tmp_path, monkeypatch, retained,
+):
+    import sys
+
+    import agent_procutil
+    from agent_procutil import _daemon_instance_child as child
+
+    root = tmp_path / "retained" / "src" if retained else None
+    marker = RuntimeError("leased launch reached")
+    instance = DaemonInstanceSpec(
+        "root-forwarding", tmp_path, Path(__file__),
+        registry_root=tmp_path / "registry", purpose="unattended-test",
+    )
+
+    def reached(command, *, bootstrap_root):
+        assert bootstrap_root == root
+        raise marker
+
+    monkeypatch.setattr(child, "leased_python_command", reached)
+    with pytest.raises(RuntimeError) as caught:
+        agent_procutil.spawn_daemon(
+            [sys.executable, "-c", "pass"], cwd=tmp_path, log_path=tmp_path / "launch.log",
+            instance=instance, **({"python_bootstrap_root": root} if retained else {}),
+        )
+    assert caught.value is marker
+    assert caught.value.process_created is False
+
+
 @pytest.mark.parametrize("root", [PurePosixPath("/runtime"), PureWindowsPath(r"C:\runtime")])
 @pytest.mark.parametrize("nested", [False, True])
 def test_runtime_slot_layout_preserves_generation_and_installation_root(root, nested):

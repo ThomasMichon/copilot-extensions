@@ -633,6 +633,30 @@ def test_failed_spawn_is_visible_and_never_foreground(area, monkeypatch):
     assert "secret" not in status(request.id, root=area / "state").error
 
 
+@pytest.mark.parametrize("retained", [False, True])
+def test_worker_preserves_native_handle_and_selected_python_bootstrap(area, monkeypatch, retained):
+    from types import SimpleNamespace
+    import agent_procutil
+
+    sample(area)
+    handle = SimpleNamespace(poll=lambda: None)
+    root = area / "state"
+    source = area / "retained" / "src"
+
+    def spawn(command, **options):
+        assert options.get("python_bootstrap_root") == (source if retained else None)
+        token = options["env_overrides"]["UPDATE_DRIVER_STARTUP"]
+        (root / f".worker-started-{token}").touch()
+        return handle
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", spawn)
+    assert ensure_worker(
+        (sys.executable, "-m", "fixture"), root=root,
+        python_bootstrap_root=source if retained else None,
+    ) is handle
+    assert not list(root.glob(".worker-started-*"))
+
+
 @pytest.mark.parametrize("kind", ["version", "schema", "corrupt", "row"])
 def test_malformed_state_fails_explicitly(area, kind):
     request = sample(area)

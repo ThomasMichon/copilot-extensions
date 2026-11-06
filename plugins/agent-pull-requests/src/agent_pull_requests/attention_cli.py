@@ -7,11 +7,13 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from typing import TYPE_CHECKING
 
-from .attention_client import AttentionClient
 from .attention_read import MAX_BATCH_BYTES, PROTOCOL
-from .watch_replay_client import ReplayClientError
 from .watch_replay_store import json_object
+
+if TYPE_CHECKING:
+    from .attention_client import AttentionClient
 
 
 def add_parser(commands: argparse._SubParsersAction) -> None:
@@ -24,6 +26,9 @@ def add_parser(commands: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace, host: AttentionClient | None = None) -> int:
+    from .attention_client import AttentionClient
+    from .watch_replay_client import ReplayClientError
+
     async def invoke(payload: dict) -> dict:
         if host is None:
             if args.attention_command == "capabilities":

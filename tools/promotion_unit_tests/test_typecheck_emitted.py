@@ -1,0 +1,389 @@
+"""Actor-free emitted-source admission using synthetic, nonexecuted producers."""
+from __future__ import annotations
+
+import ast
+import copy
+from dataclasses import replace
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+import typecheck as checker
+from tools import typecheck_source_views as views
+
+
+def emitted_source(root: Path) -> tuple[tuple[str, ...], dict]:
+    relative = views.HARNESS_PREFIX + "producer.py"
+    source = b"def emit():\n    subprocess.run([sys.executable, '-c', \"value: int = 1\"])\n"
+    path = root / relative
+    path.parent.mkdir(parents=True)
+    path.write_bytes(source)
+    shell = views.HARNESS_PREFIX + "fixture.sh"
+    shell_body = b"value: int = 2\n"
+    shell_source = b"python <<'PY'\n" + shell_body + b"PY\n"
+    (root / shell).write_bytes(shell_source)
+    tree = ast.parse(source)
+    container = next(n for n in ast.walk(tree) if isinstance(n, ast.List))
+    expression = container.elts[-1]
+    declaration = {
+        "version": 1,
+        "members": [{"path": relative, "sha256": [hashlib.sha256(source).hexdigest()],
+                     "structure": views._shape(tree)}],
+        "assets": [{"path": shell, "sha256": [hashlib.sha256(shell_source).hexdigest()],
+                    "structure": [hashlib.sha256(shell_source).hexdigest()]}],
+        "programs": [
+            {"path": relative, "function": "emit", "selector": "python-c", "index": 0,
+             "expression": views._shape(expression), "origins": {}, "transport": "unicode-python-c",
+             "role": "synthetic-constant", "classification": "static-parent-constant-relation-only",
+             "sites": [[container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]]},
+            {"path": shell, "function": "", "selector": "quoted-heredoc", "index": 0,
+             "expression": hashlib.sha256(shell_body).hexdigest(), "origins": {},
+             "transport": "quoted-shell-utf8", "role": "synthetic-shell",
+             "classification": "static-shell-body-unobserved", "sites": []},
+        ],
+        "data_writes": [],
+    }
+    (root / views.HARNESS_DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    return (relative,), declaration
+
+
+@pytest.mark.parametrize("change", ["unchanged", "missing-site", "hidden-producer", "duplicate-epoch"])
+def test_emitted_census_checks_current_synthetic_producer(
+    tmp_path: Path, change: str,
+) -> None:
+    paths, declaration = emitted_source(tmp_path)
+    if change == "missing-site":
+        declaration["programs"][0]["sites"] = []
+    elif change == "duplicate-epoch":
+        declaration["programs"].append(dict(declaration["programs"][0]))
+    elif change == "hidden-producer":
+        path = tmp_path / paths[0]
+        content = path.read_bytes() + b"\ndef hidden():\n    subprocess.run([sys.executable, '-c', 'pass'])\n"
+        path.write_bytes(content)
+        declaration["members"][0].update(
+            sha256=[hashlib.sha256(content).hexdigest()], structure=views._shape(ast.parse(content)),
+        )
+    (tmp_path / views.HARNESS_DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    if change != "unchanged":
+        with pytest.raises(views.SourceViewError):
+            views.harness_emitted_inputs(tmp_path, paths)
+        return
+    inputs, programs = views.harness_emitted_inputs(tmp_path, paths)
+    assert len(inputs) == 3 and len(programs) == 2
+    assert [body for _, body, _, _ in programs] == [b"value: int = 1", b"value: int = 2\n"]
+    assert programs[0][0] == paths[0] and programs[0][2:] == (2, 2)
+
+
+def test_shared_binding_verification_is_per_pass_and_never_skips_an_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, _ = emitted_source(tmp_path)
+    owner = checker._SourceViews(tmp_path, tmp_path / "stage")
+    emitted = owner.add_harness(paths)
+    calls = []
+    verify = views.HarnessProgramView.verify
+
+    def observe(view, root):
+        calls.append(view.output)
+        verify(view, root)
+
+    monkeypatch.setattr(views.HarnessProgramView, "verify", observe)
+    owner.verify()
+    owner.verify()
+    assert len(calls) == 2
+    last = emitted[-1].output
+    content = last.read_bytes()
+    last.write_bytes(content + b"# changed\n")
+    with pytest.raises(views.SourceViewError, match="Checker output changed"):
+        owner.verify()
+    last.write_bytes(content)
+    owner.views[-1] = replace(emitted[-1], members=())
+    with pytest.raises(views.SourceViewError, match="membership changed"):
+        owner.verify()
+    owner.views[-1] = emitted[-1]
+    owner.cleanup()
+    assert not list(owner.stage.iterdir())
+
+
+@pytest.mark.parametrize("change", ["source", "member", "asset", "replaced-output"])
+def test_emitted_views_refuse_current_binding_drift_without_foreign_cleanup(
+    tmp_path: Path, change: str,
+) -> None:
+    paths, _ = emitted_source(tmp_path)
+    owner = checker._SourceViews(tmp_path, tmp_path / "stage")
+    emitted = owner.add_harness(paths)
+    if change == "source":
+        path = tmp_path / paths[0]
+        path.write_bytes(path.read_bytes() + b"\n")
+    elif change == "member":
+        (tmp_path / views.HARNESS_PREFIX / "extra.py").write_bytes(b"pass\n")
+    elif change == "asset":
+        (tmp_path / views.HARNESS_PREFIX / "extra.sh").write_bytes(b"exit 0\n")
+    else:
+        output = emitted[-1].output
+        output.rename(output.with_suffix(".saved"))
+        output.write_bytes(b"foreign: int = 1\n")
+    with pytest.raises((checker.TypecheckError, views.SourceViewError)):
+        owner.verify()
+    if change == "replaced-output":
+        with pytest.raises(checker.TypecheckError, match="Replaced checker output retained"):
+            owner.cleanup()
+        assert emitted[-1].output.read_bytes() == b"foreign: int = 1\n"
+
+
+@pytest.mark.parametrize("change", ["later-copy", "winning-copy", "winning-stub"])
+def test_emitted_provider_uses_ordered_canonical_winner(tmp_path: Path, change: str) -> None:
+    canonical = tmp_path / "libs/agent-procutil/src"
+    package = canonical / "agent_procutil"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_bytes(b"raise RuntimeError('never imported')\n")
+    later = tmp_path / "later"
+    later.mkdir()
+    (later / "agent_procutil.py").write_bytes(b"raise RuntimeError('never imported')\n")
+    if change == "later-copy":
+        assert checker._harness_procutil_provider(tmp_path, [str(canonical), str(later)]) == package
+    elif change == "winning-copy":
+        with pytest.raises(checker.TypecheckError, match="winning candidate-local"):
+            checker._harness_procutil_provider(tmp_path, [str(later), str(canonical)])
+    else:
+        (package / "__init__.pyi").write_bytes(b"")
+        with pytest.raises(checker.TypecheckError, match="winning agent_procutil stub"):
+            checker._harness_procutil_provider(tmp_path, [str(canonical), str(later)])
+
+
+@pytest.mark.parametrize("change", ["nested-sink", "nested-literal", "function", "parameter", "import", "module-store"])
+def test_reviewed_member_digests_cannot_hide_lexical_bindings(tmp_path: Path, change: str) -> None:
+    paths, declaration = emitted_source(tmp_path)
+    path = tmp_path / paths[0]
+    source = path.read_bytes()
+    if change == "nested-sink":
+        source = (
+            b"def emit():\n    script = 'value: int = 1'\n"
+            b"    def launch(script: str):\n        subprocess.run([sys.executable, '-c', script])\n"
+            b"    launch(\"value: int = 'wrong'\")\n"
+        )
+    elif change == "nested-literal":
+        source = b"def emit():\n    def launch():\n        subprocess.run([sys.executable, '-c', \"value: int = 1\"])\n"
+    elif change == "function":
+        source += b"\ndef str(value):\n    return 42\n"
+    elif change == "parameter":
+        source = source.replace(b"def emit():", b"def emit(repr):")
+    elif change == "import":
+        source += b"\nfrom builtins import int as str\n"
+    else:
+        source += b"\nrepr = lambda value: 42\n"
+    path.write_bytes(source)
+    tree = ast.parse(source)
+    declaration["members"][0].update(
+        sha256=[hashlib.sha256(source).hexdigest()], structure=views._shape(tree),
+    )
+    if change == "nested-sink":
+        expression = next(n.value for n in ast.walk(tree) if isinstance(n, ast.Assign))
+        container = next(n for n in ast.walk(tree) if isinstance(n, ast.List))
+        declaration["programs"][0].update(
+            selector="assignment:script", expression=views._shape(expression),
+            sites=[[container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]],
+        )
+    elif change == "nested-literal":
+        container = next(n for n in ast.walk(tree) if isinstance(n, ast.List))
+        declaration["programs"][0]["sites"] = [
+            [container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]
+        ]
+    (tmp_path / views.HARNESS_DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    if change == "nested-literal":
+        assert views.harness_emitted_inputs(tmp_path, paths)[1][0][1] == b"value: int = 1"
+        return
+    with pytest.raises(views.SourceViewError, match="nested|conversion binding"):
+        views.harness_emitted_inputs(tmp_path, paths)
+
+
+def test_semantic_shape_normalizes_only_empty_optional_host_fields() -> None:
+    original = ast.parse("def sample():\n    return b'value'\n").body[0]
+    original._fields = tuple(name for name in original._fields if name != "type_params")
+    if hasattr(original, "type_params"):
+        delattr(original, "type_params")
+    newer = copy.deepcopy(original)
+    newer._fields = (*newer._fields, "type_params")
+    setattr(newer, "type_params", [])
+    assert views._shape(original) == views._shape(newer)
+    setattr(newer, "type_params", [ast.Name(id="T", ctx=ast.Load())])
+    assert views._shape(original) != views._shape(newer)
+    unknown = copy.deepcopy(original)
+    unknown._fields = (*unknown._fields, "future_semantic_field")
+    setattr(unknown, "future_semantic_field", [])
+    assert views._shape(original) != views._shape(unknown)
+    changed = ast.parse("def sample():\n    return b'changed'\n").body[0]
+    assert views._shape(original) != views._shape(changed)
+
+
+def test_harness_minimum_parser_refuses_newer_nonempty_language_semantics() -> None:
+    with pytest.raises(views.SourceViewError, match="invalid composed source"):
+        views._parse(b"def sample[T](value: T) -> T:\n    return value\n",
+                     "synthetic-newer-language", feature_version=(3, 10))
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", ""])
+def test_emitted_diagnostics_annotate_only_the_current_generated_output(
+    tmp_path: Path, ending: str,
+) -> None:
+    paths, _ = emitted_source(tmp_path)
+    owner = checker._SourceViews(tmp_path, tmp_path / "stage")
+    emitted = owner.add_harness(paths)
+    origin = (paths[0], 110, 110)
+    parent, child = (
+        replace(view, origin=origin, lines=(views.SourceLine(paths[0], 110),))
+        for view in emitted
+    )
+    owner.views = [parent, child]
+    newline = ending or "\n"
+    physical = f"{paths[0]}:110: error: physical"
+    raw = newline.join([
+        f"{parent.output}:1: error: parent", f"{child.output}:1: error: child", physical,
+    ]) + ending
+    mapped = owner.diagnostics(raw)
+    assert mapped.count("[emitted expression range 110-110; portable typing witness]") == 2
+    assert physical + ending == mapped.splitlines(keepends=True)[-1]
+    assert mapped.splitlines(keepends=True)[0].endswith("portable typing witness]" + newline)
+    with pytest.raises(views.SourceViewError, match="outside the composed source map"):
+        parent.diagnostics(f"{parent.output}:2: error: invalid", tmp_path)
+    owner.cleanup()
+
+
+def named_source(root: Path, source: str, origins: dict[str, str] | None = None) -> tuple[str, ...]:
+    paths, declaration = emitted_source(root)
+    content = source.encode()
+    (root / paths[0]).write_bytes(content)
+    tree = ast.parse(content)
+    expression = next(
+        node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "script" for target in node.targets)
+    )
+    container = next(node for node in ast.walk(tree) if isinstance(node, ast.List))
+    declaration["members"][0].update(
+        sha256=[hashlib.sha256(content).hexdigest()], structure=views._shape(tree),
+    )
+    declaration["programs"][0].update(
+        selector="assignment:script", expression=views._shape(expression), origins=origins or {},
+        sites=[[container.lineno, container.col_offset, container.end_lineno, container.end_col_offset]],
+    )
+    (root / views.HARNESS_DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    return paths
+
+
+@pytest.mark.parametrize("change", [
+    "parameter", "parameter-dead", "posonly", "kwonly", "vararg", "kwarg", "dead", "after",
+    "import", "function", "class", "global", "unconditional", "same-suite",
+    "opposite-branch", "finally", "local-helper",
+])
+def test_named_producer_requires_a_direct_prior_nonparameter_binding(tmp_path: Path, change: str) -> None:
+    headers = {
+        "parameter": "script: str", "parameter-dead": "script: str", "posonly": "script, /", "kwonly": "*, script",
+        "vararg": "*script", "kwarg": "**script",
+    }
+    assignment = "    script = 'value: int = 1'\n"
+    sink = "    subprocess.run([sys.executable, '-c', script])\n"
+    body = assignment + sink
+    if change in {"dead", "parameter-dead"}:
+        body = "    if False:\n    " + assignment + sink
+    elif change == "after":
+        body = sink + assignment
+    elif change in {"import", "function", "class", "global"}:
+        extra = {
+            "import": "    from other import value as script\n",
+            "function": "    def script():\n        return 'wrong'\n",
+            "class": "    class script:\n        pass\n",
+            "global": "    global script\n",
+        }[change]
+        body = extra + assignment + sink
+    elif change == "unconditional":
+        body = assignment + "    for item in (1,):\n    " + sink
+    elif change == "same-suite":
+        body = "    if enabled:\n    " + assignment + "    " + sink
+    elif change == "opposite-branch":
+        body = "    if enabled:\n    " + assignment + "    else:\n    " + sink
+    elif change == "finally":
+        body = "    try:\n    " + assignment + "    finally:\n    " + sink
+    elif change == "local-helper":
+        body = assignment + "    def helper():\n        script = 'unrelated local'\n" + sink
+    paths = named_source(tmp_path, f"def emit({headers.get(change, '')}):\n" + body)
+    if change in {"unconditional", "same-suite", "local-helper"}:
+        assert views.harness_emitted_inputs(tmp_path, paths)[1][0][1] == b"value: int = 1"
+    else:
+        with pytest.raises(views.SourceViewError, match="binding"):
+            views.harness_emitted_inputs(tmp_path, paths)
+
+
+@pytest.mark.parametrize("change", ["dead-origin", "same-suite", "after-expression"])
+def test_fixture_origin_requires_the_same_unconditional_binding_guarantee(
+    tmp_path: Path, change: str,
+) -> None:
+    source = (
+        "def emit(tmp_path):\n"
+        "    if False:\n        pid_file = tmp_path / 'descendant.pid'\n"
+        "    script = f\"open({str(pid_file)!r}, 'w').close()\"\n"
+        "    subprocess.run([sys.executable, '-c', script])\n"
+    )
+    if change == "same-suite":
+        source = (
+            "def emit(tmp_path):\n    if enabled:\n"
+            "        pid_file = tmp_path / 'descendant.pid'\n"
+            "        script = f\"open({str(pid_file)!r}, 'w').close()\"\n"
+            "        subprocess.run([sys.executable, '-c', script])\n"
+        )
+    elif change == "after-expression":
+        source = (
+            "def emit(tmp_path):\n"
+            "    script = f\"open({str(pid_file)!r}, 'w').close()\"\n"
+            "    pid_file = tmp_path / 'descendant.pid'\n"
+            "    subprocess.run([sys.executable, '-c', script])\n"
+        )
+    paths = named_source(tmp_path, source, {"pid_file": "tmp_path / 'descendant.pid'"})
+    if change == "same-suite":
+        assert b"__harness_typing_witness__" in views.harness_emitted_inputs(tmp_path, paths)[1][0][1]
+        return
+    with pytest.raises(views.SourceViewError, match="binding"):
+        views.harness_emitted_inputs(tmp_path, paths)
+
+
+@pytest.mark.parametrize("change", ["leaf", "python-c", "python-write"])
+def test_nested_programs_are_supported_only_to_the_declared_leaf_depth(tmp_path: Path, change: str) -> None:
+    child = "value: int = 1\n"
+    if change == "python-c":
+        child = "subprocess.run([sys.executable, '-c', \"value: int = 'wrong'\"])\n"
+    elif change == "python-write":
+        child = "Path('grandchild.py').write_text(\"value: int = 'wrong'\")\n"
+    parent = f"subprocess.run([sys.executable, '-c', {child!r}])\n"
+    paths = named_source(tmp_path, f"def emit():\n    script = {parent!r}\n"
+                         "    subprocess.run([sys.executable, '-c', script])\n")
+    declaration_path = tmp_path / views.HARNESS_DECLARATION
+    declaration = json.loads(declaration_path.read_bytes())
+    nested = dict(declaration["programs"][0])
+    nested.update(selector="nested:script", transport="nested-parent-constant",
+                  role="synthetic-child", sites=[])
+    declaration["programs"].append(nested)
+    declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
+    if change == "leaf":
+        assert len(views.harness_emitted_inputs(tmp_path, paths)[1]) == 3
+    else:
+        with pytest.raises(views.SourceViewError, match="deeper nested"):
+            views.harness_emitted_inputs(tmp_path, paths)
+
+
+@pytest.mark.parametrize("change", ["except", "match-as", "match-star", "match-rest", "delete"])
+def test_unsupported_non_name_rebindings_cannot_mask_producer(tmp_path: Path, change: str) -> None:
+    sink = "subprocess.run([sys.executable, '-c', script])\n"
+    if change == "except":
+        statements = "    try:\n        raise ValueError()\n    except ValueError as script:\n        " + sink
+    elif change == "delete":
+        statements = "    del script\n    " + sink
+    else:
+        pattern = {
+            "match-as": "script", "match-star": "[*script]",
+            "match-rest": "{'key': item, **script}",
+        }[change]
+        statements = f"    match supplied:\n        case {pattern}:\n            " + sink
+    paths = named_source(tmp_path, "def emit(supplied):\n    script = 'value: int = 1'\n" + statements)
+    with pytest.raises(views.SourceViewError, match="binding"):
+        views.harness_emitted_inputs(tmp_path, paths)

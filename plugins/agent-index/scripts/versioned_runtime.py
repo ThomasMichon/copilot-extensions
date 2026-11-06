@@ -858,7 +858,7 @@ def _rmtree_deferrable(d: Path, *, label: str) -> bool:
     """
     for attempt in range(_AV_RETRY_ATTEMPTS):
         try:
-            shutil.rmtree(d)
+            shutil.rmtree(_leases._native_path(d))
             return True
         except OSError as exc:
             if not _is_transient_lock(exc):

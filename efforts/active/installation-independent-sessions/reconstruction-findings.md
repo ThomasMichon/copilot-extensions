@@ -159,6 +159,22 @@ retain their implementation authority; filing or linking is not claiming work.
   with published complete-source assets at that Dev identity. Installed
   acceptance and existing-owner recovery are still separate open gates.
 
+- [ ] **R11 - Bootstrap preparation and request custody survive application replacement.**
+  Source repair #10559 merged at
+  `5aea4b4010c08846f92bd8d9b5d14c7b1accfa19` after exact-head approval,
+  required CI, all four native bootstrap/retention jobs and both legacy-monitor
+  jobs passed. The current controller retains the complete preparation
+  source/assets and effective installed-CLI anchors, preserves holds and
+  per-request identity, and keeps controller-only options out of older
+  application argument/environment contracts. Stable input/asset revisions
+  may reuse bytes without coalescing distinct pending requests. The
+  [source journal](<journal/2026/11.06 bootstrap-custody-source.md>) records
+  the finite proof and unsupported old-relative-CLI/deleted-cwd case.
+  Verify the containing normal release, then qualify the authorized ordinary
+  installed reconstruction and existing-owner recovery independently. Neither
+  source success nor a new request identifier settles an interrupted request
+  or authorizes replay, manual activation or a host rollout.
+
 ## Evidence limits and remaining live gate
 
 Ordinary reconstruction, data-preservation checks and subsequent service health

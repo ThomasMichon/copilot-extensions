@@ -25,6 +25,13 @@ absence of these fields is unknown, never proof that no child exists; existing
 its own launch intent from explicit producer evidence, not from an exception's
 class or message.
 
+For a source-only caller that will remove its acquisition checkout,
+`spawn_daemon(..., python_bootstrap_root=<retained-src>)` binds leased Python
+admission to that retained `agent_procutil` package before loading the daemon
+entrypoint. The caller must retain the complete source closure for the worker's
+lifetime. Omission keeps the launcher's package; this option changes neither
+native containment nor leases and does not add a production admission wrapper.
+
 The explicit Linux user-systemd fixture is
 `tests/systemd_daemon_fixture.py qualify <fresh-private-directory>`.
 It uses finite caller units and a renewable test-instance lease to prove
