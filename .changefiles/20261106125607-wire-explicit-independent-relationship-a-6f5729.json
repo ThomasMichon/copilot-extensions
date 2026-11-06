@@ -1,0 +1,9 @@
+{
+  "comment": "Wire explicit independent relationship admission through ordinary coordinator configuration, refusing invalid selections without legacy fallback.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

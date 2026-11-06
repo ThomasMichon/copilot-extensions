@@ -74,6 +74,12 @@ selector. Required exact-session resume subsequently merged in #11078,
 including endpoint-pinned per-attempt capability checks under concurrent
 startup-observer cutover. This is source credit; complete-cohort assembly
 remains open before ordinary activation.
+Original prepared-reservation correlation subsequently merged in #11105.
+Queue reconciliation now checks that exact original reservation before each
+owner call; this source prerequisite does not admit the actual writer cohort.
+Explicit ordinary coordinator configuration now has a conditional trusted
+admission-factory source path. It retains both independent callbacks and fails
+closed for invalid selections; no permissive policy is provided or installed.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running

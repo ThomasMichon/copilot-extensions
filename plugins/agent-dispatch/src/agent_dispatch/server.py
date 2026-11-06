@@ -88,6 +88,11 @@ def check_bind_safety(cfg: Config) -> None:
 def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     """Construct the coordinator; only a trusted embedding selects replay."""
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
+    from .assignment_admission import configured_writer
+
+    relationship_writer = configured_writer(
+        cfg.relationship_admission, cfg.relationship_authority,
+    )
     # Install a telemetry sink if one is configured (generic open hook; a no-op
     # unless a consumer wired a sink). Prefer a convention-located config file
     # (env-free); fall back to the environment so env-wired deploys don't
@@ -97,6 +102,8 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(
         Path(cfg.db_path).expanduser(), worker_admission=require_worker_admission,
+        relationship_writer=relationship_writer,
+        relationship_authority=cfg.relationship_authority,
     )
     app = create_app(
         queue, token=cfg.token, control_token=cfg.control_token,

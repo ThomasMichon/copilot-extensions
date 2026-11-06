@@ -19,7 +19,11 @@ and [dated journal](journal/2026/11.05-submission-resubmission.md#resident-only-
 `WorktreeRelationshipWriter` negotiates the selected executing CLI and requires
 an independent `admit_workspace` callback. Its relationship calls use the
 registered direct owner; they do not establish another resident's support.
-Ordinary coordinator construction still supplies no writer.
+Default ordinary coordinator construction still supplies no writer.
+The conditional [configuration owner](../../../plugins/agent-dispatch/docs/configuration.md#conditional-relationship-admission)
+can select a trusted factory carrying both real independent callbacks through
+the existing `serve` path. It supplies no permissive policy and is not an
+admission receipt or installed-cohort observation.
 
 Worktrees already exposes the
 [incarnation-bound relationship contract](../../../plugins/agent-worktrees/docs/resource-relationship.md#workspace-incarnation-and-executing-writer-support).
@@ -440,3 +444,11 @@ before the first reserve.
       installed-writer and complete-cohort observations remain separate gates.
       #11031 passes 17 new admitted controls, the complete 4,352-unit packet
       and 106 distinct queue/owner controls. No ordinary writer is constructed.
+
+The original queue/preparation correlation was subsequently repaired in #11105.
+Before each external operation, the queue also rereads the exact prepared
+reservation named by the original request, retaining workspace, incarnation
+and original event/generation facts. Bounded SQLite and actor-free controls
+cover changed preparation and original-request recovery. This closes that
+source defect only; independent ground-record/allocation, actual selected
+participants and complete-cohort admission remain open.

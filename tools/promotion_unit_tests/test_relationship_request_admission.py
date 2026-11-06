@@ -16,6 +16,18 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "promotion_relationship_request"
 
 
+def load_configured_admission(monkeypatch):
+    qualified = f"{PACKAGE}.assignment_admission"
+    spec = importlib.util.spec_from_file_location(
+        qualified, ROOT / "plugins/agent-dispatch/src/agent_dispatch/assignment_admission.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, qualified, module)
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture
 def boundary(monkeypatch):
     root = ROOT / "plugins/agent-dispatch/src/agent_dispatch"
@@ -113,6 +125,54 @@ def boundary(monkeypatch):
         admitted=admitted, Refused=Refused, module=owner_module, monkeypatch=monkeypatch,
         relationships=relationships,
     )
+
+
+@pytest.mark.parametrize("selection", [
+    (None, None), ("", "local"), (None, "local"), ("policy:factory", None),
+    ("policy:factory", "legacy"), ("policy..module:factory", "local"),
+])
+def test_configured_admission_never_imports_absent_or_invalid_selection(boundary, selection):
+    b = boundary
+    module = load_configured_admission(b.monkeypatch)
+
+    def forbidden(*args):
+        raise AssertionError("selection cannot import an admission owner")
+
+    b.monkeypatch.setattr(module.importlib, "import_module", forbidden)
+    if selection == (None, None):
+        assert module.configured_writer(*selection) is None
+    else:
+        with pytest.raises(ValueError):
+            module.configured_writer(*selection)
+
+
+def test_configured_admission_carries_both_actual_independent_owners(boundary):
+    b = boundary
+    module = load_configured_admission(b.monkeypatch)
+    policy = ModuleType("promotion_policy")
+    admission = module.RelationshipAdmission(
+        b.writer.admit_workspace, b.writer._admit_request,
+    )
+    policy.factory = lambda: admission
+    b.monkeypatch.setitem(sys.modules, policy.__name__, policy)
+    selected = []
+
+    def retain(**kwargs):
+        selected.append(kwargs)
+        return b.make(kwargs["admit_request"])
+
+    b.monkeypatch.setattr(b.module.WorktreeRelationshipWriter, "selected", retain)
+    writer = module.configured_writer("promotion_policy:factory", "local")
+    bound = writer.bind_request(b.request)
+    assert bound(b.workspace, "inspect", {"request_id": "original-request", "allow_missing": True})["absent"]
+    assert len(b.admitted) == 1
+    assert selected == [{
+        "admit_workspace": admission.admit_workspace, "admit_request": admission.admit_request,
+    }]
+    policy.factory = lambda: True
+    with pytest.raises(ValueError, match="independent admission owners"):
+        module.configured_writer("promotion_policy:factory", "local")
+    assert len(selected) == 1
 
 
 @pytest.mark.parametrize(
