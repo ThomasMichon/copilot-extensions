@@ -330,6 +330,42 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [owner-fenced cohort adjudication](<journal/2026/11.05 owner-fenced-cohort-adjudication.md>)
+audits eighteen subordinate tracking retirements under six existing OPEN
+parents and new daemon parent #10847, preserving every unfinished acceptance
+and actual source/operating/resource owner. Citation-derived exclusions and
+inferred issue-status vetoes are corrected without releasing real gates.
+Two equal complete18:32 PST scans measure857 whole OPEN:578 creator-eligible,
+279 excluded,575 original-cohort and282 inflow. Verified dispositions are947;
+the new parent is counted as inflow and an external departure earns no credit.
+The fixed729 gate remains128 away. Real reclamation and Active fleet receiving
+amendments remain review-gated, while three bounded studies continue.
+The campaign stays Active with every Plan/Validation checkbox state unchanged.
+
+The [same cohort journal](<journal/2026/11.05 portable-process-cohort.md>)
+then receives #6564's exact Machines legacy stamp/update identity lane under
+actual OPEN #6369, independently preserving Worktrees post-build reuse and
+both source owners. Native/parity acceptance remains unchecked; the parent
+explicitly retains authoritative incoming replacement and independent retirement.
+Audited #6564 is `NOT_PLANNED`, not implemented. Two equal complete17:52 PST
+scans remain872 whole OPEN:594 creator-eligible,278 excluded,589 original-cohort
+and283 inflow. Excluded #10840 offsets the campaign departure, metadata only.
+Verified dispositions are929,143 above729. Three further bounded cohort studies
+continue; the Active parent and all Plan/Validation checkbox states remain.
+
+The same [dated journal](<journal/2026/11.05 portable-process-cohort.md>)
+records reviewed merge #10837, then resolves #9489's false ancestry inference
+through the actual wholesale-tree promotion receipt and containing Dev snapshot.
+The finite UV outcome is audited `COMPLETED`, without protected-helper or
+installed-host claims. Actual OPEN #6470 receives #7902's full ordering
+enhancement, and OPEN #6076 receives #6269/#6660's complete residual native/
+release acceptance while preserving their existing operating custody.
+Those three child retirements are tracking-only, not implementation.
+Two equal complete17:46 PST scans measure872 whole OPEN:595 creator-eligible,
+277 excluded,590 original-cohort and282 inflow. Excluded #10836 is metadata-only.
+Verified dispositions are928,143 above the fixed729 checkpoint. The campaign
+remains Active; all canonical/public Plan and Validation checkbox states remain.
+
 The [portable-process cohort](<journal/2026/11.05 portable-process-cohort.md>)
 places three subordinate trackers under actual OPEN #5006, preserving the
 shared keeper, named Bridge local-cache cleanup workstream, five-case causal
