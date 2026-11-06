@@ -64,7 +64,7 @@ def test_git_owner_uses_the_execution_checkout_and_exact_source(
             "",
         )
 
-    monkeypatch.setattr(subprocess, "run", capture)
+    monkeypatch.setattr(plugin_auth, "_credential_run", capture)
     child = plugin_auth.plugin_management_environment(definition, original, tmp_path)
     assert child["COPILOT_GITHUB_TOKEN"] == child["GH_TOKEN"] == "git-owner-value"
     arguments, options = calls[0]
@@ -126,8 +126,8 @@ def test_explicit_git_owner_refusal_is_not_an_ambient_fallback(
 ) -> None:
     monkeypatch.setattr(plugin_auth, "execution_executable", lambda *args: "selected-git")
     monkeypatch.setattr(
-        subprocess,
-        "run",
+        plugin_auth,
+        "_credential_run",
         lambda *args, **kwargs: subprocess.CompletedProcess(
             args[0],
             128,
@@ -154,7 +154,7 @@ def test_enterprise_environment_token_is_not_used_for_a_public_host_lookup(
         assert "GH_TOKEN" not in kwargs["env"]
         return subprocess.CompletedProcess(arguments, 0, "password=public-host-value\n\n", "")
 
-    monkeypatch.setattr(subprocess, "run", capture)
+    monkeypatch.setattr(plugin_auth, "_credential_run", capture)
     child = plugin_auth.plugin_management_environment(GITHUB, original, tmp_path)
     assert child["COPILOT_GITHUB_TOKEN"] == "public-host-value"
     assert original["GH_TOKEN"] == "enterprise-value"
@@ -166,8 +166,8 @@ def test_credential_from_another_authority_is_not_forwarded(
 ) -> None:
     monkeypatch.setattr(plugin_auth, "execution_executable", lambda *args: "selected-git")
     monkeypatch.setattr(
-        subprocess,
-        "run",
+        plugin_auth,
+        "_credential_run",
         lambda *args, **kwargs: subprocess.CompletedProcess(
             args[0],
             0,
@@ -189,7 +189,7 @@ def test_credential_lookup_respects_the_remaining_budget(
         assert kwargs["timeout"] == 0.25
         raise subprocess.TimeoutExpired(arguments, kwargs["timeout"])
 
-    monkeypatch.setattr(subprocess, "run", capture)
+    monkeypatch.setattr(plugin_auth, "_credential_run", capture)
     assert plugin_auth.plugin_management_environment(GITHUB, {}, tmp_path, timeout=0.25) == {}
     with pytest.raises(TimeoutError, match="deadline expired"):
         plugin_auth.plugin_management_environment(GITHUB, {}, tmp_path, timeout=0)

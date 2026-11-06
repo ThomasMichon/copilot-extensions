@@ -328,6 +328,7 @@ def _run_copilot_update() -> tuple[bool, str]:
     from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
     from shutil import which
     from . import update_auth_context
+    from .installer_run import InstallerLaunchError
 
     if which("copilot") is None:
         return False, "copilot not on PATH"
@@ -344,6 +345,8 @@ def _run_copilot_update() -> tuple[bool, str]:
         return proc.returncode == 0, out.strip()
     except OwnedCleanupError:
         raise
+    except InstallerLaunchError:
+        return False, "copilot plugin authentication preparation failed"
     except subprocess.TimeoutExpired:
         return False, f"copilot plugin update timed out ({_COPILOT_UPDATE_TIMEOUT}s)"
     except (OSError, subprocess.SubprocessError) as e:

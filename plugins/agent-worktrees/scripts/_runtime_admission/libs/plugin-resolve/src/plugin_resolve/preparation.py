@@ -28,23 +28,26 @@ from .registration import (
 )
 from .settings import RepoPluginSettings, local_marketplace_path
 from .inventory import inventory_paths, installed_item, inventory_item
-from .execution import execution_environment, execution_executable, windows_batch_command
+from .execution import (
+    GIT_REPOSITORY_SELECTORS, execution_environment, execution_executable, windows_batch_command,
+)
 from .target import bind_target
+from .plugin_auth import plugin_management_environment, redact_plugin_credentials
 
-_GIT_SELECTORS = {
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-}
-
+_GIT_SELECTORS = GIT_REPOSITORY_SELECTORS
 
 def _environment(environment: Mapping[str, str] | None = None) -> dict[str, str]:
     source = os.environ if environment is None else environment
-    return {key: value for key, value in source.items() if key not in _GIT_SELECTORS}
+    return {key: value for key, value in source.items() if key not in GIT_REPOSITORY_SELECTORS}
 
 
-def _failure(operation: str, source: str, result: subprocess.CompletedProcess[str]) -> RuntimeError:
+def _failure(
+    operation: str, source: str, result: subprocess.CompletedProcess[str],
+    *, environment: Mapping[str, str] | None = None,
+) -> RuntimeError:
     lines = []
-    for line in (result.stderr or result.stdout or "").splitlines()[:20]:
+    diagnostic = redact_plugin_credentials(result.stderr or result.stdout or "", environment or {})
+    for line in diagnostic.splitlines()[:20]:
         line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
         if re.search(r"authorization|bearer|token|secret|password|credential|gh[pousr]_|github_pat_|eyJ",
                      line, re.IGNORECASE):
@@ -200,6 +203,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
             **_environment(environment), "COPILOT_HOME": str(home),
             "COPILOT_CACHE_HOME": str(cache_root), "COPILOT_AUTO_UPDATE": "false",
         }
+        env = plugin_management_environment(definition, env, execution_cwd or repo)
         if not copilot_command:
             raise ValueError("Native installation requires an executable")
         command_prefix = list(copilot_command)
@@ -219,7 +223,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if result.returncode:
-                raise _failure(operation, source, result)
+                raise _failure(operation, source, result, environment=env)
             check_cancelled()
 
         if reusable and _installed_metadata(home, source, required=False) is None:

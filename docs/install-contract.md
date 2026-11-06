@@ -2256,13 +2256,16 @@ It uses a matching public-host `GH_TOKEN` or `GITHUB_TOKEN` only when Git suppli
 no credential. An explicit owner refusal or a different returned authority is
 not an ambient fallback. Lookups are non-interactive, headless and bounded to
 ten seconds or the caller's shorter remaining budget.
+The existing stdlib process supervisor contains the lookup and its credential
+helper descendants, reaping them on completion, timeout or caller cancellation.
 
 Only the maintenance child's copied environment receives `COPILOT_GITHUB_TOKEN`
 and `GH_TOKEN`; ordinary prompts, ACP launches, the parent environment and saved
 logins are unchanged. This covers Bridge/venue preparation, Worktrees acquisition
 and staged refresh, and Manager's registered-origin acquisition without requiring
 an agent-worktrees runtime in standalone consumers. Exact child credentials are
-redacted from returned acquisition diagnostics. Directory/non-GitHub sources
+redacted from returned acquisition diagnostics, including byte-valued timeout
+output. Directory/non-GitHub sources
 retain existing behavior. Worktrees keeps its anonymous-source, held-source,
 `off` and `report-only` decisions; authentication preparation is not evidence that
 an acquisition child launched.

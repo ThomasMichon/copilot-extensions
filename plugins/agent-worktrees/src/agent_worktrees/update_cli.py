@@ -17,6 +17,7 @@ from . import picker_profiles_cli, services_cli
 from . import update_events as _events, update_options, update_runtime_plan, update_acquisition
 from . import update_auth_context as _auth
 from . import worktree_identity
+from .installer_run import InstallerLaunchError
 from .reconcile_freshness import check_runtime_freshness
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
@@ -519,10 +520,9 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
             output.warn("Marketplace refresh returned non-zero -- continuing")
             return False
         return True
-    except OSError as exc:
-        output.warn(
-            f"{_describe_copilot_spawn_error(exc, cwd=cwd)} -- skipping marketplace refresh"
-        )
+    except (OSError, InstallerLaunchError) as exc:
+        detail = _describe_copilot_spawn_error(exc, cwd=cwd) if isinstance(exc, OSError) else str(exc)
+        output.warn(f"{detail} -- skipping marketplace refresh")
         return False
     except subprocess.TimeoutExpired:
         output.warn("Marketplace refresh timed out -- continuing")
@@ -550,10 +550,9 @@ def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) ->
             context=cwd, marketplace=marketplace,
             **_auth.child_environment(cwd),
         )
-    except OSError as exc:
-        output.warn(
-            f"{_describe_copilot_spawn_error(exc, cwd=cwd)} -- skipping retired plugin purge"
-        )
+    except (OSError, InstallerLaunchError) as exc:
+        detail = _describe_copilot_spawn_error(exc, cwd=cwd) if isinstance(exc, OSError) else str(exc)
+        output.warn(f"{detail} -- skipping retired plugin purge")
         return None
     except subprocess.TimeoutExpired:
         output.warn("Marketplace inventory timed out -- skipping retired plugin purge")

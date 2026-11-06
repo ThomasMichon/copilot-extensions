@@ -149,7 +149,7 @@ def test_anonymous_marketplace_does_not_prepare_plugin_credentials(prepared, mon
     assert result == "anonymous"
 
 
-@pytest.mark.parametrize("outcome", ["completed", "timeout"])
+@pytest.mark.parametrize("outcome", ["completed", "timeout", "timeout-bytes"])
 def test_plugin_management_diagnostics_redact_the_selected_opaque_token(
     tmp_path, monkeypatch, outcome,
 ):
@@ -166,11 +166,12 @@ def test_plugin_management_diagnostics_redact_the_selected_opaque_token(
     )
 
     def runner(argv, **kwargs):
-        if outcome == "timeout":
-            raise subprocess.TimeoutExpired(argv, 5, output=token, stderr=token)
+        if outcome.startswith("timeout"):
+            diagnostic = token.encode() if outcome == "timeout-bytes" else token
+            raise subprocess.TimeoutExpired(argv, 5, output=diagnostic, stderr=diagnostic)
         return subprocess.CompletedProcess(argv, 1, token, token)
 
-    if outcome == "timeout":
+    if outcome.startswith("timeout"):
         with pytest.raises(subprocess.TimeoutExpired) as caught:
             context.run_acquisition(runner, ["copilot"], marketplace="catalog", context=tmp_path)
         result = caught.value
@@ -178,7 +179,68 @@ def test_plugin_management_diagnostics_redact_the_selected_opaque_token(
         result = context.run_acquisition(
             runner, ["copilot"], marketplace="catalog", context=tmp_path,
         )
-    assert result.stdout == result.stderr == "[redacted]"
+    expected = b"[redacted]" if outcome == "timeout-bytes" else "[redacted]"
+    assert result.stdout == result.stderr == expected
+
+
+@pytest.mark.parametrize("explicit_cwd", [False, True])
+def test_standalone_management_resolves_repository_settings_before_credentials(
+    tmp_path, monkeypatch, explicit_cwd,
+):
+    from plugin_resolve import plugin_auth
+
+    project = tmp_path / "project"
+    settings = project / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    definition = {"source": {"source": "github", "repo": "example/repository-catalog"}}
+    settings.write_text(json.dumps({"extraKnownMarketplaces": {"catalog": definition}}))
+    monkeypatch.setenv("CE_UPDATE_AUTH", "on")
+    if not explicit_cwd:
+        monkeypatch.chdir(project)
+    calls = []
+
+    def environment(selected, original, cwd, **kwargs):
+        calls.append((selected, cwd))
+        return {"COPILOT_GITHUB_TOKEN": "repository-value"}
+
+    monkeypatch.setattr(plugin_auth, "plugin_management_environment", environment)
+    result = context.run_acquisition(
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, kwargs["env"], ""),
+        ["copilot"], marketplace="catalog", **({"cwd": project} if explicit_cwd else {}),
+    )
+    assert calls == [(definition, project)]
+    assert result.stdout["COPILOT_GITHUB_TOKEN"] == "repository-value"
+
+
+@pytest.mark.parametrize("caller", ["refresh", "browse", "module", "stage"])
+def test_best_effort_management_preserves_failure_contract_on_auth_refusal(
+    monkeypatch, caller,
+):
+    import shutil
+    from agent_worktrees import update_cli, update_runtime, update_stage
+
+    calls = []
+
+    def acquisition(*args, **kwargs):
+        calls.append(kwargs)
+        raise installer_run.InstallerLaunchError("credential owner refused")
+
+    monkeypatch.setattr(context, "run_acquisition", acquisition)
+    monkeypatch.setattr(context, "blocked", lambda *args: False)
+    monkeypatch.setattr(update_cli, "_resolve_copilot", lambda: "copilot")
+    monkeypatch.setattr(update_runtime, "_resolve_copilot", lambda: "copilot")
+    monkeypatch.setattr(shutil, "which", lambda name: "copilot")
+    if caller == "refresh":
+        assert update_cli._refresh_marketplace("catalog") is False
+    elif caller == "browse":
+        assert update_cli._browse_marketplace_plugins("catalog") is None
+    elif caller == "module":
+        assert update_runtime._refresh_module_payload("sample") is None
+    else:
+        assert update_stage._run_copilot_update() == (
+            False, "copilot plugin authentication preparation failed",
+        )
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("caller", ["standalone-module", "staged-self"])

@@ -34,6 +34,8 @@ from .execution import (
 from .target import bind_target
 from .plugin_auth import plugin_management_environment, redact_plugin_credentials
 
+_GIT_SELECTORS = GIT_REPOSITORY_SELECTORS
+
 def _environment(environment: Mapping[str, str] | None = None) -> dict[str, str]:
     source = os.environ if environment is None else environment
     return {key: value for key, value in source.items() if key not in GIT_REPOSITORY_SELECTORS}

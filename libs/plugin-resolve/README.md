@@ -199,9 +199,10 @@ For declared GitHub HTTPS marketplaces, native maintenance commands use
 `plugin_resolve.plugin_auth.plugin_management_environment`. It obtains the
 normal Git credential at the execution checkout, with a matching-host environment
 token fallback, and overrides authentication only in the maintenance child's
-environment. Credential lookup is bounded and non-interactive; explicit owner
-refusals are retained. The launched agent keeps its original inference
-environment and saved login. Local and non-GitHub sources are unchanged, and no
+environment. Credential lookup is bounded and non-interactive; its existing
+stdlib supervisor owns and reaps helper descendants on completion, timeout or
+cancellation. Explicit owner refusals are retained. The launched agent keeps its
+original inference environment and saved login. Local and non-GitHub sources are unchanged, and no
 Worktrees runtime is required.
 
 Preparation publishes native-valid subset catalogs **only for reflected local

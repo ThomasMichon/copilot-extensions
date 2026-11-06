@@ -169,13 +169,14 @@ def run_acquisition(
                 for item in report.results
             )
             if mode() == "on" and not anonymous:
-                definition = sources.settings(context).marketplaces.get(marketplace)
+                cwd = Path(kwargs.get("cwd") or context or Path.cwd())
+                definition = sources.settings(cwd).marketplaces.get(marketplace)
                 if isinstance(definition, dict):
                     from plugin_resolve.plugin_auth import plugin_management_environment
 
                     base = kwargs.get("env")
                     kwargs["env"] = plugin_management_environment(
-                        definition, os.environ if base is None else base, context or Path.cwd(),
+                        definition, os.environ if base is None else base, cwd,
                         timeout=kwargs.get("timeout") if kwargs.get("timeout") is not None else 10,
                     )
                     if kwargs.get("timeout") is not None:
@@ -193,6 +194,12 @@ def run_acquisition(
             value.record_use(report, overlay, required=required)
 
     def redact(value):
+        if marketplace is not None and isinstance(value, bytes):
+            for key in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+                token = (kwargs.get("env") or {}).get(key)
+                if token:
+                    value = value.replace(token.encode("utf-8"), b"[redacted]")
+            return value
         if marketplace is not None and isinstance(value, str):
             from plugin_resolve.plugin_auth import redact_plugin_credentials
 

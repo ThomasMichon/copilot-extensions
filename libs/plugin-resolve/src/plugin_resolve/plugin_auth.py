@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -9,6 +11,7 @@ from urllib.parse import urlsplit
 
 from .execution import GIT_REPOSITORY_SELECTORS, execution_environment, execution_executable
 from .target import github_repository_slug
+from .receiver import capture
 
 _TOKEN_KEYS = ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 
@@ -51,6 +54,31 @@ def _usable_token(value: str | None) -> str | None:
     return None
 
 
+def _credential_run(
+    arguments: list[str], *, input: str, cwd: Path, env: Mapping[str, str], timeout: float,
+) -> subprocess.CompletedProcess[str]:
+    request = json.dumps({"arguments": arguments, "input": input})
+    program = (
+        "import json,subprocess,sys\n"
+        f"request=json.loads({request!r})\n"
+        "result=subprocess.run(request['arguments'],input=request['input'].encode('utf-8'),"
+        "capture_output=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        "sys.stdout.buffer.write(result.stdout)\n"
+        "sys.stderr.buffer.write(result.stderr)\n"
+        "sys.exit(result.returncode)\n"
+    )
+    stdout, stderr, code = capture(
+        base64.b64encode(program.encode("utf-8")).decode("ascii"),
+        timeout, cwd=cwd, env=env,
+    )
+    if code == 124:
+        raise subprocess.TimeoutExpired(arguments, timeout)
+    return subprocess.CompletedProcess(
+        arguments, code, stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+    )
+
+
 def _git_token(
     url: str,
     environment: Mapping[str, str],
@@ -80,7 +108,7 @@ def _git_token(
         lookup.pop("GITHUB_TOKEN", None)
     try:
         git = execution_executable("git", lookup, cwd)
-        result = subprocess.run(
+        result = _credential_run(
             [
                 git,
                 "-c",
@@ -93,10 +121,7 @@ def _git_token(
             input=f"url={url}\n\n",
             cwd=cwd,
             env=lookup,
-            capture_output=True,
-            text=True,
             timeout=min(10, timeout),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return None
