@@ -118,6 +118,30 @@ def tool_result(identifier, content):
     return {"role": "tool", "tool_call_id": identifier, "content": content}
 
 
+@pytest.mark.parametrize("status", ["absent", "unsafe_root", "entry_limit", "file_limit"])
+def test_refused_initial_inventory_emits_no_tool_calls(tmp_path, monkeypatch, status):
+    import snapshot_rounds
+
+    root = tmp_path / "instructions"
+    if status == "unsafe_root":
+        root.write_text("Not a directory", encoding="utf-8")
+    elif status != "absent":
+        root.mkdir()
+        for name in ("one.md", "two.md"):
+            (root / name).write_text("Synthetic guidance", encoding="utf-8")
+        limit = "MAX_INVENTORY_ENTRIES" if status == "entry_limit" else "MAX_FILES"
+        monkeypatch.setattr(snapshot_rounds, limit, 1)
+
+    snapshot = snapshot_rounds.GuidanceSnapshot(root)
+    reply = snapshot.receive(guidance_payload(), 100, tmp_path / "request.json")
+
+    assert "tool_calls" not in reply
+    assert snapshot.state == "incomplete"
+    assert snapshot.reason == "instructions_" + status
+    assert snapshot.pending == {}
+    assert snapshot.report()["rounds"][0]["generated_files"]["status"] == status
+
+
 def test_snapshot_correlates_full_bodies_and_wire_deltas(tmp_path):
     from snapshot_rounds import GuidanceSnapshot
 

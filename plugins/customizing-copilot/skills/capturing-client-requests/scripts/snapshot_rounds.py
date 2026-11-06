@@ -150,6 +150,8 @@ class GuidanceSnapshot:
         }
         self.rounds.append(row)
         if self.state == "initial":
+            if inventory["status"] != "present":
+                return self.finish("instructions_" + inventory["status"])
             arguments = {"pattern": "**/*.md", "paths": str(self.instructions)}
             name = advertised_tool(payload, "glob", arguments)
             if name is None:
