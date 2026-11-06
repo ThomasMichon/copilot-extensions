@@ -45,6 +45,9 @@ class RuntimeUpdateStep:
     source: PreparedRuntimeSource | None = None
     source_target: SourceRuntimeTarget | None = None
     project_root: Path | None = None
+    readiness_platform: str | None = None
+    repository_contexts: tuple[Path, ...] = ()
+    gate_context: Path | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "environment", MappingProxyType(dict(self.environment)))
@@ -100,6 +103,7 @@ def _select_inputs(
     project: Path | None = None,
     *, repository_contexts: tuple[Path, ...] = (),
 ) -> RuntimeUpdateStep:
+    gate_context = project
     try:
         environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
         environment = dict(environment)
@@ -117,10 +121,11 @@ def _select_inputs(
             if step.name == "agent-index":
                 source.validate(step.name, step.payload, environment)
                 project = _index_repository(source.payload, project, repository_contexts, environment)
+                gate_context = project
                 if project is not None and not environment.get("AGENT_INDEX_REPO"):
                     environment["AGENT_INDEX_REPO"] = str(project.resolve())
             try:
-                if runtime._machine_gate_blocks(step.name, scope, project):
+                if len(repository_contexts) < 2 and runtime._machine_gate_blocks(step.name, scope, project):
                     return dataclasses.replace(
                         step, status=runtime.MACHINE_GATED_SKIP, eligible=False,
                     )
@@ -138,6 +143,7 @@ def _select_inputs(
             })
         elif step.name == "agent-index":
             project = _index_repository(step.payload, project, repository_contexts, environment)
+            gate_context = project
         if step.name == "agent-index" and project is not None and not environment.get("AGENT_INDEX_REPO"):
             environment["AGENT_INDEX_REPO"] = str(project.resolve())
         environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str((project or Path.cwd()).resolve())
@@ -149,6 +155,8 @@ def _select_inputs(
                 source.version if source else reconcile.payload_version(step.payload)
             ),
             project_root=project,
+            gate_context=gate_context,
+            repository_contexts=repository_contexts,
         )
     except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
         label = "installation inputs invalid" if source else "installation context invalid"
@@ -162,6 +170,44 @@ def _deployed_version(step: RuntimeUpdateStep) -> str | None:
             step.runtime_root, step.payload, target=step.source_target,
         )
     return reconcile.runtime_deployed_version(step.name, root=step.runtime_root)
+
+
+def _readiness(
+    step: RuntimeUpdateStep, platform_name: str, *, refresh_gate: bool = False,
+) -> RuntimeUpdateStep:
+    from . import update_runtime as runtime
+    from .update_runtime_readiness import INACTIVE, activation_declared, configuration_empty
+
+    step = dataclasses.replace(step, readiness_platform=platform_name, status="", required=True)
+    admitted = False
+    try:
+        declared = activation_declared(step)
+        contexts = tuple(dict.fromkeys((
+            step.project_root or Path(step.environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"]),
+            *(step.repository_contexts if declared else ()),
+        )))
+        for context in contexts:
+            gate_context = context if step.gate_context is not None or (
+                declared and step.repository_contexts
+            ) else None
+            if (refresh_gate or len(contexts) > 1) and runtime._machine_gate_blocks(
+                step.name, reconcile.manifest_runtime_scope(step.artifact), gate_context,
+            ):
+                continue
+            admitted = True
+            candidate = dataclasses.replace(
+                step, project_root=context, gate_context=gate_context,
+                environment={**step.environment, "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(context)},
+            )
+            if not configuration_empty(candidate, platform_name):
+                return candidate
+        if not admitted:
+            return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
+        return dataclasses.replace(step, status=INACTIVE, required=False)
+    except runtime.MachineDetectionError as error:
+        return dataclasses.replace(step, status=f"machine detection failed: {error}")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return dataclasses.replace(step, status=f"runtime readiness invalid: {error}")
 
 
 def _runtime_footprint_current(step: RuntimeUpdateStep) -> bool:
@@ -233,16 +279,19 @@ def plan_registered(
     if scope == "none":
         return dataclasses.replace(step, status="payload-only")
     step = dataclasses.replace(step, eligible=True)
-    multi_index = name == "agent-index" and len(repository_contexts) > 1
+    multi_context = len(repository_contexts) > 1
     try:
-        if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):
+        if not multi_context and runtime._machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
     except runtime.MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
     step = _select_inputs(step, source, gate_context, repository_contexts=repository_contexts)
     if step.status:
         return step
-    if multi_index:
+    step = _readiness(step, platform_name)
+    if step.status:
+        return step
+    if multi_context:
         try:
             if runtime._machine_gate_blocks(name, scope, step.project_root):
                 return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
@@ -324,16 +373,19 @@ def plan_module(
     if scope == "none":
         return dataclasses.replace(step, status="SKIPPED (payload-only)")
     step = dataclasses.replace(step, eligible=True)
-    multi_index = name == "agent-index" and len(repository_contexts) > 1
+    multi_context = len(repository_contexts) > 1
     try:
-        if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):
+        if not multi_context and runtime._machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
     except runtime.MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
     step = _select_inputs(step, source, gate_context, repository_contexts=repository_contexts)
     if step.status:
         return step
-    if multi_index:
+    step = _readiness(step, platform_name)
+    if step.status:
+        return step
+    if multi_context:
         try:
             if runtime._machine_gate_blocks(name, scope, step.project_root):
                 return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
@@ -412,8 +464,7 @@ def plan_modules(
             step = plan_module(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
-                **({"repository_contexts": target.repository_contexts}
-                   if target and name == "agent-index" else {}),
+                **({"repository_contexts": target.repository_contexts} if target else {}),
                 **({"source": sources.get(name)} if sources is not None else {}),
             )
         steps.append(step)
@@ -450,7 +501,7 @@ def plan_portfolio(
         plan_registered(
             name, platform_name, force=force or name in force_runtimes,
             gate_context=target.context,
-            **({"repository_contexts": target.repository_contexts} if name == "agent-index" else {}),
+            repository_contexts=target.repository_contexts,
             **({"source": sources.get(name)} if sources is not None else {}),
         )
         for name, target in sorted(targets.items())

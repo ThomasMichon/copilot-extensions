@@ -183,6 +183,7 @@ def test_posix_engine_installer_recovery_matches_selected_scope(tmp_path, target
 set -eu
 ACTION=update
 OWNER_ARG=
+INSTALL_SOURCE_ARG=
 CONTEXTUAL_INSTALL=false
 PLUGIN_DIR="$FIXTURE_ROOT"
 SCRIPT_DIR="$FIXTURE_ROOT"

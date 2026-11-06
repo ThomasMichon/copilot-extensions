@@ -56,11 +56,13 @@ def target_plan(name, target, *, check_footprint=True):
     if engine is not None and name in update_options._module_dirs(engine) and _target_scope(payload) != "none":
         step = update_runtime_plan.plan_module(
             name, payload, platform, force=False, gate_context=target.context,
+            repository_contexts=target.repository_contexts,
             check_footprint=check_footprint,
         )
         return dataclasses.replace(step, fallback_argv=())
     return update_runtime_plan.plan_registered(
         name, platform, force=False, gate_context=target.context,
+        repository_contexts=target.repository_contexts,
         check_footprint=check_footprint,
     )
 

@@ -1398,6 +1398,11 @@ updater instead. The controller owns source selection and must honor configured
 runtime-source policy and any explicit prepared-source input; selection happens
 before Manager acquisition, without changing that policy.
 
+Owner-declared inactive runtimes report `SKIPPED (configuration-empty)` without
+claiming a retained runtime is current. See
+[runtime update readiness](runtime-update-readiness.md) for the probe contract
+and configuration-change behavior.
+
 The public command submits a durable request before Manager or standalone
 execution. `--wait` observes it by default; `--detach --json` returns an
 acceptance receipt, and `--request-status <id> --json` is a project-independent

@@ -23,6 +23,16 @@ Non-strict legacy reads tolerate malformed configuration as empty.
 
 ## Runtime activation
 
+The payload's additive `runtimeActivation` declaration exposes the existing
+configuration-only Python reader to the suite updater. Exit 2 with
+`configuration-empty` explicitly declines runtime participation; exit 0 with
+`configured` requires ordinary installation and receipt checks even without a
+database. This differs from general service readiness, where a healthy enabled
+service with no database can also report `configuration-empty`. The updater
+[participation contract](../../agent-worktrees/docs/runtime-update-readiness.md)
+defines invocation, validation and legacy fallback; older updaters ignore the
+new declaration.
+
 `enabled` is an optional strict boolean, default **false**. Plugin enablement
 loads the capability; only effective `enabled: true` opts this repository into
 runtime bootstrap, installation/update participation and ordinary command

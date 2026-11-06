@@ -1,0 +1,9 @@
+{
+  "comment": "Declare explicit configuration-only runtime participation for suite updates",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

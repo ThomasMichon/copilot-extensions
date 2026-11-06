@@ -494,8 +494,7 @@ def _reconcile_registered_runtimes(
                     platform_name,
                     force=forced,
                     gate_context=targets[name].context,
-                    **({"repository_contexts": targets[name].repository_contexts}
-                       if name == "agent-index" else {}),
+                    repository_contexts=targets[name].repository_contexts,
                 ),
             )
         )
@@ -557,9 +556,28 @@ def _reconcile_one_runtime_status(
 
 def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
     from . import reconcile
+    from .update_runtime_readiness import INACTIVE
 
-    if step.status:
+    if step.status and step.status != INACTIVE:
         return step.status
+    if step.source is not None:
+        try:
+            from .update_runtime_target import check_target
+
+            step.source.validate(step.name, step.payload, step.environment)
+            check_target(
+                step.source_target, step.source, step.name, step.payload,
+                step.runtime_root, step.environment,
+            )
+        except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
+            return f"prepared source execution refused: {error}"
+    if step.readiness_platform is not None:
+        observed = update_runtime_plan._readiness(step, step.readiness_platform, refresh_gate=True)
+        if observed.status:
+            return observed.status
+        if step.status == INACTIVE:
+            return "runtime configuration changed since preflight; repeat update"
+        step = observed
     output.header(f"Updating Runtime: {step.name}")
     receipt = functools.partial(
         reconcile.runtime_deployed_version, step.name, root=step.runtime_root,
