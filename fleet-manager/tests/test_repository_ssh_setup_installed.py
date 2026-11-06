@@ -194,11 +194,12 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             parent for parent in application.parents if (parent / "install-source.json").is_file()
         )
         construction = json.loads((application / "application.json").read_text())["construction"]
+        provenance = json.loads((current_snapshot / "install-source.json").read_text())
         return {
             "schema": "fleet-manager.continuity-ssh-setup", "version": 1,
             "snapshot": str(current_snapshot), "root": str(root),
             "selection": {
-                name: construction["identity"][name] for name in ("source_commit", "source_tree")
+                name: provenance[name] for name in ("source_commit", "source_tree")
             } | {name: construction[name] for name in ("runtime_version", "payload_hash")},
             "authority": "authority-a", "installation": "installation-a", "ssh": value,
         }
