@@ -121,11 +121,17 @@ def _run(script, arguments, environment, caller, *, timeout):
     else:
         target = script.with_suffix("" if script.parent.name == "bin" else ".sh")
         command = ["bash", str(target)]
-    return subprocess.run(  # noqa: S603 -- exact test-owned released payload
-        [*command, *arguments],
-        env=environment, cwd=caller, capture_output=True, text=True,
-        timeout=timeout, check=False, **no_window_kwargs(),
-    )
+    try:
+        return subprocess.run(  # noqa: S603 -- exact test-owned released payload
+            [*command, *arguments],
+            env=environment, cwd=caller, capture_output=True, text=True,
+            timeout=timeout, check=False, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError(
+            f"Owned payload command timed out after {timeout}s: "
+            f"stdout={error.stdout!r}; stderr={error.stderr!r}"
+        ) from error
 
 
 def _cutover_failure_details(run_root):
@@ -168,6 +174,20 @@ def test_scenario_remaining_preserves_the_original_deadline(monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "monotonic", lambda: 141)
     with pytest.raises(TimeoutError, match="scenario deadline expired"):
         _scenario_remaining(140)
+
+
+def test_payload_command_timeout_retains_both_streams(tmp_path, monkeypatch):
+    def timed_out(command, **kwargs):
+        raise subprocess.TimeoutExpired(
+            command, kwargs["timeout"], output="partial stdout", stderr="partial stderr",
+        )
+
+    monkeypatch.setattr(subprocess, "run", timed_out)
+    with pytest.raises(AssertionError) as failure:
+        _run(tmp_path / "scripts" / "init.ps1", [], {}, tmp_path, timeout=5)
+    assert "after 5s" in str(failure.value)
+    assert "partial stdout" in str(failure.value)
+    assert "partial stderr" in str(failure.value)
 
 
 def test_cutover_failure_details_exclude_private_journal_and_event_fields(tmp_path):

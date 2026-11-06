@@ -1069,6 +1069,39 @@ callback an implicit credential store.
 - Re-read the complete current Plan and Validation Plan. Keep the parent Active
   and preserve every independent source/resource, provider and rollout gate.
 
+### 2026-11-06 - Retain pinned hosted failures and improve peer diagnostics
+
+- The separately authorized `watch_owner` run `42279632485` exercised
+  #10953's exact candidate `10be300359f85323f012c94fd1124ed50ac70a06`.
+  All fifteen disposable jobs reached pytest: five passed and ten failed.
+  macOS's structured refusal, both controller-death cases and both concurrent
+  upgrades passed. This is not complete installed acceptance.
+- Eight failures stopped in parser construction because the optional attention
+  client imported unavailable `fleet_manager`. Dev already contains #10961's
+  deferred-import repair; the source branch incorporates it through the normal
+  managed sync, without duplicating that patch or changing the approved run.
+  The two peer-roundtrip failures reached the reverse CLI call but returned no
+  JSON; their stderr was not exposed, so the same cause is not yet established.
+- Peer assertions now expose stderr before decoding an empty JSON response.
+  Payload-command timeouts also retain captured stdout/stderr without changing
+  subprocess, containment or deadline policy. A contained Windows check stopped
+  earlier at a snapshot-directory stability refusal. A diagnostic attempt passed
+  that boundary but hit the normal installer's unchanged 300-second timeout;
+  neither attempt reached peer launch or qualifies the shipped-account path.
+  Temporary instrumentation was removed; do not blindly repeat that setup.
+- Rebased source validation passed thirteen refusal, concurrency, diagnostic
+  and native controller-admission controls with one macOS-only skip; four
+  timeout-output, command-shape and original-deadline controls also passed.
+  Fatal lint on all ten affected Python files, the thirteen-plugin installation
+  contract and whitespace checks passed. These remain source controls, not
+  the missing shipped-account or reverse-peer result.
+- The hosted result and provider logs are retained. The temporary tag was
+  deleted only after a fresh exact-SHA check, with absence confirmed afterward.
+  That one-run approval is consumed. Keep #10953 draft while source validation
+  and current-head review/CI proceed; a new hosted pin/run needs a new explicit
+  approval. #10927, #9277 and all installed, operational, retained-resource and
+  parent completion obligations remain open. No runtime was rolled out.
+
 ### 2026-11-06 - Repair bounded native acceptance prerequisites
 
 - #10927's Linux/Windows baseline failure came from the concurrency fixture's
