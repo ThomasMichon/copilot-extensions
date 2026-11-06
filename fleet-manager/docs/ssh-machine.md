@@ -16,7 +16,9 @@ implemented by this role.
 
 ## Configuration and authority
 
-Supply strict bounded schema-v1 `fleet-manager.ssh-client` JSON. All fields are
+Supply strict bounded `fleet-manager.ssh-client` JSON in one explicitly selected
+version. Version 1 remains token-only. Version 2 opts into `machine-key-v1`;
+missing tokens never select it implicitly. All fields in the selected form are
 required; optional references use explicit `null`, not ambient defaults.
 
 | Fields | Meaning |
@@ -24,7 +26,9 @@ required; optional references use explicit `null`, not ambient defaults.
 | `state_dir` | Dedicated absolute owner-private directory containing only this role's canonical lease |
 | `gateway_origin`, `gateway_ca` | Selected canonical HTTPS Gateway origin and nullable absolute CA reference |
 | `namespace` | Selected SSH service namespace, such as `/ssh`; no query or trailing slash |
-| `proof_key_file`, `access_token_file` | Absolute existing credential references, consumed through Fleet's credential-reference owner |
+| `proof_key_file` | Absolute existing provider-owned P-256 private PEM reference, read through Fleet's credential-reference owner |
+| `access_token_file` (v1 only) | Absolute existing access-token reference; required in v1 and forbidden in v2 |
+| `authentication` (v2 only) | Exact record containing `profile`, `principal`, `audience`, `resource`; forbidden in v1 |
 | `policy_path`, `machine`, `environment`, `controller` | Absolute local policy and exact selected logical machine/environment/controller |
 | `gateway` | Existing SSH Gateway alias, not a new endpoint or an enrollment grant |
 | `identity_file`, `public_key_file` | Absolute existing target-login key references; no key acquisition, export or rotation |
@@ -53,9 +57,39 @@ and controller to match, and reuses the existing profile and target-login
 authorization writers. No global `authorized_keys`, sshd or service settings are
 changed. Profiles retain the existing route/pin and unrelated-fragment guards.
 
-The proof key is supplied externally. Access-token contents are reread on each
-actual admission through the existing bounded credential reference; this does
-not implement provider login, enrollment, a new token cache or credential renewal.
+In v1, the external PEM proof key and access-token callback retain their existing
+meaning. Access-token contents are reread on each actual admission through the
+existing bounded credential reference.
+
+In v2, replace `access_token_file` with this explicit record:
+
+```json
+{
+  "profile": "machine-key-v1",
+  "principal": "caller-a",
+  "audience": "https://fleet.example.test",
+  "resource": "ssh-service"
+}
+```
+
+`principal` and `resource` are bounded identifiers; `audience` is a nonempty
+visible-ASCII string of at most 512 characters. These must match the external
+Gateway enrollment, audience and selected service resource; local configuration
+does not create those bindings. The reference must already contain an
+unencrypted private P-256 PEM key (PKCS8 or SEC1), not a public key, JWK,
+other curve or key type. Fleet imports that selected PEM as a JOSE `ECKey`
+locally, after local policy/output preflight and before lease or profile effects.
+It never opens an access-token source in this mode or falls back to tokens.
+The existing `ServiceCaller` owns TLS and peer-profile validation, fresh Gateway
+challenges and proofs binding the principal, audience, resource, actual method,
+full target including query and body.
+
+Both modes consume caller-explicit, externally provisioned references. No
+provider login, enrollment, key generation/materialization/export, token minting,
+cache or credential renewal is supplied. In particular, private continuity
+bootstrap state is not a PEM provider interface. Key provisioning and rotation
+remain external; replacing the selected signing key requires restarting the
+foreground consumer.
 
 ## Lifetime, catch-up and failure
 
@@ -111,11 +145,17 @@ readiness merely because a directory update was applied.
 
 The selected installed `fleet_manager` package carries
 `ssh-client-contract.json`: contract `fleet-manager.ssh-client-contract` v1,
-configuration `fleet-manager.ssh-client` v1 and directory
+configuration `fleet-manager.ssh-client` versions 1 and 2 and directory
 `agent-ssh.service-directory` v1. The existing package-resource API reads this
 data without discovery, credential acquisition or hosting. Read it from the
 same immutable runtime selected for execution, never a newer payload or a
 root-wide version stamp.
+Select v2 only when this selected provider declares configuration version 2;
+v1 support alone does not imply machine-key authentication. Older v1 readers
+reject v2 before credential access or profile effects. New readers keep v1's
+token semantics. A rollback without v2 support must refuse the machine-key
+requirement before invocation, not translate it into token credentials. Neither
+version is retired, and no per-request compatibility subprocess is required.
 
 This is a provider-first expansion. Existing Gateway serving, planning,
 diagnostics and default installation retain their commands and effects; no
@@ -138,6 +178,11 @@ this role before policy/credential reads, lease creation or any writer call.
 profile/authorization convergence, repeated cancellation/lease custody,
 restart/no-op behavior and explicit failures. The existing isolated standalone
 runner prepares the declared dependency closure.
+The same focused file also exercises v1 fresh-token reads, v2 mixed/incomplete
+configuration and invalid-key refusals, and the real v2 consumer, TLS Gateway,
+`MachineIdentityVerifier`, directory watch and local writer with synthetic PEM
+keys. It verifies the directory request's full query and empty body and a finite
+request through the composed caller with a nonempty body and opaque query.
 
 `services/ssh/tests/test_machine_consumer.py` runs the installed Fleet module
 outside the checkout against the real disposable TLS/JWT/DPoP Gateway and

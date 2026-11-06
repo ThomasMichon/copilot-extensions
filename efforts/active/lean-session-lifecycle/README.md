@@ -160,9 +160,10 @@ that merge. The normal updater subsequently adopts `1.24.475-dev1`; loaded
 client/feed identities, authenticated serving health, the ordinary JSON CLI,
 isolated delayed-publication controls and caller-owned timeout cleanup qualify
 the blocking-reader prerequisite. Together these restore the saved installed-set
-continuation, not the remaining parent gates. The broader update is still running
-with a component failure, and the separately queued target request remains an
-independent obligation.
+continuation, not the remaining parent gates. The separately queued Worktrees
+target completes successfully and verifies the same qualified reader in
+`1.24.477-dev1`. The broader update finishes unsuccessfully with five component
+failures; whole-set acceptance and the remaining parent gates stay open.
 
 ## Validation Plan
 

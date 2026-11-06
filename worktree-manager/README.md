@@ -2391,6 +2391,9 @@ the selected Manager root. Windows reads the process census, command line,
 token SID and creation time through native APIs, without PowerShell or CIM
 probe processes. Current-user ownership, root and process incarnation are
 checked before and after health; an unavailable identity remains unverified.
+When a daemon selects its port internally, the reader uses the active loopback
+route only if its recorded PID and nonempty creation time match the observed
+process. An explicit command-line port takes precedence over a conflicting route.
 This diagnostic reader does not change daemon cutover or retirement authority.
 
 ## Restart evidence and notification transport

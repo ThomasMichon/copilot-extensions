@@ -42,12 +42,33 @@ class SSHMachineConfig:
         from .gateway_service_channel import origin, target
 
         value = decode(canonical(value))
-        record(value, "fleet-manager.ssh-client", FIELDS)
+        if not isinstance(value, dict):
+            raise PlanError("input must be an object")
+        version = value.get("version")
+        if type(version) is not int or version not in (1, 2):
+            raise PlanError("unsupported input schema/version")
+        fields = FIELDS if version == 1 else FIELDS - {"access_token_file"} | {"authentication"}
+        record(value | {"version": 1}, "fleet-manager.ssh-client", fields)
+        if version == 2:
+            authentication = value["authentication"]
+            if not isinstance(authentication, dict) or set(authentication) != {
+                "profile", "principal", "audience", "resource",
+            }:
+                raise PlanError("SSH client authentication has missing or unsupported fields")
+            if authentication["profile"] != "machine-key-v1":
+                raise PlanError("SSH client authentication profile is unsupported")
+            for name in ("principal", "resource"):
+                identifier(authentication[name], "SSH client authentication identity")
+            audience = authentication["audience"]
+            if not isinstance(audience, str) or not 0 < len(audience) <= 512 or not all(
+                32 < ord(char) < 127 for char in audience
+            ):
+                raise PlanError("SSH client authentication audience is invalid")
         for name in ("machine", "gateway", "controller"):
             identifier(value[name], "SSH client identity")
         if not isinstance(value["environment"], str) or value["environment"] not in ENVIRONMENTS:
             raise PlanError("SSH client environment is unsupported")
-        for name in PATHS:
+        for name in PATHS if version == 1 else PATHS - {"access_token_file"}:
             absolute(value[name])
         for name in ("gateway_ca", "authorization_dir"):
             if value[name] is not None:
