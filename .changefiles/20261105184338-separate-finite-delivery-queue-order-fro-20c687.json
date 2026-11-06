@@ -1,0 +1,9 @@
+{
+  "comment": "Separate finite delivery queue order from retained parent completion",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

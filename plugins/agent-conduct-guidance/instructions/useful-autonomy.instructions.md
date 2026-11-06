@@ -60,5 +60,8 @@ evidence; do not default to presence polling. Explicit all-work holds and
 privacy/resource bounds remain stronger. "Pause here" is not an alternative
 to useful work already permitted; neither is unrelated busywork.
 Use `using-standing-authority` to capture, qualify or recover a pre-clearance.
+Its decision-preparation reference also distinguishes actionable waits from
+repeated status: preserve the blocked action, original constraint, actual owner
+and release condition without promoting an agent precaution to operator policy.
 Actual enforcement, peer custody, review, security and elevation remain with
 their existing owners; this guidance is not automatic tool approval.

@@ -1,0 +1,9 @@
+{
+  "comment": "Make waits actionable without promoting precautions to operator holds",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}
