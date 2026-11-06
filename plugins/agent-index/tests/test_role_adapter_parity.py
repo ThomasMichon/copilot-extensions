@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -12,6 +14,13 @@ from test_effective_config import qualified_owner_reply as qualified_owner_reply
 from test_runtime_gate import _fake_runtime, _fixture, _run
 
 PLUGIN = Path(__file__).resolve().parents[1]
+
+def _require_shell(shell):
+    if shell == "bash" and os.name == "nt":
+        pytest.skip("Native POSIX gate qualification is not Windows Bash")
+    command = "powershell.exe" if shell == "powershell" else shell
+    if not shutil.which(command):
+        pytest.skip(f"{shell} is unavailable")
 
 
 def _role_reader():
@@ -45,6 +54,7 @@ def test_role_reader_uses_winning_knowledge_namespace(
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("machine,expected", [("indexer", "host"), ("client", "client")])
 def test_payload_role_uses_merged_repository_reader(tmp_path, shell, machine, expected):
+    _require_shell(shell)
     script, env = _fixture(tmp_path, shell)
     overlay = tmp_path / ".copilot-extensions" / "agent-index" / "config.yaml"
     overlay.parent.mkdir(parents=True)
@@ -63,6 +73,7 @@ def test_payload_role_uses_merged_repository_reader(tmp_path, shell, machine, ex
 def test_payload_readiness_relays_native_adapter_without_provisioning(
     tmp_path, shell, state, exit_code,
 ):
+    _require_shell(shell)
     script, env = _fixture(tmp_path, shell)
     overlay = tmp_path / ".copilot-extensions" / "agent-index" / "config.yaml"
     overlay.parent.mkdir(parents=True)
@@ -85,6 +96,7 @@ def test_payload_readiness_relays_native_adapter_without_provisioning(
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("failure", ["exit", "invalid-config", "valid-empty"])
 def test_payload_configuration_failure_is_not_empty_readiness(tmp_path, shell, failure):
+    _require_shell(shell)
     script, env = _fixture(tmp_path, shell)
     env["TEST_PYTHON"] = ""
     if failure == "exit":
