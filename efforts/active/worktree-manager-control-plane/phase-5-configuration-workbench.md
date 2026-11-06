@@ -213,6 +213,16 @@ install-contract and module-size guards. Fresh-install/native and installed
 rollout remain explicit separately owned gates when unavailable; no production
 installation, credentials or host configuration are used for source validation.
 
+### Authentication inspection - bounded provider design (#10844)
+
+`shiny-actuator` claims the [repository-authentication inspection design](phase-5-authentication-inspection.md)
+as a bounded realization of the existing Configurator authentication/readiness
+intent. Review the native read boundary before implementation, then reuse the
+current version-1 contribution and shared shell. No registration no-nag boolean,
+account mapping or stored-token presence is a live-access verdict. Acquisition,
+provider/landing policy, complete onboarding and installed acceptance retain
+their separate owners; this amendment claims no runtime result.
+
 ## Validation Plan
 
 ### Confirmed existing-knowledge binding (#10763)
