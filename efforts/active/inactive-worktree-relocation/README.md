@@ -429,3 +429,19 @@ adopter pilot feedback gates subsequent widening.
 - Retained external-fixture disposition and the corrected real-volume retry
   remain an explicit owner gate. Source review/CI/merge, actual runtime
   selection, adopter pilot and broader inactive support are still separate.
+
+### 2026-11-06 — Concrete custody and sweep findings closed
+- Refused ignored nested Git metadata before custody, including Windows
+  case-equivalent markers, preserving both outer and nested registrations.
+  Included itemized open/pending-transfer follow-ups in responsibility checks.
+- Made non-object permission JSON and malformed workspace YAML controlled
+  refusals, and used the existing validation output helper. The real nested
+  worktree, obligation, schema-race and CLI packet passed **11 controls**.
+- Preserved the lifecycle guard's existing `TimeoutError` refusal contract:
+  interrupted relocation now skips only its record rather than aborting an
+  entire cleanup sweep. Batch and sweep controls proved an unrelated eligible
+  record is still processed while the pending record/journal stay unchanged.
+  Its focused packet passed **5 controls**, with one explicit POSIX skip.
+- These are qualification/safety corrections to the conservative first flow,
+  not broader WIP/session/pair support. Current source review/CI/merge and the
+  retained external-fixture disposition remain open.

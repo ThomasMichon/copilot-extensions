@@ -55,6 +55,9 @@ checkout-local agendas and configured index participation are not qualified in
 v1. Missing/malformed operational metadata and immutable creation receipts also
 refuse. These restrictions do not finalize, abandon, clean or rewrite anything.
 They are staged support boundaries, not a permanent exclusion of inactive WIP.
+Ignored nested Git checkouts/worktrees also refuse before custody; only the
+outer linked checkout's Git registration is qualified. Legacy and itemized
+open/pending-transfer follow-ups both count as outstanding responsibility.
 
 Git-locked worktrees are refused even when their tracking disposition is final.
 Case/slash or normalized permission aliases are refused until their migration is
@@ -102,6 +105,8 @@ operation, not another allocation. Another live or unobservable original caller,
 changed identity/content, an occupied target or unknown effects remain explicit
 holds. Do not clear journals, claims or locks manually. Do not use either copy
 for new work while the move remains unfinished.
+Cleanup treats the unfinished record as a per-worktree lifecycle refusal and
+continues unrelated eligible candidates; it does not clear move custody.
 
 Before destination publication, cancellation is available:
 
