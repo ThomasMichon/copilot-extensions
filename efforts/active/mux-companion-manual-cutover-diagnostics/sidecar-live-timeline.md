@@ -217,6 +217,13 @@ passive old-store behavior and read budgets. The same diagnostic readback
 records source-bound HTTP52 capture and current Windows lookup/client proof;
 the separate cold timeout and complete source/native acceptance remain open.
 
+#10855 merged as `fb57382abb5ee47b1db29980fa3c2ee49f0be05f`, qualifying
+the supported owner-codec packet and correcting contradictory membership
+replay admission. The [codec readback](journal/2026/11.05-sidecar-codec-boundaries.md)
+records 242 passing source controls, real global-sequence skips and preserved
+unknown custody. Complete source coverage, history/append-failure acceptance
+and every remaining native/installed/original parent gate stay open.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -730,10 +737,19 @@ is inferred from these presentation checks.
   ends, hidden/visible Refresh and active/pending selected-head retirement.
   #10435's 174 coupled controls and final 41-case affected lifecycle packet are
   source/private-process/Textual evidence, not installed or native acceptance.
-- [ ] Exact field/enumeration, numeric/boolean, cursor/generation/identity,
+- [x] Exact field/enumeration, numeric/boolean, cursor/generation/identity,
   duplicate and malformed-source tests; no render-path I/O or inferred custody.
-- [ ] History/live splice and gap tests: coalescing is current state, not lost
+  #10855 qualifies 242 controls across the supported Worktrees, Agenda,
+  membership and selected-session codecs plus the actual membership/source
+  join. This is source/private-process/Textual qualification, not universal
+  source coverage, native/installed behavior or the remaining splice/gap row.
+- [x] History/live splice and gap tests: coalescing is current state, not lost
   canonical history; retention/replacement/append failure cannot look empty/complete.
+  The [supported-source qualification](journal/2026/11.05-sidecar-history-gaps.md)
+  passes 274 owner/model/actual-three-source controls. Auxiliary journal
+  failure, canonical Agenda rollback, partial Bridge observations and explicit
+  consumer reconciliation retain different meanings; universal source coverage
+  and independently installed/native behavior remain separate open acceptance.
 - [x] Prepend, short-content padding, wheel/PageUp/Home/End/scrollbar,
   follow/unread, expansion and wide-character resize tests on real Textual.
   #10605's 78-case packet includes the short/scrollable wheel regression and
