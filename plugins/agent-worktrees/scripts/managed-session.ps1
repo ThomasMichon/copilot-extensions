@@ -122,12 +122,40 @@ function Test-PreparedWorktreesStamp {
         [StringComparison]::Ordinal)
 }
 
+function Test-PreparedWorktreesContent {
+    param([string]$Path, [object]$Digest)
+    $stream = $hash = $null
+    try {
+        if ($Digest -isnot [string] -or $Digest -cnotmatch '^[0-9a-f]{64}$') { return $false }
+        $null = Get-PreparedWorktreesPath $Path
+        if ([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::Directory) { return $false }
+        $stream = [IO.FileStream]::new(
+            $Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read
+        )
+        $bytes = [byte[]]::new(1048577)
+        $count = 0
+        while ($count -lt $bytes.Length) {
+            $read = $stream.Read($bytes, $count, $bytes.Length - $count)
+            if ($read -eq 0) { break }
+            $count += $read
+        }
+        if ($count -gt 1048576) { return $false }
+        $null = Get-PreparedWorktreesPath $Path
+        $hash = [Security.Cryptography.SHA256]::Create()
+        $actual = [BitConverter]::ToString($hash.ComputeHash($bytes, 0, $count)).Replace('-', '').ToLowerInvariant()
+        return [string]::Equals($actual, $Digest, [StringComparison]::Ordinal)
+    } finally {
+        if ($null -ne $hash) { $hash.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 function Test-PreparedManagedWorktreesSession {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
     $stream = $null
     try {
         if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
-            $env:COPILOT_EXTENSIONS_CONTEXT -or $Raw.Length -gt 1048576) { return $false }
+            $Raw.Length -gt 1048576) { return $false }
         $event = ConvertFrom-ManagedWorktreesJson $Raw
         if ($event -isnot [Collections.IDictionary]) { return $false }
         if ($event.ContainsKey('sessionId')) {
@@ -146,7 +174,18 @@ function Test-PreparedManagedWorktreesSession {
         $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
             $env:AGENT_HOME.Trim()
         } else { $env:USERPROFILE }
-        $registry = Get-PreparedWorktreesPath ([IO.Path]::Combine($registryHome, '.agent-worktrees'))
+        $context = if ($env:COPILOT_EXTENSIONS_CONTEXT) { $env:COPILOT_EXTENSIONS_CONTEXT } else { '' }
+        if ($context) {
+            $pointer = Get-PreparedWorktreesPath $context
+            if ([IO.Path]::GetFileName($pointer) -cne 'install.json') { return $false }
+            $registry = [IO.Path]::GetDirectoryName($pointer)
+            if ([IO.Path]::GetFileName($registry) -cne 'agent-worktrees' -or
+                [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($registry)) -cne 'plugins') {
+                return $false
+            }
+        } else {
+            $registry = Get-PreparedWorktreesPath ([IO.Path]::Combine($registryHome, '.agent-worktrees'))
+        }
         $marker = [IO.Path]::Combine(
             $userHome, '.copilot', 'session-state', $session, 'agent-worktrees', 'managed-session.json'
         )
@@ -175,7 +214,7 @@ function Test-PreparedManagedWorktreesSession {
         $scope = $value['scope']
         $expectedScope = @{
             session = $session; workspace = $workspace; registry = $registry
-            context = ''; platform = 'windows'
+            context = $context; platform = 'windows'
         }
         if ($scope.Count -ne $expectedScope.Count) { return $false }
         foreach ($name in $expectedScope.Keys) {
@@ -195,15 +234,84 @@ function Test-PreparedManagedWorktreesSession {
         }
         $inputs = $value['inputs']
         $sources = $value['sources']
-        if ($inputs.Count -gt 256 -or $sources.Count -ne 2) { return $false }
+        if ($inputs.Count -gt 256) { return $false }
         $expectedSources = [Collections.Generic.Dictionary[string, bool]]::new([StringComparer]::Ordinal)
         $expectedSources.Add([IO.Path]::Combine($registry, 'projects.yaml'), $false)
         $expectedSources.Add([IO.Path]::Combine($registry, 'repos.yaml'), $false)
+        if ($context) {
+            $installation = $value['installation']
+            if ($installation -isnot [Collections.IDictionary] -or $installation.Count -ne 10 -or
+                ($installation['version'] -isnot [int] -and $installation['version'] -isnot [long]) -or
+                $installation['version'] -ne 1 -or $installation['sourceKind'] -isnot [string] -or
+                $installation['sourceKind'] -cnotin @('github', 'git', 'opaque')) { return $false }
+            $selected = @{}
+            foreach ($name in @('namespaceReceipt', 'installReceipt', 'payloadRoot', 'cellRoot', 'pluginRoot')) {
+                $selected[$name] = Get-PreparedWorktreesPath $installation[$name]
+                if (-not $expectedSources.ContainsKey($selected[$name])) {
+                    $expectedSources.Add($selected[$name], $false)
+                }
+            }
+            $declared = $installation['declaredPaths']
+            if ($declared -isnot [Collections.IDictionary] -or $declared.Count -ne 3) { return $false }
+            foreach ($name in @('payloadRoot', 'pluginRoot', 'namespaceReceipt')) {
+                if (-not [string]::Equals(
+                    (Get-PreparedWorktreesPath $declared[$name]), $selected[$name],
+                    [StringComparison]::Ordinal)) { return $false }
+            }
+            $cell = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($registry))
+            if (-not [string]::Equals($selected['pluginRoot'], $registry, [StringComparison]::Ordinal) -or
+                -not [string]::Equals($selected['installReceipt'], $pointer, [StringComparison]::Ordinal) -or
+                -not [string]::Equals($selected['cellRoot'], $cell, [StringComparison]::Ordinal) -or
+                -not [string]::Equals(
+                    $selected['namespaceReceipt'], [IO.Path]::Combine($cell, 'namespace.json'),
+                    [StringComparison]::Ordinal)) { return $false }
+            $payload = if ($env:AGENT_WORKTREES_PAYLOAD_ROOT) {
+                $env:AGENT_WORKTREES_PAYLOAD_ROOT
+            } elseif ($env:COPILOT_PLUGIN_ROOT) { $env:COPILOT_PLUGIN_ROOT }
+            else { [IO.Path]::GetDirectoryName($PSScriptRoot) }
+            if (-not [string]::Equals(
+                $selected['payloadRoot'], (Get-PreparedWorktreesPath $payload),
+                [StringComparison]::Ordinal)) { return $false }
+            if ($env:COPILOT_PLUGIN_ROOT -and -not [string]::Equals(
+                $selected['payloadRoot'], (Get-PreparedWorktreesPath $env:COPILOT_PLUGIN_ROOT),
+                [StringComparison]::Ordinal)) { return $false }
+            $expectedSources.Add([IO.Path]::Combine($selected['payloadRoot'], 'plugin.json'), $false)
+            $files = $installation['files']
+            if ($files -isnot [Collections.IDictionary] -or $files.Count -ne 3) { return $false }
+            $expectedFiles = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            foreach ($path in @(
+                $selected['namespaceReceipt'], $selected['installReceipt'],
+                [IO.Path]::Combine($selected['payloadRoot'], 'plugin.json')
+            )) { $null = $expectedFiles.Add($path) }
+            foreach ($path in $files.Keys) {
+                if (-not $expectedFiles.Remove((Get-PreparedWorktreesPath $path)) -or
+                    -not (Test-PreparedWorktreesContent $path $files[$path])) { return $false }
+            }
+            if ($expectedFiles.Count) { return $false }
+            $roots = $installation['roots']
+            if ($roots -isnot [Collections.IDictionary] -or $roots.Count -ne 7) { return $false }
+            foreach ($name in @('versions', 'snapshots', 'state', 'run', 'logs', 'cache', 'launchers')) {
+                $entry = $roots[$name]
+                if ($entry -isnot [Collections.IDictionary] -or $entry.Count -ne 2) { return $false }
+                $lexical = Get-PreparedWorktreesPath $entry['path']
+                $resolved = Get-PreparedWorktreesPath $entry['resolved']
+                if (-not [string]::Equals($lexical, $resolved, [StringComparison]::Ordinal) -or
+                    -not $lexical.StartsWith($registry + '\', [StringComparison]::Ordinal)) {
+                    return $false
+                }
+            }
+        }
+        if ($sources.Count -ne $expectedSources.Count) { return $false }
         foreach ($path in $sources.Keys) {
             $canonical = Get-PreparedWorktreesPath $path
             if (-not $expectedSources.ContainsKey($canonical) -or $expectedSources[$canonical] -or
                 -not $inputs.ContainsKey($path) -or
                 -not (Test-PreparedWorktreesStamp $path $sources[$path])) { return $false }
+            if ($context -and $null -eq $sources[$path] -and
+                $canonical -cnotin @(
+                    [IO.Path]::Combine($registry, 'projects.yaml'),
+                    [IO.Path]::Combine($registry, 'repos.yaml')
+                )) { return $false }
             $expectedSources[$canonical] = $true
             $source = ConvertTo-Json -InputObject $sources[$path] -Compress
             $inputStamp = ConvertTo-Json -InputObject $inputs[$path] -Compress

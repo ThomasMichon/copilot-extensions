@@ -332,7 +332,7 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
             return result
         workspace = canonical(cwd)
         context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
-        selected = resolve_registry_context() if context else None
+        selected = resolve_registry_context(capture_membership=True) if context else None
         registry = Path(selected["pluginRoot"]) if selected is not None else resolve_registry_root(
             legacy_root=home / ".agent-worktrees" if home is not None else None,
         )
@@ -348,6 +348,17 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
             manifest = Path(selected["payloadRoot"]) / "plugin.json"
             inputs[str(manifest)] = _stamp(manifest)
         source_inputs = inputs.copy()
+        installation = (
+            {"version": 1, "files": selected["membershipFiles"], "roots": selected["membershipRoots"],
+             "sourceKind": selected["membershipSourceKind"],
+             "declaredPaths": selected["membershipDeclaredPaths"],
+             **{name: selected[name] for name in (
+                "namespaceReceipt", "installReceipt", "payloadRoot", "cellRoot", "pluginRoot",
+            )}}
+            if selected is not None and all(name in selected for name in (
+                "membershipFiles", "membershipRoots", "membershipSourceKind", "membershipDeclaredPaths",
+            )) else None
+        )
         result.update(workspace=workspace, inputs=inputs.copy())
         platform = detect_platform()
         scope = {"session": session, "workspace": workspace, "registry": canonical(registry),
@@ -381,7 +392,11 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
                     and all(cached["inputs"].get(name) == stamp for name, stamp in source_inputs.items())
                     and _current(cached["inputs"])
                 ):
-                    if marker is not None and path == cache:
+                    upgraded = installation is not None and cached.get("installation") != installation
+                    if upgraded:
+                        cached = {**cached, "installation": installation}
+                        _publish_association(cache, cached)
+                    if marker is not None and (path == cache or upgraded):
                         _publish_association(marker, cached)
                     return {"admitted": True, "workspace": workspace, "inputs": cached["inputs"]}
             except (OSError, ValueError, TypeError, KeyError, AttributeError):
@@ -446,6 +461,8 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
                 "sources": source_inputs,
                 "inputs": inputs,
             }
+            if installation is not None:
+                record["installation"] = installation
             _publish_association(cache, record)
             if marker is not None:
                 _publish_association(marker, record)
