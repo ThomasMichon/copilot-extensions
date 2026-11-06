@@ -296,6 +296,15 @@ close the participating cohort or supply an ordinary coordinator writer.
 Keep ordinary governed assignment disabled until those separate gates pass.
 Installation, rollout, allocation and original native-resource holds remain.
 
+The ordinary keyed-create CLI transport subsequently merged in #11040.
+Its `--worktree-writer-file` carries the strict file/stdin requirement through
+the existing client and capability fence, with early invalid-form, remote/URL
+and conflicting-stdin refusal. Bounded actual parser/client and actor-free
+controls, plus the 245-control current HTTP capture, qualify that transport
+only. Dispatch has not yet assembled or supplied its independent admission;
+the original first relationship, actual participating owners and complete
+cohort remain separately required.
+
 ### Keyed-creation slice validation
 
 - [x] Prove supported new/new and mixed-version refusal through the actual
