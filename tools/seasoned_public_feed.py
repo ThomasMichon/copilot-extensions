@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import re
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -120,13 +122,20 @@ class SeasonedVersionError(RuntimeError):
     an unseasoned "latest"."""
 
 
-def _default_fetch(url: str) -> bytes:
+def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
     """The real network fetch -- isolated behind the injectable ``fetch``
     parameter below so every test exercises the actual selection logic
     against a fixed, synthetic response instead of real network calls to
     pypi.org (slow, flaky, and not reproducible evidence)."""
+    timeout = _REQUEST_TIMEOUT_SECONDS
+    if deadline is not None:
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+            raise SeasonedVersionError("public toolchain requires a finite monotonic deadline")
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            raise SeasonedVersionError("public toolchain resolution deadline exceeded")
     request = urllib.request.Request(url, headers={"User-Agent": "copilot-extensions-build-toolchain-lock"})
-    with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
 
 

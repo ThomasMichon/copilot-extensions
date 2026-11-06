@@ -63,6 +63,42 @@ def test_windows_application_refuses_missing_or_ambiguous_interpreter_abi(tmp_pa
     assert not (tmp_path / "application").exists()
 
 
+@pytest.mark.parametrize("damage", [
+    "none", "missing", "extra", "bytes", "directory", "deadline", "permission",
+])
+def test_application_wheel_copy_damage_requires_distinct_repair_not_deadline_replay(
+    tmp_path, monkeypatch, damage,
+):
+    from installer_wheel_inputs import WheelDeadlineError
+    content = b"fixture wheel bytes"
+    wheels = tmp_path / "wheels"
+    if damage != "missing":
+        wheels.mkdir()
+        path = wheels / "fixture.whl"
+        if damage == "directory":
+            path.mkdir()
+        else:
+            path.write_bytes(b"damaged" if damage == "bytes" else content)
+        if damage == "extra":
+            (wheels / "unexpected.whl").write_bytes(content)
+    inputs = SimpleNamespace(
+        distributions=[("fixture", "1.0", "fixture.whl", "sha256:" + hashlib.sha256(content).hexdigest())],
+        deadline=0 if damage == "deadline" else time.monotonic() + 30,
+    )
+    if damage == "permission":
+        def denied(_path):
+            raise PermissionError("fixture permission denied")
+        monkeypatch.setattr(sys.modules[engine.verify_application_wheels.__module__], "_open", denied)
+    if damage == "none":
+        engine.verify_application_wheels(inputs, tmp_path)
+    else:
+        failure = {
+            "deadline": WheelDeadlineError, "permission": PermissionError,
+        }.get(damage, engine.HealthRepairRequired)
+        with pytest.raises(failure):
+            engine.verify_application_wheels(inputs, tmp_path)
+
+
 @pytest.fixture
 def install_transaction(tmp_path, monkeypatch):
     root = tmp_path / "root"
@@ -95,12 +131,22 @@ def install_transaction(tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.parametrize("phase", ["setup", "publication"])
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("phase", ["setup", "launcher", "publication"])
 def test_install_transaction_before_start_failure_restores_prior_state(
-    install_transaction, monkeypatch, phase,
+    install_transaction, monkeypatch, phase, existing,
 ):
     fixture = install_transaction
     starts = []
+    previous = {}
+    if existing:
+        fixture.global_bin.mkdir()
+        for name in global_binstubs(
+            fixture.record["name"], fixture.record["root_environment"],
+            fixture.record["default_directory"], root=fixture.root,
+        ):
+            previous[name] = b"unrecognized old launcher: " + name.encode() + b"\r\n"
+            (fixture.global_bin / name).write_bytes(previous[name])
 
     def command(_record, arguments, _root, _slot):
         if arguments == ["--setup"]:
@@ -112,6 +158,18 @@ def test_install_transaction_before_start_failure_restores_prior_state(
     if phase == "setup":
         fixture.record["setup"] = ["--setup"]
         (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+    elif phase == "launcher":
+        write = runtime_application_install._write
+        failed = False
+
+        def partial_launchers(path, content):
+            nonlocal failed
+            if path.name.endswith(".ps1") and not failed:
+                failed = True
+                raise RuntimeError("launcher refused")
+            write(path, content)
+
+        monkeypatch.setattr(runtime_application_install, "_write", partial_launchers)
     else:
         def partial_publication(root, version, *_):
             (root / "current-version").write_bytes((version + "\n").encode())
@@ -123,7 +181,98 @@ def test_install_transaction_before_start_failure_restores_prior_state(
     assert starts == []
     assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
     assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
-    assert not tuple(fixture.global_bin.glob("*"))
+    assert {path.name: path.read_bytes() for path in fixture.global_bin.glob("*")} == previous
+    assert not (fixture.slot / "install-success.json").exists()
+
+
+@pytest.mark.parametrize("with_start", [False, True])
+def test_install_replaces_all_declared_old_launchers_without_incumbent_provenance(
+    install_transaction, monkeypatch, with_start,
+):
+    fixture = install_transaction
+    fixture.record["commands"].append("fixture-alias")
+    fixture.record["start"] = ["--start"] if with_start else []
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+    commands = {}
+    for name in fixture.record["commands"]:
+        commands.update(global_binstubs(
+            name, fixture.record["root_environment"],
+            fixture.record["default_directory"], root=fixture.root,
+        ))
+    fixture.global_bin.mkdir()
+    for name in commands:
+        (fixture.global_bin / name).write_bytes(b"unknown legacy launcher\n")
+    unrelated = fixture.global_bin / "another-command"
+    unrelated.write_bytes(b"unrelated command\n")
+    data = fixture.root / "application.db"
+    data.write_bytes(b"preserved application state")
+    starts = []
+
+    def command(_record, arguments, root, slot):
+        if arguments:
+            assert (root / "current-version").read_text().strip() == slot.name
+            assert all((fixture.global_bin / name).read_bytes() == text.encode()
+                       for name, text in commands.items())
+            starts.append(arguments)
+
+    monkeypatch.setattr(runtime_application_install, "_run", command)
+    result = runtime_application_install.install(
+        fixture.slot, stage=False, global_bin=fixture.global_bin,
+    )
+    assert result["state"] == "installed"
+    assert starts == ([["--start"]] if with_start else [])
+    assert all((fixture.global_bin / name).read_bytes() == text.encode()
+               for name, text in commands.items())
+    assert (fixture.root / "current-version").read_bytes() == b"2.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"2.0\n"
+    assert (fixture.slot / "install-success.json").is_file()
+    assert unrelated.read_bytes() == b"unrelated command\n"
+    assert data.read_bytes() == b"preserved application state"
+
+
+def test_install_replacement_preserves_launcher_changed_during_setup(
+    install_transaction, monkeypatch,
+):
+    fixture = install_transaction
+    fixture.global_bin.mkdir()
+    command = fixture.global_bin / "fixture-app"
+    command.write_bytes(b"old launcher\n")
+    calls = []
+
+    def setup(_record, arguments, _root, _slot):
+        calls.append(arguments)
+        command.write_bytes(b"concurrent replacement\n")
+
+    monkeypatch.setattr(runtime_application_install, "_run", setup)
+    with pytest.raises(RuntimeError, match="launcher changed before publication"):
+        runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert len(calls) == 1
+    assert command.read_bytes() == b"concurrent replacement\n"
+    assert list(fixture.global_bin.iterdir()) == [command]
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
+    assert not (fixture.slot / "install-success.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["directory", "oversized"])
+def test_install_replacement_refuses_nonordinary_or_unbounded_launcher(
+    install_transaction, monkeypatch, kind,
+):
+    fixture = install_transaction
+    fixture.global_bin.mkdir()
+    command = fixture.global_bin / "fixture-app"
+    if kind == "directory":
+        command.mkdir()
+    else:
+        command.write_bytes(b"x" * 65537)
+    calls = []
+    monkeypatch.setattr(runtime_application_install, "_run", lambda *_: calls.append(True))
+    with pytest.raises(RuntimeError, match="not an ordinary file"):
+        runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert not calls
+    assert command.is_dir() if kind == "directory" else command.stat().st_size == 65537
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"0.9\n"
     assert not (fixture.slot / "install-success.json").exists()
 
 
@@ -177,8 +326,9 @@ def test_install_transaction_unknown_start_retains_selection_not_last_good(
 
 
 @pytest.mark.parametrize("reply_lost", [False, True])
+@pytest.mark.parametrize("changed_selection", [False, True])
 def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
-    install_transaction, monkeypatch, reply_lost,
+    install_transaction, monkeypatch, reply_lost, changed_selection,
 ):
     fixture = install_transaction
     winner = b"concurrent owner's command\n"
@@ -186,8 +336,9 @@ def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
     def start(_record, arguments, root, _slot):
         if not arguments:
             return
-        (root / "current-version").write_bytes(b"3.0\n")
-        (root / "last-known-good").write_bytes(b"2.9\n")
+        if changed_selection:
+            (root / "current-version").write_bytes(b"3.0\n")
+            (root / "last-known-good").write_bytes(b"2.9\n")
         (fixture.global_bin / "fixture-app.cmd").write_bytes(winner)
         if reply_lost:
             raise RuntimeError("lost startup reply")
@@ -195,8 +346,12 @@ def test_install_transaction_unknown_start_preserves_concurrent_selector_winner(
     monkeypatch.setattr(runtime_application_install, "_run", start)
     with pytest.raises(RuntimeError, match="startup outcome is unknown"):
         runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
-    assert (fixture.root / "current-version").read_bytes() == b"3.0\n"
-    assert (fixture.root / "last-known-good").read_bytes() == b"2.9\n"
+    assert (fixture.root / "current-version").read_bytes() == (
+        b"3.0\n" if changed_selection else b"2.0\n"
+    )
+    assert (fixture.root / "last-known-good").read_bytes() == (
+        b"2.9\n" if changed_selection else b"0.9\n"
+    )
     assert (fixture.global_bin / "fixture-app.cmd").read_bytes() == winner
     assert not (fixture.slot / "install-success.json").exists()
 

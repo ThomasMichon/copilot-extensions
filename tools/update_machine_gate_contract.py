@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import codecs
+import dataclasses
 import functools
 import importlib.util
 import io
@@ -256,8 +257,10 @@ def _check_machine_gate(source: Path) -> None:
     identity = ModuleType(f"{package_name}.machine_identity")
     reconcile = ModuleType(f"{package_name}.reconcile")
     runtime = ModuleType(f"{package_name}.update_runtime")
+    application = ModuleType(f"{package_name}.update_runtime_application")
     modules = {
-        module.__name__: module for module in (package, config, identity, reconcile, runtime)
+        module.__name__: module
+        for module in (package, config, identity, reconcile, runtime, application)
     }
     with patch.dict(sys.modules, modules), tempfile.TemporaryDirectory(
         prefix="update-machine-gate-contract-"
@@ -279,6 +282,10 @@ def _check_machine_gate(source: Path) -> None:
         runtime.MACHINE_GATED_SKIP = gate.MACHINE_GATED_SKIP
         runtime.MachineDetectionError = gate.MachineDetectionError
         runtime._installer_timeout = lambda *args: 60
+        application.plan_step = _function(source / "update_runtime_application.py", "plan_step", {
+            "__name__": application.__name__, "__package__": package_name,
+            "dataclasses": dataclasses,
+        })
         planner = _module(source / "update_runtime_plan.py", f"{package_name}.update_runtime_plan")
         planner.shutil = SimpleNamespace(which=lambda name: name)
         namespace = {

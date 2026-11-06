@@ -87,6 +87,7 @@ import time
 import zipfile
 from pathlib import Path
 from artifact_source_build import PromotionArtifactError, parse_wheel_identity, payload_hash_directories
+from artifact_source_build import read_project_version as _read_project_version
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
@@ -756,28 +757,8 @@ def build_wheel(
 
 
 def read_project_version(project_dir: Path) -> str:
-    """The raw, declared version string from ``project_dir``'s
-    `pyproject.toml` (`[project].version`) -- NOT a wheel's PEP 440-
-    normalized spelling (e.g. this repo declares `"0.4.1-dev3"`, which a
-    built wheel's filename normalizes to `"0.4.1.dev3"`) -- so the
-    manifest's `version` field and release-tag identity exactly match the
-    `<plugin>-v<version>` form this effort's Publication channel resolution
-    documents, rather than a normalized variant with no other exact match
-    anywhere in the repository."""
-    pyproject = project_dir / "pyproject.toml"
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        raise ArtifactBuildError(f"{pyproject}: could not read/parse: {exc}") from exc
-    project_table = data.get("project", {})
-    if not isinstance(project_table, dict):
-        raise ArtifactBuildError(f"{pyproject}: [project] is not a table")
-    version = project_table.get("version")
-    if not isinstance(version, str) or not version:
-        raise ArtifactBuildError(
-            f"{pyproject}: [project].version is missing or not a string"
-        )
-    return version
+    """Preserve the builder's public reader and error type over static admission."""
+    return _read_project_version(project_dir, error_type=ArtifactBuildError)
 
 
 def _assert_version_corresponds(
@@ -797,6 +778,7 @@ def build_plugin_artifacts(
     out_dir: Path,
     python: str | None = None,
     toolchain: ToolchainLock | None = None,
+    uv: str = "uv", deadline: float | None = None,
 ) -> dict:
     """Builds the plugin's own wheel plus every vendored lib wheel it needs,
     and returns the manifest describing the whole set (also written to
@@ -841,6 +823,7 @@ def build_plugin_artifacts(
     return build_source_artifacts(
         identity={"plugin": plugin}, source_dir=plugin_dir, dependencies=vendored_libs,
         out_dir=out_dir, python=python, toolchain=toolchain,
+        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )
 
 
@@ -848,6 +831,7 @@ def build_source_artifacts(
     *, identity: dict, source_dir: Path, dependencies: list[tuple[str, Path]],
     out_dir: Path, python: str | None, toolchain: ToolchainLock | None,
     resources: tuple[Path, ...] = (),
+    uv: str = "uv", deadline: float | None = None,
 ) -> dict:
     """Shared locked wheel construction; callers own source discovery and admission."""
     standalone = "component" in identity
@@ -859,6 +843,7 @@ def build_source_artifacts(
         raw_version=read_project_version(source_dir),
         schema_version=4 if standalone else MANIFEST_SCHEMA_VERSION,
         resources=resources, out_dir=out_dir, python=python, toolchain=toolchain,
+        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )
 
 
@@ -867,9 +852,15 @@ def build_project_artifacts(
     schema_version: int, resources: tuple[Path, ...], out_dir: Path,
     python: str | None, toolchain: ToolchainLock | None,
     selection: dict | None = None, payload_hash: str | None = None,
+    uv: str = "uv", deadline: float | None = None,
 ) -> dict:
     """One locked construction path for plugin, standalone and core wheel sets."""
     from standalone_python_artifacts import artifact_label
+    from installer_wheel_inputs import _check_deadline
+
+    execution = {"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}
+    if deadline is not None:
+        _check_deadline(deadline)
     label = artifact_label(identity)
     # Hash before the backend can leave build/egg-info residue in its inputs.
     all_dirs = [*(directory for _role, directory in projects), *resources]
@@ -887,6 +878,8 @@ def build_project_artifacts(
 
     if payload_hash is None:
         payload_hash = compute_payload_hash(all_dirs)
+    if deadline is not None:
+        _check_deadline(deadline)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     entries: list[dict] = []
@@ -902,13 +895,18 @@ def build_project_artifacts(
                     tempfile.TemporaryDirectory(prefix="build-python-artifacts-toolchain-")
                 )
             )
-            toolchain = resolve_toolchain_lock(toolchain_root / "venv", python=python)
+            toolchain = resolve_toolchain_lock(
+                toolchain_root / "venv", python=python, **execution,
+            )
 
         toolchain_record = toolchain.record
         def _build_and_verify(source_dir: Path) -> tuple[Path, dict, str]:
+            if deadline is not None:
+                _check_deadline(deadline)
             wheel = build_wheel(
                 source_dir, out_dir, toolchain=toolchain, reserved_names=reserved_names,
                 normalize_timestamps=True,
+                **execution,
             )
             info = parse_wheel_filename(wheel)
             generator = read_wheel_generator(wheel)
@@ -978,6 +976,8 @@ def build_project_artifacts(
         if selection is not None:
             manifest["selection"] = selection
         manifest_path = out_dir / f"{label}-{raw_version}-manifest.json"
+        if deadline is not None:
+            _check_deadline(deadline)
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )

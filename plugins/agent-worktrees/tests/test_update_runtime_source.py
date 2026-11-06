@@ -15,6 +15,7 @@ import pytest
 
 from agent_worktrees import reconcile, update_runtime, update_runtime_plan
 from agent_worktrees.update_runtime_source import PIN_ENV, PreparedRuntimeSource
+from agent_worktrees.update_runtime_application import PreparedApplication
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -34,6 +35,10 @@ def selected(tmp_path, monkeypatch):
     shutil.copytree(owner, artifact)
     (artifact / "scripts/install.sh").write_text("exit 0\n")
     (artifact / "scripts/install.ps1").write_text("exit 0\n")
+    (artifact / "scripts/install_source.py").write_text(
+        'APPLICATION_INSTALL_CONTRACT = '
+        '{"schema": "copilot-extensions.prepared-application-install", "version": 1}\n',
+    )
     helper = ROOT / "libs/versioned-runtime/versioned_runtime_source.py"
     spec = importlib.util.spec_from_file_location("_update_source_fixture", helper)
     assert spec and spec.loader
@@ -46,7 +51,36 @@ def selected(tmp_path, monkeypatch):
         module.runtime_version("1.0.0", "a" * 40, digest),
     )
     (artifact / "runtime-source.json").write_text(json.dumps(identity.document()))
-    source = PreparedRuntimeSource(artifact, json.dumps(module.manifest_fields(identity)))
+    application = tmp_path / "application"
+    application.mkdir()
+    (application / "application.json").write_text(json.dumps({
+        "name": "agent-worktrees", "module": "agent_worktrees",
+        "construction": {
+            "identity": module.manifest_fields(identity),
+            "runtime_version": identity.runtime_version + ".profile." + "e" * 16,
+            "payload_hash": "9" * 64, "extras": [], "local_packages": ["agent-worktrees"],
+        },
+    }))
+    (tmp_path / "install-source.json").write_text(json.dumps({
+        "schema": "copilot-extensions.install-source", "version": 1, "kind": "source",
+        "source_commit": identity.source_commit, "source_tree": identity.source_tree,
+        "main_head": "f" * 40, "composition": {"main_seed": "f" * 40, "tree": "a" * 40},
+        "projects": {"agent-worktrees": {
+            "payload": "artifact", "source": identity.document(), "profile": "profile.json",
+            "wheel_inputs": "wheels", "artifact": {}, "application": "application",
+        }},
+    }))
+    prepared = PreparedApplication(tmp_path, "agent-worktrees", "null")
+    source = PreparedRuntimeSource(artifact, json.dumps(module.manifest_fields(identity)), prepared)
+    original = subprocess.run
+
+    def run(argv, **kwargs):
+        if "--native-inputs" in argv:
+            return SimpleNamespace(returncode=0, stdout=prepared.selection, stderr="")
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(shutil, "which", lambda name: sys.executable if name == "uv" else name)
     monkeypatch.setattr(
         reconcile, "runtime_installer_environment",
         lambda name, payload: (dict(os.environ), runtime),
@@ -121,10 +155,11 @@ def test_source_selection_does_not_skip_on_matching_package(selected, kind, monk
     assert step.payload == owner
     assert step.artifact == artifact
     assert step.runtime_root == runtime
-    assert step.target_version == source.version
+    assert step.target_version == source.application.version
     assert step.environment[PIN_ENV] == source.identity
     assert step.environment["COPILOT_PLUGIN_STAGED_FROM"] == str(owner)
-    assert any(Path(argument) == artifact / "scripts/install.sh" for argument in step.argv)
+    assert "--install-application" in step.argv
+    assert str(artifact / "scripts/install_source.py") in step.argv
     assert str(owner / "scripts/install.sh") not in step.argv
 
 
@@ -144,7 +179,7 @@ def test_unrecognized_source_receipt_plans_reconstruction_without_writes(selecte
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("fault", ["storage", "foreign-service", "directory"])
-def test_source_recovery_retains_unrecoverable_receipt_gates(selected, kind, fault, monkeypatch):
+def test_legacy_receipt_cannot_veto_application_reconstruction(selected, kind, fault, monkeypatch):
     owner, _, runtime, source = selected
     runtime.mkdir()
     path = runtime / "deploy-manifest.json"
@@ -161,7 +196,7 @@ def test_source_recovery_retains_unrecoverable_receipt_gates(selected, kind, fau
             return original(target, *args, **kwargs)
 
         monkeypatch.setattr(Path, "read_text", unreadable)
-    assert plan(kind, owner, source).blocked
+    assert not plan(kind, owner, source).blocked
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
@@ -172,33 +207,39 @@ def test_source_recovery_retains_unrecoverable_receipt_gates(selected, kind, fau
 def test_only_complete_selected_source_receipt_skips(selected, kind, change):
     owner, artifact, runtime, source = selected
     runtime.mkdir()
-    manifest = json.loads(source.identity)
-    slot = runtime / "versions" / source.version
+    version = source.application.version
+    slot = runtime / "versions" / version
     slot.mkdir(parents=True)
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    python.parent.mkdir()
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
     if change != "interpreter":
         python.touch()
     (slot / ".install-complete.json").write_text(json.dumps({
-        "version": source.version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),
+        "version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),
+        "payload_hash": "9" * 64,
     }))
-    manifest.update(service="agent-worktrees", venv=str(slot))
-    if change == "service":
-        manifest.pop("service")
+    declaration = json.loads(source.application.declaration)
+    identity = json.loads(source.identity)["runtime_source"]
+    receipt = {"state": "installed", "version": version}
     if change in {"commit", "tree"}:
-        manifest["runtime_source"][f"source_{change}"] = "c" * 40
+        identity[f"source_{change}"] = "c" * 40
     if change == "version":
-        manifest["runtime_version"] = "another-slot"
-    if change == "slot":
-        slot.rename(slot.with_name("unselected"))
+        receipt["version"] = "another-slot"
     if change == "venv":
-        manifest["venv"] = str(runtime / "another-slot")
+        python.unlink()
     if change == "completion":
         (slot / ".install-complete.json").write_text("{}")
-    (runtime / "deploy-manifest.json").write_text(json.dumps(manifest))
+    if change == "service":
+        declaration["name"] = "another-runtime"
+    (slot / "install-success.json").write_text(json.dumps(receipt))
+    (slot / "application.json").write_text(json.dumps(declaration))
+    (slot / "runtime-source.json").write_text(json.dumps(identity))
+    if change == "slot":
+        slot.rename(slot.with_name("unselected"))
     (runtime / "current-version").write_text(
-        "another-slot" if change == "selector" else source.version,
+        "another-slot" if change == "selector" else version,
     )
+    (runtime / "last-known-good").write_text(version)
     step = plan(kind, owner, source)
     assert step.status == ("SKIPPED (current)" if change == "none" else "")
 
@@ -217,23 +258,26 @@ def test_old_prepared_helper_refuses_instead_of_ignoring_pin(selected):
 @pytest.mark.parametrize("fault", ["", "source", "completion", "selector"])
 def test_selected_repair_generation_preserves_exact_source_currentness(selected, kind, fault):
     owner, artifact, runtime, source = selected
-    version = source.version + ".repair." + "d" * 32
+    version = source.application.version + ".repair." + "d" * 32
     slot = runtime / "versions" / version
     slot.mkdir(parents=True)
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    python.parent.mkdir()
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
     python.touch()
     (slot / ".install-complete.json").write_text(json.dumps(
         {} if fault == "completion" else {
             "version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),
+            "payload_hash": "9" * 64,
         },
     ))
-    manifest = json.loads(source.identity)
-    manifest.update(service="agent-worktrees", runtime_version=version, venv=str(slot))
+    identity = json.loads(source.identity)["runtime_source"]
     if fault == "source":
-        manifest["runtime_source"]["source_commit"] = "b" * 40
-    (runtime / "deploy-manifest.json").write_text(json.dumps(manifest))
+        identity["source_commit"] = "b" * 40
+    (slot / "runtime-source.json").write_text(json.dumps(identity))
+    (slot / "application.json").write_text(source.application.declaration)
+    (slot / "install-success.json").write_text(json.dumps({"state": "installed", "version": version}))
     (runtime / "current-version").write_text("foreign" if fault == "selector" else version)
+    (runtime / "last-known-good").write_text(version)
     assert plan(kind, owner, source).status == ("" if fault else "SKIPPED (current)")
 
 
@@ -260,28 +304,30 @@ def test_source_input_mutation_blocks_planning(selected, kind):
     assert not runtime.exists()
 
 
-def test_source_execution_revalidates_and_keeps_retry_pin(selected, monkeypatch):
+def test_source_execution_revalidates_without_legacy_install_retry(selected, monkeypatch):
     owner, artifact, runtime, source = selected
     step = plan("module", owner, source)
+    assert not step.fallback_argv
+    step = dataclasses.replace(step, fallback_argv=step.argv)
     captured = []
 
     def run(argv, **kwargs):
         captured.append((argv, kwargs))
-        return SimpleNamespace(status="installer exited 1" if len(captured) == 1 else "OK")
+        return SimpleNamespace(status="installer exited 1")
 
     monkeypatch.setattr(update_runtime, "_run_human_installer", run)
-    assert update_runtime._execute_runtime_step(step) == "OK (installed)"
-    assert len(captured) == 2
+    assert update_runtime._execute_runtime_step(step) == "installer exited 1"
+    assert len(captured) == 1
     for argv, kwargs in captured:
         assert argv[3] == str(owner / "scripts/command_binding.py")
         assert "--managed-deployment" in argv
+        assert "--deferred-runtime" in argv
         assert argv[argv.index("--source-payload-root") + 1] == str(owner)
         assert kwargs["cwd"] == artifact
         assert kwargs["env"][PIN_ENV] == source.identity
-        assert kwargs["target_version"] == source.version
+        assert kwargs["target_version"] == source.application.version
         assert kwargs["receipt"]() is None
-    assert captured[0][0][-1] == "update"
-    assert captured[1][0][-1] == "install"
+    assert "--install-application" in captured[0][0]
 
 
 def test_source_execution_refuses_changed_inputs_before_launch(selected, monkeypatch):
@@ -293,6 +339,52 @@ def test_source_execution_refuses_changed_inputs_before_launch(selected, monkeyp
     )
     assert "payload bytes" in update_runtime._execute_runtime_step(step)
     assert not runtime.exists()
+
+
+@pytest.mark.parametrize("change", ["declaration", "composition"])
+def test_complete_application_handoff_rejects_changed_prepared_inputs(selected, monkeypatch, change):
+    owner, artifact, runtime, source = selected
+    step = plan("engine", owner, source)
+    if change == "declaration":
+        path = source.application.snapshot / "application" / "application.json"
+        document = json.loads(path.read_text())
+        document["module"] = "another_application"
+    else:
+        path = source.application.snapshot / "install-source.json"
+        document = json.loads(path.read_text())
+        document["composition"]["tree"] = "c" * 40
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(
+        update_runtime, "_run_human_installer", lambda *a, **kw: pytest.fail("must not launch"),
+    )
+    assert "inputs changed after selection" in update_runtime._execute_runtime_step(step)
+    assert not runtime.exists()
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+def test_forced_source_install_selects_canonical_repair_without_legacy_retry(selected, kind):
+    owner, artifact, runtime, source = selected
+    if kind == "engine":
+        step = update_runtime_plan.plan_engine(owner, "linux", force=True, source=source)
+    elif kind == "module":
+        step = update_runtime_plan.plan_module(
+            "agent-worktrees", owner, "linux", force=True, source=source,
+        )
+    else:
+        step = update_runtime_plan.plan_registered(
+            "agent-worktrees", "linux", force=True, source=source,
+        )
+    assert not step.blocked, step.status
+    assert "--repair" in step.argv and "--install-application" in step.argv
+    assert not step.fallback_argv
+    assert not runtime.exists()
+
+
+def test_raw_source_identity_alone_cannot_reenter_retired_installer(selected):
+    owner, artifact, runtime, source = selected
+    step = plan("engine", owner, dataclasses.replace(source, application=None))
+    assert step.blocked and "Complete application inputs are required" in step.status
+    assert not step.argv and not runtime.exists()
 
 
 @pytest.mark.parametrize(("status", "exit_code"), [
@@ -330,12 +422,17 @@ def test_malformed_selected_source_is_not_an_untyped_key_error(selected):
 def test_completion_probe_timeout_is_an_attributable_failed_step(selected, monkeypatch, kind):
     owner, artifact, runtime, source = selected
     runtime.mkdir()
-    slot = runtime / "versions" / source.version
+    version = source.application.version
+    slot = runtime / "versions" / version
     slot.mkdir(parents=True)
-    manifest = json.loads(source.identity)
-    manifest.update(service="agent-worktrees", venv=str(slot))
-    (runtime / "deploy-manifest.json").write_text(json.dumps(manifest))
-    (runtime / "current-version").write_text(source.version)
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (slot / "runtime-source.json").write_text(json.dumps(json.loads(source.identity)["runtime_source"]))
+    (slot / "application.json").write_text(source.application.declaration)
+    (slot / "install-success.json").write_text(json.dumps({"state": "installed", "version": version}))
+    (runtime / "current-version").write_text(version)
+    (runtime / "last-known-good").write_text(version)
     original = subprocess.run
 
     def run(argv, **kwargs):
@@ -362,4 +459,4 @@ def test_completion_probe_timeout_is_an_attributable_failed_step(selected, monke
         step = plan(kind, owner, source)
         assert step.blocked
         status = step.status
-    assert "Source completion probe failed" in status
+    assert "Application completion probe failed" in status

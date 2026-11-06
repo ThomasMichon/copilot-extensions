@@ -75,6 +75,23 @@ def test_local_source_refuses_changed_or_escaping_inputs(snapshot, mutation):
         inputs.select(snapshot)
 
 
+@pytest.mark.parametrize("mutation", ["seed", "tree", "foreign-kind"])
+def test_local_source_refuses_inconsistent_composed_git_association(snapshot, mutation):
+    selected = inputs.select(snapshot)
+    record = selected.record
+    record["main_head"] = "c" * 40
+    record["composition"] = {"main_seed": "c" * 40, "tree": "d" * 40}
+    if mutation == "seed":
+        record["composition"]["main_seed"] = "e" * 40
+    elif mutation == "tree":
+        record["composition"]["tree"] = "main"
+    else:
+        record["kind"] = "main"
+    (snapshot / inputs.MANIFEST).write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="composition"):
+        inputs.select(snapshot)
+
+
 @pytest.mark.parametrize("application", [False, True])
 def test_local_source_keeps_wheels_held_until_native_installer_returns(snapshot, monkeypatch, application):
     installer = self_install._runtime_installer()
@@ -323,7 +340,9 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
 @pytest.mark.parametrize("metadata_name", [
     "copilot-extensions-worktree-manager", "Copilot_Extensions_Worktree_Manager",
 ])
-@pytest.mark.parametrize("mutation", [None, "source", "provenance", "missing", "linked"])
+@pytest.mark.parametrize("mutation", [
+    None, "source", "provenance", "missing", "linked", "legacy", "seed", "tree", "removed",
+])
 def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mutation, monkeypatch):
     selected = inputs.select(snapshot)
     filename = "copilot_extensions_worktree_manager-1.0.0-py3-none-any.whl"
@@ -361,6 +380,10 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mut
     }
     (snapshot / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
     selected.record["projects"]["worktree-manager"].update(profile="profile.json", wheel_inputs="wheels")
+    if mutation != "legacy":
+        selected.record.update(
+            main_head="c" * 40, composition={"main_seed": "c" * 40, "tree": "d" * 40},
+        )
     (snapshot / inputs.MANIFEST).write_text(json.dumps(selected.record), encoding="utf-8")
     events = []
     select_project = inputs.select_project
@@ -375,8 +398,11 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mut
         "provenance": "project repository provenance changed during installation",
         "missing": "source differs from its immutable source association",
         "linked": "installation input member must not be linked",
+        "seed": "composition changed",
+        "tree": "composition changed",
+        "removed": "composition changed",
     }
-    with pytest.raises(ValueError, match=error[mutation]) if mutation else nullcontext():
+    with pytest.raises(ValueError, match=error[mutation]) if mutation in error else nullcontext():
         with inputs.manager_inputs(snapshot) as (retained, wheels):
             assert retained.identity == selected.identity
             wheels.verify()
@@ -398,6 +424,17 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mut
                 is_symlink = Path.is_symlink
                 monkeypatch.setattr(
                     Path, "is_symlink", lambda path: path == retained.payload or is_symlink(path),
+                )
+            elif mutation == "seed":
+                selected.record["main_head"] = "e" * 40
+                selected.record["composition"]["main_seed"] = "e" * 40
+            elif mutation == "tree":
+                selected.record["composition"]["tree"] = "e" * 40
+            elif mutation == "removed":
+                del selected.record["composition"]
+            if mutation in {"seed", "tree", "removed"}:
+                (snapshot / inputs.MANIFEST).write_text(
+                    json.dumps(selected.record), encoding="utf-8",
                 )
     assert events == ["select", "consumer", "select"]
 

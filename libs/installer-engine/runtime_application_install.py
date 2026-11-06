@@ -494,11 +494,7 @@ def install(
         ))
     global_bin = global_bin or Path.home() / ".local" / "bin"
     replacements = {global_bin / name: text.encode("utf-8") for name, text in globals_text.items()}
-    previous = {}
-    for path, content in replacements.items():
-        previous[path] = _read(path)
-        if previous[path] is not None and previous[path] != content:
-            raise RuntimeError(f"existing launcher requires its owner's migration: {path}")
+    previous = {path: _read(path) for path in replacements}
     selectors = (root / "current-version", root / "last-known-good")
     if arguments and not (record["setup"] or record["start"]):
         raise ValueError("application installation has no configurable setup or startup action")
@@ -570,6 +566,8 @@ def install(
                     or _read(selectors[1]) not in (selector_before[selectors[1]], *selector_forms)
                 ):
                     raise RuntimeError("application selector changed before startup completion")
+                if any(_read(path) != content for path, content in replacements.items()):
+                    raise RuntimeError("application launcher changed before startup completion")
                 _write(root / "last-known-good", selector_content)
                 _write(slot / "install-success.json", success_content)
         except BaseException as error:

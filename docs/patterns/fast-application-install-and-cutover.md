@@ -270,6 +270,13 @@ final verification explicitly.
 Application setup, startup/readiness and construction-input verification run
 outside selector-update locking. Only launcher/selector writes, the final
 success commit and guarded pre-start recovery use brief atomic updates.
+The admitted application replaces differing existing ordinary files at its
+declared global command names without requiring recognized incumbent launcher
+bytes or old-runtime provenance. Other command names and application data are
+not replacement targets. Linked, non-file or oversized targets remain literal
+publication errors. The transaction snapshots prior bytes, detects a command
+changed during preparation, and restores replaced bytes on pre-start failure;
+it does not replay over a concurrent writer.
 Callbacks may therefore use the existing selector owner without waiting for
 their installer to release a lock. A callback that confirms the same selected
 generation is not a competing winner; the final check accepts the canonical

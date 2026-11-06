@@ -49,6 +49,23 @@ Its JSON result has exactly these fields:
 This read-only mode is necessary because only the native owner knows profile
 policy; it is not a new daemon, universal handshake or admission authority.
 
+For complete-application preparation, the same installed owner also accepts
+`--application-profile --root <root>`, without an incoming payload. It reports
+`copilot-extensions.runtime-application-profile` version one with `plugin`,
+`runtime_root`, `profile` and `extras`. It uses `selected_profile` unchanged;
+base yields no extras and provider-exec yields `["provider-exec"]`. It does not
+calculate a legacy target version or provision anything.
+
+The engine's existing inventory includes these read-only facts in
+`runtime_sources.application_profiles`, keyed by component. Each value contains
+either `selection` or an explicit `error`. The query runs only for installed
+profile owners and never executes incoming code. Invalid roots, components,
+versions, extras or oversized responses are refused. Unavailable new profile
+support does not change ordinary marketplace update eligibility; a future
+complete-application consumer must refuse that specific source-input boundary
+rather than guess base. This inventory addition does not change the generation-1
+source packet or enable complete-application suite execution by itself.
+
 ## Frozen execution and currentness
 
 The updater retains the result separately from the original source pin. Its

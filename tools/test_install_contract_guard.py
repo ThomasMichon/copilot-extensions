@@ -89,6 +89,8 @@ Set-CopilotPersistentEnvironmentVariable -Name Path -Value $value -Target User
         Path("plugins/agent-worktrees/.venv/Scripts/Activate.ps1"),
         Path(".git/hooks/pre-push.ps1"),
         Path("worktree-manager/.test-venvs/foo/Scripts/Activate.ps1"),
+        Path(".test-runs/retained-fixture/Scripts/Activate.ps1"),
+        Path("libs/example/.pytest_cache/fixture.ps1"),
         Path("libs/foo/.venv-tools/bin/x.ps1"),
         Path("web/node_modules/.bin/thing.ps1"),
     ],

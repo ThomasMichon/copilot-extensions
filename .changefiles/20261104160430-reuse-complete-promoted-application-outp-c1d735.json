@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse complete promoted application outputs through the canonical provider",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

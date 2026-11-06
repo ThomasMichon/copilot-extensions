@@ -168,7 +168,9 @@ def test_core_marker_requires_an_explicit_supported_record(tmp_path, value):
         core.enabled(tmp_path)
 
 
-def test_core_builder_uses_the_shared_locked_set_owner(tmp_path, monkeypatch):
+@pytest.mark.parametrize("execution", [{}, {"uv": "selected-uv", "deadline": 123.0}],
+                         ids=["default", "selected-budget"])
+def test_core_builder_uses_the_shared_locked_set_owner(tmp_path, monkeypatch, execution):
     _source(tmp_path)
     monkeypatch.setattr(builder, "REPO", tmp_path)
     calls = []
@@ -180,8 +182,11 @@ def test_core_builder_uses_the_shared_locked_set_owner(tmp_path, monkeypatch):
     monkeypatch.setattr(builder, "build_project_artifacts", build)
     lock = object()
     result = core.build_core_artifacts(
-        out_dir=tmp_path / "out", toolchain=lock, builder=builder
+        out_dir=tmp_path / "out", toolchain=lock, builder=builder, **execution,
     )
+    assert {name: result[name] for name in execution} == execution
+    if not execution:
+        assert "uv" not in result and "deadline" not in result
     assert result["identity"] == {"composition": "core"}
     assert result["schema_version"] == 5 and result["toolchain"] is lock
     assert len(result["projects"]) == len(set(result["projects"])) == 2

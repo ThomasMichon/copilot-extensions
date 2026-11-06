@@ -37,6 +37,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import inspect
 import importlib.util
 import json
 import os
@@ -49,6 +50,10 @@ from pathlib import Path
 from promotion_candidate import (
     CandidateIdentityError, candidate_clock, candidate_environment, format_promotion_message,
     push_candidate,
+)
+from promotion_source_archive import (
+    changefile_existed_at as _changefile_existed_at,
+    main_version_inputs as _main_version_inputs,
 )
 
 REPO = Path(__file__).resolve().parent.parent
@@ -78,7 +83,9 @@ def _git(
     env: dict[str, str] | None = None, input_text: str | None = None,
 ) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=str(cwd or REPO), capture_output=True, env=env,
+        ["git", *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"]
+                  if os.name == "nt" else []), *args],
+        cwd=str(cwd or REPO), capture_output=True, env=env,
         input=input_text.encode("utf-8") if input_text is not None else None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -132,20 +139,6 @@ def remove_scratch_worktree(scratch: Path, *, repo: Path = REPO) -> None:
     _git(["worktree", "remove", "--force", str(scratch)], cwd=repo, check=False)
 
 
-def _changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
-    """True if ``.changefiles/<name>`` was already present in ``dev`` at
-    ``rev`` (a real, historical commit -- typically the last promotion's own
-    ``dev_head``). Uses the real repo's object store, which a scratch
-    worktree shares (``git worktree add`` never creates a second store), so
-    this works regardless of which checkout the caller passes."""
-    result = subprocess.run(
-        ["git", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
-        cwd=str(repo), capture_output=True, text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    return result.returncode == 0
-
-
 def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) -> None:
     """Overwrite every plugin's version-bearing surfaces in the scratch tree
     with whatever ``main`` last actually shipped for it, BEFORE any new bump
@@ -168,34 +161,40 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
     not sufficient on its own; this seed step is the other required half."""
     plugins_dir = scratch / "plugins"
     seed_result: dict[str, tuple[str, str]] = {}
-    if plugins_dir.is_dir():
-        for plugin_dir in sorted(plugins_dir.iterdir()):
-            if not plugin_dir.is_dir():
-                continue
-            plugin = plugin_dir.name
-            main_pj_raw = _git(
-                ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
-            )
-            if not main_pj_raw:
-                continue  # never shipped on main yet -- dev's own literal stands as-is
-            try:
-                main_version = json.loads(main_pj_raw)["version"]
-            except (json.JSONDecodeError, KeyError):
-                continue
-            dev_version = acc.read_plugin_json_version(plugin)
-            if dev_version is None or dev_version == main_version:
-                continue
-            seed_result[plugin] = (dev_version, main_version)
+    plugin_dirs = (
+        [path for path in sorted(plugins_dir.iterdir()) if path.is_dir()]
+        if plugins_dir.is_dir() else []
+    )
+    consumers = acc.iter_standalone_consumer_names() + acc.iter_library_consumer_names()
+    metadata = _main_version_inputs(repo, main_head, [
+        *(f"plugins/{path.name}/plugin.json" for path in plugin_dirs),
+        *(f"{consumer}/pyproject.toml" for consumer in consumers),
+    ])
+    for plugin_dir in plugin_dirs:
+        plugin = plugin_dir.name
+        main_pj_raw = metadata.get(f"plugins/{plugin}/plugin.json", "").strip()
+        if not main_pj_raw:
+            continue  # never shipped on main yet -- dev's own literal stands as-is
+        try:
+            main_version = json.loads(main_pj_raw)["version"]
+        except (json.JSONDecodeError, KeyError):
+            continue
+        dev_version = acc.read_plugin_json_version(plugin)
+        if dev_version is None or dev_version == main_version:
+            continue
+        seed_result[plugin] = (dev_version, main_version)
     # A standalone, out-of-plugin consumer (e.g. `worktree-manager`) ships
     # its own `pyproject.toml` [project].version instead of a plugin.json --
     # it needs the exact same main-is-truth seeding, or a promotion round
     # with no new changefile for it would regress it back to dev's stale
     # literal (or repeat an already-shipped bump) the same way an
     # un-seeded plugin would (PR #4514 review).
-    for consumer in (
-        acc.iter_standalone_consumer_names() + acc.iter_library_consumer_names()
-    ):
-        main_version = acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
+    parser = getattr(acc, "_project_version_from_text", None)
+    for consumer in consumers:
+        main_version = (
+            parser(metadata.get(f"{consumer}/pyproject.toml", "")) if parser is not None
+            else acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
+        )
         if main_version is None:
             continue  # never shipped on main yet -- dev's own literal stands as-is
         dev_version = acc.read_consumer_version(consumer)
@@ -261,31 +260,21 @@ def _sync_instruction_projections(
 
 def consume_pending_changes(
     scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO,
-    trusted_source: Path | None = None,
+    trusted_source: Path | None = None, allocate_versions: bool = True,
 ) -> dict:
-    """Compose candidate data using its tooling, or explicitly trusted tooling
-    for candidate-independent signing validation. Returns a summary used for
-    the tag/commit message and tests.
+    """Compose candidate data with its own or explicitly trusted signing tooling.
 
-    ``last_dev_head`` is the ``dev`` commit the PREVIOUS promotion actually
-    promoted (persisted as ``last_promotion.dev_head`` in the pipeline state
-    committed on ``main`` -- see ``_read_pipeline_state``), or ``None`` for
-    the very first promotion ever. Bump computation only considers a pending
-    changefile that did NOT already exist in ``dev`` at that commit --
-    verified by sweeping every changefile currently present and checking
-    each one's presence at that exact boundary, never by keeping a
-    persisted "have we ever seen this filename" list. `dev`'s own tree is
-    never mutated by a promotion (see this module's docstring), so an
-    already-consumed changefile can keep sitting on `dev` for a while after
-    landing (the async "clear consumed changefiles on dev" cleanup PR is
-    best-effort/eventual, not synchronous with promotion) -- without this
-    filter, every later promotion would re-read it and recompute the exact
-    same bump target from `dev`'s still-unbumped plugin.json, colliding
-    with whatever real new version actually shipped in between (confirmed
-    live: two consecutive real promotions both computed identical
-    "agent-bridge 0.4.0-dev551 -> 0.4.1-dev1"). Every changefile physically
-    present is still deleted from the scratch tree regardless -- main must
-    never carry any, newly-applied or not."""
+    ``allocate_versions=False`` retains Main versions and omits only scratch
+    changefiles; Dev is unchanged. The result summarizes version/tag inputs.
+
+    ``last_dev_head`` is the previous promotion's Dev commit, persisted as
+    ``last_promotion.dev_head`` on Main, or ``None`` for the first promotion.
+    Bumps consider only pending changefiles absent at that exact commit, not
+    a persisted filename list. Eventual Dev cleanup may leave consumed files
+    present; checking their historical boundary prevents applying the same bump
+    again against stale Dev versions. All changefiles are removed from scratch,
+    newly applied or not, because Main must never carry them.
+    """
     # accumulate_bumps.py does a bare ``from changefile import
     # read_changefiles`` -- a plain import checks sys.modules by name FIRST,
     # before consulting sys.path, so if anything else in this process has
@@ -312,9 +301,16 @@ def consume_pending_changes(
 
         _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
 
-        all_changefiles = list(acc.read_changefiles())
+        reader = acc.read_changefiles
+        parallel_reads = getattr(mm, "_parallel_pointer_reads", lambda: False)
+        all_changefiles = list(
+            reader(parallel=parallel_reads())
+            if "parallel" in inspect.signature(reader).parameters else reader()
+        )
         changefile_names = [p.name for p, _data in all_changefiles]
-        if last_dev_head is None:
+        if not allocate_versions:
+            new_entries = []
+        elif last_dev_head is None:
             new_entries = all_changefiles
         else:
             new_entries = [
@@ -349,7 +345,10 @@ def consume_pending_changes(
             # that drove a bump this round -- an already-consumed changefile
             # left un-deleted here would otherwise leak straight into main's
             # generated tree (main must never carry any .changefiles/*).
-            acc._consume_changefiles()
+            if "pending" in inspect.signature(acc._consume_changefiles).parameters:
+                acc._consume_changefiles(pending=all_changefiles)
+            else:
+                acc._consume_changefiles()
 
         materialize_log = mm.materialize(scratch, canonical_root=scratch)
         unresolved = [line for line in materialize_log if line.startswith("SKIP")]

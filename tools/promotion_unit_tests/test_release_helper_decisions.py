@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -370,6 +371,160 @@ def test_packaged_assets_materialize_only_safe_nonconflicting_bytes(tmp_path, ca
             assert output.read_text() == "foreign\n"
         else:
             assert not output.exists()
+
+
+def _nested_packaged_assets(root: Path, files: list[str]) -> Path:
+    consumer = root / "worktree-manager"
+    _write(consumer / assets.PACKAGED_MANIFEST_NAME, json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2,
+        "canonicalDir": ".", "payloadDir": "scripts/provider", "files": files,
+    }))
+    return consumer
+
+
+def test_nested_packaged_assets_preserve_explicit_layout(tmp_path):
+    root = tmp_path / "source"
+    files = ["tools/prepare.py", "libs/example/pyproject.toml", "tools/requirements.txt"]
+    consumer = _nested_packaged_assets(root, files)
+    for name in files:
+        _write(root / name, name)
+    _write(root / "tools/unrelated.py", "not declared")
+    dest = tmp_path / "release" / "worktree-manager"
+    dest.mkdir(parents=True)
+    report = wrappers.materialize_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest, canonical_root=root,
+    )
+    assert len(report) == len(files) and all(line.startswith("OK") for line in report)
+    packaged = dest / "scripts" / "provider"
+    assert sorted(path.relative_to(packaged).as_posix()
+                  for path in packaged.rglob("*") if path.is_file()) == sorted(files)
+    assert all((packaged / name).read_bytes() == (root / name).read_bytes() for name in files)
+    manifest = assets.load_manifest(consumer, manifest_name=assets.PACKAGED_MANIFEST_NAME)
+    assert manifest.source_relative(files[0]) == files[0]
+
+
+@pytest.mark.parametrize("files", [
+    ["../outside.py"], ["tools/../outside.py"], ["C:/outside.py"],
+    ["/outside.py"], ["tools\\outside.py"], ["tools/*.py"],
+    ["tools/file.py", "tools/FILE.py"], ["tools", "tools/file.py"],
+    ["tools/file.py:stream"], ["tools/name."], ["tools/name "], ["tools/CON.py"],
+], ids=[
+    "traversal", "nested-traversal", "drive", "absolute", "backslash", "glob",
+    "case-alias", "file-directory", "stream", "trailing-dot", "trailing-space", "device-name",
+])
+def test_nested_packaged_assets_reject_unsafe_or_aliased_members(tmp_path, files):
+    consumer = _nested_packaged_assets(tmp_path, files)
+    with pytest.raises(ValueError, match="files"):
+        assets.load_manifest(consumer, manifest_name=assets.PACKAGED_MANIFEST_NAME)
+
+
+@pytest.mark.parametrize("failure", ["missing", "occupied", "parent-file", "source-link", "dest-link"])
+def test_nested_packaged_assets_preflight_all_members(tmp_path, failure, monkeypatch):
+    root = tmp_path / "source"
+    files = ["tools/first.py", "libs/example/value.py"]
+    consumer = _nested_packaged_assets(root, files)
+    _write(root / files[0], "first")
+    dest = tmp_path / "release" / "worktree-manager"
+    packaged = dest / "scripts" / "provider"
+    packaged.mkdir(parents=True)
+    source = root / files[1]
+    target = packaged / files[1]
+    if failure != "missing":
+        _write(root / files[1], "second")
+    if failure == "occupied":
+        _write(target, "retained")
+    elif failure == "parent-file":
+        _write(packaged / "libs", "retained")
+    elif failure == "source-link":
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path == source.parent)
+    elif failure == "dest-link":
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path == packaged / "libs")
+    report = wrappers.materialize_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest, canonical_root=root,
+    )
+    assert len(report) == 1 and report[0].startswith("SKIP")
+    assert not (packaged / files[0]).exists()
+
+
+@pytest.mark.parametrize("version,canonical,name", [
+    (1, "tools", "prepare.py"),
+    (2, ".", "libs/example/pyproject.toml"),
+])
+def test_standalone_packaged_sources_charge_the_declared_consumer(
+    monkeypatch, tmp_path, version, canonical, name,
+):
+    spec = importlib.util.spec_from_file_location("asset_version_guard", ROOT / "tools/check-version-bump.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = tmp_path / "source"
+    (root / "plugins").mkdir(parents=True)
+    _write(root / "worktree-manager/packaged-assets.json", json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": version,
+        "canonicalDir": canonical, "payloadDir": "scripts/provider", "files": [name],
+    }))
+    monkeypatch.setattr(module, "REPO", root)
+    monkeypatch.setattr(module, "PLUGINS_DIR", root / "plugins")
+    source = (Path(canonical) / name).as_posix()
+    assert module._plugins_needing_bump([source], {}) == {
+        "worktree-manager": {f"packaged source {source}"},
+    }
+    assert module._plugins_needing_bump(["tools/unrelated.py"], {}) == {}
+
+
+def test_packaged_manager_provider_loads_its_declared_canonical_owners(tmp_path, monkeypatch):
+    source = ROOT / "worktree-manager"
+    manifest = assets.load_manifest(source, manifest_name=assets.PACKAGED_MANIFEST_NAME)
+    destination = tmp_path / "worktree-manager"
+    destination.mkdir()
+    report = wrappers.materialize_into(
+        source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=ROOT,
+    )
+    assert report and all(line.startswith("OK") for line in report), report
+    bundle = manifest.payload_dir(plugin_dir=destination)
+    assert {
+        path.relative_to(bundle).as_posix() for path in bundle.rglob("*") if path.is_file()
+    } == set(manifest.files)
+    from plugin_runtime_resources import application_resources
+
+    assert set(application_resources(destination, "worktree_manager")) == {
+        "worktree_manager/_runtime_assets/" + manifest.payload_dir_raw + "/" + name
+        for name in manifest.files
+    }
+
+    declared = {ROOT / manifest.source_relative(name) for name in manifest.files}
+    for name, module in list(sys.modules.items()):
+        filename = getattr(module, "__file__", None)
+        if filename and Path(filename) in declared:
+            monkeypatch.delitem(sys.modules, name)
+    monkeypatch.delitem(sys.modules, "_local_install_source_provenance", raising=False)
+    inherited = [
+        path for path in sys.path
+        if not Path(path or ".").resolve().is_relative_to(ROOT)
+    ]
+    monkeypatch.setattr(sys, "path", [str(bundle / "tools"), *inherited])
+    monkeypatch.chdir(tmp_path)
+    try:
+        modules = {
+            name: importlib.import_module(name) for name in (
+                "local_install_source", "local_install_profile", "local_runtime_promotion",
+                "build_python_artifacts", "standalone_python_artifacts",
+            )
+        }
+        assert all(Path(module.__file__).is_relative_to(bundle) for module in modules.values())
+        assert modules["local_install_source"].repository_source(
+            tmp_path, {"source": "github", "repo": "Example/Suite"}, deadline=1,
+        ) == {"kind": "github", "canonical": "github:example/suite", "ref": ""}
+        projection = bundle / (
+            "plugins/customizing-copilot/skills/reviewing-customizations/scripts"
+        )
+        monkeypatch.syspath_prepend(str(projection))
+        loaded = importlib.import_module("instruction_projections")
+        assert Path(loaded.__file__).is_relative_to(bundle)
+    finally:
+        for name, module in list(sys.modules.items()):
+            filename = getattr(module, "__file__", None)
+            if filename and Path(filename).is_relative_to(bundle):
+                sys.modules.pop(name, None)
 
 
 @pytest.mark.parametrize("ext", ["ps1", "sh"])

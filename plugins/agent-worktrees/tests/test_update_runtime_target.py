@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -14,9 +15,143 @@ import pytest
 
 from agent_worktrees import reconcile, update_runtime, update_runtime_plan
 from agent_worktrees.update_runtime_source import PIN_ENV, PreparedRuntimeSource
+from agent_worktrees.update_runtime_application import PreparedApplication
 from agent_worktrees.update_runtime_target import TARGET_ENV, plan_target
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize("closed_inputs", [False, True])
+@pytest.mark.parametrize("fault", ["", "target", "footprint"])
+def test_native_source_execution_retains_target_revalidation_and_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, closed_inputs: bool, fault: str,
+) -> None:
+    from agent_worktrees import update_runtime_target
+
+    owner, root, project = (tmp_path / name for name in ("owner", "runtime", "project"))
+    target, events = object(), []
+    source = SimpleNamespace(
+        application=None, install_source=tmp_path / "snapshot" if closed_inputs else None,
+    )
+
+    def validate(name, payload, environment):
+        assert (name, payload, environment) == ("agent-example", owner, {"fixture": "selected"})
+        events.append("source")
+
+    def check(expected, actual, name, payload, installation, environment):
+        assert expected is target and actual is source
+        assert (name, payload, installation, environment) == (
+            "agent-example", owner, root, {"fixture": "selected"},
+        )
+        events.append("target")
+        if fault == "target":
+            raise ValueError("selected target changed")
+
+    def deployed(installation, payload, *, target):
+        assert (installation, payload) == (root, owner) and target is step.source_target
+        events.append("receipt")
+        return "qualified-generation"
+
+    source.validate = validate
+    source.deployed_version = deployed
+    source.lifecycle_argv = lambda *args: ["native-installer", "--qualified"]
+    step = SimpleNamespace(
+        status="", name="agent-example", payload=owner, runtime_root=root, project_root=project,
+        source=source, source_target=target, artifact=tmp_path / "artifact",
+        environment={"fixture": "selected"}, deadline_s=90, target_version="qualified-generation",
+        argv=("native-installer",), fallback_argv=("legacy-installer",),
+    )
+
+    def run(command, **options):
+        assert command == ["native-installer", "--qualified"]
+        assert options["receipt"]() == options["target_version"] == "qualified-generation"
+        events.append("installer")
+        return SimpleNamespace(status="OK")
+
+    monkeypatch.setattr(update_runtime_target, "check_target", check)
+    monkeypatch.setattr(update_runtime, "_run_human_installer", run)
+    monkeypatch.setattr(
+        update_runtime_plan, "_runtime_footprint_current", lambda actual: fault != "footprint",
+    )
+    status = update_runtime._execute_runtime_step(step)
+    if fault == "target" and not closed_inputs:
+        assert status == "prepared source execution refused: selected target changed"
+        assert events == ["source", "target"]
+    else:
+        assert status == (
+            "source deployment receipt invalid: selected runtime footprint changed"
+            if fault == "footprint" else "OK"
+        )
+        assert events == ["source", *([] if closed_inputs else ["target"]), "receipt", "installer"]
+
+
+@pytest.mark.parametrize("fault", [
+    None, "profile", "plugin", "root", "version", "extras", "duplicate", "foreign", "failed", "large",
+])
+def test_application_profile_query_uses_only_installed_owner_and_rejects_foreign_inputs(
+    tmp_path, monkeypatch, fault,
+):
+    from agent_worktrees import update_runtime_target as target
+
+    owner, root = tmp_path / "owner", tmp_path / "runtime"
+    (owner / "scripts").mkdir(parents=True)
+    planner = owner / "scripts" / "runtime_profile.py"
+    planner.write_text("# installed owner fixture\n")
+    (owner / "runtime-source-target.json").write_text(json.dumps({
+        "schema": target.PROVIDER_SCHEMA, "version": 1, "planner": "scripts/runtime_profile.py",
+    }))
+    expected = {
+        "schema": target.APPLICATION_PROFILE_SCHEMA, "version": 1,
+        "plugin": "agent-containers", "runtime_root": str(root),
+        "profile": "provider-exec", "extras": ["provider-exec"],
+    }
+    value = dict(expected)
+    if fault == "profile":
+        value["profile"] = "../escape"
+    elif fault == "plugin":
+        value["plugin"] = "another"
+    elif fault == "root":
+        value["runtime_root"] = str(tmp_path / "foreign")
+    elif fault == "version":
+        value["version"] = True
+    elif fault == "extras":
+        value["extras"] = [[], "provider-exec"]
+    elif fault == "duplicate":
+        value["extras"] *= 2
+    elif fault == "foreign":
+        value["extra"] = "unsupported"
+    calls = []
+
+    def run(command, **options):
+        calls.append(command)
+        assert command == [
+            sys.executable, "-I", "-B", str(planner), "--application-profile", "--root", str(root),
+        ]
+        assert options["env"] == {"OWNER_ENV": "selected"}
+        assert options["stdin"] is subprocess.DEVNULL and options["timeout"] == 30
+        return SimpleNamespace(
+            returncode=1 if fault == "failed" else 0,
+            stdout=" " * 65537 if fault == "large" else json.dumps(value),
+            stderr="unsupported query" if fault == "failed" else "",
+        )
+
+    monkeypatch.setattr(target.subprocess, "run", run)
+    if fault:
+        with pytest.raises(ValueError, match="invalid selection|query failed|document bound"):
+            target.application_profile("agent-containers", owner, root, {"OWNER_ENV": "selected"})
+    else:
+        assert target.application_profile("agent-containers", owner, root, {"OWNER_ENV": "selected"}) == expected
+    assert len(calls) == 1
+    assert not root.exists()
+
+
+def test_unprofiled_application_needs_no_query_and_missing_containers_owner_refuses(tmp_path, monkeypatch):
+    from agent_worktrees import update_runtime_target as target
+
+    monkeypatch.setattr(target.subprocess, "run", lambda *a, **k: pytest.fail("unowned profile query"))
+    assert target.application_profile("agent-bridge", tmp_path, tmp_path / "runtime", {}) is None
+    with pytest.raises(ValueError, match="owner is unavailable"):
+        target.application_profile("agent-containers", tmp_path, tmp_path / "runtime", {})
 
 
 @pytest.fixture
@@ -39,6 +174,10 @@ def selected(tmp_path, monkeypatch):
     }), encoding="utf-8")
     (owner / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="utf-8")
     shutil.copytree(owner, artifact)
+    (artifact / "scripts/install_source.py").write_text(
+        'APPLICATION_INSTALL_CONTRACT = '
+        '{"schema": "copilot-extensions.prepared-application-install", "version": 1}\n',
+    )
     spec = importlib.util.spec_from_file_location("_target_source_fixture", scripts / "versioned_runtime_source.py")
     assert spec and spec.loader
     helper = importlib.util.module_from_spec(spec)
@@ -62,36 +201,82 @@ def selected(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: owner)
     monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *args: False)
-    return owner, artifact, runtime, source, helper
+    original = subprocess.run
+
+    def run(argv, **kwargs):
+        if "--native-inputs" in argv:
+            application = PreparedApplication(tmp_path, "agent-containers", json.dumps({
+                "schema": "copilot-extensions.runtime-application-profile", "version": 1,
+                "plugin": "agent-containers", "runtime_root": str(runtime),
+                "profile": "provider-exec", "extras": ["provider-exec"],
+            }, sort_keys=True))
+            return SimpleNamespace(returncode=0, stdout=application.selection, stderr="")
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(shutil, "which", lambda name: sys.executable if name == "uv" else name)
+    return _application((owner, artifact, runtime, source, helper))
+
+
+def _application(selected):
+    owner, artifact, runtime, source, helper = selected
+    snapshot = artifact.parent
+    app = snapshot / "application"
+    app.mkdir(exist_ok=True)
+    (app / "application.json").write_text(json.dumps({
+        "name": "agent-containers", "module": "agent_containers",
+        "construction": {
+            "identity": json.loads(source.identity),
+            "runtime_version": source.version + ".profile." + "e" * 16,
+            "payload_hash": "d" * 64, "extras": ["provider-exec"],
+            "local_packages": ["agent-containers"],
+        },
+    }))
+    (snapshot / "install-source.json").write_text(json.dumps({
+        "schema": "copilot-extensions.install-source", "version": 1, "kind": "source",
+        "source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "f" * 40,
+        "composition": {"main_seed": "f" * 40, "tree": "a" * 40},
+        "projects": {"agent-containers": {
+            "payload": "artifact", "source": json.loads(source.identity)["runtime_source"],
+            "profile": "profile.json", "wheel_inputs": "wheels", "artifact": {},
+            "application": "application",
+        }},
+    }))
+    profile = {
+        "schema": "copilot-extensions.runtime-application-profile", "version": 1,
+        "plugin": "agent-containers", "runtime_root": str(runtime),
+        "profile": "provider-exec", "extras": ["provider-exec"],
+    }
+    return owner, artifact, runtime, dataclasses.replace(source, application=PreparedApplication(
+        snapshot, "agent-containers", json.dumps(profile, sort_keys=True),
+    )), helper
 
 
 def _plan(selected, *, force=False):
+    if selected[3].application is None:
+        selected = _application(selected)
     return update_runtime_plan.plan_registered(
         "agent-containers", "linux", force=force, source=selected[3],
     )
 
 
-def _completed(selected, target):
+def _completed(selected):
     owner, artifact, root, source, helper = selected
-    slot = root / "versions" / target.version
+    version = source.application.version
+    slot = root / "versions" / version
     slot.mkdir(parents=True)
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    python.parent.mkdir()
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
     python.touch()
     (slot / ".install-complete.json").write_text(json.dumps({
-        "version": target.version, "completed_at": "2026-01-01T00:00:00Z",
+        "version": version, "completed_at": "2026-01-01T00:00:00Z",
         "pid": os.getpid(), "payload_hash": "d" * 64,
     }), encoding="utf-8")
-    fields = json.loads(source.identity)
-    (slot / "runtime-profile.json").write_text(json.dumps({
-        "profile": target.profile, "packageVersion": source.package_version,
-        "runtimeSource": fields["runtime_source"], "payloadHash": "d" * 64,
-    }), encoding="utf-8")
-    (root / "deploy-manifest.json").write_text(json.dumps({
-        **fields, "service": "agent-containers", "runtime_version": target.version,
-        "runtime_profile": target.profile, "venv": str(slot),
-    }), encoding="utf-8")
-    (root / "current-version").write_text(target.version, encoding="utf-8")
+    (slot / "runtime-source.json").write_text(json.dumps(json.loads(source.identity)["runtime_source"]))
+    (slot / "application.json").write_text(source.application.declaration)
+    (slot / "install-success.json").write_text(json.dumps({"state": "installed", "version": version}))
+    (root / "current-version").write_text(version, encoding="utf-8")
+    (root / "last-known-good").write_text(version, encoding="utf-8")
     return slot
 
 
@@ -100,13 +285,11 @@ def test_owner_process_returns_profile_target_but_keeps_base_pin_and_owner(selec
     before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
     step = _plan(selected)
     assert not step.blocked, step.status
-    assert step.source_target.profile == "provider-exec"
-    assert step.target_version == helper.runtime_version(
-        "1.0.0+provider-exec", "a" * 40, json.loads(source.identity)["runtime_source"]["assembly_hash"],
-    )
-    assert step.target_version != source.version
+    assert step.source_target is None
+    assert step.target_version == source.application.version
+    assert step.target_version != json.loads(source.identity)["runtime_version"]
     assert step.environment[PIN_ENV] == source.identity
-    assert step.environment[TARGET_ENV] == step.source_target.document
+    assert TARGET_ENV not in step.environment
     assert step.payload == owner and step.artifact == artifact and step.runtime_root == root
     assert step.environment["COPILOT_PLUGIN_STAGED_FROM"] == str(owner)
     assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
@@ -124,40 +307,42 @@ def test_prepared_profile_code_never_becomes_the_planning_authority(selected):
     )
     (artifact / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
     source = PreparedRuntimeSource(artifact, json.dumps(helper.manifest_fields(identity)))
+    source = _application((owner, artifact, root, source, helper))[3]
     step = update_runtime_plan.plan_registered(
         "agent-containers", "linux", force=False, source=source,
     )
     assert not step.blocked, step.status
-    assert step.source_target.profile == "provider-exec"
+    assert step.source_target is None
+    assert json.loads(step.source.application.selection)["extras"] == ["provider-exec"]
 
 
 @pytest.mark.parametrize("fault", [
-    "", "outer-profile", "outer-version", "outer-source-type", "slot-profile", "slot-source",
+    "", "success-version", "selector", "last-good", "application-profile", "slot-source",
     "slot-source-type", "slot-hash", "completion", "interpreter",
 ])
 def test_currentness_requires_actual_profile_source_selector_and_completion(selected, fault):
-    step = _plan(selected)
-    slot = _completed(selected, step.source_target)
+    slot = _completed(selected)
     root = selected[2]
-    path = root / "deploy-manifest.json" if fault.startswith("outer") else slot / "runtime-profile.json"
+    path = slot / "application.json"
     if fault == "interpreter":
-        (slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")).unlink()
+        (slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")).unlink()
+    elif fault in {"selector", "last-good"}:
+        (root / ("current-version" if fault == "selector" else "last-known-good")).write_text("foreign")
     elif fault:
         data = json.loads(path.read_text())
-        if fault == "outer-profile":
-            data["runtime_profile"] = "base"
-        elif fault == "outer-version":
-            data["runtime_version"] = selected[3].version
-        elif fault == "outer-source-type":
-            data["runtime_source"]["version"] = True
-        elif fault == "slot-profile":
-            data["profile"] = "base"
-        elif fault == "slot-source":
-            data["runtimeSource"]["source_tree"] = "c" * 40
-        elif fault == "slot-source-type":
-            data["runtimeSource"]["version"] = True
+        if fault == "success-version":
+            path = slot / "install-success.json"
+            data = {"state": "installed", "version": "another-slot"}
+        elif fault == "application-profile":
+            data["construction"]["extras"] = []
+        elif fault in {"slot-source", "slot-source-type"}:
+            path = slot / "runtime-source.json"
+            data = json.loads(path.read_text())
+            data["source_tree" if fault == "slot-source" else "version"] = (
+                "c" * 40 if fault == "slot-source" else True
+            )
         elif fault == "slot-hash":
-            data["payloadHash"] = "e" * 64
+            data["construction"]["payload_hash"] = "e" * 64
         else:
             path = slot / ".install-complete.json"
             data = {}
@@ -222,7 +407,7 @@ def test_provider_skew_refuses_before_any_root_effect(selected, fault):
     if fault not in {"missing-owner", "both-missing"}:
         path.write_text(json.dumps(value), encoding="utf-8")
     step = _plan(selected)
-    assert step.blocked and "target" in step.status
+    assert step.blocked and ("target" in step.status or "profile" in step.status)
     assert not (root / "versions").exists()
 
 
@@ -245,13 +430,13 @@ def test_installed_planner_response_is_bound_to_root_and_full_source(selected, m
         plan_target(source, "agent-containers", owner, root, {})
 
 
-def test_execution_rechecks_profile_before_launch_and_on_retry(selected, monkeypatch):
+def test_execution_rechecks_profile_before_launch_without_legacy_retry(selected, monkeypatch):
     step = _plan(selected)
     calls = []
 
     def execute(argv, **kwargs):
         calls.append((argv, kwargs))
-        assert kwargs["env"][TARGET_ENV] == step.source_target.document
+        assert TARGET_ENV not in kwargs["env"]
         assert kwargs["env"][PIN_ENV] == selected[3].identity
         assert kwargs["target_version"] == step.target_version
         (selected[2] / "runtime-profile.json").write_text(json.dumps({
@@ -260,11 +445,9 @@ def test_execution_rechecks_profile_before_launch_and_on_retry(selected, monkeyp
         }), encoding="utf-8")
         return SimpleNamespace(status="installer exited 1")
 
-    import dataclasses
-
-    step = dataclasses.replace(step, fallback_argv=step.argv)
     monkeypatch.setattr(update_runtime, "_run_human_installer", execute)
-    assert "Source target changed" in update_runtime._execute_runtime_step(step)
+    assert update_runtime._execute_runtime_step(step) == "installer exited 1"
+    assert "Application profile changed" in update_runtime._execute_runtime_step(step)
     assert len(calls) == 1
 
 

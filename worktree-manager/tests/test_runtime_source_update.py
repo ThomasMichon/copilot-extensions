@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,9 @@ from worktree_manager.runtime_source import ResolvedSource
 def inventory(*names: str) -> dict:
     return {
         "contract": 1,
-        "runtime_sources": {"schema": update.SCHEMA, "version": update.CONTRACT},
+        "runtime_sources": {
+            "schema": update.SCHEMA, "version": update.CONTRACT, "application_profiles": {},
+        },
         "entries": [{
             "id": name, "title": name, "kind": "universal", "enabled": "active",
             "installed": True, "payload": "1", "selected": "1", "running": "1",
@@ -41,6 +44,112 @@ def enable() -> None:
     config.set_source(config.RuntimeSource("dev", allow_dev=True))
 
 
+@pytest.mark.parametrize("phase", [
+    "complete", "reuse", "portfolio", "path", "outside", "mixed", "timeout", "late",
+])
+@pytest.mark.parametrize("extras", [None, {"agent-bridge": ("fixture-extra",)}])
+def test_complete_application_handoff_uses_one_owned_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, extras,
+) -> None:
+    directory = tmp_path / "trusted" / "tools"
+    directory.mkdir(parents=True)
+    provider = directory / "local_install_source.py"
+    provider.write_text("# trusted provider fixture\n", encoding="utf-8")
+    tool = directory / "prepare_runtime_source.py"
+    resolved = ResolvedSource(
+        config.RuntimeSource("dev", allow_dev=True), tmp_path / "checkout",
+        "a" * 40, "b" * 40, "c" * 40, "d" * 40,
+    )
+    output = tmp_path / "prepared"
+    names = ("agent-worktrees", "agent-bridge")
+    expected = {name: str(output / "profiles" / name / "snapshot") for name in names}
+    if phase == "reuse":
+        expected = {name: str(output.parent / "previous" / "profiles" / name / "snapshot") for name in names}
+    deadline = time.monotonic() + 30
+    clock = time.monotonic
+    late = [False]
+    monkeypatch.setattr(preparation.time, "monotonic", lambda: deadline + 1 if late[0] else clock())
+    calls = []
+
+    def run(command, **options):
+        calls.append(command)
+        assert command == [
+            sys.executable, "-I", "-B", "-X", "utf8", str(provider),
+            "--source-checkout", str(resolved.checkout), "--source-commit", resolved.commit,
+            "--main-head", resolved.main_head, "--branch", "dev",
+            "--output", str(output), "--prepare-applications", "--uv", "selected-uv",
+            "--deadline", str(deadline),
+            "--project", "agent-worktrees", "--project", "agent-bridge",
+            *(["--application-extras", json.dumps(extras, sort_keys=True)] if extras is not None else []),
+        ]
+        assert options["cwd"] == provider.parent
+        assert options["env"] == {"FEED_SETTING": "retained", "PYTHONUTF8": "1", "PYTHONSAFEPATH": "1"}
+        assert options["deadline"] == deadline and 0 < options["timeout"] <= 30
+        assert options["procutil"] is preparation.agent_procutil
+        assert options["construction_fd"] is None
+        if phase == "timeout":
+            raise subprocess.TimeoutExpired(command, options["timeout"])
+        late[0] = phase == "late"
+        receipt = dict(expected)
+        if phase == "portfolio":
+            receipt.pop("agent-bridge")
+        if phase == "path":
+            receipt["agent-bridge"] = str(tmp_path / "foreign")
+        if phase == "outside":
+            receipt["agent-bridge"] = str(tmp_path / "other-root" / "previous" / "profiles" / "agent-bridge" / "snapshot")
+        if phase == "mixed":
+            receipt["agent-bridge"] = str(tmp_path / "previous" / "profiles" / "agent-bridge" / "snapshot")
+        return SimpleNamespace(stdout=json.dumps(receipt))
+
+    monkeypatch.setattr(preparation.shutil, "which", lambda name: "located-uv" if name == "uv" else None)
+    monkeypatch.setattr(preparation, "_runtime_installer", lambda: SimpleNamespace(engine=SimpleNamespace(
+        _select_uv_executable=lambda value: "selected-uv",
+        _native_retained_path=lambda path: str(path), run_owned=run,
+    )))
+    options = dict(
+        deadline=deadline, environment={"FEED_SETTING": "retained", "PYTHONPATH": "discard"}, extras=extras,
+    )
+    if phase in {"complete", "reuse"}:
+        assert preparation.prepare_applications(tool, resolved, names, output, **options) == {
+            name: Path(path) for name, path in expected.items()
+        }
+    else:
+        message = {
+            "portfolio": "different portfolio", "path": "different snapshot",
+            "outside": "different snapshot", "mixed": "different preparations",
+            "timeout": "preparation failed", "late": "over-budget receipt",
+        }[phase]
+        with pytest.raises(ValueError, match=message):
+            preparation.prepare_applications(tool, resolved, names, output, **options)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("case", ["deadline", "names", "main", "assets", "uv", "extras"])
+def test_complete_application_handoff_refuses_before_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    provider = tmp_path / "local_install_source.py"
+    if case != "assets":
+        provider.write_text("# trusted provider fixture\n", encoding="utf-8")
+    resolved = ResolvedSource(
+        config.RuntimeSource("dev", allow_dev=True), tmp_path / "checkout",
+        "a" * 40, "b" * 40, "c" * 40, None if case == "main" else "d" * 40,
+    )
+    monkeypatch.setattr(preparation.shutil, "which", lambda _: None)
+    monkeypatch.setattr(preparation, "_runtime_installer", lambda: SimpleNamespace())
+    with pytest.raises(ValueError, match={
+        "deadline": "live finite deadline", "names": "bounded portfolio", "main": "Main seed",
+        "assets": "assets are unavailable", "uv": "uv is required",
+        "extras": "extras require",
+    }[case]):
+        preparation.prepare_applications(
+            tmp_path / "prepare_runtime_source.py", resolved,
+            ("../escape",) if case == "names" else ("agent-worktrees",),
+            tmp_path / "prepared", deadline=0 if case == "deadline" else time.monotonic() + 30,
+            extras={"unselected": ()} if case == "extras" else None,
+        )
+
+
 def test_marketplace_uses_no_capability_or_source_process(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ec, "engine_base_command", lambda: pytest.fail("default path is unchanged"))
     monkeypatch.setattr(update, "acquire", lambda *_: pytest.fail("no source acquisition"))
@@ -50,7 +159,7 @@ def test_marketplace_uses_no_capability_or_source_process(monkeypatch: pytest.Mo
 
 
 @pytest.mark.parametrize("capability", [None, {}, {"schema": update.SCHEMA, "version": True},
-                                           {"schema": update.SCHEMA, "version": 2}])
+                                           {"schema": update.SCHEMA, "version": 1}])
 def test_unsupported_provider_refused_before_acquisition(
     monkeypatch: pytest.MonkeyPatch, capability: object,
 ) -> None:
@@ -91,39 +200,33 @@ def test_refuses_second_packet_and_missing_engine() -> None:
 
 
 @pytest.mark.parametrize("capability", [
-    None, {}, {"schema": update.TARGET_SCHEMA, "version": True},
-    {"schema": update.TARGET_SCHEMA, "version": 2},
+    None, {}, {"schema": "copilot-extensions.runtime-application-profile", "version": True},
+    {"schema": "copilot-extensions.runtime-application-profile", "version": 2},
     {"schema": "foreign", "version": 1},
-    {"schema": update.TARGET_SCHEMA, "version": 1},
+    {"schema": "copilot-extensions.runtime-application-profile", "version": 1},
 ])
 def test_required_profile_target_uses_actual_engine_capability(
     tmp_path: Path, capability: dict | None,
 ) -> None:
-    payload = tmp_path / "payload"
-    payload.mkdir()
-    (payload / "runtime-source-target.json").write_text(json.dumps({
-        "schema": update.PROVIDER_SCHEMA, "version": 1, "planner": "scripts/runtime_profile.py",
-    }), encoding="utf-8")
     actual = inventory("agent-worktrees")
-    actual["runtime_sources"]["target_contract"] = capability
-    records = {"agent-containers": {"payload": str(payload), "identity": {}}}
-    if capability == {"schema": update.TARGET_SCHEMA, "version": 1} and type(capability["version"]) is int:
-        update._check_target_support(actual, records)
+    value = None if capability is None else {
+        **capability, "plugin": "agent-containers", "runtime_root": str(tmp_path),
+        "profile": "provider-exec", "extras": ["provider-exec"],
+    }
+    actual["runtime_sources"]["application_profiles"] = {"agent-containers": {"selection": value}}
+    if capability == {"schema": "copilot-extensions.runtime-application-profile", "version": 1} and type(capability["version"]) is int:
+        assert update._application_profiles(actual, ["agent-containers"]) == {"agent-containers": value}
     else:
-        with pytest.raises(ValueError, match="No update was run"):
-            update._check_target_support(actual, records)
-    assert set(records["agent-containers"]) == {"payload", "identity"}
+        with pytest.raises(ValueError, match="profile.*unavailable"):
+            update._application_profiles(actual, ["agent-containers"])
 
 
-def test_legacy_unprofiled_sources_keep_v1_engine_support(tmp_path: Path) -> None:
-    update._check_target_support(
-        inventory("agent-worktrees"), {"agent-worktrees": {"payload": str(tmp_path), "identity": {}}},
-    )
-    with pytest.raises(ValueError, match="requires a source target declaration"):
-        update._check_target_support(
-            inventory("agent-worktrees"),
-            {"agent-containers": {"payload": str(tmp_path), "identity": {}}},
-        )
+def test_unprofiled_application_has_no_invented_extras(tmp_path: Path) -> None:
+    assert update._application_profiles(inventory("agent-worktrees"), ["agent-worktrees"]) == {
+        "agent-worktrees": None,
+    }
+    with pytest.raises(ValueError, match="profile selection is unavailable"):
+        update._application_profiles(inventory("agent-worktrees"), ["agent-containers"])
 
 
 def test_required_target_refusal_precedes_both_update_stages(
@@ -133,26 +236,17 @@ def test_required_target_refusal_precedes_both_update_stages(
 
     enable()
     monkeypatch.setattr(ec, "engine_base_command", lambda: ["old-v1-engine"])
-    monkeypatch.setattr(ec, "run_json", lambda *args, **kwargs:
-                        inventory("agent-worktrees", "agent-containers"))
+    document = inventory("agent-worktrees", "agent-containers")
+    document["runtime_sources"]["version"] = 1
+    monkeypatch.setattr(ec, "run_json", lambda *args, **kwargs: document)
     monkeypatch.setattr(update, "_preparer", lambda: tmp_path / "trusted-preparer")
 
     @contextmanager
     def acquire(selection: config.RuntimeSource):
-        yield ResolvedSource(selection, tmp_path, "a" * 40, "b" * 40, "a" * 40)
-
-    def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> dict:
-        payload = tmp_path / name
-        payload.mkdir()
-        if name == "agent-containers":
-            (payload / "runtime-source-target.json").write_text(json.dumps({
-                "schema": update.PROVIDER_SCHEMA, "version": 1,
-                "planner": "scripts/runtime_profile.py",
-            }), encoding="utf-8")
-        return {"payload": str(payload), "identity": {}}
+        yield ResolvedSource(selection, tmp_path, "a" * 40, "b" * 40, "a" * 40, "e" * 40)
 
     monkeypatch.setattr(update, "acquire", acquire)
-    monkeypatch.setattr(update, "_prepare", prepare)
+    monkeypatch.setattr(update, "prepare_applications", lambda *a, **kw: pytest.fail("no build"))
     monkeypatch.setattr(update_events, "_ut", None)
     monkeypatch.setattr(self_install, "self_update", lambda **kwargs: pytest.fail("no self-update"))
     monkeypatch.setattr(ec, "run_engine_passthrough", lambda *args, **kwargs: pytest.fail("no suite"))
@@ -163,27 +257,32 @@ def test_required_target_refusal_precedes_both_update_stages(
 
 @pytest.mark.parametrize("value", [
     {"schema": "foreign", "version": 1, "planner": "scripts/runtime_profile.py"},
-    {"schema": update.PROVIDER_SCHEMA, "version": True, "planner": "scripts/runtime_profile.py"},
-    {"schema": update.PROVIDER_SCHEMA, "version": 1, "planner": "../foreign.py"},
+    {"schema": "copilot-extensions.runtime-application-profile", "version": True},
+    {"error": "owned profile query unavailable"},
 ])
 def test_invalid_source_target_declaration_is_not_an_ignored_optional_field(
     tmp_path: Path, value: dict,
 ) -> None:
-    (tmp_path / "runtime-source-target.json").write_text(json.dumps(value), encoding="utf-8")
-    with pytest.raises(ValueError, match="Unsupported source target"):
-        update._check_target_support(
-            inventory("agent-worktrees"), {"agent-containers": {"payload": str(tmp_path)}},
-        )
+    document = inventory("agent-worktrees")
+    document["runtime_sources"]["application_profiles"] = {"agent-containers": {"selection": value}}
+    with pytest.raises(ValueError, match="profile.*unavailable"):
+        update._application_profiles(document, ["agent-containers"])
 
 
 @pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("profiled", [False, True])
 def test_one_selection_frozen_provider_and_persistent_packet(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scoped: bool,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scoped: bool, profiled: bool,
 ) -> None:
     enable()
     calls = []
     command = ["selected-python", "-I", "selected-engine"]
     environment = {"HOME": str(tmp_path), "FIXTURE": "selected"} if scoped else None
+    profile = {
+        "schema": "copilot-extensions.runtime-application-profile", "version": 1,
+        "plugin": "agent-bridge", "runtime_root": str(tmp_path / "bridge"),
+        "profile": "fixture-profile", "extras": ["fixture-extra"],
+    }
     monkeypatch.setattr(ec, "engine_base_command", lambda: command if not scoped else pytest.fail("stale handle"))
     monkeypatch.setattr(ec, "installed_engine_command", lambda env: command if env is environment else None)
 
@@ -192,33 +291,46 @@ def test_one_selection_frozen_provider_and_persistent_packet(
         assert arguments == ["update", "--inventory", "--json"]
         assert kwargs == {"engine_command": command, **({"environment": environment} if scoped else {})}
         calls.append("capability")
-        return inventory("agent-worktrees", "agent-bridge")
+        document = inventory("agent-worktrees", "agent-bridge")
+        if profiled:
+            document["runtime_sources"]["application_profiles"] = {
+                "agent-bridge": {"selection": profile},
+            }
+        return document
 
     @contextmanager
-    def acquire(selection: config.RuntimeSource):
+    def acquire(selection: config.RuntimeSource, **kwargs):
+        assert kwargs["environment"] is environment
+        assert kwargs["deadline"] > time.monotonic()
         calls.append("acquire")
-        yield ResolvedSource(selection, tmp_path, "a" * 40, "b" * 40, "a" * 40)
+        yield ResolvedSource(selection, tmp_path, "a" * 40, "b" * 40, "a" * 40, "e" * 40)
         calls.append("released")
 
-    def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> dict:
+    def prepare(tool: Path, resolved: ResolvedSource, names: tuple[str, ...], output: Path, **kwargs) -> dict:
         assert calls[0:2] == ["capability", "acquire"]
-        calls.append(name)
+        calls.append("portfolio")
         assert resolved.commit == "a" * 40
-        assert output == tmp_path / "manager/runtime-sources/prepared"
-        return {"payload": str(output / name), "identity": {"commit": resolved.commit}}
+        assert resolved.main_head == "e" * 40
+        assert output.parent == tmp_path / "manager/runtime-sources/applications"
+        assert names == ("agent-bridge", "agent-worktrees")
+        assert kwargs["extras"] == ({"agent-bridge": ("fixture-extra",)} if profiled else {})
+        assert kwargs["environment"] is environment
+        return {name: output / "profiles" / name / "snapshot" for name in names}
 
     monkeypatch.setattr(ec, "run_json", read)
     monkeypatch.setattr(update, "acquire", acquire)
     monkeypatch.setattr(update, "_preparer", lambda: tmp_path / "trusted-preparer")
-    monkeypatch.setattr(update, "_prepare", prepare)
+    monkeypatch.setattr(update, "prepare_applications", prepare)
     prepared = update.prepare_suite("example", ["--force"], environment=environment)
     command.append("changed-after-probe")
     assert prepared.engine_command == command[:-1]
-    assert calls == ["capability", "acquire", "agent-bridge", "agent-worktrees", "released"]
+    assert calls == ["capability", "acquire", "portfolio", "released"]
     assert prepared.arguments[:2] == ["--force", "--runtime-sources"]
     packet = json.loads(prepared.arguments[2])
-    assert packet["schema"] == update.SCHEMA and packet["version"] == 1
+    assert packet["schema"] == update.SCHEMA and packet["version"] == 2
     assert set(packet["sources"]) == {"agent-bridge", "agent-worktrees"}
+    assert packet["source"] == {"commit": "a" * 40, "tree": "b" * 40, "main_seed": "e" * 40}
+    assert packet["sources"]["agent-bridge"]["profile"] == (profile if profiled else None)
 
 
 def test_orchestration_preparation_failure_precedes_independent_self_update(
@@ -290,7 +402,10 @@ def test_preparer_process_is_own_isolated_code_and_receipt_checked(
     identity = source.SourceIdentity("agent-worktrees", "1.0.0", "a" * 40, "b" * 40, digest, version)
     document = identity.document()
     payload = output / "agent-worktrees" / version
-    resolved = ResolvedSource(config.RuntimeSource("dev", allow_dev=True), tmp_path / "untrusted", "a" * 40, "b" * 40, "a" * 40)
+    resolved = ResolvedSource(
+        config.RuntimeSource("dev", allow_dev=True), tmp_path / "untrusted",
+        "a" * 40, "b" * 40, "a" * 40, "e" * 40,
+    )
     tool = tmp_path / "trusted/preparer.py"
 
     def execute(command: list[str], **kwargs: object) -> SimpleNamespace:
@@ -314,9 +429,9 @@ def test_preparer_process_is_own_isolated_code_and_receipt_checked(
     monkeypatch.setattr(source, "read_source_identity", lambda *a, **kw: None if fault == "bytes" else identity)
     if fault:
         with pytest.raises(ValueError):
-            update._prepare(tool, resolved, "agent-worktrees", output)
+            preparation.prepare(tool, resolved, "agent-worktrees", output)
     else:
-        record = update._prepare(tool, resolved, "agent-worktrees", output)
+        record = preparation.prepare(tool, resolved, "agent-worktrees", output)
         assert record == {"payload": str(payload), "identity": {"runtime_source": document, "runtime_version": version}}
 
 
@@ -389,9 +504,12 @@ def test_preparer_real_process_returns_a_usable_selected_payload(tmp_path):
     assert first["identity"]["runtime_source"]["source_commit"] == commit
 
 
-def test_installed_preparer_does_not_treat_wheel_assets_as_a_source_payload(tmp_path, monkeypatch):
+@pytest.mark.parametrize("relative", ["prepare_runtime_source.py", "tools/prepare_runtime_source.py"])
+def test_installed_preparer_does_not_treat_wheel_assets_as_a_source_payload(
+    tmp_path, monkeypatch, relative,
+):
     scripts = tmp_path / "_runtime_assets" / "scripts"
-    tool = scripts / "runtime-source-tools" / "prepare_runtime_source.py"
+    tool = scripts / "runtime-source-tools" / relative
     tool.parent.mkdir(parents=True)
     tool.write_text("# installed preparer", encoding="utf-8")
     monkeypatch.setattr(preparation, "_runtime_scripts", lambda: scripts)

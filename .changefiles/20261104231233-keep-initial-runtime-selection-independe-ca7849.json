@@ -1,0 +1,9 @@
+{
+  "comment": "Keep initial runtime selection independent of installed process helpers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

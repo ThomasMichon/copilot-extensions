@@ -295,6 +295,7 @@ def test_main_dev_exact_and_tag_resolve_without_moving_source_files(repository, 
         with source.acquire(selection, root=root) as resolved:
             assert resolved.commit == expected
             assert resolved.tree == git(repo, "rev-parse", f"{expected}^{{tree}}")
+            assert resolved.main_head == release
             assert resolved.checkout != repo
             assert (resolved.checkout / ".git").is_dir()
             snapshot = (resolved.checkout, git(resolved.checkout, "rev-parse", "HEAD"),
@@ -318,6 +319,63 @@ def test_advancing_branch_is_resolved_once_and_source_head_stays_fixed(repositor
         assert second.commit == advanced
         assert git(second.checkout, "rev-parse", "HEAD") == release
         assert first.document()["commit"] == release
+
+
+def test_unchanged_dev_keeps_frozen_main_seed_and_acquires_fresh_main_without_checkout_changes(
+    repository, tmp_path,
+):
+    repo, release, development = repository
+    root = tmp_path / "manager"
+    selection = config.RuntimeSource("dev", str(repo), allow_dev=True)
+    with source.acquire(selection, root=root) as first:
+        assert first.main_head == release
+        frozen = first.document()
+        baseline = (
+            first.checkout, git(first.checkout, "rev-parse", "HEAD"),
+            (first.checkout / "payload.txt").read_bytes(),
+        )
+        advanced = commit(repo, "release two")
+        assert first.document() == frozen
+        assert git(first.checkout, "rev-parse", "refs/remotes/origin/main") == release
+    with source.acquire(selection, root=root) as second:
+        assert second.commit == first.commit == development
+        assert second.tree == first.tree
+        assert second.main_head == advanced
+        assert second.document()["main_head"] == advanced
+        assert first.document() == frozen
+        assert (
+            second.checkout, git(second.checkout, "rev-parse", "HEAD"),
+            (second.checkout / "payload.txt").read_bytes(),
+        ) == baseline
+        assert not git(second.checkout, "status", "--porcelain=v1", "--ignored")
+        legacy = source.ResolvedSource(
+            selection, second.checkout, second.commit, second.tree, second.branch_tip,
+        )
+        assert legacy.document() == {
+            key: value for key, value in second.document().items() if key != "main_head"
+        }
+    assert git(repo, "rev-parse", "HEAD") == advanced
+    assert not (root / "versions").exists()
+    assert not (root / "current-version").exists()
+    assert not (root / "config.toml").exists()
+
+
+def test_dev_acquisition_refuses_unavailable_main_instead_of_reusing_stale_seed(
+    repository, tmp_path,
+):
+    repo, release, _development = repository
+    selection = config.RuntimeSource("dev", str(repo), allow_dev=True)
+    with source.acquire(selection, root=tmp_path / "manager") as first:
+        checkout = first.checkout
+        baseline = (git(checkout, "rev-parse", "HEAD"), (checkout / "payload.txt").read_bytes())
+    git(repo, "switch", "-q", "dev")
+    git(repo, "branch", "-D", "main")
+    with pytest.raises(source.SourceAcquisitionError, match="Git operation failed"):
+        with source.acquire(selection, root=tmp_path / "manager"):
+            pytest.fail("an old Main ref cannot substitute for the unavailable fresh seed")
+    assert git(checkout, "rev-parse", "refs/remotes/origin/main") == release
+    assert (git(checkout, "rev-parse", "HEAD"), (checkout / "payload.txt").read_bytes()) == baseline
+    assert not git(checkout, "status", "--porcelain=v1", "--ignored")
 
 
 @pytest.mark.parametrize("kind", ["tracked", "untracked", "ignored", "origin", "owner"])
@@ -499,7 +557,7 @@ def test_worktree_cannot_replace_owned_checkout(repository):
 
 
 def test_cli_resolve_reports_exact_source_without_installing(repository, tmp_path, monkeypatch, capsys):
-    repo, _release, development = repository
+    repo, release, development = repository
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     assert main(["runtime-source", "set", "dev", "--allow-dev", "--repo", str(repo)]) == 0
@@ -507,6 +565,7 @@ def test_cli_resolve_reports_exact_source_without_installing(repository, tmp_pat
     assert main(["runtime-source", "resolve"]) == 0
     document = json.loads(capsys.readouterr().out)
     assert document["commit"] == development
+    assert document["main_head"] == release
     assert document["branch"] == "dev"
     assert document["selection"]["allow_dev"] is True
     assert not (root / "current-version").exists()

@@ -1,6 +1,8 @@
 """Fresh bootstrap retains candidate custody through transactional daemon activation."""
 
 from contextlib import contextmanager, nullcontext
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -134,18 +136,22 @@ def test_selector_backups_stay_private_under_a_writable_parent(
 
 
 @pytest.mark.parametrize("cutover_ok", [True, False], ids=["running-daemon", "failed-cutover"])
-def test_repair_bootstrap_activates_before_releasing_candidate(
-    constructed_update, monkeypatch, cutover_ok,
+@pytest.mark.parametrize("repair", [False, True], ids=["normal", "repair"])
+def test_bootstrap_activates_before_releasing_candidate(
+    constructed_update, monkeypatch, cutover_ok, repair,
 ):
     state = constructed_update
 
     def activate(**kwargs):
         assert state.active
-        assert (state.root / "current-version").read_text().strip() == state.slot.name
+        assert (state.root / "current-version").read_text().strip() == state.previous
         state.cutovers.append(kwargs)
         if cutover_ok:
             state.resident = state.slot.name
-        return {"action": "cutover", "result": {"ok": cutover_ok}}
+        return {
+            "action": "cutover",
+            "result": {"ok": cutover_ok, **({"error": "health-timeout"} if not cutover_ok else {})},
+        }
 
     def popen(arguments, **kwargs):
         from worktree_manager import bootstrap_activation, mux_daemon_cutover
@@ -155,17 +161,18 @@ def test_repair_bootstrap_activates_before_releasing_candidate(
         assert Path(arguments[6]).parent == state.slot / ".runtime-bootstrap"
         assert arguments[7:9] == ["-m", "worktree_manager.bootstrap_activation"]
         assert kwargs["stdin"] == subprocess.DEVNULL
-        with monkeypatch.context() as child:
+        output = io.StringIO()
+        with monkeypatch.context() as child, redirect_stdout(output):
             child.setattr(sys, "prefix", str(state.slot))
             child.setattr(mux_daemon_cutover, "activate_after_update", activate)
             code = bootstrap_activation.main(arguments[9:])
-        return SimpleNamespace(returncode=code, communicate=lambda: ("", ""))
+        return SimpleNamespace(returncode=code, communicate=lambda: (output.getvalue(), ""))
 
     monkeypatch.setattr(state.installer.subprocess, "Popen", popen)
     arguments = [
         "--root", str(state.root), "--payload", str(state.payload),
-        "--repair-update", "--", "update",
     ]
+    arguments += ["--repair-update", "--", "update"] if repair else ["--", "--version"]
     if cutover_ok:
         with pytest.raises(CommandDispatched):
             state.installer.main(arguments)
@@ -284,13 +291,111 @@ def test_explicit_application_start_preserves_update_noop_and_checks_startup(
     assert len(activations) == (2 if start and ready else 1)
 
 
-def test_interruption_waits_for_owned_activation_before_rollback(constructed_update, monkeypatch):
+@pytest.mark.parametrize("repair", [False, True], ids=["normal", "repair"])
+def test_interrupted_acknowledged_activation_keeps_the_serving_generation_selected(
+    constructed_update, monkeypatch, repair,
+):
+    state = constructed_update
+    calls = []
+    outcome = json.dumps({
+        "action": "cutover", "root": str(state.root),
+        "runtime_generation": state.slot.name,
+        "result": {"ok": True, "new_pid": 123, "retirement": "self-observed"},
+    })
+
+    def communicate():
+        assert state.active
+        calls.append("communicate")
+        if len(calls) == 1:
+            state.resident = state.slot.name
+            raise KeyboardInterrupt
+        return outcome, ""
+
+    monkeypatch.setattr(
+        state.installer.subprocess, "Popen",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, communicate=communicate),
+    )
+    arguments = ["--root", str(state.root), "--payload", str(state.payload)]
+    arguments += ["--repair-update", "--", "update"] if repair else ["--", "--version"]
+    with pytest.raises(KeyboardInterrupt):
+        state.installer.main(arguments)
+    assert calls == ["communicate", "communicate"] and not state.dispatch
+    assert state.resident == state.slot.name
+    assert (state.root / "current-version").read_text().strip() == state.resident
+    assert (state.root / "last-known-good").read_text().strip() == state.resident
+
+
+@pytest.mark.parametrize("failure", [KeyboardInterrupt, OSError], ids=["cancel", "io-error"])
+def test_v2_start_is_not_replayed_or_rolled_back_by_publication_failure(
+    constructed_update, monkeypatch, failure,
+):
+    state = constructed_update
+    launches, publications = [], []
+    outcome = json.dumps({
+        "action": "cutover", "runtime_generation": state.slot.name,
+        "result": {"ok": True},
+    })
+
+    def communicate():
+        launches.append(state.slot.name)
+        state.resident = state.slot.name
+        return outcome, ""
+
+    monkeypatch.setattr(
+        state.installer.subprocess, "Popen",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, communicate=communicate),
+    )
+    activate = state.installer.runtime._activate
+
+    def publish(*args, **kwargs):
+        publications.append(state.slot.name)
+        result = activate(*args, **kwargs)
+        if len(publications) == 1:
+            raise failure("publication interrupted")
+        return result
+
+    monkeypatch.setattr(state.installer.runtime, "_activate", publish)
+    arguments = ["--root", str(state.root), "--payload", str(state.payload), "--", "--version"]
+    if failure is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt):
+            state.installer.main(arguments)
+        assert len(publications) == 2
+    else:
+        assert state.installer.main(arguments) == 1
+        assert len(publications) == 1
+        assert list((state.root / ".installer-inputs").glob("manager-selection-*/context.json"))
+    assert launches == [state.slot.name] and not state.dispatch
+    assert (state.root / "current-version").read_text().strip() == state.resident
+    assert (state.root / "last-known-good").read_text().strip() == state.resident
+
+
+@pytest.mark.parametrize("outcome", [
+    {"action": "cutover", "runtime_generation": "1.2.2", "result": {"ok": True}},
+    {"action": "noop", "runtime_generation": "1.2.3", "reason": "no-live-daemon"},
+])
+def test_v1_state_cannot_authorize_v2_publication(constructed_update, monkeypatch, outcome):
+    state = constructed_update
+    monkeypatch.setattr(
+        state.installer.subprocess, "Popen",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, communicate=lambda: (json.dumps(outcome), ""),
+        ),
+    )
+    assert state.installer.main([
+        "--root", str(state.root), "--payload", str(state.payload), "--", "--version",
+    ]) == 1
+    assert not state.dispatch
+    for name, before in state.selectors.items():
+        assert (state.root / name).read_bytes() == before
+
+
+def test_unconfirmed_interruption_settles_without_publishing_selection(constructed_update, monkeypatch):
     state = constructed_update
     calls = []
 
     def communicate():
         assert state.active
-        assert (state.root / "current-version").read_text().strip() == state.slot.name
+        assert (state.root / "current-version").read_text().strip() == state.previous
         calls.append("communicate")
         if len(calls) == 1:
             raise KeyboardInterrupt
@@ -309,6 +414,37 @@ def test_interruption_waits_for_owned_activation_before_rollback(constructed_upd
     assert not state.active and not state.dispatch
     for name, before in state.selectors.items():
         assert (state.root / name).read_bytes() == before
+
+
+@pytest.mark.parametrize("apply", [False, True], ids=["plan", "apply"])
+def test_self_install_command_uses_the_same_incoming_start_boundary(
+    constructed_update, monkeypatch, apply,
+):
+    from worktree_manager import __main__ as cli
+
+    state = constructed_update
+    starts = []
+
+    def install(**options):
+        assert options["dry_run"] is not apply
+        if apply:
+            assert options["_transactional_activation"] is True
+            options["_after_activate"](state.slot)
+        else:
+            assert options.get("_after_activate") is None
+        return self_install.SelfInstallResult(
+            version=state.slot.name, action="installed" if apply else "planned",
+            root=str(state.root), slot=str(state.slot),
+        )
+
+    monkeypatch.setattr(cli, "self_install", install)
+    monkeypatch.setattr(cli, "self_status", lambda: SimpleNamespace(installed_version=state.previous))
+    monkeypatch.setattr(
+        state.installer, "_activate_after_bootstrap_update",
+        lambda root, slot: starts.append((root, slot)),
+    )
+    assert cli._render_self_install(["--apply"] if apply else []) == 0
+    assert starts == ([(state.root, state.slot)] if apply else [])
 
 
 @pytest.mark.skipif(

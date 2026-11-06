@@ -19,15 +19,15 @@ from worktree_manager import source_config
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_manager_runtime_install import (
-    SOURCE, _environment, _prepare_command, _prepare_initial_construction, _prepare_materialized_source,
+    SOURCE, _environment, _prepare_command, _prepare_initial_construction,
     _prepare_qualified_construction, _run,
 )
 
 
-def _repository(directory, env):
+def _repository(directory, env, promoted):
     repo = directory / "upstream"
     payload = repo / "worktree-manager"
-    _prepare_materialized_source(payload)
+    si._copy_payload(promoted, payload, mark_complete=False)
     declaration = json.loads((SOURCE / "packaged-assets.json").read_text())
     groups = declaration.get("groups", [declaration])
     for group in groups:
@@ -64,7 +64,7 @@ def _prepare_source_candidate(directory, constructed):
     root, previous = (
         Path(constructed[key]) for key in ("root", "slot")
     )
-    repo = _repository(directory, env)
+    repo = _repository(directory, env, Path(constructed["input_payload"]))
     source = si._runtime_installer().runtime_source
     config = root / "config.toml"
     config.write_text('[runtime_source]\nchannel = "main"\nrepo = "https://example.invalid/service.git"\n')
@@ -86,8 +86,10 @@ def _prepare_source_candidate(directory, constructed):
         # No alternate data-root override: both installed interpreters resolve
         # the fixture's existing default root, as the global binstub does.
         patch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
-        patch.setattr("worktree_manager.mux_daemon_cutover.activate_after_update",
-                      lambda **kw: {"action": "fixture", "slot": str(kw["slot"])})
+        patch.setattr(
+            si._runtime_installer(), "_activate_after_bootstrap_update",
+            lambda actual_root, slot: {"action": "fixture", "slot": str(slot)},
+        )
         si._runtime_installer().activate(root, Path(constructed["target"]).name, expected=previous.name)
         planned = si.self_update(root=root, dry_run=True)
         assert planned.action == "updated", planned
