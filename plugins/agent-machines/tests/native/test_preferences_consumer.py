@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
+import time
 
 from agent_procutil import no_window_kwargs
 
@@ -162,3 +164,78 @@ def test_fresh_copilot_cli_refuses_absent_native_owner_without_bootstrap(tmp_pat
     assert json.loads(result.stderr) == {"ok": False, "error": "native-context-unavailable"}
     assert not (tmp_path / "fresh-home").exists()
     assert sorted(path.name for path in state.iterdir()) == ["accepted.json", "policy.json"]
+
+
+def test_native_settings_writers_serialize_shared_target_and_refuse_stale_live_state(tmp_path):
+    child_script = """
+import json,sys,time
+from pathlib import Path
+from agent_machines.surfaces import settings
+home, label = Path(sys.argv[1]), sys.argv[2]
+values, expected = json.loads(sys.argv[3]), json.loads(sys.argv[4])
+(home / (label + '-entered')).touch()
+def precondition(live):
+    (home / (label + '-precondition')).touch()
+    if live != expected:
+        raise ValueError('stale preview')
+    if label == 'first':
+        (home / 'first-ready').touch()
+        deadline = time.monotonic() + 5
+        while not (home / 'release-first').exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError('test barrier')
+            time.sleep(0.01)
+try:
+    result = settings.apply([('ensure-present', values)], home=home, dry_run=False, precondition=precondition)
+except ValueError:
+    sys.exit(7)
+print(json.dumps({'changed': result.changed}))
+"""
+    home = tmp_path / "settings"
+    home.mkdir()
+    target = home / "settings.json"
+    target.write_text('{"unmanaged":true}', encoding="utf-8")
+    children = []
+    environment = {
+        **os.environ, "HOME": str(tmp_path / "user"), "USERPROFILE": str(tmp_path / "user"),
+    }
+
+    def start(label, values, expected):
+        child = subprocess.Popen(
+            [sys.executable, "-c", child_script, str(home), label, json.dumps(values), json.dumps(expected)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment, **no_window_kwargs(),
+        )
+        children.append(child)
+        return child
+
+    def wait(path: Path):
+        deadline = time.monotonic() + 5
+        while not path.exists():
+            assert time.monotonic() < deadline, f"missing barrier {path.name}"
+            time.sleep(0.01)
+
+    try:
+        first = start("first", {"model": "first-model"}, {"unmanaged": True})
+        wait(home / "first-ready")
+        second = start("second", {"effortLevel": "high"}, {"unmanaged": True})
+        wait(home / "second-entered")
+        time.sleep(0.1)
+        assert second.poll() is None and not (home / "second-precondition").exists()
+        (home / "release-first").touch()
+        output, error = first.communicate(timeout=10)
+        assert first.returncode == 0, error
+        assert json.loads(output)["changed"]
+        second.communicate(timeout=10)
+        assert second.returncode == 7
+        assert json.loads(target.read_text()) == {"unmanaged": True, "model": "first-model"}
+        fresh = start("fresh", {"effortLevel": "high"}, json.loads(target.read_text()))
+        output, error = fresh.communicate(timeout=10)
+        assert fresh.returncode == 0, error
+        assert json.loads(target.read_text()) == {
+            "unmanaged": True, "model": "first-model", "effortLevel": "high",
+        }
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=5)

@@ -18,7 +18,7 @@ from .surfaces._common import copilot_home
 
 
 def _plan(state: Path, local: Path | None) -> tuple[dict, list, dict, Path]:
-    from .__main__ import _collect_reconcile_packages
+    from .__main__ import _collect_reconcile_packages, _resolve_machine_identity
 
     policy, paths = _state(state)
     if "copilot" not in policy["domains"]:
@@ -34,14 +34,16 @@ def _plan(state: Path, local: Path | None) -> tuple[dict, list, dict, Path]:
         raise codec.PreferenceError("native-context-unavailable")
     context = context_from_owner(report)
     machine, harness = context["execution_machine"], context["repository_id"]
+    selectors = argparse.Namespace(all_projects=False, repo=None, machine=machine)
+    identity = _resolve_machine_identity(selectors)
+    if identity.canonical.casefold() != machine.casefold():
+        raise codec.PreferenceError("native-machine-mismatch")
     projection = codec.preview(
         None, accepted, publisher=policy["publisher"], machine=machine, harness=harness, local=overrides,
     )
     floors = projection["values"].get("copilot", {})
-    packages, scope = _collect_reconcile_packages(
-        argparse.Namespace(all_projects=False, repo=None), machine,
-    )
-    resolved = reconcile.resolve_union(packages, machine)
+    packages, scope = _collect_reconcile_packages(selectors, machine, identity.accepted)
+    resolved = reconcile.resolve_union(packages, machine, identity.accepted)
     findings = validator.validate(resolved, machine, reconcile.current_platform())
     if validator.has_errors(findings):
         raise codec.PreferenceError("native-validation-failed")
@@ -64,6 +66,7 @@ def _plan(state: Path, local: Path | None) -> tuple[dict, list, dict, Path]:
     inputs = {
         "state": str(paths[2].parent), "local_path": str(local) if local else None,
         "policy": policy, "accepted": accepted, "local": overrides, "context": context,
+        "accepted_machines": identity.accepted,
         "scope": scope, "target": str(target), "live": live_digest,
         "native_packages": reconcile.manifest_hash(resolved), "contributions": contributions,
         "changes": proposed.changes,

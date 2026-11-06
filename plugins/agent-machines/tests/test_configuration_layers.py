@@ -350,6 +350,51 @@ def test_portable_cli_sanitizes_native_owner_refusal(tmp_path, monkeypatch, caps
     assert not target.exists()
 
 
+@pytest.mark.parametrize("source", ["gate", "directory", "overlay"])
+@pytest.mark.parametrize("guest", [False, True])
+def test_portable_retains_alias_gated_native_enforce_without_host_guest_leak(
+    tmp_path, monkeypatch, source, guest,
+):
+    from agent_machines.preference_copilot import adopt
+
+    base, home, report, state, accepted, target = portable(tmp_path, monkeypatch)
+    (base / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "logical-worker": {
+            "hostname": "physical-example", "ssh": {"environments": [
+                {"name": "windows", "alias": "native-profile"},
+                {"name": "wsl", "alias": "guest-profile"},
+            ]},
+        },
+    }}), encoding="utf-8")
+    alias, foreign = ("guest-profile", "native-profile") if guest else ("native-profile", "guest-profile")
+    if guest:
+        report["context"]["execution_machine"] = "logical-worker-wsl"
+    native = write(base, "alias-enforce", {"model": "alias-enforced"})
+    spec = native["manage"]["copilot.settings"]
+    spec["disposition"] = "enforce"
+    path = base / ".copilot-extensions" / "agent-machines" / "all" / "alias-enforce.yaml"
+    if source == "gate":
+        native["gate"] = [alias]
+    elif source == "directory":
+        path.unlink()
+        path = path.parent.parent / "machines" / alias / path.name
+        path.parent.mkdir(parents=True)
+    else:
+        spec["values"] = {"model": "base-enforced"}
+        native["per-machine"] = {alias: {"manage": {
+            "copilot.settings": {"values": {"model": "alias-enforced"}},
+        }}}
+    path.write_text(yaml.safe_dump(native), encoding="utf-8")
+    wrong = write(base, "foreign-enforce", {"model": "wrong-space"}, extra={"gate": [foreign]})
+    wrong["manage"]["copilot.settings"]["disposition"] = "enforce"
+    (base / ".copilot-extensions" / "agent-machines" / "all" / "foreign-enforce.yaml").write_text(
+        yaml.safe_dump(wrong), encoding="utf-8",
+    )
+    proposed = adopt(state)
+    adopt(state, apply=True, expected=proposed["preview_token"])
+    assert json.loads(target.read_text())["model"] == "alias-enforced"
+
+
 def test_independent_cells_keep_default_provenance_and_recompute_native_plan(tmp_path, monkeypatch):
     base, knowledge, local, home, report = setup(tmp_path, monkeypatch)
     write(base, "base-default", {"model": "base"})

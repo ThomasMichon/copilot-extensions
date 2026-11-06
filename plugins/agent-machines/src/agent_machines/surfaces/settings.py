@@ -68,6 +68,18 @@ def apply(
 ) -> SurfaceResult:
     """Converge ``settings.json`` from ``(disposition, values)`` contributions."""
     home = home or copilot_home()
+    if dry_run:
+        return _apply(contributions, home, True, precondition)
+    from ..killswitch_mutation import mutation_lock
+
+    with mutation_lock((home / SETTINGS_FILE).resolve()):
+        return _apply(contributions, home, False, precondition)
+
+
+def _apply(
+    contributions: list[tuple[str, dict[str, Any]] | tuple[str, dict[str, Any], str]],
+    home: Path, dry_run: bool, precondition: Callable[[dict[str, Any]], None] | None,
+) -> SurfaceResult:
     path = home / SETTINGS_FILE
     normalized = [
         (item[0], item[1], item[2] if len(item) == 3 else "")

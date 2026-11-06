@@ -371,3 +371,18 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   This is not a configured peer, installed-runtime, native Linux or live-carrier
   qualification. No installer behavior changed; a full clean-room installation
   lane was not exercised. Carrier writes and running activation remain held.
+
+### 2026-11-06 - Copilot adapter review corrections
+- Resolve native admitted aliases for the owner-selected logical machine and
+  retain that same set through discovery, layering and token confirmation.
+  Alias-gated packages, directories and overlays preserve enforcement without
+  leaking native-host aliases into guests.
+- Serialize all native settings applies at the shared target, not a preference
+  state directory, across read/merge/recheck/backup/replacement. Previews remain
+  lock-free. A retained local lock is not fleet-state coordination.
+- The Windows correction packet passed 48 cases with six platform-specific
+  skips. Six alias/source/host-guest controls and a real two-process overlapping
+  writer control passed: a stale writer refused, then a refreshed writer
+  preserved both adopted fields and unmanaged state.
+- Current-head review and CI remain required. These source corrections do not
+  activate a carrier, install a runtime or change a running session.

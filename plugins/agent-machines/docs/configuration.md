@@ -67,6 +67,9 @@ Every native `enforce` contribution still applies afterward, and
 `validator._settings_authority_analysis` still refuses conflicting enforced
 values before restore mutates anything. Source-tier selection **never** turns
 an enforce constraint into last-wins.
+Native settings applies serialize live read, merge, any confirmation precondition,
+backup and replacement with the target's retained `settings.json.lock`.
+Read-only surface previews do not acquire or create that writer lock.
 
 Machine-wide resource/module packages are read only for this eligible default
 projection; this does not expand a repo-scoped restore's resource-application

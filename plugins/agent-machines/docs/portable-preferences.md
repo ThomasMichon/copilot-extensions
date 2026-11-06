@@ -254,6 +254,9 @@ file is applied directly. Scope comes from the current qualified native
 configuration owner, not a supplied hostname, harness basename or target-machine
 simulation. An unavailable or unresolved owner blocks this operation without
 bootstrap, binding or fallback.
+The native identity resolver supplies the same admitted aliases to discovery
+and layering, including alias-named directories and per-machine overlays.
+Host and guest alias sets remain separate; a different canonical identity refuses.
 
 Selection retains shared -> matching named-machine -> explicit local preference
 precedence. Only `model` and `effortLevel` enter the native settings owner as
@@ -276,6 +279,11 @@ accepted/local data, native context and packages, target and live settings.
 Apply recomputes it and rechecks at the native settings-write precondition;
 changed inputs require a new preview. Withdrawal contributes no floor and
 does not erase a value already adopted. No cross-domain transaction is claimed.
+All native settings applies hold one target-scoped inter-process lock across
+live read, merge, confirmation, backup and replacement. The retained sibling
+`settings.json.lock` is local writer coordination, not synchronized fleet state.
+Different preference-state directories do not bypass it. Read-only previews
+take no writer lock and create no lock file.
 
 Exit `0` is a successful preview or native settings transaction; `2` means
 invalid/unavailable input or a refused confirmation. Inspect
