@@ -1974,6 +1974,12 @@ this boundary before its driver-owned Windows broker adoption and before
 selection or launch callbacks; removal retains the adopted action until its
 owned registration is confirmed gone.
 
+Python application construction retains those helpers from the copied,
+Source-verified application's `runtime` directory, not from a plugin-only
+`scripts` layout. Standalone applications need no plugin scripts directory.
+Non-application construction continues to retain the frozen plugin helpers;
+missing application resources do not fall back to another payload.
+
 Read-only helper execution must not mutate the admitted payload. The runtime
 primitive loads its canonical sidecar source directly without creating or
 consuming bytecode caches; both native Index role probes similarly suppress
@@ -2458,6 +2464,29 @@ A disappeared observation is omitted only after native process absence/exit
 confirmation; live unknown, ambiguous and changed-identity observations still
 refuse inspection. The existing native birth check and retirement pins remain
 separate, and the census never signals a process.
+
+Candidate ownership uses a query-only native process/token handle when
+available, binding the token user SID to the census row's creation time before
+accepting it. This avoids a separate CIM method round trip for every readable
+candidate. Native handles close on success and failure. Hosts that cannot
+compile the in-process helper, and candidates whose native query is unavailable,
+retain the existing CIM ownership query and its exit/refusal behavior.
+A changed process identity is a refusal, not a reason to use the fallback.
+No owner result is retained across census calls.
+Teardown controller recognition can traverse at most four exact Python
+forwarders of the admitted binding owner's argument vector before its native
+caller. Each interpreter must be absolute and outside the selected removal
+root. Changed arguments, unrelated ancestry, non-Python images and deeper
+chains remain unrecognized; this is not stop authority or a general parent
+exemption.
+The same live teardown proof admits at most four native installer-child
+levels matching its original or staged installer and removal root before
+classifying the exact staging watchdog. Another script, root or parent chain
+does not qualify; an exhausted depth cannot admit the watchdog.
+On Windows, the same existing MSYS/Cygdrive drive-path normalization applies
+to parsed shell command lines and captured Bash argument vectors before
+matching the exact installer and root. It does not expand shell syntax,
+accept another root or relax unknown-argument rejection.
 
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
@@ -5182,6 +5211,13 @@ queue-aware foundation upgrades are not enabled by that consumer.
 
 `libs/installer-engine/installer_engine.py` is the in-progress Python ownership
 seam for the mutable-dev-slot effort, not a completed installer adoption.
+After input validation, first-touch construction requests the runtime root
+itself with mode `0700` before `.installer-inputs` can create parent directories.
+POSIX construction/retention/publication leases likewise request their root
+with `0700` before their private lease directory. `exist_ok` never repairs an
+existing root's mode or owner; existing consumers retain all refusal checks.
+No process-wide umask is changed. The Windows private-lease DACL creator and
+its ownership/repair admission remain unchanged.
 Construction follows the complete transitive local `tool.uv.sources` graph.
 The canonical dependency policy's `retain_uv_install()` transaction is the
 single owner of its source snapshot, resolver configuration and admitted argv;

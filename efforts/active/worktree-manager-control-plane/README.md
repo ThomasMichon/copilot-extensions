@@ -945,6 +945,10 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
       registration, and machine-local pairing selections.
 - [ ] Wave 3: integrate dispatch, SSH mesh, and container-loadout panels through
       existing domain APIs and separately claimed sibling efforts.
+- [ ] Authentication inspection (#10844, `shiny-actuator`): review the
+      [bounded provider delivery design](phase-5-authentication-inspection.md),
+      then compose the native read boundary and existing Configuration shell.
+      Acquisition and broader first-run/provider-policy acceptance stay separate.
 - [ ] Wave 4: attributable templates/presets, then explicit delta-request
       submission, maintenance-worker execution, and independent evaluation.
 - [ ] Wave 5: cross-platform, compatibility, clean-room, live-surface, and
@@ -2862,6 +2866,23 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-11-05 - Confirmed existing-knowledge binding continuation
+
+- Claimed #10763 as `shiny-actuator`, a bounded Phase 5 Wave 2 / #542
+  continuation. The existing native Repositories inspection and Configuration
+  preview/confirmation shell will compose the harness-knowledge preserving
+  pointer writer, not a Manager YAML editor or new registry.
+- The first complete flow is missing required knowledge, navigation to
+  Repositories, explicit selection of an existing canonical knowledge/worktree
+  repository, read-only preview, confirmed owner apply, refreshed readiness,
+  then native New admission. Preserve a usable binding; stale registration,
+  changed configuration, unavailable writers and Cancel refuse without writes.
+- The [phase design](phase-5-configuration-workbench.md#confirmed-existing-knowledge-binding-10763)
+  records source boundaries and validation. This claim does not include
+  repository creation, default suggestions, provider-policy/authentication,
+  ambient first-restarted-model prompting, retrofit pairing or rollout.
+  #3004/#3030/#4827/#1419 and existing adoption/source owners remain separate.
 
 ### 2026-11-05 - Native New-authoring knowledge prerequisite
 
@@ -5767,3 +5788,21 @@ complete current receiving readback and separate source judgments remain.
   Existing source/native/resource custodians and every substantive acceptance
   gate remain. The effort stays Active; no product execution, tests,
   credentials, installation, session, service or rollout operation occurs.
+
+### 2026-11-06 - Repository-authentication inspection design claim
+
+- `shiny-actuator` reserved #10844 after checking current Configuration,
+  first-run/setup and provider-preflight owners and open Authentication work.
+  The bounded [Phase 5 delivery design](phase-5-authentication-inspection.md)
+  precedes runtime implementation. It reuses version-1 configuration commands,
+  rows/cards and the shared shell, without a new universal auth schema,
+  credential broker or inferred enrollment.
+- Native registration no-nag behavior, account maps and token availability
+  retain their meanings; none becomes verified provider access. The first
+  implementation must settle its native read/response and exact selected-runtime
+  support contract through normal review. No executable acquisition operation
+  is introduced by this plan.
+- #3004 retains its consolidated provider/landing-policy and original ambient
+  onboarding lanes; #3005, #8545/#356, #542 and the remaining workbench waves
+  retain their original scope, custody and acceptance. No runtime, credential,
+  installation, live environment, service or rollout action was performed.

@@ -4,6 +4,17 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Legacy management launchers
+
+Legacy global management launchers select external Python bytecode through the
+[canonical installed-cache helper](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
+An unchanged completed installation reuses its recorded namespace; changed
+completion or distribution evidence selects another. Older runtimes without
+the helper retain fresh invocation caches. Native selector replies use
+ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
+This changes no account/ownership
+checks, command deadlines, runtime selection or immutable slot bytes.
+
 ## Explicit status refresh
 
 `worktree-status-bundle --worktree <id> --force-refresh --json` requests fresh
@@ -1374,6 +1385,17 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
 
 ### `update` results: exit codes, events, and status
+
+A project may opt its ordinary update into a repository-owned Python controller
+with `update_controller: {windows: tools/update.py, linux: tools/update.py}` in
+its repo configuration. The path is relative to that project's anchor. Worktrees
+runs it inside the existing update-driver request and forwards update options;
+an absent or failing configured script fails the request rather than running a
+different updater. Targeted and phase-specific requests keep their existing
+behavior. `--no-project-controller` explicitly selects the standalone suite
+updater instead. The controller owns source selection and must honor configured
+runtime-source policy and any explicit prepared-source input; selection happens
+before Manager acquisition, without changing that policy.
 
 The public command submits a durable request before Manager or standalone
 execution. `--wait` observes it by default; `--detach --json` returns an

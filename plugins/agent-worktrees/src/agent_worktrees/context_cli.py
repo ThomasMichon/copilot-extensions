@@ -375,6 +375,11 @@ def cmd_get(args: argparse.Namespace) -> int:
             return 1
 
     repo = config.default_repo
+    if key == "update-controller":
+        from .project_update_controller import configured_script
+
+        print(configured_script(repo))
+        return 0
     project_values = {
         "repo-dir": lambda: repo.anchor,
         "git-remote": lambda: repo.remote or "origin",

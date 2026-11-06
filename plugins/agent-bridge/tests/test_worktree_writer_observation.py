@@ -16,6 +16,7 @@ from zdd import routing
 
 from agent_bridge import session_lifecycle_cli as lifecycle
 from agent_bridge import _installation_context as installation
+from agent_bridge import worktree_writer_observation as observation
 from agent_bridge.routes import health
 
 
@@ -29,8 +30,9 @@ def test_health_observes_canonical_writer_selection_without_launch(
     peer = tmp_path / ".agent-worktrees"
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
     monkeypatch.setattr(
-        lifecycle, "_legacy_worktrees_launch_prefix",
-        lambda root: ["legacy-owner"] if selection == "legacy" else None,
+        lifecycle, "_legacy_worktrees_runtime_prefix",
+        lambda root: [str(peer / "versions" / "1.0.0" / "bin" / "python")]
+        if selection == "legacy" else None,
     )
     monkeypatch.setattr(
         lifecycle.shutil, "which", lambda name: "/compat/owner" if selection == "path" else None,
@@ -61,6 +63,7 @@ def test_health_observes_canonical_writer_selection_without_launch(
         assert before["capabilities"]["worktree_record_delegation"] == 1
         assert before["worktree_record_writer"] == {
             "installation_root": str(peer) if selection in {"legacy", "cell"} else None,
+            "runtime_generation": None,
         }
         assert before["slot"]["role"] == "active"
         assert before["slot"]["pid"] == os.getpid()
@@ -74,8 +77,9 @@ def test_health_observes_canonical_writer_selection_without_launch(
         assert after["worktree_record_writer"] == before["worktree_record_writer"]
 
 
+@pytest.mark.parametrize("nested", [False, True])
 def test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool,
 ) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -102,9 +106,10 @@ def test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot(
 
         monkeypatch.setattr(os, "register_at_fork", remember)
 
-    def select(version: str) -> Path:
+    def select(version: str, generation: str) -> Path:
         slot = peer / "versions" / version
-        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        environment = slot / ".venv" if nested else slot
+        python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         python.parent.mkdir(parents=True)
         python.write_bytes(b"selected interpreter fixture")
         (slot / ".install-complete.json").write_text(
@@ -112,24 +117,86 @@ def test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot(
             encoding="utf-8",
         )
         (peer / "current-version").write_text(version, encoding="utf-8")
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        (bootstrap / "runtime-generation").write_text(generation + "\n", encoding="ascii")
         return python
 
-    first = select("1.0.0")
+    first = select("1.0.0", "a" * 32)
+    (peer / "runtime-generation").write_text("c" * 32, encoding="ascii")
     app = FastAPI()
     app.include_router(health.router)
     with TestClient(app) as client:
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json()["worktree_record_writer"]["installation_root"] == str(peer)
+        assert response.json()["worktree_record_writer"] == {
+            "installation_root": str(peer), "runtime_generation": "a" * 32,
+        }
         initial = len(registrations)
         assert initial > 0 if register is not None else initial == 0
         assert lifecycle._legacy_worktrees_runtime_prefix(own)[0] == str(first)
         for _ in range(32):
-            assert client.get("/health").json()["worktree_record_writer"]["installation_root"] == str(peer)
-        second = select("2.0.0")
-        assert client.get("/health").status_code == 200
+            assert client.get("/health").json()["worktree_record_writer"] == {
+                "installation_root": str(peer), "runtime_generation": "a" * 32,
+            }
+        second = select("2.0.0", "b" * 32)
+        assert client.get("/health").json()["worktree_record_writer"] == {
+            "installation_root": str(peer), "runtime_generation": "b" * 32,
+        }
         assert lifecycle._legacy_worktrees_runtime_prefix(own)[0] == str(second)
         assert len(registrations) == initial
+
+
+@pytest.mark.parametrize("case", [
+    "legacy", "malformed", "oversized", "non-ascii", "mutable", "linked-generation",
+    "linked-bootstrap", "linked-slot", "changed-selection", "changed-generation",
+])
+def test_unknown_or_changed_slot_never_certifies_a_build(tmp_path, monkeypatch, case):
+    root = tmp_path / "worktrees"
+    slot = root / "versions" / ("dev" if case == "mutable" else "1.0.0")
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"interpreter fixture")
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    generation = bootstrap / "runtime-generation"
+    if case != "legacy":
+        value = {"malformed": "unknown", "oversized": "a" * 65, "non-ascii": "\u2603"}
+        generation.write_text(value.get(case, "a" * 32), encoding="utf-8")
+    if case.startswith("linked-"):
+        if os.name == "nt":
+            pytest.skip("symlink control requires a native POSIX host")
+        if case == "linked-generation":
+            target = tmp_path / "foreign-generation"
+            generation.rename(target)
+            generation.symlink_to(target)
+        elif case == "linked-bootstrap":
+            target = tmp_path / "foreign-bootstrap"
+            bootstrap.rename(target)
+            bootstrap.symlink_to(target, target_is_directory=True)
+        else:
+            target = tmp_path / "foreign-slot"
+            slot.rename(target)
+            slot.symlink_to(target, target_is_directory=True)
+    selected = (["bridge-owner"], root, python)
+    calls = []
+
+    def resolve(**kwargs):
+        assert kwargs == {"allow_path_fallback": False}
+        calls.append(None)
+        if len(calls) == 2:
+            if case == "changed-selection":
+                return (["different-owner"], root, python)
+            if case == "changed-generation":
+                generation.write_text("b" * 32, encoding="ascii")
+        return selected
+
+    monkeypatch.setattr(lifecycle, "_agent_worktrees_runtime_selection", resolve)
+    monkeypatch.setattr(lifecycle.subprocess, "run", lambda *a, **k: pytest.fail("launched a child"))
+    assert observation.observe() == {
+        "installation_root": None if case.startswith("changed-") else str(root),
+        "runtime_generation": None,
+    }
 
 
 def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
@@ -195,6 +262,7 @@ def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
         for _ in range(32):
             assert client.get("/health").json()["worktree_record_writer"] == {
                 "installation_root": str(own.parent / "agent-worktrees"),
+                "runtime_generation": None,
             }
         assert load.call_count == 1
         for path in (receipt, namespace, activation):
@@ -202,9 +270,11 @@ def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
             path.write_text("{}", encoding="utf-8")
             assert client.get("/health").json()["worktree_record_writer"] == {
                 "installation_root": None,
+                "runtime_generation": None,
             }
             path.write_text(original, encoding="utf-8")
             assert client.get("/health").json()["worktree_record_writer"] == {
                 "installation_root": str(own.parent / "agent-worktrees"),
+                "runtime_generation": None,
             }
         assert load.call_count == 1

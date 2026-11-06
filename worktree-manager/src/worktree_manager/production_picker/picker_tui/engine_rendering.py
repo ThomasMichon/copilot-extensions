@@ -85,6 +85,8 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
                 getattr(self, "manager_update_state", None),
                 getattr(self, "include_maintenance", False),
                 getattr(self, "debug", None),
+                getattr(self, "_knowledge_readiness", {}).get("ready"),
+                getattr(self, "_knowledge_readiness", {}).get("code"),
                 self.cmd_mode, self.list_view.query, self.list_view.sort_index,
                 tuple(worktree_read_feedback(self)) if kind == "worktrees" else ())
     def _build_body_split(self, width, sel=None):

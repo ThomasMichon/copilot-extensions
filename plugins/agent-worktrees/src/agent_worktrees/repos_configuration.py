@@ -160,7 +160,7 @@ def command(argv: list[str]) -> int:
             )
 
     parser = SafeParser(prog="repos configuration")
-    parser.add_argument("command", choices=("catalog", "preview", "apply"))
+    parser.add_argument("command", choices=("catalog", "preview", "apply", "knowledge-preview", "knowledge-apply"))
     parser.add_argument("--context-project", required=True)
     parser.add_argument("--repository")
     parser.add_argument("--workspace", default="")
@@ -177,6 +177,13 @@ def command(argv: list[str]) -> int:
                 from .repos_configuration_catalog import catalog
 
                 result = catalog(project, workspace=args.workspace)
+            elif args.command.startswith("knowledge-"):
+                from .repos_knowledge_configuration import invoke
+
+                result = invoke(
+                    project, resource_name(args.repository),
+                    args.command.removeprefix("knowledge-"), args.preview_token,
+                )
             else:
                 name = resource_name(args.repository)
                 result = (
@@ -193,4 +200,4 @@ def command(argv: list[str]) -> int:
         print(f"Configuration failed ({code}): {message}", file=sys.stderr)
         return 1
     print(json.dumps(result))
-    return 0
+    return 1 if result.get("status") == "incomplete" else 0

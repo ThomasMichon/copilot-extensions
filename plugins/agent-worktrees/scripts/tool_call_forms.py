@@ -1,0 +1,72 @@
+"""Common native tool shapes; path extraction does not interpret edited content."""
+
+from __future__ import annotations
+
+import json
+import re
+
+MAX_CALLS = 128
+PATH_KEYS = (
+    "path", "file_path", "filePath", "filename", "fileName",
+    "target_file", "targetFile",
+)
+_PATCH_TARGET = re.compile(
+    r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$",
+    re.MULTILINE,
+)
+
+
+def tool_events(payload: dict) -> list[dict]:
+    if "toolCalls" not in payload:
+        return [payload]
+    calls = payload["toolCalls"]
+    if not isinstance(calls, list) or len(calls) > MAX_CALLS:
+        raise ValueError("unsupported tool batch")
+    events = []
+    for call in calls:
+        if not isinstance(call, dict) or not isinstance(call.get("name"), str):
+            continue
+        events.append({
+            **{key: value for key, value in payload.items() if key != "toolCalls"},
+            "toolName": call["name"],
+            "toolArgs": call.get("args", {}),
+            "toolCallId": call.get("id"),
+            "cwd": payload.get("cwd", payload.get("workingDirectory", "")),
+        })
+    return events
+
+
+def write_targets(tool: str, args: object) -> list[str]:
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            args = {"command": args}
+    if not isinstance(args, dict):
+        return []
+    targets = []
+
+    def add(value):
+        if isinstance(value, str) and value and value not in targets:
+            if len(targets) >= MAX_CALLS:
+                raise ValueError("too many write targets")
+            targets.append(value)
+
+    for key in PATH_KEYS:
+        add(args.get(key))
+    for key in ("edits", "files", "changes"):
+        entries = args.get(key)
+        if isinstance(entries, list):
+            if len(entries) > MAX_CALLS:
+                raise ValueError("too many structured write entries")
+            for entry in entries:
+                if isinstance(entry, dict):
+                    for path_key in PATH_KEYS:
+                        add(entry.get(path_key))
+    if tool == "apply_patch":
+        for key in ("input", "patch", "command"):
+            patch = args.get(key)
+            if isinstance(patch, str):
+                for match in _PATCH_TARGET.finditer(patch):
+                    add(match[1].removesuffix("\r"))
+    return targets

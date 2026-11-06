@@ -58,6 +58,12 @@ LOCAL = _local_identity()
 LOCAL_LABEL = f"{LOCAL[0]} · {LOCAL[1].lower()}"
 
 
+def knowledge_readiness() -> dict:
+    return engine_client.run_json(
+        context.project(), ["coordination-readiness"], timeout=20, allow_nonzero=True,
+    )
+
+
 def is_local(machine: str, env: str) -> bool:
     """Canonicalized "is ``(machine, env)`` this picker's own host?" check.
 

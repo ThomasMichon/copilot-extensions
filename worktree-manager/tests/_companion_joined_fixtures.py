@@ -6,9 +6,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 import importlib
 import json
+import os
 from pathlib import Path
+import site
 import sys
 from typing import Any
+import venv
 
 import pytest
 
@@ -16,6 +19,37 @@ from worktree_manager import mux_companion as companion
 from test_agenda_end_to_end import ROOT, SOURCE_PATHS
 from test_companion_bridge_codec import OWNER
 from _worktree_timeline_fixtures import resident_join
+
+
+def native_state_reader(path: Path):
+    """Keep the fixture observer from denying an atomic publisher's DELETE access."""
+    if os.name != "nt":
+        return path.open("rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 @contextmanager
@@ -52,18 +86,28 @@ def managed_join(
             f"import sys;sys.path[:0]={[str(root / 'bootstrap'), *map(str, SOURCE_PATHS)]!r};"
             "import sitecustomize\n"
         )
-        interpreter.write_text(
-            f"#!{sys.executable} -I\nimport os,sys\n"
-            f"prefix={prefix!r}\n"
-            "if '-c' in sys.argv:\n"
-            "    index=sys.argv.index('-c')\n"
-            "    code=prefix+sys.argv[index+1]; args=sys.argv[index+2:]\n"
-            "else:\n"
-            "    assert sys.argv[1:3]==['-m','agent_worktrees']\n"
-            "    code=prefix+'from agent_worktrees.__main__ import main;main(sys.argv[1:])'; args=sys.argv[3:]\n"
-            "os.execv(sys.executable,[sys.executable,'-I','-B','-c',code,*args])\n",
-        )
-        interpreter.chmod(0o700)
+        if os.name == "nt":
+            venv.EnvBuilder(with_pip=False).create(interpreter)
+            (interpreter / "Lib/site-packages/fixture-source.pth").write_text(
+                "\n".join(map(str, [
+                    root / "bootstrap", *SOURCE_PATHS, *site.getsitepackages(),
+                ])) + "\n",
+                encoding="utf-8",
+            )
+            interpreter = interpreter / "Scripts/python.exe"
+        else:
+            interpreter.write_text(
+                f"#!{sys.executable} -I\nimport os,sys\n"
+                f"prefix={prefix!r}\n"
+                "if '-c' in sys.argv:\n"
+                "    index=sys.argv.index('-c')\n"
+                "    code=prefix+sys.argv[index+1]; args=sys.argv[index+2:]\n"
+                "else:\n"
+                "    assert sys.argv[1:3]==['-m','agent_worktrees']\n"
+                "    code=prefix+'from agent_worktrees.__main__ import main;main(sys.argv[1:])'; args=sys.argv[3:]\n"
+                "os.execv(sys.executable,[sys.executable,'-I','-B','-c',code,*args])\n",
+            )
+            interpreter.chmod(0o700)
         monkeypatch.setattr(companion.ec, "engine_base_command", lambda: [str(interpreter), "-m", "agent_worktrees"])
         allocated = placement.allocate_worktree_data(
             "example", "selected", creation_nonce="f" * 32,

@@ -96,7 +96,27 @@ def owner_generation(db_path: Path) -> str | None:
 class WorktreesRuntime:
     """No request callback loads records or waits for the owner's state lock."""
 
-    def __init__(self, db_path: Path, *, wake=None, now=time.monotonic, elected=None, admitted=None) -> None:
+    @classmethod
+    def for_monitor(cls, wake, admitted, context):
+        import os
+
+        from . import status_monitor_cutover, status_monitor_runtime
+        from .hook_facts_publication import HookFactsPublisher
+        from .runtime_identity import PROCESS_GENERATION
+
+        root = status_monitor_runtime._aw_runtime_home()
+        return cls(
+            root / "worktrees-current.sqlite3", wake=wake, admitted=admitted,
+            elected=lambda: status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None,
+            hook_facts=HookFactsPublisher(
+                root, PROCESS_GENERATION, project_root=cfg.project_dir, context=context,
+            ),
+        )
+
+    def __init__(
+        self, db_path: Path, *, wake=None, now=time.monotonic, elected=None, admitted=None,
+        hook_facts=None,
+    ) -> None:
         from .worktrees_feed import WorktreesFeed
 
         self.store = WorktreesProjection(db_path)
@@ -113,6 +133,7 @@ class WorktreesRuntime:
         self._now = now
         self._elected = elected
         self._admitted = admitted
+        self.hook_facts = hook_facts
         self.feed = WorktreesFeed(self)
         from .agenda_runtime import AgendaRuntime
 
@@ -170,6 +191,8 @@ class WorktreesRuntime:
             self.agendas.activate()
             self.observations.activate()
             self.native_observations.activate()
+            if self.hook_facts is not None:
+                self.hook_facts.activate()
             if self._wake is not None:
                 self._wake.set()
 
@@ -181,6 +204,8 @@ class WorktreesRuntime:
         self.native_observations.close_admission()
         self.agendas.close(reason)
         self.observations.close_admission(reason)
+        if self.hook_facts is not None:
+            self.hook_facts.close()
 
     def health(self) -> dict:
         from .worktrees_feed import BOOTSTRAP_CAPABILITY, FEED_CAPABILITY
@@ -203,6 +228,11 @@ class WorktreesRuntime:
         result["capabilities"].extend(self.observations.capabilities())
         result["worktree_observations"] = self.observation_status()
         result["worktree_observations"]["native_receipts"] = self.native_observations.status()
+        if self.hook_facts is not None:
+            result["worktrees"]["hook_facts"] = {
+                "version": 1, "generation": self.hook_facts.generation,
+                "quality": "advisory", "error": self.hook_facts.error,
+            }
         return result
 
     def observation_read(self, payload: dict) -> dict:
@@ -385,6 +415,10 @@ class WorktreesRuntime:
                     )
                     self.native_observations.accepted(project)
                     self.observations.accepted(project)
+                    if self.hook_facts is not None:
+                        self.hook_facts.publish(
+                            project, self.store.read(project, contract_version=2),
+                        )
                 self.agendas.roster_changed(project)
             except ProjectionUnavailable as exc:
                 if self.store.superseded:
@@ -404,6 +438,8 @@ class WorktreesRuntime:
         with self._lock:
             self._publication_errors[project] = str(error)[:1024] or type(error).__name__
         self.observations.publication_failed(project, error)
+        if self.hook_facts is not None:
+            self.hook_facts.withdraw(project)
         self.feed.changed(project)
 
     def producer_failed(self, error: Exception) -> None:

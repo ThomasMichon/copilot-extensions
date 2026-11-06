@@ -11,6 +11,8 @@ if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Co
     exit 126
 }
 $payloadRoot = (Resolve-Path -LiteralPath $payloadRoot).Path
+$_awUpdateCaller = $PSCommandPath
+$_awUpdatePayload = $true
 . (Join-Path $payloadRoot 'bin\agent-worktrees-update-entry.ps1') @args
 if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $passiveObservation = $false

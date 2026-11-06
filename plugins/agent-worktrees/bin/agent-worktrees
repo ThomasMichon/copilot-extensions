@@ -7,6 +7,8 @@
 # Windows python via -m, then the newest installed slot; PATH python is the last
 # resort (#234 defect 2).
 _aw_update_entry_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+_aw_update_caller="$0"
+_aw_update_payload=0
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 export PYTHONUTF8=1
 _aw_payload_root="$(CDPATH= cd -- "$_aw_update_entry_dir/.." && pwd -P)" || exit
@@ -39,8 +41,10 @@ _aw_exec_resolved() {
   [ "${#_aw_cache_id}" -eq 32 ] || exit 1
   case "$_aw_cache_id" in *[!0-9a-f]*) exit 1 ;; esac
   _aw_python_cache="$_awroot/cache/python/unsealed-$_aw_cache_id"
+  _aw_cache_root="$_awroot"
   case "$AW_PY" in
     *.exe)
+      _aw_cache_root="$(cygpath -aw "$_awroot")" || return
       _aw_python_cache="$(cygpath -aw "$_aw_python_cache")" || return
       case "$_aw_python_cache" in
         '\\?\'*) ;;
@@ -48,9 +52,27 @@ _aw_exec_resolved() {
         *) _aw_python_cache='\\?\'"$_aw_python_cache" ;;
       esac ;;
   esac
-  exec "$AW_PY" -X "pycache_prefix=$_aw_python_cache" -m agent_worktrees "$@"
+  _aw_selected_cache="$("$AW_PY" -I -B -X "pycache_prefix=$_aw_python_cache" -c '
+import json, sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+except ImportError:
+    prefix = sys.pycache_prefix
+else:
+    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1]
+print(json.dumps(prefix, ensure_ascii=True))
+' "$_aw_cache_root")" || exit 126
+  _aw_selected_cache="$("$AW_PY" -I -B -X "pycache_prefix=$_aw_python_cache" -c '
+import json, sys
+prefix = json.loads(sys.argv[1])
+if not isinstance(prefix, str) or not prefix:
+    raise ValueError("Runtime cache selection failed")
+sys.stdout.buffer.write(prefix.encode("utf-8", "surrogateescape"))
+' "$_aw_selected_cache")" || exit 126
+  exec "$AW_PY" -X "pycache_prefix=$_aw_selected_cache" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
+if [ -n "${AGENT_WORKTREES_INTERNAL_REQUIRE_RUNTIME:-}" ]; then exit 127; fi
 if [ "${_aw_update_diagnostic:-0}" = 1 ]; then
   printf '%s\n' '[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.' >&2
   exit 127

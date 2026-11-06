@@ -279,7 +279,7 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
             )
             if error:
                 return error
-    for name in ("copilot_path", "setup_hook", "env_script"):
+    for name in ("copilot_path", "setup_hook", "env_script", "update_controller"):
         if name in repo:
             error = _validate_platform_map(
                 repo[name], location=f"{location}.{name}", list_values=False

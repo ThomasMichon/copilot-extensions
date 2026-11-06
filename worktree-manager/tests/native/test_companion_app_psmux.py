@@ -79,7 +79,9 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
         if "-t" in arguments:
             index = arguments.index("-t") + 1
             if arguments[index].startswith("%"):
-                arguments[index] = session + ":" + arguments[index]
+                arguments[index] = companion_pane._psmux_pane_target(
+                    binary, session, arguments[index], incarnation,
+                )
         result = subprocess.run(
             [binary, *arguments], capture_output=True, encoding="utf-8", timeout=5,
             env=dict(environment, PSMUX_SESSION=session),
@@ -103,7 +105,7 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
             while time.monotonic() < deadline:
                 assert not client.exited(client.process.process), diagnostic()
                 assert client.read_error is None, client.read_error
-                if condition():
+                if condition() and time.monotonic() < deadline:
                     return
                 time.sleep(.025)
             pytest.fail(describe())
@@ -140,6 +142,7 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
                         for child in process.children(recursive=True)
                     ],
                     "started": cli_receipt.read_text() if cli_receipt.exists() else None,
+                    "native_process": client.process_state(int(pid)),
                 })
 
             wait_for(lambda: "INERT SOURCE CLI" in mux("capture-pane", "-p", "-t", cli), cli_diagnostic)

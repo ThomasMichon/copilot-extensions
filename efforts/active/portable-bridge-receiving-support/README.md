@@ -110,6 +110,7 @@ requires its own applicable authority and is recorded separately.
 - [x] Document supported caller/receiver combinations, retained-host recovery and rollback using actual selected capabilities rather than package-version equality. _(source contracts and controlled combinations documented in #10748; native/installed tiers remain unqualified)_
 - [x] Update reality docs, focused tests and changefiles; retain historical protocol evidence and the required unit-only portfolio. _(#10748; source tiers only)_
 - [ ] Record source, release and installed/native/external results separately; resolve every Plan and Validation Plan item before Done.
+- [ ] Qualify the prerequisite host account/owner callbacks through their existing launchers before retrying the external receiving flow. _(newly observed acceptance prerequisite; agent-recommended source refinement)_
 
 ## Validation Plan
 
@@ -687,3 +688,92 @@ implementation. The exact support closure follows the consumer trace and tests.
   Existing source approval does not authorize shared updates, restart,
   guest-suite installation or interference with retained sessions. Preserve
   the Active effort and obtain only missing effect scope before live work.
+
+### 2026-11-05 - Installed readiness and host callback prerequisite
+
+- The promoted mux source reached a selected, healthy Bridge runtime.
+  Post-installer HTTP health and the selected CLI independently confirmed the
+  incoming version, relay readiness and portable receiving capabilities.
+  This is local installed readiness, not a complete receiving flow.
+- The first external read-only attempt failed at namespace resolution before
+  a worker was created. Independent native provider commands returned valid
+  resolver output; a scoped retry exposed an unavailable Worktrees account
+  snapshot. No token value, guest code change or model result was inspected.
+- The existing account callback returned valid output after 13.5 seconds,
+  exceeding its unchanged ten-second caller budget. The legacy global
+  launcher selected a fresh bytecode namespace on every invocation despite
+  the canonical helper qualifying that completed runtime for installed reuse.
+- Applied that existing helper to the PowerShell and POSIX global front doors,
+  preserving older-helper fallback, immutable runtime bytes and existing
+  account/owner/deadline semantics. Six native front-door controls pass.
+  A separate actual read-only callback comparison retained all samples:
+  current launcher 7.91 seconds; proposed source launcher 4.30 then 3.97.
+  Host load and filesystem caches were not reset; this is measured source-entry
+  evidence, not a latency baseline, installed correction or successful retry.
+- Source gates, public review/CI, release and authorized normal installation
+  of this prerequisite remain open. The receiving effort remains Active.
+
+### 2026-11-06 - Lossless native cache selection
+
+- Expanded the real front-door fixture with a Unicode profile and forced
+  CRLF stdout. Its native PowerShell resolver uses UTF-8 with a BOM, and the
+  cache-parent assertion compares actual filesystem identity rather than
+  unequal ordinary/extended Windows path spellings.
+- The qualified old-source control reproduced four PowerShell failures:
+  decoded paths no longer addressed the intended cache directory. Both
+  Git Bash controls passed; this did not reproduce a Git Bash CRLF defect.
+- Selector replies now carry ASCII-safe JSON. PowerShell decodes the string
+  directly; POSIX uses a separate read-only binary decoder, retaining
+  Unicode, embedded newlines and native path bytes without shell evaluation.
+  The corrected packet passes all nine cases, including original
+  old-helper fallback, repeated cache reuse and immutable-slot preservation.
+- Corrected-source actual account callback samples returned the full existing
+  JSON shape in 2.90 and 2.76 seconds without diagnostics. Earlier samples
+  remain above; this is still insufficient for tail/baseline qualification.
+  Updated-head review, CI, release, installation and live receiving remain open.
+
+### 2026-11-06 - Callback prerequisite source accepted
+
+- #10812 is verified merged at `4e63a7ca09f8c04769e8ff4c4fd2421b44eca5d0`
+  after approval with no active findings on the exact corrected head and
+  successful required CI, including the PR gate. The repository-authorized
+  self-merge exception omitted only the additional code-owner vote.
+  #10636 remains open.
+- Re-read the complete effort and retained every native/installed/external
+  gate. The source-cache prerequisite is delivered, not installed acceptance.
+  No complete receiving flow or product operation is claimed.
+- Normal source sync aborted on the squash history without changing the
+  branch. Verified all six owned paths against the actual merge, retained a
+  backup branch, and replayed only the empty post-reviewed range onto current
+  Dev. No unmerged work was discarded.
+- Next: verify the promoted launcher bytes, use the authorized normal host
+  update, then qualify the actual installed account/owner callbacks and one
+  existing receiving venue before the broader live checks. Source/runtime
+  publication never grants deployment or guest-suite upgrade authority.
+
+### 2026-11-06 - Release blocked before native test collection
+
+- #10826 is verified merged after exact-head approval and required green CI.
+  Re-read this complete effort; all installed/native/external gates remain open.
+- Promotion run `42139267241` passed candidate construction, unit qualification
+  and artifact attestation, then refused the frozen source/base binding after
+  Main advanced. The existing #8660 records that occurrence; no stale candidate
+  was forced through.
+- The new required Windows Resume gate failed during environment preparation
+  in runs `42141026158` and `42142292967`, before test collection. The missing
+  evidence upload is secondary, not a failed Resume assertion.
+- Verified the exact second run's frozen bundle and reproduced preparation
+  failure from candidate `a70eb8ce02f9b0b35e6b382f336fd61989366b51`.
+  Captured UV diagnostics identify conflicting `agent-update-driver` URLs in
+  Manager's and Bridge's separate materialized library copies. Dev's shared
+  canonical library paths do not exercise this setup difference.
+- The preparation-only reproduction used local Python 3.13, not the hosted
+  Python 3.12. It ran no native assertions or daemon. The initial general
+  archive extraction was stopped; the selected setup closure was extracted
+  separately from the same immutable archive.
+- Supplied the exact diagnosis on #10823 and to the already-claimed #10830
+  investigation. That owner retains the correction; no competing runner,
+  installer-policy or controller change was made. Keep the native gate required.
+- #10812 remains merged but unreleased. Next: observe the existing owner's
+  correction and successful promotion, verify actual release bytes, then use
+  the authorized installation and original single-venue acceptance path.

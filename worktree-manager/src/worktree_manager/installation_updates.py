@@ -68,6 +68,7 @@ def run_targeted_update(rest: list[str]) -> int:
     parser.add_argument("--target", required=True)
     parser.add_argument("--project")
     parser.add_argument("--no-manager", action="store_true")
+    parser.add_argument("--no-project-controller", action="store_true")
     args = parser.parse_args(forwarded)
     run = UpdateRun()
     try:

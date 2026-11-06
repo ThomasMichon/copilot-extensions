@@ -1595,3 +1595,41 @@ observe the normal promotion that actually contains this merged snapshot and
 verify the shipped implementation bytes; no forced release or updater is
 authorized. U13/#10652 fresh settlement, broader #10653 installer/reaping and
 #10486 reattachment acceptance retain their separate owners and gates.
+
+### 2026-11-06 - U15 containing release verified without rollout
+
+Normal candidate `42134630102` admits source
+`6a6bbb0c306ca93d65e388ba97a2ff81533d9018`, which contains #10736, but fails
+only `Promote dev -> main` during Sigstore verifier initialization after the
+existing bounded retry. Source units, freeze, build and attestation generation
+pass. Existing recurring issue #10651 receives the diagnostic; no duplicate
+issue, source correction, trust-policy weakening or forced release retry is
+performed.
+
+Already-running normal successor `42137782452` admits
+`ce18a228c5f143a07efcc2d96b36bca9c6f25fc2` at Main base
+`32c045f081ba8d9c4b5759dfb3c9bfa21ec68d55`. Its source also contains #10736.
+All release stages pass, including artifact verification, exact immutable-unit
+reuse, publication/readback and normal merge. Generated #10825 merges at
+00:51:39 UTC as `b408a6500bdd8a9ec5812cfaab1bbd882a610381`; the run finishes
+successfully at 00:52:47 UTC.
+
+The non-draft source release
+`python-artifacts-ce18a228c5f143a07efcc2d96b36bca9c6f25fc2` publishes MCP
+`0.2.189-dev1`. Downloaded archive SHA-256
+`f467e0c9e26cd73086d47c7daf1bd1d40fffb25a8ec534ad882e472c7e801b80` and
+index SHA-256 `24e00194e776f44b4b86bee833d6fe86c0e8ae8d1e71de878c5dfe45269ee473`
+match the live release metadata. The index names the admitted Dev snapshot.
+Both MCP implementation files (`cutover.py`, `__main__.py`) and the unchanged
+ZDD cutover/rollback dependencies match the source-merge Git blobs, the
+containing Main commit and the actual nested wheel bytes. This is archive
+inspection only: no package is extracted, imported or installed.
+
+This closes U15's bounded source, contained-consumer and containing-release
+evidence. It does not close #10653's broader installer/reaping acceptance,
+U13/#10652 incoming publication, #10486 reattachment or this parent's
+Plan/Validation Plan. The prior verifier failure's internal cause remains
+unconfirmed under #10651; this different source/controller run passing is
+not same-SHA transient proof or an infrastructure-fix claim. Next select the
+next owned/reproducible priority case from this matrix without lifting any
+installed-host or deployment boundary.

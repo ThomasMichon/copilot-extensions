@@ -203,6 +203,20 @@ records actual large-range/default-window eviction and healthy ordinary/narrow
 controls. The bounded statistics amendment closes, not whole S2, lifetime
 accounting, current concurrency, qualified PRE or installed/native acceptance.
 
+#10835 merged as `2faf32de089180615aea3c145b114ed8c4e8f46e`, adding an
+optional actual-call cold membership diagnostic and correcting the native
+fixture's DELETE-sharing, cancelled-predecessor wait and asynchronous menu-key
+boundaries. The [diagnostic readback](journal/2026/11.05-sidecar-membership-diagnostics.md)
+records exact-head Windows 120, Linux Companion 117 and root-attention 43
+passing controls. It does not explain the earlier 50 ms read failure or change
+production budgets, retries or cancellation; the reliability gap stays open.
+
+#10848 merged as `16d1c78f5049e52cda978fbf5d93faeae42f8afe`, qualifying
+exact-owner indexed lookups through ordinary writable bootstrap, with unchanged
+passive old-store behavior and read budgets. The same diagnostic readback
+records source-bound HTTP52 capture and current Windows lookup/client proof;
+the separate cold timeout and complete source/native acceptance remain open.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -526,8 +540,10 @@ publication and installed support retain their separate qualification.
   [linked worktree-state design](worktree-state-lifetime.md). Existing source
   approvals do not authorize actual data relocation, collection or deletion.
   #10224 delivers D1's allocator/discovery source and #10238 D2's explicit
-  initialization/export, and #10251 D3's Manager consumer. D4-D5 and native durability
-  remain open rather than completing this combined acceptance.
+  initialization/export, and #10251 D3's Manager consumer. #10777 qualifies
+  the private native Windows allocation/retry and complete-export filesystem
+  controls. Combined native integration, archival acknowledgment and D5 remain
+  open rather than completing this combined acceptance.
 - [x] Attach the selected worktree provider to the actual Manager Timeline
   through the owning process boundary, with independent page/live cursors and
   request/source/head fences. #10131 includes the resident-to-CLI-to-Textual
@@ -617,6 +633,15 @@ publication and installed support retain their separate qualification.
   actual input/history/resize/return and strict owned cleanup. The initial
   startup-banner failure remains unexplained; this is not startup-stability,
   installed, popup/Relay, headed-pixel or native-performance acceptance.
+  The manual Windows packet also selects the private actual-owner composition
+  in `test_companion_joined_psmux.py`. #10784's reviewed source passes the
+  112-case Windows packet with zero skips, including actual owner history/live
+  input and exact reader/observer exit before original CLI input. Its
+  [readback](journal/2026/11.05-sidecar-windows-owner-composition.md) closes
+  that finite native join, not startup stability, installed behavior, pixels,
+  performance or the original popup/Claims/Relay and manual/head gates.
+  The separate cold membership-read budget failure remains an open source
+  reliability gap under this effort and #8811.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
@@ -650,6 +675,23 @@ is inferred from these presentation checks.
   independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
+
+- [x] Bound exact-owner membership work independently of unrelated retained
+  registry size using owner-prepared lookups, while retaining passive
+  non-preparation, malformed legacy JSON handling and old-store VM cutoffs.
+  #10848 qualifies source controls and native Windows SQLite/bootstrap
+  behavior; its unchanged actual-client packet passes 120 cases, separately
+  from the two new controls. This does not close cold scheduling reliability,
+  complete source coverage, native performance or the parent.
+
+- [x] Qualify the isolated Windows PSMux/ConPTY client with the actual private
+  Worktrees/managed-Agenda/Bridge source owners, sparse full/narrow views,
+  independent history, live purpose/count/unread updates, Follow-live and
+  complete birth-qualified reader/observer exit before unchanged CLI input.
+  #10784's reviewed source passes run `42140565596`, Windows job
+  `127639558279`: 112 passed, zero skips. All ten earlier unsuccessful runs
+  remain retained. The separate cold membership-read budget gap, startup
+  stability, installed behavior, performance and original parent gates stay open.
 
 - [x] Qualify the actual private Windows PSMux/ConPTY client over the unmodified
   Companion with a synthetic wire-valid owner, independent history/live input,

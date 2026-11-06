@@ -10,6 +10,8 @@ import os
 import tempfile
 import venv
 import re
+import base64
+import hashlib
 
 import pytest
 
@@ -20,6 +22,89 @@ from test_source_python_publication import (
 CRITICAL = "agent-worktrees.cmd"
 NAMES = ("agent-worktrees", "agent-worktrees.cmd", "agent-worktrees.ps1")
 publication_case = shared_publication_case
+
+
+@pytest.mark.parametrize(("shell", "executable"), native_hosts())
+@pytest.mark.parametrize("stdout_newline", [None, "\r\n"])
+def test_global_frontdoor_reuses_only_the_recorded_installed_cache(
+    tmp_path: Path, shell: str, executable: str, stdout_newline: str | None,
+) -> None:
+    from agent_procutil import no_window_kwargs
+    from test_source_install_transactions import _ps, _sh
+
+    plugin = Path(__file__).resolve().parents[1]
+    home = tmp_path / "home with spaces \u00e9"
+    root = home / ".agent-worktrees"
+    slot = root / "versions" / "1.0.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    library = slot / ("Lib/site-packages" if os.name == "nt" else
+                      f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    package = library / "agent_worktrees"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import json,sys\nprint(json.dumps({'args':sys.argv[1:],"
+        "'cache':sys.pycache_prefix}))\n", encoding="utf-8",
+    )
+    shutil.copytree(
+        plugin.parents[1] / "libs/agent-procutil/src/agent_procutil",
+        library / "agent_procutil", ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    record = library / "agent_procutil-1.0.dist-info" / "RECORD"
+    record.parent.mkdir()
+    body = (library / "agent_procutil/__init__.py").read_bytes()
+    digest = base64.urlsafe_b64encode(hashlib.sha256(body).digest()).rstrip(b"=").decode()
+    record.write_text(f"agent_procutil/__init__.py,sha256={digest},{len(body)}\n", encoding="utf-8")
+    marker = slot / ".install-complete.json"
+    completion = {"version": slot.name, "completed_at": "2026-01-01T00:00:00Z",
+                  "pid": 1, "payload_hash": "1" * 64}
+    marker.write_text(json.dumps(completion), encoding="utf-8")
+    if stdout_newline:
+        (library / "stdout_newline.pth").write_text(
+            f"import sys; sys.stdout.reconfigure(newline={stdout_newline!r})\n",
+            encoding="utf-8",
+        )
+    local_bin = home / ".local" / "bin"
+    shutil.copytree(plugin / "bin", local_bin)
+    resolver = root / "bin"
+    resolver.mkdir()
+    (resolver / "resolve-runtime.ps1").write_text(f"$AwPy = {_ps(python)}\n", encoding="utf-8-sig")
+    (resolver / "resolve-runtime.sh").write_text(f"AW_PY={_sh(python)}\n", encoding="utf-8")
+    before = {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    env = {key: value for key, value in os.environ.items() if key.upper() not in {
+        "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH", "PYTHONHOME",
+    }}
+    env.update(HOME=str(home), USERPROFILE=str(home))
+    entry = local_bin / ("agent-worktrees.ps1" if shell == "ps1" else "agent-worktrees")
+    command = ([executable, "-NoProfile", "-File", str(entry)]
+               if shell == "ps1" else [executable, str(entry)])
+
+    def invoke():
+        result = subprocess.run(
+            [*command, "cache-probe", "argument with spaces"], env=env, cwd=home,
+            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        observed = json.loads(result.stdout)
+        assert observed["args"] == ["cache-probe", "argument with spaces"]
+        return Path(observed["cache"])
+
+    first = invoke()
+    cached = {path.relative_to(first): (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in first.rglob("*") if path.is_file()}
+    assert re.fullmatch(r"installed-[0-9a-f]{64}", first.name)
+    assert first.parent.samefile(root / "cache" / "python")
+    assert any(path.name.startswith("__main__") for path in cached)
+    assert invoke() == first
+    assert {path.relative_to(first): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in first.rglob("*") if path.is_file()} == cached
+    assert {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
+    completion["payload_hash"] = "2" * 64
+    marker.write_text(json.dumps(completion), encoding="utf-8")
+    assert invoke() != first
+    assert {path.relative_to(first): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in first.rglob("*") if path.is_file()} == cached
 
 
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
@@ -72,7 +157,7 @@ def test_global_frontdoor_keeps_import_cache_outside_the_selected_slot(
     assert cache.parent == Path(python_cache_args(root)[1].split("=", 1)[1]).parent
     assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
     assert {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
-    assert list((root / "cache" / "python").rglob("__main__*.pyc"))
+    assert list(cache.rglob("__main__*.pyc"))
 
 
 @pytest.fixture

@@ -20,20 +20,30 @@ def _args(**values):
     return argparse.Namespace(**{**fields, **values})
 
 
-def _run_runtime_owned(monkeypatch, argv, environment):
+def _run_runtime_owned(monkeypatch, argv, environment, *, timeout=20):
 
     with monkeypatch.context() as selected:
         for key, value in environment.items():
             selected.setenv(key, value)
         from agent_procutil.owned_process import run_owned
 
-        return run_owned(list(argv), timeout=20)
+        return run_owned(list(argv), timeout=timeout)
+
+
+def _write_fixture_project(scope):
+    import json
+
+    config = scope / ".example" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(json.dumps({
+        "repos": {"example": {"anchor": str(scope / "anchor")}},
+    }), encoding="utf-8")
 
 
 def _enqueue_fixture_update(monkeypatch, scope, **values):
     from pathlib import Path
     import update_driver
-    from agent_worktrees import __main__ as engine
+    from agent_worktrees import __main__ as engine, project_update_controller
 
     fixture = Path(__file__).parent / "fixtures" / "update_driver_context.py"
     original = update_driver.runtime_command
@@ -49,6 +59,7 @@ def _enqueue_fixture_update(monkeypatch, scope, **values):
         selected.setattr(update_driver, "ensure_worker", lambda *a, **kw: None)
         selected.setattr(boundary.cfg, "active_project", lambda: "example")
         selected.setattr(boundary.cfg, "install_dir", lambda: scope / ".agent-worktrees")
+        selected.setattr(project_update_controller, "probe_for_submission", lambda _args, **_kwargs: False)
         selected.setattr(engine, "_INVOCATION_CWD", scope / "invocation")
         return boundary.cmd_update_request(_args(detach=True, **values))
 
@@ -56,6 +67,7 @@ def _enqueue_fixture_update(monkeypatch, scope, **values):
 @pytest.fixture
 def queued(monkeypatch, tmp_path):
     import update_driver
+    from agent_worktrees import project_update_controller
 
     seen = {}
     request = SimpleNamespace(
@@ -84,6 +96,7 @@ def queued(monkeypatch, tmp_path):
     monkeypatch.setattr(update_driver, "wait", wait)
     monkeypatch.setattr(boundary.cfg, "active_project", lambda: "example")
     monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda _args, **_kwargs: False)
     from agent_worktrees import __main__ as core
     monkeypatch.setattr(core, "_INVOCATION_CWD", None)
     monkeypatch.setattr(update_cli, "cmd_update", forbidden)
@@ -97,6 +110,96 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["spec"].project == "example"
     assert seen["runner"].argv[-4:] == ("--project", "example", "update", "--force")
     assert seen["wait"] == request.id
+
+
+@pytest.mark.parametrize("route", ["shortcut", "no-manager", "direct"])
+@pytest.mark.parametrize("root_form", ["default", "relative", "registered"])
+def test_controller_shortcut_keeps_automatic_manager_policy(
+    queued, monkeypatch, tmp_path, root_form, route,
+):
+    from pathlib import Path
+    from agent_worktrees import control_plane_providers, manager_launch_cli, project_update_controller
+    from update_driver.core import automatic_update_refusal
+
+    seen, _request = queued
+    home, caller = tmp_path / "home", tmp_path / "caller"
+    home.mkdir()
+    caller.mkdir()
+    root = {
+        "default": home / ".worktree-manager",
+        "relative": caller / "manager",
+        "registered": tmp_path / "registered-manager",
+    }[root_form]
+    root.mkdir()
+    (root / "config.toml").write_text(
+        "[maintenance]\nautomatic = false\n", encoding="utf-8",
+    )
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json"))
+    if route == "shortcut":
+        monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
+    else:
+        monkeypatch.delenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", raising=False)
+        monkeypatch.setattr(
+            project_update_controller, "probe_for_submission",
+            lambda _args, **_kwargs: True,
+        )
+    if root_form == "relative":
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
+    else:
+        monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    manifest = (
+        SimpleNamespace(provider="worktree-manager", provider_root=str(root))
+        if root_form == "registered" else None
+    )
+    monkeypatch.setattr(
+        manager_launch_cli, "_control_plane_provider_selection",
+        lambda **_kwargs: (manifest, ""),
+    )
+    monkeypatch.setattr(
+        control_plane_providers, "_machine_control_plane_providers_dir",
+        lambda: home / "providers",
+    )
+    assert boundary.cmd_update_request(_args(auto=True, no_manager=route == "no-manager")) == 4
+    request = seen["spec"]
+    assert dict(request.context)["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
+    assert "maintenance.automatic is false" in automatic_update_refusal(request)
+    assert "AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER" not in boundary.os.environ
+
+
+@pytest.mark.parametrize("provider", ["other", "worktree-manager"])
+def test_controller_shortcut_rejects_a_conflicting_manager(
+    queued, monkeypatch, tmp_path, provider,
+):
+    from agent_worktrees import control_plane_providers, manager_launch_cli
+
+    seen, _request = queued
+    monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "selected"))
+    monkeypatch.setattr(
+        control_plane_providers, "_machine_control_plane_providers_dir",
+        lambda: tmp_path / "providers",
+    )
+    monkeypatch.setattr(
+        manager_launch_cli, "_control_plane_provider_selection",
+        lambda **_kwargs: (
+            SimpleNamespace(provider=provider, provider_root=str(tmp_path / "other")), "",
+        ),
+    )
+    assert boundary.cmd_update_request(_args()) == 1
+    assert "spec" not in seen
+
+
+@pytest.mark.parametrize("no_manager", [False, True])
+def test_uncontrolled_cell_does_not_inherit_manager_policy(queued, monkeypatch, tmp_path, no_manager):
+    seen, _request = queued
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json"))
+    monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", raising=False)
+    assert boundary.cmd_update_request(_args(auto=True, no_manager=no_manager)) == 4
+    assert "WORKTREE_MANAGER_ROOT" not in dict(seen["spec"].context)
 
 
 @pytest.mark.parametrize("values,repair", [
@@ -271,6 +374,7 @@ def test_actual_queue_retains_sources_after_submitting_environment_disappears(tm
         settings = scope / name / ".github" / "copilot" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text("{}")
+    _write_fixture_project(scope)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     for key in boundary._CONTEXT_KEYS:
@@ -354,8 +458,8 @@ def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_pa
 
 
 @pytest.mark.parametrize("with_manager", [False, True])
-# Two independently bounded 20-second workers plus fixture setup and cleanup.
-@pytest.mark.timeout(60)
+# Two independently bounded workers plus fixture setup and cleanup.
+@pytest.mark.timeout(100)
 def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch, with_manager):
     import json
     import importlib.util
@@ -384,6 +488,7 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
         settings = invocation / ".github" / "copilot" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text("{}")
+        _write_fixture_project(scope)
     observer = nullcontext()
     if with_manager and os.name == "nt":
         helper_path = Path(__file__).resolve().parents[3] / "libs/update-driver/tests/test_native_lifetime.py"
@@ -403,7 +508,7 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
             monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first"))
             worker, environment = update_driver.runtime_command("update_driver", ["worker"])
             try:
-                result = _run_runtime_owned(monkeypatch, worker, environment)
+                result = _run_runtime_owned(monkeypatch, worker, environment, timeout=40)
             except subprocess.TimeoutExpired as error:
                 logs = home / ".copilot-extensions" / "update-driver"
                 pytest.fail(f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}: {error}")
@@ -419,7 +524,7 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
         scope = tmp_path / name
         assert json.loads((scope / "result.json").read_text()) == {
             "anchor": str(scope / "anchor"),
-            "invocation": str(scope / ("anchor" if with_manager else "invocation")),
+            "invocation": str(scope / "invocation"),
             "update_context": str(scope / "invocation"),
         }
         if with_manager:

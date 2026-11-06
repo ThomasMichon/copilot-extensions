@@ -408,6 +408,8 @@ class PickerScreenMaintenanceActionsMixin:
             elif btn == "N":
                 # New worktree… opens the options dialog directly (#1346).
                 self._open_optmenu()
+            elif btn == "KB":
+                self._open_knowledge_configuration()
             elif btn == "NC":
                 # A registered pivot's data-driven "New …" affordance (Phase B).
                 self._open_create_action()

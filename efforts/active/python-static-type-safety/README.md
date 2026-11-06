@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Integrate the merged shared checker prerequisite (#10400 / #10553) with the separately pending Versioned Runtime (#10331), Copilot Extensions Harness payload helpers/tests (#10362), and canonical Payload Invocation (#10371) admissions; qualify real consumer aliases, emitted copies and remaining interpreter/native gates. Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Prepare the pending checker-only prerequisite (#10638) without crediting its independent full-composed-consumer-qualification gate (#9807 / #10362); integrate the merged shared foundation (#10400 / #10553) with separately pending Versioned Runtime (#10331), Copilot Extensions Harness payload helpers/tests (#10362), and canonical Payload Invocation (#10371) admissions. Real consumer aliases, emitted copies and remaining interpreter/native gates stay open. Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -212,12 +212,18 @@ rewrite.
 - [ ] Unit controls cover manifest validity, complete file classification, additions/renames, safe selection, monotonic activation and dependency impact.
 - [ ] Reconcile tracker rows and file totals with the authoritative manifest
   and inventory; local proposals and canonical-library locks must not imply
-  complete consumer/copy enforcement. The 2026-11-05 snapshot reconciles all
+  complete consumer/copy enforcement. The 2026-11-06 snapshot reconciles all
   68 rows; this recurring and final portfolio gate remains open.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
 - [ ] Composition and generated-copy controls reject omitted/reordered/changed fragments or stale source correspondence; no empty result can certify coverage.
+- [ ] **full-composed-consumer-qualification** (#9807 / #10362): preserve this
+  unmet consumer gate independently of opening the checker-only #10638 PR.
+  Prove the actual composed consumer, immutable 64-root boundary, copied/emitted
+  helpers, native behavior and full frozen-candidate/promotion qualification.
+  A passing development packet or focused source/frozen controls is not this
+  proof; failed full-candidate attempts remain failures, not a flake or CI waiver.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
 - [x] Credential Relay preserves its production behavior, assertions and deadlines across both strict targets, Python 3.10 native/copy tests and fresh exact-input source CI (#10310).
 - [x] Index service preserves its original function/assertion contracts across both strict targets, Python 3.10 native/copy tests, composed-source qualification and fresh exact-input source CI; the eight original skips receive no additional credit (#10327).
@@ -2778,3 +2784,38 @@ composition prerequisites, and review/validation rules.
   and remaining native/interpreter gates for #10331, #10362 and #10371.
   Copies and fragment/runtime/POSIX qualification remain independent. This
   effort stays Active; source merge is neither release nor installed rollout.
+
+### 2026-11-06 - Checker-only sequencing clarified; consumer proof remains open
+
+- #10638 remains a pending checker-only prerequisite, not a merged change or
+  consumer admission. The approved sequencing removes the extra local full
+  composed/frozen proof from that PR's opening prerequisites while retaining
+  **full-composed-consumer-qualification** under #9807 / #10362 as unmet.
+  Normal required development-unit checks, source profiles, release-controller
+  behavior, budgets and required CI are unchanged.
+- The earlier normal development packet passes **4,148 nodes / 12,444 phase
+  reports**, zero effects and a **248-target basis** in **253.234 seconds**.
+  Focused source/frozen evidence separately passes six positive controls,
+  four-module checks, eight argument/return negative controls and 17 custody
+  guards. Neither focused evidence nor the development packet is a successful
+  full frozen-candidate packet.
+- The separately prepared full frozen candidate did not pass its original
+  normal deadline or the subsequent ordinary short-path 300-second attempt.
+  These failures and their diagnostics remain retained for #10638's eventual
+  evidence and PR limitations; they are not positive packet credit, an accepted
+  known flake, or permission to waive CI.
+- Upstream manifest movement requires fresh development qualification after
+  the checker owner preserves both upstream changes and its intended additions.
+  The earlier 4,148-node result is historical, not proof of the current
+  rebased implementation. No prospective packet count is recorded as executed.
+- The actual inventory on reviewed Dev
+  `5155bd04dafac9f25a72786f92a85d1fbcc63f21` reconciles all **68 projects**:
+  **40 strict (58.8%)**, **28 pending**, **zero basic or unclassified paths**;
+  **400 / 8,346 physical Python files (4.8%)** belong to existing strict scopes.
+  Compared with the prior 384/7,981 snapshot, 365 physical files were added,
+  including 16 within already-strict upstream owners. No new project admission
+  or credit from prepared checker/consumer work is inferred.
+- Actual consumer, immutable-root, copy/emitted, native and candidate-promotion
+  gates remain open, including #10331, #10362 and #10371. This effort and #9807
+  remain Active. This documentation slice changes no source policy, runtime,
+  installed payload or required CI and does not complete the campaign.

@@ -45,6 +45,21 @@ print(json.dumps({'bound':name}))
 """
 
 
+def test_configuration_rejects_registration_and_path_overrides_without_effects(tmp_path: Path) -> None:
+    command = SCRIPT.with_name("bind_knowledge.py")
+    for extra in (["--register"], ["--knowledge-path", str(tmp_path / "wrong-checkout")]):
+        result = subprocess.run(
+            [sys.executable, str(command), "--configuration", "preview",
+             "--harness", "sample", "--knowledge", "knowledge", *extra],
+            cwd=tmp_path, capture_output=True, text=True, timeout=5,
+            env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+                 "PYTHONSAFEPATH": "1"},
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
+        )
+        assert result.returncode == 1 and "Configuration only supports" in result.stderr
+        assert list(tmp_path.iterdir()) == []
+
+
 def _start(config: Path, name: str, mode: str = "preserve") -> subprocess.Popen[str]:
     return subprocess.Popen(
         [sys.executable, "-c", CHILD, str(SCRIPT), str(config), name, mode],
@@ -118,5 +133,6 @@ def test_capability_probe_is_available_before_repository_selection_without_effec
     assert json.loads(result.stdout) == {
         "version": 1, "registration_classes": ["knowledge", "worktree"],
         "preserves_registration_class": True, "control_plane_pair": True,
+        "existing_binding_configuration": 2,
     }
     assert list(tmp_path.iterdir()) == []

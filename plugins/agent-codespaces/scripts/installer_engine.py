@@ -368,6 +368,7 @@ def _child(
     environment: dict[str, str] | None = None, cwd: Path | None = None,
     candidate: Path | None = None,
     on_progress: Callable[[], None] | None = None,
+    allow_breakaway: bool = False,
 ) -> subprocess.CompletedProcess:
     env = dict(os.environ if environment is None else environment)
     if environment is None:
@@ -399,6 +400,7 @@ def _child(
                 procutil=procutil, construction_fd=descriptor,
                 on_output=relay if on_progress is not None or not output_fds else None,
                 output_fds=output_fds,
+                allow_breakaway=allow_breakaway,
                 **({
                     "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
                     "runtime_path": Path(runtime.__file__),
@@ -761,6 +763,7 @@ def _candidate(
         installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
         if not selected <= installed or (included - selected) & installed:
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     with _source_phase("source-selection", child_timeout, {}) as progress:
         def selected() -> None:

@@ -92,6 +92,10 @@ from test_owner_membership import (
     as _adopted_writable_connection_preserves_membership_commits,
 )
 from test_owner_membership_budget import (
+    test_selected_owner_capture_does_not_scan_unrelated_registries
+    as test_selected_owner_capture_does_not_scan_unrelated_registries,
+    test_only_writable_bootstrap_prepares_lookup_indexes
+    as test_only_writable_bootstrap_prepares_lookup_indexes,
     test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep
     as test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep,
     test_unknown_owner_large_history_has_actual_private_vm_cutoff
@@ -129,6 +133,8 @@ from test_worktree_writer_observation import (
     as test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot,
     test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts
     as test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts,
+    test_unknown_or_changed_slot_never_certifies_a_build
+    as test_unknown_or_changed_slot_never_certifies_a_build,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -172,7 +178,7 @@ def test_http51_capture_actual_observations(
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
     observed["worktree_record_delegation"] = health["capabilities"]["worktree_record_delegation"]
-    assert set(health["worktree_record_writer"]) == {"installation_root"}
+    assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)
     receipt = json.loads(capsys.readouterr().out)

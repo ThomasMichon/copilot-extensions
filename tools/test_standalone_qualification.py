@@ -221,7 +221,11 @@ def test_managed_fleet_packet_requires_all_exact_consumers_without_wider_budgets
     assert dict(os.environ) == original
 
 
-def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped():
+@pytest.mark.parametrize("portfolio,version,digest", [
+    ("pane-argv", "3.3.6", "a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947"),
+    ("mux-companion", "3.4.0", "a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721"),
+])
+def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped(portfolio, version, digest):
     workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]
     inputs = triggers["workflow_dispatch"]["inputs"]
@@ -238,9 +242,17 @@ def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped():
         step for step in job["steps"]
         if "run" in step and step.get("if") != "inputs.portfolio == 'mux-companion'"
     ]
-    assert "/v3.3.6/psmux-v3.3.6-windows-x64.zip" in prepare["run"]
+    assert prepare["env"] == {"PORTFOLIO": "${{ inputs.portfolio }}"}
+    default, companion = prepare["run"].split("if ($env:PORTFOLIO -eq 'mux-companion') {")
+    selection = default if portfolio == "pane-argv" else companion.split("}", 1)[0]
+    assert f"$version = '{version}'" in selection
+    assert f"$digest = '{digest}'" in selection
+    assert (
+        '"https://github.com/psmux/psmux/releases/download/v$version/'
+        'psmux-v$version-windows-x64.zip"'
+    ) in prepare["run"]
     assert "Get-FileHash" in prepare["run"] and "SHA256" in prepare["run"]
-    assert "a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947" in prepare["run"]
+    assert ").Hash -ne $digest)" in prepare["run"]
     assert qualify["env"]["PSMUX_FILE_LAUNCH_E2E"] == "1"
     assert qualify["env"]["EXPECTED_SOURCE"] == "${{ github.sha }}"
     assert "actual == os.environ['EXPECTED_SOURCE']" in qualify["run"]

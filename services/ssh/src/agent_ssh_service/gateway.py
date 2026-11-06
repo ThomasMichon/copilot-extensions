@@ -153,6 +153,7 @@ class SSHService:
             code = str(exc)
             status = 503 if code in {
                 "service-draining", "notification-waiter-limit", "native-relay-unavailable",
+                "stale-service-writer",
             } else 403
             return ServiceResponse(status, (), canonical({"error": code}))
         except (PlanError, UnicodeError, ValueError, RecursionError):

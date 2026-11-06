@@ -174,6 +174,8 @@ class MapRead(NamedTuple):
     status: str
     roots: list[dict]
     reason: str = ""
+    postures: list[dict] | None = None
+    posture_errors: list[str] | None = None
 
 
 def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
@@ -198,12 +200,23 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
             or not isinstance(data.get("roots"), list) or len(data["roots"]) > MAX_ROOTS
         ):
             raise ValueError("invalid guard-map schema, scope or completeness")
-        for row in data["roots"]:
+        postures = data.get("postures", [])
+        posture_errors = data.get("posture_errors", [])
+        if not isinstance(postures, list) or len(data["roots"]) + len(postures) > MAX_ROOTS:
+            raise ValueError("invalid repository posture inventory")
+        if (
+            data.get("posture_authority", "complete") not in {"complete", "partial"}
+            or not isinstance(posture_errors, list) or len(posture_errors) > MAX_ROOTS
+            or any(not isinstance(name, str) for name in posture_errors)
+        ):
+            raise ValueError("invalid repository posture completeness")
+        for index, row in enumerate(data["roots"] + postures):
             if (
                 not isinstance(row, dict)
                 or any(not isinstance(row.get(key), str) or not row[key]
                        for key in ("name", "delegate", "path"))
-                or row["delegate"] == "none" or not os.path.isabs(row["path"])
+                or (row["delegate"] == "none" and index < len(data["roots"]))
+                or not os.path.isabs(row["path"])
                 or (
                     "registered_path" in row
                     and (
@@ -220,7 +233,10 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
                 raise ValueError("invalid guarded anchor")
             if row["identity"]["root"] != os.path.normcase(os.path.abspath(row["path"])):
                 raise ValueError("guarded anchor path and identity disagree")
-        return MapRead("ready", data["roots"])
+        for row in postures:
+            if row.get("posture") not in {"", "reference", "worktree"} or type(row.get("elevated")) is not bool:
+                raise ValueError("invalid repository posture")
+        return MapRead("ready", data["roots"], postures=postures, posture_errors=posture_errors)
     except FileNotFoundError:
         return MapRead("missing", [], "guard map not prepared")
     except (OSError, UnicodeError, ValueError, TypeError, RuntimeError) as exc:
@@ -237,4 +253,6 @@ def matches(path: str, guarded: dict, *, identity_cache: dict | None = None) -> 
     if path not in cache:
         cache[path] = repository_identity(path)
     target = cache[path]
+    if target and guarded.get("posture") == "worktree" and target["root"] != identity["root"]:
+        return False
     return bool(target and target["common_dir"] == identity["common_dir"])

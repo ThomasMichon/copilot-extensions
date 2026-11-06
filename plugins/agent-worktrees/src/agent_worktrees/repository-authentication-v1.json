@@ -1,0 +1,7 @@
+{
+  "contract": "agent-worktrees.repository-authentication",
+  "version": 1,
+  "operations": ["inspect"],
+  "providers": ["github.com"],
+  "read_only": true
+}

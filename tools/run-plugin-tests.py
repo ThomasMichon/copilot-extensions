@@ -336,8 +336,6 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
             if name == "agent-index":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
-            if name == "worktree-manager":
-                cmd.extend(["-e", str(REPO / "plugins" / "agent-bridge")])
             if name == "agent-dispatch":
                 cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
@@ -362,6 +360,16 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                     if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh"} else ()
                 ),
             )
+            if name == "worktree-manager":
+                # Materialized consumers have separate copies of shared libraries;
+                # resolving both source graphs together gives UV conflicting URLs.
+                bridge = REPO / "plugins" / "agent-bridge"
+                arguments = ["--python", str(py), "-e", str(bridge)]
+                if reinstall or drifted:
+                    arguments.append("--reinstall")
+                run_uv_install(
+                    uv, arguments, cwd=bridge, trusted_source_roots=(REPO,), check=True,
+                )
         else:
             # Source-only targets and pyproject-less plugins import their
             # owning scripts directly; they need test tooling, not an editable.

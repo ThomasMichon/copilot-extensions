@@ -67,6 +67,130 @@ A first-start interruption may leave only the validated canonical lease file.
 That otherwise empty directory can retry through the same exclusive OS lease;
 a live holder or unrelated retained contents are never displaced or adopted.
 
+## Installed-application local lifecycle
+
+This service-local adapter follows
+[authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement)
+and the [application cutover contract](../../docs/patterns/fast-application-install-and-cutover.md).
+
+The internal `__source-start` receiver requires the selected nested application,
+its co-delivered canonical `qualify_installed_application` provider, the original
+`ssh-service` Source association and explicit `AGENT_SSH_SERVICE_HOME`.
+An older provider without that callable refuses as
+`installed-Source-provider-unsupported`; it is not retried through the legacy
+payload reader or an installer constructor. Association does not grant data,
+principal, privacy, configuration or serving authority.
+The receiver derives the slot from that explicit root and verifies native
+same-file identity against the interpreter slot before qualification. A Windows
+extended executable spelling must not change the pinned wheel-origin URI spelling.
+
+Supply the private policy with `--config <absolute-path>` or explicitly set
+`AGENT_SSH_SERVICE_CONFIG` for the generated startup callback. Policy and
+dedicated data remain outside the application root. Existing roots are validated,
+never ACL-repaired or silently adopted. Ordinary `--config` foreground execution
+retains its legacy lifetime writer guard.
+Containment uses resolved physical paths, including native spelling aliases,
+without rewriting the admitted installation-root or configuration spelling.
+
+Managed startup prepares a service-local authenticated native control worker.
+When an exact owner's authenticated health is not yet ready, startup resumes
+that owner's existing `prepare`/`activate` sequence instead of spawning another
+process. A lost resume reply or a final not-ready result remains an explicit
+failure without creating a duplicate owner in that attempt. A positive
+preparation refusal still permits fresh startup; different owners and unknown
+health retain their existing handling. No control schema or deadline changes.
+Discovery reconciles only positively dead or birth-reused native owners before
+applying the 32-live/uninspectable-owner bound. Changed records and uninspectable
+peers are retained. Missing, inaccessible or unrelated runtime roots are
+nonmatches, not authority to delete an owner. Request sweeps handle at most 32
+previously unhandled entries; orphaned handled files never disable new control
+work and remain under requester custody. Shutdown cancels and drains control
+operations, then joins the native-control thread without blocking its event
+loop; discovery is removed only after that worker has settled.
+Control-cell and launch I/O use the admitted data directory's physical path,
+while configuration bytes, credential references and fence/configuration
+identity retain the original admitted spelling.
+Windows long data roots remain the instance identity but are not passed as an
+overlong Win32 process current directory; the service uses absolute references.
+POSIX control requests place their temporary socket in a newly created,
+owner-private short directory, independent of data-root length. Native peer
+authentication and the strict socket-parent checks remain unchanged. Only the
+listener's own socket inode and an empty identity-matching directory are
+removed; unexpected entries/replacements are preserved with a cleanup refusal.
+An overlong configured temporary base still reports a socket-path limit.
+Canonical first provisioning requests the runtime root itself as `0700` before
+installer-input or lease descendants can implicitly create it under the umask.
+Existing modes/ownership are never repaired; the installed receiver still
+refuses a broadly accessible runtime root. Data/control roots retain their
+separate strict private-creation and admission requirements.
+Activation retains its disk worker through cancellation before removing native
+registration. Withdrawal marks the lifecycle stopped, and the original writer
+guard checks stopped/closed state at both claim and precommit. A retired incoming
+worker cannot later claim a healthy predecessor's fence. This does not undo a
+transaction that had already committed before withdrawal.
+ZDD `RuntimePreparation` is not serving readiness. Activation initializes the
+actual directory service, and health requires its current writer fence, a real
+store transaction and the existing connector's attached event. Discovery records
+are not ready files. Exact root, physical generation, original Source and
+configuration match plus native attestation are required for reuse.
+New owners launch the Source-qualified slot interpreter, not an inherited native
+executable alias. The co-delivered canonical native-path helper supplies its
+Windows extended spelling for native DLL imports; the existing retention
+bootstrap still verifies the same physical slot.
+
+Managed owners retain the same canonical OS writer guard **for every complete
+SQLite transaction**, rather than for the whole process. An additive
+`service_writer` row fences the captured owner. Activation, configuration
+admission and fence replacement commit atomically: held earlier work completes
+first; subsequent old-owner work refuses before committing. Invalid authority,
+revision rollback or moved selection rolls back activation without adopting a
+new owner. A lost activation reply remains uncertain; retries attest the same
+owner instead of rewinding a newer fence or selector.
+Fresh database creation and initialization use that same writer guard. Failed
+initialization removes only its own identity-matching, empty rolled-back file;
+existing, replaced, committed or unprovable files are never deleted or reset.
+
+Incoming activation does not require the previous process to stop, drain or
+acknowledge. The existing Gateway replaces attached generations; a service-local
+pre/post-admission fence prevents a ticket returned after ownership loss from
+being used. Earlier tickets retain the Gateway's existing monotonic-generation
+rejection. Old process retirement is independent. `__local-stop --config ...`
+requires an exact cohort and waits for that authenticated native peer's exit.
+A confirmed different writer stops route admission but retains native control
+until retirement is authorized. An unavailable ownership probe instead pauses
+admission with a stop-aware 250 ms retry backoff. Fresh ownership checks must
+succeed before a new admission or returned ticket can be used; temporary
+database locks do not permanently disable a still-current connector. Unavailable
+evidence never confirms ownership or authorizes retirement.
+Ownership probes run off the event loop through the existing thread boundary,
+including admission, credential-access and stale-owner rechecks. Cancellation
+retains and drains the bounded read-only SQLite probe before its caller settles;
+native control and other coroutines remain responsive while it finishes.
+Health, initialized preparation and queued retirement use the same off-loop
+boundary. Health rechecks ownership after the actual store transaction;
+preparation and health recheck stopped/closed state after awaiting their work.
+Queued retirement retains the original writer guard through its final loop-side
+selection and lifecycle checks. Cancellation or failed callback delivery
+withdraws that callback before the guard is released, so it cannot apply late.
+The existing local-control worker independently observes the current database
+fence and canonical selected slot, authenticates that exact owner's existing
+ready health, and rechecks both before scheduling and applying its own stop.
+Unavailable/unready evidence or a changed fence/selection cannot authorize stop.
+The existing foreground then drains and exits; incoming installation never
+waits for this observation, drain or exit. No retirement timer or new reaper is
+introduced. Explicit stop remains supported, and unrelated or inconsistent
+failures still propagate. There is no PID-only or foreign-owner fallback.
+
+**Compatibility limits:** an old lifetime-lease owner is preserved and transfer
+refuses; this is not seamless migration from an unaware legacy binary. Current
+legacy foreground refuses a database already managed by a writer fence.
+Configuration and enrollment generation floors, public data and original request
+correlations remain unchanged. Managed native-relay transfer is explicitly
+unsupported: database fencing cannot transfer its real listener, fixed artifacts
+or child custody. The existing legacy relay path remains supported separately.
+Neither passive preparation nor Windows/synthetic-connector tests qualify an
+external Gateway, Linux/OpenSSH relay or live fleet deployment.
+
 ## Optional explicit peer approval
 
 Select this additional nonsecret configuration only on a capable service:
@@ -180,6 +304,9 @@ that namespace before dispatch:
   bounded, logged backoff until their lifetime owner stops them; they catch up
   from the same directory revision. Capacity pressure does not permanently
   retire a connected machine's notification consumer.
+  An outgoing route whose writer has been fenced also returns HTTP 503 while
+  the successor attaches. Its watch retries from the same revision; the writer
+  check remains mandatory, and authentication/authorization refusals stay fatal.
   No cursor or
   per-client event queue is stored; reconnect reads the current snapshot and
   cannot miss a machine merely because a transient notification was lost.
@@ -218,6 +345,11 @@ artifact flow, then the existing lifecycle/container manager invokes:
 python -I -m agent_ssh_service --config <absolute-service-policy.json>
 ```
 
+The wheel also declares `agent-ssh-service` as a console entry point. Source
+development resolves `agent-procutil` and `agent-single-instance-lease` from
+their canonical repository libraries; deployment consumes their non-editable
+wheels. Neither dependency is a separate service launched by this entry point.
+
 The foreground entry point retains one daemon-instance admission through the
 registered service and any unsettled native-relay retirement. Production has
 no expiry; explicitly test-owned instances use their caller's lease. The native
@@ -239,6 +371,12 @@ Do not run two hosts against one retained volume.
 This entry point is not a bespoke install/cutover command. Standalone lifecycle,
 immutable image construction, selected role placement, actual native SSH,
 rollout and rollback remain distinct from a running control-plane channel.
+
+`tests/test_source_free_runtime.py` exercises installed consumers with checkout
+reads and startup `.pth` loading disabled. A repository-local test sandbox may
+expose only its explicitly selected fixture data; Python source and bytecode
+reads there remain refused. This is installed control-plane fixture evidence,
+not generated-application installation or native SSH rollout qualification.
 
 ## Optional native relay
 
@@ -316,7 +454,7 @@ placement and preserving migration/rollback need their own evidence.
 
 ## Python type checking
 
-The `service-ssh` project in `tools/typecheck-projects.json` checks all 26
+The `service-ssh` project in `tools/typecheck-projects.json` checks all 35
 canonical Python source and test files, including native and installed-consumer
 fixtures, strictly for Linux and Windows with Python 3.10 analysis. The runtime
 minimum remains Python 3.10; static platform analysis is not native execution.
@@ -341,3 +479,8 @@ are described in the repository's `TESTING.md`.
 Artifact fixtures make only their own copied build directory owner-writable
 when the input tree is read-only. Source-free process interception retains a
 stable process type independently of the patched constructor.
+The installed Source provider's co-delivered binding remains a dynamic boundary:
+the receiver does not import its implementation from a source checkout.
+Local lifecycle, native channels, writer fencing and readiness observation use
+the existing service and SDK types; test-only native and lifecycle doubles use
+explicit casts without changing their assertions or runtime custody.

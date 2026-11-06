@@ -82,13 +82,23 @@ canonical transitions were retained.
 
 The private capture bounds physical query execution, not just returned rows:
 100,000 SQLite VM steps shared across the capture, a 100-step progress interval
-and a 50 ms cooperative compute deadline. Private connections have zero SQLite
+and a 50 ms cooperative elapsed read deadline, including connection, filesystem,
+query and materialization work. Private connections have zero SQLite
 busy timeout, and native value-length limits where supported. Python
 materialization checks the same budget between bounded records. No schema/index
 preparation occurs, and no canonical progress handler or validator is replaced.
 Source file identity, database authority, serving generation and mutation
 revision are fenced before materialization; a raced or exhausted capture is an
 explicit gap/unavailable read, not an empty complete set.
+
+Ordinary writable database bootstrap prepares three expression indexes matching
+the reader's exact canonical-owner predicate across owned sessions, relationships
+and represented registrations. JSON-backed indexes exclude malformed JSON;
+session-qualified references retain the same owner normalization. Selected reads
+need not scan unrelated owners' retained rows. Read-only opening, existing-only
+writable adoption and passive capture never prepare these indexes. Older or
+unprepared stores retain bounded scans and explicit budget failures; no new
+schema version, capability, prerequisite command or reader retry is required.
 
 Changes are qualified `observed-change`, not reconstructed native claim events.
 The projection is auxiliary, in-memory and serving-generation scoped. It is not
@@ -172,6 +182,10 @@ and real SQLite VM-work controls for large unrelated history and unknown owners,
 unrelated EventLog commits, private progress-handler isolation, coalescing and
 actual explicit transaction paths. These controls do not substitute a row-count
 limit or a wall-clock benchmark for physical query budgeting.
+An indexed control includes 10,000 unrelated rows in each registry, selected
+session-qualified owners, malformed JSON and an absent owner under one VM budget.
+An old-store control retains bounded failure without read-side preparation and
+verifies ordinary writable reopening preserves records while preparing lookups.
 
 The HTTP-51 capture portfolio expands under its existing owner, family and
 generation; historical captures are not rewritten. Source tests and prepared

@@ -13,10 +13,12 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
+from typing import NamedTuple
 
 
 class ApplicationStartupUncertain(RuntimeError):
-    """Published application work can only be reconciled by its owner."""
+    """Startup was invoked; only its application owner can reconcile its effects."""
 
     def __init__(self, slot: Path):
         self.slot = slot
@@ -134,13 +136,30 @@ def _application(slot: Path) -> dict:
     return record
 
 
-@contextmanager
-def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
+class InstalledApplicationSource(NamedTuple):
+    """Source/profile association, not application health or root admission."""
+
+    slot: Path
+    root: Path
+    python: Path
+    identity: object
+    payload_hash: str
+    profile_lock_id: str
+
+
+def _resources(slot: Path):
     runtime_path = slot / "runtime"
     runtime = _load(runtime_path / "versioned_runtime.py", "versioned_runtime")
-    sys.path.insert(0, str(runtime_path))
-    engine = _load(runtime_path / "installer_engine.py", "_application_engine")
-    from installer_wheel_inputs import WheelLimits, inspect_archive
+    previous = sys.path[:]
+    try:
+        sys.path.insert(0, str(runtime_path))
+        engine = _load(runtime_path / "installer_engine.py", "_application_engine")
+    finally:
+        sys.path[:] = previous
+    return runtime, engine
+
+
+def _construction_inputs(slot: Path, record: dict, runtime, engine, deadline: float):
     inputs = record["construction"]
     fields = {
         "identity", "runtime_version", "payload_hash", "source_hash", "wheel_inputs",
@@ -150,14 +169,20 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
         raise ValueError("regular install requires the actual Source/profile construction inputs")
     source_bytes = _read(slot / "runtime-source.json")
     declaration = _read(slot / "application.json", limit=4 << 20)
+    if not isinstance(inputs["identity"], dict):
+        raise ValueError("application construction identity must be an object")
     source = inputs["identity"].get("runtime_source")
+    source_owner = runtime._runtime_component("versioned_runtime_source")
+    identity = source_owner.parse_source_identity(source)
     if (
         source_bytes is None or json.loads(source_bytes) != source
-        or source["runtime_version"] != engine.runtime_source.runtime_version(
-            source["package_version"], source["source_commit"], source["assembly_hash"],
-        )
+        or declaration is None or json.loads(declaration) != record
         or inputs["identity"].get("runtime_version") != source["runtime_version"]
-        or re.fullmatch(r"[0-9a-f]{64}", inputs["source_hash"]) is None
+        or any(
+            not isinstance(inputs[key], str)
+            or re.fullmatch(r"[0-9a-f]{64}", inputs[key]) is None
+            for key in ("source_hash", "payload_hash")
+        )
         or any(
             not isinstance(inputs[key], list)
             or len(set(inputs[key])) != len(inputs[key])
@@ -166,7 +191,6 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
         )
     ):
         raise ValueError("application construction inputs differ from their Source identity")
-    deadline = time.monotonic() + 600
     wheels = engine.WheelReuseInputs(
         slot.name, json.dumps(inputs["wheel_inputs"], sort_keys=True, separators=(",", ":")),
         deadline,
@@ -197,15 +221,129 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
         "local_packages": inputs["local_packages"],
         **({"extras": inputs["extras"]} if inputs["extras"] else {}),
     }
+    return SimpleNamespace(
+        inputs=inputs, identity=identity, source=source, source_bytes=source_bytes,
+        declaration=declaration, wheels=wheels, receipt=receipt, origins=origins, proof=proof,
+    )
+
+
+def _unchanged_application(slot: Path, association, engine):
+    if (
+        _read(slot / "runtime-source.json") != association.source_bytes
+        or _read(slot / "application.json", limit=4 << 20) != association.declaration
+        or json.loads(_read(slot / ".runtime-input-origins.json", limit=4 << 20)) != association.proof
+    ):
+        raise RuntimeError("application construction inputs changed before publication")
+    engine.verify_application_wheels(association.wheels, slot)
+
+
+def _inspect_application_wheels(slot: Path, association, engine, deadline: float):
+    from installer_wheel_inputs import WheelLimits, inspect_archive
+
+    wheels, receipt = association.wheels, association.receipt
+    engine.verify_application_wheels(wheels, slot)
+    rows = receipt["binding"].get("wheels")
+    if (
+        not isinstance(rows, list) or len(rows) != len(wheels.distributions)
+        or {row["name"] for row in rows} != receipt["distributions"].keys()
+    ):
+        raise ValueError("application profile does not cover its complete wheel set")
+    limits = WheelLimits(
+        max_archive_bytes=128 << 20, max_expanded_bytes=1 << 30,
+        max_member_bytes=512 << 20, max_metadata_bytes=16 << 20,
+        max_members=100_000, max_tags=10_000, max_metadata_member_bytes=4 << 20,
+    )
+    expanded = 0
+    for row in rows:
+        with engine._open(slot / "wheels" / row["filename"]) as archive:
+            facts = inspect_archive(archive, limits=limits, deadline=deadline)
+        expanded += facts.unpacked_size
+        if (
+            expanded > limits.max_expanded_bytes
+            or re.sub(r"[-_.]+", "-", facts.name).lower() != row["name"]
+            or any(row[key] != receipt["distributions"][row["name"]][key]
+                   for key in ("version", "filename", "sha256"))
+            or facts.version != row["version"]
+            or facts.requires_python != row["requires_python"]
+            or list(facts.requires_dist) != row["requires_dist"]
+            or list(facts.provides_extras) != row["provides_extras"]
+        ):
+            raise ValueError("application wheel metadata differs from its Source/profile")
+
+
+def qualify_installed_application(
+    slot: Path, *, component: str, command: str, entry_point: str,
+    deadline: float | None = None,
+) -> InstalledApplicationSource:
+    """Read selected completed Source/profile evidence without lifecycle effects.
+
+    Use the existing isolated, no-bytecode startup context. This neither imports
+    application code nor replaces installed health, root or provider admission.
+    """
+    if not sys.flags.isolated or not sys.dont_write_bytecode:
+        raise ValueError("application Source reading requires isolated no-bytecode Python")
+    if not slot.is_absolute():
+        raise ValueError("application Source reading requires an absolute physical slot")
+    slot = slot.resolve(strict=True)
+    root = slot.parent.parent
+    if slot.parent.name != "versions" or slot.name == "dev":
+        raise ValueError("application Source reading requires a numbered version slot")
+    for directory in (root, slot.parent, slot, slot / ".venv"):
+        state = directory.lstat()
+        if (
+            not stat.S_ISDIR(state.st_mode) or directory.is_symlink()
+            or getattr(state, "st_file_attributes", 0) & 0x400
+        ):
+            raise ValueError("application Source slot must be an ordinary directory")
+    record = _application(slot)
+    if record["name"] != command or record["module"] != entry_point:
+        raise ValueError("application command differs from the expected entry point")
+    runtime, engine = _resources(slot)
+    python = runtime.slot_python(root, slot.name)
+
+    def normalized(path):
+        return os.path.normcase(runtime._normalize_windows_extended_path(os.path.abspath(path)))
+
+    if (
+        python is None or normalized(sys.executable) != normalized(python)
+        or not Path(sys.prefix).samefile(slot / ".venv")
+    ):
+        raise ValueError("application Source interpreter differs from the physical slot")
+    deadline = deadline if deadline is not None else time.monotonic() + 600
+    association = _construction_inputs(slot, record, runtime, engine, deadline)
+    if association.identity.plugin != component:
+        raise ValueError("application Source component differs from the expected component")
+    selected = (slot.name + "\n").encode("utf-8")
+    if (
+        _read(root / "current-version") != selected
+        or not runtime.is_complete(root, slot.name, expect_hash=association.inputs["payload_hash"])
+    ):
+        raise ValueError("application Source slot is not selected and complete")
+    _inspect_application_wheels(slot, association, engine, deadline)
+    runtime.require_immutable_environment(slot)
+    _unchanged_application(slot, association, engine)
+    if (
+        _read(root / "current-version") != selected
+        or not runtime.is_complete(root, slot.name, expect_hash=association.inputs["payload_hash"])
+    ):
+        raise RuntimeError("application Source selection changed while reading")
+    return InstalledApplicationSource(
+        slot, root, python, association.identity,
+        association.inputs["payload_hash"], association.receipt["lock_id"],
+    )
+
+
+@contextmanager
+def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
+    runtime_path = slot / "runtime"
+    runtime, engine = _resources(slot)
+    deadline = time.monotonic() + 600
+    association = _construction_inputs(slot, record, runtime, engine, deadline)
+    inputs, source = association.inputs, association.source
+    wheels, origins, proof = association.wheels, association.origins, association.proof
 
     def unchanged():
-        if (
-            _read(slot / "runtime-source.json") != source_bytes
-            or _read(slot / "application.json", limit=4 << 20) != declaration
-            or json.loads(_read(slot / ".runtime-input-origins.json", limit=4 << 20)) != proof
-        ):
-            raise RuntimeError("application construction inputs changed before publication")
-        engine.verify_application_wheels(wheels, slot)
+        _unchanged_application(slot, association, engine)
 
     def run(argv):
         command = list(argv)
@@ -239,34 +377,7 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
                 runtime.check_admission(root, slot.name, payload_hash=inputs["payload_hash"]), slot.name,
             )
             complete = runtime.is_complete(root, slot.name, expect_hash=inputs["payload_hash"])
-            engine.verify_application_wheels(wheels, slot)
-            rows = receipt["binding"].get("wheels")
-            if (
-                not isinstance(rows, list) or len(rows) != len(wheels.distributions)
-                or {row["name"] for row in rows} != receipt["distributions"].keys()
-            ):
-                raise ValueError("application profile does not cover its complete wheel set")
-            limits = WheelLimits(
-                max_archive_bytes=128 << 20, max_expanded_bytes=1 << 30,
-                max_member_bytes=512 << 20, max_metadata_bytes=16 << 20,
-                max_members=100_000, max_tags=10_000, max_metadata_member_bytes=4 << 20,
-            )
-            expanded = 0
-            for row in rows:
-                with engine._open(slot / "wheels" / row["filename"]) as archive:
-                    facts = inspect_archive(archive, limits=limits, deadline=deadline)
-                expanded += facts.unpacked_size
-                if (
-                    expanded > limits.max_expanded_bytes
-                    or re.sub(r"[-_.]+", "-", facts.name).lower() != row["name"]
-                    or any(row[key] != receipt["distributions"][row["name"]][key]
-                           for key in ("version", "filename", "sha256"))
-                    or facts.version != row["version"]
-                    or facts.requires_python != row["requires_python"]
-                    or list(facts.requires_dist) != row["requires_dist"]
-                    or list(facts.provides_extras) != row["provides_extras"]
-                ):
-                    raise ValueError("application wheel metadata differs from its Source/profile")
+            _inspect_application_wheels(slot, association, engine, deadline)
             proof_path = slot / ".runtime-input-origins.json"
             previous = _read(proof_path, limit=4 << 20)
             if previous is None and not complete:
@@ -324,9 +435,21 @@ def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
         [str(slot / (record["name"] + ".py"))] if ":" in record["module"]
         else ["-m", record["module"]]
     )
+    python, cwd = sys.executable, None
+    if os.name == "nt":
+        _, engine = _resources(slot)
+        python, cwd = engine._native_retained_path(python), slot.anchor
+        target = [
+            "-c", "import os,runpy,sys\n"
+            f"os.chdir({engine._native_retained_path(slot)!r})\n"
+            "target=sys.argv.pop(1)\n"
+            "runpy.run_module(sys.argv.pop(1), run_name='__main__', alter_sys=True) "
+            "if target == '-m' else runpy.run_path(target, run_name='__main__')",
+            *target,
+        ]
     result = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-B", *target, *command],
-        executable=sys.executable, env=environment, timeout=180,
+        [python, "-I", "-X", "utf8", "-B", *target, *command],
+        executable=python, cwd=cwd, env=environment, timeout=180,
         stdout=sys.stdout, stderr=sys.stderr,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )

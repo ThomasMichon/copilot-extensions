@@ -31,6 +31,7 @@ def _load(name: str) -> ModuleType:
 
 bk = _load("bind_knowledge")
 cp = _load("control_plane_binding")
+configuration = _load("binding_configuration")
 
 
 @pytest.fixture
@@ -56,6 +57,7 @@ def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PairFixture:
         "legacy_compatible": True,
     }
     registry: dict[str, Any] = {
+        "platform": bk._current_platform_key(),
         "repos": [
             {
                 "name": name,
@@ -92,7 +94,7 @@ def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PairFixture:
             }
         elif args in (["state-root", "--json"], ["-p", "harness", "state-root", "--json"]):
             config = home / ".harness" / "config.yaml"
-            if not config.is_file():
+            if not config.is_file() or "knowledge_repo:" not in config.read_text(encoding="utf-8"):
                 return subprocess.CompletedProcess(
                     args, 3, json.dumps({
                         "source": "knowledge_repo", "requires_external": True,
@@ -115,6 +117,7 @@ def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PairFixture:
     monkeypatch.setattr(bk, "knowledge_origin", lambda path: f"file:///example/{Path(path).name}")
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
     monkeypatch.setattr(cp, "validate_checkout", lambda _path: None)
+    monkeypatch.setattr(configuration, "control_plane_binding", cp)
     return home, harness, knowledge, topology, roles, registry, calls
 
 
@@ -151,10 +154,10 @@ def test_fresh_pair_uses_normal_writer_without_prior_local_config(pair: PairFixt
     assert list(knowledge.iterdir()) == [topology]
 
 
-def test_preflight_shares_one_inventory_but_writer_reads_registration_again(pair: PairFixture) -> None:
+def test_preflight_confirms_inventory_after_probes_and_writer_reads_again(pair: PairFixture) -> None:
     home, harness, knowledge, _topology, _roles, _registry, calls = pair
     selected = _resolve(pair)
-    assert sum(args == ["repos", "list", "--json"] for args, _ in calls) == 1
+    assert sum(args == ["repos", "list", "--json"] for args, _ in calls) == 2
 
     bk.bind(
         selected["harness"], selected["knowledge"], str(knowledge),
@@ -162,7 +165,127 @@ def test_preflight_shares_one_inventory_but_writer_reads_registration_again(pair
         assemble_plugins=False, preserve_binding=True,
     )
 
-    assert sum(args == ["repos", "list", "--json"] for args, _ in calls) == 2
+    assert sum(args == ["repos", "list", "--json"] for args, _ in calls) == 3
+
+
+def test_existing_binding_preview_apply_uses_real_preserving_writer(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, harness, knowledge, topology, _roles, registry, calls = pair
+    original_bind = bk.bind
+    monkeypatch.setattr(bk, "bind", lambda *args, **kwargs: original_bind(
+        *args, **{**kwargs, "assemble_plugins": False},
+    ))
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    before = topology.read_bytes(), json.dumps(registry, sort_keys=True)
+    proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    assert proposed["operation"] == "set" and proposed["target"]["resource"] == "harness/knowledge"
+    assert not home.exists()
+    result = configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
+    assert result["status"] == "persisted" and result["pointer_committed"] is True
+    config = home / ".harness" / "config.yaml"
+    assert "knowledge_repo: knowledge" in config.read_text(encoding="utf-8")
+    assert (topology.read_bytes(), json.dumps(registry, sort_keys=True)) == before
+    assert not any(args[:2] == ["repos", "add"] for args, _ in calls)
+    assert list(harness.iterdir()) == []
+    matching = config.read_bytes(), config.stat().st_mtime_ns
+    again = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    configuration.apply(bk, "native-owner", "harness", "knowledge", again["token"])
+    assert (config.read_bytes(), config.stat().st_mtime_ns) == matching
+
+
+@pytest.mark.parametrize("changed", ["registration", "configuration", "late-configuration"])
+def test_existing_binding_rechecks_preview_without_overwriting_new_state(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    home, _harness, _knowledge, _topology, _roles, registry, _calls = pair
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    config = home / ".harness" / "config.yaml"
+    proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    if changed == "registration":
+        registry["repos"][-1]["default_branch"] = "changed"
+    else:
+        config.parent.mkdir(parents=True)
+        config.write_text("# another writer\nrepo_name: harness\n", encoding="utf-8")
+    before = config.read_bytes() if config.exists() else None
+    if changed == "late-configuration":
+        # The first read succeeds; the only write boundary sees the changed baseline.
+        proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+        original = bk._binding_yaml.write_binding
+
+        def write(*args: Any, **kwargs: Any) -> None:
+            config.write_bytes(b"# newer winning writer\nrepo_name: harness\n")
+            original(*args, **kwargs)
+
+        monkeypatch.setattr(bk._binding_yaml, "write_binding", write)
+        before = b"# newer winning writer\nrepo_name: harness\n"
+    with pytest.raises(RuntimeError, match="preview changed|registration is not ready"):
+        configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
+    assert (config.read_bytes() if config.exists() else None) == before
+
+
+def test_existing_binding_refuses_registration_changed_during_final_preflight(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, _harness, _knowledge, _topology, _roles, registry, _calls = pair
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    original = bk._run_agent_worktrees
+    observations = 0
+
+    def native(command: str, args: list[str], **kwargs: Any) -> Any:
+        nonlocal observations
+        result = original(command, args, **kwargs)
+        if args == ["-p", "harness", "state-root", "--json"]:
+            observations += 1
+            if observations == 2:
+                registry["repos"][-1]["default_branch"] = "changed"
+        return result
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", native)
+    with pytest.raises(RuntimeError, match="registration changed during binding preflight"):
+        configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
+    assert not (home / ".harness" / "config.yaml").exists()
+
+
+def test_existing_binding_retains_pointer_receipt_after_legacy_cleanup_failure(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, *_ = pair
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    legacy = home / ".harness" / "knowledge-binding.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"\xff")
+    proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    result = configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
+    assert result["status"] == "incomplete" and result["pointer_committed"] is True
+    assert "knowledge_repo: knowledge" in legacy.with_name("config.yaml").read_text("utf-8")
+    assert legacy.read_bytes() == b"\xff"
+
+
+def test_direct_configuration_apply_uses_native_registry_transaction(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = []
+
+    def native(command: str, args: list[str], **kwargs: Any) -> Any:
+        calls.append((command, args, kwargs))
+        return subprocess.CompletedProcess(args, 1, json.dumps({
+            "status": "incomplete", "pointer_committed": True,
+        }), "")
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", native)
+    assert bk.main([
+        "--harness", "harness", "--knowledge", "knowledge",
+        "--agent-worktrees-path", "selected-owner", "--configuration", "apply",
+        "--preview-token", "a" * 64, "--json",
+    ]) == 1
+    assert json.loads(capsys.readouterr().out)["pointer_committed"] is True
+    assert calls == [("selected-owner", [
+        "repos", "configuration", "knowledge-apply", "--context-project", "harness",
+        "--repository", "knowledge", "--preview-token", "a" * 64,
+    ], {"noninteractive": True})]
+    assert not pair[0].exists()
 
 
 @pytest.mark.parametrize("change", ["removed", "repointed"])
@@ -387,6 +510,7 @@ def test_native_platform_drives_pair_paths_and_normal_inspection(
 ) -> None:
     home, harness, knowledge, *_ = pair
     original: Callable[..., subprocess.CompletedProcess[str]] = bk._run_agent_worktrees
+    pair[-2]["platform"] = platform
     for entry, path in zip(pair[-2]["repos"], (harness, knowledge)):
         entry["paths"] = {platform: str(path)}
 

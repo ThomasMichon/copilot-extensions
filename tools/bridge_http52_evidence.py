@@ -31,10 +31,11 @@ AFFECTED = (
         "acp_client.py", "acp_callbacks.py", "acp_current_requests.py",
         "session_current_requests.py", "resume_cli_contract.py",
         "event_tool_statistics.py", "session_tool_statistics.py",
+        "owner_membership_schema.py",
         "cli_mode_models.py", "cli_mode_provider.py", "db_inbox_custody.py",
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
-        "session_lifecycle_cli.py",
+        "session_lifecycle_cli.py", "worktree_writer_observation.py",
         "_peer_launch.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
@@ -71,6 +72,8 @@ PROBES = {
     **retained.PROBES,
     "test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep": 1,
     "test_unknown_owner_large_history_has_actual_private_vm_cutoff": 1,
+    "test_selected_owner_capture_does_not_scan_unrelated_registries": 1,
+    "test_only_writable_bootstrap_prepares_lookup_indexes": 1,
     "test_actual_local_callback_future_reaches_http_without_history_inference": 1,
     "test_optional_wire_is_explicit_and_never_added_to_old_or_history_reads": 1,
     "test_optional_cli_negotiates_actual_provider_before_sending_new_query": 4,
@@ -99,8 +102,9 @@ PROBES = {
     "test_bridge_provider_receiver_and_extensions_share_one_conversation": 2,
     "test_provider_owner_uses_the_actual_client_interface": 1,
     "test_health_observes_canonical_writer_selection_without_launch": 5,
-    "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 1,
+    "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 2,
     "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
+    "test_unknown_or_changed_slot_never_certifies_a_build": 10,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {

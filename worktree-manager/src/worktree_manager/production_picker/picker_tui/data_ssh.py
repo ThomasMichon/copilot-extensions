@@ -72,6 +72,10 @@ machine_source_id = source_identity.machine_ssh_id
 _LOG = logging.getLogger(__name__)
 
 
+def knowledge_readiness() -> dict:
+    return data_local.knowledge_readiness()
+
+
 class Source:
     """One machine/environment the picker loads worktrees from.
 

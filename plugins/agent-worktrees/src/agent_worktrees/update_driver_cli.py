@@ -29,11 +29,38 @@ def _invocation_cwd() -> Path:
     return (core._INVOCATION_CWD or Path.cwd()).resolve()
 
 
-def _request_context() -> tuple[tuple[str, str], ...]:
+def _request_context(*, controller: bool = False, cwd: Path | None = None) -> tuple[tuple[str, str], ...]:
     context = dict(_context())
     selected = update_cli._invocation_update_context()
     if selected is not None:
         context["AGENT_WORKTREES_UPDATE_CONTEXT"] = str(selected)
+    if context.get("WORKTREE_MANAGER_ROOT") or controller:
+        directory = cwd or _invocation_cwd()
+        configured = context.get("WORKTREE_MANAGER_ROOT")
+        root = Path(configured).expanduser() if configured else None
+        if root is not None and not root.is_absolute():
+            root = directory / root
+        if controller:
+            from . import control_plane_providers, manager_launch_cli
+
+            registry = control_plane_providers._machine_control_plane_providers_dir()
+            if not registry.is_absolute():
+                registry = directory / registry
+            provider, error = manager_launch_cli._control_plane_provider_selection(directory=registry)
+            if error:
+                raise ValueError(error)
+            if provider is not None and provider.provider != "worktree-manager":
+                raise ValueError("Project update requires the selected Manager provider")
+            registered = Path(provider.provider_root) if provider and provider.provider_root else None
+            if registered is not None and not registered.is_absolute():
+                raise ValueError("Registered Manager root must be absolute")
+            if root is not None and registered is not None and root.resolve() != registered.resolve():
+                raise ValueError("Manager root disagrees with its registration")
+            root = root or registered or Path.home() / ".worktree-manager"
+        if root is not None:
+            if not root.is_absolute():
+                raise ValueError("Manager root requires an absolute invocation directory")
+            context["WORKTREE_MANAGER_ROOT"] = str(root.resolve())
     return tuple(context.items())
 
 
@@ -94,6 +121,7 @@ def _flags(args: argparse.Namespace) -> list[str]:
 def cmd_update_request(args: argparse.Namespace) -> int:
     import update_driver as driver
 
+    controller = os.environ.pop("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "") == "1"
     update_cli.update_options.validate_auth_flags(args)
     if getattr(args, "inventory", False):
         from .installation_updates import print_inventory
@@ -174,14 +202,26 @@ def cmd_update_request(args: argparse.Namespace) -> int:
                     ):
                         raise driver.StateError("engine installation changed after submission")
                     custody.assert_owned()
-                    return update_cli.cmd_update(args)
+                    previous = getattr(args, "_controller_request", None)
+                    args._controller_request = request.spec
+                    try:
+                        return update_cli.cmd_update(args)
+                    finally:
+                        if previous is None:
+                            del args._controller_request
+                        else:
+                            args._controller_request = previous
+        from .project_update_controller import probe_for_submission
+
+        cwd = _invocation_cwd()
+        selection = True if controller else probe_for_submission(args, cwd=cwd)
+        controller = selection is True
         project = cfg.active_project()
         flags = _flags(args)
         bypass = ["--no-manager"] if getattr(args, "no_manager", False) else []
-        cwd = _invocation_cwd()
         spec = driver.RequestSpec(
             backend="engine", argv=tuple([*bypass, *flags]), project=project or "", cwd=str(cwd),
-            source=str(cfg.install_dir().resolve()), context=_request_context(),
+            source=str(cfg.install_dir().resolve()), context=_request_context(controller=controller, cwd=cwd),
             repair=not getattr(args, "auto", False),
         )
         project_args = ["--project", project] if project else []

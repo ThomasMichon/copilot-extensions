@@ -57,9 +57,11 @@ Equivalent trusted validation is reused only with complete, current evidence
 for its actual input and coverage contract. Source and generated-output checks,
 native platforms, installation acceptance and stress coverage retain their
 independent assurance in periodic containerized validation where their
-contracts differ. Promotion and required PR test orchestration admit only
-bounded units with coverage; integration cannot remain a transitive release
-dependency through a qualification or preflight wrapper.
+contracts differ. Required PR test orchestration and promotion's general test
+portfolio admit only bounded units with coverage. The release-pipeline vision's
+explicit bounded construction/launch and Windows Resume qualifications remain
+separate exceptions; no other integration becomes a transitive release dependency
+through a qualification or preflight wrapper.
 
 ### supported-capacity-and-review-headroom
 
@@ -146,8 +148,9 @@ unexplained administrative emergency.
 - No weakening contributor acceptance, fork isolation or required validation.
 - No automatic rollout or temporary policy relaxation inferred from plan approval.
 - No hidden failure or discarded ownership when integration leaves the gate.
-  Platform, generated-output, installation and stress tests remain periodic,
-  not promotion prerequisites.
+  General platform, generated-output, installation and stress portfolios remain
+  periodic, not promotion prerequisites; the release-pipeline vision owns its
+  explicit bounded release qualifications.
 - No unsupported failover claim, untrusted workload admission or capacity grant
   inferred from an available runner.
 - No competing test portfolio or release controller; this vision governs their

@@ -11,6 +11,11 @@ The independent optional [current-head agenda contract](worktree-agendas.md)
 uses the same resident owner and process boundary, not fields added to roster
 rows or a dependency on a planning runtime.
 
+The provider-first [repository authentication inspection](repository-authentication.md)
+has a separate version-1 response and package-data support declaration bound to
+the selected immutable runtime. It is optional and is not part of registration,
+preference catalog reads or the resident worktree feed.
+
 Ordinary CLI JSON lists wait for a usable current resident publication before
 emitting a response. Cold owner startup, temporary publication contention and
 short transport timeouts remain internal wait states; the caller owns the

@@ -24,6 +24,9 @@ class PickerScreenModelMixin:
             bset = []
             if self._tab_supports("create"):
                 bset.append("N")
+            if getattr(self, "_knowledge_readiness", {}).get("ready") is not True:
+                if callable(getattr(self.src, "knowledge_readiness", None)):
+                    bset.append("KB")
             scoped = self._scope_data()
             if any(self._record_supports(rec, "cleanup") for rec in scoped):
                 bset.append("K")

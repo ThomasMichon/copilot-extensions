@@ -130,7 +130,7 @@ def test_native_launch_acceptance_is_explicit_and_source_pinned() -> None:
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     assert trigger["workflow_dispatch"]["inputs"]["native_launch"] == {
-        "description": "Qualify copied native setup, POSIX terminal ownership and cross-entrypoint mux admission",
+        "description": "Qualify native entry, paired Sync, copied setup, terminal ownership and mux admission",
         "type": "boolean", "default": False,
     }
     job = workflow["jobs"]["native-launch-windows"]
@@ -744,6 +744,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "update-diagnostics-linux", "update-diagnostics-windows",
         "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
+        "gateway-role-tunnels", "gateway-host-application-linux", "gateway-host-application-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
@@ -765,11 +766,12 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "interactive-completion-linux", "interactive-completion-macos",
         "interactive-completion-windows",
         "native-launch-windows",
+        "worktree-entry-sync-linux", "worktree-entry-sync-windows",
         "native-seed-reply-linux", "native-seed-reply-macos",
         "ssh-headless-linux", "ssh-headless-windows",
         "update-diagnostics-linux", "update-diagnostics-windows",
         "packaging-seed-linux", "packaging-seed-windows",
-        "runtime-removal-macos",
+        "runtime-removal-macos", "runtime-removal-windows",
         "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
         "windows-native-process",
         "native-daemon-exit-windows",

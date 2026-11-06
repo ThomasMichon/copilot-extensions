@@ -15,6 +15,7 @@ GET_KEYS: dict[str, str] = {
     "execution-identity": "Versioned configured execution identity (JSON)",
     "platform": "Platform (win/wsl/linux)",
     "project": "Project name",
+    "update-controller": "Configured project update controller (empty when absent)",
     "owner-ref": "This worktree's qualified claim ref "
     "(machine/project/worktree_id[#session]) -- the cross-machine "
     "holder identity for resource leases; empty if not in a worktree",
