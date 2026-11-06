@@ -347,8 +347,13 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
             )
             assert result.returncode == 0, result.stderr
             assert not result.stderr
-            assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
-        assert seen == [("postToolUse", payload), ("postToolUse", payload)]
+            if event_case == "late-watch":
+                assert result.stdout == ""
+                assert (session / "local-guidance-watch.json").read_text() == "{}"
+            else:
+                assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
+        expected = [] if event_case == "late-watch" else [("postToolUse", payload)] * 2
+        assert seen == expected
     finally:
         server.close()
 
@@ -481,6 +486,503 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         )
     finally:
         runtime.shutdown()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows shell read consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "changed-partial", "failed", "later-publication", "missing-row", "missing-locator", "root-prefix",
+])
+def test_registered_late_guidance_needs_no_python_or_resident(prepared_read_event, monkeypatch, shell, case):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import local_cache_worker
+
+    fixture = prepared_read_event
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    root = Path(fixture["payload"]["cwd"])
+    monkeypatch.setenv("USERPROFILE", str(fixture["home"]))
+    monkeypatch.setattr(Path, "home", lambda: fixture["home"])
+    local_cache_worker.watch_completion(root, "prepared", initial_revision="a" * 32, started_at=1)
+    watch_path = fixture["session"] / "local-guidance-watch.json"
+    watch = json.loads(watch_path.read_text())
+    if case == "root-prefix":
+        root = Path(root.anchor)
+        watch["root"] = str(root)
+        watch_path.write_text(json.dumps(watch))
+    metadata = Path(watch["metadata"])
+    metadata.mkdir(parents=True, exist_ok=True)
+    status = "partial" if case == "changed-partial" else "failed" if case == "failed" else "ready"
+    result = {
+        "status": status, "restart_required": case != "later-publication",
+        "publication_revision": "a" * 32 if case == "later-publication" else "b" * 32,
+    }
+    (metadata / "request.json").write_text(json.dumps({
+        "version": 1, "root": str(root), "phase": "done", "completed_at": 2, "result": result,
+    }))
+    (metadata / "publication.json").write_text(json.dumps({
+        "version": 1, "root": str(root), "revision": "b" * 32,
+    }))
+    fixture["env"]["AGENT_WORKTREES_NUDGE"] = "off"
+    if case == "missing-row":
+        fixture["facts"].unlink()
+    elif case == "missing-locator":
+        binding_path = fixture["session"] / "worktree-binding.json"
+        binding = json.loads(binding_path.read_text())
+        binding.pop("hookFacts")
+        binding_path.write_text(json.dumps(binding))
+    else:
+        heads = {"worktree": {**fixture["record_heads"]["worktree"], "head_session": None}}
+        fixture["runtime"].publish(
+            "example", [fixture["row"]], observed_at=2, record_heads=heads,
+        )
+
+    def invoke():
+        response = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+            input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+            env=fixture["env"], **no_window_kwargs(),
+        )
+        assert response.returncode == 0, response.stderr
+        assert response.stderr.startswith("entry_seconds="), response.stderr
+        return json.loads(response.stdout) if response.stdout else {}
+
+    notice = invoke()["additionalContext"]
+    assert "Restart/new context is required" in notice
+    assert "not proof of model admission" in notice
+    assert ("bind-session" in notice) is (case not in {"missing-row", "missing-locator"})
+    if case == "changed-partial":
+        assert "partially refreshed" in notice and "Retain reviewed fallback" in notice
+    elif case == "failed":
+        assert "failed" in notice and "repair" in notice
+    elif case == "later-publication":
+        assert "reprepare" in notice
+    assert not watch_path.exists()
+    assert not fixture["sidecar"].exists()
+    assert invoke() == {}
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows late-guidance consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["live", "absent", "invalid-owner", "old-result", "oversized-request"])
+def test_registered_late_guidance_retains_pending_and_unknown_watch(
+    prepared_read_event, monkeypatch, shell, case,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import local_cache_worker
+
+    fixture = prepared_read_event
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    root = Path(fixture["payload"]["cwd"])
+    monkeypatch.setattr(Path, "home", lambda: fixture["home"])
+    local_cache_worker.watch_completion(root, "prepared", initial_revision="a" * 32, started_at=2)
+    path = fixture["session"] / "local-guidance-watch.json"
+    original = path.read_bytes()
+    metadata = Path(json.loads(original)["metadata"])
+    metadata.mkdir(parents=True, exist_ok=True)
+    owner = {"pid": os.getpid(), "start_time": "unknown-but-live"}
+    if case == "absent":
+        # A waited native child is absent, not a guessed unused PID.
+        with subprocess.Popen(
+            [sys.executable, "-c", "pass"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            **no_window_kwargs(),
+        ) as child:
+            child.communicate(timeout=10)
+            assert child.returncode == 0
+            owner["pid"] = child.pid
+    elif case == "invalid-owner":
+        owner["pid"] = True
+    state = {"version": 1, "root": str(root), "phase": "running", "owner": owner}
+    if case == "old-result":
+        state.update(phase="done", completed_at=1, result={"status": "ready"})
+    request_path = metadata / "request.json"
+    request_path.write_text(json.dumps(state))
+    if case == "oversized-request":
+        request_path.write_text('{"padding":"' + "x" * 262144 + '"}')
+    response = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+        input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+        env=fixture["env"], **no_window_kwargs(),
+    )
+    assert response.returncode == 0, response.stderr
+    assert response.stderr.startswith("entry_seconds="), response.stderr
+    actual = json.loads(response.stdout) if response.stdout else {}
+    if case == "absent":
+        assert "failed" in actual["additionalContext"]
+        assert not path.exists()
+        assert not fixture["sidecar"].exists()
+    else:
+        assert actual == {}
+        assert path.read_bytes() == original
+        assert json.loads(fixture["sidecar"].read_text())["count"] == 1
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows late-guidance parity")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("status", ["ready", "partial", "skipped", "timeout"])
+def test_shell_late_guidance_unchanged_matches_original_consumer(
+    prepared_read_event, monkeypatch, shell, status,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import local_cache_worker
+    from test_nudge_status import nudge
+
+    fixture = prepared_read_event
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    root = Path(fixture["payload"]["cwd"])
+    monkeypatch.setattr(Path, "home", lambda: fixture["home"])
+    local_cache_worker.watch_completion(root, "prepared", initial_revision="a" * 32, started_at=1)
+    path = fixture["session"] / "local-guidance-watch.json"
+    snapshot = path.read_bytes()
+    metadata = Path(json.loads(snapshot)["metadata"])
+    metadata.mkdir(parents=True, exist_ok=True)
+    (metadata / "request.json").write_text(json.dumps({
+        "version": 1, "root": str(root), "phase": "done", "completed_at": 2,
+        "result": {"status": status, "publication_revision": "a" * 32},
+    }))
+    expected = nudge._late_guidance_notice(fixture["payload"], fixture["home"])
+    assert expected and not path.exists()
+    path.write_bytes(snapshot)
+    fixture["env"]["AGENT_WORKTREES_NUDGE"] = "off"
+    response = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+        input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+        env=fixture["env"], **no_window_kwargs(),
+    )
+    assert response.returncode == 0, response.stderr
+    assert response.stderr.startswith("entry_seconds="), response.stderr
+    assert json.loads(response.stdout) == {"additionalContext": expected}
+    assert not path.exists()
+    assert not fixture["sidecar"].exists()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native competing Windows watch consumers")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("second_owner", ["shell", "python"])
+def test_registered_late_guidance_has_one_competing_consumer(
+    prepared_read_event, monkeypatch, shell, second_owner,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import local_cache_worker
+
+    fixture = prepared_read_event
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    root = Path(fixture["payload"]["cwd"])
+    monkeypatch.setattr(Path, "home", lambda: fixture["home"])
+    local_cache_worker.watch_completion(root, "prepared", started_at=1)
+    watch_path = fixture["session"] / "local-guidance-watch.json"
+    metadata = Path(json.loads(watch_path.read_text())["metadata"])
+    metadata.mkdir(parents=True, exist_ok=True)
+    (metadata / "request.json").write_text(json.dumps({
+        "version": 1, "root": str(root), "phase": "done", "completed_at": 2,
+        "result": {"status": "partial"},
+    }))
+    scripts = fixture["harness"].parent / "payload" / "scripts"
+    with (scripts / "hook-facts.ps1").open("a", encoding="utf-8") as stream:
+        stream.write("""
+$script:originalWatchConsumer = ${function:Remove-PostToolLateWatch}
+function Remove-PostToolLateWatch {
+    param([string]$Path, [string]$Snapshot)
+    [IO.File]::WriteAllText(
+        [IO.Path]::Combine($env:LATE_TEST_CONTROL, $env:LATE_TEST_ROLE), 'ready')
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while (-not [IO.File]::Exists([IO.Path]::Combine($env:LATE_TEST_CONTROL, 'go'))) {
+        if ($clock.Elapsed.TotalSeconds -ge 6) { throw 'watch rendezvous timed out' }
+        [Threading.Thread]::Sleep(5)
+    }
+    & $script:originalWatchConsumer $Path $Snapshot
+}
+""")
+    driver = fixture["home"] / "competing-watch.py"
+    driver.write_text("""
+import importlib.util, json, os, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("competing_nudge", sys.argv[1])
+nudge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nudge)
+original = nudge._consume_late_watch
+def consume(path, snapshot):
+    control = Path(os.environ["LATE_TEST_CONTROL"])
+    (control / os.environ["LATE_TEST_ROLE"]).write_text("ready")
+    end = time.monotonic() + 6
+    while not (control / "go").exists():
+        if time.monotonic() >= end:
+            raise RuntimeError("watch rendezvous timed out")
+        time.sleep(0.005)
+    return original(path, snapshot)
+nudge._consume_late_watch = consume
+notice = nudge._late_guidance_notice(json.load(sys.stdin), Path(sys.argv[2]))
+print(json.dumps({"additionalContext": notice} if notice else {}))
+""", encoding="utf-8")
+    control = fixture["home"] / "watch-control"
+    control.mkdir()
+    fixture["harness"].write_text(
+        "[IO.File]::WriteAllText([IO.Path]::Combine("
+        "$env:LATE_TEST_CONTROL, $env:LATE_TEST_ROLE + '-started'), 'ready')\n"
+        + fixture["harness"].read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    with driver.open("r+", encoding="utf-8") as stream:
+        body = stream.read()
+        stream.seek(0)
+        stream.write(
+            "import os\nfrom pathlib import Path\n"
+            "(Path(os.environ['LATE_TEST_CONTROL']) / "
+            "(os.environ['LATE_TEST_ROLE'] + '-started')).write_text('ready')\n"
+            + body
+        )
+    processes = []
+    deadlines = {}
+    try:
+        for role in ("first", "second"):
+            env = dict(
+                fixture["env"], LATE_TEST_CONTROL=str(control), LATE_TEST_ROLE=role,
+                AGENT_WORKTREES_NUDGE="off",
+            )
+            command = [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])]
+            if role == "second" and second_owner == "python":
+                command = [
+                    sys.executable, str(driver), str(PLUGIN / "scripts" / "nudge_status.py"),
+                    str(fixture["home"]),
+                ]
+            process = subprocess.Popen(
+                command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, env=env, **no_window_kwargs(),
+            )
+            processes.append(process)
+            deadlines[process.pid] = time.monotonic() + 10
+        for suffix in ("-started", ""):
+            end = min(time.monotonic() + 6, *deadlines.values())
+            while not all((control / (role + suffix)).exists() for role in ("first", "second")):
+                if time.monotonic() >= end or any(process.poll() is not None for process in processes):
+                    diagnostics = []
+                    for role, process in zip(("first", "second"), processes):
+                        code = process.poll()
+                        if code is None:
+                            process.kill()
+                        stdout, stderr = process.communicate(timeout=10)
+                        diagnostics.append({
+                            "role": role, "ready": (control / (role + suffix)).exists(),
+                            "exit_before_cleanup": code, "stdout": stdout, "stderr": stderr,
+                        })
+                    pytest.fail(f"watch rendezvous stage {suffix or 'evaluated'}: {diagnostics}")
+                time.sleep(0.005)
+            if suffix:
+                for process in processes:
+                    process.stdin.write(json.dumps(fixture["payload"]))
+                    process.stdin.close()
+                    process.stdin = None
+        (control / "go").write_text("go")
+        notices = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=max(0.01, deadlines[process.pid] - time.monotonic()))
+            assert process.returncode == 0, stderr
+            assert not stderr or stderr.startswith("entry_seconds="), stderr
+            notices.append(json.loads(stdout) if stdout else {})
+        assert sum("additionalContext" in notice for notice in notices) == 1, notices
+        assert "incomplete" in next(notice["additionalContext"] for notice in notices if notice)
+        assert not watch_path.exists()
+        assert not list(watch_path.parent.glob("local-guidance-watch.json.consuming-*"))
+        assert not fixture["sidecar"].exists()
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows rename must not overwrite a newer watch")
+@pytest.mark.parametrize("newer_during_restore", [False, True])
+def test_python_late_watch_claim_preserves_replacement(tmp_path, monkeypatch, newer_during_restore):
+    from test_nudge_status import nudge
+
+    path = tmp_path / "local-guidance-watch.json"
+    original = b'{"version":1,"started_at":1}'
+    replacement = b'{"version":1,"started_at":2}'
+    newest = b'{"version":1,"started_at":3}'
+    path.write_bytes(original)
+    rename = Path.rename
+
+    def replace_before_claim(source, target):
+        if source == path:
+            path.write_bytes(replacement)
+        elif target == path and newer_during_restore:
+            path.write_bytes(newest)
+        return rename(source, target)
+
+    monkeypatch.setattr(Path, "rename", replace_before_claim)
+    assert not nudge._consume_late_watch(path, original)
+    assert path.read_bytes() == (newest if newer_during_restore else replacement)
+    assert not list(tmp_path.glob("local-guidance-watch.json.consuming-*"))
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows watch replacement")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("newer_during_restore", [False, True])
+def test_shell_late_watch_claim_preserves_replacement(tmp_path, shell, newer_during_restore):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    watch = tmp_path / "local-guidance-watch.json"
+    watch.write_text('{"version":1,"started_at":2}', encoding="utf-8")
+    script = """
+. $env:TEST_MANAGED_SCRIPT
+. $env:TEST_FACTS_SCRIPT
+$script:originalRead = ${function:Read-PostToolBoundedJson}
+function Read-PostToolBoundedJson {
+    param([string]$Path, [int]$Limit, [ref]$Snapshot)
+    if ($env:TEST_REPLACE -eq 'yes') {
+        [IO.File]::WriteAllText($env:TEST_WATCH, '{"version":1,"started_at":3}')
+    }
+    & $script:originalRead $Path $Limit $Snapshot
+}
+$consumed = Remove-PostToolLateWatch $env:TEST_WATCH '{"version":1,"started_at":1}'
+[Console]::Write((ConvertTo-Json -InputObject @{ consumed = $consumed } -Compress))
+"""
+    response = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=10,
+        env=dict(
+            os.environ, TEST_MANAGED_SCRIPT=str(PLUGIN / "scripts" / "managed-session.ps1"),
+            TEST_FACTS_SCRIPT=str(PLUGIN / "scripts" / "hook-facts.ps1"),
+            TEST_WATCH=str(watch), TEST_REPLACE="yes" if newer_during_restore else "no",
+        ), **no_window_kwargs(),
+    )
+    assert response.returncode == 0, response.stderr
+    assert not response.stderr
+    assert json.loads(response.stdout) == {"consumed": False}
+    assert json.loads(watch.read_text())["started_at"] == (3 if newer_during_restore else 2)
+    assert not list(tmp_path.glob("local-guidance-watch.json.consuming-*"))
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native overlapping stale watch transactions")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("second_owner", ["shell", "python"])
+def test_overlapping_stale_claims_preserve_latest_publication(tmp_path, shell, second_owner):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    watch = tmp_path / "local-guidance-watch.json"
+    watch.write_text('{"started_at":2}', encoding="utf-8")
+    shell_driver = tmp_path / "stale-watch.ps1"
+    shell_driver.write_text("""
+. $env:TEST_MANAGED_SCRIPT
+. $env:TEST_FACTS_SCRIPT
+$script:originalRead = ${function:Read-PostToolBoundedJson}
+function Read-PostToolBoundedJson {
+    param([string]$Path, [int]$Limit, [ref]$Snapshot)
+    $control = $env:TEST_CONTROL
+    [IO.File]::WriteAllText([IO.Path]::Combine($control, $env:TEST_ROLE + '-claimed'), 'ready')
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while (-not [IO.File]::Exists([IO.Path]::Combine($control, $env:TEST_ROLE + '-go'))) {
+        if ($clock.Elapsed.TotalSeconds -ge 6) { throw 'stale claim rendezvous timed out' }
+        [Threading.Thread]::Sleep(5)
+    }
+    & $script:originalRead $Path $Limit $Snapshot
+}
+$consumed = Remove-PostToolLateWatch $env:TEST_WATCH $env:TEST_SNAPSHOT
+[Console]::Write((ConvertTo-Json -InputObject @{ consumed = $consumed } -Compress))
+""", encoding="utf-8")
+    python_driver = tmp_path / "stale-watch.py"
+    python_driver.write_text("""
+import importlib.util, json, os, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("stale_nudge", sys.argv[1])
+nudge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nudge)
+watch = Path(os.environ["TEST_WATCH"])
+control = Path(os.environ["TEST_CONTROL"])
+role = os.environ["TEST_ROLE"]
+rename = Path.rename
+def paused_rename(source, target):
+    result = rename(source, target)
+    if source == watch:
+        (control / (role + "-claimed")).write_text("ready")
+        end = time.monotonic() + 6
+        while not (control / (role + "-go")).exists():
+            if time.monotonic() >= end:
+                raise RuntimeError("stale claim rendezvous timed out")
+            time.sleep(0.005)
+    return result
+Path.rename = paused_rename
+print(json.dumps({"consumed": nudge._consume_late_watch(
+    watch, os.environ["TEST_SNAPSHOT"].encode("utf-8"))}))
+""", encoding="utf-8")
+    processes = []
+
+    def start(role, snapshot):
+        command = [executable, "-NoProfile", "-NonInteractive", "-File", str(shell_driver)]
+        if role == "second" and second_owner == "python":
+            command = [sys.executable, str(python_driver), str(PLUGIN / "scripts" / "nudge_status.py")]
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=dict(
+                os.environ, TEST_MANAGED_SCRIPT=str(PLUGIN / "scripts" / "managed-session.ps1"),
+                TEST_FACTS_SCRIPT=str(PLUGIN / "scripts" / "hook-facts.ps1"),
+                TEST_WATCH=str(watch), TEST_CONTROL=str(tmp_path), TEST_ROLE=role, TEST_SNAPSHOT=snapshot,
+            ), **no_window_kwargs(),
+        )
+        processes.append(process)
+        return process
+
+    def wait_for(predicate):
+        end = time.monotonic() + 6
+        while not predicate():
+            assert time.monotonic() < end, "stale claim control did not reach its boundary"
+            time.sleep(0.005)
+
+    def finish(process):
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0, stderr
+        assert not stderr
+        assert json.loads(stdout) == {"consumed": False}
+
+    try:
+        first = start("first", '{"started_at":1}')
+        wait_for(lambda: (tmp_path / "first-claimed").exists())
+        watch.write_text('{"started_at":3}', encoding="utf-8")
+        second = start("second", '{"started_at":2}')
+        wait_for(lambda: second.poll() is not None or (tmp_path / "second-claimed").exists())
+        (tmp_path / "first-go").write_text("go")
+        finish(first)
+        (tmp_path / "second-go").write_text("go")
+        finish(second)
+        assert json.loads(watch.read_text()) == {"started_at": 3}
+        assert not list(tmp_path.glob("local-guidance-watch.json.consuming-*"))
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
 
 
 @pytest.mark.portfolio_tier("T2")

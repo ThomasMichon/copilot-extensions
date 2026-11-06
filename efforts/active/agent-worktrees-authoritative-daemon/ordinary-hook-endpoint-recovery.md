@@ -188,10 +188,20 @@ and a version-2 advisory row; the canonical recorded head is separate from
 the listing/resume target. The original reminder window/reset and bind cooldown
 remain in their existing sidecars. Missing observations are a shell-safe
 advisory no-op, not a blocking interpreter or resident recovery dependency.
-Late-guidance watches, mutations, installation cells and POSIX retain their
+Mutations, installation cells and POSIX retain their
 previous paths pending their complete consumer checkpoints. This does not close
 the whole-hook, cold admission, notification or throughput gates.
 See the [consumer contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#windows-read-event-consumer).
+
+The Windows read-event consumer also evaluates the original late-guidance
+watch/request/publication contract after prepared admission, independently of
+row-fact availability. Pending/unknown owners retain the watch; correlated
+terminal or definitely absent-worker results preserve the original advisory
+wording. Shell and retained Python consumers share atomic snapshot-checked
+one-time consumption, including replacement preservation. A notice suppresses
+only disposition accounting, not independent binding advice. Native tests
+exercise the registered entry and competing consumers in both Windows shells.
+This does not qualify installed behavior, complete hook composition or throughput.
 
 The existing `WorktreesRuntime` publishes a small advisory view only after its
 current-roster store accepts a publication. The original project-state owner
