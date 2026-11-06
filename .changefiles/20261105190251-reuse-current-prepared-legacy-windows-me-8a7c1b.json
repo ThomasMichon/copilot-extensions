@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse current prepared legacy Windows membership in the shell before original admission fallback",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -66,8 +66,157 @@ function ConvertFrom-ManagedWorktreesJson {
     return ,($script:managedWorktreesJson.DeserializeObject($Text))
 }
 
+function Get-PreparedWorktreesPath {
+    param([object]$Path)
+    if ($Path -isnot [string] -or $Path.Length -gt 4096 -or
+        $Path -notmatch '^[A-Za-z]:[\\/]' -or $Path.Contains([char]0)) {
+        throw 'Unsupported prepared membership path'
+    }
+    $full = [IO.Path]::GetFullPath($Path)
+    if ($full.Length -gt 3) { $full = $full.TrimEnd('\') }
+    $ancestor = $full
+    for ($depth = 0; $ancestor; $depth++) {
+        if ($depth -ge 128) { throw 'Prepared membership path exceeds its bound' }
+        try {
+            if ([IO.File]::GetAttributes($ancestor) -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Prepared membership requires canonical unlinked paths'
+            }
+        } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+        }
+        $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+    }
+    return $full.ToLowerInvariant()
+}
+
+function Test-PreparedWorktreesStamp {
+    param([string]$Path, [object]$Stamp)
+    $canonical = Get-PreparedWorktreesPath $Path
+    try {
+        $attributes = [IO.File]::GetAttributes($Path)
+    } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+        return $null -eq $Stamp
+    }
+    if ($Stamp -isnot [Collections.IList] -or $Stamp.Count -lt 2 -or
+        $Stamp[0] -isnot [string] -or $Stamp[1] -isnot [string] -or
+        $Stamp[1] -cne $canonical) { return $false }
+    if ($attributes -band [IO.FileAttributes]::Directory) {
+        if ($Stamp[0] -ceq 'directory') { return $Stamp.Count -eq 2 }
+        if ($Stamp[0] -cne 'listing' -or $Stamp.Count -ne 3) { return $false }
+        $mtime = [IO.Directory]::GetLastWriteTimeUtc($Path)
+    } else {
+        if ($Stamp[0] -cne 'file' -or $Stamp.Count -ne 4 -or
+            $Stamp[2] -isnot [string] -or
+            $Stamp[2] -cne ([IO.FileInfo]::new($Path)).Length.ToString(
+                [Globalization.CultureInfo]::InvariantCulture)) { return $false }
+        $mtime = [IO.File]::GetLastWriteTimeUtc($Path)
+    }
+    # Python's Windows stat uses the same 100 ns filesystem timestamp.
+    $nanoseconds = ($mtime.Ticks - [long]621355968000000000) * [long]100
+    return $Stamp[-1] -is [string] -and $Stamp[-1] -ceq $nanoseconds.ToString(
+        [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Test-PreparedManagedWorktreesSession {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    $stream = $null
+    try {
+        if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
+            $env:COPILOT_EXTENSIONS_CONTEXT -or $Raw.Length -gt 1048576) { return $false }
+        $event = ConvertFrom-ManagedWorktreesJson $Raw
+        if ($event -isnot [Collections.IDictionary]) { return $false }
+        $session = if ($event.ContainsKey('sessionId')) {
+            $event['sessionId']
+        } else { $env:COPILOT_AGENT_SESSION_ID }
+        $cwd = if ($event.ContainsKey('cwd')) {
+            $event['cwd']
+        } elseif ($event.ContainsKey('workingDirectory')) {
+            $event['workingDirectory']
+        } else { $env:COPILOT_PROJECT_DIR }
+        if ($session -isnot [string] -or
+            $session -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { return $false }
+        $workspace = Get-PreparedWorktreesPath $cwd
+        if (-not [IO.Directory]::Exists($workspace)) { return $false }
+        $userHome = Get-PreparedWorktreesPath $env:USERPROFILE
+        $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
+            $env:AGENT_HOME.Trim()
+        } else { $env:USERPROFILE }
+        $registry = Get-PreparedWorktreesPath ([IO.Path]::Combine($registryHome, '.agent-worktrees'))
+        $marker = [IO.Path]::Combine(
+            $userHome, '.copilot', 'session-state', $session, 'agent-worktrees', 'managed-session.json'
+        )
+        $null = Get-PreparedWorktreesPath $marker
+        if ([IO.File]::GetAttributes($marker) -band [IO.FileAttributes]::Directory) { return $false }
+        $stream = [IO.FileStream]::new(
+            $marker, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+            [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        )
+        $bytes = [byte[]]::new(1048577)
+        $count = 0
+        while ($count -lt $bytes.Length) {
+            $read = $stream.Read($bytes, $count, $bytes.Length - $count)
+            if ($read -eq 0) { break }
+            $count += $read
+        }
+        if ($count -gt 1048576) { return $false }
+        $text = ([Text.UTF8Encoding]::new($false, $true)).GetString($bytes, 0, $count)
+        $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)
+        if ($value -isnot [Collections.IDictionary] -or
+            ($value['version'] -isnot [int] -and $value['version'] -isnot [long]) -or
+            $value['version'] -ne 1) { return $false }
+        foreach ($name in @('scope', 'identity', 'sources', 'inputs')) {
+            if ($value[$name] -isnot [Collections.IDictionary]) { return $false }
+        }
+        $scope = $value['scope']
+        if ($scope.Count -ne 5 -or $scope['session'] -isnot [string] -or
+            $scope['session'] -cne $session -or $scope['workspace'] -isnot [string] -or
+            $scope['workspace'] -cne $workspace -or $scope['registry'] -isnot [string] -or
+            $scope['registry'] -cne $registry -or $scope['context'] -isnot [string] -or
+            $scope['context'] -cne '' -or $scope['platform'] -isnot [string] -or
+            $scope['platform'] -cne 'windows') { return $false }
+        $identity = $value['identity']
+        foreach ($name in @('root', 'git_dir', 'common_dir')) {
+            $null = Get-PreparedWorktreesPath $identity[$name]
+        }
+        $root = $identity['root']
+        if ($workspace -cne $root -and -not $workspace.StartsWith($root + '\', [StringComparison]::Ordinal)) {
+            return $false
+        }
+        $inputs = $value['inputs']
+        $sources = $value['sources']
+        if ($inputs.Count -gt 256 -or $sources.Count -ne 2) { return $false }
+        $expectedSources = @{
+            ([IO.Path]::Combine($registry, 'projects.yaml')) = $false
+            ([IO.Path]::Combine($registry, 'repos.yaml')) = $false
+        }
+        foreach ($path in $sources.Keys) {
+            $canonical = Get-PreparedWorktreesPath $path
+            if (-not $expectedSources.ContainsKey($canonical) -or $expectedSources[$canonical] -or
+                -not $inputs.ContainsKey($path) -or
+                -not (Test-PreparedWorktreesStamp $path $sources[$path])) { return $false }
+            $expectedSources[$canonical] = $true
+            $source = ConvertTo-Json -InputObject $sources[$path] -Compress
+            $inputStamp = ConvertTo-Json -InputObject $inputs[$path] -Compress
+            if ($source -cne $inputStamp) { return $false }
+        }
+        $hasGitMarker = $false
+        foreach ($path in $inputs.Keys) {
+            if ($path -isnot [string] -or
+                -not (Test-PreparedWorktreesStamp $path $inputs[$path])) { return $false }
+            if ((Get-PreparedWorktreesPath $path) -ceq [IO.Path]::Combine($root, '.git')) {
+                $hasGitMarker = $true
+            }
+        }
+        return $hasGitMarker
+    } catch {
+        return $false
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 function Test-ManagedWorktreesSession {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    if (Test-PreparedManagedWorktreesSession -Raw $Raw) { return $true }
     $helper = Join-Path $PSScriptRoot 'managed_session.py'
     if (-not [IO.File]::Exists($helper)) { return $false }
     $process = $null

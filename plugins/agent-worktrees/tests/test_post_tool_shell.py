@@ -278,6 +278,68 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
 @pytest.mark.effect("process")
 @pytest.mark.effect("network")
 @pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+    from test_managed_session import environment, fixture_project, load
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    session = tmp_path / ".copilot" / "session-state" / "prepared"
+    session.mkdir(parents=True)
+    payload = {"sessionId": "prepared", "cwd": str(anchor), "toolName": "view"}
+    assert module.admitted(payload, home=tmp_path)
+    scripts = tmp_path / "payload" / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copyfile(SCRIPT, scripts / SCRIPT.name)
+    original = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+    (scripts / "managed-session.ps1").write_text(
+        f". '{original}'\n"
+        "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }\n",
+        encoding="utf-8",
+    )
+    command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
+    harness = tmp_path / "registered-post.ps1"
+    harness.write_text(
+        "function Get-Command { throw 'a client/CLI child was requested' }\n" + command,
+        encoding="utf-8",
+    )
+    seen = []
+
+    def decide(kind, event, deadline):
+        seen.append((kind, event))
+        return {"additionalContext": "prepared resident"}
+
+    server = HookIpcServer(decide)
+    server.start()
+    try:
+        (registry / "status-monitor.lock").write_text(json.dumps(server.rendezvous()), encoding="utf-8")
+        env = environment(tmp_path, anchor)
+        env["COPILOT_PLUGIN_ROOT"] = str(scripts.parent)
+        for _ in range(2):
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+                input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+                cwd=anchor, env=env, **no_window_kwargs(),
+            )
+            assert result.returncode == 0, result.stderr
+            assert not result.stderr
+            assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
+        assert seen == [("postToolUse", payload), ("postToolUse", payload)]
+    finally:
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("network")
+@pytest.mark.effect("filesystem")
 @pytest.mark.skipif(
     os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
     reason="explicit native shell/daemon integration",
