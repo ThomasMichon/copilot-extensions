@@ -203,6 +203,14 @@ records actual large-range/default-window eviction and healthy ordinary/narrow
 controls. The bounded statistics amendment closes, not whole S2, lifetime
 accounting, current concurrency, qualified PRE or installed/native acceptance.
 
+#10835 merged as `2faf32de089180615aea3c145b114ed8c4e8f46e`, adding an
+optional actual-call cold membership diagnostic and correcting the native
+fixture's DELETE-sharing, cancelled-predecessor wait and asynchronous menu-key
+boundaries. The [diagnostic readback](journal/2026/11.05-sidecar-membership-diagnostics.md)
+records exact-head Windows 120, Linux Companion 117 and root-attention 43
+passing controls. It does not explain the earlier 50 ms read failure or change
+production budgets, retries or cancellation; the reliability gap stays open.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than

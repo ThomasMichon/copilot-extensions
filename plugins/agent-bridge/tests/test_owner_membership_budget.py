@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 
 from agent_bridge import owner_membership as membership
 from agent_bridge import owner_membership_read as reader
+from agent_bridge.db import Database
 from agent_bridge.owner_membership_signal import MembershipConnection
 from agent_bridge.session_observation_contract import ObservationError
 from test_owner_membership import OWNER, create, owner as owner
@@ -42,7 +44,20 @@ def unrelated_sessions(db, count=10_000):
         conn.commit()
 
 
+def unindexed(db: Database) -> None:
+    with db._write_lock:
+        conn = db._get_conn()
+        for name in (
+            "idx_sessions_membership_owner",
+            "idx_relationships_membership_owner",
+            "idx_live_sessions_membership_owner",
+        ):
+            conn.execute(f"DROP INDEX IF EXISTS {name}")
+        conn.commit()
+
+
 def limited_budget(db, monkeypatch):
+    unindexed(db)
     budget_type = reader.ReadBudget
     baseline = reader.snapshot(
         db.db_path,
@@ -80,7 +95,8 @@ def test_unknown_owner_large_history_has_actual_private_vm_cutoff(
     assert tmp_db.get_session("unrelated-9999") is not None
 
 
-def test_real_query_plan_scan_is_bounded_even_when_it_returns_no_rows(tmp_db):
+def test_legacy_unindexed_query_scan_is_bounded_even_when_it_returns_no_rows(tmp_db):
+    unindexed(tmp_db)
     unrelated_sessions(tmp_db)
     conn = tmp_db._get_conn()
     sql = (
@@ -110,6 +126,81 @@ def test_real_query_plan_scan_is_bounded_even_when_it_returns_no_rows(tmp_db):
     assert budget.exhausted and budget.steps <= budget.max_steps + reader.PROGRESS_INTERVAL
 
 
+def test_selected_owner_capture_does_not_scan_unrelated_registries(tmp_db: Database) -> None:
+    unrelated_sessions(tmp_db)
+    create(tmp_db, owner=OWNER + "#producer")
+    foreign = "fixture-host/demo/unrelated#producer"
+    with tmp_db._write_lock:
+        conn = tmp_db._get_conn()
+        conn.executemany(
+            "INSERT INTO remote_acp_relationships(id,session_id,owner,recovery_json,phase) "
+            "VALUES(?,?,?,'{}','reserved')",
+            [(f"rel-{index}", f"unrelated-{index}", foreign) for index in range(10_000)]
+            + [("selected-rel", "selected-remote", OWNER + "#producer")],
+        )
+        conn.executemany(
+            "INSERT INTO live_sessions(session_id,status,venue,registered_at,updated_at) "
+            "VALUES(?,'live',?,1,1)",
+            [(f"live-{index}", json.dumps({"supervisor_ref": foreign})) for index in range(10_000)]
+            + [("selected-live", json.dumps({"supervisor_ref": OWNER + "#producer"}))],
+        )
+        conn.execute(
+            "INSERT INTO sessions(id,name,target_type,status,target_json,created_at,updated_at) "
+            "VALUES('invalid-json','fixture','local','idle','not-json',1,1)"
+        )
+        conn.execute(
+            "INSERT INTO live_sessions(session_id,status,venue,registered_at,updated_at) "
+            "VALUES('invalid-json','live','not-json',1,1)"
+        )
+        conn.commit()
+    baseline = reader.snapshot(
+        tmp_db.db_path, (), budget=reader.ReadBudget(max_steps=1_000_000, seconds=60),
+    ).steps
+    budget = reader.ReadBudget(max_steps=baseline + 3000, seconds=60)
+    result = reader.snapshot(
+        tmp_db.db_path, (OWNER, "fixture-host/demo/unknown"), budget=budget,
+    )
+    assert set(result.states[OWNER]) == {
+        "owned:child", "relationship:selected-rel", "represented:selected-live",
+    }
+    assert result.states["fixture-host/demo/unknown"] == {}
+    assert not budget.exhausted
+
+
+def test_only_writable_bootstrap_prepares_lookup_indexes(tmp_db: Database) -> None:
+    unrelated_sessions(tmp_db)
+    create(tmp_db)
+    original = tmp_db.get_session("child")["target_json"]
+    tmp_db.create_session(
+        "invalid-json", "fixture", None, ".", "local", "idle", 1.0, target_json="not-json",
+    )
+    tmp_db.execute_write(
+        "INSERT INTO live_sessions(session_id,status,venue,registered_at,updated_at) "
+        "VALUES('invalid-json','live','not-json',1,1)"
+    )
+    path = tmp_db.db_path
+    unindexed(tmp_db)
+    tmp_db.close()
+    with closing(Database(path, read_only=True)) as passive:
+        with pytest.raises(ObservationError) as failed:
+            reader.snapshot(
+                path, ("fixture-host/demo/unknown",),
+                budget=reader.ReadBudget(max_steps=100_000, seconds=60),
+            )
+        assert failed.value.code == "capture-budget-exhausted"
+        assert passive.execute_read(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%membership_owner'"
+        ) == []
+    with closing(Database(path)) as prepared:
+        capture = reader.snapshot(
+            path, (OWNER, "fixture-host/demo/unknown"),
+            budget=reader.ReadBudget(max_steps=100_000, seconds=60),
+        )
+        assert set(capture.states[OWNER]) == {"owned:child"}
+        assert capture.states["fixture-host/demo/unknown"] == {}
+        assert prepared.get_session("child")["target_json"] == original
+
+
 def test_seed_never_takes_canonical_write_lock(session_manager, tmp_db):
     create(tmp_db)
     with tmp_db._write_lock:
@@ -120,6 +211,7 @@ def test_seed_never_takes_canonical_write_lock(session_manager, tmp_db):
 def test_capture_uses_private_progress_handler_and_preserves_canonical_handler(
     tmp_db, monkeypatch
 ):
+    unindexed(tmp_db)
     unrelated_sessions(tmp_db)
     conn = tmp_db._get_conn()
     calls = []

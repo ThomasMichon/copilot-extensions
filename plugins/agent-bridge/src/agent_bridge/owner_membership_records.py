@@ -6,6 +6,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any
 
+from .owner_membership_schema import owner_expression as _owner_expression
 from .relationship_authority import (
     RelationshipRefused,
     canonical_owner,
@@ -50,10 +51,6 @@ def owner_ref(value: Any) -> str:
         raise ObservationError(
             "invalid-owner", "an exact qualified owner reference is required"
         ) from exc
-
-
-def _owner_expression(column: str) -> str:
-    return f"CASE WHEN instr({column}, '#')>0 THEN substr({column},1,instr({column},'#')-1) ELSE {column} END"
 
 
 def _optional(value: Any) -> str | None:

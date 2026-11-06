@@ -92,6 +92,10 @@ from test_owner_membership import (
     as _adopted_writable_connection_preserves_membership_commits,
 )
 from test_owner_membership_budget import (
+    test_selected_owner_capture_does_not_scan_unrelated_registries
+    as test_selected_owner_capture_does_not_scan_unrelated_registries,
+    test_only_writable_bootstrap_prepares_lookup_indexes
+    as test_only_writable_bootstrap_prepares_lookup_indexes,
     test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep
     as test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep,
     test_unknown_owner_large_history_has_actual_private_vm_cutoff
