@@ -189,6 +189,89 @@ def test_no_controller_preserves_existing_updater(project, monkeypatch):
     assert project_update_controller.run_project_update(args()) is None
 
 
+def test_project_authority_fails_closed_if_controller_disappears(project, monkeypatch):
+    from update_driver import RequestSpec
+    from update_driver.authority import selection
+
+    request = RequestSpec("engine", project="example", authority="project")
+    monkeypatch.setattr(project_update_controller, "run_project_update", lambda _args: None)
+    manager = lambda _args: pytest.fail("missing controller fell back to Manager")
+    standalone = lambda: pytest.fail("missing controller fell back to standalone")
+    assert project_update_controller.dispatch_update(
+        args(_controller_request=request, _controller_authority=selection("project", "example")),
+        lambda _args: 0, manager, standalone,
+    ) == 1
+
+
+def test_project_authority_reaches_controller_under_real_driver_custody(project, monkeypatch, tmp_path):
+    import update_driver
+    from agent_worktrees import update_driver_cli
+
+    tmp_path = tmp_path.resolve()
+    _repo, script = project
+    driver_root = tmp_path / "driver"
+    engine = tmp_path / "engine"
+    result = tmp_path / "controlled.txt"
+    paths = [str(Path(entry).resolve()) for entry in sys.path if entry]
+    script.write_text(
+        "import sys\n"
+        f"sys.path[:0] = {paths!r}\n"
+        "from pathlib import Path\n"
+        "from update_driver import borrowed_custody, current_authority\n"
+        f"root = Path({str(driver_root)!r})\n"
+        "assert current_authority(root=root).mode == 'project'\n"
+        "with borrowed_custody(root=root) as custody:\n"
+        "    custody.assert_owned()\n"
+        f"    Path({str(result)!r}).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    update_driver.change_authority(
+        "project", project="example", root=driver_root, timeout=5,
+        verify_capabilities=lambda _deadline: True,
+    )
+    request = update_driver.enqueue(
+        update_driver.RequestSpec(
+            "engine", project="example", cwd=str(tmp_path), source=str(engine.resolve()),
+            authority="project",
+        ),
+        runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
+        root=driver_root,
+    )
+    monkeypatch.setattr(config, "install_dir", lambda: engine)
+    borrow = update_driver.borrowed_custody
+
+    def execute(transaction):
+        monkeypatch.setattr(
+            update_driver, "borrowed_custody",
+            lambda: borrow(root=driver_root, environ=transaction.participant_env()),
+        )
+        return update_driver_cli.cmd_update_request(args(force=True))
+
+    assert update_driver.drain(root=driver_root, executor=execute) == 0
+    assert update_driver.status(request.id, root=driver_root).exit_code == 0
+    assert result.read_text(encoding="utf-8") == "--force"
+
+
+def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
+    from update_driver import RequestSpec
+    from update_driver.authority import selection
+
+    monkeypatch.setattr(
+        project_update_controller, "run_project_update",
+        lambda _args: pytest.fail("standalone mode entered the project controller"),
+    )
+    observed = []
+    result = project_update_controller.dispatch_update(
+        args(_controller_request=RequestSpec("engine", authority="standalone"),
+             _controller_authority=selection("standalone")),
+        lambda _args: 0,
+        lambda selected: observed.extend(update_options.forwarded_flags(selected)) or 7,
+        lambda: pytest.fail("Manager was not used"),
+    )
+    assert result == 7
+    assert "--no-project-controller" in observed
+
+
 def test_automatic_controller_rechecks_policy_when_enabled_after_submission(
     project, monkeypatch, tmp_path, capsys,
 ):

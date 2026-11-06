@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from copy import copy
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
@@ -18,7 +19,32 @@ PROBE_TIMEOUT = 30
 def dispatch_update(args, auth, manager, standalone) -> int:
     if getattr(args, "auth_report", False):
         return auth(args)
-    controlled = run_project_update(args)
+    request = getattr(args, "_controller_request", None)
+    selected = getattr(args, "_controller_authority", None)
+    requested = getattr(request, "authority", "standalone")
+    if selected is not None and selected.configured and selected.mode == "standalone":
+        if requested != "standalone":
+            output.err("Project update authority changed before execution.")
+            return 1
+        args = copy(args)
+        args.no_project_controller = True
+        controlled = None
+    elif requested == "project":
+        if (
+            selected is None or not selected.configured or selected.mode != "project"
+            or selected.project != request.project or cfg.active_project() != request.project
+        ):
+            output.err("The selected project update authority is unavailable.")
+            return 1
+        controlled = run_project_update(args)
+        if controlled is None:
+            output.err("The selected project update controller is unavailable; no update ran.")
+            return 1
+    elif selected is not None and selected.configured and selected.mode == "project":
+        output.err("Standalone update is disabled by the selected project authority.")
+        return 1
+    else:
+        controlled = run_project_update(args)
     if controlled is not None:
         return controlled
     handed_off = manager(args)
@@ -31,14 +57,14 @@ def configured_script(repo) -> str:
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
-def _selected_project(args):
+def _selected_project(args, *, project=None):
     if (
         getattr(args, "no_project_controller", False)
         or getattr(args, "phase", None)
         or getattr(args, "target", None) is not None
     ):
         return None
-    return cfg.active_project()
+    return cfg.active_project() if project is None else project
 
 
 def configured_for_update(args):
@@ -56,8 +82,10 @@ def _probe_command(project: str) -> list[str]:
     ]
 
 
-def probe_for_submission(args, *, cwd: Path, timeout: float = PROBE_TIMEOUT) -> bool | None:
-    project = _selected_project(args)
+def probe_for_submission(
+    args, *, cwd: Path, timeout: float = PROBE_TIMEOUT, project: str | None = None,
+) -> bool | None:
+    project = _selected_project(args, project=project)
     if not project:
         return None
     from agent_procutil.owned_process import OutputLimitExceeded, run_caller_owned

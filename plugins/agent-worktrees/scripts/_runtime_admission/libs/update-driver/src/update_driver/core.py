@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence, TextIO
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
-from . import boot, foundation_state
+from . import authority, boot, foundation_state
 from ._directory import create_queue_directory
 
 SCHEMA = 4
@@ -65,6 +65,7 @@ class RequestSpec:
     context: tuple[tuple[str, str], ...] = ()
     repair: bool = False
     killswitch_path: str = ""
+    authority: str = ""
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,10 @@ def _spec(spec: RequestSpec) -> RequestSpec:
     pairs = tuple(sorted((_text(k), _text(v)) for k, v in context))
     if type(spec.repair) is not bool:
         raise InvalidRequestError("repair selection must be an explicit boolean")
+    if spec.authority not in ("", "standalone", "project") or (
+        spec.authority == "project" and not spec.project
+    ):
+        raise InvalidRequestError("update authority must name a selected project or standalone")
     killswitch_path = _text(spec.killswitch_path)
     if killswitch_path and not Path(killswitch_path).is_absolute():
         raise InvalidRequestError("request KillSwitch path must be absolute")
@@ -162,6 +167,7 @@ def _spec(spec: RequestSpec) -> RequestSpec:
         spec.backend, _vector(spec.argv), _text(spec.project), cwd, _text(spec.source), pairs,
         spec.repair,
         killswitch_path,
+        spec.authority,
     )
 
 
@@ -172,6 +178,8 @@ def _spec_document(spec: RequestSpec) -> dict:
         document.pop("repair")
     if not spec.killswitch_path:
         document.pop("killswitch_path")
+    if not spec.authority:
+        document.pop("authority")
     return document
 
 
@@ -322,7 +330,7 @@ def _json(value: object) -> str:
 
 def _validate_db(db: sqlite3.Connection) -> None:
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in {2, 3, SCHEMA}:
+    if version not in {2, 3, SCHEMA, authority.SCHEMA_VERSION}:
         raise StateError("unsupported update-driver schema")
     columns = {row[1] for row in db.execute("PRAGMA table_info(requests)")}
     expected = {
@@ -335,6 +343,11 @@ def _validate_db(db: sqlite3.Connection) -> None:
         expected.update({"recovery_authority", "released_at"})
     if columns != expected:
         raise StateError("malformed update-driver schema")
+    if version == authority.SCHEMA_VERSION:
+        try:
+            authority.validate(db)
+        except authority.AuthorityError as error:
+            raise StateError("malformed update authority state") from error
 
 
 def _upgrade_schema(db: sqlite3.Connection, root: Path, custody: OperationLock) -> None:
@@ -344,7 +357,7 @@ def _upgrade_schema(db: sqlite3.Connection, root: Path, custody: OperationLock) 
     custody.assert_owned()
     _validate_db(db)
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == SCHEMA:
+    if version in (SCHEMA, authority.SCHEMA_VERSION):
         return
     for row in db.execute("SELECT * FROM requests"):
         _request(row, root)
@@ -493,6 +506,11 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
         raise StateError("malformed durable request") from error
 
 
+UPDATE_AUTHORITY_CAPABILITY = authority.CAPABILITY
+current_authority = authority.current
+change_authority = authority.change
+
+
 def enqueue(
     spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
     coalesce_running: bool = False,
@@ -510,31 +528,32 @@ def enqueue(
         raise InvalidRequestError("active coalescing must be an explicit boolean")
     spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
-    _reconcile_lost_owner(root)
-    _assert_foundation_clear(root)
-    with _database(root, create=True) as db:
-        db.execute("BEGIN IMMEDIATE")
-        if _has_fence(db, root):
-            raise InterruptedError("installation queue fenced; explicit positive settlement required")
-        row = None
-        if coalesce_running:
-            row = db.execute(
-                "SELECT * FROM requests WHERE identity=? AND state='running' LIMIT 1", (identity,),
-            ).fetchone()
-        if row is None:
-            row = db.execute(
-                "SELECT * FROM requests WHERE identity=? AND state='pending'", (identity,),
-            ).fetchone()
-        if row is None:
-            identifier = uuid.uuid4().hex
-            db.execute(
-                "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,?,?)",
-                (identifier, identity, spec_json, runner_json, "pending", time.time()),
-            )
-            row = db.execute("SELECT * FROM requests WHERE id=?", (identifier,)).fetchone()
-        request = _request(row, root)
-        db.commit()
-        return request
+    with authority.submission(root, spec):
+        _reconcile_lost_owner(root)
+        _assert_foundation_clear(root)
+        with _database(root, create=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if _has_fence(db, root):
+                raise InterruptedError("installation queue fenced; explicit positive settlement required")
+            row = None
+            if coalesce_running:
+                row = db.execute(
+                    "SELECT * FROM requests WHERE identity=? AND state='running' LIMIT 1", (identity,),
+                ).fetchone()
+            if row is None:
+                row = db.execute(
+                    "SELECT * FROM requests WHERE identity=? AND state='pending'", (identity,),
+                ).fetchone()
+            if row is None:
+                identifier = uuid.uuid4().hex
+                db.execute(
+                    "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,?,?)",
+                    (identifier, identity, spec_json, runner_json, "pending", time.time()),
+                )
+                row = db.execute("SELECT * FROM requests WHERE id=?", (identifier,)).fetchone()
+            request = _request(row, root)
+            db.commit()
+            return request
 
 
 def status(
@@ -836,7 +855,7 @@ def drain(
                     db.commit()
                     return 0
                 request = _request(row, root)
-                reason = automatic_update_refusal(request.spec)
+                reason = authority.refusal(root, request.spec, db=db) or automatic_update_refusal(request.spec)
                 if reason is not None:
                     db.execute(
                         """UPDATE requests SET state='completed',exit_code=3,error=?,
