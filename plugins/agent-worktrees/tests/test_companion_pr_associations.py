@@ -897,3 +897,75 @@ def test_absent_optional_dropin_registry_keeps_a_known_binding(source, monkeypat
 
     monkeypatch.setattr(config, "load_config", load)
     assert source.read([_pr()])["associations"][0]["binding"]["available"]
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+@pytest.mark.parametrize(
+    ("body", "available"),
+    [
+        (b"pr: [\n", False),
+        (b"marker: \xff\n", False),
+        (b"marker: committed\n", True),
+        (b"", True),
+        (None, True),
+    ],
+)
+def test_committed_value_failures_cannot_qualify_disk_fallback(
+    source, monkeypatch, foreign, body, available
+):
+    from agent_worktrees import config_cache
+
+    anchor = source.path.parent / "anchor"
+    anchor.mkdir()
+    disk = anchor / config.INREPO_CONFIG_FILENAME
+    disk.write_text("marker: disk\n")
+    reads = []
+    values = []
+
+    def git(*args, **kwargs):
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
+        assert args == ("cat-file", "--batch")
+        packet = b""
+        for spec in kwargs["input_data"].splitlines():
+            if spec.endswith(b":" + config.INREPO_CONFIG_FILENAME.encode()) and body is not None:
+                packet += b"a" * 40 + b" blob " + str(len(body)).encode() + b"\n" + body + b"\n"
+            else:
+                packet += spec + b" missing\n"
+        return SimpleNamespace(returncode=0, stdout=packet)
+
+    def load(name):
+        reads.append(name)
+        values.append(config._load_inrepo_config(str(anchor)))
+        repo = config.RepoConfig(
+            anchor="", worktree_root="", pr=config.PRConfig(provider="github")
+        )
+        return SimpleNamespace(repo_name=name, default_repo=repo, repos={name: repo})
+
+    monkeypatch.setattr(git_ops, "git", git)
+    if foreign:
+        monkeypatch.setattr(config, "_control_plane_related_pr_map", lambda: {})
+        monkeypatch.setattr(
+            repos,
+            "list_repos",
+            lambda **kwargs: [
+                SimpleNamespace(name="foreign", remote="https://github.com/example/repository.git")
+            ],
+        )
+        monkeypatch.setattr(
+            config, "load_project_config", lambda name: config_cache.memoize_in_scope(load, name)
+        )
+    else:
+        monkeypatch.setattr(config, "load_config", lambda **kwargs: load("sample"))
+    entries = source.read([_pr(), _pr(pr_id="b" * 32)])["associations"]
+    assert all(entry["binding"]["available"] is available for entry in entries)
+    assert reads == ["foreign" if foreign else "sample"]
+    marker = (
+        "committed"
+        if body == b"marker: committed\n"
+        else "\ufffd"
+        if body == b"marker: \xff\n"
+        else "disk"
+    )
+    assert values == [{"marker": marker}]
+    assert disk.read_text() == "marker: disk\n"
