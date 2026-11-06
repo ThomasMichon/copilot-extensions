@@ -23,12 +23,14 @@ sys.path.insert(0, str(SCRIPT.parent))
 def retained_inputs(tmp_path, monkeypatch):
     import bootstrap_inputs
     import runtime_install
+    from worktree_manager import update_python_path
 
     monkeypatch.delenv(TIMEOUT_ENV, raising=False)
     monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_UPDATE_CONTEXT", raising=False)
     monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, root, **kwargs: (payload, True))
     monkeypatch.setattr(runtime_install, "_source_digest", lambda payload: "a" * 64)
+    monkeypatch.setattr(update_python_path, "finish_update", lambda command, code: code)
 
 
 @pytest.mark.parametrize("exit_code", [0, 23])

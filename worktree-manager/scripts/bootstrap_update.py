@@ -18,14 +18,15 @@ def _request_control(options, forwarded) -> bool:
 
 def execute(args, driver, *, source_digest: str) -> int:
     from runtime_install import _bootstrap_hold_path, _source_digest, engine
+    from worktree_manager.update_python_path import finish_update
     from worktree_manager.update_driver_cli import (
         _CONTEXT_KEYS, _report, _source_key, _update_context_directory, parse_options,
         request_context, request_source_anchor,
     )
     from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
 
-    command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    options, forwarded = parse_options(command[1:])
+    observer_command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    options, forwarded = parse_options(observer_command[1:])
     if _request_control(options, forwarded):
         raise ValueError("Request inspection and recovery must run outside installation submission")
     command = ["update", *forwarded]
@@ -120,7 +121,7 @@ def execute(args, driver, *, source_digest: str) -> int:
     result = driver.wait(request.id, output=sys.stderr, worker=worker)
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Bootstrap update did not complete: {result.state}")
-    return result.exit_code
+    return finish_update(observer_command, result.exit_code)
 
 
 if __name__ == "__main__":

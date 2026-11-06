@@ -14,6 +14,7 @@ on:
       - worktree-manager/scripts/runtime_install.py
       - worktree-manager/src/worktree_manager/update_driver_cli.py
       - worktree-manager/tests/native/test_bootstrap_update_native.py
+      - worktree-manager/tests/test_update_python_path.py
 
 permissions:
   contents: read
@@ -47,7 +48,8 @@ jobs:
       - name: Qualify whole-operation joins, waiter loss and prepared-source compatibility
         run: >-
           python tools/run-plugin-tests.py worktree-manager
-          --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers
+          --test-file tests/native/test_bootstrap_update_native.py
+          --test-file tests/test_update_python_path.py --allow-explicit-tiers
           -k "not full_declared_repository_inputs_reach_immutable_retention"
 
   bootstrap-update-windows:

@@ -787,7 +787,7 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
             result = _dispatch_manager(invocation, wait_for_exit=True)
         else:
             result = _dispatch_manager(invocation)
-    return finish_update(command, result)
+    return result if args.update_participant else finish_update(command, result)
 
 
 def main(argv: list[str] | None = None) -> int:

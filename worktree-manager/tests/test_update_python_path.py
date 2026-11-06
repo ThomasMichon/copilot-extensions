@@ -3,6 +3,7 @@
 from contextlib import nullcontext
 from types import SimpleNamespace
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -194,7 +195,9 @@ def test_installed_already_current_frontdoor_publishes_only_after_verified_compl
 def test_bootstrap_completion_uses_same_publication_after_dispatch(public_python, monkeypatch, tmp_path):
     state = public_python
     installer = self_install._runtime_installer()
-    args = SimpleNamespace(install_only=False, repair_update=False, root=tmp_path)
+    args = SimpleNamespace(
+        install_only=False, repair_update=False, update_participant=False, root=tmp_path,
+    )
     slot = tmp_path / "versions" / "fixture"
     monkeypatch.setattr(installer.runtime, "slot_python", lambda *args: state.base)
     monkeypatch.setattr(installer.runtime, "retention_lease", lambda *args: nullcontext())
@@ -209,3 +212,70 @@ def test_bootstrap_completion_uses_same_publication_after_dispatch(public_python
     assert installer._finish(args, slot, ["update", "--wait"]) == 0
     assert state.events == ["completed", "publish"]
     assert state.value == (state.expected, 2)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows bootstrap completion boundary")
+def test_bootstrap_participant_never_publishes_after_success(public_python, monkeypatch, tmp_path):
+    installer = self_install._runtime_installer()
+    args = SimpleNamespace(
+        install_only=False, repair_update=False, update_participant=True, root=tmp_path,
+    )
+    slot = tmp_path / "versions" / "fixture"
+    monkeypatch.setattr(installer.runtime, "slot_python", lambda *args: public_python.base)
+    monkeypatch.setattr(installer.runtime, "retention_lease", lambda *args: nullcontext())
+    monkeypatch.setattr(update_driver_cli, "handoff_environment", lambda *args: {})
+    monkeypatch.setattr(installer, "_dispatch_manager", lambda *args, **kwargs: 0)
+    assert installer._finish(args, slot, ["update"]) == 0
+    assert public_python.writes == [] and public_python.notifications == 0
+    assert path_update.os.environ["PATH"] == public_python.original
+
+
+@pytest.mark.parametrize("mode,exit_code,publication_fails", [
+    ("wait", 0, False), ("detach", 0, False), ("wait", 23, False),
+    ("auto", 0, False), ("wait", 0, True),
+])
+def test_bootstrap_observer_owns_publication_only_after_successful_wait(
+    public_python, monkeypatch, tmp_path, mode, exit_code, publication_fails,
+):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    import bootstrap_inputs
+    import bootstrap_update
+    import runtime_install
+    from update_driver import core
+
+    state = public_python
+    if publication_fails:
+        state.value = (12, 4)
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, *a, **k: (payload, True))
+    monkeypatch.setattr(bootstrap_inputs, "_preparation_assets", lambda payload: None)
+    monkeypatch.setattr(runtime_install, "_bootstrap_hold_path", lambda: None)
+    monkeypatch.setattr(runtime_install.engine, "_package_roots", lambda payload: (tmp_path,))
+    monkeypatch.setattr(runtime_install.engine, "_package_name", lambda path: "agent-procutil")
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "fixture")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+    request = SimpleNamespace(
+        id="fixture", log_path=tmp_path / "log", state="pending", exit_code=None, error=None,
+    )
+
+    def wait(*args, **kwargs):
+        assert mode != "detach" and state.writes == []
+        state.events.append("completed")
+        return SimpleNamespace(state="completed", exit_code=exit_code)
+
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        default_root=lambda: tmp_path, enqueue=lambda *a, **k: request,
+        ensure_worker=lambda *a, **k: None, wait=wait,
+    )
+    args = SimpleNamespace(
+        root=tmp_path / "manager", payload=tmp_path, install_source=None, repair_update=False,
+        command=["--", "update", f"--{mode}"],
+    )
+    expected_code = 1 if publication_fails else exit_code
+    assert bootstrap_update.execute(args, driver, source_digest="a" * 64) == expected_code
+    publishes = mode == "wait" and exit_code == 0 and not publication_fails
+    assert len(state.writes) == state.notifications == int(publishes)
+    assert state.events == (
+        [] if mode == "detach" else ["completed", *(["publish"] if publishes else [])]
+    )
+    assert path_update.os.environ["PATH"] == (state.expected if publishes else state.original)

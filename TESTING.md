@@ -719,10 +719,12 @@ execution and the required unit-only CI packet.
 
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
 and for relevant PR paths on Linux and Windows. Its complete local packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers`.
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
 Hosted acceptance runs complementary behavioral and full-retention selections
-in separate jobs on each platform; no case is removed from acceptance. Every
-job retains its five-minute ceiling, and the runner's 300-second packet ceiling
+in separate jobs on each platform; no case is removed from acceptance. The
+behavioral jobs also run `tests/test_update_python_path.py` with fake registry
+state to check waited completion, excluded observer modes and publication failures.
+Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
 is unchanged. Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.
 The real shell acquisition, canonical freezing, queue, finite worker, runtime
@@ -737,8 +739,13 @@ acquisition, participant validation and the suite's source locator.
 An independent case verifies that detached acceptance removes only that caller's acquisition
 checkout while the retained worker continues to its recorded final result.
 The detached control runs twice and observes native Windows windows and focus
-changes without weakening the enclosing test lifecycle. Its first acceptance
-wait allows 60 seconds; the second remains 20 seconds. Behavioral cases retain
+changes without weakening the enclosing test lifecycle. Its first result is
+nonzero and its second succeeds; neither the detached observer nor its participant
+may run successful PATH aftercare. Only a successful waiting caller finalizes
+using its original observer arguments, with publication failure propagated.
+The ordinary two-request control records exactly one such finalization.
+The detached control's first acceptance wait allows 60 seconds; the second
+remains 20 seconds. Behavioral cases retain
 their 90-second limit, including fixtures and teardown. Bounded stderr
 breadcrumbs retain fixture-setup costs and queue-stage elapsed times even when
 a hard pytest timeout prevents normal teardown diagnostics.

@@ -57,6 +57,21 @@ def _fixture_install(args):
     return args.root / "versions" / "fixture"
 
 _install = _fixture_install
+if __name__ == "__main__" and "update" in sys.argv:
+    _execution_driver(SCRIPTS.parent)
+    from worktree_manager import update_python_path
+
+    _original_finish_update = update_python_path.finish_update
+    def _fixture_finish_update(command, result):
+        if result == 0:
+            root = Path(sys.argv[sys.argv.index("--root") + 1])
+            with (root / "finalizers.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "command": command, "participant": "--update-participant" in sys.argv,
+                }) + "\\n")
+        return _original_finish_update(command, result)
+    update_python_path.finish_update = _fixture_finish_update
+
 if __name__ == "__main__" and "--update-participant" not in sys.argv and "update" in sys.argv:
     _execution_driver(SCRIPTS.parent)
     from agent_procutil._daemon_instance_identity import birth_identity
@@ -570,9 +585,12 @@ def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_work
             assert request.state == "running" and request.exit_code is None
             retained = Path(effects()[3 * cycle]["payload"])
             assert retained.is_relative_to(driver / "bootstrap-inputs") and retained.is_dir()
+            if cycle == 1:
+                (root / "successful-request").write_text(request.id, encoding="utf-8")
             (root / "release-suite").touch()
             _eventually(lambda: core.status(request.id, root=driver).state == "completed")
-            assert core.status(request.id, root=driver).exit_code == 23
+            assert core.status(request.id, root=driver).exit_code == (23 if cycle == 0 else 0)
+        assert not (root / "finalizers.jsonl").exists()
         assert [row["phase"] for row in effects()] == [
             "manager", "suite-start", "suite-end",
         ] * 2
@@ -612,6 +630,9 @@ def test_native_ordinary_worker_drains_after_successful_caller_removes_acquisiti
     _eventually(lambda: core.status(later.id, root=driver).state == "completed")
     assert core.status(later.id, root=driver).exit_code == 23
     assert core.status(first.id, root=driver).exit_code == 0
+    assert [
+        json.loads(line) for line in (root / "finalizers.jsonl").read_text().splitlines()
+    ] == [{"command": ["update", "--project", "sample"], "participant": False}]
     procutil = Path((root / "draining-worker-procutil").read_text())
     assert procutil.is_relative_to(retained.parent) and procutil.is_file()
     assert [row["phase"] for row in effects()] == [
