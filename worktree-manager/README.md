@@ -532,7 +532,11 @@ machine with `--apply`. Apply rechecks prerequisites after provisioning and
 continues in the same invocation when they are available. Failed provisioning
 or unresolved prerequisites stop before the core installer; a PATH-changing
 install that still leaves a gap requests a shell restart. Re-running is
-idempotent and can heal a partial install. The core install is never
+idempotent and can heal a partial install. Required Python must return a
+successful, supported version from the exact discovered executable; a found
+but unusable or unqualified Python remains a prerequisite gap. Detection does
+not reorder candidates, substitute a private runtime or repair public PATH.
+The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
 `install.{ps1,sh}`. Core detection uses the same read-only, installation-context-
 qualified runtime selection as the engine client. Empty runtime/versions

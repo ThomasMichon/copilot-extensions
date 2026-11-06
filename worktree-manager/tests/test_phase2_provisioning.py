@@ -60,6 +60,104 @@ def test_detect_prereq_absent_tool():
     assert st.satisfied is False
 
 
+@pytest.mark.parametrize(
+    "returncode,output,satisfied",
+    [(0, "unrecognized version", False), (1, "Python 3.11.9", False),
+     (0, "Python 3.9.5", False), (0, "Python 3.11.9", True)],
+)
+def test_python_prerequisite_requires_a_successful_supported_version(
+    monkeypatch, returncode, output, satisfied,
+):
+    import subprocess
+
+    from worktree_manager import prereqs
+
+    monkeypatch.setattr(prereqs, "_which", lambda name: ("python3", "selected-python"))
+    monkeypatch.setattr(
+        prereqs.subprocess, "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, returncode, output, ""),
+    )
+    status = detect_prereq(Prereq("python3", min="3.10"))
+    assert status.present
+    assert status.satisfied is satisfied
+    assert PrereqStatus("fixture-tool", present=True, min_required="1.0").satisfied
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+def test_python_prerequisite_probes_the_exact_discovered_executable(monkeypatch):
+    import sys
+
+    from worktree_manager import prereqs
+
+    monkeypatch.setattr(
+        prereqs, "_which",
+        lambda name: ("unavailable-python-alias-for-test", sys.executable),
+    )
+    status = detect_prereq(Prereq("python3", min="3.10"))
+    assert status.path == sys.executable
+    assert status.version == ".".join(str(part) for part in sys.version_info[:3])
+    assert status.satisfied
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("usable", [False, True])
+def test_setup_qualifies_actual_python_before_core_and_repository(
+    monkeypatch, tmp_path, capsys, usable,
+):
+    import os
+    import sys
+
+    from worktree_manager import prereqs, setup_cli as cli
+    from worktree_manager.core_install import CoreInstallResult, CoreStatus
+    from worktree_manager.provision import ProvisionResult
+
+    python = Path(sys.executable)
+    if not usable:
+        python = tmp_path / ("unusable-python.exe" if os.name == "nt" else "unusable-python")
+        python.write_bytes(b"not an executable\n")
+        python.chmod(0o700)
+    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", (str(python),))
+    monkeypatch.setattr(
+        cli, "detect_baseline",
+        lambda: [detect_prereq(Prereq("python3", min="3.10"))],
+    )
+    monkeypatch.setattr(
+        cli, "provision_apply",
+        lambda actions, **kwargs: [
+            ProvisionResult(action, False, skipped_reason="fixture does not install")
+            for action in actions
+        ],
+    )
+    monkeypatch.setattr(
+        cli, "core_status",
+        lambda: CoreStatus("installed", True, True, None, "fixture-core"),
+    )
+    monkeypatch.setattr(cli, "install_command", lambda: None)
+    calls = []
+
+    def install(**kwargs):
+        calls.append("core")
+        return CoreInstallResult(None, False, reason="already-installed")
+
+    def repository(args):
+        calls.append("repository")
+        return 0
+
+    monkeypatch.setattr(cli, "install_core", install)
+    monkeypatch.setattr(cli.repository_bootstrap, "run", repository)
+    assert main(["setup", "--apply", "--repository", "https://example.invalid/repo"]) == (
+        0 if usable else 1
+    )
+    assert calls == (["core", "repository"] if usable else [])
+    output = capsys.readouterr().out
+    if not usable:
+        assert "prerequisites still needed: python3" in output
+        assert "core installation was not attempted" in output
+
+
 def test_optional_absent_is_satisfied():
     st = PrereqStatus(name="psmux", present=False, optional=True)
     assert st.satisfied is True

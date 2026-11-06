@@ -1,0 +1,9 @@
+{
+  "comment": "Require qualified Python prerequisite observations before Manager setup continues.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
