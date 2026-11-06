@@ -102,6 +102,10 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   typed telemetry into 168 UTC-hour buckets and an optional static chart,
   preserving unknown coverage. It starts no collector or periodic job and never
   activates telemetry. See [the report contract](docs/health-report.md).
+- **Explicit hourly health storage.** `health record` confirms typed local
+  observations into 168 absolute-hour slots; `health inspect` reports ages,
+  gaps and stale/unknown evidence. Neither executes probes nor publishes to a
+  carrier. See [the local observation contract](docs/health-report.md#explicit-local-hourly-observations).
 - **Live Copilot CLI controls.** `copilot-cli` inspects native update preferences
   and cached versions, previews/applies live on/off and native update operations,
   and deliberately launches a cached version without another installer or

@@ -86,6 +86,46 @@ def test_input_discovery_never_creates_files_or_counts_the_same_file_twice(tmp_p
     assert not missing.exists()
 
 
+def test_normal_cli_hourly_slot_roundtrip_uses_explicit_local_inputs(tmp_path):
+    from agent_machines import health_slots
+
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "policy.json").write_text(json.dumps({
+        "schema": health_slots.POLICY_SCHEMA, "version": 1,
+        "publisher": "example-worker", "continuity": "example-generation",
+    }), encoding="utf-8")
+    source = tmp_path / "observation.json"
+    now = datetime.now(timezone.utc)
+    stamp = int(now.timestamp() * 1000)
+    source.write_text(json.dumps({
+        "schema": health_slots.SCHEMA, "version": 1,
+        "publisher": "example-worker", "continuity": "example-generation",
+        "hour": stamp // health_slots.HOUR_MS, "observed_at_ms": stamp,
+        "revision": 1, "parent": None, "domains": {},
+    }), encoding="utf-8")
+    command = [sys.executable, "-m", "agent_machines", "health"]
+
+    def call(arguments):
+        child = subprocess.run(
+            [*command, *arguments], capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+        )
+        assert child.returncode == 0, child.stderr
+        return json.loads(child.stdout)
+
+    arguments = [
+        "record", "--input", str(source), "--store-dir", str(store), "--now", now.isoformat(),
+    ]
+    preview = call(arguments)
+    assert set(path.name for path in store.iterdir()) == {"policy.json"}
+    recorded = call([*arguments, "--apply", "--expect", preview["preview_token"]])
+    assert recorded["applied"] and recorded["changed"]
+    view = call(["inspect", "--store-dir", str(store), "--now", now.isoformat()])
+    assert view["observed_hours"] == 1 and len(view["hours"]) == 168
+    assert all(item["state"] == "unknown" for item in view["hours"][-1]["sample"]["domains"].values())
+    assert view["carrier_receipt"] == "not-observed" and view["probe_execution"] == "not-performed"
+
+
 def test_replaced_input_is_unavailable_without_reading_the_new_identity(
     tmp_path, monkeypatch, capsys,
 ):
