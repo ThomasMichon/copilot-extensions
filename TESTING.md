@@ -65,6 +65,17 @@ with 64 KiB per stream for token probes and 8 MiB for entrypoint captures.
 The original ten-second probe and per-item entrypoint deadlines are unchanged.
 Required unit-only CI is unchanged.
 
+Bridge's opt-in `--test-file tests/test_owner_membership_budget.py --test-file
+tests/test_owner_membership.py --test-file tests/test_db.py --test-file
+tests/test_db_custody_schema.py --allow-explicit-tiers` packet checks indexed
+exact-owner membership capture, old unindexed VM cutoffs, read-only non-preparation
+and ordinary writable database bootstrap. Large unrelated owned, relationship
+and represented histories retain one physical query budget. The manual
+`installation-context-full.yml` `mux-companion` Windows lane additionally selects
+the two indexed lookup/bootstrap controls alongside its unchanged actual-client
+packet. This qualifies SQLite behavior, not cold-read scheduling reliability or
+a wall-clock deadline increase; required unit-only CI is unchanged.
+
 Worktrees' opt-in `--test-file tests/test_resident_recovery.py
 --test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py
 --test-file tests/test_status_monitor.py --allow-explicit-tiers` packet checks

@@ -1,0 +1,9 @@
+{
+  "comment": "Index exact-owner membership lookups during writable bootstrap without changing passive readers or read budgets",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
