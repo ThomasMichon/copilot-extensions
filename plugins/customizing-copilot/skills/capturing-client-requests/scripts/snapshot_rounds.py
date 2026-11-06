@@ -181,7 +181,10 @@ class GuidanceSnapshot:
                 "tool_call_id": identifier, "path": path,
                 "decoded_text_bytes": len(text.encode("utf-8")),
             })
-        if sum(item["decoded_text_bytes"] for item in row["tool_results"]) > MAX_RESULT_BYTES:
+        if sum(
+            item["decoded_text_bytes"]
+            for recorded in self.rounds for item in recorded["tool_results"]
+        ) > MAX_RESULT_BYTES:
             return self.finish("tool_result_byte_limit")
 
         if self.state == "listing":

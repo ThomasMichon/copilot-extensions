@@ -232,6 +232,29 @@ def test_snapshot_correlates_full_bodies_and_wire_deltas(tmp_path, line_format):
     assert report["session_start_completion"] == "not_observable"
 
 
+@pytest.mark.parametrize("over_budget", [False, True])
+def test_result_byte_budget_is_cumulative_across_rounds(tmp_path, monkeypatch, over_budget):
+    import snapshot_rounds
+
+    path = tmp_path / "cue.md"
+    body = "Synthetic guidance with UTF-8: \u00e9"
+    path.write_text(body, encoding="utf-8")
+    listing = str(path)
+    total_bytes = len(listing.encode("utf-8")) + len(body.encode("utf-8"))
+    monkeypatch.setattr(snapshot_rounds, "MAX_RESULT_BYTES", total_bytes - int(over_budget))
+    snapshot = snapshot_rounds.GuidanceSnapshot(tmp_path)
+    payload = guidance_payload()
+    snapshot.receive(payload, 100, tmp_path / "request.json")
+    payload["messages"] = [tool_result("capture-list", listing)]
+    reply = snapshot.receive(payload, 200, tmp_path / "round2.json")
+    assert len(reply["tool_calls"]) == 1
+    payload["messages"].append(tool_result("capture-read-0", body))
+    reply = snapshot.receive(payload, 300, tmp_path / "round3.json")
+    assert "tool_calls" not in reply
+    assert snapshot.state == ("incomplete" if over_budget else "complete")
+    assert snapshot.reason == ("tool_result_byte_limit" if over_budget else None)
+
+
 @pytest.mark.parametrize("listing,reason", [
     ("", "empty_listing"),
     ("Permission denied", "unsupported_or_denied_listing"),
