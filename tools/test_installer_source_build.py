@@ -316,10 +316,15 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
     compact = builds._compact
     child = engine._child
     build_scopes = []
+    build_temps = []
 
     def observe_build(argv, **options):
         if argv[1:2] == ["build"]:
             build_scopes.append(options["environment"].get("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"))
+            build_temps.append((
+                Path(argv[-1]).parent,
+                {options["environment"].get(name) for name in ("TMP", "TEMP", "TMPDIR")},
+            ))
         return child(argv, **options)
 
     monkeypatch.setattr(engine, "_child", observe_build)
@@ -343,6 +348,11 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
             assert all("#sha256=" in value for value in receipt["packages"].values())
             assert len(counter.read_text().splitlines()) == 3
     assert build_scopes == ["Local\\ce-owned-job-" + f"{1:032x}"] * 3
+    # UV's per-source setuptools lock stays inside the disposable workspace.
+    assert len(build_temps) == 3 and all(
+        len(temps) == 1 and Path(next(iter(temps))).parent == workspace
+        for workspace, temps in build_temps
+    )
     monkeypatch.setattr(builds, "_compact", compact)
     assert origins[0] == origins[1]
     assert os.path.samefile(*installed_modules)

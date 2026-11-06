@@ -22,7 +22,7 @@ import stat
 import subprocess
 import tempfile
 import unicodedata
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Callable, Iterable, Iterator
@@ -1888,12 +1888,39 @@ def _repository_sync_lock(repo_root: Path) -> Iterator[None]:
         raise OSError("projection synchronization lock root is unsafe")
     lock_name = _sha256(str(repo_root).casefold().encode("utf-8")) + ".lock"
     lock_path = lock_root / lock_name
-    with lock_path.open("a+b") as handle:
-        _lock_handle(handle)
+    # Only this module uses these non-blocking locks, so the holder removes the
+    # file on release; a contender that locked an unlinked file retries.
+    # (The static-instructions lock is shared with agent-worktrees' blocking
+    # sidecar waiters, which do not re-verify identity, so it is never unlinked.)
+    for _attempt in range(3):
+        handle = lock_path.open("a+b")
         try:
-            yield
-        finally:
-            _unlock_handle(handle)
+            _lock_handle(handle)
+        except BaseException:
+            handle.close()
+            raise
+        try:
+            current = lock_path.lstat()
+        except FileNotFoundError:
+            current = None
+        held = os.fstat(handle.fileno())
+        if current is not None and (current.st_dev, current.st_ino) == (held.st_dev, held.st_ino):
+            break
+        _unlock_handle(handle)
+        handle.close()
+    else:
+        raise BlockingIOError("another projection sync is running")
+    try:
+        yield
+    finally:
+        if os.name != "nt":
+            lock_path.unlink(missing_ok=True)
+        _unlock_handle(handle)
+        handle.close()
+        if os.name == "nt":
+            # Windows refuses the unlink while any contender still has it open.
+            with suppress(OSError):
+                lock_path.unlink()
 
 
 def _prepare_destination_parent(root: Path, relative: PurePosixPath) -> Path:

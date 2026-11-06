@@ -1116,6 +1116,26 @@ def test_render_local_cache_does_not_call_discover_sources_when_lock_is_contende
     assert calls == []
 
 
+def test_repository_sync_lock_excludes_contenders_and_removes_file_on_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(projections.tempfile, "tempdir", str(tmp_path / "temp"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = projections.validate_repository_root(repo)
+    lock_root = tmp_path / "temp" / "copilot-instruction-projections"
+
+    with projections.repository_sync_lock(root):
+        assert len(list(lock_root.glob("*.lock"))) == 1
+        with pytest.raises(BlockingIOError):
+            with projections.repository_sync_lock(root):
+                pass
+    assert list(lock_root.iterdir()) == []
+    with projections.repository_sync_lock(root):
+        pass
+    assert list(lock_root.iterdir()) == []
+
+
 def test_render_local_cache_resolves_sources_exactly_once_when_uncontended(
     tmp_path: Path,
 ) -> None:
