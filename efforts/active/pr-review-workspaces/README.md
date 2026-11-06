@@ -84,9 +84,10 @@ are preserved in [inception-transcript.md](inception-transcript.md).
 
 The current adopter direction is CLI-first PR observation; the later
 [operator clarification](inception-transcript.md#operator---cli-observation-and-mcp-question)
-preserves its wording. The agent-recommended CLI observer proposal below is
-planning-only. It does not replace the wider reviewer workflow or confer
-implementation, configuration-adoption or live-effect authority.
+preserves its wording. The agent-recommended CLI observer contract cleared
+review in #10819 and its bounded source implementation is separately admitted.
+It does not replace the wider reviewer workflow or confer configuration-adoption
+or live-effect authority.
 
 ## Plan
 
@@ -177,7 +178,7 @@ extension of the existing `ReplayStore` envelope, not a second posting ledger.
 
 ### Phase 4 - Integrate and qualify the reviewer after admission
 The [existing-owner tool surface](tool-surface-slice.md) is source-accepted in
-#9845/#9928; actual adoption remains open. The next planning-only
+#9845/#9928; actual adoption remains open. The reviewed source-only
 [CLI observer adopter](cli-observer-adopter-slice.md) composes the existing
 read-only service host without another backend or an MCP prerequisite.
 Exact-source acquisition remains explicitly unavailable, not a broad fetch fallback.
@@ -226,6 +227,41 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-06 - Qualify the bounded CLI observer source candidate
+- The optional read-only profile reader, existing authenticated client/facade
+  composition and one-shot CLI path are implemented without a profile writer,
+  backend adoption, new service or source-fetch lane.
+- Request input and JSON response delivery stay inside the canonical finite
+  process owner using borrowed streams. One 60-second observer deadline covers
+  all IO; original physical-cleanup failures and retry custody remain visible.
+- The [CLI slice](cli-observer-adopter-slice.md#local-source-qualification)
+  records 30 current unit controls, six native synthetic Gateway/read-owner
+  scenarios and fresh first-party wheel/console qualification across focused
+  packets. Existing unbound/embedding controls and borrowed-stream consumers
+  pass. Actual first-use third-party acquisition and host installation are not
+  qualified by the reused prepared external dependencies.
+- Enforced Linux/Windows typing, dependency-age, install-contract,
+  documentation and touched Python lint checks pass. Generated lifecycle
+  archives are refreshed from canonical source with changefiles for their
+  affected consumers; this is source, not a runtime update.
+- Exact-head review, required CI, managed publication and actual release remain
+  pending. The parent remains Active with eight Plan and eleven Validation
+  gates open; no profile adoption, provider access, reviewer effects, serving
+  changes or rollout is admitted by these local results.
+
+### 2026-11-06 - Admit the reviewed CLI observer source implementation
+- #10819 merged as `ce18a228c5f143a07efcc2d96b36bca9c6f25fc2` after assessed
+  review, required green checks and resolution of its documentation-impact thread.
+- The operator separately admitted the bounded CLI observer implementation,
+  tests and normal source publication/release under #9535. The Planning
+  coordinator continues as the PR-domain implementer for this source slice.
+- Preserve the existing native host, credential, cache/journal and lifecycle
+  owners. Configuration adoption, installation/runtime updates, serving changes,
+  live provider/review effects and rollout remain excluded.
+- The implementation reuses the canonical finite process owner, adding only
+  inherited request-input handoff where needed to bound a blocked CLI read.
+  The parent eight Plan and eleven Validation gates remain open.
 
 ### 2026-11-05 - Plan the CLI-first observer adopter
 - The operator clarified CLI tools as the intended PR-observation interface;

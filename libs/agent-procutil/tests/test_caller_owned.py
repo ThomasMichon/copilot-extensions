@@ -77,6 +77,92 @@ def test_binary_stdin_retains_output_limit_and_terminal_settlement():
                 input_bytes=b"settled\r\n", binary=True).stdout == b"settled\r\n"
 
 
+@native_execution
+def test_inherited_stdin_preserves_bytes_and_does_not_close_caller_stream(tmp_path):
+    source = tmp_path / "input"
+    source.write_bytes(b"\xff\x00\r\nborrowed")
+    with source.open("rb") as stream:
+        result = _run("import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())",
+                      stdin_stream=stream, binary=True)
+        assert result.returncode == 0 and result.stdout == source.read_bytes()
+        assert not stream.closed
+        os.fstat(stream.fileno())
+
+
+@native_execution
+def test_blocked_inherited_stdin_remains_inside_finite_owner():
+    reader, writer = os.pipe()
+    with os.fdopen(reader, "rb", buffering=0) as stream:
+        try:
+            started = time.monotonic()
+            with pytest.raises(subprocess.TimeoutExpired):
+                _run("import sys;sys.stdin.buffer.read()", stdin_stream=stream, timeout=.5)
+            assert time.monotonic() - started < 5
+            os.fstat(stream.fileno())
+        finally:
+            os.close(writer)
+    assert _run("print('settled')").stdout == "settled\n"
+
+
+@native_execution
+def test_inherited_output_is_delivered_before_completion_without_closing_sink(tmp_path):
+    with (tmp_path / "output").open("w+b") as stream:
+        result = _run("import sys;sys.stdout.buffer.write(b'\\xff\\r\\n')",
+                      capture=False, stdout_stream=stream)
+        assert result.returncode == 0 and result.stdout is None
+        stream.seek(0)
+        assert stream.read() == b"\xff\r\n"
+
+
+@native_execution
+def test_blocked_inherited_output_remains_inside_finite_owner():
+    reader, writer = os.pipe()
+    with os.fdopen(writer, "wb", buffering=0) as stream:
+        try:
+            started = time.monotonic()
+            with pytest.raises(subprocess.TimeoutExpired):
+                _run("import sys;sys.stdout.buffer.write(b'x'*1048576);sys.stdout.flush()",
+                      capture=False, stdout_stream=stream, timeout=.5)
+            assert time.monotonic() - started < 5
+            os.fstat(stream.fileno())
+        finally:
+            os.close(reader)
+
+
+@pytest.mark.parametrize("options", [{"input_text": "text"}, {"input_bytes": b"bytes", "binary": True}])
+def test_inherited_stdin_refuses_ambiguous_input_before_launch(tmp_path, monkeypatch, options):
+    source = tmp_path / "input"
+    source.write_bytes(b"borrowed")
+    monkeypatch.setattr(protocol, "_run_owned", lambda *a, **k: pytest.fail("native launch attempted"))
+    with source.open("rb") as stream, pytest.raises(ValueError):
+        _run("pass", stdin_stream=stream, **options)
+
+
+def test_inherited_stdio_preparation_failure_retains_failed_close_and_closes_siblings(monkeypatch):
+    duplicates = iter((20, 21))
+    closed, settled = [], []
+    def close(descriptor):
+        closed.append(descriptor)
+        if descriptor == 20:
+            raise OSError("close disposition unknown")
+    monkeypatch.setitem(sys.modules, "fcntl", SimpleNamespace(
+        F_DUPFD_CLOEXEC=1, fcntl=lambda *a: next(duplicates),
+    ))
+    monkeypatch.setattr(protocol, "os", SimpleNamespace(
+        name="posix", fstat=lambda fd: None, close=close,
+    ))
+    monkeypatch.setattr(protocol, "_run_owned", lambda *a, **k: pytest.fail("native launch attempted"))
+    with pytest.raises(OwnedCleanupError) as caught:
+        _run(
+            "pass", stdin_stream=SimpleNamespace(fileno=lambda: 0),
+            stdout_stream=SimpleNamespace(fileno=lambda: 1), capture=True,
+            on_settled=lambda: settled.append(True),
+        )
+    assert sorted(closed) == [20, 21]
+    assert caught.value.cleanup_resources == (("descriptor", 20),)
+    assert settled == []
+
+
 @pytest.mark.parametrize("options", [
     {"input_bytes": b"data", "input_text": "text", "binary": True},
     {"input_bytes": b"data"},

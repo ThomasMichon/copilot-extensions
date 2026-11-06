@@ -4,6 +4,18 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`run_caller_owned` may borrow native `stdin_stream` and, with `capture=False`,
+`stdout_stream` file objects. The target's input reads and output writes then
+remain inside the same finite Job/process-group lifetime, including blocked
+pipes. The caller retains its streams; the primitive closes only its duplicated
+descriptors. Supplied text/byte input cannot be combined with borrowed stdin.
+Borrowed stdout has no captured result or capture-byte quota: the trusted
+producer must enforce its own response/encoding bound before writing. Its
+physical write still shares the absolute execution/cleanup budget.
+The POSIX guardian keeps these descriptors separate from its private framing
+and lifetime pipe; neither is application input. Ordinary captured calls and
+their stream limits are unchanged.
+
 On Linux, `spawn_daemon` also separates a durable resident from its launching
 systemd unit's cleanup cgroup. It uses an independently named transient user
 scope, without a new restart policy or persistent service definition.
