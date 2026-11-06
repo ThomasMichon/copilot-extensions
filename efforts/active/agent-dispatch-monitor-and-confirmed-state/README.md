@@ -50,6 +50,10 @@ of the installed Bridge, resident or complete participating cohort.
 Original first-relationship request admission subsequently merged in #11031.
 It carries the original audited request into the independent callback before
 effects; it does not supply independent original-queue or closed-cohort observation.
+Independent queue-owned request revalidation subsequently merged in #11034.
+The source now rereads durable queue/authority/audit/request facts before each
+external relationship call, retaining post-I/O CAS. Actual installed participant
+and complete-cohort observations remain unqualified.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running
