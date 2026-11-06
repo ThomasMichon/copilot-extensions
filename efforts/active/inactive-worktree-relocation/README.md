@@ -312,3 +312,21 @@ adopter pilot feedback gates subsequent widening.
 - Publish this final admission correction through a fresh review and required
   CI. Keep source merge, release, selected-runtime activation and adopter
   feedback distinct; the umbrella and broader effort remain Active.
+
+### 2026-11-06 — Clarified custody findings
+- Requested concrete details rather than accepting a review summary that
+  referred to unpublished critical findings. The clarified review identified
+  permission-file link replacement, non-ID source basenames and POSIX
+  read-only staged-file retry.
+- Rechecked ordinary single-link permission files under all owner locks before
+  any rewrite; aligned source basename admission with recovery; validated
+  partial-stage entries/access before copying; and made owned POSIX stage
+  retries preserve source permissions and copied metadata.
+- The complete native packet passed **39 controls**, including actual Windows
+  symlink/hardlink custody controls. Four explicit skips covered three POSIX
+  controls and the unenrolled second volume. The corrected production flow
+  then passed **1 real bounded Windows cross-filesystem roundtrip, no skips**,
+  with exact owned cleanup confirmed.
+- Fresh current-head review and required CI still gate merge. POSIX native
+  acceptance, selected-runtime activation, adopter migration and broader
+  inactive support remain open.

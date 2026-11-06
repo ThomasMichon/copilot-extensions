@@ -30,7 +30,8 @@ launch/record sidecars. Unknown owner proof is an explicit refusal.
 - An existing ordinary managed linked Git checkout with a retained creation
   nonce, completed/final tracking disposition and locally proven landed source
   content: ancestry, patch equivalence or identical upstream tree.
-- A canonical, nonredirected recorded source location, checked before creating
+- A canonical, nonredirected recorded source whose basename is the worktree ID,
+  checked before creating
   recovery custody; unsupported source aliases never create an unrecoverable
   journal.
 - Confirmed inactive session/mux and process-CWD owners, no retained sessions,
@@ -67,6 +68,8 @@ Unrelated live rows are untouched. Copilot session-reference matches are a
 refusal until their reader/writer semantics are qualified.
 Reference inspection has a 10,000-entry budget and a three-second database
 inventory budget; an incomplete inventory refuses.
+Permission files must remain ordinary, single-link files at capture and under
+the mutation locks. File links are refused without replacing their linkage.
 
 ## Transfer and recovery
 
@@ -84,6 +87,10 @@ source. Namespace publication uses native write-through replacement on Windows
 and parent-directory synchronization on POSIX. A barrier failure keeps the
 original copy and the journal for recovery. No global multi-file pointer
 transaction is claimed.
+Retry validates the partial stage's plain entries and access before copying.
+POSIX retry replaces owned staged files and temporarily makes owned staged
+directories writable, restoring source metadata through the normal copy owner;
+it never changes source permissions.
 
 Retry the exact original command after an interruption. It recovers that
 operation, not another allocation. Another live or unobservable original caller,
