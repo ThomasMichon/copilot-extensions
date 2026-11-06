@@ -334,6 +334,51 @@ def test_native_project_scope_composes_with_resident_source(tmp_path, monkeypatc
     assert config.configuration_root() == str(tmp_path / "resident")
 
 
+@pytest.mark.parametrize("resident", [False, True])
+def test_native_project_scope_preserves_extension_default_and_resident_selection(
+    tmp_path, monkeypatch, resident,
+):
+    from pathlib import Path
+
+    from agent_vault import configuration_scope, extensions
+    from agent_vault.invocation import use_configuration_root
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent.json"))
+    for name in ("AGENT_VAULT", "KPDB", "VAULT_GROUP", "AGENT_VAULT_PORT", "AGENT_VAULT_PINNED_CONTEXT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    expected_hint = None
+    if resident:
+        selected = tmp_path / "resident"
+        selected.mkdir()
+        config.bind_service_configuration(str(selected))
+        expected_hint = str(selected)
+    seen = []
+
+    def contribute(cwd):
+        seen.append(cwd)
+        name = Path(cwd).name if cwd is not None else "default"
+        return {"kpdb": str(tmp_path / f"{name}.kdbx"), "group": name}
+
+    registry = extensions.ExtensionRegistry()
+    registry.register_config_source(contribute)
+    monkeypatch.setattr(extensions, "_REGISTRY", registry)
+    expected_name = "resident" if resident else "default"
+    before = config.resolve_context(strict=True)
+    with use_configuration_root(str(project)):
+        scoped = config.resolve_context(strict=True)
+    after = config.resolve_context(strict=True)
+    assert before.kpdb == after.kpdb == str(tmp_path / f"{expected_name}.kdbx")
+    assert before.group == after.group == expected_name
+    assert scoped.kpdb == str(tmp_path / "project.kdbx")
+    assert scoped.group == "project"
+    assert seen == [expected_hint, str(project), expected_hint]
+
+
 def test_actual_absent_owner_keeps_unbound_vault_defaults_without_open_or_bootstrap(tmp_path, monkeypatch):
     import configuration_context
 

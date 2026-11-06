@@ -10,14 +10,23 @@ from pathlib import Path
 from typing import Any
 
 from .invocation import configuration_root as invocation_configuration_root
-from .configuration_scope import configuration_root as resident_configuration_root
+from .configuration_scope import (
+    REPO_CONFIG_NAME,
+    bind_service_configuration as bind_service_configuration,
+    configuration_source as resident_configuration_source,
+)
 
 
-def configuration_root(cwd: str | None = None) -> str:
+def configuration_source(cwd: str | None = None) -> str | None:
+    """Keep an absent extension hint unless a caller or resident selected one."""
     selected = invocation_configuration_root(cwd)
     if selected is not None:
         return selected
-    return resident_configuration_root()
+    return resident_configuration_source()
+
+
+def configuration_root(cwd: str | None = None) -> str:
+    return configuration_source(cwd) or os.getcwd()
 
 IS_WINDOWS = platform.system() == "Windows"
 DEFAULT_TCP_PORT = 19999
@@ -81,7 +90,6 @@ def run_dir() -> Path:
 
 CONFIG_ENV = "AGENT_VAULT_CONFIG"
 PINNED_CONTEXT_ENV = "AGENT_VAULT_PINNED_CONTEXT"
-from .configuration_scope import REPO_CONFIG_NAME, bind_service_configuration as bind_service_configuration, configuration_source
 
 
 @dataclass(frozen=True)
@@ -347,7 +355,6 @@ def resolve_context(
             port=port,
             sources=dict.fromkeys(("vault", "kpdb", "group", "port"), "pinned"),
         )
-    cwd = configuration_root(cwd)
     global_data = load_global_config(strict=True) if strict else load_global_config()
     if strict:
         _validate_config_data(global_data, "global vault configuration")

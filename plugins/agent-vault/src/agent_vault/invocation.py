@@ -14,7 +14,7 @@ _ROOT: ContextVar[str | None] = ContextVar("vault_configuration_root", default=N
 
 
 def configuration_root(cwd: str | None = None) -> str | None:
-    return cwd or _ROOT.get()
+    return cwd if cwd is not None else _ROOT.get()
 
 
 @contextmanager
