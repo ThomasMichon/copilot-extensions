@@ -1,6 +1,14 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_resident_observation_precedes_each_required_relationship[None]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_resident_observation_precedes_each_required_relationship[contract]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_resident_observation_precedes_each_required_relationship[nonce]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_resident_observation_precedes_each_required_relationship[identity]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_resident_observation_precedes_each_required_relationship[foreign-installation]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_resident_observation_precedes_each_required_relationship[resident]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_actual_resident_observation_precedes_each_required_relationship[version]",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py::test_selected_factory_retains_real_selection_and_independent_admission",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_creation_cli_forwards_validated_writer_without_changing_creation",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_creation_cli_refuses_invalid_writer_before_client[changes0-{}]",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py::test_creation_cli_refuses_invalid_writer_before_client[changes1-{}]",
@@ -5093,11 +5101,12 @@
         "tools/sweep_forbidden_labels.py": "cc848ce49e60253946d2180331ac13a66b417987014db1184973212b1a634818",
         "tools/promotion_unit_tests/test_label_cleanup.py": "5c60fa35649184a8c59ddd88ecb6a92a4963f04be808921fc68f0eeb07e1861c",
         "plugins/agent-bridge/src/agent_bridge/acquisition_writer_inspection.py": "08ac3b2329d3adb9a21638efc3a07c3a0acd4c4dd4fa38d35f642426101dece6",
-        "tools/promotion_unit_tests/test_relationship_request_admission.py": "99cc2c7afe1154f9a765968ff229c0076e267829c61c98b1db135748511c1857",
-        "plugins/agent-dispatch/src/agent_dispatch/assignment_relationship_owner.py": "8e4ec1c985cff25bfe0f18a0f5f9013b59e7cc2ec5f6d4b0ad074a01650132a0",
+        "tools/promotion_unit_tests/test_relationship_request_admission.py": "ac1dcd34bd8e7331799077d64f8eff57cdd3da3151bf7530018108cb819074b7",
+        "plugins/agent-dispatch/src/agent_dispatch/assignment_relationship_owner.py": "cad93f990c463648c957b9a3c55c4fa6ebba9e404021c5593c6dcd3083bdb7f4",
         "plugins/agent-dispatch/src/agent_dispatch/assignment_workspace.py": "9e1f96ca9bfaa8a3bbcdfe4dfcad33e86dcbe0051eb24779ddb9650df125e524",
         "plugins/agent-dispatch/src/agent_dispatch/queue_task_relationships.py": "08715a2ca83f3e1e67c2934878d6e4af27b0040ba3665ffefb6d5efcfb48b766",
-        "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py": "9915c6dbddbce56b27099b234a004c70ba548ae33f462d4718c4b11a180b4e13"
+        "plugins/agent-dispatch/src/agent_dispatch/task_relationships.py": "9915c6dbddbce56b27099b234a004c70ba548ae33f462d4718c4b11a180b4e13",
+        "plugins/agent-dispatch/src/agent_dispatch/worktree_owner_launch.py": "ae30f2fba563d9b42a894243a497a41838246af681c098bc7fcc71e750e90f90"
     },
     "coverage_targets": [
         "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",

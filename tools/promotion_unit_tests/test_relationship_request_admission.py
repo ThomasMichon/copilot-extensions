@@ -179,6 +179,102 @@ def test_required_admission_rejects_before_any_owner_effect(boundary):
     assert b.calls == []
 
 
+@pytest.mark.parametrize("change", [
+    None, "contract", "nonce", "identity", "foreign-installation", "resident", "version",
+])
+def test_actual_resident_observation_precedes_each_required_relationship(boundary, change):
+    b = boundary
+    observations = []
+    generation = ["first-resident"]
+    support = b.writer._run(["resource-relationship", "capabilities", "--json"])
+
+    def run(self, arguments, payload=None):
+        observations.append((arguments, copy.deepcopy(payload)))
+        if "capabilities" in arguments:
+            return {**support, "resident_inspect": 1}
+        result = {
+            "schema": "copilot-extensions.resource-relationship", "version": 1,
+            "ok": True, "owner": b.workspace.owner_ref,
+            "creation_nonce": b.workspace.creation_nonce, "writer_contract": b.relationships.WRITER,
+            "writer_identity": {**b.identity, "runtime_generation": "d" * 32},
+            "request_id": b.request["request_id"], "absent": True,
+            "resident": {"generation": generation[0], "runtime_generation": "resident-build"},
+        }
+        if "--resident-only" in arguments:
+            assert payload == {
+                "request_id": b.request["request_id"], "allow_missing": True,
+                "expected_creation_nonce": b.workspace.creation_nonce,
+            }
+            if change == "contract":
+                result["writer_contract"] = {}
+            elif change == "nonce":
+                result["creation_nonce"] = "replacement"
+            elif change == "identity":
+                result["writer_identity"]["runtime_generation"] = None
+            elif change == "foreign-installation":
+                result["writer_identity"]["installation_root"] = "/another/installation"
+            elif change == "resident":
+                result.pop("resident")
+            elif change == "version":
+                result["version"] = True
+        elif "record" in arguments:
+            result = {"ok": True, "worktree": {
+                "id": b.workspace.worktree, "repo": b.workspace.project, "path": b.workspace.path,
+                "creation_nonce": b.workspace.creation_nonce,
+            }}
+        else:
+            result["writer_identity"] = b.identity.copy()
+        return result
+
+    b.monkeypatch.setattr(b.module.WorktreeRelationshipWriter, "_run", run)
+    writer = b.module.WorktreeRelationshipWriter(
+        ["retained-build"], admit_workspace=lambda *a: None, require_resident=True,
+    )
+    if change is not None:
+        with pytest.raises(b.Refused, match="resident is unconfirmed"):
+            writer(b.workspace, "inspect", {"request_id": b.request["request_id"]})
+        assert len(observations) == 2 and "--resident-only" in observations[-1][0]
+    else:
+        for selected in ("first-resident", "requalified-resident"):
+            generation[0] = selected
+            assert writer(b.workspace, "inspect", {"request_id": b.request["request_id"]})["ok"]
+        assert sum("--resident-only" in args for args, _ in observations) == 2
+        assert len(observations) == 7
+
+
+def test_selected_factory_retains_real_selection_and_independent_admission(boundary):
+    b = boundary
+    selected = []
+    helper = ModuleType(f"{PACKAGE}.worktree_owner_launch")
+
+    def retain():
+        selected.append("selected")
+        return ("retained-command", "original-build")
+
+    helper.retained_selection = retain
+    b.monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    support = b.writer._run(["resource-relationship", "capabilities", "--json"])
+    b.monkeypatch.setattr(
+        b.module.WorktreeRelationshipWriter, "_run",
+        lambda *a, **k: {**support, "resident_inspect": 1},
+    )
+
+    def unqualified(*args):
+        raise b.Refused("other participating owner is unqualified")
+
+    writer = b.module.WorktreeRelationshipWriter.selected(
+        admit_workspace=unqualified, admit_request=unqualified,
+    )
+    assert writer.prefix == ("retained-command", "original-build") and selected == ["selected"]
+    with pytest.raises(b.Refused, match="other participating owner"):
+        writer.bind_request(b.request)(b.workspace, "inspect", {
+            "request_id": b.request["request_id"], "allow_missing": True,
+        })
+    with pytest.raises(b.Refused, match="bound original request"):
+        writer(b.workspace, "inspect", {"request_id": b.request["request_id"]})
+    assert b.calls == []
+
+
 @pytest.mark.parametrize("change", ["authority", "event", "workspace", "queue", "request"])
 def test_conflicting_context_cannot_inherit_original_admission(boundary, change):
     b = boundary

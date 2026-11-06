@@ -177,6 +177,27 @@ See the canonical [Worktrees relationship contract](../../agent-worktrees/docs/r
 These conditional adapter controls still do not assemble the real writer
 cohort or activate ordinary coordinator construction.
 
+The opt-in `WorktreeRelationshipWriter.selected(...)` factory retains the
+actual installed Worktrees command before negotiating its executing
+capabilities. Same-cell calls reuse the existing receipt/governance boundary;
+legacy calls recheck legacy ownership before entering the slot-local retention
+bootstrap. Neither form falls back to an ambient executable or adopts a newer
+build after selection. Missing/recreated builds refuse through the original
+pre-import identity check. Ordinary unpinned callers are unchanged.
+
+That factory additionally negotiates `resident_inspect: 1` and performs an
+authenticated `inspect --resident-only` with the original workspace nonce before
+each relationship operation. It validates the returned executing serializer,
+installation, build and resident generation; it never substitutes the direct
+CLI writer. A different compatible resident build can qualify independently,
+and each later operation reobserves its current selection rather than caching
+an earlier readiness result. This costs one additional bounded Worktrees child
+and resident read per relationship operation, not per generic record save.
+The factory still requires both independent admission callbacks. Its CLI and
+resident observations do not qualify Bridge's future keyed creation, its
+original continuation journal or any other participating producer, and cannot
+close the writer cohort or enable ordinary construction.
+
 Queue reconciliation uses the selected adapter's `bind_request` path when
 available, passing an isolated copy of the original audited request before
 reserve or retirement inspection. This path requires the separately supplied
