@@ -81,3 +81,14 @@ The operator selected:
 
 This selects canonical source planning/publication, not runtime implementation
 or service rollout. The normal source review and contribution gates remain.
+
+## Operator - CLI observation and MCP question
+
+> The intent is ultimately to use the CLI tools for observing PRs. What would the MCP flow entail?
+
+The assistant explained that MCP would add a registered tool-facing adapter
+over the same workspace SDK, PR service and forge operations, with its own
+tool-host binding and lifetime plumbing rather than another observer or cache.
+The current agent-recommended continuation is CLI-first observation, with MCP
+left optional. Only the next source-only adopter plan is being prepared;
+implementation, configuration adoption and live effects remain separately gated.
