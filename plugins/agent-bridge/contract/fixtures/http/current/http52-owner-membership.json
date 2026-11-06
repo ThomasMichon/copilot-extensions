@@ -2182,8 +2182,8 @@
       "sha256": "ccb78980645608954399a1a54675f284b533f240b1ea4fc35251067f5d595e64"
     },
     "plugins/agent-bridge/src/agent_bridge/_peer_launch.py": {
-      "blob": "aad6aa02c7b1271beff92560e798fd93bef27c8d",
-      "sha256": "f4428602ffcc75222f661472e57b75a07ad6e7538d6d987d3eeb4541db20cd29"
+      "blob": "692939fd092c960da2665943db85d00a9db5ca47",
+      "sha256": "61f232655444228af4f3ce5762a323944ff07ef4dd10183ec2d7dcf6a0b86b7a"
     },
     "plugins/agent-bridge/src/agent_bridge/acp_activation.py": {
       "blob": "9059b65200359476bbbe818850cc2fd65d07237b",
@@ -3806,8 +3806,8 @@
       "sha256": "2ac0822658aaa9d5a5ac81ed00bd1da3ab3698c63f1513701980f2030c83d804"
     },
     "plugins/agent-bridge/tests/test_worktree_writer_observation.py": {
-      "blob": "4a7bc0effc7cdf082af15ee1a8db66305c20e6ab",
-      "sha256": "c054e21f6cc5975a6a98a1b002803a30c10ef464de913bad959c9c3663ba200e"
+      "blob": "f9a3f45e06237ac81b924df7c2e31a4b2dfbafb2",
+      "sha256": "1a77f492b16222847ca4fd69c9f4095dbab259deecc25ec213493b0b365c4aee"
     },
     "plugins/agent-codespaces/src/agent_codespaces/__init__.py": {
       "blob": "0402b740fc3c14e22e5bfffe9a3e0d110b4a11cf",
@@ -3902,8 +3902,8 @@
       "sha256": "b71a8efb342f00ae8067c4fe951841589e8253081bb29a07a107653b5d016cf9"
     },
     "plugins/agent-codespaces/src/agent_codespaces/_peer_launch.py": {
-      "blob": "aad6aa02c7b1271beff92560e798fd93bef27c8d",
-      "sha256": "f4428602ffcc75222f661472e57b75a07ad6e7538d6d987d3eeb4541db20cd29"
+      "blob": "692939fd092c960da2665943db85d00a9db5ca47",
+      "sha256": "61f232655444228af4f3ce5762a323944ff07ef4dd10183ec2d7dcf6a0b86b7a"
     },
     "plugins/agent-codespaces/src/agent_codespaces/_ssh_retry.py": {
       "blob": "a6effc169e8b542e8196eea0088f33c24d0a49c9",
@@ -4374,8 +4374,8 @@
       "sha256": "553691f6ec04ee428538246a11df891b64d705c790bfa8134f4ce793a1138058"
     },
     "tools/bridge_http52_evidence.py": {
-      "blob": "59be53ff2c7e2e7afa4841cf522997d75a6112e3",
-      "sha256": "60739c4010acdb3458531692531439d9121b84a6d9f2e69718a9cfecc22d192f"
+      "blob": "0a23865313545801a8b8a55216ee492097f36340",
+      "sha256": "e3b7dc540285ec831b2a3983d4aec28295cc23991a5fcf35f4826b5106258bbc"
     },
     "tools/bridge_http_retained_evidence.py": {
       "blob": "682a27a08d18d5ec3bea54dc2e24dcd37f4d085a",
@@ -6082,7 +6082,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "4394bd85d832a17ff6cb35ac94c3a00f11ab289e5fbf5e89f4ad0f1227954c0a",
+  "execution_closure_sha256": "d3fcaa7e18ad69b322432446d3e3656adb283bb6d4466afa03883ca6c66b6e81",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -6158,11 +6158,11 @@
     "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 2,
     "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
     "test_unknown_or_changed_slot_never_certifies_a_build": 10,
-    "test_same_cell_health_rechecks_peer_selection_without_launch": 9
+    "test_same_cell_health_rechecks_peer_selection_without_launch": 11
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "2296413106112a5cae8bcc32284e74819a02b8df",
+    "commit": "d3c298f65a8b09d90bef44b3e2c69272cc7a3d56",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
