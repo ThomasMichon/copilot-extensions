@@ -73,7 +73,9 @@ class CopilotAccountFile:
             )
             self._private(os.fstat(lock))
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            descriptor = os.open(self._path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            descriptor = os.open(
+                self._path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory,
+            )
             with os.fdopen(descriptor, "rb") as stream:
                 before = os.fstat(stream.fileno())
                 self._private(before)

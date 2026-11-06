@@ -7,6 +7,7 @@ import os
 import asyncio
 import datetime
 import ssl
+import stat
 import time
 from types import SimpleNamespace
 
@@ -41,9 +42,13 @@ def fixture_client(tmp_path, monkeypatch, handler):
     context = HttpAuthContext("https://example.com", "synthetic", "generation")
     source = Source()
     auth = SourceHttpAuth(source, context, endpoint)
+    discovery_endpoint = "https://example.com/health"
     client = wire.HttpSourceLeaseClient(
         endpoint, auth=auth, context=context, source="example", account="synthetic",
         recipient="worker", host="github.com", capability_file=capability,
+        discovery_endpoint=discovery_endpoint, discovery_context=context,
+        discovery_auth=SourceHttpAuth(source, context, discovery_endpoint),
+        installation_id="synthetic-index",
         transport=httpx.MockTransport(handler),
     )
     return client, clock, source, capability
@@ -54,7 +59,15 @@ def response(**changes):
         "account": "synthetic", "host": "github.com", "token": "synthetic-native-token",
         "lease_contract": wire.LEASE_CONTRACT, "lease_id": "b" * 32,
         "lease_issued_at": 999.0, "lease_expires_at": 1059.0,
-        "lease_remaining_seconds": 55.0, **changes,
+        "lease_remaining_seconds": 55.0, "installationId": "synthetic-index", **changes,
+    }
+
+
+def discovery(**changes):
+    return {
+        "status": "ok", "plugin": "agent-index", "version": "fixture",
+        "source_credentials_contract": wire.HTTP_SUPPORT, "installationId": "synthetic-index",
+        **changes,
     }
 
 
@@ -64,7 +77,7 @@ async def test_real_injector_and_caller_capability_rotate_without_token_fallback
     def handler(request):
         requests.append(request)
         if request.method == "GET":
-            return httpx.Response(200, json=wire.HTTP_SUPPORT)
+            return httpx.Response(200, json=discovery())
         return httpx.Response(200, json=response())
     client, clock, source, capability = fixture_client(tmp_path, monkeypatch, handler)
     first = await client.acquire()
@@ -78,7 +91,10 @@ async def test_real_injector_and_caller_capability_rotate_without_token_fallback
         "Bearer", "synthetic-http-credential",
     ] for request in requests)
     assert len(source.calls) == 4
-    assert all(call["path"] == "api/v1/source-credentials" for call in source.calls)
+    assert [call["path"] for call in source.calls] == [
+        "health", "api/v1/source-credentials", "health", "api/v1/source-credentials",
+    ]
+    assert all(request.headers[wire.INSTALLATION_HEADER] == "synthetic-index" for request in requests)
     assert first.remaining_seconds() == second.remaining_seconds() == 55
     assert first.token not in repr(first)
 
@@ -86,7 +102,8 @@ async def test_real_injector_and_caller_capability_rotate_without_token_fallback
 @pytest.mark.asyncio
 @pytest.mark.parametrize("support,status", [
     ({}, 200), ({"lease_contract": wire.LEASE_CONTRACT}, 200),
-    ({**wire.HTTP_SUPPORT, "exchange": "other"}, 200), (wire.HTTP_SUPPORT, 302),
+    (discovery(source_credentials_contract={**wire.HTTP_SUPPORT, "exchange": "other"}), 200),
+    (discovery(installationId="different-index"), 200), (discovery(), 302),
 ])
 async def test_unsupported_peer_never_reads_capability_or_posts(tmp_path, monkeypatch, support, status):
     methods = []
@@ -105,14 +122,14 @@ async def test_unsupported_peer_never_reads_capability_or_posts(tmp_path, monkey
     {"account": "other"}, {"host": "other.example.com"}, {"token": "invalid\nvalue"},
     {"lease_id": "bad"}, {"lease_issued_at": True}, {"lease_expires_at": float("inf")},
     {"lease_remaining_seconds": float("nan")}, {"lease_remaining_seconds": 61},
-    {"lease_issued_at": 1001}, {"lease_contract": "other"},
+    {"lease_issued_at": 1001}, {"lease_contract": "other"}, {"installationId": "other"},
 ])
 async def test_malformed_lease_is_refused_without_retry(tmp_path, monkeypatch, changes):
     methods = []
     def handler(request):
         methods.append(request.method)
         if request.method == "GET":
-            return httpx.Response(200, json=wire.HTTP_SUPPORT)
+            return httpx.Response(200, json=discovery())
         return httpx.Response(200, content=json.dumps(response(**changes)).encode())
     client, _, _, _ = fixture_client(tmp_path, monkeypatch, handler)
     with pytest.raises(wire.SourceLeaseError):
@@ -125,7 +142,7 @@ async def test_entire_exchange_latency_and_clock_regression_consume_lease(tmp_pa
     def handler(request):
         clock.wall += 2
         clock.monotonic += 2
-        return httpx.Response(200, json=wire.HTTP_SUPPORT if request.method == "GET" else response())
+        return httpx.Response(200, json=discovery() if request.method == "GET" else response())
     client, clock, _, _ = fixture_client(tmp_path, monkeypatch, handler)
     lease = await client.acquire()
     assert lease.remaining_seconds() == 51
@@ -138,12 +155,31 @@ async def test_entire_exchange_latency_and_clock_regression_consume_lease(tmp_pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["acquisition", "retention"])
+async def test_wall_only_suspension_exhausts_the_conservative_budget(tmp_path, monkeypatch, stage):
+    def handler(request):
+        if stage == "acquisition":
+            clock.wall += 28
+            clock.monotonic += 0.5
+        return httpx.Response(200, json=discovery() if request.method == "GET" else response())
+    client, clock, _, _ = fixture_client(tmp_path, monkeypatch, handler)
+    if stage == "acquisition":
+        with pytest.raises(wire.SourceLeaseError, match="expired"):
+            await client.acquire()
+    else:
+        lease = await client.acquire()
+        clock.wall += 56
+        clock.monotonic += 1
+        assert lease.remaining_seconds() == 0
+
+
+@pytest.mark.asyncio
 async def test_post_transport_failure_is_not_replayed_or_exposed(tmp_path, monkeypatch):
     methods = []
     def handler(request):
         methods.append(request.method)
         if request.method == "GET":
-            return httpx.Response(200, json=wire.HTTP_SUPPORT)
+            return httpx.Response(200, json=discovery())
         raise httpx.ReadError("synthetic-secret-provider-detail")
     client, _, _, _ = fixture_client(tmp_path, monkeypatch, handler)
     with pytest.raises(wire.SourceLeaseError) as caught:
@@ -156,7 +192,7 @@ async def test_post_transport_failure_is_not_replayed_or_exposed(tmp_path, monke
 @pytest.mark.asyncio
 async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(tmp_path, monkeypatch):
     def handler(request):
-        return httpx.Response(200, json=wire.HTTP_SUPPORT if request.method == "GET" else response())
+        return httpx.Response(200, json=discovery() if request.method == "GET" else response())
     client, clock, _, _ = fixture_client(tmp_path, monkeypatch, handler)
     root = tmp_path / ".copilot"
     root.mkdir(mode=0o700)
@@ -223,6 +259,42 @@ def test_unsafe_native_file_is_preserved(tmp_path, monkeypatch, kind):
 def test_native_file_adapter_refuses_unsupported_platform(tmp_path):
     with pytest.raises(CopilotFileAuthError, match="platform-unsupported"):
         CopilotAccountFile(tmp_path / "config.json", account="synthetic")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO refusal")
+def test_native_fifo_is_opened_nonblocking_then_refused(tmp_path, monkeypatch):
+    root = tmp_path / ".copilot"
+    root.mkdir(mode=0o700)
+    config = root / "config.json"
+    os.mkfifo(config, 0o600)
+    original_open = os.open
+    def guarded_open(path, flags, *args, **kwargs):
+        if path == "config.json":
+            assert flags & os.O_NONBLOCK, "A FIFO must never reach a blocking open"
+        return original_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, "open", guarded_open)
+    monkeypatch.setattr(wire, "time", SimpleNamespace(time=lambda: 1000, monotonic=lambda: 200))
+    lease = wire.HttpSourceLease(
+        "new-token", "synthetic", "github.com", "b" * 32, 999, 1060, 1000, 200, 60,
+    )
+    with pytest.raises(CopilotFileAuthError):
+        CopilotAccountFile(config, account="synthetic").install(lease)
+    assert stat.S_ISFIFO(config.lstat().st_mode)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO refusal")
+@pytest.mark.asyncio
+async def test_capability_fifo_refuses_without_post(tmp_path, monkeypatch):
+    methods = []
+    def handler(request):
+        methods.append(request.method)
+        return httpx.Response(200, json=discovery())
+    client, _, _, capability = fixture_client(tmp_path, monkeypatch, handler)
+    capability.unlink()
+    os.mkfifo(capability, 0o600)
+    with pytest.raises(wire.SourceLeaseError):
+        await client.acquire(timeout=1)
+    assert methods == ["GET"]
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
@@ -300,7 +372,9 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
             body = await asyncio.wait_for(reader.readexactly(length), 3)
             requests.append((method, path, headers, body))
             issued = time.time()
-            value = wire.HTTP_SUPPORT if method == "GET" else response(
+            assert headers[wire.INSTALLATION_HEADER] == "synthetic-index"
+            assert (method, path) in {("GET", "/health"), ("POST", "/api/v1/source-credentials")}
+            value = discovery() if method == "GET" else response(
                 lease_issued_at=issued, lease_expires_at=issued + 60,
                 lease_remaining_seconds=60,
             )
@@ -327,6 +401,9 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
         kwargs = dict(
             auth=SourceHttpAuth(Source(), context, endpoint), context=context, source="example",
             account="synthetic", recipient="worker", host="github.com", capability_file=capability,
+            discovery_endpoint=f"https://localhost:{port}/health",
+            discovery_auth=SourceHttpAuth(Source(), context, f"https://localhost:{port}/health"),
+            discovery_context=context, installation_id="synthetic-index",
         )
         with pytest.raises(wire.SourceLeaseError):
             await wire.HttpSourceLeaseClient(endpoint, **kwargs).acquire(timeout=5)
@@ -335,7 +412,7 @@ async def test_real_https_requires_trust_and_preserves_fixed_account_exchange(tm
         lease = await wire.HttpSourceLeaseClient(endpoint, tls_context=trust, **kwargs).acquire(timeout=5)
         assert 0 < lease.remaining_seconds() < 60
         assert [item[0] for item in requests] == ["GET", "POST"]
-        assert all(item[1] == "/api/v1/source-credentials" for item in requests)
+        assert [item[1] for item in requests] == ["/health", "/api/v1/source-credentials"]
         assert all(item[2]["Authorization"].split() == [
             "Bearer", "synthetic-http-credential",
         ] for item in requests)

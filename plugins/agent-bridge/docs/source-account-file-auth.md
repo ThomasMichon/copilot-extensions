@@ -9,11 +9,16 @@ Copilot process. Existing Bridge sessions and credential paths are unchanged.
 ## Fixed HTTP acquisition
 
 `HttpSourceLeaseClient` receives an explicitly approved HTTPS endpoint, the
-existing `HttpAuthInjector` and exact `HttpAuthContext`, a source/account/
+existing `HttpAuthInjector` and exact `HttpAuthContext`, a separately approved
+discovery endpoint/injector/context, an expected installation ID, a source/account/
 recipient/host binding, and an absolute caller capability-file reference.
-It performs a GET against that same endpoint and requires the declared
-`credential-relay.account-source-lease/v1`, `http/v1` support before reading
-the capability. The POST uses only that capability and the fixed
+The native provider uses `GET /health` and `POST /source-credentials`.
+Discovery requires the matching `installationId` and nested
+`source_credentials_contract` declaration for
+`credential-relay.account-source-lease/v1`, `http/v1` before reading the
+capability. Both requests carry `X-Agent-Index-Installation-Id`; the response
+must carry the same installation ID. Endpoint-specific auth scopes are never
+inferred from a shared origin. The POST uses only that capability and the fixed
 `get-github-token` operation. It never borrows a service's stored capability,
 falls back to token-only acquisition, follows a redirect, uses environment
 proxies, or retries a possibly accepted POST. Every HTTP request obtains fresh
@@ -22,8 +27,10 @@ and hostname verification; omitting one uses ordinary system trust.
 
 Response account, host, token shape, exact lease fields, numeric bounds and
 generation are checked before returning an in-memory lease. The conservative
-budget subtracts the **whole** exchange duration, including discovery and auth
-acquisition, from the serving peer's remaining budget. Wall and monotonic
+budget subtracts the larger wall/monotonic duration of the **whole** exchange,
+including discovery and auth acquisition, from the serving peer's remaining
+budget. Each retained observation likewise consumes the larger elapsed duration,
+including suspension that advances wall time alone. Wall and monotonic
 regressions permanently expire that observation. Provider bodies and exception
 details are never diagnostic output; token-bearing lease representations omit
 the token. A timeout does not establish that the source did not issue a lease.
@@ -77,13 +84,20 @@ credential and native execution owners.
 The retained Host owns auth-wait admission, in-flight work, native input,
 durable conversation identity and unresolved sends. Source renewal is not
 permission to replay or retroactively settle a send. Same-session recovery
-requires actual native capability proof. These adapters do not close/reconnect
+requires actual native capability proof. Semantic prompt admission alone does
+not enforce native UI input or in-flight work. Auth-wait must remain separate
+from irreversible user-input/unknown-send control holds; renewal never resets
+those holds. These adapters do not close/reconnect
 a headed backend, replace a process, seize a pane, or advertise an auth-wait RPC.
 Until that independent owner supports and enforces the required lifecycle,
 this is source preparation, **not an active lease-enforced deployment**.
 
 The focused `tests/test_source_file_auth.py` packet covers real scoped header
 construction, source/capability rotation, unsupported/redirect/malformed peers,
-conservative clocks, no POST replay, actual verified TLS, and private native
+conservative clocks/suspension, no POST replay, actual verified TLS, FIFO refusal
+before a blocking read, and private native
 file changes. POSIX effects and unsupported-platform refusal have separate
 platform controls. All credentials, accounts and files in it are synthetic.
+The Index HTTP fixture additionally runs this client against its actual native
+health/credential routes and real account-relay provider, including installation
+identity, renewal and wrong-capability refusal.
