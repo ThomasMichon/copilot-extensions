@@ -80,10 +80,23 @@ operations, selector and effects needs fresh execution evidence, not fresh
 operator consent. Do not add a commit pin or one-attempt restriction merely
 because the agent recorded a fingerprint.
 
+Read a grant by its stated operation class and wording, not by the narrowest
+invocation it first covered. "As needed", "whenever required" or "do not re-ask"
+covers later invocations of that class within its targets, effects and limits.
+A failure followed by a reviewed fix is an ordinary bounded retry of the same
+operation, not new scope, unless the fix changes the operations, targets,
+owners, information flow or effects.
+
 An explicit pin, single attempt, deadline, budget, pause, revocation or
-narrowing remains binding. Record actual use when the grant limits repetitions;
-do not reset it at a new session, branch or handoff. Unknown admission/outcome
-requires the existing owner's observation/idempotency recovery, not blind replay.
+narrowing remains binding. For a pin or use limit, explicit means the operator
+stated it, or chose it when a broader option was also offered. A limit the
+agent wrote into its own question, as part of the only approving option, is the
+agent's proposal: record it under interpretation as a precaution, not as an
+operator pin. Inspect the evidence behind a precaution before relaxing it,
+within the granted class and effects; never clear another owner's hold this way.
+Record actual use when the grant limits repetitions; do not reset it at a new
+session, branch or handoff. Unknown admission/outcome requires the existing
+owner's observation/idempotency recovery, not blind replay.
 An operation outside the selector, a changed owner/information flow or increased
 blast radius needs the affected scope decision unless already covered.
 
@@ -93,6 +106,22 @@ Use existing evidence and judgment for routine command choices, issue
 deduplication, source repair, implementation details and effort slugs. Ask only
 for unavailable information that changes the intended outcome, genuinely
 missing effect authority, a material scope change or a separately reserved gate.
+
+Before asking for approval of an operation, run this self-check:
+
+1. Search the canonical record, current checkpoint and charter for a grant that
+   covers this operation class, read by its stated wording.
+2. Classify each recorded limit by origin: operator-stated, operator-chosen over
+   an offered broader option, or agent-proposed.
+3. If a covering grant exists and only agent-proposed limits stand in the way,
+   continue with fresh execution evidence. Ask only if a real gap remains.
+
+Shape the question around the operation class. As the default option, name the
+operations, target selector, effects and a bounded rerun policy, such as reruns
+after reviewed fixes up to a stated cap. Offer narrower one-shot or
+revision-pinned options only as clearly labeled alternatives. When the same
+operation class would need approval a second time, ask once for class-level
+pre-clearance instead of per invocation.
 
 Before a blocking question, build the
 [decision packet](references/decision-preparation.md) from authorized
@@ -108,6 +137,24 @@ When useful safe work is exhausted, state one concrete decision, recommendation,
 ramifications and exact requested scope in the host's supported decision/wait
 surface. Do not offer "Pause here" instead of already-authorized work, repeatedly
 send the same incremental question, invent busywork or take another owner's work.
+
+### Worked example: repeated qualification runs
+
+An agent needs offline qualification runs in a disposable scratch area; nothing
+outside that area changes.
+
+- Anti-pattern: it asks "Run qualification at revision v2? One attempt; a
+  failure spends it." The operator picks the only approving option. The run
+  fails, a reviewed fix lands as v3, and the agent records the grant as spent
+  and asks again, once per revision. An earlier "run these as needed; do not
+  re-ask" answer is read as covering only its first invocation.
+- Better: the self-check finds the earlier "as needed" grant for this class
+  and continues. With no grant, the agent asks once: "Pre-clear offline
+  qualification runs in disposable scratch for this effort, rerunning after
+  each reviewed fix, at most N runs, stopping on any effect outside scratch?
+  Alternative: one run at the current revision only." It records the answer
+  with its origin. If the operator picks the alternative, that limit binds
+  and needs a real amendment to exceed.
 
 ## 6. Preserve authority through continuity
 

@@ -67,6 +67,9 @@ scope choice, not a request to reauthorize the task itself or another incrementa
 lever. A real acceptance becomes the original bounded grant and is captured
 immediately through the existing record/checkpoint procedure.
 
-Avoid repeated unchanged questions. A saved "check again in four hours" is a
-condition revisit, not a daemon, approval renewal or exact-turn guarantee.
-Preserve unresolved responsibility through the existing agenda/handoff owner.
+Avoid repeated unchanged questions. Before asking about an operation class
+again, run the skill's pre-ask self-check; a repeated ask for one class should
+request class-level pre-clearance with a bounded rerun policy. A saved "check
+again in four hours" is a condition revisit, not a daemon, approval renewal or
+exact-turn guarantee. Preserve unresolved responsibility through the existing
+agenda/handoff owner.
