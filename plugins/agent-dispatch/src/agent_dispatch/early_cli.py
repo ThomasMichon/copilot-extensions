@@ -9,6 +9,13 @@ from .delegated_waiter_contract import CALLBACK_COMMAND
 
 
 def dispatch(argv: list[str]) -> int | None:
+    if argv[:1] == ["telemetry"]:
+        from .telemetry_cli import register
+
+        parser = argparse.ArgumentParser(prog="agent-dispatch", allow_abbrev=False)
+        register(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(argv)
+        return args.func(args)
     if argv[:1] == [CALLBACK_COMMAND]:
         from .delegated_waiter_callback import main
 

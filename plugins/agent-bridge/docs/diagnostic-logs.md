@@ -202,3 +202,46 @@ ASGI/wire owner or health response is changed.
 metadata only: active/archive locations, policy, namespace provisioning and
 `write_health: "unknown-from-discovery"`. It never imports a custom factory,
 reads event payloads, creates files or treats configuration as live proof.
+
+### Native configuration-only preview and apply
+
+The selected Bridge runtime exposes `agent-bridge telemetry capabilities`.
+Its `process-telemetry.retained-configuration/v1` declaration supports preview
+and confirmed apply; it does not advertise a running daemon's capabilities.
+An older runtime may reject this new discovery command. Callers must then report
+this optional configuration operation as unsupported, not write the file
+themselves or replay an effectful fallback.
+
+```text
+agent-bridge telemetry retained --directory <absolute preprovisioned base>
+agent-bridge telemetry retained --directory <same base> --apply --confirm <preview confirmation>
+```
+
+Output is always JSON (`--json` is accepted). Preview reads at most 64 KiB of
+strict object JSON, with duplicate keys and nonfinite values rejected. It creates
+no directories, lock files or spools. The configuration root and the complete
+`directory/retained` path must already be plain, unlinked directories. Linked,
+nonregular or multiply-linked configuration files are refused.
+
+Apply binds confirmation to this runtime's native configuration target, current
+file bytes and identity, directory identities, requested directory and current
+environment sink. It rechecks those inputs under the existing native
+`OperationLock` and writes atomically through the strict configuration I/O owner.
+Other top-level configuration fields survive. Existing `sink`/`spool` declarations,
+an environment sink or a different retained directory are preserved by refusal,
+not overwritten. An unchanged retained configuration is not rewritten.
+Concurrent participating writers use the same retained `telemetry.json.lock`;
+this is not exclusion against arbitrary external editors or filesystem attacks.
+
+Exit 0 means previewed/configured; exit 2 means refused, invalid, stale,
+contended or unsupported syntax. `activation: not-requested` and
+`write_health: unknown-from-configuration` remain explicit. Apply never calls a
+factory, selects a buffer, starts/reloads a service, creates a namespace, enrolls
+a job or publishes telemetry. A later activation requires its existing owner
+and independent authority. Configuration confirmation is not that authority.
+
+This is a provider-first additive boundary: existing loader, `logs` and legacy
+factory behavior remain unchanged. No consumer is made to require this command
+in the same release. Consumers select v1 support from the executable they
+actually invoke and preserve a pre-effect unsupported result after rollback;
+there is no older equivalent confirmed-write contract.

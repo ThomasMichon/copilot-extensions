@@ -119,6 +119,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   watermarks, withdrawal and changed-preview refusal without carrier enrollment.
 - [x] Prove native canonical mapping resolution and explicitly confirmed
   existing-repository binding through the selected owner, without automatic adoption.
+- [x] Prove explicitly confirmed Copilot scalar-floor adoption through native
+  configuration, alias scope, validation and the serialized settings owner.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -416,3 +418,46 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   validation and the real settings writer, with fixture-resolved context only.
   This does not qualify an installed owner or carrier. Review and exact-source
   CI remain required; the parent effort stays Active.
+
+### 2026-11-06 - Copilot scalar owner merged
+- #11037 merged as `c9554dc850856fb118a6396c978c80dd86d19b4f` after current-head
+  Copilot approval with no findings, resolved threads and green required CI.
+  The final hash-order controls passed without skips; the earlier focused
+  correction packet preserved native precedence and unmanaged state.
+- Completed only the explicit Copilot scalar-owner checkpoint. Empty native
+  requirement unions remain unsupported with a visible refusal. The other
+  domain owners, selected-carrier exchange and native/installed qualification
+  remain open; release and running adoption are not inferred from this merge.
+- Next is owner-controlled configuration-only adoption for retained telemetry,
+  preserving preprovisioned exclusive namespaces and custom sink declarations.
+  Maintenance and venue preferences retain their existing effect owners.
+  Health probes, scheduling and live carrier qualification remain Phase 5;
+  no carrier write, enrollment, update or service activation is authorized here.
+
+### 2026-11-06 - Native retained-configuration provider
+- Claimed #11050 for the producer-owned configuration prerequisite. Bridge and
+  Dispatch now expose v1 runtime support, bounded preview and confirmed atomic
+  apply over their native targets. The dependency-free shared planner receives
+  the existing operation-lock and strict configuration writer from each owner.
+- Preview creates nothing. Apply rechecks current bytes, paths, namespace and
+  environment sink under custody, preserves custom/legacy modes and unrelated
+  fields, and starts no factory, buffer, coordinator or service.
+- The Windows Bridge packet passed 40 cases; its one invalid cross-platform
+  fixture was corrected to use a native absolute path and the three preservation
+  controls passed. Dispatch passed 31 offline-adoption/retention/legacy cases.
+  Both real normal CLI processes exercised preview then confirmed apply in
+  fresh isolated configuration roots. Existing retained-loader behavior passed.
+  The final adoption packets passed 21 Bridge and three Dispatch cases without
+  skips, including strict nonfinite-number refusal and the imported parser.
+  Ruff, install contract, module caps, documentation/runbook checks and
+  whitespace passed. Review and exact-source CI remain required before merge.
+- Unit and lightweight end-to-end lanes use actual native parser/configuration
+  and lock/write owners. Fresh roots prove first configuration without bootstrap
+  or service activation. An installed/live external lane is not exercised: this
+  operation has no external backend, and installed/carrier/activation effects
+  remain independently held. Source-only Windows evidence does not qualify
+  Linux/macOS native execution or any deployed producer.
+- Only providers expand in this slice. Machines must later discover support
+  from its selected producer executable before adoption; unsupported or
+  rolled-back providers retain a visible pre-effect refusal, never a fallback
+  writer. The parent preference/carrier and health-engine gates remain open.

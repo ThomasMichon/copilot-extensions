@@ -531,6 +531,9 @@ def build_parser() -> argparse.ArgumentParser:
     owner_membership_cli.register_commands(sub)
     register_service_start_commands(sub)
     register_config_commands(sub)
+    from .telemetry_cli import register as register_telemetry
+
+    register_telemetry(sub)
     register_venue_commands(sub)
     register_service_control_commands(sub)
     register_inventory_commands(sub)
