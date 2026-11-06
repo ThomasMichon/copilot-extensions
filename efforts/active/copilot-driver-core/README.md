@@ -509,3 +509,27 @@ Full contract validation again passes both contracts and 1,022 fixtures;
 all 26 capture/frozen-corpus cases pass. Historical captures remain unchanged.
 Only updated publication, passing exact-head review and required CI remain
 before Phase 2 merge; the parent effort is still Active.
+
+### 2026-11-06 - Destination-local publication and remaining consumer seams
+
+The next review found that archive staging used the system temporary filesystem
+before atomic replacement into a caller-selected state directory. Staging now
+lives under that destination, preserving atomic publication across selected
+volumes. A real archive/reuse/cleanup regression injects the cross-device
+boundary; all 12 core/receiving cases pass. This is a deterministic boundary
+control, not a claim of a physical second-volume native test.
+
+The committed creation fixture now permits the actual support query while
+continuing to forbid Host creation after custody closes. The payload-context
+consumer patches the canonical launcher rather than removed shim internals.
+The broader creation packet exposed an attested fixture missing its required
+session identity; it now supplies that original identity and still exercises
+the post-attestation closure check. All 20 selected creation/payload cases pass.
+The staged authority closure is unchanged by the archive-builder correction.
+
+Required CI passed admitted units and the corrected source guards, then failed
+on the upstream HTTP-52 capture checkpoint missing from fresh-runner preparation.
+That exact failure is already owned by #10894 and included in #10888. Added the
+downstream PR/run evidence there rather than duplicate its fix or relax the
+local-only contract proof. Pull forward the reviewed correction when merged;
+#10863 still needs updated publication, passing exact-head review and green CI.

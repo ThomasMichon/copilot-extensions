@@ -142,7 +142,7 @@ def build_session_host_bundle(
     if out.exists():
         return out, sha
 
-    with tempfile.TemporaryDirectory(prefix="agent-driver-bundle-") as td:
+    with tempfile.TemporaryDirectory(prefix="agent-driver-bundle-", dir=dest) as td:
         stage = Path(td) / "src"
         for archive_rel, contents in _sources(legacy):
             dst = stage / archive_rel

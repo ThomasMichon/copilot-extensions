@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from agent_procutil import no_window_kwargs
 import pytest
 
 from agent_remote_driver.session_host.bundle import build_session_host_bundle
+from agent_remote_driver.session_host import bundle
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host import launcher, legacy_launcher
 from agent_remote_driver.session_host.startup_admission import CONTEXT_ENV, StartupAdmissionServer
@@ -55,6 +57,28 @@ def test_both_consumers_reach_the_same_core_through_canonical_build_owners(monke
         closure = dict(builder.resolve_vendored_libs(root / "plugins" / consumer))
         assert closure["copilot-driver-core"] == canonical
     assert canonical in _anchor_roots()
+
+
+def test_receiving_archive_publication_stays_on_the_selected_filesystem(tmp_path, monkeypatch):
+    destination = tmp_path / "selected volume" / "runtime"
+    replace = os.replace
+    publications = []
+
+    def same_volume(source, target):
+        source, target = Path(source), Path(target)
+        if not source.is_relative_to(destination):
+            raise OSError(errno.EXDEV, "simulated distinct temporary filesystem")
+        publications.append((source, target))
+        return replace(source, target)
+
+    monkeypatch.setattr(bundle.os, "replace", same_volume)
+    archive, digest = build_session_host_bundle(destination)
+    with zipfile.ZipFile(archive) as contents:
+        assert contents.testzip() is None
+        assert contents.read("__main__.py")
+    assert build_session_host_bundle(destination) == (archive, digest)
+    assert len(publications) == 1
+    assert list(destination.iterdir()) == [archive]
 
 
 def test_relocated_core_support_and_preference_closure_without_bridge(tmp_path):
