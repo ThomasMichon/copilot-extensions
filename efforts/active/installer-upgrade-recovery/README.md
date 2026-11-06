@@ -1756,3 +1756,27 @@ An initial full local invocation instead hits four Git filename-length errors
 under its overly long ad hoc scratch prefix; switching to the runner's canonical
 compact roots fixes the invocation, not the tests or Git policy.
 The revised head still needs its own review and full required CI.
+
+### 2026-11-06 - U9 source merged; provider-guidance contradiction selected
+
+#10889 merged as `75b9573f6bc2381d8fd1df70927c55da18f5e901` after the revised
+head received approval and both required CI runs `42166438070` and
+`42166577828` passed. The seven native lifecycle and 58 preparation controls
+retain their recorded boundaries. A bounded twenty-minute normal-release
+observer found no merged containing candidate; this is unobserved release,
+not evidence of failed release or authority to retry/deploy. The earlier
+six-minute type-contract timeout is already owned on #10895. No competing
+pipeline patch, deadline change or runtime update is selected.
+
+The next independent reconciliation finds #3030 closed only by consolidation
+into open #3004, whose KO3/KO4 and KOV3 retain provider/landing preflight and
+rejected-push recovery. I reserved a narrow documentation correction in
+[comment 6678410713](https://github.com/ThomasMichon/copilot-extensions/issues/3004#issuecomment-6678410713):
+`binding-knowledge` still unconditionally says knowledge repositories have no
+PR gate. The correction removes that contradiction, resolves the Git provider
+before authentication, honors repository/server publication policy, keeps
+unknown evidence explicit and preserves local commits on rejection.
+Registration/state-root readiness is not presented as server-policy proof.
+This is below-altitude guidance repair, not a new provider interface or a
+replacement for #3004's Plan/Validation. No authentication, binding, repository
+creation, policy mutation or live provider publication trial is performed.
