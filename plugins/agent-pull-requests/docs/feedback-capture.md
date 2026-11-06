@@ -195,8 +195,10 @@ Original proof and B3 echo coverage remain separate. Only successful proof
 replacement updates the in-process tracking snapshot used by the existing
 echo commit guard; failed or uncertain replacement cannot pretend it committed.
 The capture's original position and readback references never change when
-its interest covers a later proven echo. Negotiated v6 attention reads remain
-a separate B4 leaf; old serving does not gain support from protected integration.
+its interest covers a later proven echo. The separately negotiated
+[historical attention reader](attention-reader.md#explicit-historical-v2-reader)
+consumes this proof without writing it; old serving does not gain support
+from protected integration or data adoption.
 
 B1 capture adoption adds an 8 MiB default reservation to the existing total owner-byte
 limit and preserves every replay, conversation, attention and review record.

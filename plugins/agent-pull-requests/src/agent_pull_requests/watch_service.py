@@ -128,7 +128,7 @@ class WatchService:
                     expires_at=self._authority(), checkpoint=self._check,
                 )
                 for workspace in self.gateway.workspaces.values():
-                    # Attention has its own explicit v5 contract; never relabel
+                    # Attention has its own explicit layout contract; never relabel
                     # those bytes as the older conversation-serving layout.
                     readers = [reader for reader in self.gateway.attention.values()
                                if reader.workspace is workspace]

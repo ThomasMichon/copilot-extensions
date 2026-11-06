@@ -20,7 +20,7 @@ from test_workspace_integration import integration as integration
 from agent_pull_requests import __main__ as cli
 from agent_pull_requests.attention_acquisition import AttentionInputs
 from agent_pull_requests.attention_client import AttentionClient
-from agent_pull_requests.attention_read import AttentionReader, AttentionUnavailable
+from agent_pull_requests.attention_read import AttentionReader, AttentionUnavailable, HISTORICAL_PROTOCOL
 from agent_pull_requests.conversation_store import ConversationStore
 from agent_pull_requests.feedback_capture_store import FeedbackCaptureStore
 from agent_pull_requests.review_feedback import FeedbackInputs
@@ -34,8 +34,11 @@ pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
 
 
 @pytest.fixture
-def reading(feedback_environment: tuple, integration: tuple) -> tuple:
+def reading(feedback_environment: tuple, integration: tuple, request: pytest.FixtureRequest) -> tuple:
     store, _, _, _, backend, _, expires, interests = feedback_environment
+    historical = getattr(request, "param", False)
+    if historical:
+        FeedbackCaptureStore(store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
     _, _, native, _, _, binding = integration
     workspace = native.operations
     workspace.conversations = True
@@ -43,7 +46,9 @@ def reading(feedback_environment: tuple, integration: tuple) -> tuple:
         generation["id"], interests, True, False, False, False, False,
     )
     workspace.feedback_owner = lambda generation: FeedbackInputs(generation["id"], interests, 60)
-    reader = AttentionReader(workspace, consumer=binding.consumer, max_age_seconds=60, aging_seconds=30)
+    reader = AttentionReader(
+        workspace, consumer=binding.consumer, max_age_seconds=60, aging_seconds=30, historical=historical,
+    )
     scope = ConsumerScope(binding.consumer, binding.account, binding.repo)
     gateway = WatchGateway(
         store, fleet=binding.fleet, gateway=binding.gateway, slot=binding.slot,
@@ -72,7 +77,8 @@ def reading(feedback_environment: tuple, integration: tuple) -> tuple:
 
     caller = Caller()
     client = AttentionClient(caller, route_prefix="", binding=binding,
-                             key=conversation_key({**workspace.scope, "number": 1}, store.namespace))
+                             key=conversation_key({**workspace.scope, "number": 1}, store.namespace),
+                             historical=historical)
     return reader, gateway, client, caller, binding
 
 
@@ -81,6 +87,7 @@ def read(reader: AttentionReader, expires: int, **changes) -> dict:
                           expires_at=expires, checkpoint=lambda: None)
 
 
+@pytest.mark.parametrize("reading", [False, True], indirect=True)
 def test_cli_client_gateway_restart_preserves_bytes_and_independent_legacy_watch(
     feedback_environment: tuple, reading: tuple, monkeypatch, capsys,
 ) -> None:
@@ -238,6 +245,7 @@ def test_unknown_native_feedback_survives_reopen_without_masking_independent_con
                                   expires_at=value[6])["actions"] == result["actions"]
 
 
+@pytest.mark.parametrize("reading", [False, True], indirect=True)
 def test_page_snapshot_refuses_changed_input_instead_of_skipping(
     feedback_environment: tuple, reading: tuple,
 ) -> None:
@@ -284,6 +292,145 @@ def test_request_cannot_override_scope_or_progress(
         await gateway.drain(timeout=1)
 
     asyncio.run(scenario())
+    assert reader.store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reading", [True], indirect=True)
+@pytest.mark.parametrize("kind", ["comment", "verdict"])
+def test_historical_reader_requires_each_operations_own_readback(
+    feedback_environment: tuple, reading: tuple, kind: str, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    value = feedback_environment
+    reader, gateway, client, _, _ = reading
+    backend = value[4]
+    backend.versioned_reply = True
+    backend.pr["reviewers"] = copy.deepcopy(value[2]["sections"]["reviewers"]["data"])
+    assert run(value)["feedback"]["status"] == "handled"
+    newer = observe(value, change="echo")
+    assert run(value, current=lambda: (newer, backend.positions[newer["id"]]))[
+        "feedback"
+    ]["echo"]["status"] == "covered"
+    selected = value[1]
+    selected.update(operation_id="second-operation", generation_id=newer["id"])
+    selected["actions"] = [
+        {"id": "second", "kind": "comment", "body": "Second selected comment"}
+        if kind == "comment" else {"id": "second", "kind": "verdict", "verdict": "APPROVED"}
+    ]
+    attached = {**value[3], "generation_id": newer["id"]}
+    second = run((value[0], selected, newer, attached, *value[4:]))
+    assert all(action["state"] == "confirmed" for action in second["actions"])
+    before = value[0].path.read_bytes()
+    calls = len(backend.calls)
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"limit":16,"after":null}')))
+    assert cli.main(["attention", "read", "--request", "-"], attention_host=client) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["protocol"] == HISTORICAL_PROTOCOL
+    item = result["items"][0]
+    assert item["status"] == ("waiting" if kind == "comment" else "unavailable")
+    if kind == "verdict":
+        assert item["reasons"] == ["feedback-operation-readback-unavailable"]
+    else:
+        assert read(reader, value[6])["items"][0]["reasons"] == ("handled-through-cursor",)
+    assert len(backend.calls) == calls and value[0].path.read_bytes() == before
+    asyncio.run(gateway.drain(timeout=1))
+
+
+@pytest.mark.parametrize("reading", [True], indirect=True)
+def test_historical_reader_preserves_unknown_native_outcomes_across_reopen(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    value = feedback_environment
+    value[4].lose_reply = True
+    assert run(value)["actions"][0]["state"] == "unknown"
+    observe(value, change="completed", second=10)
+    observe(value, change="active", second=12)
+    before = value[0].path.read_bytes()
+    reader = reading[0]
+    item = read(reader, value[6])["items"][0]
+    assert item["status"] == "unavailable" and item["reasons"] == ("feedback-reconciliation-pending",)
+    other = AttentionReader(
+        reader.workspace, consumer="consumer-b", max_age_seconds=60, aging_seconds=30, historical=True,
+    )
+    assert read(other, value[6])["items"][0]["status"] == "actionable"
+    assert value[0].path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reading", [True], indirect=True)
+def test_newer_handled_cursor_cannot_replace_older_historical_readback(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    value = feedback_environment
+    store, selected, _, attachment, backend, _, _, _ = value
+    original = copy.deepcopy(selected)
+    backend.after_write = lambda current: setattr(current, "read_late", True)
+    assert run(value)["actions"][0]["state"] == "confirmed"
+    backend.after_write = None
+    backend.read_late = False
+    newer = observe(value, change="echo")
+    selected.update(operation_id="later-handled-operation", generation_id=newer["id"])
+    selected["actions"] = [{"id": "second", "kind": "comment", "body": "Second selected comment"}]
+    attached = {**attachment, "generation_id": newer["id"]}
+    assert run((store, selected, newer, attached, *value[4:]))["feedback"]["status"] == "handled"
+    reader = reading[0]
+    before = store.path.read_bytes()
+    assert read(reader, value[6])["items"][0]["reasons"] == ("feedback-operation-readback-unavailable",)
+    assert store.path.read_bytes() == before
+    selected.clear()
+    selected.update(original)
+    assert run(value)["entered_writes"] == 0
+    before = store.path.read_bytes()
+    assert read(reader, value[6])["items"][0]["status"] == "waiting"
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reading", [False, True], indirect=True)
+def test_opposite_attention_contract_refuses_without_fallback_or_mutation(
+    feedback_environment: tuple, reading: tuple, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    reader, gateway, client, caller, binding = reading
+    historical = reader.owner_version == 6
+    opposite = AttentionClient(
+        caller, route_prefix="", binding=binding, key=client.key, historical=not historical,
+    )
+    before = reader.store.path.read_bytes()
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"limit":16,"after":null}')))
+    assert cli.main(["attention", "read", "--request", "-"], attention_host=opposite) == (1 if historical else 3)
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error == ("invalid_attention_response" if historical else "unsupported_attention_contract")
+    assert caller.calls == ["/v1/attention/project/capabilities"]
+    assert reader.store.path.read_bytes() == before and not feedback_environment[4].calls
+    capabilities = asyncio.run(client.capabilities())
+    assert capabilities["owner_store_versions"] == [reader.owner_version]
+    assert capabilities["feedback"] == (
+        "retained_original_readback" if historical else "retained_original_capture"
+    )
+    asyncio.run(gateway.drain(timeout=1))
+
+
+def test_explicit_historical_adoption_cannot_reuse_a_v1_page(
+    feedback_environment: tuple, reading: tuple,
+) -> None:
+    reader = reading[0]
+    expires = feedback_environment[6]
+
+    def add(document: dict) -> None:
+        second = copy.deepcopy(document["attention"]["records"][0])
+        second["facts"]["key"]["number"] += 1
+        document["attention"]["records"].append(second)
+
+    reader.store._review_transaction(add, expires_at=expires)
+    original = read(reader, expires, limit=1)
+    assert original["next"] is not None
+    FeedbackCaptureStore(reader.store).adopt_readback(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    historical = AttentionReader(
+        reader.workspace, consumer=reader.consumer, max_age_seconds=60, aging_seconds=30, historical=True,
+    )
+    before = reader.store.path.read_bytes()
+    fresh = read(historical, expires, limit=1)
+    assert fresh["items"] == original["items"]
+    with pytest.raises(AttentionUnavailable, match="page changed"):
+        read(historical, expires, limit=1, after=original["next"])
+    assert read(historical, expires, limit=1, after=fresh["next"])["items"]
     assert reader.store.path.read_bytes() == before
 
 
@@ -475,7 +622,8 @@ def test_overlapping_refresh_explicitly_supersedes_read_without_invalid_result(
     assert reader.store.path.read_bytes() == before
 
 
-def test_service_writer_qualifies_v5_reader_without_claiming_v3_conversation_support(
+@pytest.mark.parametrize("reading", [False, True], indirect=True)
+def test_service_writer_qualifies_reader_without_claiming_v3_conversation_support(
     feedback_environment: tuple, reading: tuple, monkeypatch,
 ) -> None:
     from test_watch_service import Connector
@@ -512,7 +660,7 @@ def test_service_writer_qualifies_v5_reader_without_claiming_v3_conversation_sup
                 "POST", "/v1/attention/project/capabilities", (("content-type", "application/json"),),
                 json.dumps({"binding": binding.document(), "request": {}}).encode(),
             ))
-            assert response.status == 200 and json.loads(response.body)["owner_store_versions"] == [5]
+            assert response.status == 200 and json.loads(response.body)["owner_store_versions"] == [reader.owner_version]
             with pytest.raises(ReplayStoreInvalid):
                 ConversationStore(reader.store).capabilities(expires_at=feedback_environment[6])
         finally:

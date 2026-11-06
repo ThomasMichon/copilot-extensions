@@ -15,6 +15,7 @@ from .workspace_conversation import conversation_key
 from .workspace_operations import WorkspaceOperations
 
 PROTOCOL = "agent-pull-requests.attention-read/v1"
+HISTORICAL_PROTOCOL = "agent-pull-requests.attention-read/v2"
 MAX_BATCH = 16
 MAX_BATCH_BYTES = 24 * 1024
 
@@ -41,7 +42,9 @@ def _feedback_index(document: dict) -> tuple[dict, dict, set[PRKey]]:
     return captures, operations, unbound
 
 
-def _feedback_reason(row: dict, index: tuple[dict, dict, set[PRKey]]) -> str | None:
+def _feedback_reason(
+    row: dict, index: tuple[dict, dict, set[PRKey]], *, historical: bool = False,
+) -> str | None:
     facts, interest, handled = row["facts"], row["interest"], row["handled"]
     retained, operations, unbound = index
     key = PRKey(**facts["key"])
@@ -63,6 +66,10 @@ def _feedback_reason(row: dict, index: tuple[dict, dict, set[PRKey]]) -> str | N
             continue
         if handled is None or handled["cursor"]["sequence"] < capture["cursor"]["sequence"]:
             return "feedback-tracking-unavailable"
+        if historical:
+            if capture["readback"] is None:
+                return "feedback-operation-readback-unavailable"
+            continue
         proof = row["provenance"]
         if (
             proof["operation_id"] != capture["operation_id"]
@@ -93,8 +100,14 @@ def _feedback_reason(row: dict, index: tuple[dict, dict, set[PRKey]]) -> str | N
                 for value in operation["actions"]
             ]
             or any(value["state"] != "confirmed" for value in operation["actions"])
+            or historical and capture["readback"] is None
         ):
             return "feedback-provenance-unavailable"
+        if historical and (
+            facts["candidate"] == handled["candidate"]
+            and handled["cursor"]["sequence"] < facts["cursor"]["sequence"]
+        ):
+            return "feedback-change-unclassified"
     return None
 
 
@@ -114,7 +127,7 @@ class AttentionReader:
 
     def __init__(
         self, workspace: WorkspaceOperations, *, consumer: str,
-        max_age_seconds: int, aging_seconds: int,
+        max_age_seconds: int, aging_seconds: int, historical: bool = False,
     ) -> None:
         Interest("maintainer", None, consumer)
         if (
@@ -123,11 +136,14 @@ class AttentionReader:
             or not callable(workspace.feedback_owner)
             or not callable(workspace.write_context)
             or not workspace.conversations
+            or type(historical) is not bool
             or any(type(value) is not int or not 1 <= value <= 86400
                    for value in (max_age_seconds, aging_seconds))
         ):
             raise ValueError("actual acquisition and protected feedback owners required")
         self.workspace, self.store = workspace, workspace.store
+        self.owner_version = 6 if historical else 5
+        self.protocol = HISTORICAL_PROTOCOL if historical else PROTOCOL
         self.consumer = consumer
         self.max_age_seconds, self.aging_seconds = max_age_seconds, aging_seconds
         self._scope = conversation_key({**workspace.scope, "number": 1}, self.store.namespace)
@@ -150,8 +166,8 @@ class AttentionReader:
                 raise AttentionUnavailable("attention owners unavailable")
 
         def read(document: dict) -> dict:
-            if document["version"] != 5:
-                raise ReplayStoreInvalid("attention reader requires adopted owner v5")
+            if document["version"] != self.owner_version:
+                raise ReplayStoreInvalid(f"attention reader requires adopted owner v{self.owner_version}")
             check()
             result = operation(document)
             check()
@@ -167,12 +183,14 @@ class AttentionReader:
     ) -> dict:
         if operation == "capabilities" and payload == {}:
             return self._transaction(lambda _document: {
-                "protocol": PROTOCOL, "operations": ["capabilities", "read"],
-                "owner_store_versions": [5], "max_batch": MAX_BATCH,
+                "protocol": self.protocol, "operations": ["capabilities", "read"],
+                "owner_store_versions": [self.owner_version], "max_batch": MAX_BATCH,
                 "max_batch_bytes": MAX_BATCH_BYTES,
                 "max_age_seconds": self.max_age_seconds, "aging_seconds": self.aging_seconds,
                 "effects": "none", "adopts": False, "acknowledges": False,
-                "feedback": "retained_original_capture",
+                "feedback": (
+                    "retained_original_readback" if self.owner_version == 6 else "retained_original_capture"
+                ),
             }, expires_at=expires_at, checkpoint=checkpoint)
         if (
             operation != "read" or not isinstance(payload, dict)
@@ -200,7 +218,7 @@ class AttentionReader:
                 interest = Interest(**row["interest"])
                 handled = Handled(**_scoped(row["handled"])) if row["handled"] else None
                 item = project(facts, interest, handled, now=now, max_age_seconds=self.max_age_seconds)
-                reason = _feedback_reason(row, feedback)
+                reason = _feedback_reason(row, feedback, historical=self.owner_version == 6)
                 if reason is not None and item.status not in ("excluded", "terminal"):
                     item = replace(item, status="unavailable", reasons=(reason,), priority=0)
                 items.append(item)
@@ -209,7 +227,10 @@ class AttentionReader:
                 (item for item in items if item.status != "actionable"),
                 key=lambda item: (item.key.number, item.role),
             )
-            snapshot = _digest([asdict(item) for item in ordered])
+            projection = [asdict(item) for item in ordered]
+            snapshot = _digest(
+                {"protocol": self.protocol, "items": projection} if self.owner_version == 6 else projection
+            )
             if after is not None and after["snapshot"] != snapshot:
                 raise AttentionUnavailable("attention page changed; restart the read")
             offset = after["offset"] if after is not None else 0
@@ -217,7 +238,7 @@ class AttentionReader:
                 raise ValueError("attention page beyond snapshot")
             end = min(len(ordered), offset + payload["limit"])
             return {
-                "protocol": PROTOCOL, "items": [asdict(item) for item in ordered[offset:end]],
+                "protocol": self.protocol, "items": projection[offset:end],
                 "snapshot": snapshot,
                 "next": {"snapshot": snapshot, "offset": end} if end < len(ordered) else None,
                 "effects": "none",
