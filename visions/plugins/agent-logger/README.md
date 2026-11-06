@@ -6,7 +6,7 @@
 - **Scope:** branch (a per-plugin vision; a **consumer** that rides the
   [agent-fabric](../../agent-fabric/README.md) delegation layer, not a layer of it)
 - **Status:** Draft
-- **Last revised:** 2026-11-02
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`plugins/agent-logger/docs/architecture.md`](../../../plugins/agent-logger/docs/architecture.md) ·
   [`plugins/agent-logger/docs/deployment-topologies.md`](../../../plugins/agent-logger/docs/deployment-topologies.md) ·
   [`plugins/agent-logger/docs/manifest-contract.md`](../../../plugins/agent-logger/docs/manifest-contract.md)
@@ -202,6 +202,20 @@ surfaces while retaining their own presentation and workflow policy. The
 The fleet's session activity is recorded **automatically, on a schedule, from one
 elected place**, with no operator prompting. The record stays current as a
 background fact; a gap in execution is closed by catch-up, not lost.
+
+### hourly-health-diagnostic-context
+
+An explicitly selected source can supply
+[hourly machine-health blocks](../../telemetry/machine-heartbeats/README.md)
+as bounded diagnostic context for logs and later investigation. Records retain
+their observation hour, coverage, diagnosed errors and uncertainty instead of
+turning a missed heartbeat into an invented outage narrative.
+
+The machine-health publisher is independent of the elected chronicler and its
+session corpus. Agent logger can preserve or render admitted evidence through
+its existing seams, but does not become the heartbeat scheduler, peer liveness
+authority or owner of the synchronized health ring. Expiration of that short
+history does not silently prune separately authorized durable log evidence.
 
 ### worktree-state-collections
 
@@ -423,6 +437,8 @@ idempotency, single-election, fencing, or any other core guarantee.
 ## See Also
 
 - Child: [session intelligence and accounting](session-intelligence/README.md).
+- Related: [machine health heartbeats](../../telemetry/machine-heartbeats/README.md)
+  and [user-state carriers](../../user-state-carriers/README.md).
 - Depends on: [agent-dispatch](../agent-dispatch/README.md) — the delegation
   layer whose **scheduled-production** mode drives the chronicler's recurring
   runs and whose **claimable mesh** (atomic claim, liveness-reconciled recovery)

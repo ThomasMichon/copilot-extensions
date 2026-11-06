@@ -3,7 +3,7 @@
 - **Subject:** Portable credential lifecycle and authentication transaction authority
 - **Scope:** leaf (cross-cutting service)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-11-05
 - **Reality docs:** [agent-vault](../../plugins/agent-vault/README.md),
   [credential relay](../../libs/credential-relay/README.md)
 
@@ -126,6 +126,15 @@ Disconnected local authority can continue its own authorized work. Work owned
 elsewhere remains visibly unavailable or pending; disconnection does not create
 a competing durable owner or justify serving stale, expired or revoked access.
 
+### optional-user-owned-artifact-carrier
+
+An explicitly selected [user-state carrier](../user-state-carriers/README.md),
+including OneDrive, can replicate the Vault owner's approved encrypted
+artifacts across authorized machines. Transport never acquires credential
+lifecycle authority, unlock material or the right to merge conflicting Vault
+state. Reusing that provider for health or preferences does not disclose
+credentials or make those capabilities depend on Vault availability.
+
 ## Behaviors
 
 ### discovery-never-starts-a-ceremony
@@ -205,3 +214,4 @@ such a transfer.
 - Reality: [agent-vault](../../plugins/agent-vault/README.md),
   [credential relay](../../libs/credential-relay/README.md),
   [Gateway runtime](../../fleet-manager/docs/gateway-runtime.md)
+- Carriage: [user-state carriers](../user-state-carriers/README.md).
