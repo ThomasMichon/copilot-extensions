@@ -357,7 +357,7 @@ def test_actual_cli_parser_process_plan_move_and_post_move_consumer(checkout):
     command = [
         sys.executable, "-c",
         "import faulthandler,runpy; faulthandler.dump_traceback_later(20,repeat=True); "
-        "runpy.run_module('agent_worktrees',run_name='__main__')",
+        "runpy.run_module('agent_worktrees',run_name='__main__',alter_sys=True)",
         "--project", "sample",
     ]
     def invoke(*args):
