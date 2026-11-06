@@ -9,9 +9,9 @@ This is the shared implementation map, not a deployment approval or a second
 effort. Keep progress here and contracts in the linked guide. Update a row when
 claiming work, after qualification, after merge and after release; do not mark
 an app converted from wheel production or a callback declaration alone.
-This refresh records bounded Linux CodeSpaces and base-profile Containers
-controls and credits the previously recorded Windows releases and CLI
-qualification. Evidence remains
+This refresh records bounded Linux CodeSpaces, base-profile Containers and
+base-profile SSH CLI controls and credits the previously recorded Windows
+releases and CLI qualification. Evidence remains
 source-, profile- and platform-specific; it does not requalify later binaries
 or establish whole-app acceptance.
 
@@ -147,7 +147,7 @@ whole-toolset atomicity or the complete stage contract.
 | [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Bounded modern user-mode application slice #10345 released on Main `a48e41419190fe43ef006a8ef6dfa08e134785b6`. Historical Windows generated cold/restart/handoff, authenticated readiness, held synthetic claims/reservations/data and native cleanup passed; this is not whole-SDK or later-binary qualification. | Existing owners retain native POSIX, flat/nonprofile and native-service-owned supervisor transitions, distinct-source and complete authoritative-replacement acceptance. Preserve candidate admission and unfinished-work custody; do not repeat the completed Windows slice as missing. |
 | [agent-codespaces](../../../plugins/agent-codespaces/README.md) | #10311 released bounded Windows application/provider work on Main `27aab5a3262cc331c0d73564a8a59dfd20fced01`, including historical A/B/A Owner/replacement and both provider-install orders. The separate Linux x86_64 CLI/provider controls below pass on explicit Main `1a83c1d250ae8093a47afab1107c3ebb9553a53e`, with Connection Owner disabled. Neither record qualifies every newer SDK or the whole app. | Existing owners retain Linux daemon lifecycle, source-change/reverse/failure integration, healthy foreign-provider collision coverage on Linux, other architectures, pristine OS, live backend/forwards and rollout. Keep stage-only environment preparation separate from full candidate readiness. |
 | [agent-containers](../../../plugins/agent-containers/README.md) | #10347 released bounded configuration/provider callbacks on Main `f85bd817958a3ead2ba69182ad01f76bb11e4076`, with historical Windows installed front doors, both discovery orders, repeat and original-manifest preservation. The separate Linux x86_64 base-profile CLI/provider controls below pass on explicit Main `1a83c1d250ae8093a47afab1107c3ebb9553a53e`; neither record qualifies later binaries or the whole app. | Existing owners retain provider-exec/Paramiko, other platforms/architectures, pristine OS, source-change/reverse/retry, broader legacy/replacement and live credentialed fleet/backend acceptance. Preserve profile and foreign-container custody; callbacks do not borrow containers, query fleets or start a resident. |
-| [agent-ssh](../../../plugins/agent-ssh/README.md) | Bounded copied-application CLI slice #10462 released in #10862. Native Windows cold/reuse installs and installed source-qualified commands passed; retained slot members were unchanged on reuse. This is the CLI, not the SSH Manager library or remote SSH service. | Preserve installed command/resources, configuration and source-unavailable reads. Immutable Linux app adoption, real operator connections/forwards and full target conformance remain separate; do not infer them from the service CI or shared-library wheel. |
+| [agent-ssh](../../../plugins/agent-ssh/README.md) | Bounded copied-application CLI slice #10462 released in #10862, with historical native Windows cold/reuse and installed source-qualified commands. Separate Linux x86_64 BASE CLI controls below pass on explicit Main `c08449f9a3494a51afe882a37557f6749c005c2b`: stage, genuinely unstaged cold installation, reuse and source-concealed installed reads. This is neither later-binary/whole-app qualification nor the SSH Manager library or remote SSH service. | Preserve installed commands/resources and configuration. Existing owners retain distinct-source update/reverse/recovery, other platforms/architectures, pristine OS, real operator connections/forwards, broader legacy/adoption and full target conformance. Keep #10954 participant composition/writer admission and #8821 snapshot delivery separate; no service or library acceptance is inferred from this CLI witness. |
 | [agent-dispatch-service](../../../services/dispatch/README.md) | Separate standalone root exercised explicitly by #10345, released with the plugin slice. Its historical Windows generated cold/handoff front doors, Source-unavailable version/authenticated health and held-state/native cleanup passed; plugin evidence alone is not its qualification. | Retain its own installed entry and dependency boundary. Native POSIX, native-service supervision, complete source-change/recovery and authoritative-replacement adoption remain separate under the existing owners; no competing coordinator. |
 | [agent-ssh-service](../../../services/ssh/README.md) | Bounded installed startup/fenced-transfer slice #10462 released in #10862. Native Windows copied-app cold/reuse, lost-prepare reply/retry, successor readiness and outgoing self-exit passed with fixture state preserved. Installed-wheel regression also covers the stale-writer notification gap. Separate Linux/Windows service CI passed; that is not immutable Linux app adoption. | Preserve enrollment, signatures/roles, connections and native relay custody. Keep immutable Linux app adoption, live operator Gateway/SSH integration, desktop-focus observation, broader recovery and rollout open. Incoming readiness/current selection and outgoing retirement remain distinct; this bounded witness does not establish complete authoritative replacement. |
 | [agent-pull-requests](../../../plugins/agent-pull-requests/README.md) | Retained source/native work; app-level new-flow release open. | Qualify installed commands and supported cache/service discovery, without publishing reviews or changing PRs as an install side effect. |
@@ -297,6 +297,62 @@ not Main release, downstream source acquisition, resident-service readiness,
 Linux qualification or host rollout. Required review/CI, actual source merge
 and available external/native qualification remain before publication claims.
 The parent Plan and remaining common gates below remain open.
+
+### Bounded SSH Linux base-profile CLI record
+
+These controls use explicit released Main
+`c08449f9a3494a51afe882a37557f6749c005c2b`, tree
+`d0f02bc30c28b470cc9171db03513d5c2023223a`, on Linux x86_64 with
+CPython 3.12.11 in a fresh container from a pinned, preprovisioned image.
+The BASE CLI profile has no optional extras, 14 wheels (one registry wheel),
+one declared `agent-ssh` command and no setup/start callbacks. It is not the
+SSH service or an independent SSH Manager library installation. Canonical
+toolchain, source/wheel and profile preparation take 29.550 seconds in total,
+separately from these actual generated front doors:
+
+| Generated front-door control | Elapsed | Boundary checked |
+|------------------------------|---------|------------------|
+| Separate fresh `install --stage` root | 0.140 s | Nested environment only; no completion, selection or global-command publication |
+| Fresh **unstaged** normal `install` root | 0.807 s | New nested environment, canonical completion, selection and real installed command |
+| Repeat normal `install` in that same root | 0.801 s | Same physical environment, exact immutable members and protected fixture state |
+
+All three calls retain the 300-second install bound. Nineteen further actual
+installed reads cover global/slot/module help and version, printed synthetic
+profiles, static target selection, explicit topology and an unavailable
+optional Worktrees owner. Four invalid-input commands refuse with exit 2
+without changing the fixture. The explicit snapshot leaves effective routes
+and connectivity unobserved; a missing optional owner remains unavailable,
+not an empty successful mesh. No reachability probe, SSH connection, forward,
+profile write, backend or service is exercised.
+
+The original checkout, source/profile inputs and cache paths are concealed
+before repeating the installed reads. Global and slot commands still use their
+locked installed project; direct module/resource inspection resolves inside
+its physical environment. All 49 admitted non-RECORD wheel members, including
+44 package members, match the installed footprint. This does not requalify
+the canonical constructor after source concealment.
+
+Persisted protected snapshots and complete read/refusal baselines compare
+exactly; 525 immutable slot entries are unchanged on reuse. Current/last-good/
+success records retain their contents while their metadata and directory
+timestamps refresh, so this is not a no-selection-write claim. The first
+version assertion omitted the CLI's documented name prefix; its failed fixture
+record remains retained, and correcting the expectation did not replay the
+stage/cold/reuse installations or change production code.
+
+Execution is network-disconnected, non-root, capability-dropped, read-only
+outside owned temporary storage and resource-bounded, without host binds,
+socket access or credentials. Reports, input and native-footprint archives
+are exported and fully read back before exact fixture cleanup. Independent
+verification checks archive hashes, actual wheel/installed members, persisted
+snapshots, raw before/after containment and the exact container's absence.
+These 26 native commands are not pytest cases, pristine-OS proof, a new runtime
+release or host/fleet deployment.
+
+Distinct-source update/reverse/recovery, other roles/platforms/architectures,
+broader legacy/adoption, real operator Gateway/SSH integration and full
+authoritative-replacement conformance remain open under #7028 and their
+existing owners. This evidence does not take over #10954 or #8821.
 
 ## Contributing from another agent or operator
 
