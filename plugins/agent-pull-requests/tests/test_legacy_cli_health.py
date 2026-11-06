@@ -4,10 +4,42 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import venv
 
 import pytest
 from agent_procutil import no_window_kwargs
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--help"],
+    ["attention", "--help"],
+    ["version"],
+])
+def test_cli_parser_does_not_require_optional_fleet(arguments):
+    source = Path(__file__).resolve().parents[1] / "src"
+    program = """
+import importlib.abc
+import runpy
+import sys
+
+class NoFleet(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "fleet_manager" or fullname.startswith("fleet_manager."):
+            raise ModuleNotFoundError("optional Fleet dependency is unavailable", name=fullname)
+
+sys.meta_path.insert(0, NoFleet())
+sys.path.insert(0, sys.argv.pop(1))
+sys.argv[0] = "agent-pull-requests"
+runpy.run_module("agent_pull_requests", run_name="__main__")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", program, str(source), *arguments],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "agent-pull-requests" in result.stdout
+    assert result.stderr == ""
 
 
 @pytest.mark.parametrize("missing_python", [False, True])

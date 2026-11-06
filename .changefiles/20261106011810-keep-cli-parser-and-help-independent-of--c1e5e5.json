@@ -1,0 +1,9 @@
+{
+  "comment": "Keep CLI parser, help and version independent of the optional Fleet dependency.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
