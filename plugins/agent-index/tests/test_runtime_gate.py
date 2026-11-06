@@ -182,6 +182,7 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
         encoding="utf-8",
     )
     env = environment(tmp_path)
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
     env["AGENT_INDEX_HOME"] = str(tmp_path / f"home-{shell}")
     env["USERPROFILE"] = str(tmp_path)
     env["PYTHONPATH"] = os.pathsep.join(
