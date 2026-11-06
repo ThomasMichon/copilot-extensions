@@ -2384,6 +2384,34 @@ def test_running_version_lag_resolves_the_actual_completed_slot(env, monkeypatch
     assert lags[0]["installed_slot"] == selected
 
 
+@pytest.mark.parametrize(("running_slot", "stale"), [
+    ("0.4.0.dev9", True),
+    ("0.4.0.dev9+repair." + "b" * 32, False),
+    (None, False),
+])
+def test_running_version_lag_needs_running_slot_evidence_for_plain_versions(
+    env, monkeypatch, running_slot, stale,
+):
+    from agent_worktrees import reconcile_freshness
+
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "0.4.0-dev9", scope="universal")
+    env.deploy_running("agent-bridge", "0.4.0.dev9")
+    marker = env.home / ".agent-bridge" / "running-version.json"
+    record = json.loads(marker.read_text(encoding="utf-8"))
+    if running_slot is not None:
+        record["runtime_slot"] = running_slot
+        marker.write_text(json.dumps(record), encoding="utf-8")
+    selected = "0.4.0.dev9+repair." + "b" * 32
+    monkeypatch.setattr(reconcile_freshness, "_resolved_selection", lambda *_args: selected)
+    lags = reconcile.running_version_lag(env.repo)
+    assert bool(lags) is stale
+    if stale:
+        assert lags[0]["running_slot"] == running_slot
+        assert lags[0]["installed_slot"] == selected
+
+
 @pytest.mark.parametrize("error", [ValueError, RuntimeError, subprocess.SubprocessError])
 def test_running_version_lag_keeps_package_drift_when_selection_is_unavailable(env, monkeypatch, error):
     from agent_worktrees import reconcile_freshness
