@@ -265,3 +265,20 @@ adopter pilot feedback gates subsequent widening.
 - Source review convergence, required CI and merge remain open. The effort
   stays Active; selected-runtime activation, actual migration and initial
   adopter feedback are still separate gates.
+
+### 2026-11-06 — Publication and journal-rotation corrections
+- The next review identified three further defects. Added atomic no-replace
+  publication for supported POSIX kernels (otherwise refuse), retained the
+  current terminal journal until its atomic replacement, and used a read-only
+  descriptor for POSIX file synchronization without changing preserved modes.
+- The focused affected-consumer packet passed **12 controls** with one explicit
+  Windows skip for the POSIX read-only-file control. Native collision refusal,
+  journal-rotation crash fencing, interrupted effects, fresh-process recovery
+  and the complete CLI flow were exercised.
+- Re-ran the real bounded Windows cross-filesystem roundtrip after the journal
+  correction: **1 passed, no skips**; exact owned fixture cleanup confirmed.
+  POSIX native qualification remains open, not inferred from Windows proof.
+- The separate trusted identifier scanner encountered a GitHub API HTTP 503,
+  not a reported identifier leak. Required source CI passed. Preserve a fresh
+  scanner result and an actual passing current-head review before merge;
+  neither the infrastructure error nor resolved threads substitute for them.
