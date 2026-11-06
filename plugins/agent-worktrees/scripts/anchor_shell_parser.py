@@ -166,10 +166,15 @@ def literal_write_targets(seg: str, tool: str, *, syntax: set[str] | None = None
             index += 1
     if not arguments:
         return targets
-    verb, args = arguments[0].lower(), arguments[1:]
+    verb = arguments[0].lower().replace("\\", "/").rsplit("/", 1)[-1].removesuffix(".exe")
+    args = arguments[1:]
+    if syntax is not None and verb in {"invoke-expression", "iex", "eval"}:
+        syntax.add("evaluation")
     if verb == "sed" and not _sed_in_place(args):
         return targets
     if verb == "dd":
+        if syntax is not None:
+            syntax.add("write")
         return targets + [arg[3:] for arg in args if arg.lower().startswith("of=")]
     positional, named = [], {}
     index = 0
@@ -200,15 +205,23 @@ def literal_write_targets(seg: str, tool: str, *, syntax: set[str] | None = None
     paths = [named[key] for key in ("-path", "-literalpath", "-filepath") if key in named]
     destination = named.get("-destination")
     if verb in {"cp", "copy-item"}:
+        if syntax is not None:
+            syntax.add("write")
         return targets + ([destination] if destination is not None else positional[-1:])
     if verb in {"mv", "move-item"}:
+        if syntax is not None:
+            syntax.add("write")
         return targets + paths + positional + ([destination] if destination is not None else [])
     if verb in {
         "set-content", "add-content", "out-file", "new-item", "remove-item",
         "clear-content", "rename-item", "set-itemproperty", "tee-object",
     }:
+        if syntax is not None:
+            syntax.add("write")
         return targets + (paths or positional[:1])
     if verb in {"tee", "sed", "rm", "touch", "mkdir", "truncate", "patch"}:
+        if syntax is not None:
+            syntax.add("write")
         return targets + positional
     return targets
 

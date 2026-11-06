@@ -352,6 +352,10 @@ Known Git reads and read-only branch flags do not invalidate or wake a sweep;
 an output-file option before the path delimiter makes an otherwise read-only
 Git command a mutation. PowerShell dot invocation is normalized for the same
 classification, including assignment right-hand commands.
+The original literal reader normalizes module-qualified command names and
+reports known-write occurrence even when the target is unresolved. Explicit
+command-evaluation forms invalidate conservatively; quoted evaluation text
+passed to an ordinary read command remains data.
 Other Git subcommands are conservative mutations. Supported literal writes and
 redirections invalidate globally, retaining the original shell target scope.
 Missing commands/parser support and traversal overflow are conservative too,

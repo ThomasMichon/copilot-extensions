@@ -622,6 +622,7 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "shell-literal-scriptblock",
     "shell-read-bracket-path", "shell-read-type-call", "shell-sed-cluster",
     "shell-git-output", "shell-dot-write", "shell-dot-read", "shell-dot-assignment",
+    "shell-evaluation", "shell-module-write", "shell-module-read", "shell-quoted-evaluation",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -646,12 +647,18 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
     )
     received, release = threading.Event(), threading.Event()
     notices = []
+    callback_errors = []
 
     class Server(HookIpcServer):
         def _on_native_mutation(self, request):
             notices.append(request)
-            super()._on_native_mutation(request)
-            received.set()
+            try:
+                super()._on_native_mutation(request)
+            except Exception as exc:
+                callback_errors.append(repr(exc))
+                raise
+            finally:
+                received.set()
 
     class NoReply(socketserver.BaseRequestHandler):
         def handle(self):
@@ -769,6 +776,14 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
                 args = {"command": ". git status --short"}
             elif case == "dot-assignment":
                 args = {"command": "$result = . git commit -m test"}
+            elif case == "evaluation":
+                args = {"command": "Invoke-Expression 'Set-Content file value'"}
+            elif case == "module-write":
+                args = {"command": r"Microsoft.PowerShell.Management\Set-Content file value"}
+            elif case == "module-read":
+                args = {"command": r"Microsoft.PowerShell.Management\Get-Content file"}
+            elif case == "quoted-evaluation":
+                args = {"command": "Write-Output \"Invoke-Expression 'Set-Content file value'\""}
             payload.update(toolName="powershell", toolArgs=args)
             if case == "bash-assignment":
                 payload["toolName"] = "bash"
@@ -795,7 +810,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         elif case in {"wrong-generation", "closed"} and not received.wait(2):
             assert not notices
         else:
-            assert received.wait(2)
+            assert received.wait(2), f"arrived={bool(notices)}, callback_errors={callback_errors}"
             assert len(notices) == 1
             expected = {
                 key: value for key, value in payload.items()
@@ -805,7 +820,8 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             assert notices[0]["kind"] == (
                 "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
             )
-        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment", "control-block", "conditional", "bash-assignment", "typed-assignment", "pipeline-block", "invoke-block", "sed-cluster", "git-output", "dot-write", "dot-assignment"}
+        assert callback_errors == []
+        writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment", "control-block", "conditional", "bash-assignment", "typed-assignment", "pipeline-block", "invoke-block", "sed-cluster", "git-output", "dot-write", "dot-assignment", "evaluation", "module-write"}
         assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch", "shell-metadata"} else [])
         assert server.has_recent_hook_demand() is (writes or case in {
             "structured", "patch", "reads", "read", "literal-assignment", "read-sed",
@@ -813,6 +829,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             "literal-scriptblock",
             "read-bracket-path", "read-type-call",
             "dot-read",
+            "module-read", "quoted-evaluation",
         })
     finally:
         release.set()

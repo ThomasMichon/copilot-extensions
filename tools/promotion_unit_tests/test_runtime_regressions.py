@@ -114,6 +114,13 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     pytest.param(". Set-Content file value", True, id="dot-file-write"),
     pytest.param(". git status --short", False, id="dot-read"),
     pytest.param("$result = . git commit -m test", True, id="assigned-dot-write"),
+    pytest.param("Invoke-Expression 'Set-Content file value'", True, id="expression-evaluation"),
+    pytest.param("iex 'git commit -m test'", True, id="evaluation-alias"),
+    pytest.param(r"Microsoft.PowerShell.Management\Set-Content file value", True, id="module-write"),
+    pytest.param(r"Microsoft.PowerShell.Management\Set-Content", True, id="module-unknown-target"),
+    pytest.param(r"Microsoft.PowerShell.Management\Get-Content file", False, id="module-read"),
+    pytest.param(r"Write-Output 'Microsoft.PowerShell.Management\Set-Content file value'", False, id="quoted-module"),
+    pytest.param("Write-Output \"Invoke-Expression 'Set-Content file value'\"", False, id="quoted-evaluation"),
 ])
 def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
     assert guard.shell_may_mutate(command, "powershell") is mutates
