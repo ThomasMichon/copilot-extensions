@@ -65,7 +65,7 @@ class ForeignRepoResolution:
 
 
 def resolve_repo_config_for_slug(
-    config: cfg.Config, repo_slug: str
+    config: cfg.Config, repo_slug: str, *, allow_git: bool = True,
 ) -> ForeignRepoResolution:
     """Resolve the :class:`~agent_worktrees.config.RepoConfig` that OWNS
     ``repo_slug`` (``owner/name`` or ADO ``project/repo``), independent of the
@@ -89,22 +89,41 @@ def resolve_repo_config_for_slug(
     A registry entry without a local checkout does not veto an explicit
     checkout-free binding. Other config load failures remain visible and
     block fallback, so malformed or inaccessible project policy is not bypassed.
+    ``allow_git=False`` requires registered remote evidence and refuses ambiguous
+    registry matches; it never discovers an anchor's remote through Git.
     """
     from . import repos as repos_mod
 
-    try:
-        active_remote = _resolve_repo_remote(config, config.default_repo)
-    except Exception:
-        active_remote = ""
+    entries = None
+    if allow_git:
+        try:
+            active_remote = _resolve_repo_remote(config, config.default_repo)
+        except Exception:
+            active_remote = ""
+    else:
+        try:
+            entries = repos_mod.list_repos()
+        except Exception:
+            return ForeignRepoResolution(None, error="Repository registry unavailable")
+        matches = [
+            entry for entry in entries
+            if entry.remote and git_ops.slug_from_url(entry.remote) == repo_slug
+        ]
+        if len(matches) > 1:
+            return ForeignRepoResolution(None, error="Ambiguous registered PR repository")
+        active_remote = next(
+            (entry.remote for entry in matches if entry.name == config.repo_name), "",
+        )
     if active_remote and git_ops.slug_from_url(active_remote) == repo_slug:
         return ForeignRepoResolution(
             config.default_repo, config.repo_name, same_as_active=True
         )
 
-    try:
-        entries = repos_mod.list_repos()
-    except Exception:
-        entries = []
+    if entries is None:
+        try:
+            entries = repos_mod.list_repos()
+        except Exception:
+            entries = []
 
     for entry in entries:
         if entry.name == config.repo_name:

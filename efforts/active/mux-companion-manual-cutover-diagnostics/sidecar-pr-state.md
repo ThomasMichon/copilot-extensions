@@ -4,7 +4,8 @@ Canonical parent: [complete effort](README.md), Step 6 topology and Step 7
 source coverage. Original request: [purpose-first continuation](purpose-first.md).
 Coordination: #8811.
 
-**Status: proposed source realization; review before implementation.**
+**Status: source plan reviewed in #10920; R1 source qualified and awaiting
+independent review; R2 implementation pending.**
 
 ## Existing boundary and intent
 
@@ -31,8 +32,11 @@ standing intent.
 
 ### R0 - Review the realization
 
-- [ ] Land this proposal through normal independent review and required CI.
+- [x] Land this proposal through normal independent review and required CI.
       Read the entire parent and its original contracts after actual merge.
+      #10920 merged as `b8bb77b2af6c32e06848917c9b6fbc56036483e6` after
+      current-head approval and all required checks; full readback followed
+      immediately before bookkeeping or source execution.
 
 ### R1 - Passive owner association and runtime declaration
 
@@ -153,3 +157,52 @@ S2-S5, independent manual/head, permanent Claims/mode, Relay, PRE, native,
 installed or D5 operational/archive acceptance. The canonical parent stays
 Active until every original Plan and Validation Plan clause is resolved or
 genuinely transferred to a named tracked objective under its actual owner.
+
+## Journal
+
+### 2026-11-05 - Reviewed PR-source admission
+
+#10920 merged at 23:09:14 PST after independent approval of the amended
+`370ba944a7795e98b80599f9c51950c711ed6222` head, no inline findings and all
+three required checks passed. The complete parent, five original linked
+contracts and this plan were read immediately after actual merge, before
+provider readback, claim settlement or source realignment.
+
+The amendment keeps related-PR binding acquisition out of ordinary status
+calculation, which deliberately omits that expensive configuration work.
+Only the new fact construction is passive; existing status Git/liveness/
+bootstrap behavior stays unchanged. Managed reconciliation preserved all seven
+contracts exactly. R1's declared on-demand association fact is the next source
+slice; R2, full live topology and every original parent gate remain open.
+No runtime, source provider, configuration, real daemon, model, data or
+head/baton operation was performed by this planning admission.
+
+### 2026-11-05 - R1 provider source qualification
+
+The selected CLI now advertises `companion-pr-observations-v1` and accepts the
+optional `--pr-associations` read. It projects exact stored association IDs,
+revisions, target identity and record state through the existing read-only
+configuration owner. Default status reads do not acquire related-PR bindings,
+and the optional read preserves the original core/cache without repeating its
+Git work. Missing incarnation/association/URL evidence, duplicates, malformed
+data, conflicting scopes and unavailable configuration do not manufacture
+provider observations. The 24-association and 1 MiB output limits remain
+explicit, including a bounded unavailable response when the combined core
+cannot fit.
+
+The existing passive snapshot additionally exports its effective `endpoint`,
+without another provider request. This is needed to compare the eventual
+point-read scope when configured `api_base` is empty and the provider selects
+an ambient host; prior snapshots without that field remain unknown.
+
+The nine-file isolated packet passed all 239 controls without skips and with
+verified cleanup. It includes actual private YAML reads, strict current and
+frozen prior status-parser processes, old caller/new owner, missing support,
+one shared fresh binding discovery, reassignment/incarnation changes,
+three-provider binding, explicit budgets and independent cached facts.
+These are source/private-process controls, not installed/native input-ready
+performance or a real provider read. Required unit-only CI is unchanged.
+The R1 and R2 completion boxes remain open pending independent current-head
+review, required checks, actual merge and immediate whole-parent readback.
+No rollout, real daemon wake, live Mux binding, model/data or head/baton
+operation was performed.

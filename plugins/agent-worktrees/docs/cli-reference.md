@@ -40,6 +40,55 @@ Overlapping request and background refreshes use per-worktree publication
 generations: an older computation may finish its own response, but cannot
 replace a newer generation's cached or durable facts or renew their age.
 
+## On-demand PR associations
+
+Ordinary `worktree-status-bundle` responses add the optional
+`companion_pr_observations` declaration: contract
+`companion-pr-observations-v1`, version 1, option `--pr-associations`, and
+passive snapshot schema `agent-worktrees.pr-snapshot`, version 1.
+This is the executing CLI's support, not the resident's generation or fresh
+provider evidence. Ordinary reads keep their existing six facts and omit
+related-PR binding discovery.
+
+After finding that declaration, a consumer may request
+`worktree-status-bundle --worktree <id> --pr-associations --json`.
+It retains the original cached/core bundle and adds the independently timed
+`facts.pr_associations` fact. The version-1 `agent-worktrees.pr-associations`
+value identifies the exact project, worktree and stored `creation_nonce`,
+with `available`, `complete`, `associations` and `omitted`.
+Each association retains its stored `pr_id`, `pr_revision`, `provider`,
+target `repo`, `number`, `url` and `recorded_state`. Its separate `binding`
+reports `available` and either the registered provider/repository,
+configured `api_base` and effective `endpoint`, or a bounded reason.
+Binding availability means that target can be selected for the existing read;
+it is not authorization, provider reachability or observation freshness.
+
+Discovery projects at most 24 associations, with explicit omissions, within
+the existing 1 MiB body budget. One invocation shares one fresh configuration
+acquisition scope. It performs no credential/forge read, Git remote discovery,
+Git fetch, service startup or canonical write of its own; the status command's
+existing Git/liveness/bootstrap behavior is unchanged.
+The record is reread and checked against the selected worktree incarnation and
+again after binding resolution. Changed, malformed, oversized or legacy
+incarnation evidence remains unavailable, not an empty success.
+An exact known empty list needs no binding discovery. Missing/legacy identity,
+duplicate association IDs, incomplete targets and conflicting/unregistered
+bindings cannot qualify a provider read. Configuration failure retains the
+known associations with unavailable bindings.
+If even the unavailable fact cannot fit beside the existing core within the
+body budget, the optional response reports `availability.status: unavailable`
+with reason `association-byte-budget`, without replaying the oversized core.
+The original cache is unchanged; consumers retain independently obtained views
+rather than treating this bounded failure as an empty core.
+
+Claims and recorded `open`, `merged`, `closed` or other lifecycle state do not
+establish current provider state, acceptance or claim release. This operation
+does not acquire a snapshot or watch. Consumers using older/rolled-back CLIs
+without the declaration retain their claim-only baseline and unknown PR state;
+they must not guess the new option or fall back to a raw forge client.
+Older readers can ignore the additive declaration/fact. Unknown arguments
+remain rejected, and no existing form is retired.
+
 ## Repository PR census
 
 `pr-sweep <owner/repository> [--fleet] [--include MACHINE/ENV]
