@@ -1,0 +1,13 @@
+{
+  "comment": "Compose explicit continuity SSH setup through normal repository and Source application owners",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

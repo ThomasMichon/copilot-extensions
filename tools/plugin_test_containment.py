@@ -55,7 +55,7 @@ sys.path.insert(
 )
 try:
     from agent_procutil import no_window_kwargs
-    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle
+    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle as daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
 
@@ -371,12 +371,13 @@ class _WindowsJob:
 
     _JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
     _JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
+    _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
     _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
     _PROCESS_SET_QUOTA = 0x0100
     _PROCESS_TERMINATE = 0x0001
 
-    def __init__(self, limits: Limits) -> None:
+    def __init__(self, limits: Limits, *, native_application: bool = False) -> None:
         import ctypes
         from ctypes import wintypes
 
@@ -458,6 +459,8 @@ class _WindowsJob:
             | self._JOB_OBJECT_LIMIT_JOB_MEMORY
             | self._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         )
+        if native_application:
+            extended.BasicLimitInformation.LimitFlags |= self._JOB_OBJECT_LIMIT_BREAKAWAY_OK
         emergency_processes = max(
             limits.max_processes * 2, limits.max_processes + 16
         )
@@ -719,6 +722,7 @@ def _run_contained_process(
     sandbox: Path,
     limits: Limits,
     qualification: Qualification | None = None,
+    native_application: bool = False,
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
@@ -782,7 +786,10 @@ def _run_contained_process(
             qualification.capture.start((proc.stdout, proc.stderr))
         if os.name == "nt":
             try:
-                job = _WindowsJob(limits)
+                job = (
+                    _WindowsJob(limits, native_application=True)
+                    if native_application else _WindowsJob(limits)
+                )
                 job.assign(proc.pid)
             except BaseException:
                 try:
@@ -915,70 +922,18 @@ def run_contained(
     daemon_purpose: str = "unattended-test",
     daemon_lease: DaemonLeasePolicy | None = None,
     qualification: Qualification | None = None,
+    native_application: bool = False,
 ) -> int:
     """Run an owned test tree; interactive tests require an explicit lease policy."""
-    lifecycle_results: list[Any] = []
-    if qualification is not None:
-        if os.name != "nt":
-            raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
-        if limits != Limits(wall_seconds=WORK_SECONDS):
-            raise QualificationError("Native qualification must preserve the original process, memory and poll limits.")
-        qualification.validate(sandbox, time.monotonic)
-    environment_snapshot = _read_registry_environment()
-    if qualification is not None:
-        qualification.boundary.require(time.monotonic, work=True)
-    unreaped = None
-    try:
-        with daemon_test_lifecycle(
-            owner=f"contained-test-runner:{os.getpid()}",
-            registry_root=sandbox.resolve() / "daemon-instances",
-            purpose=daemon_purpose,
-            lease=daemon_lease,
-            **(
-                {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
-                if qualification is not None else {}
-            ),
-        ) as daemon_environment:
-            result = _run_contained_process(
-                command,
-                cwd=cwd,
-                env={**env, **daemon_environment},
-                sandbox=sandbox,
-                limits=limits,
-                **({"qualification": qualification} if qualification is not None else {}),
-            )
-        if qualification is not None:
-            qualification.boundary.require(time.monotonic)
-            qualification.lifecycle_settled = all(
-                outcome.status in ("settled", "missing") for outcome in lifecycle_results
-            )
-    except UnreapedProcessError as exc:
-        unreaped = exc
-        raise
-    finally:
-        try:
-            if qualification is not None:
-                qualification.boundary.require(time.monotonic)
-            changed = _registry_environment_drift(environment_snapshot)
-            if changed:
-                print(
-                    "[HOST-STATE] contained test changed persistent Windows "
-                    f"environment state; detected without rollback: {', '.join(changed)}",
-                    file=sys.stderr,
-                )
-        except BaseException as audit_error:
-            if unreaped is None:
-                raise
-            raise UnreapedProcessError(
-                f"{unreaped}; environment audit also failed: "
-                f"{type(audit_error).__name__}: {audit_error}"
-            ) from unreaped
-    if changed:
-        return 125
-    if qualification is not None:
-        qualification.registry_unchanged = True
-        qualification.require_settled(time.monotonic)
-    return result
+    if __package__:
+        from .plugin_test_lifecycle import run_contained as run
+    else:
+        from plugin_test_lifecycle import run_contained as run
+    return run(
+        sys.modules[__name__], command, cwd=cwd, env=env, sandbox=sandbox, limits=limits,
+        daemon_purpose=daemon_purpose, daemon_lease=daemon_lease,
+        qualification=qualification, native_application=native_application,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

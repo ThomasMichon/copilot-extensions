@@ -243,11 +243,14 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     workflow = yaml.safe_load(
         (root / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
     )
+    events = workflow.get("on", workflow.get(True))
+    assert len(events["workflow_dispatch"]["inputs"]) <= 25
     job = workflow["jobs"]["gateway-host-application-" + platform]
     steps = [step for step in job["steps"] if "run" in step]
-    assert job["timeout-minutes"] == 6 and len(steps) == 2
+    assert job["timeout-minutes"] == 6 and len(steps) == 3
     assert [shlex.split(step["run"]) for step in steps] == [
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
     ]
     assert not any(step.get("continue-on-error") for step in steps)
@@ -259,8 +262,22 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert shlex.split(followthrough[0]["run"]) == [
         "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
     ]
+    normal = workflow["jobs"]["gateway-normal-setup-" + platform]
+    assert normal["timeout-minutes"] == 6
+    assert normal["needs"] == "gateway-continuity-application-" + platform
+    normal_steps = [step for step in normal["steps"] if "run" in step]
+    assert [shlex.split(step["run"]) for step in normal_steps] == [
+        ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
+        ["python", "tools/run-plugin-tests.py", "agent-worktrees",
+         "--test-file", "tests/test_repository_continuity.py",
+         "-k", "normal_ssh_setup or setup_status"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
+         "--ephemeral-native-ssh-setup"],
+    ]
+    assert not any(step.get("continue-on-error") for step in normal_steps)
+    assert normal_steps[2]["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"
     expressions = []
-    for step in steps + followthrough:
+    for step in steps + followthrough + [normal_steps[2]]:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(
@@ -269,6 +286,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "or test_ssh_machine or test_machine_identity or test_credential_references"
         " or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
         " or test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
+        " or test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
     )
     nodes = {
         path.name + "::" + node.name
@@ -287,22 +305,31 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert groups[0] == {
         "test_gateway_host_distribution.py::test_selected_gateway_application_first_touch_repeat_update_and_stop",
     }
-    assert groups[0].isdisjoint(groups[1])
-    assert groups[2] == {
+    assert groups[1] == {
+        "test_gateway_host_distribution.py::"
+        "test_selected_ssh_application_first_touch_repeat_update_and_stop",
+    }
+    assert groups[3] == {
         "test_gateway_host_distribution.py::"
         "test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop",
     }
-    assert groups[2].isdisjoint(groups[0] | groups[1])
-    assert groups[0] | groups[1] | groups[2] == selected(original)
-    assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
+    assert groups[4] == {
+        node for node in nodes if node.startswith("test_ssh_setup.py::")
+    } | {
+        "test_repository_ssh_setup_installed.py::"
+        "test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop",
+    }
+    for index, group in enumerate(groups):
+        assert group.isdisjoint(set().union(*groups[:index]))
+    assert set().union(*groups) == selected(original)
     assert (
         "test_continuity_bootstrap.py::"
         "test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
-    ) in groups[1]
+    ) in groups[2]
     assert (
         "test_continuity_bootstrap.py::"
         "test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
-    ) in groups[1]
+    ) in groups[2]
 
 
 @pytest.mark.parametrize(

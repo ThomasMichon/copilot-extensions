@@ -1748,6 +1748,12 @@ jobs:
             -vv --durations=20
             -k selected_gateway_application_first_touch_repeat_update_and_stop
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
+      - name: Selected SSH installed lifecycle
+        env:
+          PYTEST_ADDOPTS: >-
+            -vv --durations=20
+            -k selected_ssh_application_first_touch_repeat_update_and_stop
+        run: python tools/run-standalone-tests.py fleet-manager --timeout 180
       - name: Selected host lifecycle and SSH consumer authentication
         env:
           PYTEST_ADDOPTS: >-
@@ -1760,6 +1766,7 @@ jobs:
             or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment
             or test_provider_caller_does_not_recreate_a_concurrently_removed_identity)
             and not selected_gateway_application_first_touch_repeat_update_and_stop
+            and not selected_ssh_application_first_touch_repeat_update_and_stop
             and not selected_continuity_ssh_application_first_touch_repeat_update_and_stop"
         run: python tools/run-standalone-tests.py fleet-manager --timeout 180
   gateway-host-application-windows:
@@ -1801,6 +1808,48 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 6
     steps: *gateway-continuity-application-steps
+
+  gateway-normal-setup-linux:
+    if: ${{ inputs.pr_artifacts }}
+    needs: gateway-continuity-application-linux
+    name: Normal selected SSH setup (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env: &gateway-normal-setup-env
+      UV_PYTHON: "3.12"
+    steps: &gateway-normal-setup-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare the declared engine dependency support
+        run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Repository source admission and pinned SSH setup controls
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_repository_continuity.py
+          -k "normal_ssh_setup or setup_status"
+      - name: Normal Manager and engine SSH setup
+        env:
+          COPILOT_EXTENSIONS_SSH_SETUP_NATIVE: "1"
+          PYTEST_ADDOPTS: >-
+            -vv --durations=20
+            -k "test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180 --ephemeral-native-ssh-setup
+
+  gateway-normal-setup-windows:
+    if: ${{ inputs.pr_artifacts }}
+    needs: gateway-continuity-application-windows
+    name: Normal selected SSH setup (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    env: *gateway-normal-setup-env
+    steps: *gateway-normal-setup-steps
 
   gateway-role-tunnels:
     if: ${{ inputs.pr_artifacts }}

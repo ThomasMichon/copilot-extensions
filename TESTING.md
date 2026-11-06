@@ -575,6 +575,44 @@ source-independent repeat, failed candidate
 preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
+The Gateway jobs keep each complete installed Gateway and SSH lifecycle case
+in its own sequential 180-second runner, separate from the independent consumer
+controls. No lifecycle sequence is split; the six-minute job limit and peak job
+concurrency are unchanged.
+
+Its further dependent normal-setup jobs prepare the engine's declared test
+dependencies and run the repository continuity module's `normal_ssh_setup or
+setup_status` controls, including real Git source qualification and required
+request-pin capability. They then run `test_ssh_setup.py` and the whole
+`test_repository_ssh_setup_installed.py` sequence under the same 180-second
+runner/six-minute job limits. The latter builds the engine wheel with its
+packaged Source API and drives the actual Manager/engine handoff into synthetic
+TLS enrollment and the complete Source application installer, repeat,
+wrong-scope preservation, selected update and exact native stop. The Manager
+and engine dependency support remain fixtures; this is not complete installed
+product-cohort, provider, fresh-adopter or rollout proof. These jobs are
+sequenced after the retained explicit continuity cases, not parallel replacement
+coverage. Local helper/ordering controls and a packaged-API refusal probe do
+not substitute for their actual native outcomes.
+
+Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
+requires an explicitly selected Fleet lane on a GitHub-hosted disposable runner,
+with its owned sandbox beneath `RUNNER_TEMP`; ordinary hosts, self-hosted
+runners and nested contained callers refuse before preparation. The native
+envelope retains the original bounded-worker limits and runner-renewed daemon
+lease, but permits explicit application-daemon escape from caller cleanup
+Jobs/process groups. Bounded descendants remain caller-owned; held daemon
+cleanup fails and retains the sandbox. Ordinary tests still suppress daemon
+escape. Held cleanup retains the sandbox even when the controller raises,
+preserving the original failure as the exception cause. A teardown exception
+also retains the sandbox when no cleanup results were recorded; a controller
+failure followed by confirmed cleanup keeps its original error.
+This distinction matters because the real Source constructor closes
+an inner cleanup scope before the engine checks the selected host's readiness.
+On Linux, a caller cleanup unit also requires the current user's already-running,
+owned user-manager bus. The native envelope selects that fixed local bus endpoint
+without moving `XDG_RUNTIME_DIR` or application state out of the sandbox; it
+does not start a manager, install a service or use an inherited bus address.
 
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
