@@ -167,7 +167,7 @@ if [ "$recovery_only" -eq 1 ]; then
     recovery_staging="$(mktemp -d -t manager-repair.XXXXXXXX)"
     STAGING="$recovery_staging/source"
     trap 'rm -rf -- "$recovery_staging"' EXIT
-elif [ -z "$install_source" ] && [ "${1-}" = update ]; then
+elif [ "${1-}" = update ]; then
     mkdir -p "$ROOT/bootstrap-acquisition"
     update_staging="$(mktemp -d "$ROOT/bootstrap-acquisition/update.XXXXXXXX")"
     STAGING="$update_staging/source"

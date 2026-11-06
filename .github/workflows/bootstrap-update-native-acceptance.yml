@@ -15,6 +15,8 @@ on:
       - worktree-manager/src/worktree_manager/update_driver_cli.py
       - worktree-manager/tests/native/test_bootstrap_update_native.py
       - worktree-manager/tests/test_update_python_path.py
+      - worktree-manager/tests/test_bootstrap_dispatch.py
+      - worktree-manager/tests/test_install_source.py
 
 permissions:
   contents: read
@@ -49,8 +51,12 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py worktree-manager
           --test-file tests/native/test_bootstrap_update_native.py
-          --test-file tests/test_update_python_path.py --allow-explicit-tiers
-          -k "not full_declared_repository_inputs_reach_immutable_retention"
+          --test-file tests/test_update_python_path.py
+          --test-file tests/test_bootstrap_dispatch.py
+          --test-file tests/test_install_source.py --allow-explicit-tiers
+          -k "not full_declared_repository_inputs_reach_immutable_retention and
+          (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and
+          (not test_install_source or standalone_prepared_updates)"
 
   bootstrap-update-windows:
     name: Whole bootstrap update (Windows)

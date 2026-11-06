@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 from itertools import product
 import os
@@ -64,6 +65,89 @@ def test_posix_owned_inspection_waits_without_forwarding_a_witness(monkeypatch):
         ["/selected/python", "-m", "manager", "update", "--auth-report"], wait_for_exit=True,
     ) == 0
     assert "env" not in seen[0] and "creationflags" not in seen[0]
+
+
+@pytest.mark.parametrize("prior,relative,remove_at_spawn", [
+    (False, True, False), (False, True, True), (True, False, False),
+])
+def test_finish_survives_removed_source_anchor(
+    tmp_path, monkeypatch, prior, relative, remove_at_spawn,
+):
+    from worktree_manager import source_config, update_driver_cli
+
+    installer = self_install._runtime_installer()
+    root = tmp_path / "manager"
+    slot = root / "versions" / "fixture"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    anchor = tmp_path / "submission"
+    anchor.mkdir()
+    source = tmp_path / "source"
+    source.mkdir()
+    repo = "../source" if relative else str(source)
+    (root / "config.toml").write_text(
+        "[source]\nrepo=" + json.dumps(repo) + "\n", encoding="utf-8",
+    )
+    module = (
+        Path(__file__).parent / "fixtures" / "bootstrap-prior-cli" / "source_config.py"
+        if prior else Path(source_config.__file__)
+    )
+    output = root / "observed.json"
+    (bootstrap / "runtime_launcher.py").write_text(
+        "import json,os,runpy\nfrom pathlib import Path\n"
+        f"source=runpy.run_path({str(module)!r})\n"
+        "repo=source['absolute_local_source'](source['resolved_repo']())\n"
+        f"Path({str(output)!r}).write_text(json.dumps({{"
+        "'cwd':str(Path.cwd()),'repo':repo,"
+        f"'anchor':os.environ[{source_config.SOURCE_ANCHOR_ENV!r}]}}))\n"
+        "raise SystemExit(23)\n", encoding="utf-8",
+    )
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.setenv(source_config.SOURCE_ANCHOR_ENV, str(anchor))
+    monkeypatch.setattr(installer.runtime, "slot_python", lambda *args: Path(sys.executable))
+    monkeypatch.setattr(installer.runtime, "retention_lease", lambda *args: nullcontext())
+    monkeypatch.setattr(installer, "sys", SimpleNamespace(stdin=None, stdout=None, stderr=None))
+    monkeypatch.setattr(
+        update_driver_cli, "handoff_environment",
+        lambda command: {source_config.SOURCE_ANCHOR_ENV: str(anchor)},
+    )
+    popen = installer.subprocess.Popen
+    launches = []
+
+    def launch(command, **options):
+        launches.append(options["cwd"])
+        if remove_at_spawn and len(launches) == 1:
+            anchor.rmdir()
+        return popen(command, **options)
+
+    monkeypatch.setattr(installer.subprocess, "Popen", launch)
+    if not remove_at_spawn:
+        anchor.rmdir()
+    args = SimpleNamespace(
+        install_only=False, repair_update=False, update_participant=True, root=root,
+    )
+    assert installer._finish(args, slot, ["update"]) == 23
+    assert json.loads(output.read_text()) == {
+        "cwd": str(root), "repo": str(source), "anchor": str(anchor),
+    }
+    assert launches == [str(anchor), str(root)]
+
+
+def test_dispatch_does_not_retry_a_missing_executable_with_a_live_anchor(tmp_path, monkeypatch):
+    installer = self_install._runtime_installer()
+    monkeypatch.setattr(installer, "sys", SimpleNamespace(stdin=None, stdout=None, stderr=None))
+    launches = []
+
+    def launch(command, **options):
+        launches.append(options)
+        raise FileNotFoundError("missing interpreter")
+
+    monkeypatch.setattr(installer.subprocess, "Popen", launch)
+    with pytest.raises(FileNotFoundError, match="missing interpreter"):
+        installer._dispatch_manager(
+            ["missing-interpreter"], cwd=str(tmp_path), fallback_cwd=str(tmp_path.parent),
+        )
+    assert len(launches) == 1
 
 
 @pytest.mark.parametrize("interrupted", [False, True])

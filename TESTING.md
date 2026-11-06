@@ -718,12 +718,15 @@ the actual UV stage entry; its native POSIX controls are separate from Windows
 execution and the required unit-only CI packet.
 
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
-and for relevant PR paths on Linux and Windows. Its complete local packet is
+and for relevant PR paths on Linux and Windows. Its native/PATH local packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
 Hosted acceptance runs complementary behavioral and full-retention selections
 in separate jobs on each platform; no case is removed from acceptance. The
 behavioral jobs also run `tests/test_update_python_path.py` with fake registry
 state to check waited completion, excluded observer modes and publication failures.
+They select the source-anchor-loss dispatch controls and standalone prepared-source
+acquisition controls from `test_bootstrap_dispatch.py` and `test_install_source.py`
+without adding those files' unrelated cases to this acceptance packet.
 Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
 is unchanged. Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.
@@ -739,8 +742,19 @@ application data: the shells keep their executing controller when its full
 payload is available, otherwise acquire the controller through their normal
 source path, rather than execute bootstrap code from the prepared application.
 The prepared fixture carries the actual prior, pre-anchor CLI and source locator.
-The selected application starts in the saved submission directory, so that prior
-CLI's relative-source check matches the current controller's admitted source.
+The selected application starts in the saved submission directory when it still
+exists, so that prior CLI's relative-source check matches the current controller's
+admitted source. If that directory disappears before process creation, dispatch
+falls back to the retained installation root without losing the source-anchor
+environment. Real `_finish()` subprocess controls cover current relative sources,
+prior absolute sources and deletion at the process-creation boundary. A missing
+interpreter with a live directory is not retried. A prior CLI's relative-source
+resolver still requires its original directory; it cannot honor the newer anchor
+environment, and that unsupported combination is not claimed as passing.
+The standalone prepared-source shell control launches two concurrent callers,
+verifies distinct per-invocation controller checkouts and
+preserves unrelated shared staging. It exercises normal controller acquisition
+without a sibling payload; only the selected interpreter body is a finite fixture.
 That actual-shell control observes queue admission for up to 20 seconds, then
 suite startup for up to another 20 seconds, within the unchanged 90-second case.
 The caller-loss case uses a relative configured source through real

@@ -362,19 +362,25 @@ def _windows_console_stream(stream: TextIO | None) -> bool:
 
 def _dispatch_manager(
     command: list[str], *, handoff: dict[str, str] | None = None, wait_for_exit: bool = False,
-    cwd: str | None = None,
+    cwd: str | None = None, fallback_cwd: str | None = None,
 ) -> int:
     if os.name == "nt" or handoff or wait_for_exit or cwd is not None:
         console = os.name == "nt" and any(
             _windows_console_stream(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)
         )
-        process = subprocess.Popen(
-            command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+        options = dict(
+            stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
             **({"creationflags": 0 if console else subprocess.CREATE_NO_WINDOW}
                if os.name == "nt" else {}),
             **({"env": {**os.environ, **handoff}} if handoff else {}),
             **({"cwd": cwd} if cwd is not None else {}),
         )
+        try:
+            process = subprocess.Popen(command, **options)
+        except (FileNotFoundError, NotADirectoryError):
+            if cwd is None or fallback_cwd is None or Path(cwd).is_dir():
+                raise
+            process = subprocess.Popen(command, **{**options, "cwd": fallback_cwd})
         try:
             return process.wait()
         except BaseException:
@@ -782,7 +788,9 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
 
     handoff = handoff_environment(command)
     owned_without_handoff = not handoff and bool(participant_environment())
-    selected = {"cwd": request_source_anchor()} if args.update_participant else {}
+    selected = {
+        "cwd": request_source_anchor(), "fallback_cwd": str(args.root.resolve()),
+    } if args.update_participant else {}
     with runtime.retention_lease(args.root, slot.name):
         if handoff:
             result = _dispatch_manager(invocation, handoff=handoff, **selected)

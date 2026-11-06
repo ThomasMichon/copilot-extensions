@@ -4188,7 +4188,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
         "tools/promotion_unit_tests/test_hook_demand.py": "a4e61e5a2f787f784331b9a60495a017ae1ed6233ebec869e172b637fb8459f1",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "10269ea5299c84dc925c7dc19371b3cb473f1cd00fc8342a461f03453d1a9016",
-        "worktree-manager/scripts/runtime_install.py": "296d9627de309e8a9702beceb0de3cfc63b7bfe5b47c9291ef261c53b81266d6",
+        "worktree-manager/scripts/runtime_install.py": "1e77ee6455713c1d8b4fd45cf51183183bb5b7eb7f5b75f9bbbce06e187e4d6f",
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "1ef40d40796509d299ffade905703cbe6a0950301bbb3092f8dc4597c04e4afe",
         "worktree-manager/src/worktree_manager/project_update_controller.py": "f2c4490f3205ba20edaf7d549c7c268cae5ba1211de1c4daab67e433202ea3a6",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",

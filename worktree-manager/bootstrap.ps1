@@ -362,7 +362,7 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--bootstrap-update') {
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
 }
-if (-not $InstallSource -and $commandArgs.Count -and $commandArgs[0] -ceq 'update') {
+if ($commandArgs.Count -and $commandArgs[0] -ceq 'update') {
     $UpdateStaging = Join-Path $Root ('bootstrap-acquisition\update.' + [Guid]::NewGuid().ToString('N'))
     $Staging = Join-Path $UpdateStaging 'source'
 }
