@@ -1,0 +1,9 @@
+{
+  "comment": "Add a read-only effort digest and targeted-readback guidance so agents stop re-reading whole effort documents",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}
