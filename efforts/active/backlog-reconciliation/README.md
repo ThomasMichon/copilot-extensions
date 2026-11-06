@@ -330,6 +330,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [anchor/owner study](anchor-and-owner-observation-cohorts.md) now records
+reviewed #11048, two separately audited NOT_PLANNED tracking retirements
+under OPEN #4173/#4619, and #7039's finite completed source correction in
+actual merged #8855. All identity acceptance and source/resource custody
+remain. Complete 09:43 PST scans measure 802 whole OPEN and 1,020 audited
+outcomes, 73 above fixed 729. Three new independent current-source studies
+cover #7010/#7136/#8511 rather than repeating unchanged packet summaries.
+No native execution, implementation or claim/resource release follows;
+the canonical Plan/Validation and fixed checkpoint remain Active.
+
 The [registered-anchor and current-owner observation cohorts](anchor-and-owner-observation-cohorts.md)
 account for twenty complete qualified originals and two independent
 actual OPEN parent intakes: #7689 under #4173 and #7180 under #4619.
