@@ -141,7 +141,9 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   repair via `agent-ssh restore-host` when the host is unhealthy or stale, and
   a dtssh mesh refresh -- re-discover live tunnel ids, re-emit this machine's
   SSH profile, and verify reachability to every known alias) and a daily
-  `sweep` tier (repo fast-forward + full repo `update` + full restore). Both
+  `sweep` tier (repo fast-forward + full repo `update` + full restore).
+  Local dtssh launcher/host checks are Windows-only; Linux/WSL skips them
+  explicitly while retaining outbound mesh refresh. Both
   defer around a live session and are a clean no-op when not opted in. See the
   `agent-machines-setup` skill's *Enable a regular unattended maintenance
   schedule* section and [`docs/resources.md`](docs/resources.md#self-update).

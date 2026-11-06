@@ -470,6 +470,13 @@ scheduler pinned to an old version:
   elevate-and-retry instruction), and a newly opted-out tier is removed without
   a separate install/uninstall step.
 
+The watchdog's local dtssh launcher and host-health checks are Windows-only.
+Linux/WSL runs report those two steps as `skipped` without reading Windows
+configuration or launching PowerShell. Outbound `agent-ssh refresh-mesh` still
+runs on either platform, retaining its existing optional-peer/no-mesh skips
+and unreachable-peer failures. A successful watchdog run is not proof of
+local SSH service health on Linux/WSL.
+
 ### `fleet-update`
 
 Declare machine-local opt-in for the unattended `agent-machines fleet-update`

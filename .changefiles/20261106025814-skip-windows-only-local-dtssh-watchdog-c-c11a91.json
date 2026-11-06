@@ -1,0 +1,9 @@
+{
+  "comment": "Skip Windows-only local dtssh watchdog checks on Linux while retaining outbound mesh refresh.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
