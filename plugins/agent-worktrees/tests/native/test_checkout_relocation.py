@@ -150,6 +150,80 @@ def test_copy_interruption_fences_launch_and_retries_original_operation(checkout
     assert _move(checkout)["phase"] == "complete"
 
 
+def test_new_responsibility_during_planning_refuses_before_custody(checkout, monkeypatch):
+    from contextvars import Context
+
+    capture = relocation.permission_paths.capture
+    def concurrent_capture(*args):
+        result = capture(*args)
+        def claim():
+            record = tracking.load_record(checkout.record.yaml_path)
+            record.status = "active"
+            record.resources = [tracking.ResourceClaim(kind="worktree", ref="new-responsibility", state="active")]
+            tracking.save_record(record)
+        Context().run(claim)
+        return result
+    monkeypatch.setattr(relocation.permission_paths, "capture", concurrent_capture)
+    with pytest.raises(ValueError, match="changed before admission"):
+        _move(checkout)
+    current = tracking.load_record(checkout.record.yaml_path)
+    assert current.status == "active" and current.resources[0].ref == "new-responsibility"
+    assert checkout.source.exists() and not checkout.destination.exists()
+    assert not move_state.journal_path(current.yaml_path).exists()
+
+
+def test_readonly_permission_metadata_refuses_without_custody(checkout):
+    path = checkout.copilot / "config.json"
+    path.chmod(0o444)
+    try:
+        with pytest.raises(ValueError, match="metadata"):
+            _plan(checkout)
+        assert not move_state.journal_path(checkout.record.yaml_path).exists()
+        assert checkout.source.exists() and not checkout.destination.exists()
+    finally:
+        path.chmod(0o600)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX source-directory admission")
+@pytest.mark.parametrize("location", ["checkout", "parent"])
+def test_readonly_source_directories_refuse_before_custody(checkout, location):
+    path = checkout.source if location == "checkout" else checkout.source.parent
+    path.chmod(0o500)
+    try:
+        with pytest.raises(ValueError, match="writable source"):
+            _plan(checkout)
+        assert not move_state.journal_path(checkout.record.yaml_path).exists()
+    finally:
+        path.chmod(0o700)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows effective delete-access proof")
+def test_source_delete_access_refuses_before_custody(checkout):
+    import ctypes
+    from ctypes import wintypes
+    from agent_procutil import _daemon_instance_owner as owner
+
+    api, kernel = owner._apis()
+    user = owner._current_sids(os.getpid())[0]
+    api.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
+    ]
+    api.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+    api.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+    api.SetFileSecurityW.restype = wintypes.BOOL
+    descriptor = ctypes.c_void_p()
+    assert api.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        f"D:P(D;;SD;;;{user})(A;;FA;;;{user})", 1, ctypes.byref(descriptor), None,
+    )
+    try:
+        assert api.SetFileSecurityW(str(checkout.source / "tracked.txt"), 4 | 0x80000000, descriptor)
+    finally:
+        kernel.LocalFree(descriptor)
+    with pytest.raises(ValueError, match="delete/write"):
+        _plan(checkout)
+    assert not move_state.journal_path(checkout.record.yaml_path).exists()
+
+
 def test_prepublication_abort_preserves_new_source_edits_and_releases_only_move_custody(checkout, monkeypatch):
     copy = relocation.transfer.copy
     def interrupted(source, stage):

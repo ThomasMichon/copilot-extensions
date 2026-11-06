@@ -15,6 +15,65 @@ MAX_ENTRIES = 10_000
 MAX_BYTES = 1024 * 1024 * 1024
 
 
+def _windows_access(path: Path, access: int) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(path), access, 7, None, 3, 0x02000000 if path.is_dir() else 0, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        raise ValueError("relocation requires confirmed source delete/write and destination creation access")
+    if not kernel.CloseHandle(handle):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def require_source_access(source: Path, destination_parent: Path) -> None:
+    if os.name == "nt":
+        _windows_access(destination_parent, 0x46)
+    elif (
+        source.parent.stat().st_uid != os.getuid()
+        or stat.S_IMODE(source.parent.stat().st_mode) & 0o300 != 0o300
+    ):
+        raise ValueError("relocation v1 requires an owned writable source parent")
+    for index, path in enumerate(itertools.chain((source,), source.rglob("*"))):
+        if index >= MAX_ENTRIES:
+            raise ValueError("source access inventory exceeds its budget")
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("source access inventory is redirected")
+        if os.name == "nt":
+            _windows_access(path, 0x10000 | (0x46 if path.is_dir() else 2))
+        elif (
+            info.st_uid != os.getuid()
+            or stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o300 != 0o300
+        ):
+            raise ValueError("relocation v1 requires owned writable source directories")
+
+
+def require_file_mutation(path: Path) -> None:
+    info, parent = path.lstat(), path.parent.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError("relocation metadata is redirected or linked")
+    if os.name == "nt":
+        if getattr(info, "st_file_attributes", 0) & 0x401:
+            raise ValueError("relocation metadata is read-only or redirected")
+        _windows_access(path.parent, 0x46)
+        _windows_access(path, 0x10002)
+    elif (
+        info.st_uid != os.getuid() or parent.st_uid != os.getuid()
+        or not stat.S_IMODE(info.st_mode) & 0o200
+        or stat.S_IMODE(parent.st_mode) & 0o300 != 0o300
+    ):
+        raise ValueError("relocation metadata requires owned writable files and parents")
+
+
 def manifest(root: Path) -> dict[str, tuple]:
     result = {}
     total = 0

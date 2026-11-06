@@ -40,6 +40,9 @@ launch/record sidecars. Unknown owner proof is an explicit refusal.
 - Clean Git state, with all actual ordinary checkout files copied, including
   ignored files. File bytes, modes, file modification times, ownership/DACL
   semantics and native attributes are verified before source deletion.
+- Confirmed source retirement/creation access and writable receiving metadata.
+  Windows uses non-mutating access-handle probes. POSIX requires owned writable
+  source directories and parent; restrictive directory support remains gated.
 - At most 10,000 inventory entries and 1 GiB of checkout data. Windows requires
   uniform checkout access and an equally restricted destination parent.
 - An existing absolute, nonredirected destination parent outside any Git
@@ -74,6 +77,8 @@ the mutation locks. File links are refused without replacing their linkage.
 ## Transfer and recovery
 
 The existing per-worktree lifecycle and launch-admission leases fence the move.
+Admission pins the record bytes used to validate eligibility, not a later
+snapshot; responsibility acquired during planning refuses before custody.
 The receiving record's journal retains original identity, paths, content
 fingerprint, permission state and caller incarnation. Native bounded child
 custody owns Windows copying; there is no detached helper or new daemon.

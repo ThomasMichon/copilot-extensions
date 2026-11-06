@@ -235,7 +235,10 @@ def plan(worktree_id: str, destination: str, config) -> dict:
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     if ledger.is_symlink():
         raise ValueError("relocation ledger is redirected")
+    original_record = ledger.read_bytes()
     record = tracking.load_record(ledger)
+    if ledger.read_bytes() != original_record:
+        raise ValueError("receiving record changed while reading its planning snapshot")
     if record.worktree_id != worktree_id or record.repo != config.repo_name:
         raise ValueError("relocation record does not match the receiving ledger identity/project")
     previous = state.read(ledger)
@@ -270,6 +273,8 @@ def plan(worktree_id: str, destination: str, config) -> dict:
     _sessionless(source)
     head = _check_data(source, config, record.branch)
     fingerprint = _digest(source)
+    transfer.require_file_mutation(ledger)
+    transfer.require_source_access(source, target.parent)
     transfer.require_safe_destination(source, target.parent)
     total = sum(path.stat().st_size for path in source.rglob("*") if path.is_file())
     if shutil.disk_usage(target.parent).free < total + 1024 * 1024:
@@ -280,7 +285,7 @@ def plan(worktree_id: str, destination: str, config) -> dict:
         "destination": str(target), "head": head, "fingerprint": fingerprint,
         "anchor": str(Path(config.default_repo.anchor).resolve()),
         "git_common": _git(Path(config.default_repo.anchor), "rev-parse", "--path-format=absolute", "--git-common-dir"),
-        "ledger_sha256": hashlib.sha256(ledger.read_bytes()).hexdigest(),
+        "ledger_sha256": hashlib.sha256(original_record).hexdigest(),
         "permissions": permissions, "phase": "planned", "apply": False,
     }
     if previous is not None:

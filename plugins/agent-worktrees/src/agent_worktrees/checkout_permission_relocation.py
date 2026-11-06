@@ -8,6 +8,7 @@ from contextlib import ExitStack
 
 from . import permissions, tracking
 from .checkout_reference_paths import canonical, under as _under
+from .checkout_transfer import require_file_mutation
 
 
 def _require_plain_file(path) -> None:
@@ -45,6 +46,8 @@ def capture(source: str, destination: str) -> dict:
         value = source in entries if kind == "trust" else entries.get(source)
         if kind == "permissions" and source in entries and not isinstance(value, dict):
             raise ValueError("unsupported source permission entry")
+        if value is not None and (kind != "trust" or value):
+            require_file_mutation(path)
         captured[kind] = value
     return captured
 
@@ -102,4 +105,5 @@ def apply(source: str, destination: str, captured: dict) -> None:
                         raise ValueError("source permissions changed during relocation")
                 elif source in entries or destination in entries:
                     raise ValueError("source permissions changed during relocation")
-            permissions._atomic_json_write(path, data, header=header)
+            if expected is not None and (kind != "trust" or expected):
+                permissions._atomic_json_write(path, data, header=header)
