@@ -151,6 +151,14 @@ explicitly enrolled private disposable parent on another filesystem. Without
 it, the cross-volume case is unqualified, not passed. The fixture creates one
 timestamped owned child and retires only its own successful checkout; failures
 retain the ownership breadcrumb for inspection.
+External-volume qualification also requires
+`AGENT_WORKTREES_RELOCATION_PRIMARY_ROOT`: an explicitly enrolled persistent
+private fixture parent on the primary filesystem. Its Git objects, record and
+recovery journal stay outside runner teardown, so a failed external copy does
+not lose its recovery authority. The caller retains that primary evidence and
+cleans it only after positively confirmed completion. The combined two-leg
+native control has its own 120-second item budget; production probes are not
+weakened.
 
 Source tests, required PR CI, source merge, Main promotion, selected-runtime
 qualification and actual operator migration are different gates. Normal rollout

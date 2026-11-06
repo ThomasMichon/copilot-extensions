@@ -23,8 +23,31 @@ from agent_worktrees import checkout_relocation_state as move_state
 from agent_worktrees import config as cfg, git_ops, permissions, sessions, tracking
 from agent_worktrees import retained_checkout, worktree_lifecycle
 
+
+def _fixture_home(tmp_path, request):
+    if "native_cross_volume" not in request.node.name or not os.environ.get(
+        "AGENT_WORKTREES_RELOCATION_SECOND_ROOT",
+    ):
+        return tmp_path
+    value = os.environ.get("AGENT_WORKTREES_RELOCATION_PRIMARY_ROOT")
+    if not value:
+        raise ValueError("cross-volume qualification requires an enrolled persistent primary root")
+    parent = Path(value)
+    if not parent.is_absolute() or not parent.is_dir() or parent.resolve() != parent.absolute():
+        raise ValueError("persistent primary fixture root is unavailable or redirected")
+    home = parent / ("primary-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:12])
+    home.mkdir(mode=0o700)
+    (home / "scratch-owner.json").write_text(json.dumps({
+        "owner": request.node.nodeid, "created_at": datetime.now(timezone.utc).isoformat(),
+        "purpose": "native relocation primary Git, ledger and recovery custody",
+        "retention": "caller-owned evidence; retain on failure, cleanup only after confirmed completion",
+    }), encoding="utf-8")
+    return home
+
+
 @pytest.fixture
-def checkout(tmp_path, monkeypatch):
+def checkout(tmp_path, monkeypatch, request):
+    tmp_path = _fixture_home(tmp_path, request)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
     monkeypatch.setattr(permissions, "_copilot_dir", lambda: tmp_path / ".copilot")
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path / ".copilot" / "session-state")
@@ -708,6 +731,7 @@ def test_posix_copy_retry_preserves_readonly_files_and_directory_modes(tmp_path)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native cross-volume qualification")
+@pytest.mark.timeout(120)
 def test_native_cross_volume_move_requires_an_explicit_owned_second_root(checkout, request):
     root = os.environ.get("AGENT_WORKTREES_RELOCATION_SECOND_ROOT")
     if not root:
@@ -748,3 +772,21 @@ def test_native_cross_volume_move_requires_an_explicit_owned_second_root(checkou
         if succeeded:
             assert sorted(path.name for path in parent.iterdir()) == ["scratch-owner.json"]
             shutil.rmtree(parent)
+
+
+def test_external_fixture_keeps_primary_git_and_journal_outside_runner_teardown(tmp_path, monkeypatch):
+    primary = tmp_path / "enrolled-primary"
+    primary.mkdir(mode=0o700)
+    monkeypatch.setenv("AGENT_WORKTREES_RELOCATION_SECOND_ROOT", str(tmp_path / "second"))
+    monkeypatch.setenv("AGENT_WORKTREES_RELOCATION_PRIMARY_ROOT", str(primary))
+    request = SimpleNamespace(node=SimpleNamespace(
+        name="test_native_cross_volume_fixture", nodeid="fixture-owner",
+    ))
+    runner_home = tmp_path / "runner"
+    home = _fixture_home(runner_home, request)
+    assert home.parent == primary and home != runner_home
+    owner = json.loads((home / "scratch-owner.json").read_text())
+    assert owner["owner"] == request.node.nodeid and "retain on failure" in owner["retention"]
+    monkeypatch.delenv("AGENT_WORKTREES_RELOCATION_PRIMARY_ROOT")
+    with pytest.raises(ValueError, match="persistent primary root"):
+        _fixture_home(runner_home, request)
