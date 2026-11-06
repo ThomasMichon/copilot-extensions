@@ -34,6 +34,78 @@ def git_branch_invocation_is_readonly(args: list[str]) -> bool:
     )
 
 
+def git_tokens(seg: str, tool: str) -> list[str]:
+    """Tokenize literal arguments with the selected shell's quoting rules."""
+    posix_escapes = tool.lower() in {"bash", "sh"}
+    powershell_escapes = tool.lower() in {"powershell", "pwsh"}
+    tokens: list[str] = []
+    current: list[str] = []
+    token_started = False
+    quote = None
+    index = 0
+    while index < len(seg):
+        char = seg[index]
+        if quote:
+            if (
+                powershell_escapes
+                and quote == "'"
+                and char == "'"
+                and index + 1 < len(seg)
+                and seg[index + 1] == "'"
+            ):
+                current.append("'")
+                index += 1
+            elif char == quote:
+                quote = None
+            elif (
+                posix_escapes
+                and char == "\\"
+                and quote == '"'
+                and index + 1 < len(seg)
+                and seg[index + 1] in {'"', "\\", "$", "`"}
+            ):
+                current.append(seg[index + 1])
+                index += 1
+            elif (
+                powershell_escapes
+                and quote == '"'
+                and char == "`"
+                and index + 1 < len(seg)
+            ):
+                current.append(seg[index + 1])
+                index += 1
+            else:
+                current.append(char)
+        elif char in {"'", '"'}:
+            token_started = True
+            quote = char
+        elif char.isspace():
+            if token_started:
+                tokens.append("".join(current))
+                current = []
+                token_started = False
+        elif (
+            posix_escapes
+            and char == "\\"
+            and index + 1 < len(seg)
+            and (seg[index + 1].isspace() or seg[index + 1] in {"'", '"', "\\"})
+        ):
+            current.append(seg[index + 1])
+            token_started = True
+            index += 1
+        elif powershell_escapes and char == "`" and index + 1 < len(seg):
+            current.append(seg[index + 1])
+            token_started = True
+            index += 1
+        else:
+            current.append(char)
+            token_started = True
+        index += 1
+    if token_started:
+        tokens.append("".join(current))
+    return tokens
+
+
 def shell_segments(cmd: str, tool: str) -> list[str]:
     lower_tool = tool.lower()
     posix_escapes = lower_tool in {"bash", "sh"}
