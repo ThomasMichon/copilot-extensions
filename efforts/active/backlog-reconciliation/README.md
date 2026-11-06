@@ -331,6 +331,26 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records complete actual [Picker cohort](picker-input-and-row-receiving-cohorts.md)
+intakes under existing OPEN #4183 and #4182. #4175/#4274/#3791 retired
+`NOT_PLANNED` only after whole current receiving readback, retaining all native
+input, optional progress, demand-gated composition and claimant conditions.
+No new parent, implementation or source/resource release was created.
+Complete06:02 PST scans measure822 whole OPEN,1000 effective audited
+dispositions and93 above729; three own original-cohort departures, no arrivals
+or external departures. The campaign remains Active.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
+records actual reviewed merge #11002 and complete delivered-blob agreement.
+#10971's additional direction is now qualified by the author's actual
+four-file execution report as well as the new source/tests; the earlier
+reopen debit remains historical rather than being erased. Complete05:37 PST
+scans measure825 whole OPEN,997 effective audited dispositions and96 above729.
+The twenty-original studies preserve real holders and identify bounded
+current gaps; a naturally related nine-original Picker intake study continues
+without forcing unrelated contracts into arbitrary batch umbrellas.
+
+The same [journal](<journal/2026/11.05 acquisition-diagnostics-cohort.md>)
 records #4960 retired `NOT_PLANNED` because the current released declared-copy
 contract removes its old hash/version tie branch, not because the historical
 2/5 model result passed a rerun. Actual consumer and five fixed policy blobs
