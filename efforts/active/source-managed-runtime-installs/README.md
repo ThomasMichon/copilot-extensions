@@ -1658,7 +1658,7 @@ Bounded qualification passed 151 shared removal controls (three platform skips),
 124 canonical packaging controls (two skips), and four native MCP
 removal/restamp/provenance controls (one skip). Native removal/restamp exercised
 both Windows PowerShell and PowerShell with only the process census mocked.
-The installer contract passed for all 13 runtime plugins. The packaging fixture
+The installer contract passed for all 13 then-current runtime plugins. The packaging fixture
 now supplies the Manager package manifest needed by the complete-payload
 validator and the new canonical support file. No deadline was enlarged after
 the initial combined batch timed out; its owned cleanup was verified and the

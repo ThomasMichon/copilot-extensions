@@ -17,7 +17,7 @@ CLASSIFICATIONS = {
 APIS = {
     "Popen", "create_subprocess_exec", "create_subprocess_shell", "spawn_daemon",
     "spawn_keeper", "spawn_instance", "spawn_finite_worker", "spawn_dispatch_daemon",
-    "fork", "serve_forever", "run_app", "start_server",
+    "fork", "serve_forever", "run_app", "start_server", "create_server",
     "uvicorn.run", "HTTPServer", "ThreadingHTTPServer",
     "posix_spawn", "posix_spawnp",
 }
@@ -35,7 +35,10 @@ NATIVE = re.compile(
 def source_files(root: Path):
     import os
 
-    for owner in ("plugins", "worktree-manager", "fleet-manager", "services", "tools"):
+    for owner in (
+        "plugins", "worktree-manager", "fleet-manager", "services", "tools",
+        "libs/copilot-driver-core",
+    ):
         for directory, dirs, files in os.walk(root / owner):
             dirs[:] = sorted(name for name in dirs if name not in SKIP)
             for name in sorted(files):

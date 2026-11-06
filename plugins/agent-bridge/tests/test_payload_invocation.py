@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
-from agent_bridge.session_host import launcher
+from agent_remote_driver.session_host import launcher
 
 PLUGIN = Path(__file__).resolve().parents[1]
 

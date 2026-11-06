@@ -34,7 +34,7 @@ def receiver(monkeypatch):
     monkeypatch.setitem(sys.modules, "repository_policy.receiving", receiving_module)
     receiving_spec.loader.exec_module(receiving_module)
     source = (
-        Path(__file__).resolve().parents[2] / "plugins/agent-bridge/src/agent_bridge"
+        Path(__file__).resolve().parents[2] / "libs/copilot-driver-core/src/agent_remote_driver"
         / "session_host/receiver_policy.py"
     )
     spec = importlib.util.spec_from_file_location("portable_receiver_unit", source)

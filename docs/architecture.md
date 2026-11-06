@@ -105,7 +105,7 @@ managed cutover; those remain separate slices of the
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
 | [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Independent ambient conduct modules and task-time procedures, including charter-bounded useful autonomy and persistent operator effect-scope pre-clearance; the plugin README owns the module list | Marketplace payload (static instruction projections + skills) | No grant broker, automatic tool approval or runtime; original evidence and current limits remain with existing effort/checkpoint/resource owners |
-| [agent-remote-driver](../plugins/agent-remote-driver/) | User-global SDK extension — baseline session drivability (attach/send/steer/abort) over a loopback HTTP surface, independent of agent-bridge | Marketplace payload (extension only) | Extension is auto-discovered from the enabled plugin's `extensions/` dir, same mechanism as `context-handoff`'s; no daemon, no runtime to install; not yet default-enabled (`cli-default-bridging` effort, pre-validation) |
+| [agent-remote-driver](../plugins/agent-remote-driver/) | Independent headless Session Host core plus SDK extension; TCP broker and optional `acp.v1` WebSocket access | Marketplace extension payload; separate locked Python application | Plugin activation discovers the extension only. The standalone app uses the ordinary application build/install owner; its compact receiving export is TCP-only. No global daemon or default-mode promotion. |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -286,6 +286,16 @@ flowchart TB
 > `agent-remote-driver` —
 > deploy entirely from the marketplace payload — no installer, no
 > `~/.agent-*` runtime, no binstub.
+
+The Driver's independently installed Python application is separate from that
+extension-only activation. Its Python implementation lives in the ordinary
+[`copilot-driver-core` shared library](../libs/copilot-driver-core/README.md);
+Bridge and the Driver application consume the same canonical distribution.
+New keyed Bridge launches export its canonical Host
+into retained runtime storage, with no executing Bridge/Worktrees/Manager
+dependency. Existing receiving adapters retain their supported TCP contracts.
+See the [Driver application](../plugins/agent-remote-driver/README.md#independent-session-host-application)
+and [ACP WS boundary](../plugins/agent-remote-driver/docs/session-host-websocket.md).
 
 ### Agent-facing invocation and command glossaries
 

@@ -64,6 +64,20 @@ def test_preference_authority_capture_replays_terminal_and_host(capture_tool) ->
     assert not accepted and "consent" not in events
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows revision/path disambiguation")
+def test_committed_capture_reads_long_provenance_path_as_revision(capture_tool) -> None:
+    root = capture_tool.REPO
+    revision = capture_tool.evidence.git("rev-parse", "HEAD")
+    assert revision.returncode == 0
+    commit = revision.stdout.strip()
+    registry = json.loads((root / capture_tool.REGISTRY).read_text(encoding="utf-8"))
+    contract = next(
+        entry for entry in registry["contracts"] if entry["id"] == "agent-bridge.session-host-wire"
+    )
+    path = contract["provenance_chunks"][0]["path"]
+    assert capture_tool.committed(commit, path) == (root / path).read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("indent", [1, 2, None])
 @pytest.mark.parametrize("representation", ["inline", "chunked"])
 def test_preference_authority_capture_accepts_legacy_json_layouts(
@@ -100,7 +114,13 @@ def test_preference_authority_capture_accepts_legacy_json_layouts(
     monkeypatch.setattr(capture_tool, "unchanged", lambda *_args: None)
     monkeypatch.setattr(capture_tool.evidence, "ensure_commit_available", lambda _commit: True)
     monkeypatch.setattr(capture_tool.evidence, "plugin_version_at", lambda _commit: "1.0.0")
-    monkeypatch.setattr(capture_tool.evidence, "git_blob", lambda *_args: "b" * 40)
+    relocated = {
+        source: json.loads(committed("", capture_tool.CURRENT + name))["captured_from"]["source_git_blob"]
+        for name, source in zip(capture_tool.FILES[3:], capture_tool.SOURCES[3:], strict=True)
+    }
+    monkeypatch.setattr(
+        capture_tool.evidence, "git_blob", lambda _commit, path: relocated.get(path, "b" * 40),
+    )
     monkeypatch.setattr(
         capture_tool.evidence, "git_file_sha256",
         lambda _commit, path: hashlib.sha256(committed("", path).encode()).hexdigest(),
@@ -117,6 +137,29 @@ def test_preference_authority_capture_accepts_legacy_json_layouts(
     assert set(output) == {capture_tool.REGISTRY, *(
         capture_tool.CURRENT + name for name in capture_tool.FILES
     )}
+    for name in capture_tool.FILES[3:]:
+        before = json.loads(committed("", capture_tool.CURRENT + name))
+        after = json.loads(output[capture_tool.CURRENT + name])
+        before.pop("captured_from")
+        after.pop("captured_from")
+        assert after == before
+
+
+@pytest.mark.parametrize("changed", ["source_path", "source_git_blob", "source_sha256"])
+def test_source_only_relocation_refuses_changed_identity(
+    capture_tool, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    source = capture_tool.SOURCES[3]
+    vector = {"captured_from": {
+        "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+        "source_git_blob": "b" * 40, "source_sha256": "c" * 64,
+    }, "payload": {"unchanged": True}}
+    monkeypatch.setattr(capture_tool.evidence, "git_blob", lambda *_args: "b" * 40)
+    monkeypatch.setattr(capture_tool.evidence, "git_file_sha256", lambda *_args: "c" * 64)
+    assert capture_tool.relocated_vector("a" * 40, vector, source) == vector
+    vector["captured_from"][changed] = "unexpected"
+    with pytest.raises(ValueError, match="identical captured blob and SHA-256"):
+        capture_tool.relocated_vector("a" * 40, vector, source)
 
 
 def test_preference_authority_capture_without_home_environment(
@@ -249,5 +292,5 @@ def test_preference_authority_capture_refuses_unapproved_output_set(
     capture_tool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, relative: str,
 ) -> None:
     monkeypatch.setattr(capture_tool, "REPO", tmp_path)
-    with pytest.raises(ValueError, match="four approved files"):
+    with pytest.raises(ValueError, match="six approved files"):
         capture_tool.output_paths({relative: "captured\n"})

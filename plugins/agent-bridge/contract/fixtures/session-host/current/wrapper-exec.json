@@ -1,9 +1,9 @@
 {
   "captured_from": {
-    "commit": "d33335b83a2fc0c83db7b21c94d9dc9730c898e8",
+    "commit": "59f44149a92a601cb6b5148cc810bfc1ebc01add",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
-    "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+    "source_path": "libs/copilot-driver-core/src/agent_remote_driver/preference_exec.py",
     "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
     "source_sha256": "c65331a77a10c63f14f7cd54c30b95ce341b5dd0e88a3663ad9b277d84c52936"
   },
@@ -18,6 +18,6 @@
   "consent_base64": "AQ==",
   "refused_exit_code": 78,
   "exec_preserves_pid": true,
-  "component_digest": "80edba74f62f342e3aadab4959b35905fe0ad0ba77e8676bb885386772f3f8b1",
+  "component_digest": "8e482285e3a454ae331068bff6cdd04007eec9a79ae64ff074c7a2cf7daf614e",
   "capability_scope": "Linux target-local final context; actual ACP readback remains mandatory"
 }

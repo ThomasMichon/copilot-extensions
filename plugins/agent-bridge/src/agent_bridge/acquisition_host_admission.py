@@ -26,6 +26,7 @@ def context(owner: AcquisitionLaunchOwner, argv: list[str], cwd: str) -> str:
 
 def require_child_admission(
     raw: str, *, cwd: str, session_id: str, argv: list[str] | None = None,
+    parent_pid: int | None = None,
 ) -> None:
     """The actual Host checks again after scheduling, before spawning its child."""
     from .acquisition_journal import AcquisitionJournal, _digest
@@ -36,7 +37,9 @@ def require_child_admission(
         "delivery_id", "request_digest", "handoff_id", "session_id", "argv", "cwd",
     } or type(value["version"]) is not int or value["version"] != 1:
         raise RuntimeCustodyError("Unsupported original acquisition child context")
-    with child_database(value, cwd=cwd, session_id=session_id, argv=argv) as (db, admission):
+    with child_database(
+        value, cwd=cwd, session_id=session_id, argv=argv, parent_pid=parent_pid,
+    ) as (db, admission):
         with db._runtime_transaction(write=False) as conn:
             effect = conn.execute(
                 "SELECT e.data_json,e.stage,a.state FROM acquisition_effects e "

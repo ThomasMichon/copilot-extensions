@@ -685,7 +685,13 @@ The installer writes `deploy-manifest.json` tracking:
 The current process model uses a **Session Host** for owned ACP sessions. The
 Session Host is the stable process that owns the `copilot --acp` child and its
 stdio pipes; the agent-bridge daemon is a frontend that attaches to the host over
-a reattachable loopback protocol (`session_host/`). On Windows the host breaks
+a reattachable loopback protocol. The canonical Host lives in the independent
+`agent-remote-driver` application; Bridge's `session_host/` modules are bounded
+compatibility and startup-custody adapters. New keyed local launches execute a
+retained core archive under a physical interpreter, not Bridge's venv. Their
+launch-scoped admission channel asks the original Bridge owner to revalidate
+the operation immediately before child creation; it does not import the
+Bridge journal into the core. On Windows the host breaks
 away from the daemon's job; on POSIX it runs in its own session, so a daemon
 restart does not inherently close the child's pipes.
 
@@ -696,6 +702,16 @@ An incomplete connection leaves the current frontend serving; a refused
 connection closes only itself. A validated replacement still takes over the
 single frontend and receives replay after its supplied cursor. This ordering
 does not change the separate private-ticket attachment protocol.
+
+New core ACP Hosts keep the same framing but refuse a competing controller.
+An older cursor, including Bridge's cold cursor-zero bootstrap, resumes the
+retained suffix without restoring already-trimmed history; future cursors
+refuse. These Hosts do not interpret a legacy reapable boolean or detach as
+automatic retirement. They retain the child until explicit stop or child exit;
+structured pending-work-aware idle retirement remains unavailable. Retained
+legacy receiving adapters keep their prior lifetime/replacement behavior.
+The app's optional ACP WS endpoint is a separate access adapter to this Host,
+not the transport Bridge uses internally or a replacement for durable TCP ACKs.
 
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
   events, and host connection data are persisted to SQLite/host state. On startup

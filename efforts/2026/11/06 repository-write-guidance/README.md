@@ -158,7 +158,7 @@ gap, with no new sandbox, process interception, service, or security guarantee.
   An unavailable supplemental repository no longer invalidates unrelated
   confirmed delegated roots. Managed project-mode writes refresh prepared views.
 - Updated operational docs and deployment reconciliation. Install contract
-  passed for all 13 runtime plugins; documentation consistency and touched-Python
+  passed for all 13 then-current runtime plugins; documentation consistency and touched-Python
   lint passed. Focused source regressions and shipped Python/PowerShell entry
   controls cover admission, native batches, grant scope, expiry and revocation.
 - Retained an intermittent native PowerShell no-denial result during an

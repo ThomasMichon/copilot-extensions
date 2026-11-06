@@ -550,11 +550,17 @@ async def test_project_without_cwd_uses_read_only_owner_and_honors_denial(
     ]
 
 
-def test_portable_bundle_contains_enforcing_dependency_free_adapter() -> None:
+def test_portable_bundle_contains_enforcing_dependency_free_adapter(tmp_path: Path) -> None:
+    import zipfile
+
     from agent_bridge.session_host import bundle
 
-    sources = dict(bundle._bundle_sources())
-    assert sources["agent_bridge/hosting_policy.py"].name == "receiver_policy.py"
+    archive, _ = bundle.build_session_host_bundle(tmp_path)
+    with zipfile.ZipFile(archive) as contents:
+        assert contents.read("agent_bridge/hosting_policy.py") == contents.read(
+            "agent_remote_driver/session_host/receiver_policy.py",
+        )
+        assert contents.getinfo("repository_policy/receiving.py").file_size > 0
 
 
 @pytest.mark.parametrize("allowed", [True, False, None, 1])

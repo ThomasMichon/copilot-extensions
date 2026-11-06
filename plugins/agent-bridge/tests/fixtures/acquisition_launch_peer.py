@@ -12,6 +12,7 @@ import sys
 def main() -> None:
     database, audit, delivery, mode = sys.argv[1:]
     assert "AGENT_BRIDGE_ORIGINAL_ACQUISITION" not in os.environ
+    assert "AGENT_DRIVER_STARTUP_ADMISSION" not in os.environ
     for line in sys.stdin:
         message = json.loads(line)
         method = message.get("method")

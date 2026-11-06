@@ -87,13 +87,16 @@ class CreationLaunchOwner(LocalLaunchOwner):
 
 def require_child_admission(
     value: dict, *, cwd: str, session_id: str, argv: list[str] | None,
+    parent_pid: int | None = None,
 ) -> None:
     if set(value) != {
         "version", "installation", "admission", "producer", "database_identity",
         "handoff_id", "session_id", "argv", "cwd", "operation", "key_digest", "facts_digest",
     } or type(value["version"]) is not int or value["version"] != 1:
         raise RuntimeCustodyError("Unsupported original creation child context")
-    with child_database(value, cwd=cwd, session_id=session_id, argv=argv) as (db, admission):
+    with child_database(
+        value, cwd=cwd, session_id=session_id, argv=argv, parent_pid=parent_pid,
+    ) as (db, admission):
         rows = db.execute_read(
             "SELECT * FROM workspace_embodiments WHERE key_digest=?", (value["key_digest"],),
         )

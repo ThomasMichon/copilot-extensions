@@ -12,7 +12,7 @@ payload-only entries. Source pins:
 Development base versions do not establish deployment age; promotion
 materializes pointers and computes published versions.
 
-The execution-free install-contract guard passed 13 runtime plugins (the
+The execution-free install-contract guard passed 13 then-current runtime plugins (the
 12 agent runtimes plus budget-guidance). That establishes structural
 conformance, not serving convergence. No installer, service, runtime test or
 live repair was executed by this audit. Later releases and peer-owned

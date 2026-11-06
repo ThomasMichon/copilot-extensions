@@ -310,9 +310,10 @@ def test_zipapp_dispatch_propagates_refused_exec_status(monkeypatch):
 
 
 @pytest.mark.parametrize("component", [
-    "agent_bridge.session_host.preference_spawn",
-    "agent_bridge.session_host.launcher",
-    "agent_bridge.session_host.host",
+    "agent_remote_driver.session_host.preference_spawn",
+    "agent_remote_driver.session_host.launcher",
+    "agent_remote_driver.session_host.host",
+    "agent_remote_driver.session_host.startup_admission",
 ])
 def test_verifier_dispatcher_and_receipt_emitter_are_digest_bound(monkeypatch, component):
     from importlib.util import find_spec
@@ -332,11 +333,11 @@ def test_verifier_dispatcher_and_receipt_emitter_are_digest_bound(monkeypatch, c
 
 
 def test_digest_covers_the_staged_host_role_closure():
-    from agent_bridge.session_host.bundle import _AGENT_BRIDGE_MODULES
+    from agent_remote_driver.session_host.bundle import _DRIVER_MODULES
 
     names = set()
-    for path in _AGENT_BRIDGE_MODULES:
-        name = "agent_bridge." + path.removesuffix(".py").replace("/", ".")
+    for path in _DRIVER_MODULES:
+        name = "agent_remote_driver." + path.removesuffix(".py").replace("/", ".")
         names.add(name.removesuffix(".__init__"))
     assert set(a.AUTHORITY_MODULES) == names | {"agent_procutil"}
 
@@ -350,13 +351,11 @@ def test_release_label_does_not_change_authority_digest(
     import re
 
     original = find_spec
-    source = original("agent_bridge").loader.get_source("agent_bridge")
-    if label == "__version__":
-        source = '__version__ = "0.4.1-dev3"\n'
+    source = f'{label} = "0.4.1-dev3"\n'
 
     def changed(name: str):
         spec = original(name)
-        if name == "agent_bridge":
+        if name == "agent_remote_driver":
             return SimpleNamespace(loader=SimpleNamespace(get_source=lambda ignored: source))
         return spec
 
@@ -383,11 +382,9 @@ def test_root_executable_change_remains_authority_bound(
 
     def changed(name: str):
         spec = original(name)
-        if name == "agent_bridge":
+        if name == "agent_remote_driver":
             source = spec.loader.get_source(name)
-            statement = 'raise AttributeError(f"module {__name__!r} has no attribute {name!r}")'
-            assert source.count(statement) == 1
-            source = source.replace(statement, statement.replace("AttributeError", "RuntimeError"))
+            source += "\nraise RuntimeError('changed executable fixture')\n"
             return SimpleNamespace(loader=SimpleNamespace(get_source=lambda ignored: source))
         return spec
 
@@ -406,25 +403,27 @@ def test_generated_release_preserves_authority_digest(
     repo = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(repo / "tools"))
     import accumulate_bumps
+    import build_python_artifacts as builder
     import materialize_main
 
-    plugin = tmp_path / "plugins" / "agent-bridge"
-    shutil.copytree(repo / "plugins" / "agent-bridge", plugin)
-    root = plugin / "src" / "agent_bridge" / "__init__.py"
+    plugin = tmp_path / "plugins" / "agent-remote-driver"
+    shutil.copytree(repo / "plugins" / "agent-remote-driver", plugin)
+    root = plugin / "src" / "agent_remote_driver_app" / "__init__.py"
     manifest = plugin / "plugin.json"
     if source_view == "already-materialized":
         initial_version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
         stamped_version = "98.99.99" if initial_version != "98.99.99" else "97.99.99"
         assert accumulate_bumps._write_source_fallbacks(
             plugin, initial_version, stamped_version,
-        ) == 1
+        ) == 0
         assert accumulate_bumps._write_version(
             manifest, accumulate_bumps._JSON_VERSION_RE, stamped_version,
         )
         assert accumulate_bumps._write_project_version(plugin / "pyproject.toml", stamped_version)
         log = materialize_main.materialize(tmp_path, canonical_root=repo)
         assert not any(line.startswith("SKIP") for line in log), log
-        assert (plugin / "scripts" / "installer-engine.sh").is_file()
+        closure = dict(builder.resolve_vendored_libs(plugin))
+        assert (closure["copilot-driver-core"] / "src" / "agent_remote_driver").is_dir()
 
     old_version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
     replacement = "99.99.99" if old_version != "99.99.99" else "99.99.98"
@@ -432,11 +431,16 @@ def test_generated_release_preserves_authority_digest(
     original_source = root.read_text(encoding="utf-8")
     assert accumulate_bumps._write_source_fallbacks(
         plugin, old_version, replacement,
-    ) == 1
-    assert root.read_text(encoding="utf-8") != original_source
+    ) == 0
+    assert root.read_text(encoding="utf-8") == original_source
+    assert accumulate_bumps._write_version(
+        manifest, accumulate_bumps._JSON_VERSION_RE, replacement,
+    )
+    assert accumulate_bumps._write_project_version(plugin / "pyproject.toml", replacement)
     if source_view == "canonical":
         log = materialize_main.materialize(tmp_path, canonical_root=repo)
         assert not any(line.startswith("SKIP") for line in log), log
+    closure = dict(builder.resolve_vendored_libs(plugin))
 
     original = find_spec
     before = a.component_digest()
@@ -444,9 +448,8 @@ def test_generated_release_preserves_authority_digest(
     def materialized(name: str):
         spec = original(name)
         if name in a.AUTHORITY_MODULES:
-            base = plugin / "src" if name.startswith("agent_bridge") else (
-                plugin / "libs" / "agent-procutil" / "src"
-            )
+            library = "copilot-driver-core" if name.startswith("agent_remote_driver") else "agent-procutil"
+            base = closure[library] / "src"
             path = base.joinpath(*name.split("."))
             path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
             source = path.read_text(encoding="utf-8")
