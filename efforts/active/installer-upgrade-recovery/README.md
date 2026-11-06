@@ -2425,3 +2425,31 @@ separately rather than relabeling the source pin. The next committed branch
 must pass the exact module guard and fresh review/required CI before merge
 and containing-release observation. The local Windows historical-seed
 performance follow-up and all caller/installed/parent gates remain open.
+
+### 2026-11-06 - Preserve the next accepted upstream cohort before requalification
+
+The qualified-output/componentization candidate `01b7c92c6a` passes the exact
+branch-scoped module guard and is published with an audited current validation
+record. Provider readback then reports an actual merge conflict; required CI
+is not admitted for that conflicted head. Rerunning the older failed head
+cannot resolve this condition. The PR's retained base field is not treated as
+the current remote branch tip.
+
+A local backup preserves the complete qualified candidate. Managed sync aborts
+its conflict safely. The owned-branch rebase onto published
+`5c27efdad108c5e5e63ede1ae4f29025ad53eafe` then encounters exactly 132 conflicts,
+all within the actual producer's declared generated-output inventory. Those
+exact paths take accepted upstream inputs, not the older current capture or
+hand-combined hashes. The native read feature, identity fix, guard correction
+and mechanical planner move survive; no contributor implementation is
+superseded.
+
+The newer cohort includes original keyed creation custody, portable native
+knowledge preferences and original-queue relationship admission. Its current
+capture owner declares 229 cases, not the older 197. All newly accepted cases
+and source inputs are retained. The complete 39/39 native and 197/115 retained
+results remain genuine evidence for `50e4`, never relabeled as proof of this
+composed tree. Fresh exact-source native and complete current capture are
+required before final CI/review/merge/release. The reconciled branch's module
+guard already passes without changing a ceiling. Source #11003 and this parent
+remain open, and no installed effect or larger validation budget is introduced.
