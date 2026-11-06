@@ -127,11 +127,13 @@ def test_native_application_refuses_without_disposable_owner(tmp_path, monkeypat
 def test_native_application_retains_runner_lease_limits_and_cleanup(tmp_path, monkeypatch, held):
     from contextlib import contextmanager
     from types import SimpleNamespace
+    from tools import plugin_test_lifecycle
 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
     monkeypatch.delenv(plugin_test_containment.CONTAINED_ENV, raising=False)
+    monkeypatch.setattr(plugin_test_lifecycle, "_native_scope_environment", lambda env: env)
     events = []
     limits = Limits(wall_seconds=180)
     environment = {plugin_test_containment.CONTAINED_ENV: "1", "KEEP": "yes"}
@@ -166,6 +168,45 @@ def test_native_application_retains_runner_lease_limits_and_cleanup(tmp_path, mo
         ) == 0
     assert events == ["lease", "run", "cleanup"]
     assert environment[plugin_test_containment.CONTAINED_ENV] == "1"
+
+
+@pytest.mark.parametrize("failure", [None, "missing", "foreign", "ordinary"])
+def test_native_application_selects_only_the_existing_owned_user_bus(monkeypatch, failure):
+    import stat
+    from types import SimpleNamespace
+    from agent_procutil import linux_daemon_scope
+    from tools import plugin_test_lifecycle as lifecycle
+
+    class Bus:
+        def __init__(self, value):
+            assert value == "/run/user/1001/bus"
+            self.value = value
+
+        def __str__(self):
+            return self.value
+
+        def lstat(self):
+            if failure == "missing":
+                raise FileNotFoundError
+            return SimpleNamespace(
+                st_mode=stat.S_IFREG if failure == "ordinary" else stat.S_IFSOCK,
+                st_uid=1002 if failure == "foreign" else 1001,
+            )
+
+    monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(lifecycle, "os", SimpleNamespace(getuid=lambda: 1001))
+    monkeypatch.setattr(lifecycle, "Path", Bus)
+    monkeypatch.setattr(linux_daemon_scope, "caller_unit", lambda: "fixture.service")
+    environment = {"XDG_RUNTIME_DIR": "sandbox-run", "DBUS_SESSION_BUS_ADDRESS": "unselected"}
+    if failure:
+        with pytest.raises(ValueError, match="user-manager bus"):
+            lifecycle._native_scope_environment(environment)
+    else:
+        assert lifecycle._native_scope_environment(environment) == {
+            "XDG_RUNTIME_DIR": "sandbox-run",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1001/bus",
+        }
+    assert environment == {"XDG_RUNTIME_DIR": "sandbox-run", "DBUS_SESSION_BUS_ADDRESS": "unselected"}
 
 
 def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path, monkeypatch):

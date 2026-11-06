@@ -2,6 +2,30 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import stat
+import sys
+
+
+def _native_scope_environment(environment):
+    if sys.platform != "linux":
+        return environment
+    from agent_procutil.linux_daemon_scope import caller_unit
+
+    if caller_unit() is None:
+        return environment
+    uid = os.getuid()
+    bus = Path(f"/run/user/{uid}/bus")
+    try:
+        info = bus.lstat()
+    except OSError:
+        raise ValueError("Native application testing requires an existing user-manager bus.") from None
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != uid:
+        raise ValueError("Native application user-manager bus is not owned by the current user.")
+    # Keep XDG_RUNTIME_DIR and application state private to the sandbox.
+    return {**environment, "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(bus)}
+
 
 def run_contained(
     owner, command, *, cwd, env, sandbox, limits, daemon_purpose,
@@ -23,6 +47,7 @@ def run_contained(
             raise owner.ContainmentError("Native application testing requires its disposable hosted CI owner.")
         env = dict(env)
         env.pop(owner.CONTAINED_ENV, None)
+        env = _native_scope_environment(env)
     lifecycle_results = []
     if qualification is not None:
         if owner.os.name != "nt":

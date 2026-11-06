@@ -552,6 +552,10 @@ Jobs/process groups. Bounded descendants remain caller-owned; held daemon
 cleanup fails and retains the sandbox. Ordinary tests still suppress daemon
 escape. This distinction matters because the real Source constructor closes
 an inner cleanup scope before the engine checks the selected host's readiness.
+On Linux, a caller cleanup unit also requires the current user's already-running,
+owned user-manager bus. The native envelope selects that fixed local bus endpoint
+without moving `XDG_RUNTIME_DIR` or application state out of the sandbox; it
+does not start a manager, install a service or use an inherited bus address.
 
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
