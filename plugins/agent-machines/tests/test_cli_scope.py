@@ -6,7 +6,7 @@ import json
 import pytest
 
 from agent_machines import __main__ as cli
-from agent_machines.manifest import ManifestError
+from agent_machines.manifest import ManifestError, RequirementPackage
 
 
 def _args(*, repo=None, all_projects=False):
@@ -14,7 +14,7 @@ def _args(*, repo=None, all_projects=False):
 
 
 def test_reconcile_defaults_to_cwd_repo(monkeypatch, tmp_path):
-    package = object()
+    package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(
         cli._layout,
         "resolve_cwd_repo",
@@ -49,8 +49,8 @@ def test_reconcile_defaults_to_adopted_project_plus_supplement(
     supplement = tmp_path / "supplement"
     current.mkdir()
     supplement.mkdir()
-    current_package = object()
-    supplemental_package = object()
+    current_package = RequirementPackage(name="current", schema_version=4, manage={})
+    supplemental_package = RequirementPackage(name="supplement", schema_version=4, manage={})
     calls = []
     monkeypatch.setattr(
         cli._layout,
@@ -120,7 +120,7 @@ def test_reconcile_unavailable_supplement_names_exact_repo_escape(
 
 
 def test_reconcile_all_projects_is_explicit(monkeypatch):
-    package = object()
+    package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(
         cli,
         "_collect_all_packages",
@@ -137,7 +137,7 @@ def test_reconcile_all_projects_is_explicit(monkeypatch):
 
 
 def test_reconcile_accepts_registered_repo(monkeypatch, tmp_path):
-    package = object()
+    package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(
         cli._discover,
         "project_scope_repos",
@@ -164,7 +164,7 @@ def test_reconcile_accepts_registered_repo(monkeypatch, tmp_path):
 
 
 def test_reconcile_accepts_explicit_repo_path(monkeypatch, tmp_path):
-    package = object()
+    package = RequirementPackage(name="example", schema_version=4, manage={})
     monkeypatch.setattr(cli._discover, "resolve_registered_repo", lambda name: None)
     monkeypatch.setattr(
         cli._layout,

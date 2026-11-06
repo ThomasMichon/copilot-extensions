@@ -81,6 +81,10 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
 
 ## What works today
 
+- **Bounded local telemetry reports.** `health report` projects explicit local
+  typed telemetry into 168 UTC-hour buckets and an optional static chart,
+  preserving unknown coverage. It starts no collector or periodic job and never
+  activates telemetry. See [the report contract](docs/health-report.md).
 - **Live Copilot CLI controls.** `copilot-cli` inspects native update preferences
   and cached versions, previews/applies live on/off and native update operations,
   and deliberately launches a cached version without another installer or

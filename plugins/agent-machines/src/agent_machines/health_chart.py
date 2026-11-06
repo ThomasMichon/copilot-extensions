@@ -1,0 +1,89 @@
+"""A static chart over an already bounded health report; no active content."""
+
+from __future__ import annotations
+
+from html import escape
+
+
+def render(report: dict) -> str:
+    hours = report["hours"]
+    counts = [sum(group["observations"] for group in hour["groups"]) for hour in hours]
+    errors = [
+        sum(group["outcomes"].get("error", 0) for group in hour["groups"])
+        for hour in hours
+    ]
+    timing_groups = sorted({
+        (group["component"], group["stage"])
+        for hour in hours for group in hour["groups"] if group["kind"] == "performance"
+    })
+    maximum = max(counts, default=0) or 1
+    chart_height = 340 + 110 * len(timing_groups)
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="{chart_height}" '
+        f'viewBox="0 0 1040 {chart_height}" role="img">',
+        "<title>Seven-day local telemetry observations</title>",
+        f'<rect width="1040" height="{chart_height}" fill="white"/>',
+        '<g font-family="sans-serif" font-size="14" fill="#222">',
+        '<text x="16" y="24">168 UTC hours: observed events (blue), errors (red)</text>',
+        '<text x="16" y="46">Gaps mean no observations, not uptime; population and loss unknown.</text>',
+    ]
+    for index, (count, error) in enumerate(zip(counts, errors)):
+        x = 16 + index * 6
+        if count:
+            height = count / maximum * 180
+            parts.append(
+                f'<rect x="{x}" y="{250 - height:.2f}" width="5" '
+                f'height="{height:.2f}" fill="#2463a5"/>',
+            )
+        else:
+            parts.append(f'<path d="M{x} 246v4" stroke="#aaa"/>')
+        if error:
+            height = error / maximum * 180
+            parts.append(
+                f'<rect x="{x}" y="{250 - height:.2f}" width="5" '
+                f'height="{height:.2f}" fill="#bc3030"/>',
+            )
+    coverage = report["coverage"]
+    parts.append(
+        f'<text x="16" y="285">{sum(counts)} observed records; '
+        f'{len(timing_groups)} separate timing groups below.</text>',
+    )
+    parts.append(
+        f'<text x="16" y="309">Scan limited: {str(coverage["scan_limited"]).lower()}; '
+        f'unavailable inputs: {coverage["unavailable_inputs"]}. No p99 or uptime claim.</text>',
+    )
+    for row, identity in enumerate(timing_groups):
+        values = [
+            next((
+                group["p95_ns"] for group in hour["groups"]
+                if group["kind"] == "performance"
+                and (group["component"], group["stage"]) == identity
+            ), None)
+            for hour in hours
+        ]
+        maximum_ns = max((value for value in values if value is not None), default=0) or 1
+        top = 340 + row * 110
+        label = escape("/".join(identity))
+        parts.append(
+            f'<text x="16" y="{top}">{label}: observed-success p95; '
+            f'chart ceiling {maximum_ns / 1_000_000:.3f} ms</text>',
+        )
+        segment = []
+        for index, value in enumerate(values):
+            if value is None:
+                if segment:
+                    parts.append(
+                        f'<polyline points="{" ".join(segment)}" fill="none" stroke="#2463a5"/>',
+                    )
+                    segment = []
+                continue
+            x = 18 + index * 6
+            y = top + 80 - value / maximum_ns * 60
+            segment.append(f"{x},{y:.2f}")
+            parts.append(f'<circle cx="{x}" cy="{y:.2f}" r="2" fill="#2463a5"/>')
+        if segment:
+            parts.append(
+                f'<polyline points="{" ".join(segment)}" fill="none" stroke="#2463a5"/>',
+            )
+    parts.append("</g></svg>\n")
+    return "\n".join(parts)
