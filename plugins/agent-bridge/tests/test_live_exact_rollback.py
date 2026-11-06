@@ -9,7 +9,7 @@ import types
 
 import pytest
 
-from agent_bridge.db import Database
+from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_schema import _SchemaMixin
 from agent_bridge.inbox_custody import schema_triggers
 from tests.test_live_keyed_receipt import rollover
@@ -105,7 +105,7 @@ def test_writable_migration_replaces_only_known_guard_and_preserves_legacy_bytes
     tmp_db.execute_write("UPDATE schema_version SET version=?", (version,))
     migrated = Database(tmp_db.db_path)
     try:
-        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == 40
+        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         assert dict(migrated.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0]) == before
     finally:
         migrated.close()
@@ -178,7 +178,7 @@ def test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint(
     validate_schema(tmp_db._get_conn(), exact_native=False)
     resumed = Database(tmp_db.db_path)
     try:
-        assert resumed.execute_read("SELECT version FROM schema_version")[0][0] == 40
+        assert resumed.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         validate_schema(resumed._get_conn())
         assert dict(resumed.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0]) == before
     finally:

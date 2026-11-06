@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the original executing Worktrees writer through keyed workspace creation, strict continuation and read-only requalification.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

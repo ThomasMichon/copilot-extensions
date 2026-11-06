@@ -4921,6 +4921,15 @@ ordinary-verb-compatible resident receives the legacy control but no required
 registration, binding or succession. Those commands reject changed identity,
 nonce, project and path. Capture instrumentation is restored explicitly in the
 fixture after the real owner environment scrub; production routing is unchanged.
+Creation controls in that same actor-free packet distinguish the original
+workspace journal from acquisition attempts, retain strict resume and successor
+seed custody, and requalify exact-session inspection without writer reselection.
+The separate `test_creation_worktree_writer.py` packet covers SQLite schema
+preparation, passive refusal, real HTTP negotiation, frontend rehydration,
+concurrent replay and registration dormancy. Its finite source-process control
+preserves the protected claim and creation nonce through registration, binding
+and succession while the unqualified resident remains reachable. These probes
+are enrolled in the opt-in HTTP-52 capture, not the required actor-free packet.
 
 `tools/promotion_unit_tests/test_namespace_contract.py` joins the actual
 Containers `namespace-list` CLI and `ContainerResolver.list_specs` output to

@@ -41,6 +41,10 @@ AFFECTED = (
         "acquisition_journal.py", "acquisition_runtime.py", "acquisition_store.py",
         "routes/acquisitions.py", "session_handoff.py", "session_resume.py",
         "session_start.py", "session_core.py", "session_prompts.py", "worktree_head.py", "worktree_lineage.py",
+        "workspace_creation.py", "creation_custody.py", "session_start_models.py",
+        "client.py", "routes/sessions.py", "client_session_start.py",
+        "creation_worktree_writer.py", "creation_writer_schema.py",
+        "creation_writer_inspection.py",
         "_peer_launch.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
@@ -67,6 +71,9 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_acquisition_runtime.py",
     "plugins/agent-bridge/tests/test_acquisition_writer_inspection.py",
     "plugins/agent-bridge/tests/test_worktree_lineage_authority.py",
+    "plugins/agent-bridge/tests/test_creation_worktree_writer.py",
+    "plugins/agent-bridge/tests/test_workspace_creation.py",
+    "plugins/agent-bridge/docs/retained-acquisition-writer.md",
     "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/launch-wrapper-assets.json",
@@ -136,6 +143,22 @@ PROBES = {
     "test_retained_session_receiver_refuses_changed_scope_without_resident_fallback": 12,
     "test_retained_writer_inspection_cli_http": 3,
     "test_retained_writer_inspection_unavailable_http": 4,
+    "test_creation_writer_preparation_preserves_unpinned_rows_and_readonly_refuses": 1,
+    "test_keyed_creation_writer_retains_original_scope_and_strict_resume": 1,
+    "test_keyed_creation_writer_rehydrates_same_native_without_reselection": 1,
+    "test_keyed_creation_writer_concurrent_replay_and_changed_key_do_not_reallocate": 1,
+    "test_keyed_creation_writer_reconciles_lost_completion_without_new_native": 1,
+    "test_keyed_creation_writer_refuses_changed_custody_before_effects": 5,
+    "test_keyed_creation_writer_cannot_retrofit_or_replace_original_journal": 1,
+    "test_required_creation_writer_parser_rejects_unsupported_forms": 6,
+    "test_required_creation_writer_client_refuses_unsupported_active_provider": 4,
+    "test_required_creation_writer_rechecks_capability_after_provider_cutover": 1,
+    "test_required_creation_writer_round_trips_through_actual_http_owner": 1,
+    "test_creation_writer_inspection_refuses_changed_owner_without_effects": 4,
+    "test_required_creation_writer_inspection_rejects_ignored_legacy_query": 1,
+    "test_keyed_creation_handoff_retains_original_successor_and_seed": 2,
+    "test_keyed_creation_registration_failure_retains_native_and_dormancy": 1,
+    "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
@@ -146,6 +169,8 @@ CAPABILITY_VERSIONS = {
     "worktree_record_delegation": 1,
     "retained_acquisition_worktree_writer": 1,
     "retained_acquisition_writer_inspection": 1,
+    "retained_workspace_creation_writer": 1,
+    "retained_workspace_creation_writer_inspection": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,
