@@ -179,6 +179,43 @@ def test_second_move_preserves_the_completed_receipt_and_restores_original_locat
     assert (source / "ignored.bin").read_bytes() == bytes(range(256))
 
 
+def test_archiving_never_removes_the_current_stale_location_fence(checkout):
+    import hashlib
+
+    assert _move(checkout)["phase"] == "complete"
+    journal = move_state.journal_path(checkout.record.yaml_path)
+    original = journal.read_bytes()
+    move_state.archive_terminal(checkout.record.yaml_path, hashlib.sha256(original).hexdigest())
+    assert journal.read_bytes() == original
+    with pytest.raises(ValueError, match="stale checkout location"):
+        tracking.save_record(checkout.record)
+
+
+def test_publication_never_replaces_an_occupied_empty_destination(tmp_path):
+    source, target = tmp_path / "source", tmp_path / "target"
+    source.mkdir()
+    target.mkdir()
+    (source / "preserved").write_bytes(b"owned stage")
+    with pytest.raises(OSError):
+        relocation.durability.replace(source, target, existing=False)
+    assert source.is_dir() and target.is_dir()
+    assert (source / "preserved").read_bytes() == b"owned stage"
+    assert not list(target.iterdir())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX read-only descriptor durability")
+def test_durability_preserves_a_read_only_posix_file(tmp_path):
+    path = tmp_path / "preserved"
+    path.write_bytes(b"ordinary read-only data")
+    path.chmod(0o444)
+    try:
+        relocation.durability.files([path])
+        assert path.stat().st_mode & 0o777 == 0o444
+        assert path.read_bytes() == b"ordinary read-only data"
+    finally:
+        path.chmod(0o600)
+
+
 def test_old_published_writer_refuses_move_without_activation_or_data_effects(checkout, monkeypatch):
     from agent_worktrees import status_monitor_runtime
 

@@ -154,4 +154,3 @@ def archive_terminal(ledger: Path, expected: str) -> None:
     from .checkout_durability import files
 
     files([history])
-    path.unlink()
