@@ -107,6 +107,80 @@ def test_writer_preflight_allows_the_profile_writer_to_create_a_shared_parent(tm
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize("scope", ["provider", "profile", "fragment", "root"])
+def test_writer_preflight_rejects_lock_file_directories_without_effects(tmp_path, scope):
+    from agent_ssh import gateway_profile, ssh_profile
+
+    config = arguments(tmp_path)
+    config["ssh_config"] = tmp_path / "separate-root" / "config"
+    sources = config["config_d"].parent / gateway_profile._SOURCE_DIR
+    locks = config["config_d"].parent / ssh_profile._LOCK_DIR_NAME
+    path = {
+        "provider": sources / "gateway-provider.lock",
+        "profile": sources / "gateway.lock",
+        "fragment": locks / (ssh_profile.fragment_name("gateway") + ".lock"),
+        "root": config["ssh_config"].parent / ssh_profile._LOCK_DIR_NAME / "root-config.lock",
+    }[scope]
+    path.mkdir(parents=True)
+    retained = path / "retained"
+    retained.write_bytes(b"existing owner content")
+    before = set(tmp_path.rglob("*"))
+    with pytest.raises(ValueError, match="lock.*ordinary file"):
+        gateway_directory.validate_writer_destinations(
+            config_d=config["config_d"], ssh_config=config["ssh_config"],
+            authorization_dir=config["authorization_dir"],
+            authorization_target={"machine": config["machine"], "environment": config["environment"]},
+            authorization_controller=config["controller"],
+            gateway=config["gateway"], identity_file=config["identity_file"],
+        )
+    assert set(tmp_path.rglob("*")) == before
+    assert retained.read_bytes() == b"existing owner content"
+
+
+def test_writer_preflight_does_not_acquire_or_modify_an_existing_lock(tmp_path):
+    from agent_ssh import gateway_profile
+    from agent_ssh.file_lock import exclusive_file_lock
+
+    config = arguments(tmp_path)
+    path = config["config_d"].parent / gateway_profile._SOURCE_DIR / "gateway-provider.lock"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"existing lock")
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    with exclusive_file_lock(path):
+        gateway_directory.validate_writer_destinations(
+            config_d=config["config_d"], ssh_config=config["ssh_config"],
+            authorization_dir=config["authorization_dir"],
+            authorization_target={"machine": config["machine"], "environment": config["environment"]},
+            authorization_controller=config["controller"],
+            gateway=config["gateway"], identity_file=config["identity_file"],
+        )
+        assert path.stat().st_mtime_ns == before[1]
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+    assert not config["config_d"].exists()
+    assert not config["authorization_dir"].exists()
+
+
+def test_writer_preflight_preserves_a_hardlinked_lock_and_its_other_owner(tmp_path):
+    from agent_ssh import gateway_profile
+
+    config = arguments(tmp_path)
+    retained = tmp_path / "retained"
+    retained.write_bytes(b"existing owner content")
+    path = config["config_d"].parent / gateway_profile._SOURCE_DIR / "gateway-provider.lock"
+    path.parent.mkdir(parents=True)
+    path.hardlink_to(retained)
+    with pytest.raises(ValueError, match="lock.*ordinary file"):
+        gateway_directory.validate_writer_destinations(
+            config_d=config["config_d"], ssh_config=config["ssh_config"],
+            authorization_dir=config["authorization_dir"],
+            authorization_target={"machine": config["machine"], "environment": config["environment"]},
+            authorization_controller=config["controller"],
+            gateway=config["gateway"], identity_file=config["identity_file"],
+        )
+    assert path.read_bytes() == retained.read_bytes() == b"existing owner content"
+    assert not config["config_d"].exists()
+
+
 @pytest.mark.parametrize("failure", ["foreign-entry", "permissions", "missing-parent"])
 def test_writer_preflight_validates_authorization_owner_without_creation_or_repair(tmp_path, failure):
     import os

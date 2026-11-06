@@ -89,6 +89,8 @@ read during setup preflight, before the incoming selection can replace a healthy
 owner. The local public-key reference must also parse as canonical bounded
 ed25519 during preflight; readable malformed bytes cannot defer failure until
 after selection changes.
+Existing profile/source lock paths must be ordinary single-link files.
+Preflight does not create, acquire, clear or modify those locks.
 Capability output additively advertises both host configuration versions and
 each role's required extras. Older strict v1 host readers refuse v2; rollback
 must not translate it into Gateway serving or foreground-only success.

@@ -394,6 +394,30 @@ def test_invalid_derived_writer_directory_refuses_before_host_state(tmp_path, sc
     assert not Path(value["state_dir"]).exists()
 
 
+def test_invalid_writer_lock_refuses_before_host_or_credential_effects(tmp_path, monkeypatch):
+    from agent_ssh import ssh_profile
+    from fleet_manager import credential_references
+
+    root = tmp_path / "i"
+    selection, value, _, _ = ssh_selected(root)
+    value["ssh_config"] = str(tmp_path / "separate-root" / "config")
+    lock = Path(value["ssh_config"]).parent / ssh_profile._LOCK_DIR_NAME / "root-config.lock"
+    lock.mkdir(parents=True)
+    retained = lock / "retained"
+    retained.write_bytes(b"existing owner content")
+    host.write_private(Path(selection["configuration"]), value)
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda *_args: pytest.fail("invalid writer lock read credentials"),
+    )
+    with pytest.raises(ValueError, match="lock.*ordinary file"):
+        host.prepare(root, selection)
+    assert retained.read_bytes() == b"existing owner content"
+    assert not (root / host.STATE).exists()
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
 @pytest.mark.parametrize("failure", [
     "conflicting-root", "conflicting-authorization", "foreign-authorization", "foreign-owner",
 ])

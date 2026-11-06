@@ -30,6 +30,7 @@ def validate_writer_destinations(
 ) -> None:
     """Validate existing direct and derived writer kinds without creating anything."""
     from . import gateway_profile, ssh_profile
+    from .file_lock import validate_lock_file
 
     gateway_profile._alias(gateway)
     gateway_profile._path(str(identity_file))
@@ -60,6 +61,13 @@ def validate_writer_destinations(
         if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("SSH writer configuration must be an ordinary file")
         ssh_profile._root_config_target(ssh_config).read_text(encoding="utf-8")
+    for path in (
+        directories["sources"] / "gateway-provider.lock",
+        directories["sources"] / "gateway.lock",
+        directories["fragment-locks"] / (ssh_profile.fragment_name("gateway") + ".lock"),
+        directories["root-locks"] / "root-config.lock",
+    ):
+        validate_lock_file(path)
     gateway_provider._directory_state(authorization_target, authorization_controller, directories["sources"])
     if authorization_dir is not None:
         parent = authorization_dir.parent.resolve()

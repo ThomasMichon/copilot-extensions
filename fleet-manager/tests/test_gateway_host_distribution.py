@@ -565,6 +565,22 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             assert invalid_root.read_bytes() == b"\xff"
             host.write_private(Path(selection["configuration"]), value)
             await preserved_owner(initial["pid"])
+            from agent_ssh import ssh_profile
+
+            invalid_lock = tmp_path / "invalid-lock" / ssh_profile._LOCK_DIR_NAME / "root-config.lock"
+            invalid_lock.mkdir(parents=True)
+            retained_lock = invalid_lock / "retained"
+            retained_lock.write_bytes(b"existing owner content")
+            host.write_private(Path(selection["configuration"]), value | {
+                "ssh_config": str(invalid_lock.parent.parent / "config"),
+            })
+            failed = await invoke(updated_slot, "install")
+            assert failed.returncode != 0
+            assert (root / "current-version").read_text().strip() == first.name
+            assert (root / "last-known-good").read_text().strip() == first.name
+            assert retained_lock.read_bytes() == b"existing owner content"
+            host.write_private(Path(selection["configuration"]), value)
+            await preserved_owner(initial["pid"])
             host.write_private(Path(selection["configuration"]), value | {
                 "config_d": str(state_file),
             })
