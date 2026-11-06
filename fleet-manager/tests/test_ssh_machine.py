@@ -4,9 +4,11 @@ from copy import deepcopy
 from importlib.resources import files
 import json
 import hashlib
+import os
 from pathlib import Path
 import signal
 import sys
+import time
 from types import SimpleNamespace
 
 from cryptography.hazmat.primitives import serialization
@@ -23,9 +25,10 @@ from test_gateway_ssh_provider import fixtures, key
 
 @pytest.fixture(autouse=True)
 def bounded_caller(monkeypatch):
-    from fleet_manager import gateway_service_caller
+    from fleet_manager import continuity_bootstrap, gateway_service_caller
 
     original = gateway_service_caller.ServiceCaller
+    monkeypatch.setattr(continuity_bootstrap, "ServiceCaller", original)
     monkeypatch.setattr(
         gateway_service_caller, "ServiceCaller", lambda **_options: SimpleNamespace(),
     )
@@ -64,6 +67,137 @@ def machine_config(root):
         "audience": "https://fleet.example.test", "resource": "service-a",
     }
     return value, policy, directory
+
+
+def continuity_config(root, *, gateway_origin=None, gateway_ca=None, audience=None):
+    from fleet_manager import continuity_bootstrap, private_state
+    from test_gateway_enrollment import GRANT
+
+    value, policy, directory = machine_config(root)
+    Path(value.pop("proof_key_file")).unlink()
+    (root / "access").unlink()
+    value["version"] = 3
+    value["gateway_origin"] = gateway_origin or value["gateway_origin"]
+    value["gateway_ca"] = gateway_ca
+    value["authentication"]["audience"] = audience or value["authentication"]["audience"]
+    source = root / "continuity-source" / "selected.json"
+    state = root / "continuity-state"
+    private_state.private_directory(source.parent)
+    projection = {
+        "schema": "fleet-manager.continuity-projection", "version": 1,
+        "provider": "local-projection-v1", "authority": "authority-a",
+        "audience": value["authentication"]["audience"],
+        "delegation": {
+            "id": "grant-a", "grant_sha256": hashlib.sha256(GRANT.encode()).hexdigest(),
+            "grant_expires_at": int(time.time()) + 1800,
+            "scope": {
+                "source": "source-a", "account": "account-a", "container": "container-a",
+                "harness": "harness-a", "gateway": "gateway-a",
+                "destination": value["gateway_origin"], "machine": value["machine"],
+                "principal": value["authentication"]["principal"], "generation": 1,
+                "slots": [value["authentication"]["resource"]], "methods": ["GET", "POST"],
+                "expires_at": int(time.time()) + 3600,
+            },
+        },
+        "grant": GRANT, "gateway_ca": gateway_ca,
+    }
+    with os.fdopen(private_state.create_private_file(source), "wb") as stream:
+        stream.write(canonical(projection))
+    retained = continuity_bootstrap._state(state, projection, apply=True)
+    value["credential_source"] = {
+        "provider": "local-projection-v1", "source": str(source),
+        "harness": "harness-a", "state_root": str(state),
+    }
+    return value, policy, directory, retained["request"]["public_key"]
+
+
+@pytest.mark.parametrize("change", [
+    {"version": 2}, {"proof_key_file": "unused"}, {"access_token_file": "unused"},
+    {"credential_source": None}, {"credential_source": {}},
+    *({"credential_source": {
+        "provider": "local-projection-v1", "source": "unused", "harness": "harness-a",
+        "state_root": "unused", **bad,
+    }} for bad in (
+        {"provider": "arbitrary-module"}, {"source": "relative"}, {"state_root": "relative"},
+        {"harness": ""}, {"command": "ignored"},
+    )),
+])
+def test_continuity_config_refuses_mixed_or_invalid_references(tmp_path, monkeypatch, change):
+    from fleet_manager import continuity_bootstrap
+
+    value, _, _, _ = continuity_config(tmp_path)
+    if isinstance(change.get("credential_source"), dict) and change["credential_source"]:
+        selected = dict(change["credential_source"])
+        for name in ("source", "state_root"):
+            if selected.get(name) == "unused":
+                selected[name] = value["credential_source"][name]
+        change = change | {"credential_source": selected}
+    monkeypatch.setattr(
+        continuity_bootstrap, "machine_caller_reference",
+        lambda *_args, **_kwargs: pytest.fail("invalid config read the retained identity"),
+    )
+    with pytest.raises(PlanError):
+        ssh_machine.prepare(SSHMachineConfig.from_dict(value | change))
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
+
+
+@pytest.mark.parametrize("kind", ["source", "state_root", "lease-in-identity"])
+def test_continuity_lease_cannot_own_provider_inputs(tmp_path, kind):
+    value, _, _, _ = continuity_config(tmp_path)
+    if kind == "lease-in-identity":
+        value["state_dir"] = str(Path(value["credential_source"]["state_root"]) / "lease")
+    else:
+        value["credential_source"][kind] = str(Path(value["state_dir"]) / kind)
+    with pytest.raises(PlanError, match="exclude input references|must be separate"):
+        SSHMachineConfig.from_dict(value)
+    assert not (tmp_path / "state").exists()
+
+
+@pytest.mark.parametrize("configure", [configured, machine_config, continuity_config])
+def test_all_credential_modes_refuse_writer_owned_inputs_before_key_reads(tmp_path, monkeypatch, configure):
+    from fleet_manager import credential_references, continuity_bootstrap
+
+    value = configure(tmp_path)[0]
+    original = Path(
+        value["credential_source"]["source"] if value["version"] == 3 else value["proof_key_file"],
+    )
+    selected = Path(value["config_d"]) / "retained-input"
+    selected.parent.mkdir(parents=True)
+    selected.write_bytes(original.read_bytes())
+    if value["version"] == 3:
+        value["credential_source"]["source"] = str(selected)
+    else:
+        value["proof_key_file"] = str(selected)
+    monkeypatch.setattr(
+        credential_references, "read_credential_reference",
+        lambda *_args: pytest.fail("writer-owned input was read as a credential"),
+    )
+    monkeypatch.setattr(
+        continuity_bootstrap, "machine_caller_reference",
+        lambda *_args, **_kwargs: pytest.fail("writer-owned input reached its provider"),
+    )
+    before = selected.read_bytes()
+    with pytest.raises(ValueError, match="outside local writer scopes"):
+        ssh_machine.prepare(SSHMachineConfig.from_dict(value))
+    assert selected.read_bytes() == before
+    assert not Path(value["state_dir"]).exists()
+
+
+@pytest.mark.parametrize("missing", ["MACHINE_REFERENCE_CAPABILITY", "machine_caller_reference"])
+def test_older_continuity_provider_refuses_before_identity_or_lease(tmp_path, monkeypatch, missing):
+    from fleet_manager import continuity_bootstrap
+
+    value, _, _, _ = continuity_config(tmp_path)
+    monkeypatch.delattr(continuity_bootstrap, missing)
+    monkeypatch.setattr(
+        continuity_bootstrap, "_state",
+        lambda *_args, **_kwargs: pytest.fail("older provider read the retained identity"),
+    )
+    with pytest.raises(PlanError, match="lacks the machine-reference-v1 capability"):
+        ssh_machine.prepare(SSHMachineConfig.from_dict(value))
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["config_d"]).exists()
 
 
 @pytest.mark.parametrize("public", [
@@ -264,8 +398,9 @@ def test_v1_keeps_external_pem_and_fresh_token_callback(tmp_path, monkeypatch, b
     assert observed == ["synthetic-access", "synthetic-rotated"]
 
 
+@pytest.mark.parametrize("credential_mode", ["pem", "continuity"])
 def test_machine_consumer_real_tls_proofs_and_local_writer(
-    tmp_path, monkeypatch, bounded_caller,
+    tmp_path, monkeypatch, bounded_caller, credential_mode,
 ):
     from aiohttp import web
     from fleet_manager import credential_references, gateway_service_caller
@@ -291,9 +426,10 @@ def test_machine_consumer_real_tls_proofs_and_local_writer(
     value["authentication"]["audience"] = AUDIENCE
     value["namespace"] = "/api"
     value["gateway_ca"] = rig.ca
-    Path(value["proof_key_file"]).write_bytes(rig.h.keys[3].get_op_key("sign").private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption(),
-    ))
+    if credential_mode == "pem":
+        Path(value["proof_key_file"]).write_bytes(rig.h.keys[3].get_op_key("sign").private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption(),
+        ))
     Path(tmp_path / "access").unlink()
     monkeypatch.setattr(
         credential_references, "load_service_credentials",
@@ -311,7 +447,20 @@ def test_machine_consumer_real_tls_proofs_and_local_writer(
         callers.append(caller)
         return caller
 
-    monkeypatch.setattr(gateway_service_caller, "ServiceCaller", compose)
+    if credential_mode == "pem":
+        monkeypatch.setattr(gateway_service_caller, "ServiceCaller", compose)
+    else:
+        from fleet_manager import continuity_bootstrap
+
+        monkeypatch.setattr(gateway_service_caller, "ServiceCaller", bounded_caller)
+        reference = continuity_bootstrap.machine_caller_reference
+
+        def compose_reference(*args, **kwargs):
+            prepared = reference(*args, **kwargs)
+            callers.append(prepared.caller)
+            return prepared
+
+        monkeypatch.setattr(continuity_bootstrap, "machine_caller_reference", compose_reference)
     verify = MachineIdentityVerifier.verify
 
     def observe(verifier, principal, proof, **context):
@@ -338,6 +487,20 @@ def test_machine_consumer_real_tls_proofs_and_local_writer(
         try:
             await rig.start()
             value["gateway_origin"] = rig.origin
+            if credential_mode == "continuity":
+                selected, _, _, public = continuity_config(
+                    tmp_path, gateway_origin=rig.origin, gateway_ca=rig.ca, audience=AUDIENCE,
+                )
+                selected["namespace"] = "/api"
+                value.clear()
+                value.update(selected)
+                binding = next(
+                    item for item in rig.h.document["bindings"] if item["reference"] == "keys/caller-a"
+                )
+                binding["jwk"] = public
+                rig.h.document["manifest"]["revision"] += 1
+                rig.save()
+                await rig.state.reload()
             connector = ServiceConnector(
                 slot="service-a", gateway_origin=rig.origin, backend_origin=rig.origins[0],
                 proof_key=rig.h.keys[1], gateway_ca=rig.ca,
@@ -645,7 +808,7 @@ def test_selected_runtime_declares_its_optional_contract_without_hosting():
     ).read_text("utf-8"))
     assert descriptor == {
         "schema": "fleet-manager.ssh-client-contract", "version": 1,
-        "configuration": {"schema": "fleet-manager.ssh-client", "versions": [1, 2]},
+        "configuration": {"schema": "fleet-manager.ssh-client", "versions": [1, 2, 3]},
         "directory": {"schema": "agent-ssh.service-directory", "versions": [1]},
         "entrypoint": {"command": "serve", "role": "ssh-client"},
         "automatic_invocation": False,

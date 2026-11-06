@@ -102,8 +102,16 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
     ]
     assert not any(step.get("continue-on-error") for step in steps)
+    continuity = workflow["jobs"]["gateway-continuity-application-" + platform]
+    assert continuity["timeout-minutes"] == 6
+    assert continuity["needs"] == "gateway-host-application-" + platform
+    followthrough = [step for step in continuity["steps"] if "run" in step]
+    assert len(followthrough) == 1 and not followthrough[0].get("continue-on-error")
+    assert shlex.split(followthrough[0]["run"]) == [
+        "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
+    ]
     expressions = []
-    for step in steps:
+    for step in steps + followthrough:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(
@@ -131,7 +139,12 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "test_gateway_host_distribution.py::test_selected_gateway_application_first_touch_repeat_update_and_stop",
     }
     assert groups[0].isdisjoint(groups[1])
-    assert groups[0] | groups[1] == selected(original)
+    assert groups[2] == {
+        "test_gateway_host_distribution.py::"
+        "test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop",
+    }
+    assert groups[2].isdisjoint(groups[0] | groups[1])
+    assert groups[0] | groups[1] | groups[2] == selected(original)
     assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
     assert (
         "test_continuity_bootstrap.py::"

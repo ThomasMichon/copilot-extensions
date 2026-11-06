@@ -158,7 +158,9 @@ def main(argv=None):
     if args.command in ("capabilities", "bootstrap"):
         try:
             import asyncio
-            from .continuity_bootstrap import CAPABILITY, MACHINE_CALLER_CAPABILITY, PROVIDER, bootstrap
+            from .continuity_bootstrap import (
+                CAPABILITY, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY, PROVIDER, bootstrap,
+            )
             from .gateway_service_channel import TransportError
         except ImportError:
             print("fleet-manager: continuity bootstrap requires the service-gateway extra",
@@ -167,7 +169,9 @@ def main(argv=None):
         try:
             if args.command == "capabilities":
                 result = {"schema": "fleet-manager.capabilities", "version": 1,
-                          "capabilities": [CAPABILITY, PROVIDER, MACHINE_CALLER_CAPABILITY]}
+                          "capabilities": [
+                              CAPABILITY, PROVIDER, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY,
+                          ]}
             else:
                 result = asyncio.run(bootstrap(
                     args.source.expanduser().absolute(), harness=args.harness,

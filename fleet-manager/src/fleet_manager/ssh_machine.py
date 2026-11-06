@@ -34,11 +34,11 @@ def _consumer(config):
         authorization_controller=value["controller"],
         gateway=value["gateway"], identity_file=absolute(value["identity_file"]),
     )
-    validate_consumer_state(
-        absolute(value["state_dir"]), config_d=absolute(value["config_d"]),
-        ssh_config=absolute(value["ssh_config"]),
-        authorization_dir=absolute(value["authorization_dir"]) if value["authorization_dir"] else None,
-    )
+    for path in (absolute(value["state_dir"]), *config.input_paths()):
+        validate_consumer_state(
+            path, config_d=absolute(value["config_d"]), ssh_config=absolute(value["ssh_config"]),
+            authorization_dir=absolute(value["authorization_dir"]) if value["authorization_dir"] else None,
+        )
     return partial(apply_update, **config.local_scope())
 
 
@@ -86,6 +86,24 @@ async def _settle(task):
             interrupted = True
 
 
+def _continuity_reference(config: SSHMachineConfig):
+    try:
+        from .continuity_bootstrap import MACHINE_REFERENCE_CAPABILITY, machine_caller_reference
+    except ImportError:
+        raise PlanError("Selected continuity provider lacks the machine-reference-v1 capability") from None
+    if MACHINE_REFERENCE_CAPABILITY != "continuity-machine-reference-v1":
+        raise PlanError("Selected continuity provider has an unsupported machine reference")
+    value = config.to_dict()
+    credential, selected = value["credential_source"], value["authentication"]
+    return machine_caller_reference(
+        absolute(credential["source"]), harness=credential["harness"],
+        state_root=absolute(credential["state_root"]), machine=value["machine"],
+        gateway_origin=value["gateway_origin"], gateway_ca=value["gateway_ca"],
+        principal=selected["principal"], audience=selected["audience"], resource=selected["resource"],
+        timeout=35,
+    )
+
+
 def prepare(config: SSHMachineConfig):
     """Validate the selected local writer and credentials without network or writes."""
     config = SSHMachineConfig.from_dict(config.to_dict())
@@ -109,45 +127,48 @@ def prepare(config: SSHMachineConfig):
     if len(public) > 256:
         raise PlanError("Gateway local public-key file exceeds its bound")
     public_key(public.decode("ascii").strip())
-    if value["version"] == 1:
-        credentials = load_service_credentials(
-            proof_key_file=absolute(value["proof_key_file"]),
-            access_token_file=absolute(value["access_token_file"]),
-        )
-        read_access_token_reference(credentials.access_token_file)
-        authentication = {
-            "access_token_callback": credentials.access_token, "proof_key": credentials.proof_key,
-        }
+    if value["version"] == 3:
+        caller = _continuity_reference(config).caller
     else:
-        from joserfc.jwk import ECKey
-        from joserfc.errors import JoseError
-        from cryptography.hazmat.primitives.asymmetric.ec import (
-            EllipticCurvePrivateKey, SECP256R1,
-        )
+        if value["version"] == 1:
+            credentials = load_service_credentials(
+                proof_key_file=absolute(value["proof_key_file"]),
+                access_token_file=absolute(value["access_token_file"]),
+            )
+            read_access_token_reference(credentials.access_token_file)
+            authentication = {
+                "access_token_callback": credentials.access_token, "proof_key": credentials.proof_key,
+            }
+        else:
+            from joserfc.jwk import ECKey
+            from joserfc.errors import JoseError
+            from cryptography.hazmat.primitives.asymmetric.ec import (
+                EllipticCurvePrivateKey, SECP256R1,
+            )
 
-        try:
-            raw = read_credential_reference(absolute(value["proof_key_file"]))
-            if not raw.lstrip().startswith((
-                b"-----BEGIN PRIVATE KEY-----", b"-----BEGIN EC PRIVATE KEY-----",
-            )):
-                raise ValueError
-            proof_key = ECKey.import_key(raw)
-            signing_key = proof_key.get_op_key("sign")
-            if not isinstance(signing_key, EllipticCurvePrivateKey) or not isinstance(
-                signing_key.curve, SECP256R1,
-            ):
-                raise ValueError
-        except (ValueError, TypeError, JoseError):
-            raise GatewayError("credential-key-unavailable") from None
-        selected = value["authentication"]
-        authentication = {
-            "proof_key": proof_key, "machine_principal": selected["principal"],
-            "machine_audience": selected["audience"], "machine_resource": selected["resource"],
-        }
-    caller = ServiceCaller(
-        gateway_origin=value["gateway_origin"], gateway_ca=value["gateway_ca"],
-        timeout=35, **authentication,
-    )
+            try:
+                raw = read_credential_reference(absolute(value["proof_key_file"]))
+                if not raw.lstrip().startswith((
+                    b"-----BEGIN PRIVATE KEY-----", b"-----BEGIN EC PRIVATE KEY-----",
+                )):
+                    raise ValueError
+                proof_key = ECKey.import_key(raw)
+                signing_key = proof_key.get_op_key("sign")
+                if not isinstance(signing_key, EllipticCurvePrivateKey) or not isinstance(
+                    signing_key.curve, SECP256R1,
+                ):
+                    raise ValueError
+            except (ValueError, TypeError, JoseError):
+                raise GatewayError("credential-key-unavailable") from None
+            selected = value["authentication"]
+            authentication = {
+                "proof_key": proof_key, "machine_principal": selected["principal"],
+                "machine_audience": selected["audience"], "machine_resource": selected["resource"],
+            }
+        caller = ServiceCaller(
+            gateway_origin=value["gateway_origin"], gateway_ca=value["gateway_ca"],
+            timeout=35, **authentication,
+        )
     client = SSHDirectoryClient(caller, namespace=value["namespace"])
     return accept, client
 
