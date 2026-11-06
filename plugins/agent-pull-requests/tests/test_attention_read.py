@@ -369,6 +369,31 @@ def test_actual_gateway_authority_refusal_is_cli_exit_four(
     assert reader.store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("cause,exit_code", [
+    ("capabilities", 1), ("read", 1), ("missing-owner", 3),
+])
+def test_cli_distinguishes_invalid_successful_results_from_missing_owners(
+    feedback_environment: tuple, reading: tuple, monkeypatch, capsys, cause: str, exit_code: int,
+) -> None:
+    reader, gateway, client, caller, _ = reading
+    before = reader.store.path.read_bytes()
+    if cause == "missing-owner":
+        gateway.attention = {}
+    else:
+        def change(value: dict) -> None:
+            if cause == "capabilities":
+                value["protocol"] = "invalid"
+            elif "items" in value:
+                value["items"] = "invalid"
+        caller.change = change
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"limit":16,"after":null}')))
+    assert cli.main(["attention", "read", "--request", "-"], attention_host=client) == exit_code
+    assert json.loads(capsys.readouterr().out)["error"] == (
+        "attention_unsupported" if cause == "missing-owner" else "invalid_attention_response"
+    )
+    assert reader.store.path.read_bytes() == before
+
+
 def test_service_writer_qualifies_v5_reader_without_claiming_v3_conversation_support(
     feedback_environment: tuple, reading: tuple, monkeypatch,
 ) -> None:
