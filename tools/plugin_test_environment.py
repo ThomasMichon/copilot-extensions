@@ -152,6 +152,32 @@ def capture_preparation_auth(uv, environment, cwd, *, run_metadata):
     return {"UV_CREDENTIALS_DIR": str(directory)}
 
 
+def capture_preparation_netrc(environment, *, windows: bool | None = None):
+    """Preserve UV's documented NETRC-or-home/.netrc location, without reading it."""
+    import installer_dependency_policy as dependencies
+
+    selected = dependencies._captured_environment({
+        key: environment[key] for key in environment
+        if (key.upper() if os.name == "nt" else key) in {"NETRC", "HOME", "USERPROFILE"}
+    })
+    home_key = "USERPROFILE" if (os.name == "nt" if windows is None else windows) else "HOME"
+    explicit = selected.get("NETRC")
+    raw = explicit if explicit is not None else selected.get(home_key)
+    requirement = "Test preparation needs absolute NETRC or an absolute original home for UV netrc input."
+    try:
+        if not isinstance(raw, str) or not raw or any(ord(char) < 32 or ord(char) == 127 for char in raw):
+            raise ValueError("invalid netrc location")
+        path = Path(raw)
+        if not path.is_absolute():
+            raise ValueError("unqualified relative netrc location")
+        path = (path if explicit is not None else path / ".netrc").resolve()
+        if path.exists() and not path.is_file():
+            raise ValueError("netrc location names a directory")
+    except (OSError, ValueError, RuntimeError):
+        raise dependencies.DependencyPolicyError(requirement) from None
+    return {"NETRC": str(path)}
+
+
 def preparation_environment(
     base: Mapping[str, str], sandbox: Path, project: Path, *, uv: str,
 ) -> dict[str, str]:
@@ -173,6 +199,7 @@ def preparation_environment(
             raise UnreapedProcessError("Authentication metadata cleanup unconfirmed", job=exc.job) from exc
 
     authentication = capture_preparation_auth(uv, base, project, run_metadata=metadata)
+    authentication.update(capture_preparation_netrc(base))
 
     inputs = dependencies._config_inputs([], base, project)
     configuration = {}
@@ -261,6 +288,13 @@ def isolated_environment(
             value = root.joinpath(*relative.split("/"))
             value.parent.mkdir(parents=True, exist_ok=True)
             env[name] = str(value)
+    if os.name == "nt":
+        for name in tuple(env):
+            if name.casefold() == "netrc":
+                env.pop(name)
+    private_netrc = root / "uv" / "netrc"
+    private_netrc.parent.mkdir(parents=True, exist_ok=True)
+    env["NETRC"] = str(private_netrc)
     env[CONTAINED_ENV] = "1"
     env[SANDBOX_ENV] = str(root)
     if allow_explicit_tiers:

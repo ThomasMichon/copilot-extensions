@@ -1876,6 +1876,17 @@ contexts. The opt-in
 `tools/test_preparation_auth_context.py` uses only an offline synthetic store;
 its selected-UV result is independent native qualification, not promotion-unit
 actor admission.
+The same preparation boundary retains the qualified **netrc location**, not its
+contents. UV's [documented rule](https://docs.astral.sh/uv/concepts/authentication/http/#netrc-files)
+is explicit `NETRC`, otherwise `~/.netrc`; the existing native-feed owner uses
+original `HOME` on POSIX and `USERPROFILE` on Windows for that home. Preparation
+requires an absolute explicit `NETRC` or absolute original home, and refuses
+unqualified locations rather than guessing an OS fallback. A missing file is
+not manufactured or populated. Actors always receive a private `NETRC` file
+location, including Windows case aliases and host-state opt-ins. The opt-in
+netrc fixture uses only an owned loopback index, synthetic credentials and
+selected UV resolution without installation or external network access; it
+checks default/explicit preparation success and actor refusal.
 Windows Job teardown reuses procutil's pinned-member native-exit barrier.
 Zero active-process accounting alone does not prove that native exit or pending
 I/O has completed. Unconfirmed retirement retains the same Job witnesses on

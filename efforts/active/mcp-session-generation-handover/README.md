@@ -1276,3 +1276,34 @@ migration already works.
 - F/E9, module caps and canonical binding verification passed. Only the admitted
   preparation-owner digest changed; **4234/598/300** remains intact. No native,
   full-unit or MCP packet was repeated, and no new gate or actor was admitted.
+
+### 2026-11-06 - Actual-base reconciliation and netrc preparation input
+
+- Preserved the published source/lease and rebased onto actual Dev
+  `af9afa408013c9d5378feb4eb5be6887447f174a`. The only conflict was the runner's
+  primary installation call: retained private `env` together with upstream's
+  non-editable Manager installation, cache-shape fingerprint and group planner.
+  No upstream netrc correction was present; no recovery ref or stash was altered.
+- Selected UV **0.11.18** against an owned synthetic loopback index proved
+  default netrc authentication succeeded before home isolation but failed during
+  preparation. Explicit `NETRC` already survived preparation, but leaked into
+  actors. Both new native controls failed before the correction.
+- Preparation now retains only the qualified netrc location: explicit absolute
+  `NETRC`, otherwise the documented home `.netrc` using original POSIX `HOME`
+  or Windows `USERPROFILE`, matching the existing native-feed owner. Unknown or
+  unqualified home/file locations refuse with an explicit-input requirement;
+  no credential contents are read/copied and no OS fallback is guessed.
+- Actor netrc locations remain private in ordinary and host-state modes,
+  including Windows case aliases. Final affected qualification passed
+  **45 tests** with verified cleanup, including actual default/explicit UV
+  resolution, unauthenticated actor requests, private home disambiguation and
+  rebase/preparation controls. The POSIX home rule is source/document-qualified
+  and covered by pure controls; this is not a full POSIX installed qualification.
+- Current upstream **4525 nodes**, **621 sources**, coverage targets and the
+  original **300-second** unit budget are preserved. Only the changed
+  preparation-owner digest needed refresh; the canonical MCP footprint needed
+  no regeneration. Source/doc/contract guards and dependency guard **567/0**
+  passed. No full unit or MCP-native packet, publication or production operation
+  was performed. Current-head CI/review and release/installed acceptance remain
+  coordinator-owned; full handover, prepared qualification and adoption holds
+  remain open.
