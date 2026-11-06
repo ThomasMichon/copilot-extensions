@@ -294,9 +294,14 @@ retains the operator's wording.
 - [ ] Land directly related tests, docs and required changefiles.
   - [x] Land current-controller bootstrap preparation/custody and legacy
     application compatibility repairs (#10559), with exact-head native,
-    retention and legacy controls. Containing release, installed reconstruction
-    and interrupted-request settlement remain separate; see the
+    retention and legacy controls. The containing release is verified below;
+    installed reconstruction and interrupted-request settlement remain separate.
+    See the
     [source journal](<journal/2026/11.06 bootstrap-custody-source.md>) and R11.
+  - [x] Repair retained Manager test preparation through both entry points
+    (#11008), preserving the independently merged native fixture repair
+    (#10960). Keep shared-cache construction consistent and checkout assertions
+    active when Manager is installed outside the checkout.
   - [x] Land incoming-start-first monitor replacement, exact native rollback
     validation, bounded old-port exclusion and truthful cleanup scope (#10148).
     The six-stage handoff/grace target is reviewed documentation, not full
@@ -363,6 +368,12 @@ retains the operator's wording.
   intent; a maintenance hold keeps installed tasks runnable but quiescent.
   The manual program wipe is not supported-uninstaller conformance evidence.
 - [ ] Verify containing normal Main release and exact released behavior.
+  - [x] Verify the containing #10559 release through normal promotion #11007:
+    Main `0dbbdd374e1af0b6443c84cead45102333855da3`, admitted Dev
+    `2161ab2b11723828c83ad107d8034463774c9870`, Worktrees 1.24.506-dev1,
+    Manager 0.6.316-dev1 and Bridge 0.9.334-dev1. All thirteen selected source
+    and test blobs match the reviewed repair; complete source and admitted
+    artifact/evidence assets are published. No installed rollout is claimed.
   - [x] Verify the containing #10266 release through normal promotion #10314:
     Main `142a2a3c50f886a052136fa4aae5e10d6a0fb2f5`, admitted Dev
     `18f110d637a2133ad5dd08610bf3ca789fd89115`, Worktrees 1.24.445-dev1.
@@ -610,6 +621,12 @@ operator's installation-survival contract.
     full retention preserves all 3,373 files and 54,153,397 bytes. This is
     component evidence, not a cold-machine performance promise, selected-host
     reconstruction or either real installation cycle.
+  - [x] Qualify #11008's non-editable preparation and shared-cache repair with
+    targeted preparation controls, a real installed-core subprocess, all 23
+    affected checkout/import-boundary tests and all four hosted Windows Resume
+    cases on reviewed head `480ec4f1bf57a38ed239a8795520db8923f04aab`.
+    The native fixture, consumer assertions, portfolio and deadlines are
+    unchanged; installed reconstruction and same-session survival remain open.
 - [ ] Real overlapping same-worktree attempts create one mux and join it;
   different-worktree launches overlap independently. Admission releases when
   the mux is discoverable, not when Copilot exits.
@@ -921,6 +938,13 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-11-06 - Containing release and test preparation verified
+
+[Detailed journal](<journal/2026/11.06 containing-release-and-test-preparation.md>).
+The bootstrap repair is released; the distinct test-preparation repair is merged
+after fresh approval and exact-head CI/native qualification. Installed recovery
+and the complete parent survival contract remain open.
 
 ### 2026-11-06 - Bootstrap preparation and custody source merged
 

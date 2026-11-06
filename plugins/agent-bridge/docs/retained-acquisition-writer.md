@@ -1,4 +1,4 @@
-# Retained acquisition Worktrees writer
+# Retained Worktrees writers
 
 Back to [local session acquisition](session-acquisition.md).
 
@@ -90,6 +90,52 @@ The merged pinned launcher owns retention, current installation governance and
 pre-import checks of the original completion/build identity. Selector movement
 does not replace this writer. Removed or recreated slots refuse; this feature
 does not veto an authorized installer replacement or preserve a second registry.
+
+## Ordinary keyed creation
+
+The optional `retained_workspace_creation_writer: 1` capability accepts the
+same strict `worktree_writer` requirement on the existing
+`POST /api/v1/sessions/workspace-creations` request. It requires a creation key
+and an already-prepared explicit local ACP worktree; provider-instance,
+remote, CLI and allocate-new forms refuse before effects. The client
+negotiates the named capability on every transport attempt within HTTP 52.
+Unpinned requests retain their existing behavior.
+
+This route does **not** create an acquisition attempt. Its original
+`workspace_embodiments` row atomically retains the creation facts, workspace
+incarnation, requirement and provider-selected pinned writer before native
+launch. Required replay requalifies that command and exact workspace without
+reselecting. A different key cannot capture the same retained workspace;
+changed inputs, dropped requirements and retrofitting an unpinned row refuse.
+Schema 41 prepares the nullable columns and immutable original-row/native
+fences through the ordinary writable migration. Passive and existing-only
+adoption validate rather than prepare them.
+
+The session carries a pointer to that original creation row. Registration,
+binding, strict native resume, provider refresh and succession recover that
+owner instead of interpreting its historical `acquisition:` caller prefix as
+an acquisition journal. The native identity is recorded before registration;
+a registration failure retains that native stopped and dormant until guarded
+recovery succeeds. The same row retains each handoff's original successor,
+native and seed progress. An unconfirmed seed is not resent and no retry
+creates a replacement conversation.
+
+`retained_workspace_creation_writer_inspection: 1` adds the optional
+`BridgeClient.get_session(exact_id, worktree_writer=True)` form on the existing
+`GET /api/v1/sessions/{exact_id}?worktree_writer=true`. The negotiated query
+requalifies the original serializer and workspace, bracketed by unchanged
+journal, target, native identity and active Bridge readiness/instance checks.
+It returns `worktree_writer_observation` schema
+`copilot-extensions.creation-worktree-writer`, version 1, with the creation key
+digest, exact session/native/workspace, original requirement, serializer
+contract and Bridge instance. It exposes no command or environment. An
+unqualified exact owner returns 409; an older reader ignoring the query is
+unconfirmed, not successful evidence. Ordinary session reads remain unchanged.
+
+This is read-only qualification of the creation's delegated writer, not a
+ready permit, native-liveness assertion or admission of every other writer
+of the shared workspace. The ordinary Dispatch writer remains independently
+gated.
 
 ## Qualification boundary
 

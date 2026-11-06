@@ -49,6 +49,8 @@ class _SchemaMixin:
         from .creation_launch_schema import validate_schema as validate_creation_launch_schema
         from .provider_creation_launch_schema import ensure_schema as ensure_provider_launch_schema
         from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
+        from .creation_writer_schema import ensure_schema as ensure_creation_writer_schema
+        from .creation_writer_schema import validate_schema as validate_creation_writer_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -77,6 +79,8 @@ class _SchemaMixin:
                     validate_provider_launch_schema(conn)
                 if recorded is not None and recorded["version"] >= 39:
                     validate_exact_live_schema(conn)
+                if recorded is not None and recorded["version"] >= 41:
+                    validate_creation_writer_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -90,6 +94,7 @@ class _SchemaMixin:
                 ensure_creation_schema(conn)
                 ensure_creation_launch_schema(conn)
                 ensure_provider_launch_schema(conn)
+                ensure_creation_writer_schema(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
                 validate_consumer_schema(conn)
@@ -98,6 +103,7 @@ class _SchemaMixin:
                 validate_creation_schema(conn)
                 validate_creation_launch_schema(conn)
                 validate_provider_launch_schema(conn)
+                validate_creation_writer_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -116,6 +122,7 @@ class _SchemaMixin:
             validate_creation_schema(conn)
             validate_creation_launch_schema(conn)
             validate_provider_launch_schema(conn)
+            validate_creation_writer_schema(conn)
             validate_exact_live_schema(conn)
             conn.commit()
 
@@ -873,3 +880,12 @@ class _SchemaMixin:
                 migrate_exact_native_guard(conn)
                 conn.execute("UPDATE schema_version SET version=?", (40,))
             log.info("Schema migrated to version 40: exact-native input and cold rollback fence")
+
+        if from_version < 41:
+            from .creation_writer_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (41,))
+            conn.commit()
+            log.info("Schema migrated to version 41: retained ordinary keyed creation writer")

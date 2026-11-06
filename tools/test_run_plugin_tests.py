@@ -739,6 +739,11 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
     (runner.VENV_ROOT / "worktree-manager").mkdir(parents=True)
+    python = runner._venv_python("worktree-manager")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setattr(runner, "dependency_fingerprint", lambda *_args: "old-editable")
+    (runner.VENV_ROOT / "worktree-manager" / ".dep-fingerprint").write_text("old-editable")
     calls = []
     monkeypatch.setattr(
         runner.subprocess, "run",
@@ -759,9 +764,13 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     assert len(calls) == 2
     manager_arguments, manager_options = calls[0]
     assert str(bridge) not in manager_arguments
+    assert "-e" not in manager_arguments
+    assert "--reinstall" in manager_arguments
+    assert manager_options["non_editable"] is True
     assert manager_options["cwd"] == manager
     arguments, options = calls[1]
     assert arguments[arguments.index(str(bridge)) - 1] == "-e"
+    assert "non_editable" not in options
     assert options["cwd"] == bridge and options["trusted_source_roots"] == (tmp_path,)
     assert "agent-bridge" not in (manager / "pyproject.toml").read_text()
 
