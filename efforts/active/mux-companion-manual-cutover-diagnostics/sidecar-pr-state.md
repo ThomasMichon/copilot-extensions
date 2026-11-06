@@ -40,6 +40,8 @@ standing intent.
       optional versioned PR-association fact and declaration for the existing
       snapshot operation. Keep all current facts, defaults and old readers
       compatible; no new standalone command or snapshot acquisition at opening.
+      The new fact's construction is passive; the status command's existing
+      Git/liveness/bootstrap behavior is unchanged, not newly declared passive.
 - [ ] Read exact canonical PR associations from the selected worktree record.
       Preserve their stable association ID/revision, provider, target repository,
       number, URL and recorded lifecycle state. A claim URL alone cannot supply
@@ -49,6 +51,12 @@ standing intent.
       service, fetching Git or altering a record. Unregistered, contradictory,
       incomplete and legacy targets remain explicitly unavailable/unknown.
       Keep missing binding evidence distinct from an empty canonical list.
+      Make this association/binding acquisition explicitly on demand through
+      an optional declared `--pr-associations` form of the existing operation.
+      Normal status reads advertise support but do not acquire the new fact
+      or re-enable their deliberately omitted related-PR configuration map.
+      Reuse one read-configuration acquisition scope for the bounded selection;
+      retain the original cache/core observation without repeating Git work.
 - [ ] Bound the projection to 24 associations and the existing body budget,
       retaining explicit omission and completeness. Use the original current
       record/worktree incarnation and recheck selection when needed; never
@@ -63,6 +71,8 @@ standing intent.
 - [ ] Present recorded PR associations separately from resource claims in Graph.
       Recorded `open`, `merged` or `closed` remains labelled record state, not
       current openness, review approval, content acceptance or claim release.
+      Request the optional association form only after the original response
+      declares support; absence retains the current claim-only view.
 - [ ] On explicit operator selection, inspect exactly one admitted association
       through the same resolved Worktrees executable's existing
       `pr-watch snapshot <repository> <number> --json` operation. Do not pass
