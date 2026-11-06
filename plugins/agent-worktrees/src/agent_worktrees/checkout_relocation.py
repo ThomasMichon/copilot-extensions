@@ -405,7 +405,10 @@ def move(worktree_id: str, destination: str, config) -> dict:
             durability.tree(target)
             durability.files([
                 ledger, administrative / "gitdir", target / ".git",
-                *(path for path in (permissions._config_path(), permissions._permissions_path()) if path.exists()),
+                *(path for kind, path in (
+                    ("trust", permissions._config_path()), ("permissions", permissions._permissions_path()),
+                ) if path.exists() and report["permissions"][kind] is not None
+                  and (kind != "trust" or report["permissions"][kind])),
             ])
             state.write(ledger, report)
             if source.exists():

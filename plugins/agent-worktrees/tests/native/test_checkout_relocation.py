@@ -184,6 +184,19 @@ def test_readonly_permission_metadata_refuses_without_custody(checkout):
         path.chmod(0o600)
 
 
+def test_unrelated_readonly_permission_file_is_not_rewritten_or_opened_for_write(checkout):
+    path = checkout.copilot / "config.json"
+    original = b'// unrelated settings\n{"trustedFolders":["unrelated"],"preserved":true}\n'
+    path.write_bytes(original)
+    path.chmod(0o444)
+    try:
+        assert _move(checkout)["phase"] == "complete"
+        assert path.read_bytes() == original
+        assert not path.stat().st_mode & 0o200
+    finally:
+        path.chmod(0o600)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX source-directory admission")
 @pytest.mark.parametrize("location", ["checkout", "parent"])
 def test_readonly_source_directories_refuse_before_custody(checkout, location):
