@@ -393,7 +393,9 @@ def test_invalid_derived_writer_directory_refuses_before_host_state(tmp_path, sc
     assert not Path(value["state_dir"]).exists()
 
 
-@pytest.mark.parametrize("failure", ["missing", "empty", "invalid-utf8", "overlong"])
+@pytest.mark.parametrize("failure", [
+    "missing", "empty", "invalid-utf8", "overlong", "space", "non-ascii", "del",
+])
 def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_path, failure):
     from fleet_manager.gateway_contract import GatewayError
     from test_ssh_machine import configured
@@ -409,6 +411,7 @@ def test_ssh_host_token_preflight_refuses_before_lifetime_or_writer_state(tmp_pa
     else:
         token.write_bytes({
             "empty": b" \n", "invalid-utf8": b"\xff", "overlong": b"x" * 8193,
+            "space": b"synthetic invalid", "non-ascii": b"token\xc3\xa9", "del": b"token\x7f",
         }[failure])
     host.write_private(Path(selection["configuration"]), value)
     with pytest.raises(GatewayError):

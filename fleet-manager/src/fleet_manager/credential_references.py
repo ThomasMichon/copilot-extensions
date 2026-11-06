@@ -25,9 +25,11 @@ def read_credential_reference(path: Any) -> bytes:
 def read_access_token_reference(path: Path) -> str:
     raw = read_credential_reference(path)
     try:
-        return text(raw.decode("utf-8").strip(), 8192)
+        value = text(raw.decode("utf-8").strip(), 8192)
     except UnicodeError:
         raise GatewayError("credential-reference-unavailable") from None
+    require(all(32 < ord(char) < 127 for char in value), "credential-reference-unavailable")
+    return value
 
 
 @dataclass(frozen=True)

@@ -447,7 +447,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             token_candidate = {
                 key: selected for key, selected in value.items() if key != "authentication"
             } | {"version": 1, "access_token_file": str(root / "absent-token")}
-            for token in (None, b"\xff"):
+            for token in (None, b"\xff", b"synthetic invalid"):
                 if token is not None:
                     Path(token_candidate["access_token_file"]).write_bytes(token)
                 host.write_private(Path(selection["configuration"]), token_candidate)

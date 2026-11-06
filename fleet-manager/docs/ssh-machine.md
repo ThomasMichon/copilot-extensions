@@ -83,6 +83,9 @@ meaning. Access-token contents are reread on each actual admission through the
 existing bounded credential reference.
 Preparation validates that same token's readability and bounded text format,
 without caching it or treating token claims as admission authority.
+After trimming surrounding file whitespace, both preparation and fresh
+callbacks require the caller's visible-ASCII token format, excluding internal
+spaces, non-ASCII characters and DEL.
 
 In v2, replace `access_token_file` with this explicit record:
 
