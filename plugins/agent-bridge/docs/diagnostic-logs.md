@@ -211,6 +211,10 @@ and confirmed apply; it does not advertise a running daemon's capabilities.
 An older runtime may reject this new discovery command. Callers must then report
 this optional configuration operation as unsupported, not write the file
 themselves or replay an effectful fallback.
+Both payload launcher variants resolve telemetry commands without provisioning.
+A missing selected runtime refuses before installation or parser execution
+(exit 1); unavailable or invalid installation-context support can refuse with
+exit 126. Explicit installation management remains a separate operation.
 
 ```text
 agent-bridge telemetry retained --directory <absolute preprovisioned base>
@@ -218,7 +222,9 @@ agent-bridge telemetry retained --directory <same base> --apply --confirm <previ
 ```
 
 Output is always JSON (`--json` is accepted). Preview reads at most 64 KiB of
-strict object JSON, with duplicate keys and nonfinite values rejected. It creates
+strict UTF-8 object JSON, with duplicate keys and nonfinite values rejected.
+UTF-8 BOMs and UTF-16/32 are rejected like the native loader, including when the
+retained values otherwise match. It creates
 no directories, lock files or spools. The configuration root and the complete
 `directory/retained` path must already be plain, unlinked directories. Linked,
 nonregular or multiply-linked configuration files are refused.

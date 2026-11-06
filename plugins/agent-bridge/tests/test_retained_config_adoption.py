@@ -102,6 +102,17 @@ def test_missing_namespace_is_not_provisioned(configuration, capsys):
     assert not target.exists() and not (directory / "retained").exists()
 
 
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+def test_unchanged_configuration_uses_native_utf8_loader_encoding(configuration, capsys, encoding):
+    target, directory = configuration
+    original = json.dumps({"retained_spool": {"directory": str(directory)}}).encode(encoding)
+    target.write_bytes(original)
+    code, result = invoke(capsys, directory)
+    assert code == 2 and result["status"] == "error"
+    assert target.read_bytes() == original
+    assert not target.with_suffix(".json.lock").exists()
+
+
 @pytest.mark.parametrize("change", ["bytes", "target", "environment", "namespace"])
 def test_confirmation_rejects_changed_inputs(configuration, monkeypatch, capsys, change):
     target, directory = configuration

@@ -461,3 +461,26 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   from its selected producer executable before adoption; unsupported or
   rolled-back providers retain a visible pre-effect refusal, never a fallback
   writer. The parent preference/carrier and health-engine gates remain open.
+
+### 2026-11-06 - Provider review corrections
+- #11058's first current-head review identified two real prerequisite gaps:
+  payload launchers could provision a missing runtime, and byte-based JSON
+  decoding accepted encodings the native UTF-8 loaders reject.
+- Both producers' Bash/PowerShell runtime gates now resolve telemetry commands
+  read-only and refuse missing runtimes before installation. Existing ordinary
+  first-use behavior remains unchanged. Strict UTF-8 decoding refuses BOM and
+  UTF-16/32 input even when retained settings otherwise match.
+- Bridge's corrected packet passed 11 cases with six unavailable native POSIX
+  skips, including actual payload refusal in legacy/namespaced roots, existing
+  observer behavior, encoding refusal and normal confirmed adoption. Dispatch
+  passed three actual PowerShell payload controls with three POSIX skips.
+  Fixture corrections exclude PowerShell-owned startup caches from plugin
+  state assertions and do not invoke Windows' WSL launcher as native Bash.
+- The first CI unit lane passed; its strict type gate rejected three missing
+  generic parameters in the new shared API. Added precise callback/lock/parser
+  annotations; the admitted library passes Python-3.10 Linux and Windows type
+  targets (18 source files each). This is portable type evidence, not native
+  Linux execution. Ruff, install and documentation checks remain green.
+- Review and exact-source CI must pass after publishing these corrections.
+  No live configuration, runtime installation, service activation or carrier
+  publication was performed.

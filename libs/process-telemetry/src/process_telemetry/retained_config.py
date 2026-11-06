@@ -10,12 +10,16 @@ import os
 import stat
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ContextManager, Protocol
 
 from .configured_spool import retained_directory
 
 SCHEMA = "process-telemetry.retained-configuration/v1"
 MAX_CONFIG_BYTES = 64 * 1024
+
+
+class _OwnedLock(Protocol):
+    def assert_owned(self) -> None: ...
 
 
 def _plain(path: Path, *, directory: bool) -> tuple[int, int]:
@@ -84,7 +88,8 @@ def preview(
         if len(raw) > MAX_CONFIG_BYTES:
             raise ValueError("telemetry configuration exceeds its read bound")
         data = json.loads(
-            raw, object_pairs_hook=_pairs, parse_constant=_constant, parse_float=_float,
+            raw.decode("utf-8"), object_pairs_hook=_pairs,
+            parse_constant=_constant, parse_float=_float,
         )
         if type(data) is not dict:
             raise ValueError("telemetry configuration must be an object")
@@ -122,7 +127,8 @@ def preview(
 
 def execute(
     args: argparse.Namespace, *, target: Callable[[], Path], service: str,
-    sink_env: str, lock_factory: Callable, write_atomic: Callable,
+    sink_env: str, lock_factory: Callable[[Path], ContextManager[_OwnedLock]],
+    write_atomic: Callable[[Path, dict[str, Any]], None],
 ) -> int:
     """Recheck the native target and snapshot under the producer's writer lock."""
     try:
@@ -163,7 +169,10 @@ def execute(
     return 2 if result["status"] == "refused" else 0
 
 
-def register_commands(sub: argparse._SubParsersAction, handler: Callable) -> None:
+def register_commands(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    handler: Callable[[argparse.Namespace], int],
+) -> None:
     telemetry = sub.add_parser(
         "telemetry", help="Configuration-only telemetry operations", allow_abbrev=False,
     )

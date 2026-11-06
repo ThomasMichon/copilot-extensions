@@ -3,6 +3,17 @@ set -euo pipefail
 
 export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
+CONFIGURATION_ONLY=0
+SKIP_VALUE=0
+for ARGUMENT in "$@"; do
+    if [[ "$SKIP_VALUE" == 1 ]]; then SKIP_VALUE=0; continue; fi
+    case "$ARGUMENT" in
+        --url|--token|--control-token) SKIP_VALUE=1 ;;
+        --url=*|--token=*|--control-token=*|--shared|--local) ;;
+        telemetry) CONFIGURATION_ONLY=1; break ;;
+        *) break ;;
+    esac
+done
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
@@ -120,8 +131,16 @@ run_runtime() {
     fi
     exec "$AGENT_RT_PY" -m "$MODULE" "$@"
 }
-resolve_runtime
+if [[ "$CONFIGURATION_ONLY" == 1 ]]; then
+    resolve_runtime read-only
+else
+    resolve_runtime
+fi
 [[ -z "$AGENT_RT_PY" ]] || run_runtime "$@"
+if [[ "$CONFIGURATION_ONLY" == 1 ]]; then
+    printf '[agent-dispatch] runtime not provisioned (configuration-only; no self-provision).\n' >&2
+    exit 1
+fi
 if [[ -n "${AGENT_DISPATCH_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).\n' >&2
     exit 1

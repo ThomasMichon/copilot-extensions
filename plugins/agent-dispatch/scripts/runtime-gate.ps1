@@ -4,6 +4,20 @@ Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $forwardArgs = @($args)
+$configurationOnly = $false
+$skipValue = $false
+foreach ($argument in $forwardArgs) {
+    if ($skipValue) { $skipValue = $false; continue }
+    $optionName = ([string]$argument -split '=', 2)[0]
+    if ($argument -cin @('--url', '--token', '--control-token')) {
+        $skipValue = $true
+    } elseif ($optionName -cin @('--url', '--token', '--control-token', '--shared', '--local')) {
+        continue
+    } elseif ($argument -ceq 'telemetry') {
+        $configurationOnly = $true
+        break
+    } else { break }
+}
 $globalSurface = (Split-Path -Leaf $PSScriptRoot) -ceq 'bin'
 $module = 'agent_dispatch'
 if ($globalSurface) {
@@ -124,8 +138,12 @@ function Invoke-Runtime([string]$Python) {
     try { & $Python -m $module @nativeArgs } finally { $ErrorActionPreference = $previous }
     exit $LASTEXITCODE
 }
-$python = Resolve-Runtime
+$python = if ($configurationOnly) { Resolve-Runtime read-only } else { Resolve-Runtime }
 if ($python) { Invoke-Runtime $python }
+if ($configurationOnly) {
+    [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned (configuration-only; no self-provision).')
+    exit 1
+}
 if ($env:AGENT_DISPATCH_NO_SELFPROVISION) {
     [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).')
     exit 1
