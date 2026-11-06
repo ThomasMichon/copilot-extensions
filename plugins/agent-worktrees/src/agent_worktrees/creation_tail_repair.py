@@ -432,7 +432,7 @@ def targeted_doctor(args) -> int:
                             config, path, seed.seed_id, retained=record, retained_seed=seed,
                         )
                         report["checks"] = _checks(current, _pair_plan(config, current))
-                    except _REPAIR_ERRORS as observation_error:
+                    except Exception as observation_error:
                         report["checks_error"] = str(observation_error)
                     raise
     except _REPAIR_ERRORS as exc:

@@ -896,7 +896,7 @@ def test_creation_reports_projection_failure_without_claiming_seed(native_creati
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
-@pytest.mark.parametrize("observation", ["unreadable", "changed_seed"])
+@pytest.mark.parametrize("observation", ["unreadable", "changed_seed", "malformed_record"])
 def test_creation_preserves_failure_when_post_attempt_checks_are_unavailable(
     native_creation, monkeypatch, capsys, observation,
 ):
@@ -909,6 +909,10 @@ def test_creation_preserves_failure_when_post_attempt_checks_are_unavailable(
             state = json.loads(seed_path.read_text())
             state["text"] = "newer intent"
             seed_path.write_text(json.dumps(state))
+        elif observation == "malformed_record":
+            state = yaml.safe_load(creation.record.yaml_path.read_text())
+            state.pop("branch")
+            creation.record.yaml_path.write_text(yaml.safe_dump(state))
         else:
             monkeypatch.setattr(
                 repair, "_checks",
@@ -924,6 +928,11 @@ def test_creation_preserves_failure_when_post_attempt_checks_are_unavailable(
     assert not all(report["initial_checks"].values())
     assert report["projection_status"] == "failed"
     monkeypatch.setattr(repair, "_checks", original_checks)
+    if observation == "malformed_record":
+        state = yaml.safe_load(creation.record.yaml_path.read_text())
+        assert "branch" not in state
+        state["branch"] = creation.record.branch
+        creation.record.yaml_path.write_text(yaml.safe_dump(state))
     record = tracking.load_record(creation.record.yaml_path)
     assert all(repair._checks(record, repair._pair_plan(creation.configs["harness"], record)).values())
     retained = launch_seed_state.peek(creation.record.yaml_path)
