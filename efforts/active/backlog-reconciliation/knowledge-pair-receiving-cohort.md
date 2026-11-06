@@ -1,12 +1,12 @@
 # Complete Stateless-Harness and Knowledge-Pair Operations
 
-**Draft receiving-parent proposal.** AI-assisted; not published. It groups four separately owned, unfinished tracks by their shared stateless-harness/knowledge-pair lifecycle, without requiring one root cause or one implementation owner.
+**Reviewed tracking intake adopted in [#1419](https://github.com/ThomasMichon/copilot-extensions/issues/1419).** AI-assisted; product implementation remains planned. Four separately owned tracks share the stateless-harness/knowledge-pair lifecycle without requiring one root cause or one implementation owner.
 
 Campaign coordination reference: #7556. This is not a product receiving issue.
 
 [Campaign README](README.md)
 
-## Proposed Plan
+## Received Plan
 
 ### Track 1 — Rightful continuation and paired readiness (predecessor #2467)
 
@@ -40,9 +40,9 @@ Campaign coordination reference: #7556. This is not a product receiving issue.
 - [ ] **PF5:** For Windows locked/inaccessible residuals, report the actual failing operation/path/probe with bounded retry OR an exact actionable hint. Separate structural emptiness, readable-content proof, and accessibility/lock proof. An inaccessible descendant is UNKNOWN, not disposable cache noise.
 - [ ] **PF6:** Revalidate both lifecycle/pair identities, ownership, content, liveness, claims, refs, and accessibility under existing ordered locking at the action boundary. Preserve residual branches, partial outcomes, and the last authoritative recovery record until exact owned, content-safe removal is proven. Concurrent changes must not race a stale idle decision.
 - [ ] **PF7:** Distinguish tracking-only retirement, verified complete physical absence, and incomplete removal in structured and human results. Keep success/exit/warnings/removed semantics coherent; do not claim physical success from an intermediate stage or confuse deliberately retained unmanaged content with failed or fully deleted managed content.
-- [ ] **PF8:** Preserve incumbent source/resource/implementation owners, assignments, claims, holds, and activation gates. Existing live-CWD-holder deferral and report-only documentation are partial credit, not full recovery. No age-only lock clearing, elevation, ACL reset, process kill, force removal, manual cleanup, or new tidier is authorized by this proposal.
+- [ ] **PF8:** Preserve incumbent source/resource/implementation owners, assignments, claims, holds, and activation gates. Existing live-CWD-holder deferral and report-only documentation are partial credit, not full recovery. No age-only lock clearing, elevation, ACL reset, process kill, force removal, manual cleanup, or new tidier is authorized by this tracking intake.
 
-## Proposed Validation Plan
+## Received Validation Plan
 
 ### Track 1 — #2467
 
@@ -69,15 +69,16 @@ Campaign coordination reference: #7556. This is not a product receiving issue.
 - [ ] **PFV2:** Cover shared-clone lock contention, fetch failures, missing HEAD/linkage/admin data, interrupted/one-half removal, branch-ref failure, and repeat resume/repair. Prove atomic refusal OR supported idempotent recovery with accurate finalizing/incomplete state and continued custody.
 - [ ] **PFV3:** Through the existing separately authorized bounded lane, qualify actual Windows handle/access/inaccessible-descendant and partial-removal cases with exact diagnostics, action-time rechecks, and actionable hint. Other-platform lock simulation or a source warning alone is insufficient.
 - [ ] **PFV4:** Verify truthful structured/human outcomes for physical absence, residual tree/lost linkage, supported retry, and tracking-only retirement. Preserve unknown/holder/dirty/landing/pair/claim refusals and exact partial outcomes.
-- [ ] **PFV5:** Before any predecessor is administratively superseded, verify the eligible open recipient, materialize every transferred clause, and read back its full current body and continuing custody. This draft is not receipt. Product work, native qualification, deployment, release, or physical resource disposition is not credited here.
+- [ ] **PFV5:** Before any predecessor is administratively superseded, verify the eligible open recipient, materialize every transferred clause, and read back its full current body and continuing custody. A proposal or document alone is not receipt. Product work, native qualification, deployment, release, or physical resource disposition is not credited here.
 
 ## Continuity, custody, and status
 
-- The four predecessor trackers are proposed as subordinate workstreams of this finite parent, not as completed or subsumed work now. Keep each open until an actual qualified receiving issue contains its complete scope and the full current recipient body has been read back. This draft is not a tracker edit or a closure request.
+- The existing OPEN #1419 received the complete direct four-track Plan/Validation and its full current body was read back before #2467/#2475/#3004/#5543 retired as `NOT_PLANNED` duplicated tracking. Original bodies, titles, assignments, current discussion and source/resource custody remain unchanged; no product acceptance is declared complete.
 - Preserve each existing implementation/source/resource owner, assignment, reservation, claim, hold, and approval boundary. No owner release, claim transfer, reassignment, resource operation, or native/installed/deployment action is proposed.
 - No explicit deadlines were present in the four admitted originals. Preserve all separately recorded deadlines and expiry rules if present in their owning records; this proposal creates none.
 - A documentation correction was separately confirmed merged to `dev` in #10908 at `bc9ad742a90d106de52927ab4ca7b253a288a8ee`. Credit only that correction. It does not complete #3004's actual first-session prompt, provider preflight, rejected-push recovery, protection, or model/installed validation; no release or installation is claimed.
 - No universal acknowledgement, receipt, hash, attestation, contributor-signoff, or public-evidence gate is added. Each track retains only its own stated authority, validation, review, and delivery requirements.
+- The original #1419 K1-K5/KV1-KV4, inherited #2401/#3005 scope and the separately owned feasibility and source-discovery slices remain intact. The current sixth #3004 comment records #10908's bounded correction released through #10942; no local installation or wider KO/KOV acceptance follows. This observation is preserved directly in the receiver and record copy.
 
 ## Original admitted packets
 
