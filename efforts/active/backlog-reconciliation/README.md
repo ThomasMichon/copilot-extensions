@@ -330,6 +330,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [unit-budget replacement adjudication](<journal/2026/11.05 unit-budget-policy-reconciliation.md>)
+supplies #6733's accepted policy-replacement alternative with actual bounded
+job/teardown/aggregate observations and current supported-contract inspection.
+It proposes the finite disposition for normal review, not a transfer into a
+Draft receiver, restored native PR jobs or a new runtime test. Four returned
+current-source studies retain #10031/#10032/#10652/#10653 OPEN at their original
+acceptance tiers; #10736 supplies only the credited drain correction.
+No new tracker credit or census is claimed before actual audited effects.
+
 Six further subordinate trackers consolidate into four existing OPEN parents:
 callback cwd/failure outcomes, post-push head convergence, independent launch
 provenance and source-isolated/recoverable installer artifacts. Complete
