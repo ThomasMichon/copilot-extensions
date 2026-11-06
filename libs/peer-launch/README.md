@@ -53,13 +53,17 @@ compatibility path returning `(prefix, selected_python)`. Keep that same prefix
 for capability qualification and subsequent calls; creating a new prefix for
 each call would select again. It requires a child-free peer-owned Python
 resolver and the selected immutable slot's existing `.runtime-bootstrap`
-launcher. At execution the boundary still checks current owner/peer receipts
+launcher with build-identity support. Selection captures the existing
+`runtime-generation` UUID and a digest of the exact completion record in the
+retained prefix; subsequent calls never recapture either. At execution the boundary still checks current owner/peer receipts
 and governance and rebinds the environment, but it does not consult runtime
 selectors. The slot-local launcher acquires its existing retention lease before
-site imports and refuses incomplete or unattributable completion. Missing,
-retired or redirected slots fail without selecting another runtime or replaying
+site imports, verifies both original identity fields under that lease, and
+refuses incomplete or unattributable completion. Missing,
+retired, redirected or same-path recreated slots fail without selecting another runtime or replaying
 the operation. Dynamic `launch_prefix` and native-only legacy execution remain
-unchanged; no ordinary caller opts into pinning automatically.
+unchanged; older bootstraps and missing or malformed generation evidence refuse
+only this optional route. No ordinary caller opts into pinning automatically.
 
 Bridge's `_agent_worktrees_pinned_selection()` retains the prefix, installation
 root and interpreter for an explicit caller. It also supports its existing

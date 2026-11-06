@@ -22,11 +22,13 @@ def main() -> int:
             raise ContextRefused("missing bridge installation root")
         arguments = sys.argv[2:]
         if arguments[:1] == ["--pinned-runtime"]:
-            if len(arguments) < 2:
-                raise ContextRefused("missing pinned runtime interpreter")
+            if len(arguments) < 4 or arguments[2] != "--runtime-identity":
+                raise ContextRefused("missing pinned runtime interpreter or original build identity")
             root = _legacy_worktrees_owner_root(Path(sys.argv[1]))
-            prefix = retained_runtime_prefix(root, Path(arguments[1]), "agent_worktrees")
-            arguments = arguments[2:]
+            prefix = retained_runtime_prefix(
+                root, Path(arguments[1]), "agent_worktrees", runtime_identity=arguments[3],
+            )
+            arguments = arguments[4:]
         else:
             prefix = _legacy_worktrees_runtime_prefix(Path(sys.argv[1]))
         if not prefix:

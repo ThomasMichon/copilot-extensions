@@ -207,6 +207,7 @@ def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatc
         for source in (PLUGIN / "scripts" / "runtime_launcher.py",
                        *(PLUGIN / "scripts").glob("versioned_runtime*.py")):
             shutil.copyfile(source, bootstrap / source.name)
+        (bootstrap / "runtime-generation").write_text("1" * 32, encoding="ascii")
         marker = slot / ".install-complete.json"
         marker.write_text(json.dumps({
             **json.loads(marker.read_text()), "payload_hash": "a" * 64,
@@ -225,6 +226,49 @@ def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatc
     assert result.returncode == code, result.stderr
     assert json.loads(result.stdout) == {"argv": arguments, "stdin": payload}
     assert result.stderr == "peer stderr\n"
+    if pinned:
+        (package.parent / "_virtualenv.pth").write_text("import _virtualenv\n", encoding="utf-8")
+        (package.parent / "_virtualenv.py").write_text(
+            "import os\nfrom pathlib import Path\n"
+            "Path(os.environ['SITE_EXECUTION_SENTINEL']).write_text('site executed')\n",
+            encoding="utf-8",
+        )
+        positive = tmp_path / "expected-site-execution"
+        admitted = subprocess.run(
+            [*prefix, *arguments],
+            env={**environment, "SITE_EXECUTION_SENTINEL": str(positive)},
+            input=payload, capture_output=True, text=True, encoding="utf-8",
+            timeout=15, **no_window_kwargs(),
+        )
+        assert admitted.returncode == code, admitted.stderr
+        assert positive.read_text() == "site executed"
+        generation = bootstrap / "runtime-generation"
+        original = marker.read_text(encoding="utf-8")
+        for mutation in ("generation", "completion", "recreated-slot"):
+            if mutation == "generation":
+                generation.write_text("2" * 32, encoding="ascii")
+            elif mutation == "completion":
+                marker.write_text(json.dumps({
+                    **json.loads(original), "completed_at": "2026-02-01",
+                }), encoding="utf-8")
+            else:
+                previous = slot.with_name("original-slot-evidence")
+                slot.rename(previous)
+                shutil.copytree(previous, slot, symlinks=True)
+                generation.write_text("3" * 32, encoding="ascii")
+            sentinel = tmp_path / f"unexpected-site-{mutation}"
+            refused = subprocess.run(
+                [*prefix, *arguments],
+                env={**environment, "SITE_EXECUTION_SENTINEL": str(sentinel)},
+                input=payload, capture_output=True, text=True, encoding="utf-8",
+                timeout=15, **no_window_kwargs(),
+            )
+            assert refused.returncode != 0 and refused.stdout == "", refused.stderr
+            assert "build identity changed" in refused.stderr
+            assert not sentinel.exists()
+            if mutation != "recreated-slot":
+                generation.write_text("1" * 32, encoding="ascii")
+                marker.write_text(original, encoding="utf-8")
 
 
 def test_pinned_legacy_selection_has_no_bootstrap_or_path_fallback(installation):

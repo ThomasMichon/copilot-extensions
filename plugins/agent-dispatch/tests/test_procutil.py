@@ -356,6 +356,7 @@ def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypa
         bootstrap.mkdir()
         for source in (scripts / "runtime_launcher.py", *scripts.glob("versioned_runtime*.py")):
             shutil.copyfile(source, bootstrap / source.name)
+        (bootstrap / "runtime-generation").write_text("1" * 32, encoding="ascii")
         _update_receipt(slot / ".install-complete.json", lambda data: data.update(payload_hash="a" * 64))
     monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -399,23 +400,81 @@ def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypa
     assert refused.returncode != 0 and refused.stdout == ""
     assert not sentinel.exists()
     marker.write_text(original, encoding="utf-8")
+    slot = marker.parent
+    generation = slot / ".runtime-bootstrap" / "runtime-generation"
+    environment = first.parent.parent
+    site = (
+        environment / "Lib" / "site-packages" if os.name == "nt"
+        else environment / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    (site / "_virtualenv.pth").write_text("import _virtualenv\n", encoding="utf-8")
+    (site / "_virtualenv.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "Path(os.environ['SITE_EXECUTION_SENTINEL']).write_text('site executed')\n",
+        encoding="utf-8",
+    )
+    positive = tmp_path / "expected-site-execution"
+    admitted = subprocess.run(
+        [*pinned, "probe"], env={**os.environ, "SITE_EXECUTION_SENTINEL": str(positive)},
+        capture_output=True, encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert admitted.returncode == 0, admitted.stderr
+    assert positive.read_text() == "site executed"
+    for mutation in ("generation", "completion", "recreated-slot"):
+        if mutation == "generation":
+            generation.write_text("2" * 32, encoding="ascii")
+        elif mutation == "completion":
+            _update_receipt(marker, lambda data: data.update(completed_at="2026-02-01T00:00:00Z"))
+        else:
+            previous = slot.with_name("original-slot-evidence")
+            slot.rename(previous)
+            shutil.copytree(previous, slot, symlinks=True)
+            generation.write_text("3" * 32, encoding="ascii")
+        site_sentinel = tmp_path / f"unexpected-site-{mutation}"
+        refused = subprocess.run(
+            [*pinned, "probe"],
+            env={**os.environ, "PEER_EXECUTION_SENTINEL": str(sentinel),
+                 "SITE_EXECUTION_SENTINEL": str(site_sentinel)},
+            capture_output=True, encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+        )
+        assert refused.returncode != 0 and refused.stdout == "", refused.stderr
+        assert "build identity changed" in refused.stderr
+        assert not sentinel.exists() and not site_sentinel.exists()
+        if mutation != "recreated-slot":
+            generation.write_text("1" * 32, encoding="ascii")
+            marker.write_text(original, encoding="utf-8")
     # A retained slot does not bypass current receipt/activation governance.
     _update_receipt(peer / "installation-activation.json", lambda data: data.update(state="inactive"))
     _assert_peer_refused(pinned)
 
 
 @pytest.mark.parametrize("python_resolver", [False, True])
-def test_pinning_refuses_legacy_peer_without_retention_support(tmp_path, monkeypatch, python_resolver):
+@pytest.mark.parametrize("bootstrap_kind", ["absent", "older", "generation-missing"])
+def test_pinning_refuses_legacy_peer_without_retention_support(
+    tmp_path, monkeypatch, python_resolver, bootstrap_kind,
+):
     from agent_dispatch import peer_launch
 
     cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
     own = _make_namespaced_context(cell)
-    _make_live_peer(cell, "agent-worktrees", "1.0.0", python_resolver=python_resolver)
+    python = _make_live_peer(cell, "agent-worktrees", "1.0.0", python_resolver=python_resolver)
+    if bootstrap_kind != "absent":
+        bootstrap = python.parent.parent / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        if bootstrap_kind == "older":
+            (bootstrap / "runtime_launcher.py").write_text("def main(): pass\n", encoding="utf-8")
+        else:
+            scripts = Path(__file__).resolve().parents[2] / "agent-worktrees" / "scripts"
+            shutil.copyfile(scripts / "runtime_launcher.py", bootstrap / "runtime_launcher.py")
     monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
     monkeypatch.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("pinning launched"))
-    with pytest.raises(ValueError, match="immutable retention bootstrap|peer-owned Python resolver"):
+    with pytest.raises(
+        (OSError, ValueError),
+        match="immutable retention bootstrap|peer-owned Python resolver|build identity support|runtime-generation",
+    ):
         peer_launch.pinned_launch_prefix("agent-dispatch", own.parent, str(own), "agent-worktrees")
 
 

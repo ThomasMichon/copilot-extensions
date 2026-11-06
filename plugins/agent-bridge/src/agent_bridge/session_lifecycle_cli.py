@@ -286,11 +286,11 @@ def _agent_worktrees_pinned_selection() -> tuple[tuple[str, ...], Path, Path]:
                 raise ValueError("completed worktree owner runtime is unavailable")
             root = _legacy_worktrees_owner_root(own_root)
             python = Path(runtime[0])
-            _peer_launch.retained_runtime_prefix(root, python, "agent_worktrees")
+            identity = _peer_launch.retained_runtime_identity(root, python, "agent_worktrees")
             prefix = [
                 sys.executable, "-I", "-X", "utf8", "-m",
                 "agent_bridge.worktree_owner_launch", str(own_root),
-                "--pinned-runtime", str(python),
+                "--pinned-runtime", str(python), "--runtime-identity", identity,
             ]
         return tuple(prefix), root, python
     except (OSError, ValueError, ImportError) as error:

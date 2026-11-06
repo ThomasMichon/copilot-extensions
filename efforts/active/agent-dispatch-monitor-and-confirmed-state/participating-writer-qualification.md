@@ -72,8 +72,10 @@ Worktrees interpreter through the existing owner/peer launch boundary and
 slot-local retention bootstrap. An explicit caller can use the exact same
 command for capability qualification and subsequent acquisition/lineage
 operations. Runtime selector movement does not silently replace that writer;
-current installation governance still applies, and a missing pinned slot
-refuses without substitution. Native-only or bootstrap-less peers remain
+current installation governance still applies. The retained prefix binds the
+original completion and build-generation UUID, checked under the existing
+retention lease before site imports. Missing or same-path recreated slots
+refuse without substitution. Native-only or unsupported older bootstraps remain
 supported by ordinary legacy calls but cannot satisfy this optional route.
 This is a source compatibility seam, not ordinary assembly, independent
 workspace/resident admission or running-service qualification.

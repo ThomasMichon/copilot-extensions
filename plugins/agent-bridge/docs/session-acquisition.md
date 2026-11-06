@@ -322,7 +322,10 @@ tuple prefix to `acquisition_authority.worktree_command` and the lineage
 helpers through `owner_prefix`, including the capability call that qualifies
 the writer. Later operations recheck installation ownership/governance but
 use the same immutable Worktrees slot and its existing retention bootstrap,
-not the current selector. Legacy ownership still rejects an installation-cell
+not the current selector. The retained command binds the original completion
+record and build-generation UUID; verification under the existing lease occurs
+before site imports, so recreating the same version pathname is a refusal.
+Legacy ownership still rejects an installation-cell
 tombstone; missing retention support refuses without PATH or runtime fallback.
 Ordinary acquisition/lineage callers do not opt in automatically. This source
 seam does not establish a resident cohort, change fail-open lineage returns,
