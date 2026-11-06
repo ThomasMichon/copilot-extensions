@@ -210,11 +210,27 @@ def attach(path: str | Path, bridge: str | Path) -> socket.socket:
     host refuses the attach handshake -- the caller falls back to a direct
     in-process bridge without respawning.
     """
+    from .request_context import capture_context, supports_context
+
+    req: dict = {
+        "op": "attach", "bridge": str(bridge),
+        "configuration_context": capture_context(str(bridge)),
+    }
     sock, token = _connect(path)
-    req: dict = {"op": "attach", "bridge": str(bridge)}
     if token is not None:
         req["token"] = token
     try:
+        hello: dict = {"op": "ping"}
+        if token is not None:
+            hello["token"] = token
+        sock.sendall((json.dumps(hello) + "\n").encode())
+        line = _read_ack_line(sock)
+        try:
+            capable = supports_context(json.loads(line))
+        except (ValueError, TypeError):
+            capable = False
+        if not capable:
+            raise OSError("resident does not support caller configuration context; use the direct bridge")
         sock.sendall((json.dumps(req) + "\n").encode())
         line = _read_ack_line(sock)
     except OSError:

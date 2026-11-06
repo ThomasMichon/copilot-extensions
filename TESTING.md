@@ -5808,6 +5808,15 @@ integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/
 and unverified cleanup. These explicit native packets do not expand required
 unit-only CI, and skips are not native platform qualification.
 
+The actor-free `tests/test_resident_configuration.py` selection executes the
+native configuration consumer and qualified owner-report reader with a synthetic
+peer transport. It compares direct and resident call/attach loading from a
+neutral daemon directory, concurrent repository/source isolation, relative and
+directory-marketplace declarations, missing/mismatched context refusal, and
+pre-effect direct fallback against legacy or invalid capability replies.
+It does not qualify an installed daemon, native desktop behavior or session
+handover. Existing transport/lifecycle tests remain separately selectable.
+
 Agent MCP's focused home-binding lane is:
 
 ```text

@@ -26,6 +26,7 @@ import contextlib
 import json
 from pathlib import Path
 
+from .request_context import BRIDGE_OPS, capture_context, supports_context
 from .sockio import (
     _TCP_HOST,
     _endpoint_path,
@@ -116,7 +117,7 @@ async def request_via_socket(socket_path: str | Path, request: dict) -> dict | N
     """
     reader, writer, token = await _connect(socket_path)
     try:
-        req = dict(request)
+        req = await _qualified_request(reader, writer, token, request)
         if token is not None:
             req["token"] = token
         writer.write((json.dumps(req) + "\n").encode())
@@ -127,6 +128,29 @@ async def request_via_socket(socket_path: str | Path, request: dict) -> dict | N
         return json.loads(line)
     finally:
         await aclose_writer(writer)
+
+
+async def _qualified_request(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+    token: str | None, request: dict,
+) -> dict:
+    req = dict(request)
+    if req.get("op") not in BRIDGE_OPS:
+        return req
+    hello: dict = {"op": "ping"}
+    if token is not None:
+        hello["token"] = token
+    writer.write((json.dumps(hello) + "\n").encode())
+    await writer.drain()
+    line = await reader.readline()
+    try:
+        capable = bool(line) and supports_context(json.loads(line))
+    except (ValueError, TypeError):
+        capable = False
+    if not capable:
+        raise OSError("resident does not support caller configuration context; use the direct bridge")
+    req.setdefault("configuration_context", capture_context(str(req.get("bridge", ""))))
+    return req
 
 
 async def call_via_socket(socket_path: str | Path, bridge: str, tool: str,
@@ -175,7 +199,13 @@ async def open_attached_session(socket_path: str | Path, bridge: str | Path):
     the attach, so a consumer falls back to a direct, in-process bridge.
     """
     reader, writer, token = await _connect(socket_path)
-    req: dict = {"op": "attach", "bridge": str(bridge)}
+    try:
+        req = await _qualified_request(
+            reader, writer, token, {"op": "attach", "bridge": str(bridge)},
+        )
+    except BaseException:
+        await aclose_writer(writer)
+        raise
     if token is not None:
         req["token"] = token
     writer.write((json.dumps(req) + "\n").encode())

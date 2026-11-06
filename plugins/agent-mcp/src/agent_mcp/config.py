@@ -106,9 +106,10 @@ def _plugin_roots() -> list[Path]:
     return [home / "installed-plugins"]
 
 
-def _live_marketplace_roots() -> list[Path]:
+def _live_marketplace_roots(repository_root: Path | None = None) -> list[Path]:
     """Return directory marketplace roots declared by the nearest workspace."""
-    for root in (Path.cwd(), *Path.cwd().parents):
+    workspace = repository_root if repository_root is not None else Path.cwd()
+    for root in (workspace, *workspace.parents):
         settings = root / ".github" / "copilot" / "settings.json"
         if not settings.is_file():
             continue
@@ -360,7 +361,7 @@ def _read_file(path: Path) -> dict[str, Any]:
     return data
 
 
-def _find_plugin_bridge(name: str) -> Path | None:
+def _find_plugin_bridge(name: str, *, repository_root: Path | None = None) -> Path | None:
     """Find a plugin-shipped bridge config named ``name``.
 
     Searches live directory marketplaces from the nearest workspace first, then
@@ -369,7 +370,7 @@ def _find_plugin_bridge(name: str) -> Path | None:
     **distinct** files match within the selected source tier.
     """
     live_matches: list[Path] = []
-    for root in _live_marketplace_roots():
+    for root in _live_marketplace_roots(repository_root):
         if not root.is_dir():
             continue
         for sub in ("agents", "mcp"):
@@ -500,7 +501,7 @@ def discover_plugin_bridges() -> dict[str, Path]:
     return found
 
 
-def resolve_config_path(name_or_path: str) -> Path:
+def resolve_config_path(name_or_path: str, *, repository_root: Path | None = None) -> Path:
     """Resolve a ``--config`` value or a bare bridge name to a file path.
 
     A value containing a path separator or an explicit extension is treated as a
@@ -514,12 +515,12 @@ def resolve_config_path(name_or_path: str) -> Path:
     """
     candidate = Path(name_or_path).expanduser()
     if candidate.suffix or os.sep in name_or_path or "/" in name_or_path:
-        return candidate
+        return candidate if repository_root is None else repository_root / candidate
     for ext in (".yaml", ".yml", ".json"):
         p = BRIDGES_DIR / f"{name_or_path}{ext}"
         if p.exists():
             return p
-    plugin_hit = _find_plugin_bridge(name_or_path)
+    plugin_hit = _find_plugin_bridge(name_or_path, repository_root=repository_root)
     if plugin_hit is not None:
         return plugin_hit
     roots = ", ".join(str(r) for r in _plugin_roots())
@@ -847,11 +848,11 @@ def _apply_overlay(data: dict[str, Any], path: Path) -> dict[str, Any]:
     return _deep_merge(data, _machine_overlay(data, path))
 
 
-def load_config(name_or_path: str) -> BridgeConfig:
+def load_config(name_or_path: str, *, repository_root: Path | None = None) -> BridgeConfig:
     """Resolve, read, apply any machine-local overlay, parse, and validate."""
     from .configuration import load_native_config
 
-    return load_native_config(name_or_path)
+    return load_native_config(name_or_path, repository_root=repository_root)
 
 
 # ---------------------------------------------------------------------------
