@@ -42,6 +42,7 @@ on:
           - coverage-selection
           - pane-argv
           - generic-mux
+          - resume-pane
           - manager-uninstall
           - komodo-recovery
           - manager-suite
@@ -1467,8 +1468,8 @@ jobs:
           --timeout 300 --plugin-timeout 360 --test-timeout 60
 
   generic-mux-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'generic-mux'
-    name: Generic PSMux 3.3.8 creation (isolated session)
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'generic-mux' || inputs.portfolio == 'resume-pane')
+    name: PSMux 3.3.8 consumer qualification (isolated sessions)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -1496,7 +1497,25 @@ jobs:
           $binaries = @(Get-ChildItem -LiteralPath $root -Filter psmux.exe -Recurse -File)
           if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
           "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+          $binaries[0].DirectoryName >> $env:GITHUB_PATH
+      - name: Qualify concurrent Resume consumers before controller activation
+        if: inputs.portfolio == 'resume-pane'
+        env:
+          UV_PYTHON: "3.12"
+        shell: pwsh
+        run: |
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers --junit-dir "$env:RUNNER_TEMP\resume-evidence" --timeout 360 --plugin-timeout 600 --test-timeout 180
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain native Resume evidence
+        if: always() && inputs.portfolio == 'resume-pane'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-resume-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resume-evidence
+          if-no-files-found: error
+          retention-days: 2
       - name: Qualify generic creation and truthful verification
+        if: inputs.portfolio == 'generic-mux'
         env:
           PSMUX_FILE_LAUNCH_E2E: "1"
           UV_PYTHON: "3.12"

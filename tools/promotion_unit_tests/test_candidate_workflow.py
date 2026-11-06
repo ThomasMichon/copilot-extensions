@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import yaml
+import release_controller_contract as control
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -55,6 +56,60 @@ def test_real_controller_publication_requires_explicit_candidate_profile():
     assert "candidate-units-v3" in jobs["merge-promotion"]["if"]
     assert "compose-candidate" in jobs["report-failure"]["needs"]
     assert "needs.compose-candidate.result == 'failure'" in jobs["report-failure"]["if"]
+
+
+def test_every_frozen_candidate_requires_native_windows_resume_before_publication():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_text())["jobs"]
+    native = jobs["native-resume-windows"]
+    assert set(native["needs"]) == {"gate", "compose-candidate"}
+    assert native["if"] == (
+        "needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true'"
+    )
+    assert native["runs-on"] == "windows-latest"
+    assert native["permissions"] == {"contents": "read"}
+    assert "continue-on-error" not in native
+    steps = native["steps"]
+    assert not any(step.get("continue-on-error") for step in steps)
+    assert any(step.get("with", {}).get("name") == "frozen-promotion-candidate" for step in steps)
+    commands = "\n".join(step.get("run", "") for step in steps)
+    assert "promotion_frozen_candidate.py" in commands
+    assert '--candidate-sha "$CANDIDATE_SHA"' in commands
+    assert any(
+        step.get("env", {}).get("CANDIDATE_SHA")
+        == "${{ needs.compose-candidate.outputs.candidate_sha }}" for step in steps
+    )
+    assert 'Set-Location "$env:RUNNER_TEMP\\candidate"' in commands
+    assert "--test-file tests/native/test_resume_pane_startup.py" in commands
+    assert "--allow-explicit-tiers" in commands
+    assert "Get-FileHash" in commands and "PSMUX_TEST_BIN=" in commands
+    assert "PSMUX_TEST_BIN=" not in str(native.get("env", {}))
+    for name in ("python-artifacts", "promote", "report-failure"):
+        assert "native-resume-windows" in jobs[name]["needs"]
+    promote = "\n".join(step.get("run", "") for step in jobs["promote"]["steps"])
+    assert '"${{ needs.native-resume-windows.result }}"' in promote
+    assert "needs.native-resume-windows.result == 'failure'" in jobs["report-failure"]["if"]
+
+
+def test_real_candidate_controller_keeps_all_helper_invocations_compatible():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_text())
+    implementations = {
+        name: (ROOT / "tools" / name).read_bytes()
+        for name in control.helper_implementations(workflow)
+    }
+    control.verify_helper_selection(workflow)
+    control.verify_controller_inputs(workflow, implementations)
+
+
+def test_manual_resume_qualification_does_not_depend_on_the_generic_mux_packet():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/installation-context-full.yml").read_text())
+    events = workflow.get("on", workflow.get(True))
+    assert "resume-pane" in events["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    job = workflow["jobs"]["generic-mux-windows"]
+    assert "inputs.portfolio == 'resume-pane'" in job["if"]
+    resume = next(step for step in job["steps"] if "test_resume_pane_startup.py" in step.get("run", ""))
+    generic = next(step for step in job["steps"] if "test_generic_mux_startup.py" in step.get("run", ""))
+    assert resume["if"] == "inputs.portfolio == 'resume-pane'"
+    assert generic["if"] == "inputs.portfolio == 'generic-mux'"
 
 
 def test_complete_source_is_attested_and_read_back_before_the_final_main_pr():

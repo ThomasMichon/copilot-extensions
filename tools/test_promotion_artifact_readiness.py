@@ -726,7 +726,10 @@ def _assert_readiness_ci(jobs, *, builder_minutes, split_publication):
         assert set(jobs) == {"checks", "unit-tests", "pr-gate"}
         assert jobs["unit-tests"]["timeout-minutes"] == 5
         assert jobs["unit-tests"]["permissions"] == {"contents": "read", "actions": "read"}
-        assert jobs["unit-tests"]["if"] == "github.event_name != 'push'"
+        assert jobs["unit-tests"]["if"] == (
+            "github.event_name != 'push' && "
+            "(github.event_name != 'pull_request' || github.event.pull_request.state != 'closed')"
+        )
         assert set(jobs["pr-gate"]["needs"]) == {"checks", "unit-tests"}
         manifest = json.loads((Path(__file__).resolve().parent / "promotion-unit-manifest.json").read_bytes())
         assert {
