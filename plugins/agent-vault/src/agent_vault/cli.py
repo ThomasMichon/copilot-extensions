@@ -1594,7 +1594,6 @@ def cmd_vault_remove(args):
 
 def main(argv: list[str] | None = None):
     from .invocation import invoke_cli
-
     return invoke_cli(_main, sys.argv[1:] if argv is None else argv)
 
 
