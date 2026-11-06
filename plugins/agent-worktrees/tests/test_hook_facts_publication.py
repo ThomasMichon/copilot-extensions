@@ -132,6 +132,39 @@ def test_removed_failed_and_closed_publications_withdraw_and_recover(owner, tmp_
     assert path.exists()
 
 
+@pytest.mark.parametrize("missing", ["file", "hook-facts", "worktree"])
+def test_missing_derived_path_does_not_withdraw_surviving_worktree(owner, tmp_path, missing):
+    runtime, publisher, project = owner
+    survivor = row(tmp_path, id="survivor")
+    runtime.publish("project", [row(tmp_path), survivor], observed_at=1)
+    removed = output_path(publisher, project)
+    retained = project / "worktrees" / "survivor" / "hook-facts" / removed.name
+    original = retained.read_bytes()
+    removed.unlink()
+    if missing != "file":
+        removed.parent.rmdir()
+    if missing == "worktree":
+        removed.parent.parent.rmdir()
+    for observed_at in (2, 3):
+        runtime.publish("project", [survivor], observed_at=observed_at)
+        assert retained.read_bytes() == original
+        assert publisher.error is None
+    runtime.publish("project", [row(tmp_path), survivor], observed_at=4)
+    assert removed.is_file() and retained.read_bytes() == original
+
+
+def test_withdrawal_refuses_replaced_derived_directory(owner, tmp_path):
+    runtime, publisher, project = owner
+    runtime.publish("project", [row(tmp_path)], observed_at=1)
+    path = output_path(publisher, project)
+    path.unlink()
+    path.parent.rmdir()
+    path.parent.write_bytes(b"not an owned directory")
+    publisher.withdraw("project")
+    assert path.parent.read_bytes() == b"not an owned directory"
+    assert publisher.error == "ValueError"
+
+
 def test_same_build_replacement_has_distinct_files_and_old_close_is_local(owner, tmp_path):
     runtime, old, project = owner
     runtime.publish("project", [row(tmp_path)], observed_at=1)

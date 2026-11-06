@@ -134,14 +134,14 @@ class HookFactsPublisher:
         return raw
 
     def _remove(self, root: Path, path: Path) -> None:
-        home = self._home(root, path.parent.parent.name, create=False)
-        if path.parent != home:
-            raise ValueError("hook fact home changed")
         try:
+            home = self._home(root, path.parent.parent.name, create=False)
+            if path.parent != home:
+                raise ValueError("hook fact home changed")
             _child(path, directory=False)
+            path.unlink()
         except FileNotFoundError:
             return
-        path.unlink()
 
     def withdraw(self, project: str) -> None:
         with self._lock:
