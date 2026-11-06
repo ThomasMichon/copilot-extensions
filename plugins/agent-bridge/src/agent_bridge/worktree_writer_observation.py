@@ -50,10 +50,28 @@ def observe() -> dict:
     if selection is None or selection[1] is None:
         return unknown
     _prefix, root, python = selection
+    context = lifecycle._agent_bridge_installation_context()
+    if python is None and context:
+        try:
+            python = lifecycle._peer_launch.observe_peer_python(
+                "agent-bridge", lifecycle._agent_bridge_owner_root(),
+                context, "agent-worktrees",
+            )
+        except (OSError, ValueError, ImportError):
+            return unknown
     generation = _slot_generation(root, python)
     if (
         lifecycle._agent_worktrees_runtime_selection(allow_path_fallback=False) != selection
         or _slot_generation(root, python) != generation
     ):
         return unknown
+    if context and python is not None:
+        try:
+            if lifecycle._peer_launch.observe_peer_python(
+                "agent-bridge", lifecycle._agent_bridge_owner_root(),
+                context, "agent-worktrees",
+            ) != python:
+                return unknown
+        except (OSError, ValueError, ImportError):
+            return unknown
     return {"installation_root": str(root), "runtime_generation": generation}

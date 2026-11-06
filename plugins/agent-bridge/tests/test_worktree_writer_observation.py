@@ -46,6 +46,7 @@ def test_health_observes_canonical_writer_selection_without_launch(
             side_effect=ValueError("invalid owner") if selection == "refused" else None,
         ))
         monkeypatch.setattr(lifecycle._peer_launch, "launch_prefix", lambda *args: ["cell-owner"])
+        monkeypatch.setattr(lifecycle._peer_launch, "observe_peer_python", lambda *args: None)
         monkeypatch.setattr(lifecycle.shutil, "which", lambda name: pytest.fail("cell used PATH"))
     monkeypatch.setattr(
         lifecycle.subprocess, "run", lambda *a, **k: pytest.fail("health launched a child"),
@@ -261,7 +262,7 @@ def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
     with TestClient(app) as client:
         for _ in range(32):
             assert client.get("/health").json()["worktree_record_writer"] == {
-                "installation_root": str(own.parent / "agent-worktrees"),
+                "installation_root": None,
                 "runtime_generation": None,
             }
         assert load.call_count == 1
@@ -274,7 +275,75 @@ def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(
             }
             path.write_text(original, encoding="utf-8")
             assert client.get("/health").json()["worktree_record_writer"] == {
-                "installation_root": str(own.parent / "agent-worktrees"),
+                "installation_root": None,
                 "runtime_generation": None,
             }
         assert load.call_count == 1
+
+
+@pytest.mark.parametrize("case", [
+    "known", "native-only", "changed", "refused", "replaced-code",
+    "runtime-error", "syntax-error", "late-runtime-error", "late-syntax-error",
+    "validator-error", "late-validator-error",
+])
+def test_same_cell_health_rechecks_peer_selection_without_launch(tmp_path, monkeypatch, case):
+    root = tmp_path / "marketplaces" / "fixture" / "plugins" / "agent-worktrees"
+    slot = root / "versions" / "1.0.0"
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"selected fixture")
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    (bootstrap / "runtime-generation").write_text("a" * 32, encoding="ascii")
+    monkeypatch.setattr(lifecycle, "_agent_worktrees_runtime_selection",
+                        lambda **kw: (["native-owner"], root, None))
+    monkeypatch.setattr(lifecycle, "_agent_bridge_installation_context", lambda: "receipt")
+    monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: root.with_name("agent-bridge"))
+    observed = []
+    if "error" in case:
+        scripts = tmp_path / "peer-payload" / "scripts"
+        scripts.mkdir(parents=True)
+        source = (
+            "def broken(:\n" if "syntax" in case else
+            "def resolve_python(root):\n raise RuntimeError('fixture failure')\n"
+        )
+        (scripts / "versioned_runtime.py").write_text(source, encoding="utf-8")
+        monkeypatch.setattr(lifecycle._peer_launch, "_peer_runtimes", {})
+        if "validator" in case:
+            primitive = scripts / "installation-context"
+            primitive.mkdir()
+            (primitive / "installation_context.py").write_text("def broken(:\n", encoding="utf-8")
+
+    def select(*args):
+        observed.append(args)
+        if "error" in case and (not case.startswith("late-") or len(observed) == 2):
+            if "validator" in case:
+                return lifecycle._peer_launch._load_primitive(
+                    primitive / "installation_context.py", "_broken_peer_validator_fixture",
+                )
+            return lifecycle._peer_launch._peer_python_inprocess({
+                "payloadRoot": str(scripts.parent), "pluginRoot": str(root),
+                "pluginId": "agent-worktrees", "versionsRoot": str(root / "versions"),
+            })
+        if case == "native-only":
+            return None
+        if case == "refused" or (case == "replaced-code" and len(observed) == 2):
+            raise ValueError("peer evidence unavailable")
+        if case == "changed" and len(observed) == 2:
+            return python.with_name("different")
+        return python
+
+    monkeypatch.setattr(lifecycle._peer_launch, "observe_peer_python", select)
+    monkeypatch.setattr(lifecycle.subprocess, "run", lambda *a, **k: pytest.fail("health launched"))
+    monkeypatch.setattr(health, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(health, "get_default_manager",
+                        lambda: SimpleNamespace(carrier_diagnostics=lambda: {}))
+    app = FastAPI()
+    app.include_router(health.router)
+    with TestClient(app) as client:
+        result = client.get("/health")
+    assert result.status_code == 200
+    assert result.json()["worktree_record_writer"] == {
+        "installation_root": str(root) if case in {"known", "native-only"} else None,
+        "runtime_generation": "a" * 32 if case == "known" else None,
+    }

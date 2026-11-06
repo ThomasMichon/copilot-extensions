@@ -28,6 +28,8 @@ The conditional selected-writer adapter subsequently merged in #10806;
 its independent admission callback is still not ordinary cohort assembly.
 The physical application-slot peer-launch prerequisite subsequently merged in
 #10813; it repairs selected execution, not generation-bound admission.
+Legacy selected-slot generation observation subsequently merged in #10822;
+same-cell generation, live delegated-writer support and cohort admission stay open.
 Next, bind generation-aware independent admission to those writers and qualify
 ordinary submission consumers,
 then post-stop same-native recovery and the complete running
