@@ -52,6 +52,7 @@ def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeyp
     facts = owner.inventory()
     assert facts["runtime_sources"] == {
         "schema": "copilot-extensions.prepared-runtime-sources", "version": 1,
+        "prepared_install_source": 1,
         "target_contract": {"schema": "copilot-extensions.runtime-source-target", "version": 1},
     }
     rows = {row["id"]: row for row in facts["entries"]}
@@ -94,8 +95,30 @@ def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, m
     assert capability == ({
         "schema": "copilot-extensions.project-update-delegation",
         "version": 1, "engine_fallback": True, "isolated_runtime_phase": True,
-        "targeted_payload_install": False,
+        "targeted_payload_install": False, "project_integration": False,
     } if capable else None)
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_project_integration_capability_requires_selected_runtime(installed, monkeypatch, tmp_path, foreign):
+    from agent_worktrees import manager_launch_cli, manager_recovery, update_integration
+
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
+    for module in (update_cli, update_integration, manager_launch_cli, manager_recovery):
+        root = tmp_path / "foreign" if foreign and module is update_integration else prefix / "site"
+        monkeypatch.setattr(
+            module, "__file__", str(root / "agent_worktrees" / f"{module.__name__.split('.')[-1]}.py"),
+        )
+    driver = SimpleNamespace(
+        __file__=str(prefix / "site" / "update_driver" / "__init__.py"),
+        UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1",
+        current_authority=lambda **_kwargs: None, borrowed_custody=lambda: None,
+        participant_environment=lambda: {}, status=lambda *_a, **_k: None,
+        runtime_command=lambda *_a, **_k: None,
+    )
+    monkeypatch.setitem(sys.modules, "update_driver", driver)
+    capability = owner.inventory()["project_controller_delegation"]
+    assert capability["project_integration"] is not foreign
 
 
 @pytest.mark.parametrize("foreign", [False, True])

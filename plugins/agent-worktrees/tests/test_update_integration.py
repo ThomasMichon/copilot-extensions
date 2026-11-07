@@ -140,6 +140,81 @@ def test_unadopted_manager_does_not_install_or_refresh_profiles(monkeypatch, tmp
     assert integration.finish(tmp_path, "windows", {})
 
 
+@pytest.mark.parametrize("adopted", [False, True])
+def test_controller_owned_integration_never_repairs_manager(monkeypatch, tmp_path, adopted):
+    from agent_worktrees import manager_launch_cli, manager_recovery
+
+    calls = []
+    root = tmp_path / "manager"
+    monkeypatch.setattr(manager_recovery, "recover", lambda: pytest.fail("Manager repair was invoked"))
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: root)
+    monkeypatch.setattr(
+        manager_recovery, "adopted_manager",
+        lambda: SimpleNamespace(root=root, verify=lambda: calls.append("verify")) if adopted else None,
+    )
+    monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: calls.append("binstubs") or {})
+    monkeypatch.setattr(
+        integration.picker_profiles_cli, "_refresh_terminal_profiles",
+        lambda: calls.append("profiles") or True,
+    )
+    assert integration.finish(tmp_path, "windows", {}, manager_owned_by_controller=True)
+    assert calls == (["verify", "binstubs", "profiles", "verify"] if adopted else ["binstubs"])
+
+
+def test_controller_owned_integration_refuses_changed_manager_adoption(monkeypatch, tmp_path):
+    from agent_worktrees import manager_launch_cli, manager_recovery
+
+    def changed():
+        raise manager_recovery.RecoveryRefused("Manager registration changed")
+
+    root = tmp_path / "manager"
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: root)
+    monkeypatch.setattr(
+        manager_recovery, "adopted_manager", lambda: SimpleNamespace(root=root, verify=changed),
+    )
+    monkeypatch.setattr(
+        integration.installer, "reconcile_binstubs",
+        lambda: pytest.fail("integration continued after adoption changed"),
+    )
+    assert not integration.finish(tmp_path, "windows", {}, manager_owned_by_controller=True)
+
+
+def test_controller_owned_integration_refuses_foreign_manager_root(monkeypatch, tmp_path):
+    from agent_worktrees import manager_launch_cli, manager_recovery
+
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: tmp_path / "selected")
+    monkeypatch.setattr(
+        manager_recovery, "adopted_manager",
+        lambda: SimpleNamespace(
+            root=tmp_path / "other", verify=lambda: pytest.fail("foreign Manager was accepted"),
+        ),
+    )
+    monkeypatch.setattr(
+        integration.installer, "reconcile_binstubs", lambda: pytest.fail("integration ran"),
+    )
+    assert not integration.finish(tmp_path, "windows", {}, manager_owned_by_controller=True)
+
+
+def test_controller_owned_integration_detects_late_adoption_change(monkeypatch, tmp_path):
+    from agent_worktrees import manager_launch_cli, manager_recovery
+
+    root = tmp_path / "manager"
+    calls = []
+
+    def verify():
+        calls.append("verify")
+        if len(calls) == 2:
+            raise manager_recovery.RecoveryRefused("Manager registration changed")
+
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: root)
+    monkeypatch.setattr(
+        manager_recovery, "adopted_manager", lambda: SimpleNamespace(root=root, verify=verify),
+    )
+    monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: {})
+    assert not integration.finish(tmp_path, "linux", {}, manager_owned_by_controller=True)
+    assert calls == ["verify", "verify"]
+
+
 @pytest.mark.parametrize("status", ["current", "not-adopted", "recovered"])
 def test_successful_recovery_preserves_the_final_update_exit(monkeypatch, tmp_path, status):
     from agent_worktrees import manager_recovery, update_events
