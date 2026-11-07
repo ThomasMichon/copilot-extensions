@@ -58,6 +58,93 @@ def test_helper_pins_only_manager_source_and_prepares_under_its_held_lease(
     assert (root / "config.toml").read_bytes() == config
 
 
+@pytest.mark.parametrize("relative_root", [False, True])
+def test_source_acceptance_patches_activation_in_the_drivers_actual_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_root: bool,
+) -> None:
+    import json
+    import os
+    import sys
+
+    native = Path(__file__).parent / "native"
+    monkeypatch.syspath_prepend(str(native))
+    import test_manager_source_install as fixture
+
+    scripts = tmp_path / "payload" / "scripts"
+    scripts.mkdir(parents=True)
+    root = tmp_path / "fixture"
+    (root / "versions" / "candidate").mkdir(parents=True)
+    (scripts / "runtime_install.py").write_text(
+        """
+import json,os,subprocess,sys
+from pathlib import Path
+from types import SimpleNamespace
+runtime=SimpleNamespace(is_complete=lambda root,version: version=="candidate")
+driver=SimpleNamespace(TrustedRunner=lambda argv: SimpleNamespace(argv=argv))
+def _execution_driver(payload):
+    return driver
+def _activate_after_bootstrap_update(root,slot):
+    raise AssertionError("fixture child missed the activation patch")
+def main(arguments):
+    root=Path(arguments[1])
+    if arguments[0]=="child":
+        result=_activate_after_bootstrap_update(root,root/"versions"/"candidate")
+        print(json.dumps({"pid":os.getpid(),"activation":result}))
+        return 0
+    runner=driver.TrustedRunner([
+        sys.executable,"-I","-S","-B",str(Path(__file__)),"child",str(root),
+    ])
+    child=subprocess.run(
+        runner.argv,capture_output=True,text=True,timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0,
+    )
+    if child.returncode:
+        print(child.stderr,file=sys.stderr)
+        return child.returncode
+    print(json.dumps({"pid":os.getpid(),"child":json.loads(child.stdout)}))
+    return 0
+if __name__=="__main__":
+    raise SystemExit(main(sys.argv[1:]))
+""",
+        encoding="utf-8",
+    )
+    result = fixture._fixture_command([
+        Path(sys.executable), "-I", "-S", "-B", scripts / "runtime_install.py", "parent",
+        root.relative_to(tmp_path) if relative_root else root,
+    ], dict(os.environ), tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert len({os.getpid(), observed["pid"], observed["child"]["pid"]}) == 3
+    assert observed["child"]["activation"] == {
+        "action": "fixture", "slot": str(root / "versions" / "candidate"),
+    }
+    receipt, = (root / "source-fixture-activation.jsonl").read_text().splitlines()
+    assert json.loads(receipt) == {
+        "pid": observed["child"]["pid"], "root": str(root), "slot": str(root / "versions" / "candidate"),
+    }
+
+
+def test_source_acceptance_snapshot_capture_keeps_complete_inputs_and_restores_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
+    import test_manager_source_install as fixture
+
+    snapshot = tmp_path / "applications" / "owned" / "profiles" / "worktree-manager" / "snapshot"
+    calls = []
+
+    def prepare(*args: object, **options: object) -> dict[str, Path]:
+        calls.append((args, options))
+        return {"worktree-manager": snapshot}
+
+    monkeypatch.setattr(update, "prepare_applications", prepare)
+    with fixture._selected_snapshot() as captured:
+        assert update.prepare_applications("trusted-tool", deadline=100) == {"worktree-manager": snapshot}
+        assert captured == [snapshot]
+    assert update.prepare_applications is prepare
+    assert calls == [(("trusted-tool",), {"deadline": 100})]
+
+
 @pytest.mark.parametrize("mismatch", [None, "commit", "tree", "seed", "application"])
 def test_complete_manager_selection_is_revalidated_then_held_through_consumption(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mismatch: str | None,
