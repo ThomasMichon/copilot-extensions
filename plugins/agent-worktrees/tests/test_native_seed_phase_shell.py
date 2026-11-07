@@ -32,9 +32,13 @@ def _bash() -> str:
 
 def _slot(
     root: Path, version: str, *, exit_code: int = 0, tail: str = "", malformed: bool = False,
+    application: bool = False,
 ) -> bytes:
     slot = root / "versions" / version
-    (slot / "bin").mkdir(parents=True)
+    environment = slot / ".venv" if application else slot
+    (environment / "bin").mkdir(parents=True)
+    if application:
+        (slot / "application.json").write_text("{}", encoding="utf-8")
     (slot / ".runtime-bootstrap").mkdir()
     (slot / ".runtime-bootstrap" / "runtime_launcher.py").write_text("# fixture\n", encoding="utf-8")
     (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
@@ -46,7 +50,7 @@ def _slot(
     }).decode("utf-8").split("\0")[:-1]
     if malformed:
         fields[0] = "malformed"
-    python = slot / "bin" / "python"
+    python = environment / "bin" / "python"
     python.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'trap \'printf "%s" "$?" > "${0%/versions/*}/provider-status"\' EXIT\n'
@@ -85,14 +89,26 @@ def _run(
         return result
 
 
-def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: Path) -> None:
+@pytest.mark.parametrize("application", [False, True], ids=["legacy", "application"])
+def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: Path, application) -> None:
     root = tmp_path / "runtime"
-    expected = _slot(root, "A")
+    expected = _slot(root, "A", application=application)
     (root / "current-version").write_text("A\n", encoding="utf-8", newline="\n")
     result = _run('. "$1"; aw_native_seed_phase "$2" --phase prepare --output-format nul', [root])
     assert result.returncode == 0, result.stderr
     assert result.stdout.encode("utf-8") == expected
     assert not result.stderr
+
+
+def test_incomplete_application_cannot_select_a_leftover_flat_interpreter(tmp_path):
+    root = tmp_path / "runtime"
+    _slot(root, "A")
+    (root / "versions" / "A" / "application.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text("A\n", encoding="utf-8", newline="\n")
+    result = _run('. "$1"; aw_native_seed_phase "$2" --phase prepare --output-format nul', [root])
+    assert result.returncode == 3
+    assert not result.stdout
+    assert not (root / "observed").exists()
 
 
 def test_control_lookup_ignores_exported_functions_and_preserves_backend_path(tmp_path: Path) -> None:

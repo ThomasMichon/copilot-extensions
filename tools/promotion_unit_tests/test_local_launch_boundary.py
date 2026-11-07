@@ -21,7 +21,7 @@ def boundary(monkeypatch, tmp_path):
     package.__path__ = [str(source)]
     monkeypatch.setitem(sys.modules, package_name, package)
     installer = ModuleType(f"{package_name}.installer")
-    installer.install_dir = lambda: tmp_path
+    installer.scripts_dir = lambda: tmp_path / "scripts"
     monkeypatch.setitem(sys.modules, installer.__name__, installer)
 
     def load(name, path):
