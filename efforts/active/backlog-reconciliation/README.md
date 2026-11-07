@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [exact-session receiving contract](<journal/2026/11.06 exact-session-receiving-contract.md>)
+receives #11181's complete admission, retirement and RPC-boundary requirements
+directly in OPEN #6394, preserving its original alternatives, all existing
+acceptance and source/resource custody. Normal review and a separate current
+source judgment precede any tracking retirement. Two complete equal scans
+measure 813 whole OPEN, 84 above fixed 729; Phase 2 remains Active.
+
 The [late-provider and incremental-capture study](<journal/2026/11.06 late-provider-and-incremental-capture-boundaries.md>)
 confirms the current pre-filter enumeration defect and keeps two OPEN MCP
 providers, a merged strict-mode correction and daemon observation qualification
