@@ -26,9 +26,11 @@ same owned-preimage checks, then rebinds the declaration after candidate rewrite
 Malformed declarations and foreign candidate replacements still refuse copying.
 
 The single-consumer wrapper used by source preparation and previews invokes the
-same verified refresh after native-reference conversion succeeds. Already-local
-writers and standalone Python consumers are covered there too. The whole-tree
-composer keeps its existing single refresh pass.
+same verified refresh. Canonical references refresh missing or stale support
+assets after reference validation and before native conversion; foreign assets
+refuse conversion. Already-local writers and standalone Python consumers are
+covered after conversion succeeds. The whole-tree composer keeps its existing
+single refresh pass.
 
 Validation phases are explicit:
 

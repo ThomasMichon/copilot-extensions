@@ -493,6 +493,47 @@ def test_single_consumer_wrapper_refreshes_declared_standalone_assets(tmp_path, 
                       for path in canonical.rglob("*") if path.is_file()}
 
 
+@pytest.mark.parametrize("case", ["absent", "stale", "foreign"])
+def test_single_consumer_canonical_reference_refreshes_support_before_conversion(tmp_path, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source = canonical / "plugins/agent-vault"
+    for ext in ("ps1", "sh"):
+        text = engine.canonical_line(ext) + "\n"
+        _write(source / f"scripts/install.{ext}", text)
+        _write(destination / f"scripts/install.{ext}", text)
+        _write(canonical / f"libs/installer-engine/installer-engine.{ext}",
+               "# fixture engine uses " + engine.SUPPORT_FILES[0] + "\n")
+    for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES):
+        _write(canonical / "libs/installer-engine" / name, "# canonical " + name + "\n")
+    if case != "absent":
+        _write(source / "scripts/installer_engine_commands.py", "# admitted older helper\n")
+        _write(destination / "scripts/installer_engine_commands.py",
+               "# foreign helper\n" if case == "foreign" else "# admitted older helper\n")
+    before = {path.relative_to(canonical): path.read_bytes()
+              for path in canonical.rglob("*") if path.is_file()}
+    candidate_before = {path.relative_to(destination): path.read_bytes()
+                        for path in destination.rglob("*") if path.is_file()}
+    log = materializer.materialize_installer_engine_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=canonical,
+    )
+    if case == "foreign":
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert candidate_before == {path.relative_to(destination): path.read_bytes()
+                                    for path in destination.rglob("*") if path.is_file()}
+    else:
+        assert log and all(line.startswith("OK") for line in log), log
+        for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES, "installer-engine.ps1", "installer-engine.sh"):
+            assert (destination / "scripts" / name).read_bytes() == (
+                canonical / "libs/installer-engine" / name
+            ).read_bytes()
+        for ext in ("ps1", "sh"):
+            assert engine.is_local_ref(
+                engine.find_engine_ref(destination / f"scripts/install.{ext}", ext), destination,
+            )
+    assert before == {path.relative_to(canonical): path.read_bytes()
+                      for path in canonical.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize("case", ["valid", "fresh-file", "yanked-file", "missing-hash"])
 def test_public_release_selection_ages_every_file_and_binds_hashes(case):
     def file(digest, timestamp="2026-01-01T00:00:00Z"):

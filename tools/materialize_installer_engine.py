@@ -300,8 +300,23 @@ def materialize_ref_into(
         if dest_engine.exists() or dest_engine.is_symlink():
             log.append(f"SKIP {dest_engine}: already exists -- refusing to overwrite")
             continue
+        support_names = ier.support_files(canonical.parent)
+        if any(
+            not (canonical.parent / name).is_file()
+            or not (dest_engine.parent / name).is_file()
+            or (dest_engine.parent / name).read_bytes() != (canonical.parent / name).read_bytes()
+            for name in support_names
+        ):
+            refreshed = materialize_derived_files(
+                dest_consumer_dir, canonical_root=canonical_root,
+                copied_consumer=(source_consumer_dir, dest_consumer_dir),
+                file_names=frozenset(support_names),
+            )
+            log.extend(refreshed)
+            if any(line.startswith("SKIP") for line in refreshed):
+                return log
         support_assets = []
-        for name in ier.support_files(canonical.parent):
+        for name in support_names:
             source_asset = canonical.parent / name
             dest_asset = dest_engine.parent / name
             if (_find_symlinked_ancestor(source_asset, canonical_root_r) is not None
