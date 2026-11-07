@@ -19,6 +19,10 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap_update.py"
 sys.path.insert(0, str(SCRIPT.parent))
 
 
+def _legacy_authority(**_kwargs):
+    return core.authority.UpdateAuthority()
+
+
 @pytest.fixture(autouse=True)
 def retained_inputs(tmp_path, monkeypatch):
     import bootstrap_inputs
@@ -86,6 +90,7 @@ def test_bootstrap_update_journals_scope_and_waits_for_the_whole_result(
 
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=enqueue, drain=drain, wait=wait, default_root=lambda: tmp_path,
     )
     args = SimpleNamespace(
@@ -109,6 +114,47 @@ def test_bootstrap_update_journals_scope_and_waits_for_the_whole_result(
     assert not capsys.readouterr().out
 
 
+@pytest.mark.parametrize("mode", ["standalone", "project"])
+def test_bootstrap_repair_obeys_configured_authority(tmp_path, monkeypatch, mode):
+    import bootstrap_inputs
+
+    tmp_path = tmp_path.resolve()
+    payload, queue = tmp_path / "source", tmp_path / "driver"
+    payload.mkdir()
+    core.change_authority(
+        mode, project="example" if mode == "project" else "", root=queue, timeout=5,
+        verify_capabilities=lambda _deadline: True,
+    )
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+    captured = []
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        DriverError=core.DriverError, StateError=core.StateError, InterruptedError=core.InterruptedError,
+        default_root=lambda: queue,
+        current_authority=lambda **kwargs: core.current_authority(root=queue, **kwargs),
+        enqueue=lambda spec, **kwargs: core.enqueue(spec, root=queue, **kwargs),
+        drain=lambda: core.drain(root=queue, executor=lambda transaction: captured.append(transaction.request) or 0),
+        wait=lambda request_id, **kwargs: core.wait(request_id, root=queue, **kwargs),
+    )
+    args = SimpleNamespace(
+        payload=payload, root=tmp_path / "manager",
+        command=["update", "--supervised-debug", "--repair-engine", str(payload), "--project", "sample"],
+        repair_update=True, install_source=None,
+    )
+    if mode == "project":
+        monkeypatch.setattr(bootstrap_inputs, "retain", lambda *_a, **_kw: pytest.fail("unselected bootstrap ran"))
+        assert runpy.run_path(str(SCRIPT))["execute"](args, driver, source_digest="a" * 64) == 1
+        assert not core.status(root=queue)
+    else:
+        assert runpy.run_path(str(SCRIPT))["execute"](args, driver, source_digest="a" * 64) == 0
+        assert len(captured) == 1
+        request = captured[0]
+        assert request.spec.authority == "standalone"
+        assert "--no-project-controller" in request.spec.argv
+        assert "--no-project-controller" in request.runner.argv
+
+
 @pytest.mark.parametrize("state", ["interrupted", "blocked"])
 def test_bootstrap_update_does_not_report_unfinished_work_as_success(tmp_path, monkeypatch, state):
     execute = runpy.run_path(str(SCRIPT))["execute"]
@@ -116,6 +162,7 @@ def test_bootstrap_update_does_not_report_unfinished_work_as_success(tmp_path, m
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         default_root=lambda: tmp_path,
         enqueue=lambda *a, **k: SimpleNamespace(id="fixture", log_path=tmp_path / "log"),
         drain=lambda: None,
@@ -162,6 +209,7 @@ def test_default_update_observes_a_retained_worker_instead_of_running_installers
 
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         default_root=lambda: tmp_path,
         enqueue=lambda *a, **k: request, ensure_worker=worker, wait=wait,
         drain=lambda: pytest.fail("ordinary observer ran installation"),
@@ -199,6 +247,7 @@ def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monk
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=enqueue, default_root=lambda: tmp_path, drain=lambda: None,
         wait=lambda *a, **k: SimpleNamespace(state="completed", exit_code=23),
     )
@@ -230,6 +279,7 @@ def test_bootstrap_retains_effective_budget_only_for_suite_execution(
     captured = []
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=lambda spec, **kwargs: captured.append((spec, kwargs["runner"]))
         or SimpleNamespace(id="fixture", log_path=tmp_path / "log"),
         default_root=lambda: tmp_path, drain=lambda: None,
@@ -277,6 +327,7 @@ def test_observer_modes_share_the_actual_pending_installation_recipe(
 
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         default_root=lambda: queue,
         enqueue=lambda spec, **kwargs: core.enqueue(spec, root=queue, **kwargs),
         ensure_worker=worker, wait=wait, drain=lambda: events.append("drain"),
@@ -410,6 +461,7 @@ def test_bootstrap_source_identity_is_captured_before_retention(tmp_path, monkey
     monkeypatch.setattr(bootstrap_inputs, "retain", retain)
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=enqueue, default_root=lambda: tmp_path, drain=lambda: None,
         wait=lambda *a, **k: SimpleNamespace(state="completed", exit_code=23),
     )

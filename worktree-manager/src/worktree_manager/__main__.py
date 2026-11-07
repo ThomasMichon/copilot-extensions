@@ -1143,7 +1143,9 @@ def _run_production_picker(project: str, *, initial_decision=None) -> int:
         if action in ("refresh", "manager-update"):
             # Apply the update, then loop back to reopen the Picker rather
             # than exiting the process (#4423).
-            _cmd_update(["--project", project])
+            from .update_driver_cli import cmd_update_request
+
+            cmd_update_request(["--project", project])
             continue
         if action == "open-venue":
             from . import launch_observations, launcher
