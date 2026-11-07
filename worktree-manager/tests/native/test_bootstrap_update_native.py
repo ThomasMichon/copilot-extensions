@@ -451,14 +451,21 @@ def test_retained_controller_prepares_dev_source_without_its_acquisition(
     import bootstrap_inputs
 
     _root, acquisition, driver, _start, _effects = bootstrap
-    manifest = SOURCE / "worktree-manager" / "packaged-assets.json"
-    shutil.copy2(manifest, acquisition / "worktree-manager" / manifest.name)
-    declaration = json.loads(manifest.read_text(encoding="utf-8"))
-    for group in declaration.get("groups", [declaration]):
-        for name in group["files"]:
-            destination = acquisition / group["canonicalDir"] / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(SOURCE / group["canonicalDir"] / name, destination)
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        manifest = SOURCE / "worktree-manager" / filename
+        declaration = json.loads(manifest.read_text(encoding="utf-8"))
+        shutil.copy2(manifest, acquisition / "worktree-manager" / filename)
+        for group in declaration.get("groups", [declaration]):
+            for name in group["files"]:
+                relative = Path(group["canonicalDir"]) / name
+                target = acquisition / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(SOURCE / relative, target)
+    shutil.copytree(
+        SOURCE / "libs/installer-engine", acquisition / "libs/installer-engine",
+        ignore=shutil.ignore_patterns("tests", "docs", "__pycache__", "*.pyc"),
+        dirs_exist_ok=True,
+    )
     _git(acquisition, "add", ".")
     _git(
         acquisition, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",

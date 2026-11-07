@@ -113,7 +113,9 @@ declaration includes the Invocation adapter it imports.
 Manager's existing launch-wrapper asset declaration also places the generator
 and packager under `scripts/libs/payload-invocation`, the adapter's trusted
 loader location. Raw-source retention addresses both declared asset groups;
-the Manager wheel retains those tooling paths too.
+the canonical Versioned Runtime build helper selected by Manager's `setup.py`
+retains those tooling paths in the wheel too. The developer fallback helper is
+not the source authority for that resource policy.
 
 The remaining canonical-first witness transition is still open: source-bound
 catalog checks and their current fixtures bind real consumer/helper bytes, and
