@@ -10,6 +10,7 @@ prerequisites for one contribution.
 |----------|------------|
 | What does required PR/promotion testing cover? | [Unit packet](#unit-only-promotion-packet), [portfolio invariants](#test-portfolio-invariants), and the bounded Windows Resume promotion exception below |
 | How do I run a focused local selection? | [Turn-key runner](#the-turn-key-runner); select the affected files/contracts rather than the whole portfolio |
+| Can I obtain Windows evidence without running tests on my machine? | [Owner-only hosted Windows escape hatch](#owner-only-hosted-windows-escape-hatch); focused, explicit and independent of required CI |
 | What should I do after a run times out? | [Per-test diagnosis and residual runs](#per-test-diagnosis-and-residual-runs); inspect retained progress before repeating or enlarging a run |
 | How do I isolate portable integration? | [Devcontainer isolation](#optional-devcontainer-based-isolation-linux) and the declared periodic inventory in `tools/periodic-integration-inventory.json` |
 | What proves a native or external consumer? | Its explicitly selected packet below, with the actual platform, launch mode and prerequisites; a portable or synthetic pass is not equivalent |
@@ -33,6 +34,81 @@ useful evidence without passing the original full acceptance gate. Preserve
 that remaining gate, real assertions, cleanup and resource bounds. Required
 CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
+
+## Owner-only hosted Windows escape hatch
+
+`windows-qualification.yml` is an explicit manual lane on a disposable
+GitHub-hosted Windows image. Only the individual repository owner may submit
+or rerun it, and its controller must run from the protected GitHub default
+branch. Organization-owned repositories are not admitted. It is not a
+Maintainer-role ACL supplied by GitHub, required PR CI, release authority,
+self-hosted execution, or proof of a productive desktop/native application.
+
+Use the source-owned client with the exact `agent-worktrees` command path
+from the current session catalog. The candidate must be a commit in a checkout
+whose `origin` names the same public GitHub repository. Uncommitted changes
+are not test input. For example (substitute the actual command path and repo):
+
+```text
+python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --plugin agent-bridge --test-file tests/test_venue_path_length.py
+python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --tools --test-file tools/test_windows_qualification.py
+python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> wait --request-id <id> --seconds 600
+python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> result --request-id <id>
+```
+
+Add `-k <expression>` to focused plugin/library or tool files. A named plugin
+uses the turn-key runner's existing target resolver, including its library
+aliases. `--allow-explicit-tiers` retains existing eligibility/prerequisites;
+it never opts into host credentials or changes a packet's deadlines.
+Omitting files is an error unless `--full-suite` explicitly selects the named
+plugin/library suite or tool suite. Broad runs are an escape hatch, not the
+default after a timeout.
+
+`submit --packet bridge-http52 --source <full-commit>` invokes the candidate's
+canonical capture with `--write`, a separate same-source no-write capture,
+the independent contract verifier and the canonical artifact exporter.
+Each capture retains its own existing aggregate clock, including managed test
+environment preparation; the workflow timeout does not enlarge it.
+Returned files are data: the client never applies the generated outputs.
+
+Before any staging or dispatch, the client reads the selected protected
+controller's `tools/windows-qualification-support.json`. Missing/unsupported
+request, result or selection support refuses without publishing source.
+Caller package versions do not establish receiver support. New controllers
+reach the default branch through normal Dev review, CI and promotion.
+
+Already-readable candidate commits need no staging. Local-only commits are
+retained through one reserved append-only ref, `refs/qualification/windows-inputs`,
+not per-request branches. An envelope retains the prior transport tip and
+the exact candidate; its tree equals the candidate tree. Normal fast-forward
+updates and bounded contention retry never force shared history, alter the
+caller's branch/index/tree, or merge staging into source/default branches.
+An unrelated existing ref is refused. This history intentionally retains
+submitted public source; there is no automatic ref cleanup. Provider rejection
+of this namespace is an explicit unsupported transport, not permission to
+create a different ref silently.
+
+The client emits a request ID before effects and stores its state under the
+current worktree's Git metadata (`windows-qualification/<id>`). `status` and
+`wait` resolve that same run, not the latest successful workflow.
+`resume --request-id <id>` may finish a confirmed original transport and its
+not-yet-attempted dispatch. It never repeats a possibly accepted dispatch.
+An original transport that remains unobserved, or an unknown dispatch with no
+run yet, stays unresolved; do not submit a replacement ID to hide uncertainty.
+Local state operations use a crash-releasing lock for that request only;
+another live operation reports busy instead of duplicating a resume. Wait
+releases it between polls. Independent requests still use shared-ref CAS.
+Preserve needed records before normal worktree retirement.
+
+`result` downloads the uniquely named run/attempt artifact, validates request,
+source, trusted control, selection, Windows platform and phase identity, and
+returns the manifest. Actual test identities, failure/skip reasons, phase
+progress/timing, available JUnit, bounded logs and named-packet outputs are
+retained in Actions artifacts for seven days. Empty, skipped, failed, timed-out,
+unsupported or partial selections never become unconditional qualification.
+The result command exits zero only for qualification, one for a returned
+failed/incomplete result, and two for an unavailable or invalid result.
+Artifacts are immutable run evidence, not patches to execute or apply.
 
 ## Per-test diagnosis and residual runs
 
