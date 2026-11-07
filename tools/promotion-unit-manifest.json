@@ -1,6 +1,14 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_application_sources.py::test_declared_application_is_required_only_when_selected[default]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_declared_application_is_required_only_when_selected[selected]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_declared_application_is_required_only_when_selected[missing]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_declared_application_is_required_only_when_selected[different]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_application_source_declaration_refuses_invalid_or_ambiguous_values[table]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_application_source_declaration_refuses_invalid_or_ambiguous_values[selector]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_application_source_declaration_refuses_invalid_or_ambiguous_values[collision]",
+        "tools/promotion_unit_tests/test_application_sources.py::test_undeclared_application_name_is_not_a_source_exemption",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_original_membership_producer_preserves_inputs_and_upgrades_only_missing_cell_view[fresh]",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_original_membership_producer_preserves_inputs_and_upgrades_only_missing_cell_view[old-association]",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py::test_original_membership_producer_preserves_inputs_and_upgrades_only_missing_cell_view[old-declared-paths]",
@@ -4606,6 +4614,8 @@
         "tools/promotion_unit_tests/test_contract.py::test_catalog_data_is_hash_bound_but_never_executable_unit_source"
     ],
     "sources": {
+        "tools/application_sources.py": "3dba45b18c2597044205a98c8bdf7cd43c7bb529c4b1a4bcb898d04af2dbe9b0",
+        "tools/promotion_unit_tests/test_application_sources.py": "d548d2d1f120fea379400c3977dcde66a7dc2ecb30d110012eff38586f9aa9a7",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py": "0d46c2ef80b1507fb8f80beda2a903f25c4dda86ca38974d8ccd6bbdf1905be5",
         "plugins/agent-worktrees/scripts/managed_session.py": "373989e7c6c72b629f9e3e48093077ae758752bb16c7989a5589ec2febe2e09e",
         "plugins/agent-worktrees/scripts/execution_platform.py": "d04e459a34cba4d21d73cbdea6f22a1635f2a8ef504d98c6b4482c60aea2344a",
@@ -4651,7 +4661,7 @@
         "tools/core_native_public_feed.py": "e417db26f8331e1ed758edb0d85b5e6f8883d975ee67b9ba028e0dc41a14c8c8",
         "tools/core_release_delivery.py": "7e0e9639e86fa0c3e54a86c8a93bd64eaf172ffb8fabb323047eca34167d46e7",
         "tools/core_release_inputs.py": "b4f14520dd52527eb0b5608bb366b00ce6a58a5c6037e5c027b530e94f2f3867",
-        "tools/local_install_profile.py": "c38b94bed4538a9bf247cc267eb1e534c194a7364e7e3c1ac78d1a4611435fb4",
+        "tools/local_install_profile.py": "4341a22a52c65eb86632215ed6eaf605c5509c5bad3d95ed36c032952fb635f7",
         "tools/local_install_source.py": "9119fc8ced3bb13380097350dc51db1c2ddea95b83b4c8ee5711f3830c5ca7b0",
         "tools/prepare_runtime_source.py": "ac7fe12bbac0b13fba9339c1fd2a6e6669c95c3ba5695c55ab21ba5f72fb92ce",
         "tools/runtime_profile_bundle.py": "4710950140ca7f8e7b9a0d497e2ae4225765f9aae25b2d1d34764ef6dc28b876",
@@ -5207,7 +5217,7 @@
         "tools/bundle_lock.py": "630134574d86ab5c115ee5e64e1f8e108b0386838992f21e003fbf1957831787",
         "tools/bundle_input_cases.py": "8371f0ee7916be6312ecf8aa6635627d62723ba74586085bf90690f855503743",
         "tools/promotion_unit_tests/test_bundle_inputs.py": "58fe264c28fe361c0e0417b6ed4f09d3ff04ebd053dcfb9310485093fa590d20",
-        "tools/dependency_age.py": "8e2d8756032ae96b76c20bc82aa01fb7d89adaf7c187e070fb5bdeb623f0e3aa",
+        "tools/dependency_age.py": "a85ce5a7bccb2aa07691e1ef70366de942b3b96cb6ccd47c01beb7c36955eb56",
         "worktree-manager/src/worktree_manager/runtime_source.py": "b31589778a1d85f09db80cdef66fb2f60f9f6bf6aeaa92b3e8d6d82aee3be1bb",
         "tools/artifact_release_discovery.py": "96d96fce933c6354714ede8f92ff3b941406789210d9e797bbadbe10a28d3157",
         "tools/update_machine_gate_contract.py": "4e937d4ed4806066cf08598864d90ccbc4d0e3008110cab0d8b91b59b2604ab5",
@@ -5258,6 +5268,8 @@
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
+        "tools/application_sources.py",
+        "tools/local_install_profile.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_writer_admission.py",
         "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
         "libs/repository-policy/src/repository_policy/receiving.py",
