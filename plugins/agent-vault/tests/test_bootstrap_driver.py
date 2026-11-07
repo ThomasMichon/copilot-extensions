@@ -1,10 +1,13 @@
 """Native bootstrap routing, opt-outs and skew without a real installer."""
 
 import json
+import math
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import time
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -28,6 +31,69 @@ def native_bootstrap(plugin, project, native_directory):
         f"[IO.Directory]::SetCurrentDirectory({quote(native_directory)}); "
         f"& {quote(script)}; exit $LASTEXITCODE",
     ]
+
+
+@pytest.mark.skipif(
+    os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1",
+    reason="explicit isolated bootstrap performance measurement",
+)
+@pytest.mark.parametrize("phase", ["cold", "current-metadata"])
+def test_native_bootstrap_performance_samples(tmp_path, capsys, phase):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    plugin = _make_fake_plugin(tmp_path, "agent-vault")
+    if phase == "current-metadata":
+        installation = _make_fake_install(home, "agent-vault")
+        (installation / "deploy-manifest.json").write_text(
+            '{"source":{"version":"1.0.1"}}', encoding="utf-8",
+        )
+        (installation / "current-version").write_text("1.0.1", encoding="utf-8")
+        python = installation / "versions" / "1.0.1" / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        python.parent.mkdir(parents=True)
+        python.write_text("current interpreter metadata fixture\n", encoding="utf-8")
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
+    })
+    samples, errors = [], []
+    parent_cpu = time.process_time()
+    try:
+        for _ in range(2):
+            started = time.perf_counter()
+            result = subprocess.run(
+                native_bootstrap(plugin, project, home), env=env, cwd=project,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                encoding="utf-8", timeout=15, **no_window_kwargs(),
+            )
+            samples.append(time.perf_counter() - started)
+            assert result.returncode == 0 and json.loads(result.stdout) == {}, result.stderr
+            assert (project / "handoff").exists() is (phase == "cold")
+    except BaseException as error:
+        errors.append(type(error).__name__)
+        raise
+    finally:
+        ordered = sorted(samples)
+        report = {
+            "phase": phase, "platform": sys.platform,
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+            "source_sha": os.environ.get("GITHUB_SHA"),
+            "vault_installations": 1, "configuration_contexts": 1,
+            "expected": 2, "completed": len(samples), "samples_seconds": samples,
+            "status": "measured" if len(samples) == 2 and not errors else "incomplete",
+            "errors": errors, "quantile_method": "nearest-rank",
+            "insufficient_tail_samples": True,
+            "parent_cpu_seconds": time.process_time() - parent_cpu,
+            "cpu_coverage": "test-parent-only", "child_cpu_seconds": None,
+            "spawn_count": None, "spawn_coverage": "separate native work-count control",
+            "cache_conditions": "fresh shell per sample; existing Python; OS caches uncontrolled",
+        }
+        for name, quantile in (("p50", .5), ("p95", .95), ("p99", .99), ("max", 1)):
+            report[name + "_seconds"] = ordered[math.ceil(quantile * len(ordered)) - 1] if ordered else None
+        with capsys.disabled():
+            print("vault-bootstrap-measurement=" + json.dumps(report, sort_keys=True), flush=True)
 
 
 @pytest.mark.parametrize("phase", ["cold", "drift"])

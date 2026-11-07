@@ -144,6 +144,48 @@ its current Windows front door still requires Python on PATH before resolving
 an installation. The POSIX payload control qualifies the full no-global-Python
 path; Windows separately qualifies the activation reader with owned Python.
 
+### Activation performance
+
+The legacy session bootstrap reads activation once on every eligible session
+start, before checking current runtime metadata; inactive scope therefore still
+needs the read. Killswitch and cell-context exits precede it. On Windows with a
+supported PATH candidate this adds one qualification subprocess to the existing
+configuration-reader subprocess. Launcher/root discovery runs only if PATH
+qualification fails. The read itself does no network, installation, repository
+history or full-tree work; optional configuration-owner composition retains its
+existing bounded peer read. An ordinary runtime dispatcher supplies its selected
+completed interpreter, avoiding discovery. Explicit install participation also
+performs an activation read. Each call covers one selected Vault installation
+and configuration context, not a fleet or enabled-plugin roster scan.
+
+Selection evidence is reused within that call for the reader, not cached across
+sessions: executable availability and opt-in/configuration may change. Runtime
+metadata, process count and a watchdog do not establish latency acceptance.
+The plugin's 30-second hook timeout is unchanged; it is not a claim that the
+composed hook meets the performance pattern's two-second target.
+
+The explicitly selected `vault-activation` integration portfolio runs
+`test_native_bootstrap_performance_samples`. It observes two real native entry
+invocations for each absent-runtime and current-metadata fixture, including
+shell startup and cleanup. Its driver is a non-installing stub; current metadata
+is not an actual installed/healthy runtime. Reports retain individual monotonic
+samples, nearest-rank summaries and errors; two samples cannot qualify tails.
+Child CPU/spawn totals, live installed latency, first-OS-boot cache conditions,
+visible/model-ready and whole-enabled-hook-stack boundaries remain unavailable,
+not zero or passing. Instrumentation stays outside production callbacks.
+The initial local Windows/Python 3.14 samples were 9.078/5.271s for absent runtime
+and 4.620/3.654s for current metadata. These do not meet a two-second composed-hook
+target. Local source SHA and before-change delta were not captured; this is
+fixture observation, not installed performance or a regression comparison.
+The broader latency target remains with the performance-telemetry objective
+[#7935](https://github.com/ThomasMichon/copilot-extensions/issues/7935).
+
+Reproduce in an isolated test lane with:
+
+```text
+python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers --test-file tests/test_bootstrap_driver.py -k native_bootstrap_performance_samples --plugin-timeout 180 --timeout 120 --test-timeout 60
+```
+
 Removing opt-in or setting `enabled: false` withdraws this scope's automatic
 participation; it does not stop a shared service, delete data, uninstall
 KeePassXC or migrate credentials. Explicit stop/lock operations and validated
