@@ -905,6 +905,10 @@ as a quiet empty stream. The HTTP equivalents live below
 
 ### Bounded result snapshots
 
+For an actual pending interactive `ask_user`, use the separately qualified
+[live question answer path](docs/live-question-answers.md); passive history is
+not answer authority.
+
 `result` is the cursor-neutral answer to "what did this delegate produce?":
 
 ```bash

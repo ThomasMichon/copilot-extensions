@@ -855,6 +855,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         *,
         controls: bool = False,
         outcome: str | None = None,
+        questions_only: bool = False,
     ) -> int:
         """Mark the given messages delivered; return how many rows changed.
 
@@ -870,12 +871,15 @@ class _LiveSessionsMixin(LiveControlsMixin):
             return 0
         placeholders = ",".join("?" for _ in ids)
         if controls:
+            from .live_questions import QUESTION_CONTROL
+
+            question_filter = "kind=?" if questions_only else "kind!=?"
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=?, outcome=? "
                 f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind LIKE 'control:%' "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
-                f"AND claimed_at IS NOT NULL AND id IN ({placeholders})",
-                (now, outcome or "applied", session_id, session_id, session_id, *ids),
+                f"AND {question_filter} AND claimed_at IS NOT NULL AND id IN ({placeholders})",
+                (now, outcome or "applied", session_id, session_id, session_id, QUESTION_CONTROL, *ids),
             )
         else:
             cur = self.execute_write(

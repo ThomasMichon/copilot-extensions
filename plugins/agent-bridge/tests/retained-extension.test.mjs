@@ -5,6 +5,7 @@ import vm from "node:vm";
 import * as path from "node:path";
 import * as delivery from "../extensions/agent-bridge/delivery.mjs";
 import * as retained from "../extensions/agent-bridge/retained-delivery.mjs";
+import * as questions from "../extensions/agent-bridge/questions.mjs";
 import { isRemoteDriverSource } from "../extensions/agent-bridge/remote-driver.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -84,6 +85,7 @@ async function load(selected, version = 50, {
     "@github/copilot-sdk/extension": { joinSession: async () => session },
     "./delivery.mjs": delivery,
     "./retained-delivery.mjs": retained,
+    "./questions.mjs": questions,
     "./remote-driver.mjs": {
       isRemoteDriverSource,
       createHeadedDriverSession: async (native, options) => {

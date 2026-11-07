@@ -164,6 +164,28 @@ def translate_sdk_event(
             return []
         return [("agent_thought", _out({"text": content}))]
 
+    if sdk_type in {"elicitation.requested", "user_input.requested"}:
+        request_id = _text(d.get("requestId"))
+        if request_id is None:
+            return []
+        return [("ask_user_request", _out({
+            "request_id": request_id,
+            "request_family": sdk_type.split(".")[0],
+            "tool_call_id": d.get("toolCallId"),
+            "message": d.get("message") or d.get("question"),
+            "requested_schema": d.get("requestedSchema"),
+            "choices": d.get("choices"),
+            "read_only": True,
+        }))]
+
+    if sdk_type in {"elicitation.completed", "user_input.completed"}:
+        request_id = _text(d.get("requestId"))
+        if request_id is None:
+            return []
+        return [("ask_user_resolved", _out({
+            "request_id": request_id, "request_family": sdk_type.split(".")[0],
+        }))]
+
     if sdk_type == "tool.execution_start":
         tool_call_id = d.get("toolCallId")
         if not tool_call_id:
@@ -174,12 +196,9 @@ def translate_sdk_event(
             # Represent it as a first-class, legible request (prompt + offered
             # choices) rather than an opaque tool spinner that never completes
             # -- the exact failure that leaves a represented CLI session looking
-            # permanently "Responding…". READ-ONLY here (mirrors
-            # ``permission.requested``): this SDK path represents a *live CLI
-            # session* whose interactive Copilot owns the reply, so the answer
-            # affordance downstream is a take-over, never an inline reply. Kept
-            # in step with the NF-side translator
-            # (services/neuron-forge/server/core/live_representation.py).
+            # permanently "Responding…". A tool start alone is observation,
+            # never native answer authority; /questions requires the extension's
+            # fresh request/session/generation snapshot.
             args = d.get("arguments")
             args = args if isinstance(args, dict) else {}
             return [(
