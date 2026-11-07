@@ -127,7 +127,10 @@ edit retains its existing body plus `preparation` with exactly `identity` and
 [shared preparation result](../../ai-attribution/docs/comment-preparation.md).
 The identity retains its public comment/write GUIDs and original source
 projection. The hash and canonical trailing marker must agree with the exact
-body; no second body or profile history is stored. Bodyless votes carry no
+body, including the producer's single-outer-marker and conservative literal
+boundaries. Quoted and closed code examples remain authored content; duplicate
+outer markers and unfinished fences/comments refuse before admission.
+No second body or profile history is stored. Bodyless votes carry no
 preparation and do not create filler comments.
 
 One selected operation has at most one prepared action per logical comment;

@@ -151,6 +151,59 @@ def test_prepared_binding_refuses_mismatched_metadata_without_mutating_owner(
     assert store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("layout", [
+    "Selected.\n\n{marker}\n\n{marker}",
+    "Selected.\n\n```text\n{marker}",
+    "Selected.\n\n~~~text\n{marker}",
+    "Selected.\n\n```bad`info\n<!-- agent-comment:v1 c=foreign w=foreign -->\n```\n\n{marker}",
+    "<!-- harmless ` --> <!-- agent-comment:v1 c=foreign w=foreign --> ` -->\n\n{marker}",
+])
+def test_prepared_admission_rejects_literal_boundaries_the_shared_producer_refuses(
+    store: ReplayStore, prepared_intent: dict, layout: str,
+) -> None:
+    comment_preparation = importlib.import_module("comment_preparation")
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    action = prepared_intent["actions"][0]
+    marker = action["body"].splitlines()[-1]
+    action["body"] = layout.format(marker=marker)
+    action["preparation"]["body_id"] = hashlib.sha256(action["body"].encode()).hexdigest()
+    complete = {
+        "protocol": comment_preparation.PROTOCOL,
+        **action["preparation"], "body": action["body"], "effects": "none",
+    }
+    with pytest.raises(ValueError):
+        comment_preparation._previous(complete)
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError):
+        store.admit_review(prepared_intent, expires_at=expires())
+    assert store.path.read_bytes() == before
+
+
+def test_actual_shared_preparation_literal_examples_remain_admissible_and_repeatable(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    comment_preparation = importlib.import_module("comment_preparation")
+    attribution_profile = importlib.import_module("attribution_profile")
+    identity = prepared_intent["actions"][0]["preparation"]["identity"]
+    example = "<!-- agent-comment:v1 c=example w=example -->"
+    draft = f"> {example}\n\n```html\n{example}\n```\n\nInline `{example}`.\n\nSelected."
+    prepared = comment_preparation.prepare(
+        draft, attribution_profile.validate({"version": 1}),
+        {"domain": "forge", "visibility": "public", "activity": "comment", "required": True},
+        identity["source"], comment_id=identity["comment_id"], write_id=identity["write_id"],
+    )
+    assert comment_preparation._previous(prepared) == prepared
+    prepared_intent["actions"][0].update(
+        body=prepared["body"], preparation={"identity": prepared["identity"], "body_id": prepared["body_id"]},
+    )
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    store.admit_review(prepared_intent, expires_at=expires())
+    restarted = ReplayStore(store.root, store.namespace)
+    retained = restarted.inspect_review("prepared-review", SCOPE, expires_at=expires())
+    assert retained["intent"] == prepared_intent
+    assert restarted.admit_review(prepared_intent, expires_at=expires())["status"] == "existing"
+
+
 def test_prepared_binding_remains_immutable_and_write_identity_cannot_move_to_new_operation(
     store: ReplayStore, prepared_intent: dict,
 ) -> None:
