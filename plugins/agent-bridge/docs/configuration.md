@@ -38,6 +38,13 @@ After editing configuration, `scripts\install.ps1 schedule` reconciles task
 policy alone. With `absent` it does not stop a running daemon, delete runtime
 or state, or change activation/maintenance policy. Install/update/provision
 also reconcile the selection, including content-match fast paths.
+Provision serializes policy reads and task changes with install/update/schedule.
+Self-elevating repair releases that lock before elevation, then re-enters provision
+to recheck current policy, ownership and holds under the lock. Task ownership
+requires the actual PowerShell script operand (including supported conhost
+wrapping), not an owned path forwarded to a foreign script.
+Repair assessment and elevation retain the selected installation's exact task
+name; an available installed task-name binding must agree with that selection.
 
 A disabled existing task retains an independent startup hold: provisioning
 does not enable it, installer startup does not bypass it, and absence refuses to erase

@@ -50,6 +50,10 @@ param(
     # existing working non-interactive task is preserved across updates.
     [switch]$NonInteractive,
 
+    # Retained repair entry: refresh task settings even when its action matches.
+    # Does not bypass scheduling policy, ownership, holds or the install lock.
+    [switch]$ForceTaskRepair,
+
     # DEPRECATED / no-op (Thread B): the graceful ZDD cutover is now the DEFAULT on
     # `update` whenever a live daemon is running -- activation always cuts over
     # automatically (invariant #1), so this opt-in is no longer required. The switch
@@ -75,6 +79,9 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
 
 if ($RequireGracefulCutover -and $Action -ne 'update') {
     throw '-RequireGracefulCutover requires update'
+}
+if ($ForceTaskRepair -and $Action -ne 'provision') {
+    throw '-ForceTaskRepair requires provision'
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -104,6 +111,7 @@ function Copy-InstallerStageDirectory {
 
 if ($env:OS -eq 'Windows_NT' -and
     $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    -not $ForceTaskRepair -and
     $Action -in @('install', 'update', 'provision', 'uninstall') -and
     -not ($Action -eq 'uninstall' -and $DryRun)) {
     $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -1870,8 +1878,23 @@ function Assert-OwnedBridgeTask {
     if (@($Task.Actions).Count -ne 1) { throw 'Refusing ambiguous Bridge scheduled task actions' }
     $taskAction = @($Task.Actions)[0]
     $launcher = [regex]::Escape((Join-Path $InstallDir 'start-agent-bridge.ps1'))
-    if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
-        ([string]$taskAction.Arguments) -notmatch "(?:^|\s)-File\s+(?:`"$launcher`"|$launcher)(?:\s|$)") {
+    $executor = [string]$taskAction.Execute
+    $arguments = [string]$taskAction.Arguments
+    # Accept only the generated shell options, then the actual script operand.
+    # Anything after -File is script input, never another shell option.
+    $shell = '(?:"(?:[^"]*\\)?(?:pwsh|powershell)\.exe"|(?:[^\s"]*\\)?(?:pwsh|powershell)\.exe)'
+    if ((Split-Path -Leaf $executor) -ieq 'conhost.exe') {
+        if ($arguments -notmatch "^\s*--headless\s+$shell\s+(?<shellArguments>.*)$") {
+            throw "Refusing foreign scheduled task: $TaskName"
+        }
+        $arguments = $Matches.shellArguments
+    } elseif ((Split-Path -Leaf $executor) -notin @('pwsh.exe', 'powershell.exe')) {
+        throw "Refusing foreign scheduled task: $TaskName"
+    }
+    $options = '(?:(?:-NoProfile|-NonInteractive|-NoLogo)\s+|-ExecutionPolicy\s+Bypass\s+|-WindowStyle\s+Hidden\s+)*'
+    $operand = "`"$launcher`""
+    if ((Join-Path $InstallDir 'start-agent-bridge.ps1') -notmatch '\s') { $operand += "|$launcher" }
+    if ($arguments -notmatch "^\s*$options-File\s+(?:$operand)\s*$") {
         throw "Refusing foreign scheduled task: $TaskName"
     }
 }
@@ -1941,12 +1964,17 @@ function Ensure-ScheduledTask {
 }
 
 function Register-ScheduledTask_ {
+    param([switch]$ForceTaskRepair)
     if (-not (Test-Path $LinkPython)) {
         Write-Warn "agent-bridge venv not found -- skipping scheduled task"
         return
     }
 
-    Resolve-DaemonLogonMode
+    if ($ForceTaskRepair) {
+        $Script:UseNonInteractive = $false
+    } else {
+        Resolve-DaemonLogonMode
+    }
 
     # Create launcher script
     $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
@@ -2102,7 +2130,7 @@ Set-Content -Path `$pidFile -Value `$proc.Id
             ($curAct.Execute -eq $action.Execute) -and
             ($curAct.Arguments -eq $action.Arguments) -and
             (("" + $curAct.WorkingDirectory) -eq ("" + $action.WorkingDirectory))
-        if ($sameAction) {
+        if ($sameAction -and -not $ForceTaskRepair) {
             Write-Ok "Scheduled task already configured ($modeLabel) -- unchanged, left as-is"
             return
         }
@@ -2847,7 +2875,7 @@ function Invoke-Install {
 function Invoke-Provision {
     Write-Step 'agent-bridge provision'
 
-    if (-not (Test-Path $LinkPython)) {
+    if (-not $ForceTaskRepair -and -not (Test-Path $LinkPython)) {
         # Preserve the self-provisioning binstub contract: `provision` is the
         # first-use full install when no runtime exists. The task-only path below
         # applies once a healthy runtime is already present.
@@ -2855,40 +2883,69 @@ function Invoke-Provision {
         return
     }
 
-    Ensure-RuntimeSlotRetention -PayloadHash (Get-PayloadHash)
-
-    if ((Get-WindowsScheduledTaskPolicy) -ne 'enabled') {
-        Ensure-ScheduledTask
-        return
+    if (-not $ForceTaskRepair) {
+        Ensure-RuntimeSlotRetention -PayloadHash (Get-PayloadHash)
     }
 
-    # A never-ran S4U task cannot be flipped to the default interactive
-    # principal from a normal shell. Route that exact recovery through the
-    # existing self-elevating repair instead of rebuilding or restarting the
-    # already-healthy runtime.
-    $explicitNonInteractive = $NonInteractive -or
-        ($env:AGENT_BRIDGE_NONINTERACTIVE -in @('1', 'true', 'yes', 'on'))
-    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($existing -and $existing.State -eq 'Disabled') {
-        Write-Skip 'Bridge scheduled task is disabled; startup hold preserved'
-        return
-    }
-    if (-not $explicitNonInteractive -and $existing -and
-        ($existing.Principal.LogonType -eq 'S4U') -and
-        ((Get-ScheduledTaskLastResult -Name $TaskName) -eq $ScheduledTaskHasNotRunResult)) {
-        $repair = Get-ScheduledTaskRepairScript
-        if (-not (Test-Path -LiteralPath $repair)) {
-            Write-Fail "Scheduled-task repair script not found: $repair"
-            exit 1
+    if (-not (Enter-InstallLock)) { throw 'Bridge installer lock is held' }
+    $repair = $null
+    try {
+        if ($ForceTaskRepair) {
+            # Repair is task-only: select the incumbent, not the incoming slot.
+            $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+            if (-not (Test-Path -LiteralPath $resolver)) { throw 'Bridge runtime resolver is unavailable' }
+            $previousRoot = $env:AGENT_RT_ROOT
+            try {
+                $env:AGENT_RT_ROOT = $InstallDir
+                $AgentRtPy = $null
+                . $resolver
+                if (-not $AgentRtPy -or -not (Test-Path -LiteralPath $AgentRtPy)) {
+                    throw 'Bridge selected runtime is unavailable'
+                }
+                $LinkPython = $AgentRtPy
+            } finally { $env:AGENT_RT_ROOT = $previousRoot }
+        }
+        if ((Get-WindowsScheduledTaskPolicy) -ne 'enabled') {
+            Ensure-ScheduledTask
+            return
         }
 
+        # A never-ran S4U task needs elevation to become interactive. The
+        # elevated child re-enters provision, rechecking policy under this lock.
+        $explicitNonInteractive = $NonInteractive -or
+            ($env:AGENT_BRIDGE_NONINTERACTIVE -in @('1', 'true', 'yes', 'on'))
+        $existing = Get-SchedulingPolicyTask -Policy 'enabled'
+        if ($existing -and $existing.State -eq 'Disabled') {
+            Write-Skip 'Bridge scheduled task is disabled; startup hold preserved'
+            return
+        }
+        if ($existing) { Assert-OwnedBridgeTask -Task $existing }
+        $isAdmin = ([Security.Principal.WindowsPrincipal] `
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $isAdmin -and -not $explicitNonInteractive -and $existing -and
+            ($existing.Principal.LogonType -eq 'S4U') -and
+            ((Get-ScheduledTaskLastResult -Name $TaskName) -eq $ScheduledTaskHasNotRunResult)) {
+            $repair = Get-ScheduledTaskRepairScript
+            if (-not (Test-Path -LiteralPath $repair)) {
+                Write-Fail "Scheduled-task repair script not found: $repair"
+                exit 1
+            }
+        } else {
+            Register-ScheduledTask_ -ForceTaskRepair:$ForceTaskRepair
+            return
+        }
+    } finally { Exit-InstallLock }
+
+    # Never wait for an elevation/repair child while owning its install lock.
+    if ($repair) {
         Write-Step 'Repairing never-ran S4U scheduled task as the default interactive AtLogOn task...'
         $pwsh = Get-PwshPath
         $repairHostArguments = @()
         if ([Environment]::GetCommandLineArgs() -icontains '-NonInteractive') {
             $repairHostArguments += '-NonInteractive'
         }
-        & $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair
+        & $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair -InstallDir $InstallDir -TaskName $TaskName
         $repairExit = $LASTEXITCODE
         if ($repairExit -ne 0) {
             Write-Fail "Scheduled-task repair failed (exit $repairExit)"
@@ -2896,11 +2953,6 @@ function Invoke-Provision {
         }
         return
     }
-
-    # Missing tasks, action/trigger drift, and explicitly requested S4U mode all
-    # use the normal reconciliation path. This intentionally does not touch the
-    # immutable runtime slot or daemon lifecycle.
-    Register-ScheduledTask_
 }
 
 function Invoke-Uninstall {
@@ -3893,13 +3945,14 @@ function Write-InstallerLifecycle {
     }
 }
 
-$script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 'install' }
+$script:InstallerLifecycleAction = if ($ForceTaskRepair) { '' }
+    elseif ($Action -in @('install', 'provision')) { 'install' }
     elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
 $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
-    if ($Action -ne 'schedule') { Initialize-SourceRuntime }
-    if ($Action -in @('install', 'update', 'provision')) {
+    if ($Action -ne 'schedule' -and -not $ForceTaskRepair) { Initialize-SourceRuntime }
+    if ($Action -in @('install', 'update', 'provision') -and -not $ForceTaskRepair) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
         Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
     }
