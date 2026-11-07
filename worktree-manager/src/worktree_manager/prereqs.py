@@ -108,7 +108,6 @@ def _python_candidates(first: str | None) -> Iterator[str]:
                 found = shutil.which(candidate, path=directory or os.curdir)
                 if found:
                     yield found
-                    break
 
 
 def _probe_version(exe: str) -> str | None:

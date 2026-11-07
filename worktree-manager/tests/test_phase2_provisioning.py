@@ -221,9 +221,11 @@ def test_python_prerequisite_windowsapps_alias_is_windows_only(
 
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("filesystem")
-@pytest.mark.parametrize("supported_suffix", [".exe", ".cmd"])
-def test_python_prerequisite_windows_current_directory_cannot_hide_path_python(
-    monkeypatch, tmp_path, supported_suffix,
+@pytest.mark.parametrize(
+    "supported_suffix,older_location", [(".exe", "current"), (".cmd", "current"), (".cmd", "path")],
+)
+def test_python_prerequisite_windows_candidates_cannot_hide_supported_path_python(
+    monkeypatch, tmp_path, supported_suffix, older_location,
 ):
     import os
 
@@ -235,7 +237,8 @@ def test_python_prerequisite_windows_current_directory_cannot_hide_path_python(
     supported = tmp_path / "supported Python"
     current.mkdir()
     supported.mkdir()
-    for executable in (current / "python.exe", supported / ("python" + supported_suffix)):
+    older = current if older_location == "current" else supported
+    for executable in (older / "python.exe", supported / ("python" + supported_suffix)):
         executable.write_bytes(b"synthetic version-probe fixture\n")
     monkeypatch.chdir(current)
     monkeypatch.setenv("PATH", str(supported))
@@ -244,7 +247,7 @@ def test_python_prerequisite_windows_current_directory_cannot_hide_path_python(
     monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", ("python",))
     monkeypatch.setattr(
         prereqs, "_probe_version",
-        lambda path: "3.9.5" if Path(path).samefile(current / "python.exe") else "3.11.9",
+        lambda path: "3.9.5" if Path(path).samefile(older / "python.exe") else "3.11.9",
     )
     status = detect_prereq(Prereq("python3", min="3.10"))
     assert status.satisfied
