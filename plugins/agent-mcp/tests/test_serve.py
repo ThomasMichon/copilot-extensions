@@ -343,7 +343,7 @@ def test_call_verb_uses_serve_daemon(tmp_path, monkeypatch, capsys):
 
     from agent_mcp.__main__ import main
 
-    sock = tmp_path / "serve.sock"
+    sock = tmp_path / "current" / "serve.sock"
     bridge = _bridge_file(tmp_path)
 
     server = Server(sock)

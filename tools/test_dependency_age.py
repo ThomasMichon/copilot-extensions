@@ -498,6 +498,128 @@ def test_replay_preparation_keeps_attributable_source_branches(plugin, dependenc
     )
 
 
+@pytest.mark.parametrize("mode", [
+    "called", "missing", "not-called", "repointed", "wrong-argument", "dead-call",
+    "nested-call", "other-plugin-call", "after-return",
+    "local-assignment", "local-import", "local-parameter", "local-definition",
+    "local-class", "local-after-return", "local-except", "local-with",
+    "module-class", "module-async", "entry-repointed",
+    "after-true-return", "after-true-raise", "after-matching-return",
+    "after-both-branches", "after-nested-with", "after-nested-if",
+    "after-nonmatching-return", "after-partial-branch",
+    "branch-return", "branch-raise", "branch-true-return", "branch-partial-return",
+])
+def test_plugin_contract_follows_only_invoked_canonical_preparation(tmp_path, mode):
+    path = project(tmp_path, dependencies='"owned"')
+    source = write(tmp_path / "libs/owned/pyproject.toml", '[project]\nname="owned"\n')
+    helper = """
+def _prepare_venv(name, uv, *, reinstall, environment):
+    cmd = []
+    if name == "demo":
+        cmd.extend(["-e", str(REPO / "libs" / "owned")])
+"""
+    call = "return _prepare_venv(name, uv, reinstall=reinstall, environment=environment)"
+    implementation = (
+        "def _ensure_venv(name, uv, *, reinstall):\n"
+        "    environment = {}\n"
+        "    with private_environment():\n"
+        f"        {call}\n"
+        + helper
+    )
+    if mode == "missing":
+        implementation = implementation.replace(helper, "")
+    elif mode == "not-called":
+        implementation = implementation.replace(call, "return None")
+    elif mode == "repointed":
+        implementation += "\n_prepare_venv = unrelated_preparation\n"
+    elif mode == "wrong-argument":
+        implementation = implementation.replace("_prepare_venv(name, uv,", '_prepare_venv("other", uv,', 1)
+    elif mode == "dead-call":
+        implementation = implementation.replace("    with private_environment():", "    if False:")
+    elif mode == "nested-call":
+        implementation = implementation.replace("    with private_environment():", "    def uninvoked():")
+    elif mode == "other-plugin-call":
+        implementation = implementation.replace("    with private_environment():", '    if name == "other":')
+    elif mode == "after-return":
+        implementation = implementation.replace("    environment = {}", "    return None\n    environment = {}")
+    elif mode == "local-assignment":
+        implementation = implementation.replace("    environment = {}", "    _prepare_venv = unrelated\n    environment = {}")
+    elif mode == "local-import":
+        implementation = implementation.replace("    environment = {}", "    from unrelated import _prepare_venv\n    environment = {}")
+    elif mode == "local-parameter":
+        implementation = implementation.replace("uv, *, reinstall):", "uv, *, reinstall, _prepare_venv):", 1)
+    elif mode == "local-definition":
+        implementation = implementation.replace("    environment = {}", "    def _prepare_venv(*args, **kwargs): pass\n    environment = {}")
+    elif mode == "local-class":
+        implementation = implementation.replace("    environment = {}", "    class _prepare_venv: pass\n    environment = {}")
+    elif mode == "local-after-return":
+        implementation = implementation.replace(f"        {call}", f"        {call}\n    _prepare_venv = unrelated")
+    elif mode == "local-except":
+        implementation = implementation.replace("    environment = {}", "    try: pass\n    except Exception as _prepare_venv: pass\n    environment = {}")
+    elif mode == "local-with":
+        implementation = implementation.replace("    with private_environment():", "    with private_environment() as _prepare_venv:")
+    elif mode == "module-class":
+        implementation += "\nclass _prepare_venv: pass\n"
+    elif mode == "module-async":
+        implementation += "\nasync def _prepare_venv(*args, **kwargs): pass\n"
+    elif mode == "entry-repointed":
+        implementation = implementation.replace(
+            "    environment = {}",
+            '    cmd = []\n    if name == "demo":\n'
+            '        cmd.extend(["-e", str(REPO / "libs" / "owned")])\n'
+            '    environment = {}',
+        )
+        implementation += "\n_ensure_venv = unrelated_preparation\n"
+    elif mode.startswith("after-"):
+        prefixes = {
+            "after-true-return": "    if True:\n        return None\n",
+            "after-true-raise": "    if True:\n        raise RuntimeError\n",
+            "after-matching-return": '    if name == "demo":\n        return None\n',
+            "after-both-branches": (
+                "    if condition:\n        return None\n"
+                "    else:\n        raise RuntimeError\n"
+            ),
+            "after-nested-with": "    with context():\n        if True:\n            return None\n",
+            "after-nested-if": (
+                "    if condition:\n        if True:\n            return None\n"
+                "    else:\n        return None\n"
+            ),
+            "after-nonmatching-return": '    if name == "other":\n        return None\n',
+            "after-partial-branch": "    if condition:\n        return None\n",
+        }
+        implementation = implementation.replace(
+            "    with private_environment():",
+            prefixes[mode] + "    with private_environment():",
+        )
+    elif mode.startswith("branch-"):
+        exits = {
+            "branch-return": "        return cmd\n",
+            "branch-raise": "        raise RuntimeError\n",
+            "branch-true-return": "        if True:\n            return cmd\n",
+            "branch-partial-return": "        if condition:\n            return cmd\n",
+        }
+        implementation = implementation.replace(
+            '    if name == "demo":\n',
+            '    if name == "demo":\n' + exits[mode],
+        )
+    runner = write(tmp_path / "tools/run-plugin-tests.py", implementation)
+    _, projects = age.inventory(tmp_path)
+    assert age.contract_source(Requirement("owned"), path, projects, tmp_path) == (
+        source if mode in {
+            "called", "after-nonmatching-return", "after-partial-branch", "branch-partial-return",
+        } else None
+    )
+    if mode == "called":
+        trees = {}
+        assert age.contract_source(
+            Requirement("owned"), path, projects, tmp_path, source_trees=trees,
+        ) == source
+        runner.write_text(implementation.replace(call, "return None"), encoding="utf-8")
+        assert age.contract_source(
+            Requirement("owned"), path, projects, tmp_path, source_trees=trees,
+        ) is None
+
+
 def test_standalone_source_contract_revoked_if_paths_or_registration_disappear(tmp_path):
     project(tmp_path, "services/demo", dependencies='"owned"')
     write(tmp_path / "libs" / "owned" / "pyproject.toml", '[project]\nname = "owned"\n')

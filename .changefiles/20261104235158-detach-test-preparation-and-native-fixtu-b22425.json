@@ -1,0 +1,9 @@
+{
+  "comment": "Detach test preparation and native fixture state from inherited service roots",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

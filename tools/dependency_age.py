@@ -216,6 +216,121 @@ def _source_tree(path: Path, root: Path, trees: _SourceTrees | None) -> ast.Modu
     return tree
 
 
+def _preparation_nodes(statements: list[ast.stmt], plugin: str):
+    """Inspect reachable statement blocks, excluding uninvoked nested definitions."""
+    for statement in statements:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield statement
+        test = statement.test if isinstance(statement, ast.If) else None
+        if isinstance(test, ast.Constant):
+            if (yield from _preparation_nodes(statement.body if test.value else statement.orelse, plugin)):
+                return True
+        elif (
+            isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) and test.left.id == "name"
+            and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)
+            and len(test.comparators) == 1 and isinstance(test.comparators[0], ast.Constant)
+        ):
+            selected = statement.body if test.comparators[0].value == plugin else statement.orelse
+            if (yield from _preparation_nodes(selected, plugin)):
+                return True
+        elif isinstance(statement, ast.If):
+            body_exits = yield from _preparation_nodes(statement.body, plugin)
+            else_exits = yield from _preparation_nodes(statement.orelse, plugin)
+            if body_exits and else_exits:
+                return True
+        else:
+            for field, value in ast.iter_fields(statement):
+                if isinstance(value, list) and value and all(isinstance(item, ast.stmt) for item in value):
+                    exits = yield from _preparation_nodes(value, plugin)
+                    if isinstance(statement, ast.With) and field == "body" and exits:
+                        return True
+        if isinstance(statement, (ast.Return, ast.Raise)):
+            return True
+    return False
+
+
+def _binds_helper(function: ast.FunctionDef, helper: str) -> bool:
+    arguments = function.args
+    if any(arg.arg == helper for arg in (
+        *arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs,
+        *((arguments.vararg,) if arguments.vararg else ()),
+        *((arguments.kwarg,) if arguments.kwarg else ()),
+    )):
+        return True
+    pending = list(function.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == helper:
+                return True
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id == helper:
+            return True
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+            (alias.asname or alias.name.split(".")[0]) == helper for alias in node.names
+        ):
+            return True
+        if isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name == helper:
+            return True
+        if isinstance(node, ast.MatchMapping) and node.rest == helper:
+            return True
+        pending.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def _preparation_functions(tree: ast.Module, plugin: str) -> list[ast.FunctionDef]:
+    names = ("_ensure_venv", "_prepare_venv")
+    functions = {
+        name: [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name]
+        for name in names
+    }
+    ensure = functions["_ensure_venv"]
+    if len(ensure) != 1 or ensure[0].decorator_list:
+        return []
+    result = [ensure[0]]
+    helper = functions["_prepare_venv"]
+    available = len(helper) == 1 and not helper[0].decorator_list and not _binds_helper(ensure[0], "_prepare_venv")
+    # A named definition is not evidence if another module-level binding replaces it.
+    for statement in tree.body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if statement.name in names and statement not in (*ensure, *helper):
+                if statement.name == "_ensure_venv":
+                    return []
+                available = False
+            continue
+        bound = {
+            node.id for node in ast.walk(statement)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
+        }
+        if isinstance(statement, (ast.Import, ast.ImportFrom)):
+            bound.update(alias.asname or alias.name.split(".")[0] for alias in statement.names)
+        if "_ensure_venv" in bound or "*" in bound:
+            return []
+        if "_prepare_venv" in bound:
+            available = False
+    if not available:
+        return result
+    nodes = list(_preparation_nodes(ensure[0].body, plugin))
+    if any(
+        isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == "name"
+        for statement in nodes for node in ast.walk(statement)
+        if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ):
+        return result
+    for statement in nodes:
+        call = statement.value if isinstance(statement, ast.Return) else None
+        if (
+            isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and call.func.id == "_prepare_venv" and len(call.args) == 2
+            and all(isinstance(arg, ast.Name) and arg.id == name
+                    for arg, name in zip(call.args, ("name", "uv")))
+        ):
+            result.append(helper[0])
+            break
+    return result
+
+
 def _plugin_contract_sources(
     path: Path, root: Path, *, source_trees: _SourceTrees | None = None,
 ) -> list[Path]:
@@ -223,10 +338,9 @@ def _plugin_contract_sources(
     if not runner.is_file():
         return []
     tree = _source_tree(runner, root, source_trees)
-    prepare = next((node for node in tree.body
-                    if isinstance(node, ast.FunctionDef) and node.name == "_ensure_venv"), None)
     sources = []
-    for branch in ast.walk(prepare) if prepare is not None else ():
+    preparations = _preparation_functions(tree, path.parent.name)
+    for branch in (node for prepare in preparations for node in _preparation_nodes(prepare.body, path.parent.name)):
         condition = branch.test if isinstance(branch, ast.If) else None
         if (isinstance(condition, ast.Compare) and isinstance(condition.left, ast.Name)
                 and condition.left.id == "name" and len(condition.ops) == 1
@@ -234,7 +348,7 @@ def _plugin_contract_sources(
                 and isinstance(condition.comparators[0], ast.Constant)
                 and type(condition.comparators[0].value) is str
                 and path.parent == root / "plugins" / condition.comparators[0].value):
-            for statement in branch.body:
+            for statement in _preparation_nodes(branch.body, path.parent.name):
                 call = statement.value if isinstance(statement, ast.Expr) else None
                 if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
                         and isinstance(call.func.value, ast.Name) and call.func.value.id == "cmd"

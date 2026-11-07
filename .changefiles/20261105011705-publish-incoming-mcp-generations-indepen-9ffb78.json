@@ -1,0 +1,9 @@
+{
+  "comment": "Publish incoming MCP generations independently of retirement and qualify fresh physical-generation admission",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

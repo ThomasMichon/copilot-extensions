@@ -349,6 +349,15 @@ if ($SrcVersion) {
 }
 # === end install-contract:v3 versioned-venv ===
 
+# MCP's installed callback owner supports nested slot environments. Keep this
+# choice outside the shared installer blocks and inside construction custody.
+if ($VersionedRuntime) {
+    $VenvDir = Join-Path $VenvDir '.venv'
+    $VenvPython = Join-Path $VenvDir $(if ($env:OS -eq 'Windows_NT') { 'Scripts\python.exe' } else { 'bin/python' })
+    $LinkDir = $VenvDir
+    $LinkPython = $VenvPython
+}
+
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
@@ -442,7 +451,7 @@ function Invoke-VersionedSlotClean {
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) `
         -Footprint (Join-Path $PSScriptRoot 'uninstall-profile.json') -Plugin 'agent-mcp'
     $script:SrcVersion = $script:RuntimeConstructionSession.Version
-    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvDir = Join-Path (Join-Path (Join-Path $InstallDir 'versions') $SrcVersion) '.venv'
     $script:VenvPython = Join-Path $VenvDir $(if ($env:OS -eq 'Windows_NT') { 'Scripts\python.exe' } else { 'bin/python' })
     $script:LinkDir = $VenvDir
     Assert-SourceRuntime
@@ -459,14 +468,15 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 
-function Invoke-RuntimeOwnerSettlement {
-    if (-not $VersionedRuntime -or $script:RuntimeConstructionSession.Construction -ne 'fresh') { return }
-    $arguments = @('-I', (Join-Path $PSScriptRoot 'reap_versions.py'), '--root', $InstallDir,
-        '--link-name', '.venv', '--fresh', '--reset-control')
-    if ($env:AGENT_MCP_NO_VERSION_REAP) { $arguments += '--check-only' }
-    Invoke-Hidden -FilePath $VenvPython -ArgList $arguments | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Fresh MCP replacement could not settle its old runtime owners and control state' }
-    Write-Ok 'Old MCP runtime owners and control state settled'
+function Publish-IncomingMcp {
+    if (-not $VersionedRuntime) { return }
+    $incomingError = ''
+    Invoke-Hidden -FilePath $VenvPython -ArgList @(
+        '-I', (Join-Path $PSScriptRoot 'publish_incoming.py'), '--root', $InstallDir
+    ) -ErrorOutput ([ref]$incomingError) | Out-Null
+    if ($incomingError) { [Console]::Error.Write($incomingError) }
+    if ($LASTEXITCODE -ne 0) { throw 'Incoming MCP generation failed readiness/publication; live custody retained' }
+    Write-Ok 'Incoming MCP selection qualified; serving activation follows policy'
 }
 
 # === end install-contract:v4 marker/toss helpers ===
@@ -505,7 +515,8 @@ function Deploy-SelfProvisioningBinstub {
     # agent-mcp ships a SINGLE self-provisioning .cmd (no .ps1): it is spawned by
     # Copilot as a bare ``command: agent-mcp`` stdio MCP server, where a .cmd
     # forwards stdin verbatim (a .ps1 shim does not) and wins PATHEXT/PowerShell
-    # resolution. Fast-path the built slot python; if no slot is built yet (a
+    # resolution. Resolve the built slot through its canonical marker owner; if
+    # no slot is built yet (a
     # ``stamp`` deferred the venv), provision on first use from the slot-local
     # snapshot (``init.ps1 provision``) then dispatch. Opt out with
     # AGENT_MCP_NO_SELFPROVISION=1. POSIX gets its sh shim. (#1393)
@@ -572,15 +583,11 @@ echo [agent-mcp] provisioning did not yield a runtime.>&2
 exit /b 1
 :_resolve
 set "_PY="
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if defined _PY goto :eof
 if not exist "%_ROOT%\bin\resolve-runtime.ps1" goto :eof
 set "_PSX=powershell"
 where pwsh >nul 2>&1
 if %ERRORLEVEL%==0 set "_PSX=pwsh"
-for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT='%_ROOT%'; . '%_ROOT%\bin\resolve-runtime.ps1'; if ($AgentRtPy) { $AgentRtPy }" 2^>nul`) do set "_PY=%%p"
+for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT=$env:_ROOT; . (Join-Path $env:_ROOT 'bin\resolve-runtime.ps1') -TraceMode read-only; if ($AgentRtPy) { [Console]::Out.WriteLine($AgentRtPy) }" 2^>nul`) do set "_PY=%%p"
 goto :eof
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
@@ -991,87 +998,9 @@ if ($VersionedRuntime) {
 }
 # === end install-contract:v3 versioned-venv activate ===
 
-# agent-mcp-specific (Phase 2, agent-mcp-graceful-cutover): before the hard
-# reap below, give a live `serve` daemon on a stale (non-current) version a
-# graceful zero-downtime handoff instead of just killing it. `--require-live`
-# makes this call safe to run unconditionally on every activation: it never
-# starts a resident daemon where none was running (serve is optional,
-# on-demand warmth, not a registered service), and no-ops if the live daemon
-# is already on this exact version. Only a genuinely live, differently-
-# versioned daemon actually cuts over here; the reap step right after this
-# still runs unchanged as the safety net for anything cutover didn't handle
-# (a pre-feature daemon with no control channel, a failed cutover, or a
-# leaked/orphaned bridge tree that was never a `serve` daemon at all).
-# Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
-# The CLI's own defaults (60s health / 300s drain) are tuned for a human
-# operator explicitly watching a manual `agent-mcp cutover`; an unattended
-# activation pass must not silently block for up to ~6 minutes on a lightly-
-# used bridge, so this uses much shorter install-appropriate defaults
-# (still overridable, e.g. for a host with slow-starting upstream MCP
-# servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
-if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_CUTOVER) {
-    $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
-    $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
-    try {
-        $cutoverArgs = @(
-            '-I', '-X', 'utf8', '-m', 'agent_mcp', 'cutover', '--require-live', '--force', '--json',
-            '--health-timeout', $cutoverHealthTimeout, '--drain-timeout', $cutoverDrainTimeout
-        )
-        $cutoverJson = Invoke-Hidden -FilePath $VenvPython -ArgList $cutoverArgs
-        $cutoverArg = (($cutoverJson | Out-String).Trim())
-        if ($cutoverArg) {
-            $cutoverResult = $cutoverArg | ConvertFrom-Json
-            if ($cutoverResult.skipped) {
-                Write-Skip "Cutover skipped: $($cutoverResult.skipped)"
-            } elseif ($cutoverResult.ok) {
-                Write-Ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
-            } else {
-                Write-Warning "Cutover attempted -- $($cutoverResult.error)" -WarningAction Continue
-            }
-        }
-    } catch { Write-Skip "Cutover skipped ($($_.Exception.Message))" }
-}
-
-# agent-mcp-specific (NOT part of the byte-identical activate block above): reap
-# processes still running from a now-stale (non-current) slot -- leaked/orphaned
-# bridge trees or a warmth daemon from the prior version -- so an upgrade never
-# leaves "two runtime versions resident". Best-effort; opt out with
-# AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
-# attributed to the current version and never reaps itself.
-Invoke-RuntimeOwnerSettlement
-if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
-    $ReapScript = Join-Path $PSScriptRoot 'reap_versions.py'
-    try {
-        # Use the plain (one 'version:pid' per line) output, not --json: under this
-        # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
-        # a later .Count throws. @(...) of the lines is always a countable array.
-        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', $ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
-        if ($LASTEXITCODE -ne 0) { throw 'Old MCP runtime retirement was not confirmed' }
-        $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
-        if ($reaped.Count -gt 0) {
-            $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
-            Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
-        }
-    } catch { Write-Warning "Version-reap incomplete ($($_.Exception.Message))" -WarningAction Continue }
-    # Collect the now-idle stale version *directories* the reap above freed. The
-    # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
-    # protects any slot a live process runs from), so without this step stale
-    # slots accumulate unbounded across upgrades. --protect-pids keeps the current
-    # version + any slot a live process still runs from; --min-age-days is a
-    # recency floor so a concurrent peer install's freshly-built (not-yet-live)
-    # slot is never reaped mid-build. Best-effort; runs via the new slot's python.
-    try {
-        $gcJson = & $VenvPython $VrScript --root $InstallDir --link-name '.venv' `
-            --json gc --protect-pids --min-age-days 0.05 2>$null
-        $gcArg = (($gcJson | Out-String).Trim())
-        $gcCountError = ''
-        $gcN = (Invoke-Hidden -FilePath $VenvPython -ArgList @(
-            '-c', 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)', $gcArg
-        ) -ErrorOutput ([ref]$gcCountError) | Out-String).Trim()
-        if ($gcCountError) { [Console]::Error.Write($gcCountError) }
-        if ([int]$gcN -gt 0) { Write-Ok "Collected $gcN stale version dir(s)" }
-    } catch { Write-Skip "Version-gc skipped ($($_.Exception.Message))" }
-}
+# Incoming readiness is required; incumbent extinction is not. Never invoke
+# reset-control or forced drain as incoming admission.
+Publish-IncomingMcp
 
 # -- 4. Deploy binstub -------------------------------------------------
 
@@ -1170,6 +1099,7 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
+Write-Skip 'Predecessor retirement and slot collection deferred; incoming publication is complete'
 Write-Host '  Try: agent-mcp version' -ForegroundColor DarkGray
 exit 0
 } catch {

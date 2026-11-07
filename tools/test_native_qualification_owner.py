@@ -202,12 +202,28 @@ def test_original_job_forced_drain_remains_nonpositive(tmp_path: Path, monkeypat
     result = contract.Qualification(contract.Boundary(10, UTC), 7, "a" * 64, tmp_path)
     monkeypatch.setattr(owner, "time", SimpleNamespace(monotonic=lambda: 20, sleep=lambda _seconds: None))
     job = object.__new__(owner._WindowsJob)
-    active = iter([2, 0])
-    job.active_processes = lambda: next(active)
+    job.active_processes = lambda: 2
     job._handle = 7
-    job._kernel32 = SimpleNamespace(TerminateJobObject=lambda *_args: 1, CloseHandle=lambda _handle: 1)
+    events = []
+    monkeypatch.setattr(owner, "JobHandle", lambda handle: SimpleNamespace(handle=handle))
+
+    def retire(native_owner, timeout):
+        assert native_owner.handle == 7 and timeout == 5
+        native_owner._native_retirement = object()
+        events.append("native-members-pinned")
+        events.append("native-members-exited")
+        native_owner.handle = None
+        del native_owner._native_retirement
+        events.append("native-witnesses-closed")
+
+    monkeypatch.setattr(owner, "_retire_windows_job", retire)
     job.close(qualification=result)
+    assert events == ["native-members-pinned", "native-members-exited", "native-witnesses-closed"]
+    assert job._handle is None and job._retirement_owner.handle is None
+    assert not hasattr(job._retirement_owner, "_native_retirement")
     assert result.job_zero_observed and result.job_handle_closed and result.forced_termination
+    with pytest.raises(contract.QualificationError, match="no positive"):
+        result.require_settled(lambda: 20)
 
 
 def test_reap_timeout_uses_only_remaining_original_whole_bound(
