@@ -373,6 +373,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   fresh allocation, explicit-ID/v1/v2 and receiver rollback semantics (#11381;
   250 coupled source cases). Normal host enrollment, other publishers and
   provider/installed adoption remain separate.
+- [ ] Review the [trusted producer-enrollment contract](comment-producer-enrollment.md)
+  before changing normal-host behavior. Deliver its actual source/profile
+  resolver and protected write-owner prerequisites through their existing
+  owners, then bind one explicitly selected authenticated host route.
+  Injected factories and observation credentials do not satisfy these exits;
+  default watch-only and native read-only hosting stay unchanged.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -941,6 +947,13 @@ or silently expanding a bounded source claim.
   through the real owning preparation, publication, receipt and acquisition
   boundaries, with explicit surface/provider coverage and evidence tiers.
   Preserve every existing attention, native, installed and shadow gate.
+
+- [ ] Qualify the [normal producer-enrollment controls](comment-producer-enrollment.md#serial-delivery-and-qualification)
+  through actual source/profile and protected native owner boundaries, not
+  supplied callbacks alone. Cover source/policy mismatch, observe-only and
+  changed credential bindings, old/withdrawn support, original-key recovery,
+  explicit exact admission and read-only/default refusal. Source controls
+  cannot substitute for installed/provider or operational authorization.
 
 - [x] Qualify the finite pre-approval owner data path through actual shared
   preparation, original-key restart/lost-result recovery, contention,
