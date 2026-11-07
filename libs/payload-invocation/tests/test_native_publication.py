@@ -1,5 +1,6 @@
 """Native bootstrap and early first use consult the actual deployment owner."""
 from __future__ import annotations
+from typing import Any, cast
 
 import json
 import os
@@ -10,14 +11,17 @@ import venv
 from pathlib import Path
 
 import pytest
+from test_command_binding import PowerShellFactory, _PowerShellHost
 
 from test_command_binding import (
     POWERSHELL, ROOT, _activate, _snapshot, _write,
-    binding_fixture as binding_fixture,
-    powershell_host as powershell_host,
+    binding_fixture as _binding_fixture,
+    powershell_host as _powershell_host,
 )
 from test_command_deployment import _policy
 from test_command_lifecycle import _real_installer
+binding_fixture = _binding_fixture
+powershell_host = _powershell_host
 
 SHELLS = [
     pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX entry point")),
@@ -25,7 +29,7 @@ SHELLS = [
 ]
 
 
-def _native_fixture(fixture: dict, shell: str) -> dict:
+def _native_fixture(fixture: dict[str, Any], shell: str) -> dict[str, str]:
     _, environment = _real_installer(fixture, shell, "installed")
     scripts = fixture["payload"] / "scripts"
     for name in ("bootstrap-check", "invoke-payload-runtime", "resolve-runtime"):
@@ -68,18 +72,18 @@ def _native_fixture(fixture: dict, shell: str) -> dict:
     return environment
 
 
-def _command(fixture: dict, shell: str, name: str) -> list[str]:
+def _command(fixture: dict[str, Any], shell: str, name: str) -> list[str]:
     suffix = "sh" if shell == "bash" else "ps1"
     script = fixture["payload"] / f"scripts/{name}.{suffix}"
     if shell == "bash":
         return ["bash", str(script)]
-    prefix = [POWERSHELL, "-NoLogo", "-NoProfile", "-File"]
+    prefix = [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File"]
     if os.name != "nt":
         prefix.append(str(fixture["home"] / "native-powershell.ps1"))
     return [*prefix, str(script)]
 
 
-def _run(fixture: dict, environment: dict, command: list[str], host=None):
+def _run(fixture: dict[str, Any], environment: dict[str, str], command: list[str], host: _PowerShellHost | None = None) -> subprocess.CompletedProcess[str]:
     if host:
         return host.run(command)
     return subprocess.run(
@@ -88,7 +92,7 @@ def _run(fixture: dict, environment: dict, command: list[str], host=None):
     )
 
 
-def _state(fixture: dict, state: str) -> None:
+def _state(fixture: dict[str, Any], state: str) -> None:
     if state == "missing":
         return
     policy = _policy(fixture, managed=state != "standalone")
@@ -105,7 +109,7 @@ def _state(fixture: dict, state: str) -> None:
 @pytest.mark.parametrize("entry", ["bootstrap-check", "invoke-payload-runtime"])
 @pytest.mark.parametrize("state", ["managed", "invalid", "foreign", "future"])
 def test_native_publication_denial_precedes_all_product_writes(
-    binding_fixture: dict, shell: str, entry: str, state: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, entry: str, state: str, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     _state(binding_fixture, state)
@@ -123,7 +127,7 @@ def test_native_publication_denial_precedes_all_product_writes(
         assert _snapshot(binding_fixture["home"]) == before
 
 
-def _old_lib_copy(fixture: dict) -> Path:
+def _old_lib_copy(fixture: dict[str, Any]) -> Path:
     root = fixture["legacy"]
     package = root / "lib/agent_worktrees"
     package.mkdir(parents=True)
@@ -152,23 +156,23 @@ def _old_lib_copy(fixture: dict) -> Path:
             root / f"bin/resolve-runtime.{suffix}",
         )
     _completed_slot(fixture)
-    return package
+    return cast(Path, package)
 
 
-def _completed_slot(fixture: dict) -> Path:
+def _completed_slot(fixture: dict[str, Any]) -> Path:
     slot = fixture["legacy"] / "versions/1.0.0"
     venv.EnvBuilder(with_pip=False).create(slot)
     _write(slot / ".install-complete.json", {
         "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
     })
     (fixture["legacy"] / "current-version").write_text("1.0.0", encoding="utf-8")
-    return slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return cast(Path, slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
 
 
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed", "foreign"])
 def test_native_old_lib_copy_uses_invoked_owner_not_manifest_source(
-    binding_fixture: dict, shell: str, state: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, state: str, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     package = _old_lib_copy(binding_fixture)
@@ -196,7 +200,7 @@ def test_native_old_lib_copy_uses_invoked_owner_not_manifest_source(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["missing", "standalone"])
 def test_native_first_stamp_retains_standalone_behavior(
-    binding_fixture: dict, shell: str, state: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, state: str, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     _state(binding_fixture, state)
@@ -212,7 +216,7 @@ def test_native_first_stamp_retains_standalone_behavior(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_native_healthy_dispatch_does_not_require_publication_permission(
-    binding_fixture: dict, shell: str,
+    binding_fixture: dict[str, Any], shell: str,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     _policy(binding_fixture)
@@ -238,7 +242,7 @@ def test_native_healthy_dispatch_does_not_require_publication_permission(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_native_first_use_rechecks_real_policy_under_existing_provision_lock(
-    binding_fixture: dict, shell: str,
+    binding_fixture: dict[str, Any], shell: str,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     policy = _policy(binding_fixture)
@@ -276,7 +280,7 @@ def test_native_first_use_rechecks_real_policy_under_existing_provision_lock(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed"])
 def test_native_bootstrap_preserves_aliased_home(
-    binding_fixture: dict, shell: str, state: str, powershell_host, tmp_path: Path,
+    binding_fixture: dict[str, Any], shell: str, state: str, powershell_host: PowerShellFactory, tmp_path: Path,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     _state(binding_fixture, state)
@@ -285,7 +289,7 @@ def test_native_bootstrap_preserves_aliased_home(
         result = subprocess.run(
             [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(alias),
              str(binding_fixture["home"])],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW,
+            capture_output=True, text=True, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
         )
         assert result.returncode == 0, result.stderr
     else:
@@ -306,7 +310,7 @@ def test_native_bootstrap_preserves_aliased_home(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_native_first_use_reads_namespaced_policy_not_legacy(
-    binding_fixture: dict, shell: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     selected = _activate(binding_fixture, binding_fixture["payload"])
@@ -344,7 +348,7 @@ def test_native_first_use_reads_namespaced_policy_not_legacy(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("managed", [False, True])
 def test_native_old_deployed_hook_requires_capable_helper_for_present_policy(
-    binding_fixture: dict, shell: str, managed: bool, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, managed: bool, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     package = _old_lib_copy(binding_fixture)
@@ -370,7 +374,7 @@ def test_native_old_deployed_hook_requires_capable_helper_for_present_policy(
 @pytest.mark.parametrize("old_copy", [False, True])
 @pytest.mark.parametrize("mode_policy", ["missing", "disabled", "enabled", "invalid", "tombstone"])
 def test_native_bootstrap_missing_provenance_uses_canonical_legacy_admission(
-    binding_fixture: dict, shell: str, old_copy: bool, mode_policy: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, old_copy: bool, mode_policy: str, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     if old_copy:
@@ -404,7 +408,7 @@ def test_native_bootstrap_missing_provenance_uses_canonical_legacy_admission(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("mode_policy", ["missing", "disabled"])
 def test_native_first_use_missing_provenance_retains_standalone_dispatch(
-    binding_fixture: dict, shell: str, mode_policy: str,
+    binding_fixture: dict[str, Any], shell: str, mode_policy: str,
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     (binding_fixture["home"] / ".copilot/settings.json").unlink()

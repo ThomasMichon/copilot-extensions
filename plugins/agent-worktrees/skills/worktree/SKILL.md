@@ -285,7 +285,10 @@ without `--handoff-to`); creating-agent cleanup remains the default. See
 [references/obligations.md](references/obligations.md) for the itemized
 per-resource-kind resolution procedure (cross-repo worktrees, CodeSpaces,
 bridge sessions, crashed holders, out-of-band resources you must journal
-yourself) and the claims-ledger commands.
+yourself, derived output directories) and the claims-ledger commands. A
+`derived` claim is settled per path by its owner -- `claims settle <path>
+--reclaim [--dry-run]` deletes it after safety checks, `claims release <path>`
+keeps it; finalize and the sweep never delete one.
 
 ## PR Workflow (PR mode)
 

@@ -1,5 +1,6 @@
 """Actual adopter installers must refuse publication before staging writes."""
 from __future__ import annotations
+from typing import Any, cast
 
 import json
 import os
@@ -12,14 +13,17 @@ import time
 from pathlib import Path
 
 import pytest
+from test_command_binding import PowerShellFactory
 
 from test_command_binding import (
     POWERSHELL, ROOT, _catalog_environment, _snapshot, _write,
-    binding_fixture as binding_fixture,
-    powershell_host as powershell_host,
+    binding_fixture as _binding_fixture,
+    powershell_host as _powershell_host,
 )
 from test_installer_publication import _policy
 from test_native_publication import _run
+binding_fixture = _binding_fixture
+powershell_host = _powershell_host
 
 SHELLS = [
     pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
@@ -29,7 +33,7 @@ SHELLS = [
 ]
 
 
-def _command(fixture: dict, shell: str, name: str) -> list[str]:
+def _command(fixture: dict[str, Any], shell: str, name: str) -> list[str]:
     suffix = "sh" if shell == "bash" else "ps1"
     script = str(fixture["payload"] / f"scripts/{name}.{suffix}")
     if shell == "bash":
@@ -40,7 +44,7 @@ def _command(fixture: dict, shell: str, name: str) -> list[str]:
     return [POWERSHELL, "-NoLogo", "-NoProfile", "-File", script]
 
 
-def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str, str]:
+def _adopter(fixture: dict[str, Any], plugin: str, source: Path | None = None) -> dict[str, str]:
     payload = fixture["payload"].with_name(plugin)
     payload.mkdir(exist_ok=True)
     root = fixture["home"] / f".{plugin}"
@@ -94,7 +98,7 @@ def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str
     for state in ("standalone", "managed")
 ] + [("legacy-resolver", "managed", False), ("missing-driver", "managed", False)])
 def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
-    binding_fixture: dict, state: str, stamp_python: bool, entry: str, tmp_path: Path,
+    binding_fixture: dict[str, Any], state: str, stamp_python: bool, entry: str, tmp_path: Path,
 ) -> None:
     helpers = runpy.run_path(str(ROOT / "plugins/agent-logger/tests/test_install_binstub.py"))
     released = helpers["_stage_release_payload"](tmp_path / "publisher")
@@ -145,7 +149,7 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
     )
     arguments = ["--help"] if entrypoint == "auxiliary" else ["version"]
     command = (
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *arguments]
+        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *arguments]
         if os.name == "nt" else [str(wrapper), *arguments]
     )
     result = subprocess.run(
@@ -186,7 +190,7 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
 @pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("shell", SHELLS)
 def test_logger_cold_cell_refuses_without_legacy_fallback(
-    binding_fixture: dict, shell: str, managed: bool,
+    binding_fixture: dict[str, Any], shell: str, managed: bool,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     primitive = binding_fixture["primitive"]
@@ -239,7 +243,7 @@ def test_logger_cold_cell_refuses_without_legacy_fallback(
     assert not (binding_fixture["home"] / ".copilot-extensions/update-driver").exists()
 
 
-def _without_python(fixture: dict, environment: dict[str, str]) -> None:
+def _without_python(fixture: dict[str, Any], environment: dict[str, str]) -> None:
     if os.name == "nt":
         environment["PATH"] = ""
         return
@@ -258,8 +262,8 @@ def _without_python(fixture: dict, environment: dict[str, str]) -> None:
 
 
 def _assert_refusal(
-    binding_fixture: dict, shell: str, state: str, action: str,
-    scoped: bool, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, state: str, action: str,
+    scoped: bool, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     root = binding_fixture["legacy"]
@@ -300,7 +304,7 @@ def _assert_refusal(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_logger_managed_first_stamp_refuses_before_staging(
-    binding_fixture: dict, shell: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, powershell_host: PowerShellFactory,
 ) -> None:
     _assert_refusal(binding_fixture, shell, "managed", "stamp", False, powershell_host)
 
@@ -311,15 +315,15 @@ def test_logger_managed_first_stamp_refuses_before_staging(
 @pytest.mark.parametrize("action", ["stamp", "install", "update", "provision"])
 @pytest.mark.parametrize("scoped", [False, True])
 def test_logger_publication_refuses_before_staging(
-    binding_fixture: dict, shell: str, state: str, action: str,
-    scoped: bool, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, state: str, action: str,
+    scoped: bool, powershell_host: PowerShellFactory,
 ) -> None:
     _assert_refusal(binding_fixture, shell, state, action, scoped, powershell_host)
 
 
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["missing", "standalone"])
-def test_logger_standalone_retains_staging(binding_fixture: dict, shell: str, state: str) -> None:
+def test_logger_standalone_retains_staging(binding_fixture: dict[str, Any], shell: str, state: str) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
     result = _run(
@@ -333,7 +337,7 @@ def test_logger_standalone_retains_staging(binding_fixture: dict, shell: str, st
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_logger_explicit_management_reuses_canonical_custody(binding_fixture: dict, shell: str) -> None:
+def test_logger_explicit_management_reuses_canonical_custody(binding_fixture: dict[str, Any], shell: str) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], "managed")
     interpreter = (
@@ -359,7 +363,7 @@ def test_logger_explicit_management_reuses_canonical_custody(binding_fixture: di
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_logger_forged_management_does_not_authorize_stamping(
-    binding_fixture: dict, shell: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], "managed")
@@ -379,7 +383,7 @@ def test_logger_forged_management_does_not_authorize_stamping(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native Python-free bootstrap")
 @pytest.mark.parametrize("state", ["missing", "managed"])
-def test_logger_python_free_policy_admission(binding_fixture: dict, state: str, powershell_host) -> None:
+def test_logger_python_free_policy_admission(binding_fixture: dict[str, Any], state: str, powershell_host: PowerShellFactory) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     environment["PATH"] = ""
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
@@ -404,7 +408,7 @@ def test_logger_python_free_policy_admission(binding_fixture: dict, state: str, 
     "default", "relative", "trailing", "missing-relative", "missing-trailing",
 ])
 def test_python_free_explicit_standalone_preserves_source_and_root(
-    binding_fixture: dict, shell: str, spelling: str,
+    binding_fixture: dict[str, Any], shell: str, spelling: str,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     _without_python(binding_fixture, environment)
@@ -430,7 +434,7 @@ def test_python_free_explicit_standalone_preserves_source_and_root(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("python_available", [False, True])
 def test_relocated_admission_retains_launch_project(
-    binding_fixture: dict, shell: str, python_available: bool,
+    binding_fixture: dict[str, Any], shell: str, python_available: bool,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     if not python_available:
@@ -460,7 +464,7 @@ def test_relocated_admission_retains_launch_project(
 @pytest.mark.parametrize("source", ["project-only", "conflicting"])
 @pytest.mark.parametrize("publish", [False, True])
 def test_worktrees_self_stage_retains_launch_project(
-    binding_fixture: dict, shell: str, source: str, publish: bool,
+    binding_fixture: dict[str, Any], shell: str, source: str, publish: bool,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-worktrees")
     project = binding_fixture["home"] / "launch-project"
@@ -541,7 +545,7 @@ def test_worktrees_self_stage_retains_launch_project(
 @pytest.mark.parametrize("relative_root", [False, True])
 @pytest.mark.parametrize("python_available", [False, True])
 def test_interactive_location_retains_project_and_install_root(
-    binding_fixture: dict, relative_root: bool, python_available: bool, monkeypatch,
+    binding_fixture: dict[str, Any], relative_root: bool, python_available: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     if not python_available:
@@ -581,9 +585,9 @@ def test_interactive_location_retains_project_and_install_root(
         + "; exit $LASTEXITCODE"
     )
     result = subprocess.run(
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-Command", command],
+        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-Command", command],
         env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        text=True, timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text(encoding="utf-8-sig"))
@@ -594,7 +598,7 @@ def test_interactive_location_retains_project_and_install_root(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX relative PATH entries")
 @pytest.mark.parametrize("selected", ["python", "bash"])
-def test_relocated_admission_retains_relative_path_interpreter(binding_fixture: dict, selected: str) -> None:
+def test_relocated_admission_retains_relative_path_interpreter(binding_fixture: dict[str, Any], selected: str) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     project = binding_fixture["home"] / "launch-project"
     binaries = project / "bin"
@@ -627,7 +631,7 @@ def test_relocated_admission_retains_relative_path_interpreter(binding_fixture: 
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("shell", SHELLS)
 def test_waiting_admission_releases_replaceable_payload(
-    binding_fixture: dict, shell: str,
+    binding_fixture: dict[str, Any], shell: str,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
     command = [*_command(binding_fixture, shell, "install"), "stamp"]
@@ -635,7 +639,7 @@ def test_waiting_admission_releases_replaceable_payload(
 
 
 def _assert_waiting_payload_released(
-    binding_fixture: dict, environment: dict[str, str], command: list[str],
+    binding_fixture: dict[str, Any], environment: dict[str, str], command: list[str],
     *, cwd: Path | None = None,
 ) -> None:
     environment["COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP"] = "6"
@@ -673,7 +677,7 @@ def _assert_waiting_payload_released(
 
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows Git Bash")
-def test_windows_bash_waiting_admission_releases_payload(binding_fixture: dict) -> None:
+def test_windows_bash_waiting_admission_releases_payload(binding_fixture: dict[str, Any]) -> None:
     git = shutil.which("git")
     bash = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
     if bash is None or not bash.is_file():
@@ -689,7 +693,7 @@ def test_windows_bash_waiting_admission_releases_payload(binding_fixture: dict) 
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows Git Bash")
-def test_windows_bash_retains_payload_cwd_readiness_refusal(binding_fixture: dict) -> None:
+def test_windows_bash_retains_payload_cwd_readiness_refusal(binding_fixture: dict[str, Any]) -> None:
     git = shutil.which("git")
     bash = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
     if bash is None or not bash.is_file():
@@ -700,7 +704,7 @@ def test_windows_bash_retains_payload_cwd_readiness_refusal(binding_fixture: dic
     result = subprocess.run(
         [str(bash), (binding_fixture["payload"] / "scripts/install.sh").as_posix(), "stamp"],
         env=environment, cwd=binding_fixture["payload"], capture_output=True,
-        text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        text=True, timeout=15, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     assert result.returncode != 0
     assert "Windows shell launch CWD pins the payload" in result.stderr

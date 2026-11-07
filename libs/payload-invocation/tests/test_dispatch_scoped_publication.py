@@ -1,5 +1,6 @@
 """Scoped Dispatch stamps must not acquire the legacy command namespace."""
 from __future__ import annotations
+from typing import Any, cast
 
 import json
 import os
@@ -13,13 +14,15 @@ from test_adopter_publication import _adopter, _command
 from test_bridge_first_use_publication import _initialize_shell_profiles
 from test_command_binding import (
     POWERSHELL, _snapshot,
-    binding_fixture as binding_fixture,
+    binding_fixture as _binding_fixture,
 )
 from test_dispatch_first_use_publication import (
-    _selected_cell, dispatch_release as dispatch_release,
+    _selected_cell, dispatch_release as _dispatch_release,
 )
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot, _run
+binding_fixture = _binding_fixture
+dispatch_release = _dispatch_release
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
@@ -34,7 +37,7 @@ SHELLS = [
 ]
 
 
-def _environment(fixture: dict, dispatch_release: Path) -> dict[str, str]:
+def _environment(fixture: dict[str, Any], dispatch_release: Path) -> dict[str, str]:
     environment = _adopter(fixture, "agent-dispatch", dispatch_release)
     environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
     environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
@@ -46,8 +49,8 @@ def _environment(fixture: dict, dispatch_release: Path) -> dict[str, str]:
 
 
 def _stamp(
-    fixture: dict, environment: dict[str, str], shell: str, root: Path | str,
-) -> subprocess.CompletedProcess:
+    fixture: dict[str, Any], environment: dict[str, str], shell: str, root: Path | str,
+) -> subprocess.CompletedProcess[str]:
     command = [*_command(fixture, shell, "install"), "stamp"]
     command += ["-InstallDir" if shell == "powershell" else "--install-dir", str(root)]
     result = _run(fixture, environment, command)
@@ -55,7 +58,7 @@ def _stamp(
     return result
 
 
-def _global_paths(fixture: dict, shell: str) -> list[Path]:
+def _global_paths(fixture: dict[str, Any], shell: str) -> list[Path]:
     names = (
         ("agent-dispatch.ps1", "agent-dispatch.cmd",
          "agent-dispatch-board.ps1", "agent-dispatch-board.cmd")
@@ -67,7 +70,7 @@ def _global_paths(fixture: dict, shell: str) -> list[Path]:
 @pytest.mark.parametrize("scope", ["custom", "cell"])
 @pytest.mark.parametrize("existing_global", [False, True])
 def test_dispatch_scoped_stamp_preserves_global_ownership(
-    binding_fixture: dict, dispatch_release: Path, scope: str, existing_global: bool,
+    binding_fixture: dict[str, Any], dispatch_release: Path, scope: str, existing_global: bool,
 ) -> None:
     fixture = binding_fixture
     if os.name == "nt" and POWERSHELL is None:
@@ -136,7 +139,7 @@ def test_dispatch_scoped_stamp_preserves_global_ownership(
             command = (
                 [ordinary["COMSPEC"], "/d", "/s", "/c", str(path), "version"]
                 if path.suffix == ".cmd" else
-                [POWERSHELL, "-NoProfile", "-File", str(path), "version"]
+                [cast(str, POWERSHELL), "-NoProfile", "-File", str(path), "version"]
                 if path.suffix == ".ps1" else [str(path), "version"]
             )
             result = _run(fixture, ordinary, command)
@@ -161,7 +164,7 @@ def test_dispatch_scoped_stamp_preserves_global_ownership(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("spelling", ["trailing", "dot"])
 def test_dispatch_legacy_root_spellings_publish_globals(
-    binding_fixture: dict, dispatch_release: Path, shell: str, spelling: str,
+    binding_fixture: dict[str, Any], dispatch_release: Path, shell: str, spelling: str,
 ) -> None:
     fixture = binding_fixture
     environment = _environment(fixture, dispatch_release)
@@ -174,7 +177,7 @@ def test_dispatch_legacy_root_spellings_publish_globals(
 @pytest.mark.skipif(os.name == "nt", reason="Distinct case-sensitive POSIX directories")
 @pytest.mark.parametrize("shell", SHELLS)
 def test_dispatch_case_distinct_root_preserves_globals(
-    binding_fixture: dict, dispatch_release: Path, shell: str,
+    binding_fixture: dict[str, Any], dispatch_release: Path, shell: str,
 ) -> None:
     fixture = binding_fixture
     environment = _environment(fixture, dispatch_release)

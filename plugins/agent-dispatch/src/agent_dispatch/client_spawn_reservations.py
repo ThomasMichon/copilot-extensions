@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import httpx
+
 
 class SpawnReservationClientMixin:
     """``list_reservations``/``get_reservation``, mixed into
@@ -48,6 +50,7 @@ class SpawnReservationClientMixin:
         worktree_path: str | None = None,
         creation_nonce: str | None = None,
         worktree_writer_requirement: dict | None = None,
+        timeout: float | None = None,
     ) -> dict:
         """Retain workspace provenance and its independent execution machine."""
         if creation_nonce is not None:
@@ -58,6 +61,12 @@ class SpawnReservationClientMixin:
             versions = self.pool_placement_contract().get("prepared_writer_requirement_versions")
             if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
                 raise DispatchError(409, "selected task owner cannot retain a prepared writer requirement")
+        options = {}
+        if timeout is not None:
+            selected = httpx.Timeout(self._http.timeout)
+            if selected.read is not None:
+                selected.read = max(selected.read, timeout)
+            options["timeout"] = selected
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/worktree",
             json={
@@ -69,6 +78,7 @@ class SpawnReservationClientMixin:
                 **({"worktree_writer_requirement": worktree_writer_requirement}
                    if worktree_writer_requirement is not None else {}),
             },
+            **options,
         ))
 
     def record_created_agent(

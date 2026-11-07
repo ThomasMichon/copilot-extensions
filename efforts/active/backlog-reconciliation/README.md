@@ -233,6 +233,12 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [source-capability and retained-outcome study](<journal/2026/11.06 source-capability-and-retained-outcomes.md>)
+keeps foreign-target conformance, historical vector repair and deliberate
+install/adopt choices distinct from already-shipped capabilities. Actual merge
+and current source identities do not supply the unfinished acceptance or
+receiving transfer. The whole-queue checkpoint and all existing owners remain.
+
 The [authenticated board-waiter cohort](board-waiter-receiving-cohort.md)
 records reviewed #11166, complete actual #5452 receiving/readback and #5410's
 separate NOT_PLANNED tracking retirement. Actual-header regressions and both
@@ -240,10 +246,11 @@ delegated/relay consumers remain independent unchecked lanes; no implementation
 or source/resource custody transfer follows.
 
 The [managed validation cohorts](managed-validation-evidence-cohorts.md)
-propose #4835's finite contained-Windows exit-state lane under existing OPEN
-#6917, retaining fixture and shared-primitive owners separately from the
-accepted shared-runner writer. Review, actual complete delivery/readback and
-a separate judgment still precede any tracking retirement.
+retain #4835's finite contained-Windows exit-state lane directly in OPEN
+#6917 after reviewed #11171, complete actual receiving/readback and its
+separate NOT_PLANNED tracking retirement. Fixture and shared-primitive owners
+remain separate from the accepted shared-runner writer; all technical
+acceptance stays unchecked.
 
 The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
 independently verifies eighteen PR records and twenty-four source identities.

@@ -35,7 +35,7 @@ catalog = {
             "availability": os.environ["AVAILABILITY"],
         }
     ],
-}
+}  # type: dict[str, object]
 @@CATALOG_BINDING_PYTHON@@@@CATALOG_FLIGHT_PYTHON@@context = (
     "## @@COMMAND@@ session command catalog\n\n"
     "Invoke the exact `argv` below. Do not search `PATH` or substitute a "

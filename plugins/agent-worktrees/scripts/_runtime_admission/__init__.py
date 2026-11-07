@@ -4,7 +4,7 @@ import json
 import sys
 
 
-def activate():
+def activate() -> None:
     """Make only this self-contained toolkit's first-party owners importable.
 
     Call in the installation authority's admitted tooling interpreter, never in
