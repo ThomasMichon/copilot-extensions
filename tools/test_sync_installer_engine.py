@@ -1381,14 +1381,16 @@ def test_promotion_checks_actual_postwrite_bytes_before_reporting_success(tmp_pa
 
 
 @pytest.mark.parametrize("initial", ["absent", "stale", "foreign"])
-def test_single_consumer_release_wrapper_refreshes_local_reference_assets(tmp_path, initial):
+@pytest.mark.parametrize("reference", ["local", "canonical"])
+def test_single_consumer_release_wrapper_refreshes_local_reference_assets(tmp_path, initial, reference):
     import materialize_main
     import materialize_installer_engine as materializer
 
     source = tmp_path / "source"
     _promotion_installer_source(source, stale=initial != "absent", consumer_names={"agent-vault"})
     consumer = source / "plugins/agent-vault"
-    _write_local_refs(consumer / "scripts")
+    if reference == "local":
+        _write_local_refs(consumer / "scripts")
     candidate = tmp_path / "preview"
     shutil.copytree(consumer, candidate)
     target = candidate / "scripts/installer_engine_commands.py"
