@@ -19,7 +19,7 @@ import zipfile
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
-from packaging.tags import sys_tags
+from packaging.tags import parse_tag, sys_tags
 from packaging.utils import canonicalize_name
 import pytest
 
@@ -31,13 +31,24 @@ from test_gateway_host import selected as select_host
 
 def _installed_wheel(distribution, output):
     """Keep actual installed public dependency bytes; replace only wheel RECORD."""
-    metadata = distribution.metadata
     wheel_metadata = distribution.read_text("WHEEL")
     assert wheel_metadata
-    tag = next(line[5:] for line in wheel_metadata.splitlines() if line.startswith("Tag: "))
-    name = metadata["Name"].replace("-", "_")
-    version = distribution.version.replace("-", "_")
-    path = output / f"{name}-{version}-{tag}.whl"
+    tags = {
+        tag for line in wheel_metadata.splitlines() if line.startswith("Tag: ")
+        for tag in parse_tag(line[5:].strip())
+    }
+    assert tags
+    tag = "-".join(".".join(sorted({getattr(item, field) for item in tags})) for field in (
+        "interpreter", "abi", "platform",
+    ))
+    assert parse_tag(tag) == tags, "installed wheel tags are not a compressed filename product"
+    prefixes = {
+        member.parent.name for member in distribution.files
+        if len(member.parts) == 2 and member.name == "WHEEL" and member.parent.name.endswith(".dist-info")
+    }
+    assert len(prefixes) == 1
+    prefix = prefixes.pop()
+    path = output / f"{prefix.removesuffix('.dist-info')}-{tag}.whl"
     records = []
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for member in distribution.files:
@@ -54,14 +65,24 @@ def _installed_wheel(distribution, output):
                 "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode(),
                 str(len(data)),
             ))
-        record_path = next(
-            member.as_posix() for member in distribution.files
-            if member.name == "RECORD" and member.parent.name.endswith(".dist-info")
-        )
+        record_path = prefix + "/RECORD"
         table = io.StringIO(newline="")
         csv.writer(table, lineterminator="\n").writerows([*records, (record_path, "", "")])
         archive.writestr(record_path, table.getvalue())
     return path
+
+
+@pytest.mark.parametrize("name", ["PyYAML", "cryptography"])
+def test_installed_dependency_archive_preserves_native_wheel_identity(tmp_path, monkeypatch, name):
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    from runtime_wheel_inspection import inspect_wheel_facts
+
+    distribution = importlib.metadata.distribution(name)
+    path = _installed_wheel(distribution, tmp_path)
+    with path.open("rb") as archive:
+        facts = inspect_wheel_facts(archive, {"filename": path.name})
+    assert facts.name == distribution.metadata["Name"]
+    assert facts.version == distribution.version
 
 
 def _closure(first_party, output, *, extras="gateway-host"):
