@@ -659,6 +659,9 @@ account binding take precedence over a newly active account, so an account
 switch does not hide its retained venue. Explicit repository mappings still
 win; unrelated bindings do not select an account. Binding contention or an
 unavailable selected credential refuses admission rather than switching users.
+An expired or malformed ambient identity may fall back only to that bound
+account's qualified credential. Creation-scope checks run after reuse admission
+and use the admitted environment, not an unrelated ambient token.
 
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through

@@ -118,6 +118,11 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Selected permission and retained-credential corrections
+- Reproduced six failures covering premature ambient scope checks and failed/malformed ambient identity blocking valid retained credentials.
+- Deferred creation-scope checks until creation is needed and kept that check on the admitted environment. Invalid ambient verification can use the workstream's bound credential, never an unrelated account; verified matching environment-only credentials remain valid.
+- Rebased onto current dev, preserving both effort-index entries at the sole conflict. The four affected CLI, lifecycle, claim-resolution and authentication suites passed 227 tests; touched-Python lint passed. Fresh exact-head CI/review remain required.
+
 ### 2026-11-06 - Retained workstream account
 - Reproduced ordinary `create` attempting a new venue and `allocate` suggesting creation after an unmapped workstream's active account changed.
 - Selected the workstream's own repository-matching persisted account before narrowing inventory; explicit repository mappings remain authoritative, and matching environment-only credentials stay usable without a saved token.

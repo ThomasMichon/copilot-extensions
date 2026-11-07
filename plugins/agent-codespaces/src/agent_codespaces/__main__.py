@@ -2928,7 +2928,7 @@ def _parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
     return parse_gh_account_scopes(status_text)
 
 
-def _gh_auth_status() -> tuple[int, str]:
+def _gh_auth_status(environment: dict | None = None) -> tuple[int, str]:
     """Run ``gh auth status`` once -> ``(returncode, combined stdout+stderr)``.
 
     The single shared ``gh`` invocation behind both the multi-account
@@ -2938,10 +2938,11 @@ def _gh_auth_status() -> tuple[int, str]:
     caller map the can't-check case to its own guidance.
     """
     import subprocess as sp
+    from agent_procutil import no_window_kwargs
     try:
         r = sp.run(
             ["gh", "auth", "status"],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, timeout=20, env=environment, **no_window_kwargs(),
         )
     except FileNotFoundError:
         return -1, ""
@@ -2957,9 +2958,9 @@ def _gh_auth_preflight() -> list[str]:
     return gh_auth_preflight(_gh_auth_status, _account_login_remedy)
 
 
-def _ambient_codespace_scope() -> tuple[bool, str]:
-    """``(ok, remedy)`` for the **ambient** gh token's ``codespace`` scope -- the
-    scope every ``gh codespace`` op needs. Focused (ambient account only, unlike
+def _ambient_codespace_scope(environment: dict | None = None) -> tuple[bool, str]:
+    """``(ok, remedy)`` for the selected (default: ambient) token's ``codespace``
+    scope. Focused (one credential only, unlike
     :func:`_gh_auth_preflight` which also checks each mapped account) so a
     connect/mutating gate fails only on the account the op will actually use.
 
@@ -2969,7 +2970,7 @@ def _ambient_codespace_scope() -> tuple[bool, str]:
     backstop). ``ok=False`` only on a positively-confirmed missing scope /
     unauthenticated ambient token.
     """
-    rc, combined = _gh_auth_status()
+    rc, combined = _gh_auth_status(environment) if environment is not None else _gh_auth_status()
     if rc < 0:
         return True, ""  # gh can't be run/read -> don't block
     if rc != 0 or "not logged" in combined.lower():
@@ -2982,10 +2983,10 @@ def _ambient_codespace_scope() -> tuple[bool, str]:
     return True, ""
 
 
-def _require_codespace_scope(op: str) -> int | None:
+def _require_codespace_scope(op: str, *, environment: dict | None = None) -> int | None:
     """Fail-fast gate before a mutating CodeSpace op (#980).
 
-    When the ambient gh token lacks the ``codespace`` scope, a ``gh codespace``
+    When the selected gh token lacks the ``codespace`` scope, a ``gh codespace``
     call would otherwise fail with an opaque 403/404 *after* doing work; this
     surfaces the exact remedy up front instead. Returns an exit code the caller
     propagates (``if (rc := _require_codespace_scope("create")) is not None:
@@ -2995,7 +2996,7 @@ def _require_codespace_scope(op: str) -> int | None:
     """
     if os.environ.get("AGENT_CODESPACES_SKIP_SCOPE_CHECK"):
         return None
-    ok, remedy = _ambient_codespace_scope()
+    ok, remedy = _ambient_codespace_scope(environment) if environment is not None else _ambient_codespace_scope()
     if ok:
         return None
     print(f"[gh] {remedy}", file=sys.stderr)
@@ -3950,12 +3951,6 @@ def _cmd_create(args: argparse.Namespace) -> int:
     """
     from ssh_manager import ConnectionManager
 
-    # #980: fail-fast if the gh 'codespace' scope is missing -- a create without
-    # it fails confusingly minutes in (after provisioning starts). Best-effort +
-    # escape-hatchable so it never wedges a legit create.
-    if (rc := _require_codespace_scope("create a CodeSpace")) is not None:
-        return rc
-
     config = load_merged_config()
 
     from .allocation import allocation_context
@@ -4002,6 +3997,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
     else:
         print("[override] --force-create bypasses local capacity policy, not provider limits", file=sys.stderr)
 
+    if (rc := _require_codespace_scope("create a CodeSpace", environment=environment)) is not None:
+        return rc
     print(f"Creating CodeSpace for {args.repo}...")
 
     def _create():

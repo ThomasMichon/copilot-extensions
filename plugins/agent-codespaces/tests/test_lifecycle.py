@@ -184,6 +184,28 @@ def test_bound_account_never_falls_back_to_another_environment_identity(monkeypa
         allocation.allocation_context("example/project")
 
 
+@pytest.mark.parametrize("response", [
+    MagicMock(returncode=1, stdout="", stderr="expired"),
+    MagicMock(returncode=0, stdout="not-json", stderr=""),
+    MagicMock(returncode=0, stdout="{}", stderr=""),
+])
+def test_bound_account_survives_invalid_ambient_identity(monkeypatch, response):
+    monkeypatch.setenv("GH_TOKEN", "expired-fixture-token")
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr(
+        "agent_codespaces.driving_worktrees.current_workstream_account",
+        lambda repo: "original-owner",
+    )
+    monkeypatch.setattr(allocation.subprocess, "run", lambda *a, **kw: response)
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: {"GH_TOKEN": f"fixture-{account}"},
+    )
+    assert allocation.allocation_context("example/project") == (
+        "original-owner", {"GH_TOKEN": "fixture-original-owner"},
+    )
+
+
 class TestCreateCodespace:
     @pytest.mark.parametrize("explicit", [False, True])
     def test_creation_preserves_admitted_account_environment(self, monkeypatch, explicit):

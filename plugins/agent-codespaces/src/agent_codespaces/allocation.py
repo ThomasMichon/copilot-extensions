@@ -18,6 +18,31 @@ ALLOC_RECYCLE = "recycle"
 ALLOC_PRESSURE = "pressure"
 
 
+def _environment_context(ambient: str) -> tuple[str, dict]:
+    from agent_procutil import no_window_kwargs
+
+    environment = dict(os.environ)
+    environment["GH_TOKEN"] = ambient
+    environment.pop("GITHUB_TOKEN", None)
+    try:
+        result = subprocess.run(
+            ["gh", "api", "user"], capture_output=True, text=True,
+            timeout=10, env=environment, **no_window_kwargs(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"Environment GitHub identity verification failed: {exc}") from exc
+    if result.returncode:
+        raise RuntimeError(f"Environment GitHub identity verification failed: {result.stderr.strip()}")
+    try:
+        profile = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("Environment GitHub identity response is malformed") from exc
+    login = profile.get("login") if isinstance(profile, dict) else None
+    if not isinstance(login, str) or not login.strip():
+        raise RuntimeError("Environment GitHub identity response has no account")
+    return login.strip(), environment
+
+
 def allocation_context(repo: str) -> tuple[str, dict]:
     from . import gh_account
     from .driving_worktrees import current_workstream_account
@@ -29,28 +54,12 @@ def allocation_context(repo: str) -> tuple[str, dict]:
     bound = current_workstream_account(repo)
     ambient = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if ambient:
-        from agent_procutil import no_window_kwargs
-
-        environment = dict(os.environ)
-        environment["GH_TOKEN"] = ambient
-        environment.pop("GITHUB_TOKEN", None)
         try:
-            result = subprocess.run(
-                ["gh", "api", "user"], capture_output=True, text=True,
-                timeout=10, env=environment, **no_window_kwargs(),
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise RuntimeError(f"Environment GitHub identity verification failed: {exc}") from exc
-        if result.returncode:
-            raise RuntimeError(f"Environment GitHub identity verification failed: {result.stderr.strip()}")
-        try:
-            profile = json.loads(result.stdout)
-        except (ValueError, TypeError) as exc:
-            raise RuntimeError("Environment GitHub identity response is malformed") from exc
-        login = profile.get("login") if isinstance(profile, dict) else None
-        if not isinstance(login, str) or not login.strip():
-            raise RuntimeError("Environment GitHub identity response has no account")
-        login = login.strip()
+            login, environment = _environment_context(ambient)
+        except RuntimeError:
+            if not bound:
+                raise
+            return bound, qualified_environment(bound)
         if bound and bound.casefold() != login.casefold():
             return bound, qualified_environment(bound)
         return login, environment

@@ -593,7 +593,7 @@ class TestCreateScopeGate:
         with patch.object(m, "_ambient_codespace_scope",
                           return_value=(False, "run: gh auth refresh -s codespace")), \
              patch.object(m, "create_codespace") as create:
-            rc = main(["create", "owner/repo"])
+            rc = main(["create", "owner/repo", "--force-create"])
         assert rc == 3
         create.assert_not_called()          # gated BEFORE any create work
         assert "Refusing to create" in capsys.readouterr().err
@@ -614,6 +614,30 @@ class TestCreateScopeGate:
         assert rc == 0
         create.assert_called_once()
 
+    @pytest.mark.parametrize("allowed", [True, False])
+    def test_creation_scope_uses_selected_not_ambient_credential(self, monkeypatch, allowed):
+        from types import SimpleNamespace
+        from agent_codespaces import __main__ as cli
+        from agent_codespaces.config import CodespacesConfig
+
+        monkeypatch.delenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", raising=False)
+        monkeypatch.setenv("GH_TOKEN", "ambient-without-scope")
+        monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+        observed = []
+
+        def run(argv, **kwargs):
+            assert argv == ["gh", "auth", "status"]
+            observed.append(kwargs.get("env"))
+            return SimpleNamespace(
+                returncode=0, stdout="codespace" if allowed else "repo", stderr="",
+            )
+
+        monkeypatch.setattr("subprocess.run", run)
+        with patch.object(cli, "create_codespace", return_value=SimpleNamespace(name="new-venue")) as create:
+            assert main(["create", "example/project", "--no-wait", "--force-create"]) == (0 if allowed else 3)
+        assert observed == [{"GH_TOKEN": "selected-fixture-token"}]
+        assert create.call_count == int(allowed)
+
     def test_create_provisioning_shares_launch_environment(self, monkeypatch):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
@@ -632,7 +656,7 @@ class TestCreateScopeGate:
         async def record(kind, *args, **kwargs):
             environments[kind] = kwargs
 
-        monkeypatch.setattr(m, "_require_codespace_scope", lambda *a: None)
+        monkeypatch.setattr(m, "_require_codespace_scope", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_merged_config", lambda: config)
         monkeypatch.setattr(m, "create_codespace", lambda *a, **kw: SimpleNamespace(
             name="synthetic-created", account="synthetic-owner",
@@ -747,7 +771,7 @@ class TestCreateReuseGuard:
         from agent_codespaces.worktrees import ContextRefused
 
         monkeypatch.setattr(cli, "load_merged_config", lambda: {})
-        monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation: None)
+        monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation, **kwargs: None)
         monkeypatch.setattr(
             cli.pool_mod, "build_pool",
             lambda **kwargs: (_ for _ in ()).throw(ContextRefused("fixture context refused")),
@@ -829,7 +853,7 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
         lambda account: pytest.fail("environment credential became a named saved-token lookup"),
     )
     monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
-    monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation: None)
+    monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation, **kwargs: None)
     monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
     monkeypatch.setattr(cli, "validate_context", lambda: None)
     monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
@@ -895,7 +919,8 @@ def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatc
         lambda account: {"GH_TOKEN": f"fixture-{account}"},
     )
     monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
-    monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation: None)
+    monkeypatch.delenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", raising=False)
+    monkeypatch.setattr(cli, "_gh_auth_status", lambda *a, **kw: pytest.fail("reuse checked creation scope"))
     monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
     monkeypatch.setattr(cli, "validate_context", lambda: None)
     monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
@@ -942,7 +967,7 @@ from agent_codespaces.config import CodespacesConfig
 from agent_codespaces.lifecycle import CodespaceInfo
 
 cli.load_merged_config = CodespacesConfig
-cli._require_codespace_scope = lambda operation: None
+cli._require_codespace_scope = lambda operation, **kwargs: None
 cli.validate_context = lambda: None
 cli._gh_binary_available = lambda: True
 allocation.allocation_context = lambda repo: ("fixture-owner", {"GH_TOKEN": "fixture-token"})
