@@ -14,7 +14,7 @@ from .owner_membership_signal import MembershipSignal, commit as commit_membersh
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 42
+SCHEMA_VERSION = 43
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -302,18 +302,6 @@ CREATE TABLE IF NOT EXISTS worktree_ownership (
     updated_at REAL NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS mux_question_answers (
-    inspection_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    fingerprint TEXT NOT NULL,
-    sender TEXT NOT NULL,
-    answer TEXT NOT NULL,
-    state TEXT NOT NULL,
-    detail TEXT,
-    created_at REAL NOT NULL,
-    UNIQUE(session_id, fingerprint)
-);
-
 CREATE TABLE IF NOT EXISTS cli_mode_reservations (
     worktree_id TEXT PRIMARY KEY,
     reservation_id TEXT NOT NULL,
@@ -381,6 +369,7 @@ class _CoreMixin:
                 from .creation_launch_schema import validate_schema as validate_creation_launch_schema
                 from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
                 from .creation_writer_schema import validate_schema as validate_creation_writer_schema
+                from .mux_question_schema import validate_schema as validate_mux_question_schema
 
                 validate_schema(self._get_conn())
                 validate_cold_recovery_schema(self._get_conn())
@@ -392,6 +381,7 @@ class _CoreMixin:
                 validate_creation_launch_schema(self._get_conn())
                 validate_provider_launch_schema(self._get_conn())
                 validate_creation_writer_schema(self._get_conn())
+                validate_mux_question_schema(self._get_conn())
                 validate_exact_live_schema(self._get_conn())
                 after = self._db_path.stat()
                 if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):

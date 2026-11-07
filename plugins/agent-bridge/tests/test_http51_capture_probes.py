@@ -49,6 +49,15 @@ from test_mux_question_client import (
     test_cli_mux_does_not_start_a_daemon_or_touch_native_or_permission_paths
     as test_cli_mux_does_not_start_a_daemon_or_touch_native_or_permission_paths,
 )
+from test_db_adoption import (
+    test_mux_storage_requires_writable_preparation_before_passive_adoption
+    as test_mux_storage_requires_writable_preparation_before_passive_adoption,
+)
+from test_runtime_serving import (
+    captured as captured,
+    test_foreground_serves_real_authenticated_routes_only_after_fenced_commit
+    as test_foreground_serves_real_authenticated_routes_only_after_fenced_commit,
+)
 from test_live_questions import (
     api as api,
     test_live_question_provider_advertises_actual_capability

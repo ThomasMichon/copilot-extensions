@@ -70,6 +70,13 @@ session. A daemon restart revokes all unsubmitted inspection tokens and retains
 the original audit, including unfinished admission. Use the terminal to resolve
 uncertainty; no retry/reset endpoint bypasses that boundary.
 
+Restored serving prepares fresh question owners; it does not inherit old
+inspection tokens. Audit/admission storage requires schema 43, including the
+complete `mux_question_answers` table and its unique screen admission.
+Supported writable preparation upgrades earlier databases before adoption.
+Migration-free candidate and writable-adoption paths refuse missing or malformed
+storage instead of advertising an unusable answer capability.
+
 The existing observation stream also records admission and outcome with caller,
 answer and inspection. Original audit reads do not depend on continued live
 registration. The implementation never calls abort, prompt/message submission,

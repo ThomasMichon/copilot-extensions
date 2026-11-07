@@ -202,3 +202,21 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   two contracts and 1,066 retained fixtures. Historical generations are unchanged.
 - Return #11390 to review. Source merge, Main promotion, both authorized
   adopter updates and installed same-conversation proofs remain unfinished.
+
+### 2026-11-07 - Restored-serving and storage review corrections
+
+- A further review found that retained candidate state discarded the new mux
+  owner, and migration-free adoption did not require the new audit table.
+- Retained serving now receives fresh native/mux question owners before
+  activation. Schema 43 requires the full answer table, including unique screen
+  admission, through writable preparation and both migration-free checks.
+- All 71 focused cases passed, including authenticated restored inspection,
+  submission and audit, stale-token refusal, malformed/missing storage,
+  previous-schema preparation and retained session preservation.
+- Rebasing the owned PR preserved concurrent schema-42 acquisition changes.
+  Only current derived evidence was reconciled; immutable generations and
+  upstream source content were retained. Fresh qualification must bind the
+  combined source, not either earlier capture.
+- The declared capture portfolio now includes these four additional controls,
+  for 316 cases. Requalify, audit the complete delivery graph and request review
+  before source merge; release and both installed proofs remain open.
