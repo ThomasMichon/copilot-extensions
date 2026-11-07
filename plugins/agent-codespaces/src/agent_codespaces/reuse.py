@@ -122,7 +122,7 @@ def reserve(
     if not readiness.ready or coordination.RELEASED_ONLY_CAPABILITY not in readiness.capabilities:
         raise RuntimeError("Selected lease receiver does not support released-only acquisition")
     bind(name, account, repo=repo, strict=True)
-    if not coordination.journal_obligation(name, holder):
+    if not coordination.journal_obligation(name, holder, confirmed=True):
         raise RuntimeError(f"Could not record responsibility for reusing '{name}'")
     acquired = coordination.acquire(
         name, holder, released_only=True, preflight_result=readiness,

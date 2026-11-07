@@ -668,6 +668,15 @@ binding writes preserve additive fields, other records and corrupt-state bytes.
 Qualified ownership is read through the selected Worktrees runtime, not an
 installed sibling Python package. Failed or malformed ledger reads refuse;
 an omitted inventory row does not hide a matching bound obligation.
+Admission classifies every matching obligation; one returned venue cannot hide
+another uncertain acquisition. Holder equality includes machine, project and
+worktree, ignoring only the session suffix. Unmapped obligations spanning
+accounts require an explicit repository-account selection.
+Tokened return confirms shared release and settles the original qualified
+owner's ledger before removing the unchanged local claim. Unknown return or
+deferred settlement reports failure and retains local custody, including through
+generic and bulk release. A quota retry that discovers a returned venue uses
+the same reservation flow rather than creating again.
 The existing per-target lifecycle lock covers final inventory/user checks,
 local reservation, binding confirmation and eligibility-marker removal, so a
 managed destructive operation cannot interleave with that commit sequence.

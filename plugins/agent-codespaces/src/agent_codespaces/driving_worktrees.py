@@ -114,19 +114,17 @@ def _workstream_claim_refs(owner: str | None) -> set[str]:
         return set()
 
 
-def _box_from_refs(
+def _boxes_from_refs(
     members: Iterable[Any], repo: str, refs: set[str], account: str | None = None,
-) -> str | None:
+) -> tuple[str, ...]:
     by_name = {member.name: member for member in members}
     candidates = sorted(
         name for name in refs
         if (member := by_name.get(name)) is not None
         and _matches_workstream_repo(repo, member.repository)
     )
-    if candidates:
-        return candidates[0]
     if not account or not refs:
-        return None
+        return tuple(candidates)
     from .account_binding import list_bindings
 
     # A missing inventory row does not settle a recorded acquisition attempt.
@@ -142,7 +140,13 @@ def _box_from_refs(
         and binding.account.casefold() == account.casefold()
         and _matches_workstream_repo(repo, binding.repo)
     )
-    return missing[0] if missing else None
+    return tuple(sorted(set(candidates + missing)))
+
+
+def _box_from_refs(
+    members: Iterable[Any], repo: str, refs: set[str], account: str | None = None,
+) -> str | None:
+    return next(iter(_boxes_from_refs(members, repo, refs, account)), None)
 
 
 def resolve_workstream_box(
@@ -182,13 +186,20 @@ def resolve_current_workstream_box(
     becoming absence. With a selected account, a matching persisted binding
     keeps an omitted venue's unresolved obligation visible to admission.
     """
+    return next(iter(resolve_current_workstream_boxes(members, repo, account)), None)
+
+
+def resolve_current_workstream_boxes(
+    members: Iterable[Any], repo: str, account: str | None = None,
+) -> tuple[str, ...]:
+    """Return every matching responsibility, including inventory omissions."""
     try:
         from .lease import resolve_owner_worktree
 
         owner = resolve_owner_worktree()
     except Exception:
         owner = None
-    return _box_from_refs(members, repo, _workstream_claim_refs(owner), account)
+    return _boxes_from_refs(members, repo, _workstream_claim_refs(owner), account)
 
 
 def current_workstream_account(repo: str) -> str | None:
@@ -210,14 +221,16 @@ def current_workstream_account(repo: str) -> str | None:
             for binding in bindings for value in (binding.codespace, binding.account, binding.repo)
         ):
             raise RuntimeError("Malformed workstream account binding")
-        bindings.sort(key=lambda binding: binding.codespace)
     except (AttributeError, TypeError, ValueError) as exc:
         raise RuntimeError("Malformed workstream account bindings") from exc
-    return next((
+    accounts = {
         binding.account for binding in bindings
         if binding.codespace in refs and binding.account
         and _matches_workstream_repo(repo, binding.repo)
-    ), None)
+    }
+    if len({account.casefold() for account in accounts}) > 1:
+        raise RuntimeError("Workstream obligations span multiple accounts; select a repository account")
+    return next(iter(accounts), None)
 
 
 def same_worktree_family(holder: str, owner: str) -> bool:
