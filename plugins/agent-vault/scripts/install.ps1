@@ -57,6 +57,24 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+# Retain the native selector before activation, driver handoff or self-staging
+# can move the filesystem cwd. This also applies to task-only schedule actions.
+if ($env:AGENT_VAULT_CONFIG) {
+    $vaultConfigLocation = Get-Location
+    if ($vaultConfigLocation.Provider.Name -cne 'FileSystem') {
+        throw 'Vault configuration requires a filesystem invocation directory'
+    }
+    $vaultConfigProvider = $null
+    $vaultConfigDrive = $null
+    $vaultConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+        $env:AGENT_VAULT_CONFIG, [ref]$vaultConfigProvider, [ref]$vaultConfigDrive
+    )
+    if ($vaultConfigProvider.Name -cne 'FileSystem') {
+        throw 'Vault configuration selector must name a filesystem path'
+    }
+    $env:AGENT_VAULT_CONFIG = $vaultConfigPath
+}
+
 if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
     . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
     $activationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
@@ -1174,7 +1192,7 @@ if (([string]`$_supportsContext).Trim() -ceq '1') {
 exit `$LASTEXITCODE
 "@, [Text.UTF8Encoding]::new($true))
     if ($policy -eq 'enabled') {
-        $action = New-ScheduledTaskAction `
+        $desiredTaskAction = New-ScheduledTaskAction `
             -Execute 'conhost.exe' `
             -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
             -WorkingDirectory $InstallDir
@@ -1195,18 +1213,18 @@ exit `$LASTEXITCODE
         if ($existing) {
             $existingAction = $existing.Actions | Select-Object -First 1
             $matchesDesired = $existingAction -and
-                $existingAction.Execute -eq $action.Execute -and
-                $existingAction.Arguments -eq $action.Arguments -and
-                $existingAction.WorkingDirectory -eq $action.WorkingDirectory
+                $existingAction.Execute -eq $desiredTaskAction.Execute -and
+                $existingAction.Arguments -eq $desiredTaskAction.Arguments -and
+                $existingAction.WorkingDirectory -eq $desiredTaskAction.WorkingDirectory
             if ($matchesDesired) {
                 Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
             } else {
-                Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
+                Set-ScheduledTask -TaskName $TaskName -Action $desiredTaskAction -Trigger $trigger -Settings $settings | Out-Null
                 Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
             }
         } else {
             Register-ScheduledTask -TaskName $TaskName `
-                -Action $action -Trigger $trigger -Settings $settings `
+                -Action $desiredTaskAction -Trigger $trigger -Settings $settings `
                 -Description 'agent-vault -- local KeePassXC-backed secret store.' | Out-Null
             Write-Ok "Scheduled task registered ($TaskName, at logon, 15s delay)"
         }

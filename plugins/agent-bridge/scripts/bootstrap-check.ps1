@@ -102,12 +102,11 @@ try {
             '# Installation driver lifecycle contract: bridge-install-v1' -Quiet
     )) { throw 'The packaged installation driver lacks the Bridge install lifecycle contract.' }
     $previousEap = $ErrorActionPreference
-    $previousMode = $env:AGENT_BRIDGE_NONINTERACTIVE
     $ErrorActionPreference = 'Continue'
     try {
         if ($suffix -ceq 'ps1') {
-            # This is Bridge's service choice (S4U/AtStartup), not just host UI suppression.
-            if ($installerAction -ceq 'install') { $env:AGENT_BRIDGE_NONINTERACTIVE = '1' }
+            # Host UI suppression does not opt into S4U service scheduling.
+            # Preserve only an operator's existing scheduling selector.
             $shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
             $acknowledgement = @(& $shell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
                 -File $firstUse -Root $executionRoot -Payload $PluginDir `
@@ -120,7 +119,6 @@ try {
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousEap
-        $env:AGENT_BRIDGE_NONINTERACTIVE = $previousMode
     }
     if ($code -ne 0) { throw "Installation driver admission failed (exit $code)." }
     $acknowledgementText = $acknowledgement -join "`n"

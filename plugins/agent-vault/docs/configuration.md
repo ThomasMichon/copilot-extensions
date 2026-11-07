@@ -14,6 +14,10 @@ unlock a vault, start a daemon, fetch a credential, or install anything.
 The global file is selected by `AGENT_VAULT_CONFIG`, otherwise
 `%APPDATA%/agent-vault/config.json` on Windows or
 `${XDG_CONFIG_HOME:-~/.config}/agent-vault/config.json` elsewhere.
+The Windows installer resolves an explicit relative selector against its original
+filesystem invocation directory before activation or staging changes cwd. The
+absolute selection is retained for task-only actions and staged child invocations;
+an invalid present file never becomes a missing-file/default-policy result.
 `_discover_repo_config` walks the calling directory's parents for the first
 `.agent-vault.json`. Registered extension configuration is collected separately
 by `extensions.py`; it is not a knowledge-binding or repository-identity engine.

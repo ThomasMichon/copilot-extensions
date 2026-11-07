@@ -46,7 +46,11 @@ def test_windows_scheduling_is_separate_from_service_and_state(tmp_path, policy,
     root = tmp_path / "vault"
     root.mkdir()
     (root / "bin").mkdir()
-    (root / "bin" / "resolve-runtime.ps1").write_text("$AgentRtPy='fixture-python'\n")
+    interpreter = root / "python.ps1"
+    interpreter.write_text(
+        "$global:LASTEXITCODE=0; '{\"root\":\"fixture\",\"config\":\"fixture\"}'\n",
+    )
+    (root / "bin" / "resolve-runtime.ps1").write_text(f"$AgentRtPy='{interpreter}'\n")
     state = root / "state"
     state.write_text("live-daemon-and-state")
     (tmp_path / "runtime-activation.ps1").write_text(
@@ -64,19 +68,15 @@ def test_windows_scheduling_is_separate_from_service_and_state(tmp_path, policy,
         f"$InstallDir={quote(root)}; $TaskName='fixture-only'; $Action={quote(action)}; $script:kind={quote(task)}\n"
         "$TaskLauncher=Join-Path $InstallDir 'service.ps1'; $RunDir=Join-Path $InstallDir 'run'\n"
         "$SocketPath='fixture'; $PipePath='fixture'; $PidFile='fixture'; $LogFile='fixture'; $installationId=''\n"
-        "$NoService=$false; $LinkPython='fixture-python'; $script:registered=0; $script:removed=0; $script:checks=0\n"
+        f"$NoService=$false; $LinkPython={quote(interpreter)}\n"
+        "$script:registered=0; $script:removed=0; $script:starts=0; $script:ensured=0\n"
         "function Write-Ok { param($m) }; function Write-Skip { param($m) }\n"
         "function Write-Fail { param($m) throw $m }; function Write-Warn { param($m) throw $m }\n"
         f"function Get-WindowsScheduledTaskPolicy {{ {quote(policy)} }}\n"
-        # Only the initial runtime-readiness check is true: do not run the real
-        # service-generation subprocess at the bottom of the registration function.
-        "function Test-Path { param($Path,$LiteralPath) "
-        "if ($LiteralPath) { return (Microsoft.PowerShell.Management\\Test-Path -LiteralPath $LiteralPath) }; "
-        "$script:checks++; ($script:checks % 2) -eq 1 }\n"
-        "function fixture-python { $global:LASTEXITCODE=0; '{\"root\":\"fixture\",\"config\":\"fixture\"}' }\n"
         "function Stop-ScheduledTask { throw 'service stop forbidden' }\n"
         "function Invoke-Stop { throw 'daemon stop forbidden' }\n"
-        "function Start-ScheduledTask { param($TaskName,$ErrorAction) }\n"
+        "function Start-ScheduledTask { param($TaskName,$ErrorAction) $script:starts++ }\n"
+        "function powershell.exe { $script:ensured++; $global:LASTEXITCODE=0 }\n"
         "function New-ScheduledTaskAction { param($Execute,$Argument,$WorkingDirectory) "
         "[pscustomobject]@{Execute=$Execute; Arguments=$Argument; WorkingDirectory=$WorkingDirectory} }\n"
         "function New-ScheduledTaskTrigger { param([switch]$AtLogOn,$User) [pscustomobject]@{Delay=''} }\n"
@@ -99,10 +99,11 @@ def test_windows_scheduling_is_separate_from_service_and_state(tmp_path, policy,
         + _installer_function("Assert-OwnedVaultTask")
         + _installer_function("Get-SchedulingPolicyTask")
         + _installer_function("Register-AgentVaultTask")
-        + "\n$result='unchanged'; try { Register-AgentVaultTask; $script:checks=0; Register-AgentVaultTask } "
+        + "\n$result='unchanged'; try { Register-AgentVaultTask; Register-AgentVaultTask } "
         "catch { $result='refused'; [Console]::Error.WriteLine($_) }\n"
         "if ($script:registered) { $result='registered' }; if ($script:removed) { $result='removed' }\n"
-        "[Console]::WriteLine((@{result=$result; removed=$script:removed; registered=$script:registered} | ConvertTo-Json -Compress))\n",
+        "[Console]::WriteLine((@{result=$result; removed=$script:removed; registered=$script:registered;"
+        " starts=$script:starts; ensured=$script:ensured} | ConvertTo-Json -Compress))\n",
         encoding="utf-8-sig",
     )
     result = subprocess.run(
@@ -114,6 +115,11 @@ def test_windows_scheduling_is_separate_from_service_and_state(tmp_path, policy,
     assert actual["result"] == expected, result.stdout + result.stderr
     assert actual["removed"] == (1 if expected == "removed" else 0)
     assert actual["registered"] == (1 if expected == "registered" else 0)
+    normal_service = action != "schedule" and expected != "refused" and task != "disabled"
+    assert (actual["starts"], actual["ensured"]) == (
+        2 if normal_service and policy == "enabled" else 0,
+        2 if normal_service else 0,
+    )
     assert state.read_text() == "live-daemon-and-state"
 
 
@@ -165,7 +171,8 @@ def test_windows_scheduling_distinguishes_missing_from_unknown(tmp_path, policy,
 
 @pytest.mark.skipif(os.name != "nt", reason="faithful Windows task-only variable setup and dispatch")
 @pytest.mark.parametrize("retained_runtime", [True, False])
-def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtime):
+@pytest.mark.parametrize("config_state", ["absent", "malformed", "invalid-policy"])
+def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtime, config_state):
     root = tmp_path / "vault"
     root.mkdir()
     payload = tmp_path / "incoming"
@@ -178,10 +185,19 @@ def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtim
         interpreter.write_text("retained interpreter must not be executed")
     state = root / "state"
     state.write_text("protected daemon state")
+    home = tmp_path / "home"
+    home.mkdir()
     config = tmp_path / "native-config.json"
-    configuration = {"enabled": False, "windows_scheduled_task": "absent"}
-    config.write_text(json.dumps(configuration))
+    configuration = {"enabled": False, "windows_scheduled_task": (
+        "invalid" if config_state == "invalid-policy" else "absent"
+    )}
+    original_config = "{" if config_state == "malformed" else json.dumps(configuration)
+    config.write_text(original_config)
     source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+    preamble_start = source.index("Set-StrictMode -Version 2.0")
+    preamble_end = source.index("if ($Action -in @('install', 'update', 'stamp', 'provision', 'start'))")
+    stage_start = source.index("                Set-Location -LiteralPath $env:USERPROFILE")
+    stage_end = source.index("                $__selfStageRoot", stage_start)
     setup_start = source.index("# === install-contract:v3 versioned-venv (")
     setup_end = source.index("# === end install-contract:v3 versioned-venv ===", setup_start)
     dispatch_start = source.index("    switch ($Action) {", source.index("$needsInstallLock"))
@@ -195,15 +211,21 @@ def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtim
     script.write_text(
         "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
         f"$InstallDir={quote(root)}; $PluginDir={quote(payload)}\n"
-        f"$env:AGENT_VAULT_CONFIG={quote(config)}\n"
-        "$VenvDir=Join-Path $InstallDir '.venv'; $VenvPython=Join-Path $VenvDir 'Scripts\\python.exe'\n"
+        f"$env:USERPROFILE={quote(home)}; Set-Location -LiteralPath {quote(tmp_path)}\n"
+        f"[IO.Directory]::SetCurrentDirectory({quote(tmp_path)})\n"
+        f"$env:AGENT_VAULT_CONFIG={quote(config.name)}\n"
+        "$env:COPILOT_EXTENSIONS_HUMAN_UTF8=''\n"
+        + source[preamble_start:preamble_end]
+        + source[stage_start:stage_end]
+        + "$VenvDir=Join-Path $InstallDir '.venv'; $VenvPython=Join-Path $VenvDir 'Scripts\\python.exe'\n"
         "$Action='schedule'; $NoService=$false; $TaskName='fixture-only'; $script:removed=0\n"
         "$TaskLauncher=Join-Path $InstallDir 'service.ps1'\n"
         "$script:task=[pscustomobject]@{State='Running'; Actions=@([pscustomobject]@{"
         "Execute='conhost.exe'; Arguments=\"--headless powershell.exe -File `\"$TaskLauncher`\"\"})}\n"
         "function Get-ScheduledTask { param($TaskName,$ErrorAction) $script:task }\n"
         "function Unregister-ScheduledTask { param($TaskName,$Confirm,$ErrorAction) "
-        "$script:removed++; $script:task=$null }\n"
+        "$script:removed++; $script:task=$null; "
+        "[IO.File]::AppendAllText((Join-Path $InstallDir 'retired'),\"removed`n\") }\n"
         "function Start-ScheduledTask { throw 'service start forbidden' }\n"
         "function Stop-ScheduledTask { throw 'service stop forbidden' }\n"
         "function Invoke-Start { throw 'direct start forbidden' }\n"
@@ -225,11 +247,21 @@ def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtim
         [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
         capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == "1"
+    if config_state == "absent":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == "1"
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert any(word in result.stderr.lower() for word in (
+            "configuration", "json", "windows_scheduled_task",
+        ))
+    retired = root / "retired"
+    assert (retired.read_text().splitlines() if retired.exists() else []) == (
+        ["removed"] if config_state == "absent" else []
+    )
     assert state.read_text() == "protected daemon state"
     assert (root / "current-version").read_text() == "1.0.0"
-    assert json.loads(config.read_text()) == configuration
+    assert config.read_text() == original_config
     assert not (root / "versions" / "9.0.0").exists()
     assert not (root / "service.ps1").exists()
 
