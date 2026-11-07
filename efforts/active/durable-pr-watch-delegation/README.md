@@ -335,6 +335,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   adopter leaves. Keep AI-profile/privacy policy, minimal clutter, stable
   comment/per-write identity and native proof distinct; a helper alone is
   not full publication coverage.
+  Shared preparation merged in #11146. The
+  [publisher inventory](comment-publication-inventory.md) keeps legacy,
+  explicit-composition and unsupported surfaces distinct; automatic consumer
+  adoption, allocation/correlation and installed qualification remain open.
+  The [prepared-intent binding refinement](comment-intent-binding.md) addresses
+  the missing structured admission fact before new storage/publisher behavior.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -986,6 +992,44 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Qualify explicit prepared-body consumption before admission changes
+
+- #11197 actually merged as `106bebee5ce46eb290ffb4cc28c8821c5ab77564`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. The source worktree reconciled through its normal completion path.
+- All 42 affected workspace CLI/tool cases pass with bounded cleanup verified.
+  The three new cases compose the actual source/profile preparers with native
+  create, reply and owned-edit serialization, real-file retained intent and
+  confirmed retry after owner restart without another send.
+- Review corrected the invalid sibling-plugin development dependency and
+  parent/reply identity reuse. The actual canonical dependency graph and finite
+  release materializer now pass with isolated source imports and a YAML-parser
+  development dependency only. No runtime or request schema changed.
+- Re-read the parent Plan/Validation and publication inventory. Explicit opaque
+  body consumption is qualified; automatic preparation, structured original
+  identity admission/correlation, other surfaces/providers and installed
+  adoption remain open. Review the narrow existing-owner binding refinement
+  before changing strict persisted or receiver shapes. No deployment occurred.
+
+### 2026-11-06 - Land compact comment preparation and continue actual consumers
+
+- #11146 actually merged as `1f92edb9aba7a9f1499dbc36efa7c3981e6abba0`
+  after current-head Copilot approval and the latest required checks passed.
+  The source worktree reconciled through its normal completion path.
+- The optional AI-profile/body helper composes a public-safe source snapshot,
+  supplied comment/write GUIDs and one bounded hidden marker before approval.
+  It preserves retry bytes and refuses foreign/ambiguous/filler metadata;
+  it does not allocate identities, persist intent, publish or prove native effects.
+- Its final focused source packet passes 119 cases with four existing profile
+  skips and verified cleanup. Strict typing passes all seven targets under
+  Linux and win32 settings. The actual origin/body CLI composition case also
+  passes separately; native Windows and installed/provider adoption are not
+  claimed.
+- Re-read the parent Plan and Validation Plan; the effort and #11128 remain
+  open. Continue actual publication-owner inventory and contained opaque-body
+  consumer qualification, retaining allocation, correlation and separately
+  authorized adoption as unfinished work.
 
 ### 2026-11-06 - Repair the actual release-candidate projection blocker
 
