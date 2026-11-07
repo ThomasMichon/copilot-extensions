@@ -99,9 +99,12 @@ Destination data and recovery/pointer files are flushed before retiring the
 source. Namespace publication uses native write-through replacement on Windows
 and parent-directory synchronization on POSIX. Retirement first renames the
 verified original to `<id>.retiring-<original-stage-token>` beside the old
-location through the same exclusive native publication owner. It then verifies
-and removes that owned duplicate and synchronizes the old parent before
-checkpointing completion. A barrier failure can retain the original under its
+location through the same exclusive native publication owner. Full source
+equality is required before publication and before retirement; source deletions
+are changes, not completed cleanup. The fully verified retirement copy and
+old-parent barrier precede a durable `retiring` checkpoint. Only that checkpoint
+allows retrying a partially removed owned duplicate. The old parent is
+synchronized again before completion. A barrier failure can retain the original under its
 old name or this tokenized retirement name; the original journal recovers either
 without another allocation. Do not remove that copy manually. No global
 multi-file pointer transaction is claimed.

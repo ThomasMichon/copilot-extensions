@@ -619,3 +619,21 @@ adopter pilot feedback gates subsequent widening.
   stale-lock output and fresh-child guard/refusal controls passed **9 cases**.
   The negative guard control uses a nonexistent fixture executable, so a failed
   bootstrap cannot accidentally query another host namespace.
+
+### 2026-11-07 — Source deletion intent versus owned cleanup
+- Independently confirmed the next unpublished overview concern: accepting a
+  subset before retirement can mistake a post-copy ignored-file deletion for
+  already completed cleanup. Source equality is now exact before publication
+  and before retiring the old name; no deleted source content is silently
+  restored from the earlier copy.
+- A complete retirement copy and its parent barrier precede durable `retiring`
+  custody. Only that checkpoint permits subset verification during recovery
+  of an actually started owned removal. Original stage identity remains fixed.
+- The dedicated native packet passed **20 controls**, including deletion
+  immediately after copying, after pointer changes, and after rename but before
+  verified cleanup. Prepublication deletion remains cancellable; later drift
+  preserves both views and refuses completion/retry without guessing intent.
+  Positive partial cleanup still recovers through the original operation.
+- The source umbrella and effort remain Active. This safety correction does
+  not add inactive WIP support, authorize activation or settle the separately
+  held external-fixture disposition.
