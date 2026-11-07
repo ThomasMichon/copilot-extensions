@@ -128,6 +128,22 @@ def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path,
                         for path in source.rglob("*") if path.is_file()}
 
 
+def test_unrelated_library_copy_does_not_read_installer_inputs(tmp_path, monkeypatch):
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    library = source / "libs/unrelated"
+    copied = candidate / "plugins/sample/libs/unrelated"
+    library.mkdir(parents=True)
+    copied.mkdir(parents=True)
+
+    def refuse_read(*args, **kwargs):
+        raise AssertionError("An unrelated library must not acquire Installer inputs")
+
+    monkeypatch.setattr(materializer.mie.ier, "support_files", refuse_read)
+    assert materializer.mie.materialize_derived_files(
+        candidate, canonical_root=source, copied_consumer=(library, copied),
+    ) == []
+
+
 def test_materializer_refuses_missing_standalone_manifest(tmp_path, monkeypatch):
     (tmp_path / "worktree-manager").mkdir()
     (tmp_path / "plugins" / "skill-only").mkdir(parents=True)

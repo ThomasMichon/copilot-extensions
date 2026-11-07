@@ -42,6 +42,17 @@ def derived_file_pairs(
     canonical_root: Path, dest: Path, *, copied_consumer: tuple[Path, Path] | None = None,
 ) -> list[tuple[Path, Path]]:
     """Declared non-kit assets only; an absent consumer is never created."""
+    if copied_consumer is not None:
+        try:
+            relative = copied_consumer[0].relative_to(canonical_root).as_posix()
+        except ValueError:
+            return []
+        declared = {
+            *(f"plugins/{name}" for name in (*ier.ADOPTERS, *ier.PYTHON_ADOPTERS)),
+            *ier.STANDALONE_PYTHON_ADOPTERS, *ier.STANDALONE_NATIVE_ADOPTERS,
+        }
+        if relative not in declared:
+            return []
     canonical = canonical_root / "libs" / "installer-engine"
     consumers: dict[Path, set[str]] = {}
     support = ier.support_files(canonical)
