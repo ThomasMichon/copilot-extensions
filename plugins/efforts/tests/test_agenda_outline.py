@@ -217,6 +217,25 @@ def test_backfill_reconstructs_requests_todos_and_carried_work(tmp_path: Path) -
     assert "Deduplicating rows" in actions
 
 
+def test_backfill_includes_bridged_requests_from_their_envelope(tmp_path: Path) -> None:
+    folder = _session(tmp_path / "s", [("2026-01-01T01:00:00Z", "Start the migration", None)], [], ended=True)
+    bridged = {"type": "user.message", "timestamp": "2026-01-01T02:00:00Z",
+               "data": {"content": "Message from operator (via agent-bridge)", "source": "agent-bridge",
+                        "transformedContent": '<current_datetime>x</current_datetime>\n\n'
+                                              '<agent-message from="operator" msg-id="7">\r\n'
+                                              'Now verify the rollback path\r\n</agent-message>'}}
+    header_only = {"type": "user.message", "timestamp": "2026-01-01T03:00:00Z",
+                   "data": {"content": "Message from peer (via agent-bridge)", "source": "agent-bridge"}}
+    events = folder / "events.jsonl"
+    events.write_text(events.read_text() + json.dumps(bridged) + "\n" + json.dumps(header_only) + "\n")
+
+    items = BACKFILL.outline(folder)["items"]
+
+    assert [item["action"] for item in items] == ["Start the migration", "Now verify the rollback path"]
+    assert items[1]["evidence"] == "bridged request from operator at 2026-01-01T02:00:00Z"
+    assert items[0]["evidence"].startswith("operator request at")
+
+
 @pytest.mark.parametrize("content", ["修复解析器", "Исправь парсер", "ok 修复解析器"])
 def test_non_english_requests_are_not_acknowledgements(content: str) -> None:
     assert not BACKFILL.acknowledgement(content)
