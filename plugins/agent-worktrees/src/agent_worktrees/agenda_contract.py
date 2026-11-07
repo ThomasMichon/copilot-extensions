@@ -238,7 +238,7 @@ def graph(value, revision: int) -> None:
             _text(frame["via"], "expanding item")
             _text(frame["returns"], "return action")
         known[frame["id"]] = frame
-    seen: set[str] = set()
+    seen: dict[str, str] = {}
     for item in items:
         exact(item, {"id", "frame", "label", "state", "attempts"})
         _text(item["id"], "item id")
@@ -248,7 +248,7 @@ def graph(value, revision: int) -> None:
         if not _member(item["state"], GRAPH_ITEM_STATES):
             raise AgendaError("invalid agenda graph item state")
         _count(item["attempts"], "attempt count")
-        seen.add(item["id"])
+        seen[item["id"]] = item["frame"]
     cursor = value["cursor"]
     exact(cursor, {"frame", "item", "stack"})
     stack = cursor["stack"]
@@ -256,8 +256,10 @@ def graph(value, revision: int) -> None:
         raise AgendaError("agenda graph stack names an unknown frame")
     if (cursor["frame"] is None) != (not stack) or (stack and cursor["frame"] != stack[-1]):
         raise AgendaError("agenda graph cursor is not the top of the stack")
-    if cursor["item"] is not None and not _member(cursor["item"], seen):
-        raise AgendaError("agenda graph cursor names an omitted item")
+    if cursor["item"] is not None and (
+        not _member(cursor["item"], seen) or seen[cursor["item"]] != cursor["frame"]
+    ):
+        raise AgendaError("agenda graph cursor names an omitted or other-frame item")
     for entry in history:
         exact(entry, {"at", "kind", "frame", "item", "text"})
         _utc(entry["at"], "agenda graph history")

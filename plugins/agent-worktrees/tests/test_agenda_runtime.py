@@ -374,6 +374,7 @@ def test_cli_publication_of_a_graph_requests_and_accepts_its_echo(monkeypatch, c
         lambda g: g["items"][0].update(frame=["root"]),
         lambda g: g["cursor"].update(stack=[["root"]]),
         lambda g: g["cursor"].update(item=["probe"]),
+        lambda g: g["cursor"].update(item="parent"),
     ],
 )
 def test_graph_shape_is_strict(owned, fault):

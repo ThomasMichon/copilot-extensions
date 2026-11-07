@@ -91,8 +91,8 @@ recent history:
 ```
 
 `revision` matches the observation's. Frames form a tree, `via` naming the
-parent item a subqueue expanded from. The cursor names the active frame and
-item, and `stack` lists frame ids from the root frame down to the active
+parent item a subqueue expanded from. The cursor names the active frame and an
+item of that frame, and `stack` lists frame ids from the root frame down to the active
 frame. Counts in `omitted` report what the bound dropped. The graph is
 validated with the observation, so it has the same size limit.
 

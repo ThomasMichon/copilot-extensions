@@ -185,6 +185,7 @@ def _frame(graph, index):
     lambda graph: graph["items"][0].update(frame=["f-root"]),
     lambda graph: graph["cursor"].update(stack=[["f-root"]]),
     lambda graph: graph["cursor"].update(item=["i-missing"]),
+    lambda graph: graph["cursor"].update(item="i-docs"),
 ])
 def test_malformed_graph_is_rejected(mutate):
     frame = graph_publication()

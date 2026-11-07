@@ -202,7 +202,7 @@ def validate_graph(value, revision: int) -> None:
         ):
             raise ValueError("agenda graph has an invalid or out-of-order frame")
         known.add(frame["id"])
-    seen: set[str] = set()
+    seen: dict[str, str] = {}
     for item in items:
         if (
             not isinstance(item, dict)
@@ -212,7 +212,7 @@ def validate_graph(value, revision: int) -> None:
             or type(item["attempts"]) is not int or not 0 <= item["attempts"] <= MAX_INTEGER
         ):
             raise ValueError("agenda graph has an invalid, duplicated or orphaned item")
-        seen.add(item["id"])
+        seen[item["id"]] = item["frame"]
     cursor = value["cursor"]
     if not isinstance(cursor, dict) or set(cursor) != {"frame", "item", "stack"}:
         raise ValueError("agenda graph has an invalid cursor")
@@ -221,7 +221,9 @@ def validate_graph(value, revision: int) -> None:
         not isinstance(stack, list) or any(not _graph_member(frame, known) for frame in stack)
         or (cursor["frame"] is None) != (not stack)
         or (stack and cursor["frame"] != stack[-1])
-        or (cursor["item"] is not None and not _graph_member(cursor["item"], seen))
+        or (cursor["item"] is not None and (
+            not _graph_member(cursor["item"], seen) or seen[cursor["item"]] != cursor["frame"]
+        ))
     ):
         raise ValueError("agenda graph cursor is not the top of a known stack")
     for entry in history:
