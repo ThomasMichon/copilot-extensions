@@ -1683,3 +1683,10 @@ checker source and candidate test file, before executing the packet. Refresh
 only those two reviewed hashes. Source verification passes with the admitted
 nodes, coverage targets and whole-packet budget unchanged; fresh CI and review
 remain required at the updated head.
+
+The next review has no open issues but notes a shared startup/shutdown
+deadline in the finite pane control. Give shutdown its own ten-second wait
+after release, leaving the original item and packet limits unchanged. Both
+native pane controls pass in 2.44 seconds (35.03 seconds including preparation
+and cleanup). This fixture-only adjustment does not change the qualified
+checker sources or require repeating their settled validation.

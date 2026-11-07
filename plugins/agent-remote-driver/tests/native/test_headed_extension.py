@@ -165,6 +165,7 @@ def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, c
         pid = int(marker.read_text(encoding="utf-8"))
         assert pid_alive(pid)
         release.write_text("release", encoding="utf-8")
+        deadline = time.monotonic() + 10
         while pid_alive(pid) and time.monotonic() < deadline:
             time.sleep(0.05)
         assert not pid_alive(pid)
