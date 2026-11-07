@@ -110,6 +110,10 @@ The packaged toolkit includes its pinned generator and admission packager at
 their original relative paths, including the file-loaded tooling edges that
 static import closure alone cannot discover. Manager's separate preparer tool
 declaration includes the Invocation adapter it imports.
+Manager's existing launch-wrapper asset declaration also places the generator
+and packager under `scripts/libs/payload-invocation`, the adapter's trusted
+loader location. Raw-source retention addresses both declared asset groups;
+the Manager wheel retains those tooling paths too.
 
 The remaining canonical-first witness transition is still open: source-bound
 catalog checks and their current fixtures bind real consumer/helper bytes, and
