@@ -678,7 +678,7 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     "receipt-payload-fallback", "receipt-plugin-fallback", "receipt-namespace-fallback",
 ])
 def test_prepared_cell_membership_reuses_only_complete_current_owner_observation(
-    tmp_path, monkeypatch, shell, case,
+    tmp_path, monkeypatch, record_testsuite_property, shell, case,
 ):
     from types import SimpleNamespace
     import test_registry_paths as fixtures
@@ -863,7 +863,15 @@ def test_prepared_cell_membership_reuses_only_complete_current_owner_observation
     )
     if case == "payload-selection":
         env["COPILOT_PLUGIN_ROOT"] = str(legacy)
-    command = ". $env:PREPARED_MEMBERSHIP_SCRIPT; "
+    phase_prefix = "prepared-membership-phase:"
+
+    def phase(name):
+        return (
+            f"[Console]::Error.WriteLine('{phase_prefix}{name}:' + "
+            "[DateTime]::UtcNow.ToString('O')); "
+        )
+
+    command = phase("entered") + ". $env:PREPARED_MEMBERSHIP_SCRIPT; " + phase("loaded")
     fallback = case in {
         "original-fallback", "directory-fallback", "receipt-payload-fallback",
         "receipt-plugin-fallback", "receipt-namespace-fallback",
@@ -872,15 +880,32 @@ def test_prepared_cell_membership_reuses_only_complete_current_owner_observation
         env["AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON"] = sys.executable
     else:
         command += "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }; "
-    command += (
-        "[Console]::Out.Write((Test-ManagedWorktreesSession -Raw ([Console]::In.ReadToEnd())).ToString())"
-    )
-    result = native_run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
-        input=json.dumps(event), text=True, capture_output=True, timeout=10,
-        cwd=workspace, env=env, **no_window_kwargs(),
-    )
-    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    command += "$raw = [Console]::In.ReadToEnd(); " + phase("input-ready")
+    command += "$admitted = Test-ManagedWorktreesSession -Raw $raw; " + phase("checked")
+    command += "[Console]::Out.Write($admitted.ToString())"
+    started = time.monotonic()
+    try:
+        result = native_run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+            input=json.dumps(event), text=True, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        stderr = error.stderr or b""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        pytest.fail(
+            f"{shell}/{case} exceeded the unchanged 10-second native child deadline "
+            f"after {time.monotonic() - started:.3f}s; captured phases/errors:\n{stderr}",
+        )
+    phases, errors = [], []
+    for line in result.stderr.splitlines():
+        (phases if line.startswith(phase_prefix) else errors).append(line)
+    record_testsuite_property(f"prepared_membership:{shell}:{case}", json.dumps({
+        "elapsed_seconds": round(time.monotonic() - started, 3), "phases": phases,
+    }))
+    assert len(phases) == 4, result.stdout + result.stderr
+    assert result.returncode == 0 and not errors, result.stdout + result.stderr
     assert result.stdout == ("True" if case == "current" or fallback else "False")
     if case == "original-fallback":
         assert len(json.loads(marker.read_text())["installation"]["files"]) == 3
