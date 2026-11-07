@@ -93,17 +93,17 @@ def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
     recovered = False
 
     def recover() -> bool:
-        assert controller.predecessor.recovery_process is pin
+        assert controller.predecessor.custody is pin
         if recovered:
-            controller.predecessor.recovery_process = None
+            controller.predecessor.custody = None
         return recovered
 
-    controller.predecessor = SimpleNamespace(recovery_process=pin, recover=recover)
+    controller.predecessor = SimpleNamespace(custody=pin, recover=recover)
     transfers = []
 
     def transfer(status: dict, payload: dict, *, writer_released: bool = False) -> bool:
         assert not controller.has_writer and not vault._runtime_can_work and not work
-        assert controller.predecessor.recovery_process is pin
+        assert controller.predecessor.custody is pin
         transfers.append(writer_released)
         return True
 
@@ -121,7 +121,7 @@ def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
         work.clear()
         await controller.tick()
         assert transfers == [True] and vault._shutdown
-        assert controller.predecessor.recovery_process is pin
+        assert controller.predecessor.custody is pin
         incoming = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
         incoming.writer.acquire()
         incoming.writer.release()
@@ -129,10 +129,10 @@ def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
         try:
             await asyncio.sleep(.01)
             assert not settling.done()
-            assert controller.predecessor.recovery_process is pin
+            assert controller.predecessor.custody is pin
             recovered = True
             await asyncio.wait_for(settling, 2)
-            assert controller.predecessor.recovery_process is None
+            assert controller.predecessor.custody is None
         finally:
             if not settling.done():
                 settling.cancel()
@@ -728,20 +728,28 @@ from agent_vault import service_predecessor
 if mode in {"bounded-successor", "prepared-successor", "rollback-successor", "resume-failure-successor", "retirement-probe-successor"}:
     service_predecessor.GRACE_SECONDS = 3
 if mode == "retirement-probe-successor":
+    census = service_predecessor._has_children
     def held_retirement(pid):
         (root / "pin-owner.retirement").touch()
-        return True
+        return census(pid)
     service_predecessor._has_children = held_retirement
 if mode == "resume-failure-successor":
-    from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
-    close = PinnedProcess.close
+    from agent_procutil.process_retirement import RetirementRefused
+    from agent_procutil.retirement_custody import RetirementCustody, _Pin
+    close = RetirementCustody.close
     def held_resume(self):
-        if self._paused and not (root / "resume.release").exists():
-            error = RetirementRefused("Owned fixture resume is held")
-            error.process = self
-            raise error
+        if not (root / "resume.release").exists():
+            from agent_procutil import _daemon_instance_store as store
+            (root / (identity + ".custodian")).write_text(json.dumps({
+                "pid": self._process.pid,
+                "job": store._expiry_job.name if os.name == "nt" else None,
+            }))
+            raise RetirementRefused("Owned fixture lifeline close is held")
         return close(self)
-    PinnedProcess.close = held_resume
+    RetirementCustody.close = held_resume
+    def held_pin_close(self, *_):
+        raise RetirementRefused("Owned fixture pin close is held")
+    _Pin.__exit__ = held_pin_close
     service_predecessor._has_children = lambda _: True
     settle = generation.ServiceGeneration.settle_retirements
     async def observed_settlement(self):
@@ -749,8 +757,8 @@ if mode == "resume-failure-successor":
         await settle(self)
     generation.ServiceGeneration.settle_retirements = observed_settlement
 if mode == "rollback-successor":
-    from agent_procutil.process_retirement import PinnedProcess
-    terminate = PinnedProcess.terminate
+    from agent_procutil.retirement_custody import _Pin
+    terminate = _Pin.terminate
     def held_terminate(self, *args, **kwargs):
         (root / "retire.ready").touch()
         deadline = time.monotonic() + 10
@@ -759,7 +767,7 @@ if mode == "rollback-successor":
                 raise RuntimeError("Owned retirement fixture was not released")
             time.sleep(.01)
         return terminate(self, *args, **kwargs)
-    PinnedProcess.terminate = held_terminate
+    _Pin.terminate = held_terminate
 if mode == "legacy-receiver":
     read = service_handoff.read_frame
     def legacy_read(*args):
@@ -1031,6 +1039,19 @@ def _capture_process(pid: int) -> PeerProcess:
     )
 
 
+def _retain_fixture_job(name: str):
+    import ctypes
+    from ctypes import wintypes
+    from agent_procutil import JobHandle, _kernel32
+
+    kernel = _kernel32()
+    kernel.OpenJobObjectW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.OpenJobObjectW.restype = wintypes.HANDLE
+    handle = kernel.OpenJobObjectW(0x0004, False, name)
+    assert handle, ctypes.get_last_error()
+    return JobHandle(handle, name=name)
+
+
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native process references")
 @pytest.mark.parametrize("old_mode,incoming_mode,warm", (
     ("legacy-health", "normal", True), ("normal", "no-overlap", False),
@@ -1191,7 +1212,7 @@ assert (root / "current-version").read_text().strip() == "newer"
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned recovery")
-def test_native_later_successor_cannot_retire_the_owner_of_a_pending_resume(tmp_path: Path) -> None:
+def test_native_later_successor_refuses_a_live_custodian_child(tmp_path: Path) -> None:
     for identity in ("newer", "middle", "older"):
         _stage_generation(tmp_path, identity)
     (tmp_path / "current-version").write_text("newer")
@@ -1222,8 +1243,8 @@ def test_native_later_successor_cannot_retire_the_owner_of_a_pending_resume(tmp_
         )
         status = _send(target, {"action": "ping"})
         assert status["accepting_work"]
-        assert status["predecessor_retirement"] in {"refused-owner", "refused-owner-or-selection"}
-        assert not (tmp_path / "pin-owner.retirement").exists()
+        assert status["predecessor_retirement"] == "refused-live-workers"
+        assert (tmp_path / "pin-owner.retirement").exists()
         assert middle.poll() is None and old.poll() is None
         (tmp_path / "resume.release").touch()
         middle.communicate(timeout=6)
@@ -1236,14 +1257,19 @@ def test_native_later_successor_cannot_retire_the_owner_of_a_pending_resume(tmp_
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned recovery")
-def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(tmp_path: Path) -> None:
+@pytest.mark.parametrize("caller_dies", (False, True), ids=("shutdown", "caller-death"))
+def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(
+    tmp_path: Path, caller_dies: bool,
+) -> None:
     from concurrent.futures import ThreadPoolExecutor
+    from zdd.private_protocol import Deadline
 
     for identity in ("newer", "older"):
         _stage_generation(tmp_path, identity)
     (tmp_path / "current-version").write_text("newer")
     old = _start(tmp_path, "newer", 0, "hung-work")
     children = [old]
+    fixture_job = custodian = None
     with ThreadPoolExecutor(max_workers=1) as worker:
         try:
             _until(lambda: _endpoint(tmp_path) is not None, children)
@@ -1265,19 +1291,42 @@ def test_native_resume_pin_survives_reselection_and_shutdown_until_settled(tmp_p
             )
             assert not _send(target, {"action": "ping"})["accepting_work"]
             assert old.poll() is None and not pending.done()
-            (tmp_path / "current-version").write_text("newer")
-            (tmp_path / "older.stop").touch()
-            _until(lambda: (tmp_path / "resume.shutdown").exists(), children)
-            assert new.poll() is None
-            assert old.poll() is None and not pending.done()
-            (tmp_path / "resume.release").touch()
-            new.communicate(timeout=6)
-            assert new.returncode == 0
+            if caller_dies:
+                offer = json.loads((tmp_path / "older.custodian").read_text())
+                custodian = _capture_process(offer["pid"])
+                if os.name == "nt":
+                    # Preserve test containment while isolating caller death from Job teardown.
+                    fixture_job = _retain_fixture_job(offer["job"])
+                # Only this fixture-owned caller dies; its worker keeps the original pin.
+                new.kill()
+                new.communicate(timeout=3)
+                assert new.returncode != 0
+                assert not (tmp_path / "resume.release").exists()
+            else:
+                (tmp_path / "current-version").write_text("newer")
+                (tmp_path / "older.stop").touch()
+                _until(lambda: (tmp_path / "resume.shutdown").exists(), children)
+                assert new.poll() is None
+                assert old.poll() is None and not pending.done()
+                (tmp_path / "resume.release").touch()
+                new.communicate(timeout=6)
+                assert new.returncode == 0
             assert old.poll() is None
             (tmp_path / "newer.release").touch()
             assert pending.result(timeout=3)["ok"]
+            assert ["newer", "settled"] in [
+                json.loads(line) for line in (tmp_path / "work.jsonl").read_text().splitlines()
+            ]
+            if custodian is not None:
+                custodian.wait_exit(Deadline(3))
         finally:
-            _settle(tmp_path, children)
+            try:
+                _settle(tmp_path, children)
+            finally:
+                if custodian is not None:
+                    custodian.close()
+                if fixture_job is not None:
+                    fixture_job.close()
     assert old.returncode == 0
 
 

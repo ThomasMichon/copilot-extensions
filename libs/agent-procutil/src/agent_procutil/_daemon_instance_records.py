@@ -157,17 +157,3 @@ def finish_for_process(
             raise ValueError("daemon instance custody belongs to another process")
         record.update(state="finished", updated=str(store._wall_clock()))
         store._write(path, record)
-
-
-def change_protection(receipt: DaemonInstanceReceipt, delta: int) -> None:
-    from . import _daemon_instance_store as store
-
-    with store._locked(receipt, wait_seconds=1) as path:
-        record = store._read(path)
-        if record.get("state") != "running" or not ProcessIdentity.current().matches(record):
-            raise ValueError("daemon protection belongs to the admitted process")
-        count = int(record.get("protected", "0"))
-        if delta not in (-1, 1) or not 0 <= count + delta <= 64:
-            raise ValueError("daemon protection count is outside its bound")
-        record.update(protected=str(count + delta), updated=str(store._wall_clock()))
-        store._write(path, record)

@@ -503,10 +503,7 @@ class ServiceGeneration:
             (self.predecessor, "predecessor_retirement"),
             (self.writer_predecessor, "writer_predecessor_retirement"),
         ):
-            if target is not None and (
-                getattr(target, "recovery_process", None) is not None
-                or getattr(target, "protection", None) is not None
-            ):
+            if target is not None and getattr(target, "custody", None) is not None:
                 if await settle_owned(asyncio.to_thread(target.recover)):
                     setattr(self, status, "refused-native-retirement")
                 else:

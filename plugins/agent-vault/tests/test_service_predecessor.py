@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,11 +31,14 @@ def owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(predecessor, "identity_state", lambda *args: "matching")
     monkeypatch.setattr(predecessor, "peer_identity", lambda _: SimpleNamespace())
     monkeypatch.setattr(predecessor, "_has_children", lambda _: False)
-    monkeypatch.setattr(predecessor, "admit_daemon_instance", lambda _: nullcontext(
-        SimpleNamespace(protect=lambda: SimpleNamespace(close=lambda: None)),
-    ))
     endpoint = Endpoint("tcp", "127.0.0.1:12345", pid=123, installation_id="fixture-installation")
     return endpoint, tmp_path, record
+
+
+def _custody(process):
+    return SimpleNamespace(
+        __enter__=lambda: None, pin=process, close=lambda: None,
+    )
 
 
 @pytest.mark.parametrize("field,value", (
@@ -103,12 +105,12 @@ def test_mutation_rechecks_owner_selection_and_native_birth(
         def pause(self):
             pass
 
-        def terminate(self, *, timeout: float):
+        def terminate(self):
             if change == "exit":
                 raise predecessor.RetirementRefused("fixture unconfirmed exit")
             pytest.fail("An unqualified target reached native termination")
 
-    monkeypatch.setattr(predecessor, "PinnedProcess", Process)
+    monkeypatch.setattr(predecessor, "RetirementCustody", lambda _: _custody(Process))
     selections = iter((True, False)) if change == "selection" else iter((True, True))
     if change == "principal":
         def refuse(_: int):
@@ -143,12 +145,12 @@ def test_one_owned_predecessor_uses_its_native_pin_and_confirms_exit(
         def pause(self):
             events.append("paused")
 
-        def terminate(self, *, timeout: float):
-            events.append(("terminate-and-confirm", timeout))
+        def terminate(self):
+            events.append("terminate-and-confirm")
 
-    monkeypatch.setattr(predecessor, "PinnedProcess", Process)
+    monkeypatch.setattr(predecessor, "RetirementCustody", lambda _: _custody(Process))
     assert captured.retire(lambda: True) == "cold-retired"
-    assert events == [(123, "native-birth"), "paused", ("terminate-and-confirm", 5), "closed"]
+    assert events == [(123, "native-birth"), "paused", "terminate-and-confirm", "closed"]
 
 
 def test_unavailable_native_identity_is_not_mistaken_for_exit(
@@ -204,13 +206,13 @@ def test_live_credential_worker_refuses_parent_retirement_and_resumes_it(
         def terminate(self, **kwargs):
             pytest.fail("A parent with live credential children was terminated")
 
-    monkeypatch.setattr(predecessor, "PinnedProcess", Process)
+    monkeypatch.setattr(predecessor, "RetirementCustody", lambda _: _custody(Process))
     monkeypatch.setattr(predecessor, "_has_children", lambda _: True)
     assert captured.retire(lambda: True) == "refused-live-workers"
     assert events == ["paused", "resume-and-close"]
 
 
-def test_failed_resume_retains_the_original_pin_until_recovery_settles(
+def test_unsettled_worker_retains_the_same_custody_without_replaying_native_effects(
     owned, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     endpoint, root, _ = owned
@@ -227,7 +229,8 @@ def test_failed_resume_retains_the_original_pin_until_recovery_settles(
             return self
 
         def __exit__(self, *_):
-            self.close()
+            events.append("close-pin")
+            raise predecessor.RetirementRefused("fixture ambiguous pin close")
 
         def exited(self):
             return False
@@ -235,35 +238,30 @@ def test_failed_resume_retains_the_original_pin_until_recovery_settles(
         def pause(self):
             events.append("pause")
 
-        def close(self):
-            events.append("resume")
-            if failed:
-                error = predecessor.RetirementRefused("fixture resume unconfirmed")
-                error.process = self
-                raise error
-
         def terminate(self, **kwargs):
             pytest.fail("A refused parent must not be terminated during recovery")
 
-    monkeypatch.setattr(predecessor, "PinnedProcess", Process)
+    def close():
+        events.append("settle-worker")
+        if failed:
+            raise predecessor.RetirementRefused("fixture worker still holds original pin")
+
+    custody = _custody(Process)
+    custody.close = close
+    monkeypatch.setattr(predecessor, "RetirementCustody", lambda _: custody)
     monkeypatch.setattr(predecessor, "_has_children", lambda _: True)
     assert captured.retire(lambda: True) == "refused-native-resume"
-    pin = captured.recovery_process
-    assert pin is not None
-    protection = captured.protection
-    assert protection is not None
+    assert captured.custody is custody
     assert not captured.recover()
-    assert captured.recovery_process is pin
-    assert captured.protection is protection
+    assert captured.custody is custody
     assert captured.retire(lambda: pytest.fail("No second retirement attempt")) == "refused-native-resume"
     failed = False
     assert captured.recover()
-    assert captured.recovery_process is None
-    assert captured.protection is None
-    assert events == ["pin", "pause", "resume", "resume", "resume"]
+    assert captured.custody is None
+    assert events == ["pin", "pause", "close-pin", *["settle-worker"] * 3]
 
 
-def test_failed_protection_release_is_retried_without_repeating_retirement(
+def test_partial_worker_start_retains_cleanup_custody_before_enter(
     owned, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     endpoint, root, _ = owned
@@ -271,24 +269,22 @@ def test_failed_protection_release_is_retried_without_repeating_retirement(
     assert captured is not None
     releases = []
 
-    def release() -> None:
-        releases.append("release")
-        if len(releases) == 1:
-            raise OSError("fixture registry unavailable")
+    def enter():
+        assert captured.custody is custody
+        raise predecessor.RetirementRefused("fixture partially started worker")
 
-    protection = SimpleNamespace(close=release)
-    monkeypatch.setattr(predecessor, "admit_daemon_instance", lambda _: nullcontext(
-        SimpleNamespace(protect=lambda: protection),
-    ))
-    monkeypatch.setattr(
-        predecessor, "PinnedProcess",
-        lambda *_: nullcontext(SimpleNamespace(exited=lambda: True)),
-    )
-    assert captured.retire(lambda: True) == "exited"
-    assert captured.recovery_process is None and captured.protection is protection
+    def close():
+        releases.append("close")
+        if len(releases) == 1:
+            raise predecessor.RetirementRefused("fixture worker exit unconfirmed")
+
+    custody = SimpleNamespace(__enter__=enter, close=close)
+    monkeypatch.setattr(predecessor, "RetirementCustody", lambda _: custody)
+    assert captured.retire(lambda: True) == "refused-native-resume"
+    assert captured.custody is custody
     assert captured.retire(lambda: pytest.fail("No repeated native retirement")) == "refused-native-resume"
-    assert captured.recover() and captured.protection is None
-    assert releases == ["release", "release"]
+    assert captured.recover() and captured.custody is None
+    assert releases == ["close", "close"]
 
 
 @pytest.mark.parametrize("image", ("system-console", "foreign-console", "backend"))

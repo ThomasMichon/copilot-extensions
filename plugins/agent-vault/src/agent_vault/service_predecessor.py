@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import Callable
 
 from agent_procutil._daemon_instance_identity import identity_state, path_identity
-from agent_procutil.daemon_instances import (
-    DaemonInstanceProtection, admit_daemon_instance, inspect_instances,
-)
-from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
+from agent_procutil.daemon_instances import inspect_instances
+from agent_procutil.process_retirement import RetirementRefused
+from agent_procutil.retirement_custody import RetirementCustody
 
 from .config import installation_id
 from .rendezvous import Endpoint
@@ -33,8 +32,7 @@ class Predecessor:
         self.root = root
         self.record = dict(record)
         self.registry_root = registry_root
-        self.recovery_process: PinnedProcess | None = None
-        self.protection: DaemonInstanceProtection | None = None
+        self.custody: RetirementCustody | None = None
 
     @classmethod
     def capture(
@@ -121,44 +119,39 @@ class Predecessor:
 
     def retire(self, current: Callable[[], bool]) -> str:
         """Revalidate selection and central-role custody at the native mutation."""
-        if self.recovery_process is not None or self.protection is not None:
+        if self.custody is not None:
             return "refused-native-resume"
         try:
             if self.exited():
                 return "exited"
             if not current() or not self._owned(inspect_instances(self.registry_root)):
                 return "refused-owner-or-selection"
-            with admit_daemon_instance("agent-vault") as custody:
-                self.protection = custody.protect()
-            with PinnedProcess(self.pid, self.record["birth"]) as process:
+            self.custody = RetirementCustody(self.root)
+            self.custody.__enter__()
+            with self.custody.pin(self.pid, self.record["birth"]) as process:
                 if process.exited():
-                    return "exited"
-                process.pause()
-                if not current() or not self._owned(inspect_instances(self.registry_root)):
-                    return "refused-owner-or-selection"
-                if _has_children(self.pid):
-                    return "refused-live-workers"
-                process.terminate(timeout=5)
-            return "cold-retired"
-        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused) as error:
-            process = getattr(error, "process", None)
-            if process is not None:
-                self.recovery_process = process
-                return "refused-native-resume"
-            return "refused-native-retirement"
+                    result = "exited"
+                else:
+                    process.pause()
+                    if not current() or not self._owned(inspect_instances(self.registry_root)):
+                        result = "refused-owner-or-selection"
+                    elif _has_children(self.pid):
+                        result = "refused-live-workers"
+                    else:
+                        process.terminate()
+                        result = "cold-retired"
+        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused):
+            result = "refused-native-retirement"
         finally:
-            if self.recovery_process is None:
-                self.recover()
+            settled = self.recover()
+        return result if settled else "refused-native-resume"
 
     def recover(self) -> bool:
-        """Settle only the retained pin's resume/close, never repeat retirement."""
+        """Settle only the original finite custodian, never repeat native effects."""
         try:
-            if self.recovery_process is not None:
-                self.recovery_process.close()
-                self.recovery_process = None
-            if self.protection is not None:
-                self.protection.close()
-                self.protection = None
+            if self.custody is not None:
+                self.custody.close()
+                self.custody = None
         except (OSError, ValueError, RuntimeError):
             return False
         return True

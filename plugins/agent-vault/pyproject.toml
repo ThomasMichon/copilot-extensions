@@ -17,7 +17,7 @@ authors = [
 ]
 dependencies = [
     "agent-configuration-layers",
-    "agent-procutil",
+    "agent-procutil[retirement-custody]",
     "agent-zdd",
     "agent-single-instance-lease",
     "agent-update-driver",

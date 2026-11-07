@@ -121,16 +121,16 @@ No child is terminated. A stuck backend can therefore retain write exclusion;
 it is not silently treated as a completed cold replacement. Admitted backend
 work may finish normally and transfer custody after a refused cold attempt.
 
-If native resume is unconfirmed after a refused attempt, the generation retains
-the original paused process pin and reports `refused-native-resume`. Its existing
-lifecycle retries only resume/close on that pin, even after reselection, never
-another retirement attempt. Shutdown closes work admission and retains its
-resident custody until those pins settle; persistent native resume failure is
-an explicit unresolved shutdown, not a discarded handle or successful cleanup.
-The generation protects its own daemon-instance record before acquiring a native
-retirement pin and releases that protection only after pin cleanup settles.
-A later successor therefore cannot cold-retire the owner of an unresolved
-resume. Pending recovery prevents new writer acquisition or further cold
+The existing finite `RetirementCustody` worker owns each native pin outside the
+production caller's cleanup lifetime. Caller death drops its private lifeline
+and resumes the original paused process. The generation retains that same
+custodian until its exit is confirmed, including partial startup and failed
+cleanup, and reports `refused-native-resume` while cleanup remains unsettled.
+Its lifecycle retries only custodian settlement, never native retirement or
+an ambiguous resume. The worker holds an ambiguously closed pin until original
+process exit instead of guessing whether another resume is safe. Shutdown closes
+work admission and waits for settlement, not a discarded handle or false success.
+Pending recovery prevents new writer acquisition or further cold
 attempts, but never suppresses successor detection: an already-ready generation
 still closes admission, drains admitted work and transfers its writer before
 waiting for its retained pins during shutdown.

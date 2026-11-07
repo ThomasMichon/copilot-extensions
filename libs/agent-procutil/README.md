@@ -1163,16 +1163,6 @@ paths, protected work and unknown launch outcomes hold. A guard may declare
 individual already-created lifecycle files using `add_artifact`; cleanup does
 not recursively delete runtime roots, source, installed code, undeclared logs,
 or retained evidence. Canonical lock files remain to prevent split custody.
-`guard.protect()` returns one explicitly released current-process protection.
-Nested protections share the existing `protected` record count; every nonzero
-count holds cleanup. Acquire before creating an obligation whose owner must
-survive retirement, retain the returned handle across unresolved cleanup, then
-call its idempotent `close()` after that obligation settles. Failed release
-retains the same handle for retry. Protection changes require the admitted
-process's actual native birth; a receipt alone cannot protect another process.
-Application retirement owners must recheck this existing field after pausing
-their target. Protection does not grant effect authority or replace admission,
-and must settle before the final admission guard closes.
 An existing code/config directory may be a borrowed, read-only metadata anchor,
 including a root-owned container payload. Recording its identity does not confer
 ownership or deletion authority. Registry entries and individually declared

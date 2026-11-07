@@ -1166,3 +1166,38 @@ implementation. The exact support closure follows the consumer trace and tests.
   No new resident service, watchdog or retirement protocol is authorized or
   needed by that assessment. The PR stays draft; merge, release, rollout and
   the parent acceptance remain open.
+
+### 2026-11-06 - Move Vault pins into existing finite crash-safe custody
+
+- The remaining crash-safety concern is real for a pin held directly by a
+  central daemon: registry protection can prevent planned retirement, not
+  preserve suspension rollback after owner death. Vault now uses the existing
+  SDK `RetirementCustody` finite worker, retaining that same owner before
+  startup and through unconfirmed cleanup. Settlement never replays retirement
+  or an ambiguously completed native resume. Ready-writer supersession remains
+  ahead of the new-admission recovery gate.
+- Removed this PR's now-unnecessary registry protection API, helper, tests and
+  shared-consumer changefile. The SDK has no remaining source change. Restored
+  the two affected unit source bindings without changing node inventory,
+  production coverage targets, effect restrictions or deadlines. Vault
+  explicitly adopts the existing retirement-custody dependency extra.
+- The affected generation/predecessor/alias/pipe packet passes 132 cases with
+  two platform skips; Python lint, install contract, documentation and headless
+  checks pass. The packet reports one asyncio closed-pipe finalizer warning.
+  The separate request-settlement, resident-lifetime and installer-readiness
+  packet passes all 97 cases.
+- A new native consumer case abruptly kills the fixture-owned incoming Vault
+  while its predecessor is paused. The original admitted request then
+  completes without caller cleanup or a release signal, and the same finite
+  custodian exits. The first attempt exposed test containment rather than
+  rollback failure: killing the disposable caller also closed its private
+  kill-on-close Job. The fixture now retains that Job in the runner, preserving
+  every limit and outer containment while isolating caller death. This proves
+  native Vault integration, not survival after all production cleanup Jobs
+  close; that SDK/lifetime tier remains distinct.
+- Normal shutdown, a later successor's refusal of the live custodian child,
+  rollback serialization and already-ready writer supersession also pass.
+  No resident reaper, watchdog, new retirement protocol or deployed patch was
+  added. Required exact-head CI/review, release, installer clean-room, installed
+  whole-update, Linux-native/macOS and external acceptance remain open.
+  No live service was changed; both source and parent efforts remain Active.
