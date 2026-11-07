@@ -103,7 +103,8 @@ def test_python_prerequisite_continues_to_supported_path_candidate(
         ("python3" if same_alias else "python", directories[1]): supported,
     }
     monkeypatch.setattr(
-        prereqs.shutil, "which", lambda name, path=None: mapping.get((name, path)),
+        prereqs.shutil, "which",
+        lambda name, path=None: mapping.get((Path(name).stem.lower(), path)),
     )
     probes = []
 
@@ -196,7 +197,8 @@ def test_python_prerequisite_windowsapps_alias_is_windows_only(
         ("python", supported_dir): supported if supported_available else None,
     }
     monkeypatch.setattr(
-        prereqs.shutil, "which", lambda name, path=None: mapping.get((name, path)),
+        prereqs.shutil, "which",
+        lambda name, path=None: mapping.get((Path(name).stem.lower(), path)),
     )
     probes = []
 
@@ -215,6 +217,38 @@ def test_python_prerequisite_windowsapps_alias_is_windows_only(
     assert probes == (
         ([supported] if supported_available else []) if platform == "windows" else [alias]
     )
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("supported_suffix", [".exe", ".cmd"])
+def test_python_prerequisite_windows_current_directory_cannot_hide_path_python(
+    monkeypatch, tmp_path, supported_suffix,
+):
+    import os
+
+    from worktree_manager import prereqs
+
+    if os.name != "nt":
+        pytest.skip("native Windows implicit current-directory search")
+    current = tmp_path / "current"
+    supported = tmp_path / "supported Python"
+    current.mkdir()
+    supported.mkdir()
+    for executable in (current / "python.exe", supported / ("python" + supported_suffix)):
+        executable.write_bytes(b"synthetic version-probe fixture\n")
+    monkeypatch.chdir(current)
+    monkeypatch.setenv("PATH", str(supported))
+    monkeypatch.setenv("PATHEXT", ".EXE;.CMD;")
+    monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
+    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", ("python",))
+    monkeypatch.setattr(
+        prereqs, "_probe_version",
+        lambda path: "3.9.5" if Path(path).samefile(current / "python.exe") else "3.11.9",
+    )
+    status = detect_prereq(Prereq("python3", min="3.10"))
+    assert status.satisfied
+    assert Path(status.path).samefile(supported / ("python" + supported_suffix))
 
 
 @pytest.mark.parametrize(

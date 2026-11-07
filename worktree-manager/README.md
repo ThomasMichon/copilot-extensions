@@ -619,7 +619,9 @@ successful, supported version from the exact discovered executable. Detection
 continues through the existing `python3`/`python` aliases and their PATH entries
 when an earlier Python is unusable or too old, without executing WindowsApps
 Store aliases. If none qualifies, the first candidate remains the diagnostic
-path and Python remains a prerequisite gap. Detection does not change PATH,
+path and Python remains a prerequisite gap. Fallback lookup stays within each
+PATH directory, retaining the current-directory meaning of empty entries.
+Detection does not change PATH,
 acquire Python, search private runtimes or add launcher/install-root discovery.
 Windows also requires a working PowerShell 7 (`pwsh`) host for the native core
 installer. A missing, older or unqualified host stops setup before core or

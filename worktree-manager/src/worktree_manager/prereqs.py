@@ -93,10 +93,22 @@ def _python_candidates(first: str | None) -> Iterator[str]:
     if first:
         yield first
     for exe in _EXE_ALIASES["python3"]:
+        suffixes = ("",)
+        if os.name == "nt":
+            # Python 3.11 does not apply PATHEXT to directory-qualified commands.
+            extensions = tuple(
+                ext for ext in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
+                if ext
+            )
+            if extensions and not any(exe.lower().endswith(ext.lower()) for ext in extensions):
+                suffixes = extensions
         for directory in os.get_exec_path():
-            found = shutil.which(exe, path=directory or os.curdir)
-            if found:
-                yield found
+            for suffix in suffixes:
+                candidate = os.path.abspath(os.path.join(directory or os.curdir, exe + suffix))
+                found = shutil.which(candidate, path=directory or os.curdir)
+                if found:
+                    yield found
+                    break
 
 
 def _probe_version(exe: str) -> str | None:
