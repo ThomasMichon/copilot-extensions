@@ -462,3 +462,65 @@ def test_gateway_selection_uncertainty_reconciles_original_key_without_native_ef
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())
+
+
+def test_gateway_normalizes_original_endpoint_for_first_preview_and_same_key_recovery(
+    environment: tuple, prepared_workspace: tuple, selection_workspace: tuple,
+) -> None:
+    store, _, _, attachment, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+    draft, state = selection_workspace
+    alias = copy.deepcopy(draft)
+    alias["scope"]["endpoint"] += "/"
+    original = copy.deepcopy(alias)
+
+    async def scenario() -> None:
+        host = WorkspaceTools(client)
+        request = {"number": 42, "intent": alias, "source_attachment": attachment, "budget_seconds": 60}
+        preview = await host.invoke("allocate", request)
+        assert preview["result"]["intent"]["scope"] == draft["scope"] and alias == original
+        assert await host.invoke("allocate", request) == preview
+        assert await host.invoke("allocate", {**request, "intent": draft}) == preview
+        retained = ReviewSelectionStore(store).recover(alias, expires_at=native.expires_at())
+        assert retained["intent"] == preview["result"]["intent"]
+        assert state["resolutions"] == 1 and len(json.loads(store.path.read_bytes())["reviews"]) == 1
+        assert backend.calls == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_gateway_refuses_missing_or_deleted_reply_targets_before_composition(
+    environment: tuple, prepared_workspace: tuple, selection_workspace: tuple, deleted: bool,
+) -> None:
+    from agent_pull_requests.review_workspace import _digest, _record
+    from agent_pull_requests.workspace_client import WorkspaceClientError
+
+    store, _, generation, attachment, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+    draft, state = selection_workspace
+    draft["actions"][0].update(kind="reply", thread_id=50)
+    if deleted:
+        thread = {"id": 50, "isDeleted": True, "comments": [{
+            "id": 1, "content": "Parent note.", "author": {"id": draft["scope"]["principal_id"]},
+        }]}
+        old_id = generation["id"]
+        generation["sections"]["discussions"]["data"] = [_record("discussions", thread)]
+        generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+        draft["generation_id"] = attachment["generation_id"] = generation["id"]
+        native.operations.cache.publish(generation, expected_current=old_id)
+    before = store.path.read_bytes()
+
+    async def scenario() -> None:
+        host = WorkspaceTools(client)
+        with pytest.raises(WorkspaceClientError):
+            await host.invoke("allocate", {
+                "number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60,
+            })
+        assert state["resolutions"] == 0 and state["results"] == [] and backend.calls == []
+        assert store.path.read_bytes() == before
+        assert ReviewSelectionStore(store).recover(draft, expires_at=native.expires_at()) is None
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())

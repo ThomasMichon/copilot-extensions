@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from . import review_intent
 from .generation_cache import GenerationCache
-from .review_executor import validate_review_selection
+from .review_executor import _check_selected_ownership, validate_review_selection
 from .review_selection_store import ReviewSelectionStore
 from .review_workspace import _digest
 
@@ -53,6 +53,8 @@ def allocate_selection(
     original = review_intent.intent(payload["intent"])
     if original["scope"] != scope:
         raise ValueError("selected preparation differs from authorized workspace scope")
+    if any(action["kind"] == "edit_owned_comment" for action in original["actions"]):
+        raise ValueError("automatic owned edits require their original native identity binding")
     attachment = payload["source_attachment"]
     source = attachment.get("source") if isinstance(attachment, dict) else None
     if (
@@ -69,7 +71,9 @@ def allocate_selection(
         generation = cache.lookup(scope, generation_id=original["generation_id"])["generation"]
         if generation is None:
             raise WorkspaceUnavailable("selected preparation generation unavailable")
-        validate_review_selection(original, generation, attachment)
+        _, baseline = validate_review_selection(original, generation, attachment)
+        for action in original["actions"]:
+            _check_selected_ownership(action, baseline, scope["principal_id"])
         # Resolve policy/profile/origin outside the replay transaction; only pure
         # synchronous composition runs while the existing storage owner is locked.
         compose = workspace.selection_preparer(copy.deepcopy(generation), checkpoint=checkpoint)

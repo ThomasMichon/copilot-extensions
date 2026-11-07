@@ -182,7 +182,8 @@ class WorkspaceClient:
                     or result["effects"] != "none" or result["approval_required"] is not True
                 ):
                     raise ValueError
-                ReviewSelectionStore._prepared(payload["intent"], result["intent"])
+                from .review_intent import intent
+                ReviewSelectionStore._prepared(intent(payload["intent"]), result["intent"])
             except (ValueError, KeyError, TypeError):
                 raise WorkspaceClientError("invalid_selection_response", outcome_unknown=True) from None
         return value

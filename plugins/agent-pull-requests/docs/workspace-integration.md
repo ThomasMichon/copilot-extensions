@@ -202,6 +202,10 @@ then commits fresh comment/reply GUIDs and exact final v2 bytes through
 `ReviewSelectionStore.allocate` before returning a preview. Bodyless votes
 receive no comment identity. Owned/legacy edits remain unsupported on this
 automatic path pending original scoped/native identity binding.
+Selected reply targets must exist and not be deleted in that exact baseline;
+invalid targets refuse before composition. Fleet validates returned previews
+against the same normalized v1 original as the receiver, so accepted endpoint
+aliases recover the original selection rather than rejecting retained output.
 Recovery with the same original selection returns the first committed bytes,
 including after restart, lost responses, later profile/origin changes or
 execution admission; it does not resolve a new composer or require the old
