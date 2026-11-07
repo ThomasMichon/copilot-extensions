@@ -1492,6 +1492,13 @@ updater instead. The controller owns source selection and must honor configured
 runtime-source policy and any explicit prepared-source input; selection happens
 before Manager acquisition, without changing that policy.
 
+When a full project-owned request delegates its `integration` phase, the
+selected engine can advertise `project_integration` in its versioned
+`project_controller_delegation` inventory. That phase checks the selected
+Manager registration but does not independently recover or install Manager;
+the project controller remains responsible for Manager readiness. Standalone
+integration retains its existing recovery behavior.
+
 On Windows, ordinary update entry points first test whether the current shell
 can create the breakaway process required for durable execution. Refusal exits
 before controller discovery, downloads, builds or request submission; existing
