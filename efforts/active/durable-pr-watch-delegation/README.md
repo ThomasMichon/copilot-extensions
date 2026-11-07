@@ -993,6 +993,25 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Correlate explicitly selected native prepared effects
+
+- #11214 actually merged as `7ef86b52f3a091e3bda3c8e308e64f6833e62f37`
+  after exact-head Copilot approval with no open issues and the latest
+  current-head CI and required checks green. The source worktree reconciled.
+- The explicitly selected source executor retains v2 identity through the same
+  native context, unknown fence and original receipts. The read-only scoped
+  receipt projection preserves unknown/partial states and does not infer
+  identity from legacy tags or bodyless votes, perform fresh native IO or
+  advance feedback/echo/ACK/Dispatch.
+- The actual executor/feedback/owner packet passes 176 cases and the existing
+  workspace/service/echo packet passes 106, with bounded cleanup verified.
+  A confirmed original receipt remains distinct from current readback:
+  independent edits leave feedback unavailable rather than marking it handled.
+- Re-read the parent Plan/Validation and continue optional actual receiver/
+  client/tool/CLI composition through existing capability and Gateway owners.
+  Default v1, no implicit adoption/fallback and all remaining publication,
+  allocation, provider and installed gates remain; no rollout occurred.
+
 ### 2026-11-06 - Retain structured prepared identity before native source adoption
 
 - #11207 actually merged as `4bb05db59c8f836d90bf494afab403d811c6d9b2`
