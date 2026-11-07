@@ -523,16 +523,17 @@ def _outcome(
             )
 
 
+def _request_fenced(request: Request) -> bool:
+    return request.state in {"pending", "interrupted", "blocked"} and request.unresolved
+
+
 def _has_fence(db: sqlite3.Connection, root: Path) -> bool:
     requests = tuple(_request(row, root) for row in db.execute(
         """SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')
         OR (state='pending' AND
             (started_at IS NOT NULL OR finished_at IS NOT NULL OR boot_id IS NOT NULL))""",
     ))
-    return any(
-        request.state in {"pending", "interrupted", "blocked"} and request.unresolved
-        for request in requests
-    )
+    return any(_request_fenced(request) for request in requests)
 
 
 def foundation_status(*, root: Path | None = None) -> foundation_state.FoundationOperation | None:
@@ -608,10 +609,7 @@ def ensure_worker(
     create_queue_directory(root)
     _reconcile_lost_owner(root)
     _assert_foundation_clear(root)
-    if any(
-        row.state in {"interrupted", "blocked"} and row.unresolved
-        for row in status(root=root)
-    ):
+    if any(_request_fenced(row) for row in status(root=root)):
         raise InterruptedError("installation queue fenced; explicit positive settlement required")
     token = uuid.uuid4().hex
     receipt = root / f".worker-started-{token}"
@@ -946,10 +944,7 @@ def wait(
         _assert_foundation_clear(_root(root))
         if status(request_id, root=root).state != request.state:
             continue
-        if request.state == "pending" and any(
-            item.state in {"pending", "interrupted", "blocked"} and item.unresolved
-            for item in status(root=root)
-        ):
+        if request.state == "pending" and any(_request_fenced(item) for item in status(root=root)):
             raise InterruptedError("installation queue fenced by unsettled prior transaction")
         if request.state == "pending" and request.error:
             raise SpawnError(request.error)
