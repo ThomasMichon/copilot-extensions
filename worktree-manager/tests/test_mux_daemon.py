@@ -1766,6 +1766,8 @@ def test_runtime_health_reports_version_attached_clients_and_busy(tmp_path):
             "status": "ready",
             "version": __version__,
             "runtime_generation": mux_daemon.running_generation(),
+            "pid": mux_daemon.os.getpid(),
+            "process_start_time": mux_daemon.process_start_time(mux_daemon.os.getpid()),
             "active": True,
             "attached_clients": 0,
             "busy": False,
@@ -1906,6 +1908,8 @@ def test_scrub_session_credentials_is_case_insensitive():
         "Github_Token": "secret-github-mixed",
         "agent_worktrees_ahp_auth_token": "secret-ahp-lower",
         "GH_TOKEN": "secret-gh-upper",
+        "update_driver_witness": "fixture",
+        "agent_worktrees_internal_project_controller": "fixture",
         "SOME_OTHER_VAR": "kept",
     }
 

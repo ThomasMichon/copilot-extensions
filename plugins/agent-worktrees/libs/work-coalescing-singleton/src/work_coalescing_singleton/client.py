@@ -28,6 +28,17 @@ def new_client_id() -> str:
     return secrets.token_hex(8)
 
 
+def _completion_deadline(timeout: float | None) -> float | None:
+    if timeout is None:
+        return None
+    if (
+        isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout) or timeout <= 0
+    ):
+        raise ValueError("completion_timeout_s must be finite and positive")
+    return time.monotonic() + timeout
+
+
 def _send_recv(
     host: str, port: int, token: str, message: dict[str, Any], *, timeout: float,
     completion_deadline: float | None = None,
@@ -79,12 +90,15 @@ def subscribe(
 
 
 def release(
-    host: str, port: int, token: str, client_id: str, *, timeout: float = _DEFAULT_DIAL_TIMEOUT_S
+    host: str, port: int, token: str, client_id: str, *, timeout: float = _DEFAULT_DIAL_TIMEOUT_S,
+    completion_timeout_s: float | None = None,
 ) -> None:
     """Best-effort: a failed release is backstopped by the server's own liveness reaper."""
+    deadline = _completion_deadline(completion_timeout_s)
     try:
         _send_recv(
-            host, port, token, {"action": "release", "client_id": client_id}, timeout=timeout
+            host, port, token, {"action": "release", "client_id": client_id}, timeout=timeout,
+            **({"completion_deadline": deadline} if deadline is not None else {}),
         )
     except DaemonUnavailable:
         pass
@@ -107,15 +121,7 @@ def request(
     The optional monotonic completion budget includes dialing, sending and all
     response fragments. Ordinary calls retain their server-deadline grace.
     """
-    completion_deadline = None
-    if completion_timeout_s is not None:
-        if (
-            isinstance(completion_timeout_s, bool)
-            or not isinstance(completion_timeout_s, (int, float))
-            or not math.isfinite(completion_timeout_s) or completion_timeout_s <= 0
-        ):
-            raise ValueError("completion_timeout_s must be finite and positive")
-        completion_deadline = time.monotonic() + completion_timeout_s
+    completion_deadline = _completion_deadline(completion_timeout_s)
     deadline = time.time() + request_deadline_s
     message: dict[str, Any] = {
         "action": "request",
