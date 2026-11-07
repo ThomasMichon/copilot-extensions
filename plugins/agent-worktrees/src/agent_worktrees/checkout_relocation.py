@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import fnmatch
 import json
+import os
 import secrets
 import shutil
 import sqlite3
+import stat
 import sys
 import time
 from pathlib import Path
@@ -103,13 +106,13 @@ def _ordinary_shape(record, ledger: Path) -> None:
 def _launchless(ledger: Path) -> None:
     from . import launch_attempt, launch_request
 
-    for index, path in enumerate((ledger.parent / "launch-requests").glob("*.json")):
+    for index, path in enumerate(_strict_glob(ledger.parent / "launch-requests", "*.json")):
         if index >= transfer.MAX_ENTRIES or path.is_symlink() or path.stat().st_size > 64 * 1024:
             raise ValueError("launch request inventory is incomplete")
         receipt = launch_request._read_admission(ledger.parent, path.stem)
         if receipt["worktree_id"] == ledger.stem:
             raise ValueError("relocation v1 refuses retained launch request history")
-    for index, path in enumerate((ledger.parent / "launch-attempts").glob("*/*.json")):
+    for index, path in enumerate(_strict_glob(ledger.parent / "launch-attempts", "*/*.json")):
         if index >= transfer.MAX_ENTRIES:
             raise ValueError("launch attempt inventory is incomplete")
         if len(path.stem) != 32:
@@ -117,6 +120,36 @@ def _launchless(ledger: Path) -> None:
         receipt = launch_attempt.read(ledger.parent, path.parent.name, path.stem)
         if any(event["details"].get("worktree_id") == ledger.stem for event in receipt["events"]):
             raise ValueError("relocation v1 refuses retained launch attempt history")
+
+
+def _strict_glob(root: Path, pattern: str):
+    parts, pending, seen = pattern.split("/"), [(root, 0)], 0
+    while pending:
+        directory, depth = pending.pop()
+        try:
+            info = directory.lstat()
+        except FileNotFoundError:
+            if depth == 0:
+                continue
+            raise
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("operational reference directory is redirected or unsupported")
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                seen += 1
+                if seen > transfer.MAX_ENTRIES:
+                    raise ValueError("operational reference directory inventory exceeds its budget")
+                if not fnmatch.fnmatch(entry.name, parts[depth]):
+                    continue
+                path = Path(entry.path)
+                if depth == len(parts) - 1:
+                    yield path
+                else:
+                    item = path.lstat()
+                    if stat.S_ISLNK(item.st_mode) or getattr(item, "st_file_attributes", 0) & 0x400:
+                        raise ValueError("operational reference directory is redirected")
+                    if stat.S_ISDIR(item.st_mode):
+                        pending.append((path, depth + 1))
 
 
 def _ordinary(record, ledger: Path, config) -> None:
@@ -165,7 +198,7 @@ def _sessionless(checkout: Path) -> None:
     directory = sessions._session_state_dir()
     import yaml
 
-    for index, workspace in enumerate(directory.glob("*/workspace.yaml") if directory.exists() else ()):
+    for index, workspace in enumerate(_strict_glob(directory, "*/workspace.yaml")):
         if index >= transfer.MAX_ENTRIES or workspace.stat().st_size > 64 * 1024 or workspace.is_symlink():
             raise ValueError("session workspace inventory is redirected")
         try:
@@ -507,6 +540,7 @@ def abort(worktree_id: str, destination: str, config) -> dict:
         state.write(ledger, report)
         if stage.exists():
             shutil.rmtree(stage)
+        durability.directory(stage.parent)
         report["phase"] = "cancelled"
         state.write(ledger, report)
         return {**report, "apply": True}
