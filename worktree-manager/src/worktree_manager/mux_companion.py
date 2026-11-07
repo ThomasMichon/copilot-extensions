@@ -47,7 +47,7 @@ from . import engine_client as ec
 from . import companion_client as cc
 from . import companion_observations as co
 from . import companion_attention as ca
-from . import companion_pr_state as cpr
+from .companion_pr_panel import CompanionPrMixin
 from .companion_head_observation import observation_details, observation_text
 from .companion_recovery import (
     CompanionData as _CompanionData,
@@ -177,7 +177,7 @@ def _closure_explanation(row: dict) -> list[str]:
     return lines
 
 
-class MuxCompanionApp(App):
+class MuxCompanionApp(CompanionPrMixin, App):
     """Summary, Claims and secondary Recovery for the CURRENT worktree, plus
     explicit, human-gated actions ("Cut over", "Refresh") -- see the module
     docstring for the exact boundary. Styled to match the Worktree Manager's
@@ -308,17 +308,7 @@ class MuxCompanionApp(App):
         self._observation_cancel = Event()
         self._observation_owner: _CompanionData | None = None
         self._attention_cancel = Event()
-        self._pr_cancel = Event()
-        self._pr_read_cancel = Event()
-        self._pr_thread: asyncio.Future | None = None
-        self._pr_options: tuple[tuple[str, str], ...] | None = None
-        self._pr_generation = 0
-        self._pr_owner: _CompanionData | None = None
-        self._pr_fact: dict | None = None
-        self._pr_error: str | None = "not-loaded"
-        self._pr_selected: cpr.Association | None = None
-        self._pr_read: cpr.PointRead | None = None
-        self._pr_busy = False
+        self._init_pr_state()
         self._attention_busy = False
         self._attention_next = 0.0
         self._agenda_cancel = Event()
@@ -467,6 +457,10 @@ class MuxCompanionApp(App):
             self._refresh_view(reload=False)
             return
         self._loading = True
+        # Invalidate PR state before any await so no late point read is admitted.
+        self._reset_pr_state()
+        self._update_pr_controls()
+        self._update_topology()
         self._timeline_sync_revision += 1
         self._rich_agenda_attachment.stop_now()
         self._timeline_attachment.stop_now()
@@ -485,7 +479,6 @@ class MuxCompanionApp(App):
             await self._agenda_worker.wait()
             self._agenda_worker = None
         self._observation_cancel.set()
-        self._reset_pr_state()
         self._attention_cancel.set()
         self._attention_busy = False
         self._attention_next = 0.0
@@ -681,138 +674,6 @@ class MuxCompanionApp(App):
         elif event.select.id == "pr-association":
             self._select_pr(event.value if isinstance(event.value, str) else None)
 
-    def _reset_pr_state(self, error: str | None = "not-loaded") -> None:
-        """Invalidate associations, selection and any in-flight point read."""
-        self._pr_cancel.set()
-        self._pr_read_cancel.set()
-        self._pr_generation += 1
-        self._pr_owner = None
-        self._pr_fact = None
-        self._pr_error = error
-        self._pr_selected = None
-        self._pr_read = None
-        self._pr_busy = False
-
-    @work(exclusive=True, group="pr-associations")
-    async def _load_pr_associations(self) -> None:
-        data = self._data
-        self._pr_owner = data
-        worktree_id = data.worktree.get("id")
-        if not cpr.supported(data.bundle) or not isinstance(worktree_id, str) or not worktree_id:
-            self._update_pr_controls()
-            return
-        cancelled = Event()
-        self._pr_cancel = cancelled
-        generation = self._pr_generation
-        self._pr_error = "loading"
-        self._update_topology()
-        try:
-            fact = await asyncio.to_thread(
-                cpr.read_associations, worktree_id, runner=self._owned_read_runner(cancelled),
-            )
-        except ec.EngineError as exc:
-            fact, error = None, str(exc)
-        else:
-            error = None
-        finally:
-            cancelled.set()
-        if generation != self._pr_generation or self._data is not data:
-            return
-        self._pr_fact, self._pr_error = fact, error
-        self._update_pr_controls()
-        self._update_topology()
-
-    def _update_pr_controls(self) -> None:
-        associations, _ = cpr.admitted(self._pr_fact)
-        select = self.query_one("#pr-association", Select)
-        options = tuple((item.label, item.pr_id) for item in associations)
-        selected = self._pr_selected
-        with self.prevent(Select.Changed):
-            if options != self._pr_options:
-                self._pr_options = options
-                select.set_options(options)
-            # set_options() blanks the value; keep the admitted selection visible.
-            value = selected.pr_id if selected is not None and any(
-                pr_id == selected.pr_id for _label, pr_id in options) else None
-            if value is None:
-                if not select.is_blank():
-                    select.clear()
-            elif select.value != value:
-                select.value = value
-        select.disabled = not associations
-        self.query_one("#pr-read-btn", Button).disabled = (
-            self._pr_selected is None or self._pr_busy
-        )
-
-    def _select_pr(self, pr_id: str | None) -> None:
-        if pr_id is None:
-            if self._pr_selected is not None:
-                # Deselection invalidates and cancels any read for the old choice.
-                self._pr_read_cancel.set()
-                self._pr_generation += 1
-                self._pr_selected, self._pr_read, self._pr_busy = None, None, False
-                self._update_pr_controls()
-                self._update_topology()
-            return
-        associations, _ = cpr.admitted(self._pr_fact)
-        selected = next((item for item in associations if item.pr_id == pr_id), None)
-        if selected is None or (self._pr_selected is not None and selected.key == self._pr_selected.key):
-            return
-        self._pr_selected, self._pr_read, self._pr_busy = selected, None, False
-        self._start_pr_read()
-
-    def _start_pr_read(self) -> None:
-        """One explicit finite read of the selected, still-admitted association."""
-        selected = self._pr_selected
-        associations, _ = cpr.admitted(self._pr_fact)
-        if selected is None or self._pr_busy or selected.key not in {item.key for item in associations}:
-            return
-        self._pr_read_cancel.set()
-        self._pr_generation += 1
-        self._pr_busy = True
-        self._update_pr_controls()
-        self._update_topology()
-        self._read_pr(selected, self._pr_generation)
-
-    @work(exclusive=True, group="pr-point-read")
-    async def _read_pr(self, selected: cpr.Association, generation: int) -> None:
-        # Cancelling a worker does not stop its thread: retire the previous
-        # read's thread and owned process before starting another (one in flight).
-        await self._retire_pr_read()
-        if generation != self._pr_generation:
-            return
-        if self._engine_cleanup_failures:
-            result = cpr.PointRead(
-                selected, "unavailable", time.time(),
-                reason="engine resource retirement unresolved; no read started")
-        else:
-            cancelled = Event()
-            self._pr_read_cancel = cancelled
-            thread = asyncio.ensure_future(asyncio.to_thread(
-                cpr.point_read, selected, runner=self._owned_read_runner(cancelled),
-            ))
-            self._pr_thread = thread
-            try:
-                await asyncio.wait({thread})
-            finally:
-                cancelled.set()
-            try:
-                result = thread.result()
-            except Exception as exc:  # noqa: BLE001 - surfaced as unavailability
-                result = cpr.PointRead(selected, "unavailable", time.time(), reason=str(exc)[:240])
-        if generation != self._pr_generation or self._pr_selected is None \
-                or self._pr_selected.key != selected.key:
-            return
-        self._pr_read, self._pr_busy = result, False
-        self._update_pr_controls()
-        self._update_topology()
-
-    async def _retire_pr_read(self) -> None:
-        self._pr_read_cancel.set()
-        thread = self._pr_thread
-        if thread is not None and not thread.done():
-            await asyncio.wait({thread})
-
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:
         data = self._data
@@ -844,11 +705,7 @@ class MuxCompanionApp(App):
         self.query_one("#topology", Static).update(topology_view(
             data.worktree, data.bundle, data.session_observation,
             data.bundle_error or data.observation_error,
-            pr_state={
-                "declared": cpr.supported(data.bundle), "fact": self._pr_fact,
-                "error": None if self._pr_error == "not-loaded" else self._pr_error,
-                "selected": self._pr_selected, "read": self._pr_read, "busy": self._pr_busy,
-            },
+            pr_state=self._pr_topology_state(),
         ))
 
     def _poll_attention(self, *, force=False) -> None:

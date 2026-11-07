@@ -289,15 +289,9 @@ def run_json(project: str | None, args: list[str], *,
              environment: dict[str, str] | None = None,
              engine_command: list[str] | None = None,
              max_bytes: int | None = None) -> dict:
-    """Run a ``--json`` verb and parse its stdout envelope into a dict.
-
-    ``max_bytes`` bounds the actual UTF-8 stdout before it is parsed."""
+    """Run a ``--json`` verb; bound its UTF-8 stdout to ``max_bytes``, then parse it."""
     raw = _run(
-        project,
-        args,
-        timeout=timeout,
-        allow_nonzero=allow_nonzero,
-        runner=runner,
+        project, args, timeout=timeout, allow_nonzero=allow_nonzero, runner=runner,
         stream_progress=stream_progress,
         **({"environment": environment} if environment is not None else {}),
         **({"engine_command": engine_command} if engine_command is not None else {}),

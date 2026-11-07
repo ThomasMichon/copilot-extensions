@@ -76,7 +76,8 @@ class PointRead:
     checks_complete: bool | None = None
     draft: bool = False
     reviews: int = 0
-    latest_review: str = ""
+    last_review: str = ""
+    """The provider's last returned review state; not necessarily the most recent."""
 
 
 def _text(value, limit: int = TEXT_LIMIT) -> bool:
@@ -88,12 +89,14 @@ def supported(bundle) -> bool:
     return isinstance(bundle, dict) and bundle.get("companion_pr_observations") == DECLARATION
 
 
-def read_associations(worktree_id: str, *, runner=None) -> dict:
-    """Request the declared optional association form for the selected worktree."""
+def read_associations(worktree_id: str, *, runner=None, engine_command: list[str] | None = None) -> dict:
+    """Request the declared optional association form for the selected worktree.
+
+    ``engine_command`` pins the exact runtime that declared the contract."""
     obj = ec.run_json(
         None,
         ["worktree-status-bundle", "--worktree", worktree_id, "--pr-associations", "--json"],
-        runner=runner,
+        runner=runner, engine_command=engine_command,
     )
     if obj.get("worktree_id") != worktree_id or not isinstance(obj.get("facts"), dict):
         raise ec.EngineError("The association response does not describe the selected worktree.")
@@ -190,18 +193,38 @@ def decode_snapshot(obj, association: Association, *, observed_at: float) -> Poi
     return PointRead(
         association, state, observed_at, head_sha=head_sha, mergeable=mergeable,
         checks_state=checks, checks_complete=complete, draft=draft, reviews=len(reviews),
-        latest_review=reviews[-1]["state"][:64] if reviews else "",
+        last_review=reviews[-1]["state"][:64] if reviews else "",
     )
 
 
-def point_read(association: Association, *, runner=None, clock=time.time) -> PointRead:
+def point_read(association: Association, *, runner=None, engine_command: list[str] | None = None,
+               clock=time.time) -> PointRead:
     """Run one finite read; every failure is explicit unavailability, never empty success."""
     try:
         obj = ec.run_json(None, snapshot_argv(association), runner=runner,
-                          max_bytes=MAX_SNAPSHOT_BYTES)
+                          engine_command=engine_command, max_bytes=MAX_SNAPSHOT_BYTES)
         return decode_snapshot(obj, association, observed_at=clock())
     except (ec.EngineError, PointReadError) as exc:
         return PointRead(association, "unavailable", clock(), reason=str(exc)[:240])
+
+
+def revalidated_read(association: Association, worktree_id: str, *, runner=None,
+                     engine_command: list[str] | None, clock=time.time) -> tuple[dict | None, PointRead | None]:
+    """Re-read the owner's associations, then snapshot only a still-admitted selection.
+
+    Returns the refreshed fact (``None`` when revalidation failed) and the read,
+    or ``None`` for the read when the association was removed or reassigned."""
+    if not engine_command:
+        return None, PointRead(association, "unavailable", clock(),
+                               reason="declaring engine runtime unknown; no read started")
+    try:
+        fact = read_associations(worktree_id, runner=runner, engine_command=engine_command)
+    except ec.EngineError as exc:
+        return None, PointRead(association, "unavailable", clock(),
+                               reason=("association revalidation failed: " + str(exc))[:240])
+    if association.key not in {item.key for item in admitted(fact)[0]}:
+        return fact, None
+    return fact, point_read(association, runner=runner, engine_command=engine_command, clock=clock)
 
 
 _STATE_LABELS = {
@@ -290,4 +313,4 @@ def _render_read(entry: Tree, read: PointRead | None, busy: bool) -> None:
         "Mergeability: " + ("unknown" if read.mergeable is None else str(read.mergeable))))
     diagnostics.add(Text(
         f"Reviews observed: {read.reviews}"
-        + (f"; latest: {_plain(read.latest_review)}" if read.latest_review else "")))
+        + (f"; last returned state: {_plain(read.last_review)}" if read.last_review else "")))

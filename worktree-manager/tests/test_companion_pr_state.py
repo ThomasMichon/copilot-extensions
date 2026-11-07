@@ -88,7 +88,7 @@ def test_snapshot_argv_is_the_passive_owner_read_without_overrides():
 def test_decode_maps_provider_state(extra, state):
     read = cpr.decode_snapshot(snapshot(**extra), association(), observed_at=5.0)
     assert read.state == state and read.observed_at == 5.0
-    assert read.latest_review == "COMMENTED" and read.reviews == 1
+    assert read.last_review == "COMMENTED" and read.reviews == 1
 
 
 @pytest.mark.parametrize(("extra", "reason"), [
@@ -190,3 +190,24 @@ def test_render_keeps_record_state_distinct_and_labels_point_reads():
     failed = cpr.PointRead(selected, "unavailable", 0.0, reason="endpoint unknown")
     assert "unknown/unavailable" in plain(fact=fact(row()), selected=selected, read=failed)
     assert "Unavailable: boom" in plain(error="boom")
+
+
+
+def test_revalidated_read_pins_the_declaring_runtime(monkeypatch):
+    association = cpr.admitted(fact(row()))[0][0]
+    seen = []
+
+    def run_json(project, argv, **kw):
+        seen.append(kw.get("engine_command"))
+        if len(seen) == 1:
+            return {"worktree_id": "selected", "companion_pr_observations": dict(cpr.DECLARATION),
+                    "facts": {"pr_associations": fact(row())}}
+        return snapshot()
+
+    monkeypatch.setattr(cpr.ec, "run_json", run_json)
+    refreshed, read = cpr.revalidated_read(association, "selected", engine_command=["pinned", "--x"])
+    assert seen == [["pinned", "--x"], ["pinned", "--x"]]
+    assert refreshed is not None and read.state == "open"
+
+    _fact, read = cpr.revalidated_read(association, "selected", engine_command=None)
+    assert read.state == "unavailable" and len(seen) == 2

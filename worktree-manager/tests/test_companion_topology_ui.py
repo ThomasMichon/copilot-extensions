@@ -7,6 +7,7 @@ from threading import Event
 import pytest
 from textual.widgets import Static, TabbedContent
 
+from worktree_manager import companion_pr_state as cpr
 from worktree_manager import mux_companion as companion
 from test_companion_observations import envelope
 
@@ -182,7 +183,8 @@ def graph_text(app):
 
 def pr_data():
     current = data()
-    current.bundle["companion_pr_observations"] = dict(companion.cpr.DECLARATION)
+    current.bundle["companion_pr_observations"] = dict(cpr.DECLARATION)
+    current.engine_command = ["fixture-engine"]
     return current
 
 
@@ -194,17 +196,17 @@ def test_pr_point_read_only_on_selection_and_late_reply_is_rejected(monkeypatch)
     monkeypatch.setattr(companion, "_load_current_worktree", lambda *a, **kw: pr_data())
     monkeypatch.setattr(companion.co, "read_session_observations",
                         lambda *a, **kw: {"observation": None, "error": "none"})
-    monkeypatch.setattr(companion.cpr, "read_associations", lambda wt, **kw: fact(row()))
+    monkeypatch.setattr(cpr, "read_associations", lambda wt, **kw: fact(row()))
 
     def point(association, **kw):
         reads.append(association.pr_id)
         if len(reads) == 2:
             entered.set()
             assert release.wait(5)
-        return companion.cpr.decode_snapshot(
+        return cpr.decode_snapshot(
             snapshot(pr_state="closed", merged=True), association, observed_at=1.0)
 
-    monkeypatch.setattr(companion.cpr, "point_read", point)
+    monkeypatch.setattr(cpr, "point_read", point)
 
     async def check():
         app = companion.MuxCompanionApp()
@@ -248,7 +250,7 @@ def _pr_app(monkeypatch, *rows):
     monkeypatch.setattr(companion, "_load_current_worktree", lambda *a, **kw: pr_data())
     monkeypatch.setattr(companion.co, "read_session_observations",
                         lambda *a, **kw: {"observation": None, "error": "none"})
-    monkeypatch.setattr(companion.cpr, "read_associations", lambda wt, **kw: fact(*rows))
+    monkeypatch.setattr(cpr, "read_associations", lambda wt, **kw: fact(*rows))
 
 
 async def _open_graph(app, pilot):
@@ -271,9 +273,9 @@ def test_pr_selection_stays_visible_and_deselection_cancels_the_read(monkeypatch
         cancels.append(runner)
         entered.set()
         assert release.wait(5)
-        return companion.cpr.decode_snapshot(snapshot(), association, observed_at=1.0)
+        return cpr.decode_snapshot(snapshot(), association, observed_at=1.0)
 
-    monkeypatch.setattr(companion.cpr, "point_read", point)
+    monkeypatch.setattr(cpr, "point_read", point)
     monkeypatch.setattr(companion.MuxCompanionApp, "_owned_read_runner",
                         lambda self, cancelled: cancelled)
 
@@ -324,12 +326,12 @@ def test_switching_pr_waits_for_the_previous_read_to_retire(monkeypatch):
             if association.pr_id == "pr-1":
                 entered.set()
                 assert release.wait(5)
-            return companion.cpr.decode_snapshot(
+            return cpr.decode_snapshot(
                 snapshot(pr=association.number), association, observed_at=1.0)
         finally:
             active[0] -= 1
 
-    monkeypatch.setattr(companion.cpr, "point_read", point)
+    monkeypatch.setattr(cpr, "point_read", point)
 
     async def check():
         app = companion.MuxCompanionApp()
@@ -355,6 +357,96 @@ def test_switching_pr_waits_for_the_previous_read_to_retire(monkeypatch):
     asyncio.run(check())
 
 
+def test_reread_of_removed_association_clears_selection(monkeypatch):
+    from textual.widgets import Select
+
+    from test_companion_pr_state import fact, row, snapshot
+
+    rows = [row()]
+    _pr_app(monkeypatch, row())
+    monkeypatch.setattr(cpr, "read_associations", lambda wt, **kw: fact(*rows))
+    reads = []
+
+    def point(association, **kw):
+        reads.append(association.pr_id)
+        return cpr.decode_snapshot(snapshot(), association, observed_at=1.0)
+
+    monkeypatch.setattr(cpr, "point_read", point)
+
+    async def check():
+        app = companion.MuxCompanionApp()
+        async with app.run_test(size=(100, 40)) as pilot:
+            await _open_graph(app, pilot)
+            select = app.query_one("#pr-association", Select)
+            select.value = "pr-1"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert reads == ["pr-1"]
+            rows[:] = [row("pr-2", number=8)]
+            app.query_one("#pr-read-btn").press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert reads == ["pr-1"]
+            assert app._pr_selected is None and app._pr_read is None
+            assert select.is_blank() and "#8" in graph_text(app)
+
+    asyncio.run(check())
+
+
+def test_refresh_invalidates_pr_before_blocked_retirement(monkeypatch):
+    from test_companion_pr_state import row, snapshot
+
+    _pr_app(monkeypatch, row())
+    monkeypatch.setattr(cpr, "point_read", lambda association, **kw: cpr.decode_snapshot(
+        snapshot(), association, observed_at=1.0))
+    blocked, release = Event(), Event()
+
+    async def check():
+        app = companion.MuxCompanionApp()
+        try:
+            async with app.run_test(size=(100, 40)) as pilot:
+                await _open_graph(app, pilot)
+                app.query_one("#pr-association").value = "pr-1"
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                assert app._pr_read is not None
+                generation = app._pr_generation
+
+                async def stuck(*a, **kw):
+                    blocked.set()
+                    await asyncio.to_thread(release.wait, 5)
+
+                monkeypatch.setattr(app._bridge_attachment, "set_selection", stuck)
+                app.action_refresh()
+                await pilot.pause()
+                assert app._pr_generation != generation
+                assert app._pr_selected is None and app._pr_read is None
+                assert blocked.is_set() and "Point read" not in graph_text(app)
+        finally:
+            release.set()
+
+    asyncio.run(check())
+
+
+def test_pr_labels_keep_provider_brackets_literal(monkeypatch):
+    from textual.widgets import Select
+
+    from test_companion_pr_state import row
+
+    _pr_app(monkeypatch, row())
+
+    async def check():
+        app = companion.MuxCompanionApp()
+        async with app.run_test(size=(100, 40)) as pilot:
+            await _open_graph(app, pilot)
+            select = app.query_one("#pr-association", Select)
+            labels = [str(prompt) for prompt, _value in select._options if _value == "pr-1"]
+            assert labels and "[" in labels[0]
+
+    asyncio.run(check())
+
+
 def test_undeclared_engine_keeps_claim_only_view(monkeypatch):
     monkeypatch.setattr(companion, "_load_current_worktree", lambda *a, **kw: data())
     monkeypatch.setattr(companion.co, "read_session_observations",
@@ -363,7 +455,7 @@ def test_undeclared_engine_keeps_claim_only_view(monkeypatch):
     def forbidden(*a, **kw):
         raise AssertionError("undeclared engines must not receive the optional request")
 
-    monkeypatch.setattr(companion.cpr, "read_associations", forbidden)
+    monkeypatch.setattr(cpr, "read_associations", forbidden)
 
     async def check():
         app = companion.MuxCompanionApp()
