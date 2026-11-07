@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Podman Runtime and Image Sources](active/podman-runtime-and-image-sources/README.md) | Draft; reviewed driver/consumer proposal before implementation | #11386; existing runtime-driver, fleet/lease and credential owners retained; no engine/machine/image/venue effects or rollout |
 | [Installed Manager TTY Qualification](active/installed-manager-tty-qualification/README.md) | Draft; reviewed install-to-interactive-consumer gate before implementation | #11377; extends existing #3336/#7529 qualification, preserves native and launcher owners; no live rollout |
 | [Mux Question Answers](active/mux-question-answers/README.md) | Draft; explicit single-question fallback plan before implementation | #11371; native preferred, permissions and existing sessions protected; separately authorized rollout |
 | [Owned Codespace Capacity](active/owned-codespace-capacity/README.md) | Active; admission and first stopped-venue sequential consumer merged; generation-qualified recovery proposal and release/consumer qualification open | Bounded #4187/#11343 slice; preserves recycler, capture and owner-wave integration owners; no live cleanup or rollout |
