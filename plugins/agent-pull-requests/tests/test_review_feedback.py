@@ -6,10 +6,12 @@ import copy
 from dataclasses import replace
 import json
 import time
+from typing import Any
 
 import pytest
 
 from test_review_executor import environment as environment, writes
+from test_review_owner_store import prepared_intent as prepared_intent
 
 from agent_pull_requests.attention import Cursor, Interest
 from agent_pull_requests.attention_acquisition import AttentionInputs
@@ -64,6 +66,38 @@ def run(value: tuple, *, interests: tuple[Interest, ...] | None = None, current=
         feedback_position=backend.positions.get(generation["id"]),
         feedback_current=current,
     )
+
+
+@pytest.mark.parametrize("changed_readback", [False, True])
+def test_prepared_receipt_correlation_does_not_replace_actual_feedback_readback(
+    feedback_environment: tuple, prepared_intent: dict, changed_readback: bool,
+) -> None:
+    store, selected, generation, attachment, backend, _, expires, interests = feedback_environment
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires)
+    selected["version"] = 2
+    selected["actions"][0].update({
+        key: copy.deepcopy(prepared_intent["actions"][0][key]) for key in ("body", "preparation")
+    })
+    backend.versioned_reply = True
+    if changed_readback:
+        def alter(current: Any) -> None:
+            current.threads[0]["comments"][0]["content"] += " Later independent edit."
+        backend.after_write = alter
+    result = execute_review(
+        store, selected, generation, attachment, context_factory=backend.context,
+        checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
+        prepared_intent=True, feedback=FeedbackInputs(generation["id"], interests[:1], 60),
+        feedback_position=backend.positions[generation["id"]],
+    )
+    receipt = store.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], selected["actions"][0]["id"],
+        expires_at=expires,
+    )
+    assert receipt["action_state"] == "confirmed" and receipt["fresh_native_read"] is False
+    assert receipt["identity"] == selected["actions"][0]["preparation"]["identity"]
+    assert result["feedback"]["status"] == ("unavailable" if changed_readback else "handled")
+    assert (document(feedback_environment)["attention"]["records"][0]["handled"] is None) is changed_readback
+    assert len(writes(backend)) == 1
 
 
 def document(value: tuple) -> dict:
