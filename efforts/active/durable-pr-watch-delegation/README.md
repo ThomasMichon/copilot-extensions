@@ -1036,6 +1036,21 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-07 - Review selected owned-edit binding before consumer activation
+
+- #11370 actually merged as `d6b69d7dfe` after exact-head Copilot approval
+  with no open issues and latest CI `42414652814`, including its required PR
+  gate, passed. Managed completion retained the source backup and reconciled
+  only the merged contract commit.
+- Re-read the complete current parent. The refinement keeps protected
+  generation/source validation and original native receipts under their
+  existing owners, with selected legacy edits distinguished from backfill.
+  The next finite library slice does not change `owned_edits: false` in the
+  existing receiver, activate a consumer or close the full comment-identity,
+  provider/installed, attention, CLI/Dispatch or shadow acceptance.
+- Both the parent and #11128 remain open. No rollout, live feedback, migration
+  or source/resource custody change is authorized by the reviewed contract.
+
 ### 2026-11-07 - Commit receiver-owned previews before approval
 
 - #11299 actually merged as `0b9cf2df611ba9d254fc3e3c6762b21e8a40b4d2`
