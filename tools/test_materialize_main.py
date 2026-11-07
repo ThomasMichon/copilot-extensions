@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import re
 import shutil
@@ -15,7 +16,260 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine_ref as ier
 import launch_wrapper_assets_ref as lwar
 import materialize_main as mm
+import materialize_payload_invocation as mpiv
 import uv_editable_ref as uer
+
+
+def _invocation_candidate(tmp_path: Path) -> tuple[Path, Path]:
+    repo = Path(__file__).resolve().parents[1]
+    canonical, candidate = tmp_path / "canonical", tmp_path / "candidate"
+    shutil.copytree(
+        repo / "libs/payload-invocation", canonical / "libs/payload-invocation",
+        ignore=shutil.ignore_patterns("tests", "__pycache__"),
+    )
+    tools = canonical / "tools"
+    tools.mkdir()
+    entries = (
+        "runtime_profile_policy", "runtime_source_build", "runtime_source_reuse",
+        "runtime_marketplace_source", "artifact_release_discovery", "runtime_profile_delivery",
+    )
+    for name in entries:
+        (tools / (name + ".py")).write_text(
+            "import support\nimport promotion_unit_contract\n" if name == entries[0] else "VALUE = 1\n",
+            newline="\n",
+        )
+    (tools / "promotion_unit_contract.py").write_text("VALUE = 'version-stamped canonical'\n", newline="\n")
+    (canonical / "worktree-manager/src").mkdir(parents=True)
+    support = canonical / "libs/support"
+    support.mkdir()
+    (support / "support.py").write_text("VALUE = 1\n", newline="\n")
+    (support / "caller.pyz").write_bytes(b"PK\x00\xffcanonical binary\n")
+    for name in (
+        "libs/agent-procutil/setup.py", "libs/versioned-runtime/standalone_build.py",
+        "plugins/agent-containers/setup.py",
+    ):
+        path = canonical / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("pass\n", newline="\n")
+    plugin = canonical / "plugins/agent-worktrees"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copyfile(repo / "plugins/agent-worktrees/payload-invocation.json", plugin / "payload-invocation.json")
+    for name in ("install.sh", "install.ps1", "resolve-runtime.sh", "resolve-runtime.ps1"):
+        (scripts / name).write_text("# owned fixture\n")
+    for name in ("invoke-payload-runtime.sh", "invoke-payload-runtime.ps1"):
+        shutil.copyfile(repo / "plugins/agent-worktrees/scripts" / name, scripts / name)
+    primitive = scripts / "installation-context/installation_context.py"
+    primitive.parent.mkdir()
+    primitive.write_text("pass\n", newline="\n")
+    (plugin / "pyproject.toml").write_text('[project]\nname = "agent-worktrees"\nversion = "1"\n')
+    roster = canonical / ".github/plugin/marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(json.dumps({"plugins": [{"name": "agent-worktrees", "source": "plugins/agent-worktrees"}]}))
+    telemetry = canonical / "libs/update-telemetry/src/update_telemetry"
+    telemetry.mkdir(parents=True)
+    for name in ("human.py", "redact.py", "capabilities.py"):
+        shutil.copyfile(repo / "libs/update-telemetry/src/update_telemetry" / name, telemetry / name)
+    shutil.copytree(plugin, candidate / "plugins/agent-worktrees")
+    return canonical, candidate
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_invocation_promotion_rebuilds_canonical_helpers_and_toolkit(tmp_path: Path, stale: bool) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    plugin = candidate / "plugins/agent-worktrees"
+    if stale:
+        for name in ("scripts/command_binding.py", "scripts/_runtime_admission/tools/promotion_unit_contract.py"):
+            target = plugin / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"obsolete derived copy\n")
+        (plugin / "scripts/_runtime_admission/toolkit.json").write_bytes(b"obsolete inventory\n")
+    unrelated = plugin / "unrelated.txt"
+    unrelated.write_bytes(b"preserve")
+    before = {p.relative_to(canonical): p.read_bytes() for p in canonical.rglob("*") if p.is_file()}
+    log = mpiv.materialize(candidate, canonical_root=canonical)
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    assert (plugin / "scripts/command_binding.py").read_bytes() == (
+        canonical / "libs/payload-invocation/command_binding.py"
+    ).read_bytes()
+    assert (plugin / "scripts/_runtime_admission/tools/promotion_unit_contract.py").read_bytes() == (
+        canonical / "tools/promotion_unit_contract.py"
+    ).read_bytes()
+    kit = plugin / "scripts/_runtime_admission"
+    assert (kit / "libs/support/caller.pyz").read_bytes() == b"PK\x00\xffcanonical binary\n"
+    assert "tools/promotion_unit_contract.py" in json.loads((kit / "toolkit.json").read_text())["files"]
+    assert unrelated.read_bytes() == b"preserve"
+    assert before == {p.relative_to(canonical): p.read_bytes() for p in canonical.rglob("*") if p.is_file()}
+    if os.name != "nt":
+        assert os.access(plugin / "scripts/emit-command-catalog.sh", os.X_OK)
+
+
+def test_invocation_promotion_refuses_foreign_manifest_before_writes(tmp_path: Path) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    manifest = candidate / "plugins/agent-worktrees/payload-invocation.json"
+    manifest.write_bytes(manifest.read_bytes() + b"\n")
+    assert mpiv.materialize(candidate, canonical_root=canonical)[0].startswith("SKIP")
+    assert not (manifest.parent / "scripts/command_binding.py").exists()
+
+
+def test_invocation_promotion_uses_the_version_stamped_candidate_root(tmp_path: Path) -> None:
+    canonical, _candidate = _invocation_candidate(tmp_path)
+    before = {p.relative_to(canonical): p.read_bytes() for p in canonical.rglob("*") if p.is_file()}
+    log = mpiv.materialize(canonical, canonical_root=canonical)
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    assert all((canonical / name).read_bytes() == raw for name, raw in before.items())
+    assert (canonical / "plugins/agent-worktrees/scripts/_runtime_admission/tools/promotion_unit_contract.py").read_bytes() == (
+        canonical / "tools/promotion_unit_contract.py"
+    ).read_bytes()
+
+
+def test_invocation_promotion_refuses_escaping_output(tmp_path: Path) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    for root in (canonical, candidate):
+        manifest = root / "plugins/agent-worktrees/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data["outputDir"] = "../../foreign"
+        manifest.write_text(json.dumps(data))
+    assert mpiv.materialize(candidate, canonical_root=canonical)[0].startswith("SKIP")
+    assert not (candidate / "foreign").exists()
+
+
+def test_invocation_promotion_refuses_linked_destination(tmp_path: Path, native_file_symlink) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    foreign = tmp_path / "foreign.py"
+    foreign.write_bytes(b"foreign")
+    target = candidate / "plugins/agent-worktrees/scripts/command_binding.py"
+    native_file_symlink(target, foreign)
+    assert mpiv.materialize(candidate, canonical_root=canonical)[0].startswith("SKIP")
+    assert foreign.read_bytes() == b"foreign"
+
+
+def test_materialize_calls_invocation_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(mm.mie, "validate_human_output_sources", lambda _root: frozenset())
+
+    def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
+        calls.append((dest, canonical_root))
+        return ["MATERIALIZE Invocation fixture"]
+
+    monkeypatch.setattr(mm.mpiv, "materialize", materialize)
+    assert "MATERIALIZE Invocation fixture" in mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert calls == [(tmp_path, tmp_path)]
+
+
+def _invocation_generator(canonical: Path):
+    tooling_root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "_invocation_phase_fixture", tooling_root / "libs/payload-invocation/generate.py",
+    )
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    return generator
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_invocation_source_check_accepts_stale_or_absent_outputs(tmp_path: Path, stale: bool) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    manifest = candidate / "plugins/agent-worktrees/payload-invocation.json"
+    if stale:
+        assert not any(line.startswith("SKIP") for line in mpiv.materialize(candidate, canonical_root=canonical))
+    helper = canonical / "libs/payload-invocation/command_binding.py"
+    helper.write_bytes(helper.read_bytes() + b"\n# canonical source update\n")
+    (canonical / "tools/promotion_unit_contract.py").write_text("VALUE = 'new canonical contract'\n")
+    generator = _invocation_generator(canonical)
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert generator.source_check(manifest, canonical_root=canonical) == []
+    assert generator.process_manifest(manifest, check=True, canonical_root=canonical)
+    assert before == {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert not any(line.startswith("SKIP") for line in mpiv.materialize(candidate, canonical_root=canonical))
+    assert generator.process_manifest(manifest, check=True, canonical_root=canonical) == []
+    assert all(
+        generator.check_generated(path, value, exact_bytes=True) == []
+        for path, value in generator.expected_files(manifest, canonical_root=canonical).items()
+    )
+
+
+@pytest.mark.parametrize("kind", ["text", "binary"])
+def test_invocation_materialized_equality_refuses_byte_drift(tmp_path: Path, kind: str) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    assert not any(line.startswith("SKIP") for line in mpiv.materialize(candidate, canonical_root=canonical))
+    generator = _invocation_generator(canonical)
+    manifest = candidate / "plugins/agent-worktrees/payload-invocation.json"
+    name = "tools/promotion_unit_contract.py" if kind == "text" else "libs/support/caller.pyz"
+    target = manifest.parent / "scripts/_runtime_admission" / name
+    expected = generator.expected_files(manifest, canonical_root=canonical)[target]
+    raw = target.read_bytes()
+    target.write_bytes(raw.replace(b"\n", b"\r\n") if kind == "text" else raw + b"\x00")
+    assert generator.check_generated(target, expected, exact_bytes=True)
+    assert generator.source_check(manifest, canonical_root=canonical) == []
+
+
+def test_invocation_source_check_refuses_invalid_python(tmp_path: Path) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    (canonical / "libs/payload-invocation/command_binding.py").write_text("def broken(\n")
+    generator = _invocation_generator(canonical)
+    assert any("invalid canonical generated Python" in problem for problem in generator.source_check(
+        candidate / "plugins/agent-worktrees/payload-invocation.json", canonical_root=canonical,
+    ))
+
+
+def test_invocation_source_check_refuses_linked_destination(tmp_path: Path, native_file_symlink) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    foreign = tmp_path / "foreign.py"
+    foreign.write_bytes(b"foreign")
+    target = candidate / "plugins/agent-worktrees/scripts/command_binding.py"
+    native_file_symlink(target, foreign)
+    with pytest.raises(ValueError, match="unsafe custody"):
+        _invocation_generator(canonical).source_check(
+            target.parent.parent / "payload-invocation.json", canonical_root=canonical,
+        )
+    assert foreign.read_bytes() == b"foreign"
+
+
+def test_invocation_source_cli_keeps_check_and_source_modes_distinct(tmp_path: Path) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    generator = _invocation_generator(canonical)
+    manifest = str(candidate / "plugins/agent-worktrees/payload-invocation.json")
+    assert generator.main([manifest, "--source-check"], canonical_root=canonical) == 0
+    assert generator.main([manifest, "--check"], canonical_root=canonical) == 1
+    with pytest.raises(SystemExit) as failure:
+        generator.main([manifest, "--check", "--source-check"])
+    assert failure.value.code == 2
+
+
+def test_invocation_materializer_refuses_corrupt_writer_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    write_text = Path.write_text
+
+    def corrupt(path: Path, content: str, *args, **kwargs):
+        result = write_text(path, content, *args, **kwargs)
+        if path.name == "command_binding.py":
+            path.write_bytes(b"corrupt writer result\n")
+        return result
+
+    monkeypatch.setattr(Path, "write_text", corrupt)
+    log = mpiv.materialize(candidate, canonical_root=canonical)
+    assert log[0].startswith("SKIP") and "generated content is stale" in log[0]
+
+
+def test_invocation_materializer_never_executes_candidate_tooling(tmp_path: Path) -> None:
+    canonical, candidate = _invocation_candidate(tmp_path)
+    marker = tmp_path / "candidate-tool-executed"
+    for name in ("generate.py", "runtime_admission.py"):
+        path = canonical / "libs/payload-invocation" / name
+        path.write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n"
+            "raise AssertionError('candidate Python tooling executed')\n",
+        )
+    log = mpiv.materialize(candidate, canonical_root=canonical)
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    assert not marker.exists()
+    assert (candidate / "plugins/agent-worktrees/scripts/_runtime_admission/tools/promotion_unit_contract.py").read_bytes() == (
+        canonical / "tools/promotion_unit_contract.py"
+    ).read_bytes()
 
 
 def test_actual_manager_manifest_materializes_without_a_bridge_test_pointer(tmp_path):

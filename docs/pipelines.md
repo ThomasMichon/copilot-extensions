@@ -604,6 +604,17 @@ closed; unsupported data-files or exclusion layouts do not receive signatures.
 Both preparation and release-authorized promotion compose candidate data
 using tools and the projection manager from the pinned workflow-source
 checkout, never Python tooling imported from the candidate scratch tree.
+The same composer refreshes the declared Installer Engine consumer slots and
+generates manifest-declared Invocation shims, helpers and admission toolkits.
+Both owners use canonical candidate data and verify the actual written bytes
+before the composition is frozen. Invocation's generator and toolkit packager
+remain pinned executable tooling; candidate copies are not imported.
+Contributors do not synchronize those derived Dev mirrors to publish canonical
+changes. Dev's Invocation source check validates the producible inventory,
+paths and grammar, while the development install-contract check validates
+Installer producers and owned layouts. Neither is materialized-copy evidence:
+the separate exact-copy checks and frozen-candidate consumer tests remain
+required, including source-bound checker witnesses and positive unit origins.
 The release writer checks out that same pinned source; `origin/main` remains
 the promotion parent and version/state seed, not the executable tooling root.
 The writer's job-wide token is read-only. Checkout persists no credentials,

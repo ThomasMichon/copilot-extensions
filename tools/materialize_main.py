@@ -52,6 +52,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import materialize_installer_engine as mie  # noqa: E402
 import materialize_launch_wrapper_assets as mlwa  # noqa: E402
+import materialize_payload_invocation as mpiv  # noqa: E402
 import nested_uv_editable_ref as nuer  # noqa: E402
 import uv_editable_ref as uer  # noqa: E402
 
@@ -546,6 +547,7 @@ def materialize(
     log.extend(materialize_installer_engine_refs(
         dest, canonical_root=canonical_root, human_sources=human_sources,
     ))
+    log.extend(mpiv.materialize(dest, canonical_root=canonical_root))
     log.extend(materialize_launch_wrapper_assets(dest, canonical_root=canonical_root))
     log.extend(mie.materialize_human_output_declarations(
         dest, canonical_root=canonical_root, human_sources=human_sources,

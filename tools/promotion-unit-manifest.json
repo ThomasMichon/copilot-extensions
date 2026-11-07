@@ -4668,7 +4668,12 @@
         "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[empty]",
         "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[command-separator]",
         "tools/promotion_unit_tests/test_standalone_artifacts.py::test_pr_preparation_resources_refuse_substitution_without_runtime_primitives[False]",
-        "tools/promotion_unit_tests/test_standalone_artifacts.py::test_pr_preparation_resources_refuse_substitution_without_runtime_primitives[True]"
+        "tools/promotion_unit_tests/test_standalone_artifacts.py::test_pr_preparation_resources_refuse_substitution_without_runtime_primitives[True]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_pinned_invocation_owner_replaces_candidate_outputs_without_running_them[absent]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_pinned_invocation_owner_replaces_candidate_outputs_without_running_them[stale]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_pinned_invocation_owner_refuses_corrupted_actual_write",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_pinned_invocation_loader_closure_is_statically_admitted[candidate-producer]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_pinned_invocation_loader_closure_is_statically_admitted[canonical-packager]"
     ],
     "sources": {
         "tools/application_sources.py": "3dba45b18c2597044205a98c8bdf7cd43c7bb529c4b1a4bcb898d04af2dbe9b0",
@@ -5041,9 +5046,9 @@
         "tools/governed_feed_trust.py": "6fcfca959294d45d5b9b92475674fddcf81cbb22fbb0d3f6ac8b0b99b513311f",
         "tools/installer_engine_ref.py": "bd4b30a5feac04b5c6c231598f23935756363ba8e5fe5edabedaa74f219801c8",
         "tools/launch_wrapper_assets_ref.py": "d0f578fa6c35edbb4a16cf680a1bb0b267db94b0180e50bab7b19f6f8139c28d",
-        "tools/materialize_installer_engine.py": "0fbdd8c974257e61f462ca5e6816938054980c399eaa95323eebda5407442e28",
+        "tools/materialize_installer_engine.py": "063edf1b314414d473a54febc9dc5918d2170a05ed4fbfd7c463603335b6d12a",
         "tools/materialize_launch_wrapper_assets.py": "84a81fb3101143754c82facce392f77817be34c62de07ec51e5534bab0b07308",
-        "tools/materialize_main.py": "0b248728284d755eda50aca6f328fc47cfbf22c8f8cb98fb909cd8ca66a7e41f",
+        "tools/materialize_main.py": "4672e18c95aa547b38366795b7dd56c01baa69ac25d59f63b739d7ddbfb8d648",
         "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
         "tools/native_daemon_artifacts.py": "c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
         "tools/native_qualification_contract.py": "2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",
@@ -5284,7 +5289,7 @@
         "worktree-manager/src/worktree_manager/runtime_source.py": "0a9c25302de87b36c07d38057595452c3f1592f9cd4c825c0133db40c8d334c9",
         "tools/artifact_release_discovery.py": "96d96fce933c6354714ede8f92ff3b941406789210d9e797bbadbe10a28d3157",
         "tools/update_machine_gate_contract.py": "4e937d4ed4806066cf08598864d90ccbc4d0e3008110cab0d8b91b59b2604ab5",
-        "tools/check-install-contract.py": "a435b187bc0faaa9e4beb13fa05694b5d2b7fdb211477bc39fba362d475e28a7",
+        "tools/check-install-contract.py": "6aa44a0781b5cea565a4fa70e43f727e7a425921bad1b00d9fabb0647b6476d2",
         "tools/promotion_unit_tests/test_update_receipt_contract.py": "af14589c316669a93b8d20f9f99526a0f155031624a68f6ad5fdcfcbeac0179e",
         "tools/promotion_unit_tests/test_monitor_outcome_contract.py": "aeec028e93d677a3e9e6c20ee3acb980ad82a7b8fd8bd621f68753e9058bb64e",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py": "c7cbf1406777c60b8dabf13dae924b1e7ac98958e432eed0e58a3d5b8f4075c6",
@@ -5312,7 +5317,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
         "libs/payload-invocation/command_lifecycle.py": "fa59ad840f2a9c4a5c2a77c0a9d4fd22f9124e352ec310042b07d0d7d2873271",
-        "libs/payload-invocation/python-catalog-inputs.json": "5de2fc9a531f4c5fdbe26ffc00e4c7a93f50a5edf3397720e9439a30fca824f3",
+        "libs/payload-invocation/python-catalog-inputs.json": "6d56be9124e5fbd7d935d5a2384a1b406f639205c601dbb000168c9cb4842f2b",
         "tools/promotion_unit_tests/test_typecheck_catalog.py": "f3dddd8e2676e8f56a83da62a072c205b12fc9e0b3d811d2c4e75cc267239a4c",
         "libs/payload-invocation/templates/catalog-powershell.tmpl": "2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
         "libs/payload-invocation/templates/dispatcher-posix.tmpl": "a49ba79f2a92262f8a51bdab2afc5129cdfe89bdc4be13925322819f462ea238",
@@ -5327,13 +5332,15 @@
         "libs/payload-invocation/command_binding.py": "783c14e3da2c21ab10e7e61ece68d6920ec5b273d04030d099c4b0c96b285864",
         "tools/typecheck_catalog_views.py": "0e807c81f590817ef3556e38bfb278560735b56733e93f0e35d89508bb722ea7",
         "libs/payload-invocation/templates/catalog-python.tmpl": "c752063e0fa7c4ae6e344843055991498773870d78823e14a5d4f89edeaf93b6",
-        "libs/payload-invocation/generate.py": "592ed4a2497f02f0b2110002db9b37015f8fc5db431129e25ef852b205f02e68",
+        "libs/payload-invocation/generate.py": "9159fd4354209a0e2f20c93276a6ff053ca5426cdb55afe7d60cdc8f5311fd13",
         "tools/promotion_unit_tests/test_live_question_answers.py": "51b9c884787883d6fec7ce81db0075d0d13f54b32df71d3bff6c92227a9134bf",
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py": "61900a7eb7acbdf924fabaabf1175ddfbe337672971a3ec4ac9016c4d720fdba",
         "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": "d7c57186148fc9538f6f18eaf87ba1abab42e60ba31f6b4e7d3d163e0d7a19b2",
         "tools/promotion_unit_tests/test_mux_question_forms.py": "a3040e5cbffffbb723e7030a826af8a1a3efc65dc17732ad86f51955099fb375",
         "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
-        "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242"
+        "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
+        "tools/materialize_payload_invocation.py": "72358c48a4bdce3bdb53291145c25609f0b27ace9a6104c489411be2b645df4e",
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "caf6cf338501c390d14281d73b54e86658669d5e6d0b53c500622739b83cb789"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
@@ -5613,7 +5620,9 @@
         "plugins/agent-worktrees/scripts/registry_root.py",
         "tools/typecheck_catalog_views.py",
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py",
-        "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py"
+        "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py",
+        "tools/materialize_payload_invocation.py",
+        "libs/payload-invocation/generate.py"
     ],
     "max_seconds": 300
 }

@@ -10185,12 +10185,17 @@ python tools/check-install-contract.py         # runtime-plugin install contract
 python -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
 python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
 python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
-python libs/payload-invocation/generate.py --all --check  # generated payload shims match manifests
+python libs/payload-invocation/generate.py --all --source-check  # canonical producers and owned output inventory
 python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
 python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
 python -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
 python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
 ```
+
+For a materialized candidate, Invocation's `--all --check` and Installer
+Engine's default `verify()` retain actual-copy equality. A successful Dev
+source/layout check is not that evidence; the promotion copier verifies its
+real writes before freezing the candidate.
 
 ## Per-plugin coverage (unit suites)
 
