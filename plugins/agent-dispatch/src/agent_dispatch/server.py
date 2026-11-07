@@ -17,6 +17,7 @@ from . import __version__, telemetry
 from .action_controls import require_worker_admission
 from .config import (
     Config,
+    coordinator_start_lock_path,
     has_live_local_coordinator,
     load_config,
     requires_token_bind,
@@ -353,7 +354,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         # lock through its own route transition), or it could publish over
         # that other transition and recreate the exact undrained duplicate
         # this whole guard exists to prevent.
-        lock_path = routing_dir() / "serve-start.lock"
+        lock_path = coordinator_start_lock_path()
         start_lock = SingleInstance(lock_path)
         if not start_lock.acquire():
             from .single_instance import read_holder_pid

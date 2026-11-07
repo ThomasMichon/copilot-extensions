@@ -580,7 +580,7 @@ def _cmd_cutover(
 
     from .single_instance import SingleInstance, read_holder_pid
 
-    routing_lock_path = captured_routing_dir / "serve-start.lock"
+    routing_lock_path = _config.coordinator_start_lock_path(captured_routing_dir)
     routing_lock = SingleInstance(routing_lock_path)
     acquired = routing_lock.acquire()
     wait_budget = min(30.0, args.health_timeout) if reconcile_existing else 30.0

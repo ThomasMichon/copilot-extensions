@@ -235,6 +235,8 @@ does not update the supervisor or claim suite-wide readiness. Older runtimes
 without this module remain unchanged:
 callers must establish support before invoking the new form and must not replay
 an effectful request through another command after an uncertain result.
+`agent_dispatch.config.coordinator_start_lock_path()` resolves the same native
+start/cutover lock used by serve and deploy; the pathname alone is not custody.
 
 Source validation compares the actual installation identity and normalizes
 equivalent Windows extended-path spellings without relaxing module containment
