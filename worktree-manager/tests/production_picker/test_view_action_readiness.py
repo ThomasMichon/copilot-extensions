@@ -98,3 +98,42 @@ def test_finite_actions_require_successful_completion_and_no_replacement(
             wait(lambda: not runtime.read_pending(""))
     finally:
         runtime.close()
+
+
+@pytest.mark.parametrize("state", ["ready", "pending", "error"])
+def test_queued_row_progress_rechecks_its_captured_scope_before_spawn(tmp_path, state):
+    canary = tmp_path / "ran"
+    command = tmp_path / "action.py"
+    command.write_text(
+        "import json\nfrom pathlib import Path\n"
+        f"Path({str(canary)!r}).write_text('ran')\n"
+        "print(json.dumps({'type':'done'}),flush=True)\n", encoding="utf-8",
+    )
+    reg = pivots.parse_manifest({
+        "label": "Fixture", "scope": "global", "list": ["provider", "list"],
+        "actions": [{
+            "key": "repair", "label": "Repair", "run": [sys.executable, str(command)],
+            "progress": True,
+        }],
+    }, name="fixture", source_path="fixture")
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    runtime._cache[""] = ("ready", [], "")
+    screen = engine(runtime, reg)
+    queued = []
+    screen._run_task_action_progress = lambda _reg, _action, ctx, _title: queued.append(ctx)
+    action = reg.actions[0]
+    try:
+        screen._run_task_action(reg, action, {"id": "one", "_manager_scope": ""})
+        assert len(queued) == 1 and queued[0]["_manager_scope"] == ""
+        if state == "pending":
+            runtime._inflight.add("")
+        elif state == "error":
+            runtime._cache[""] = ("error", [], "replacement failed")
+        ok, message = runtime.run_action_stream(action, queued[0], lambda *_: None)
+        if state == "ready":
+            assert ok and canary.read_text() == "ran"
+        else:
+            assert not ok and "Source read is not current" in message
+            assert not canary.exists()
+    finally:
+        runtime.close()

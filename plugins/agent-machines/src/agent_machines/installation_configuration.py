@@ -16,10 +16,10 @@ def entry(outcome: dict) -> dict:
     observation = outcome.get("observedAfter") or outcome["observedBefore"]
     installer = outcome.get("installer")
     state = (
-        "restart-required" if outcome["restartRequired"] else
         "repair-failed" if installer and (
             installer.get("status") != "exited" or installer.get("exitCode") != 0
         ) else
+        "restart-required" if outcome["restartRequired"] else
         "blocked" if outcome["blockedBy"] else observation["state"]
     )
     module = outcome["module"]

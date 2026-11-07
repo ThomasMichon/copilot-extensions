@@ -129,11 +129,13 @@ def test_native_configuration_action_progress_is_not_terminal_until_repair_compl
     assert frames[-1]["type"] == "done"
 
 
+@pytest.mark.parametrize("restart", ["none", "shell"])
 def test_native_configuration_action_progress_preserves_failed_owner_and_exit(
-    repair_fixture, monkeypatch, capsys,
+    repair_fixture, monkeypatch, capsys, restart,
 ):
     select(monkeypatch, repair_fixture)
-    home, _, payload, *_ = repair_fixture
+    home, _, payload, configure, _ = repair_fixture
+    configure(restart=restart, dependencies=("agent-example/base",))
     script = payload / "scripts" / ("action.ps1" if os.name == "nt" else "action.sh")
     text = script.read_text(encoding="utf-8")
     text = text.replace(
@@ -152,3 +154,8 @@ def test_native_configuration_action_progress_preserves_failed_owner_and_exit(
     assert frames[-1]["type"] == "error" and not any(row["type"] == "done" for row in frames)
     assert any("repair-failed" in row.get("msg", "") for row in frames)
     assert not list(home.glob("*.ready"))
+    if restart == "shell":
+        assert cli.main(arguments) == 0
+        observed = read(capsys)[0]
+        assert observed["repair"]["restarts"]["pending"]
+        assert any("Pending restart: True" in row["card"]["body"] for row in observed["entries"])

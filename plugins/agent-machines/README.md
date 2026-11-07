@@ -188,6 +188,8 @@ including actual optional prerequisites but not unrelated optional modules.
 Rows distinguish unobserved, ready, not-ready, failed, configuration-empty,
 unsupported, dependency-blocked and restart-required states. This is installation
 readiness, not authentication, complete app health or permission to create a task.
+An installer failure remains `repair-failed` even when it also leaves a pending
+restart; the detail card preserves that separate restart obligation.
 
 The native adapter is also available without Manager:
 

@@ -809,6 +809,8 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         try:
             argv = _resolve_command(argv)
             scopes = ctx.get("_manager_refresh_scopes")
+            if scopes is None and "_manager_scope" in ctx:
+                scopes = (ctx["_manager_scope"],)
             if scopes is not None and not self.actions_ready(scopes):
                 return False, "Source read is not current; refresh and reopen this action."
             proc = self._spawn_stream(argv)
