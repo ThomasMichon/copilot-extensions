@@ -345,7 +345,7 @@ def test_native_claim_journaling_is_inside_claim_return_exclusion(venue, monkeyp
 
 
 @pytest.mark.parametrize("caller", ["ssh", "copilot"])
-@pytest.mark.parametrize("blocked", ["busy", "pending", "malformed"])
+@pytest.mark.parametrize("blocked", ["busy", "pending", "malformed", "deploy-hold", "corrupt-hold", "store-lock"])
 def test_connections_refuse_claim_return_exclusion_and_unknown_progress(
     venue, monkeypatch, capsys, caller, blocked,
 ):
@@ -357,7 +357,7 @@ def test_connections_refuse_claim_return_exclusion_and_unknown_progress(
     assert cli.main(["create", "example/project", "--no-wait"]) == 0
     capsys.readouterr()
     monkeypatch.setattr(lease, "active_worktree_ids", lambda: {"new-worktree"})
-    if blocked != "busy":
+    if blocked in ("pending", "malformed"):
         monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
         with pytest.raises(RuntimeError, match="settlement"):
             lease.release_claim("returned", "new-worktree")
@@ -365,18 +365,35 @@ def test_connections_refuse_claim_return_exclusion_and_unknown_progress(
             raw = json.loads(lease.LEASE_FILE.read_text(encoding="utf-8"))
             raw[RETURN_KEY]["version"] = 2
             lease.LEASE_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    elif blocked == "corrupt-hold":
+        lease._DEPLOY_HOLDS_FILE.write_text("{", encoding="utf-8")
+    elif blocked == "store-lock":
+        from functools import partial
+        import time
+
+        lease._LOCK_FILE.write_text("another-writer", encoding="utf-8")
+        future = time.time() + 60
+        os.utime(lease._LOCK_FILE, (future, future))
+        monkeypatch.setattr(lease, "_lease_lock", partial(lease._lease_lock, timeout=0))
     args = SimpleNamespace(name="returned", no_relay=True, stdio=False)
     monkeypatch.setattr("agent_codespaces.hosting_policy.admit_stdio_launch", lambda args: None)
     monkeypatch.setattr("agent_codespaces.lifecycle.account_for_codespace", lambda name: None)
     monkeypatch.setattr(cli, "CodespaceSource", lambda *a, **kw: SimpleNamespace())
     monkeypatch.setattr(cli, "_clear_status_quietly", lambda name: pytest.fail("unclaimed SSH admission"))
     before = lease.LEASE_FILE.read_bytes()
-    with claim_guard("returned") if blocked == "busy" else nullcontext():
+    guard = (
+        claim_guard("returned") if blocked == "busy"
+        else lease.deploy_hold("returned", "stop") if blocked == "deploy-hold"
+        else nullcontext()
+    )
+    with guard:
         if caller == "ssh":
             assert cli._ssh_session(args) == 78
         else:
             assert copilot_venue.claim_or_exit_code(args, launch_policy=False) == 78
     assert lease.LEASE_FILE.read_bytes() == before
+    if blocked in ("deploy-hold", "corrupt-hold", "store-lock"):
+        assert venue.shared["returned"].state == "leased"
     assert "BLOCKED" in capsys.readouterr().err
 
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 import json
+import os
 import subprocess
+import time
+from types import SimpleNamespace
 
 from agent_codespaces import coordination as coord
 from agent_codespaces import lease as lease_mod
@@ -19,6 +22,7 @@ def leases(monkeypatch, tmp_path):
     monkeypatch.setattr(lease_mod, "LEASE_FILE", tmp_path / "leases.json")
     monkeypatch.setattr(lease_mod, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
+    monkeypatch.setattr(lease_mod, "_DEPLOY_HOLDS_FILE", tmp_path / "deploy-holds.json")
     monkeypatch.setattr(lease_mod, "ensure_runtime_dir", lambda: None)
     monkeypatch.setattr(lease_mod, "resolve_owner_worktree", lambda: "/wt/a")
     monkeypatch.setattr(coord, "owner_ref", lambda: "m/p/w")
@@ -45,6 +49,134 @@ def leases(monkeypatch, tmp_path):
 
 def _acq(token):
     return lambda key, holder, **kw: coord.L2Result("ok", token=token)
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("force", [False, True])
+def test_existing_provider_hold_refuses_claim_before_shared_effects(leases, monkeypatch, existing, force):
+    if existing:
+        monkeypatch.setattr(coord, "acquire", _acq("a" * 40))
+        lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+    original = lease_mod.LEASE_FILE.read_bytes() if existing else None
+    shared = {"state": "leased" if existing else "absent", "token": "a" * 40}
+    calls = []
+
+    def acquire(*args, **kwargs):
+        calls.append("acquire")
+        shared.update(state="leased", token="b" * 40)
+        return coord.L2Result("ok", token=shared["token"])
+
+    def renew(*args, **kwargs):
+        calls.append("renew")
+        shared["token"] = "b" * 40
+        return coord.L2Result("ok", token=shared["token"])
+
+    def release(*args, **kwargs):
+        calls.append("release")
+        shared["state"] = "released"
+        return coord.L2Result("ok")
+
+    monkeypatch.setattr(coord, "acquire", acquire)
+    monkeypatch.setattr(coord, "renew", renew)
+    monkeypatch.setattr(coord, "release", release)
+    with lease_mod.deploy_hold("cs-one", "stop"):
+        with pytest.raises(lease_mod.ProviderAdmissionError):
+            lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w", force=force)
+    assert shared == {"state": "leased" if existing else "absent", "token": "a" * 40}
+    assert calls == []
+    assert (lease_mod.LEASE_FILE.read_bytes() if lease_mod.LEASE_FILE.exists() else None) == original
+
+
+def test_provider_hold_creation_joins_claim_exclusion(leases, monkeypatch):
+    monkeypatch.setattr(coord, "acquire", _acq("a" * 40))
+    lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+
+    def renew(*args, **kwargs):
+        with pytest.raises(lease_mod.ProviderAdmissionError, match="busy"):
+            with lease_mod.deploy_hold("cs-one", "stop"):
+                pytest.fail("provider hold interleaved with claim admission")
+        return coord.L2Result("ok", token="b" * 40)
+
+    monkeypatch.setattr(coord, "renew", renew)
+    assert lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w").lease_token == "b" * 40
+    assert lease_mod.get_deploy_hold("cs-one") is None
+
+
+@pytest.mark.parametrize("mode", ["renew", "adopt", "adopt-absent", "acquire", "renew-replaced"])
+def test_late_hold_cleanup_releases_only_this_attempts_acquisition(leases, monkeypatch, mode):
+    original = None
+    if mode in ("renew", "adopt", "renew-replaced"):
+        monkeypatch.setattr(coord, "acquire", _acq("a" * 40))
+        original = lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+    shared = {"state": "leased", "token": "b" * 40}
+    released = []
+
+    def coordinate(*args, **kwargs):
+        # A legacy writer can bypass the new exclusion; retain the final check.
+        now = time.time()
+        hold = lease_mod.DeployHold(
+            "cs-one", "stop", "hold-token", os.getpid(),
+            lease_mod._this_host(), lease_mod._this_environment(), now, now, now + 60,
+        )
+        with lease_mod._lease_lock():
+            lease_mod._write_records(lease_mod._DEPLOY_HOLDS_FILE, {"cs-one": hold})
+            if mode == "renew-replaced":
+                records = lease_mod._read_leases()
+                records["cs-one"].worktree = "/wt/b"
+                records["cs-one"].lease_token = "c" * 40
+                lease_mod._write_leases(records)
+        return coord.L2Result(
+            "conflict" if mode.startswith("adopt") else "ok",
+            token="b" * 40, holder="m/p/w",
+        )
+
+    def release(name, token):
+        released.append(token)
+        shared["state"] = "released"
+        return coord.L2Result("ok")
+
+    monkeypatch.setattr(coord, "acquire", coordinate)
+    monkeypatch.setattr(coord, "renew", coordinate)
+    monkeypatch.setattr(coord, "release", release)
+    with pytest.raises(lease_mod.ProviderAdmissionError):
+        lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+    assert shared["state"] == ("released" if mode == "acquire" else "leased")
+    assert released == (["b" * 40] if mode == "acquire" else [])
+    held = lease_mod._read_leases().get("cs-one")
+    if mode == "renew-replaced":
+        assert held.worktree == "/wt/b" and held.lease_token == "c" * 40
+    elif original:
+        assert held.lease_token == "b" * 40
+        assert held.worktree == original.worktree and held.acquired_at == original.acquired_at
+    else:
+        assert held is None
+
+
+@pytest.mark.parametrize("exception", [False, True])
+def test_new_acquisition_rollback_failure_remains_explicit(leases, monkeypatch, exception):
+    states = iter(({}, {"cs-one": SimpleNamespace(operation="stop")}))
+    monkeypatch.setattr(lease_mod, "_read_live_records", lambda *a, **kw: next(states))
+    monkeypatch.setattr(coord, "acquire", _acq("b" * 40))
+    returned = []
+
+    def release(name, token):
+        returned.append((name, token))
+        if exception:
+            raise RuntimeError("return transport unavailable")
+        return coord.L2Result("unavailable")
+
+    monkeypatch.setattr(coord, "release", release)
+    with pytest.raises(lease_mod.ClaimAdmissionRejected, match="newly acquired.*unconfirmed"):
+        lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+    assert returned == [("cs-one", "b" * 40)]
+    assert lease_mod._read_leases() == {}
+
+
+def test_known_local_conflict_refuses_before_shared_acquisition(leases, monkeypatch):
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a", "/wt/b"})
+    monkeypatch.setattr(coord, "acquire", lambda *a, **kw: pytest.fail("acquisition before local admission"))
+    with pytest.raises(lease_mod.ClaimConflict):
+        lease_mod.claim("cs-one", "/wt/b", active={"/wt/a", "/wt/b"}, holder_ref="m/p/w-b")
 
 
 def test_claim_takes_l2_lease_and_stores_token(leases, monkeypatch):

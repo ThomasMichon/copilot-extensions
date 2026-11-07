@@ -699,6 +699,17 @@ short lease-file transaction. Concurrent operations report busy, and a process
 exit releases the guard without deleting or age-stealing its lock identity.
 Busy, unsettled or malformed return coordination is a blocking rejection for
 SSH and attached/detached Copilot admission, not optional bookkeeping.
+Provider-hold publication briefly joins this same exclusion before its body;
+it does not retain the guard during provider work or block normal return
+inside that hold. Claim checks provider holds and known local conflicts before
+shared coordination, then rechecks before committing local ownership.
+Force, renewal and adoption do not bypass an existing hold. A rejected attempt
+returns only a shared acquisition it created, never an original lease it
+renewed or adopted. A defensive late-hold check preserves a rotated original
+token only when its local snapshot is unchanged; replacement records remain
+untouched. Unconfirmed rollback is reported explicitly, not called cleanup
+success. Provider-hold, corrupt-admission and store-lock failures block
+owner-associated connection admission rather than becoming bookkeeping warnings.
 Generic and bulk return also pin their preselected local snapshots; a delayed
 selection cannot release a replacement claim from the same owner.
 The existing `leases.json` retains pending returns in the reserved

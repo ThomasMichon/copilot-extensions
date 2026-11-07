@@ -376,6 +376,7 @@ def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases
     from agent_codespaces import coordination
 
     responses = iter([
+        {},
         {
             "cs-one": lease_mod.DeployHold(
                 codespace="cs-one",
@@ -412,13 +413,11 @@ def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases
         ),
     )
     released = {}
-    monkeypatch.setattr(
-        coordination,
-        "release",
-        lambda codespace, token: released.update(
-            {"codespace": codespace, "token": token}
-        ),
-    )
+    def release(codespace, token):
+        released.update({"codespace": codespace, "token": token})
+        return coordination.L2Result("ok")
+
+    monkeypatch.setattr(coordination, "release", release)
 
     with pytest.raises(
         lease_mod.ProviderAdmissionError,
