@@ -1,6 +1,8 @@
 """Real lifecycle-selected native OpenSSH listener, with no production changes."""
 
 import base64
+import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -72,8 +74,63 @@ def test_windows_command_probe_preserves_context_through_outer_shell(shell):
         pytest.fail("Native outer shell did not preserve the selected user context")
 
 
+@pytest.fixture(params=[
+    pytest.param(False, id="synthetic-pair"),
+    pytest.param(True, id="vault-pair", marks=pytest.mark.skipif(
+        os.environ.get("AGENT_SSH_VAULT_NATIVE") != "1",
+        reason="opt-in composed disposable Vault/native SSH proof",
+    )),
+])
+def native_peer_key(request, native_target_root):
+    if not request.param:
+        yield None
+        return
+    path = Path(__file__).resolve().parents[2] / "agent-vault" / "tests" / "test_identity_key_keepass_live.py"
+    spec = importlib.util.spec_from_file_location("_ssh_disposable_vault", path)
+    helper = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = helper
+    spec.loader.exec_module(helper)
+    with helper.disposable_vault(native_target_root / "native vault", seed_owner=False) as fixture:
+        entry = "SSH/native-peer"
+        prepared = fixture.run(
+            "ssh-key", "prepare", "--entry", entry, "--require-running",
+            "--initialize", "--confirm-initialization", "--json",
+        )
+        assert prepared.returncode == 0, "Disposable Vault pair preparation failed"
+        metadata = json.loads(prepared.stdout)
+        assert metadata["status"] == "created"
+        database_before = hashlib.sha256(Path(fixture.database).read_bytes()).digest()
+        command = (
+            "ssh-key", "install", "--entry", entry, "--directory",
+            str(fixture.root / "protected pair"), "--require-running",
+            "--expected-fingerprint", metadata["fingerprint"], "--json",
+        )
+        installed = fixture.run(*command)
+        assert installed.returncode == 0, "Disposable pinned key installation failed"
+        result = json.loads(installed.stdout)
+        assert result["status"] == "installed"
+        private = Path(result["private_key_path"])
+        before = (private.read_bytes(), private.stat().st_mtime_ns)
+        repeated = fixture.run(*command)
+        assert repeated.returncode == 0, "Fresh Vault installation reader failed"
+        assert json.loads(repeated.stdout)["status"] == "reused"
+        assert (private.read_bytes(), private.stat().st_mtime_ns) == before
+        assert fixture.request({"action": "lock", "kpdb": fixture.database})["ok"] is True
+        refused = fixture.run(*command)
+        assert refused.returncode == 1, "Locked Vault setup used existing local files"
+        assert json.loads(refused.stdout)["error"] == "needs_unlock"
+        yield result
+        assert (private.read_bytes(), private.stat().st_mtime_ns) == before
+        assert hashlib.sha256(Path(fixture.database).read_bytes()).digest() == database_before
+        output = prepared.stdout + installed.stdout + repeated.stdout + refused.stdout
+        output += prepared.stderr + installed.stderr + repeated.stderr + refused.stderr
+        output += (fixture.root / "daemon.log").read_text(encoding="utf-8")
+        assert "BEGIN OPENSSH PRIVATE KEY" not in output, "Fixture private key leaked"
+        assert not (fixture.root / "cache-root").exists(), "Fixture populated an identity cache"
+
+
 @pytest.mark.timeout(60)
-def test_native_listener_login_refresh_withdrawal_and_preservation(native_target_root):
+def test_native_listener_login_refresh_withdrawal_and_preservation(native_target_root, native_peer_key):
     sshd, keygen, ssh = (shutil.which(name) for name in ("sshd", "ssh-keygen", "ssh"))
     if not all((sshd, keygen, ssh)):
         pytest.skip("Native OpenSSH server, client and key generator are required")
@@ -86,6 +143,8 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
         root.mkdir(mode=0o700)
     _, directory = fixture_files(root)
     for name in ("host", "local", "peer", "new-peer"):
+        if name == "peer" and native_peer_key is not None:
+            continue
         subprocess.run(
             [keygen, "-q", "-t", "ed25519", "-N", "", "-f", str(root / name)],
             check=True, capture_output=True, timeout=10, **no_window_kwargs(),
@@ -97,6 +156,8 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
         (root / "host").write_bytes(private)
 
     def public(name):
+        if name == "peer" and native_peer_key is not None:
+            return native_peer_key["public_key"]
         return " ".join((root / (name + ".pub")).read_text(encoding="ascii").split()[:2])
 
     policy_path, directory_path = root / "policy.json", root / "directory.json"
@@ -134,9 +195,13 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
     known_hosts.write_text("native-ingress " + public("host") + "\n", encoding="ascii")
 
     def client_arguments(identity="peer"):
+        private_key = (
+            Path(native_peer_key["private_key_path"])
+            if identity == "peer" and native_peer_key is not None else root / identity
+        )
         return [
             ssh, "-F", str(client_config), "-l", ingress._account(), "-p", str(port),
-            "-i", str(root / identity),
+            "-i", str(private_key),
             "-o", "HostKeyAlias=native-ingress", "-o", "StrictHostKeyChecking=yes",
             "-o", 'UserKnownHostsFile="' + str(known_hosts) + '"', "-o", "GlobalKnownHostsFile=none",
             "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",

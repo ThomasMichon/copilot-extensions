@@ -628,6 +628,14 @@ not installation, credential or live-adoption authority.
   existing encrypted-key signer. Verify unchanged key protection and host
   trust; missing/locked Vault and absent/incompatible signer remain distinct
   negative results, with no enrollment or system-agent fallback.
+- [x] Qualify the composed current-source normal Vault pair/native Windows
+  client against the existing pinned loopback listener: one opt-in disposable
+  KeePass/CLI case passes in19.19s, including fresh pinned protected-file
+  reuse, locked new-setup refusal, actual command exit/EOF, selected user
+  SID/session/non-elevated token, authorization refresh/withdrawal and owned
+  teardown. The four synthetic-pair/outer-shell controls pass separately
+  in11.49s. Installed selection, an encrypted signer and full logon lifetime
+  remain open; no production identity or system agent is used.
 - [ ] Prove native inbound command completion and expected user/token context
   separately from `ssh -N -T` authentication. Include direction-policy refusal,
   exit/EOF, permitted downstream-credential behavior and unchanged existing
@@ -713,6 +721,36 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-11-07 - Composed disposable Vault pair and native SSH command
+
+- Comment6710772139 reserves only the existing native listener test,
+  directly dependent test documentation/changefile and this journal.
+  The open-PR file check found no overlap; retained setup, construction,
+  enrollment and lifecycle source and effect custody remains unchanged.
+- The opt-in `AGENT_SSH_VAULT_NATIVE=1` case reuses the existing PID-owned
+  disposable KeePass/Vault fixture. Actual public-only preparation explicitly
+  creates a synthetic pair; require-running, expected-fingerprint installation
+  materializes it in an owner-protected fixture directory. Fresh-process
+  reuse preserves private-file bytes/timestamp and the encrypted database.
+- Locking that Vault refuses a new installation with `needs_unlock`, even
+  though matching files exist. The already-materialized exact pair still
+  signs through native OpenSSH with `IdentityAgent=none`, preserving the
+  distinct new-setup and existing-connection contracts rather than treating
+  lock as connection revocation.
+- The real pinned loopback listener completes the command with the expected
+  Windows SID/session/non-elevated token and retains existing authentication,
+  key refresh/withdrawal, direction/forwarding refusal, unrelated-state
+  preservation and listener teardown assertions. One case passes in19.19s:
+  setup10.55s, call6.95s, teardown0.20s. The four unchanged synthetic-pair and
+  real outer-shell controls pass separately in11.49s, with no skips.
+- The canonical contained source runner reuses leased prepared dependencies,
+  isolates fixture state and retains60s item/180s aggregate limits. No
+  dependencies, application or production service were installed. The fresh
+  disposable database is first-touch consumer evidence, not source-denying
+  installed setup, release provenance, OneDrive, an encrypted operator signer,
+  cold-logon/reconnect, downstream credentials or production adoption.
+  Those parent gates remain open.
 
 ### 2026-11-07 - Cold Vault activation reader prerequisite
 
