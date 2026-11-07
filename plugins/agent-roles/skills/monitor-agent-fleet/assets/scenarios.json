@@ -134,6 +134,12 @@
       "expected": "Over-narrow self-proposed grant. Recommend one decision packet covering the operation class, target selector and bounded revision/retry loop; the monitor grants nothing and sends nothing in read-only mode."
     },
     {
+      "id": "recurring-roster-refresh",
+      "mode": "read-only",
+      "facts": "A recurring fleet-wide watch starts its next cycle. Since the last cycle the topology manifest added a machine that passes the read-only SSH check, removed a machine that still has an outstanding steer record, and kept a declared machine that now fails the check.",
+      "expected": "Re-resolve the roster before observing: add the ready machine, retire the removed one while keeping its history and steer record, and keep the unready machine as a coverage gap. Record the manifest source and changes in the cycle log. Do not provision, connect or repair the unready venue."
+    },
+    {
       "id": "dormant-stale-blocker",
       "mode": "dormant-correction",
       "facts": "An inactive worktree's open effort says its next slice is blocked on an operator decision. The full chronology shows the operator answered later and the dependent PR merged. Liveness is terminal on recheck and the grant allows clear corrections directly.",

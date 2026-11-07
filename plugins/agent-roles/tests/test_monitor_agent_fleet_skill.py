@@ -188,3 +188,30 @@ def test_dormant_correction_edits_records_only_under_its_own_grant() -> None:
         "dormant-unavailable-evidence",
         "dormant-stale-baton",
     } <= dormant
+
+
+def test_recurring_watch_re_resolves_roster_each_cycle() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    readers = " ".join(_read(
+        SKILL / "references" / "fabric-readers.md"
+    ).split())
+    for requirement in (
+        "**re-resolves its roster at the start of every cycle**",
+        "Retire one removed from the manifest, keeping its history",
+        "Keep a declared but unready machine as a coverage gap",
+        "Readiness failures never authorize provisioning, connecting or "
+        "repairing a venue",
+        "Each cycle begins with the roster refresh above.",
+    ):
+        assert requirement in skill, requirement
+    assert skill.index("re-resolves its roster") < skill.index(
+        "## 3. Analyze history"
+    )
+    assert "Roster source: <fixed list | re-resolved each cycle" in charter
+    assert "machines added, retired or kept as gaps" in charter
+    assert "do not reuse an earlier cycle's readiness" in readers
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert "recurring-roster-refresh" in {
+        case["id"] for case in scenarios["cases"]
+    }

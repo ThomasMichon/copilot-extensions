@@ -14,6 +14,9 @@ Report home: <private destination for findings>
 
 Scope
   Targets: <machines/workspaces/owners, resolved through topology readers>
+  Roster source: <fixed list | re-resolved each cycle from the topology
+    manifest and transport readiness: add ready, retire removed, keep
+    unready as a gap>
   Exclusions: <owners, repositories or work never observed or steered>
   Observation period: <time range or "from now">
 
@@ -62,6 +65,8 @@ Acceptance: <what a completed sweep or a healthy service period must show>
 ## Acceptance checks
 
 - Every target resolves through an existing owner, or is a recorded gap.
+- A recurring cycle with a re-resolved roster records its manifest source,
+  readiness results and machines added, retired or kept as gaps.
 - Every finding cites evidence and a coverage manifest; inferred purpose is
   marked with confidence.
 - **Messages sent** is `none` in read-only mode, and each steer in steering mode
