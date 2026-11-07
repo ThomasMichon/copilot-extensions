@@ -41,6 +41,9 @@ discarded on a grace deadline. An adopter may instead provide
 In self-retirement mode that bounded cleanup runs only after successor serving
 readiness, without changing publication's irreversible frontier. Cleanup failure
 is reported separately and never rolls back the healthy incoming generation.
+An adopter may set `require_predecessor_retirement=True` with that fallback to
+retain the committed recovery record and report failure until exact predecessor
+exit is confirmed; the default remains best-effort.
 Native identity and exact route custody remain required. Recovery records
 include the full predecessor endpoint so uncertain publication can be reconciled
 against its original native identity. Once a ready successor is observed,

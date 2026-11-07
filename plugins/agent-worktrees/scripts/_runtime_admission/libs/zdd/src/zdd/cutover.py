@@ -115,6 +115,7 @@ class CutoverOrchestrator:
         activate_successor: Callable[[Endpoint], None] | None = None,
         serving_health_check: Callable[[str, int], bool] | None = None,
         retire_failed_predecessor: Callable[[Endpoint], dict[str, Any]] | None = None,
+        require_predecessor_retirement: bool = False,
         drain_predecessor: bool = True,
         refuse_restoration: Callable[[dict[str, Any] | None], str | None] | None = None,
         routing_lock_timeout: float | None = None,
@@ -150,6 +151,13 @@ class CutoverOrchestrator:
         self.retire_failed_predecessor = retire_failed_predecessor
         if retire_failed_predecessor is not None and expected_old is None:
             raise ValueError("best-effort retirement requires an exact observed predecessor")
+        if type(require_predecessor_retirement) is not bool or (
+            require_predecessor_retirement and (
+                not self_retirement or retire_failed_predecessor is None
+            )
+        ):
+            raise ValueError("required predecessor retirement needs an explicit self-retirement fallback")
+        self.require_predecessor_retirement = require_predecessor_retirement
         if type(drain_predecessor) is not bool or (
             not drain_predecessor and retire_failed_predecessor is None
         ):

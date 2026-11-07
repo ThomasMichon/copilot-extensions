@@ -203,6 +203,35 @@ def test_self_retirement_commits_without_calling_the_predecessor(tmp_path, monke
     assert not handle.terminated and not next_handle.terminated
 
 
+@pytest.mark.parametrize("retired", [False, True])
+def test_required_predecessor_retirement_preserves_committed_recovery(tmp_path, monkeypatch, native_birth, retired):
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    old = routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=9281, pid=111, version="0.9", process_start_time="1110",
+    )
+    calls = []
+
+    def retire(endpoint):
+        calls.append(endpoint)
+        return {"exit_confirmed": retired}
+
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={}, expected_old=old, refuse_old=lambda _raw: None,
+        self_retirement=True, activate_successor=lambda _endpoint: None,
+        retire_failed_predecessor=retire, require_predecessor_retirement=True,
+    )
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert calls == [old]
+    assert result.committed and not result.rolled_back and not handle.terminated
+    assert result.ok is retired
+    assert result.retirement_confirmed is retired
+    assert routing.read_table(tmp_path)["active"]["pid"] == handle.pid
+    pending = breadcrumb.read_breadcrumb(tmp_path)
+    assert (pending is None) is retired
+    if not retired:
+        assert pending["state"] == "committed"
+
+
 def test_self_retirement_activation_failure_never_disposes_a_promoted_candidate(tmp_path, monkeypatch, native_birth):
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)

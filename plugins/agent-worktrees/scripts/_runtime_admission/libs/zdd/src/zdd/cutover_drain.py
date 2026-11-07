@@ -179,6 +179,12 @@ def complete_self_retirement(
                 "old_endpoint": old.to_dict(), "predecessor_cleanup": result.predecessor_cleanup,
             },
         )
+        if self.require_predecessor_retirement:
+            if not result.retirement_confirmed:
+                result.error = "predecessor retirement unconfirmed; committed recovery record retained"
+                result.steps.append(result.error)
+                return result
+            result.retirement_pending = False
     if not breadcrumb.clear_breadcrumb(self.config_dir):
         raise CutoverError("committed recovery record retained; retry cleanup")
     result.ok = True

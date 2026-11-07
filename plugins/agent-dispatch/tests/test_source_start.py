@@ -885,6 +885,148 @@ def test_reconcile_checks_same_generation_behavior(tmp_path, monkeypatch, behavi
     assert result["status"] == expected
 
 
+@pytest.mark.parametrize(("status", "manual"), [
+    ({"enabled": True, "armed": True}, False),
+    ({"enabled": True, "armed": False}, True),
+    ({"enabled": False, "armed": False}, True),
+    ({}, True),
+])
+def test_reconcile_requires_explicit_retirement_when_predecessor_cannot_self_retire(
+    tmp_path, monkeypatch, status, manual,
+):
+    from agent_dispatch import client, source_start
+    from agent_dispatch.config import Config
+    from zdd import cutover, diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version="older", process_start_time=birth,
+    )
+    health = {
+        "status": "ok", "version": "older", "data_auth_required": False,
+        "runtime_config_identity": source_start.config_identity(cfg),
+        "slot": {"pid": pid, "process_start_time": birth, "role": "active", "self_retire": status},
+    }
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return health
+
+    captured = {}
+
+    class Orchestrator:
+        def __init__(self, *_args, **kwargs):
+            captured.update(kwargs)
+
+        def run(self, **_kwargs):
+            return SimpleNamespace(to_dict=lambda: {"ok": True})
+
+    monkeypatch.setattr(client, "DispatchClient", Client)
+    monkeypatch.setattr(cutover, "CutoverOrchestrator", Orchestrator)
+    assert source_start.run_coordinator(
+        cfg, tmp_path, token=None, spawn_passive=lambda _port: pytest.fail("fixture must not spawn"),
+        pick_free_port=lambda: 43124, timeout=1.0, verify_selected=lambda: None,
+        start_if_missing=False, confirm_inactive=lambda _table: True,
+    )["ok"] is True
+    assert bool(captured.get("retire_failed_predecessor")) is manual
+    assert bool(captured.get("require_predecessor_retirement")) is manual
+
+
+@pytest.mark.parametrize("outcome", ["exited", "drain-refused", "successor-changed", "exit-unconfirmed"])
+def test_explicit_retirement_drains_only_the_pinned_predecessor(tmp_path, monkeypatch, outcome):
+    from agent_dispatch import coordinator_observation, source_start
+    from agent_dispatch.config import Config
+    from zdd import cutover, diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: str(pid * 10))
+    old = routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=111, version="older", process_start_time="1110",
+    )
+    state = {"old": "matching"}
+    monkeypatch.setattr(source_start, "_route_owner_state", lambda _endpoint: state["old"])
+    calls = []
+
+    class Client:
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            new = self.url.endswith(":43124")
+            pid = 222 if new else 111
+            return {
+                "status": "ok", "version": source_start.__version__ if new else "older",
+                "runtime_config_identity": source_start.config_identity(cfg),
+                "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
+                "data_auth_required": False, "data_token_match_v1": False,
+                "slot": {
+                    "pid": pid, "process_start_time": str(pid * 10), "role": "active",
+                    "self_retire": {"enabled": False, "armed": False},
+                },
+            }
+
+        def drain(self, *, timeout, poll, force):
+            calls.append(("drain", force))
+            if outcome == "successor-changed":
+                routing.publish_active(
+                    tmp_path, bind="127.0.0.1", port=43125, pid=333,
+                    version="foreign", process_start_time="3330",
+                )
+            clean = outcome != "drain-refused"
+            return {"drained": clean, "clean": clean, "forced": False}
+
+        def shutdown(self):
+            calls.append(("shutdown",))
+            if outcome == "exited":
+                state["old"] = "dead"
+            return {"shutdown": True}
+
+    monkeypatch.setattr(coordinator_observation, "_local_client", lambda url, **_kwargs: Client(url))
+
+    class Orchestrator:
+        def __init__(self, *_args, **kwargs):
+            self.options = kwargs
+
+        def run(self, **_kwargs):
+            self.options["spawn_passive"](43124)
+            new = routing.publish_active(
+                tmp_path, bind="127.0.0.1", port=43124, pid=222,
+                version=source_start.__version__, process_start_time="2220",
+            )
+            self.options["activate_successor"](new)
+            retirement = self.options["retire_failed_predecessor"](old)
+            return SimpleNamespace(to_dict=lambda: retirement)
+
+    monkeypatch.setattr(cutover, "CutoverOrchestrator", Orchestrator)
+    result = source_start.run_coordinator(
+        cfg, tmp_path, token=None, spawn_passive=lambda _port: SimpleNamespace(pid=222, poll=lambda: None),
+        pick_free_port=lambda: 43124, timeout=0.25, verify_selected=lambda: None,
+        start_if_missing=False, confirm_inactive=lambda _table: True,
+    )
+    assert result["exit_confirmed"] is (outcome == "exited")
+    assert ("drain", False) in calls
+    assert (("shutdown",) in calls) is (outcome in {"exited", "exit-unconfirmed"})
+
+
 @pytest.mark.parametrize("record", ['{"state":"committed","self_retirement":true}', "invalid"])
 def test_reconcile_refuses_unsettled_breadcrumb_before_same_generation_reuse(
     tmp_path, monkeypatch, record,

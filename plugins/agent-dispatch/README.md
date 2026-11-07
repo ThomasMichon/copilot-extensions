@@ -236,7 +236,11 @@ information, not evidence that a caller holds the lock or may alter selection.
 `--apply` reuses the existing guarded coordinator cutover without starting an
 absent service or running broad reaping. It rechecks incumbent liveness before
 spawn and bounds each native routing-lock wait by the requested timeout. It
-does not update the supervisor or claim suite-wide readiness. Older runtimes
+uses asynchronous self-retirement only when the incumbent reports that its
+retirement loop is enabled and armed. Otherwise it drains and shuts down the
+exact predecessor without force after the successor serves, retaining committed
+recovery evidence if predecessor exit cannot be confirmed. It does not update
+the supervisor or claim suite-wide readiness. Older runtimes
 without this module remain unchanged:
 callers must establish support before invoking the new form and must not replay
 an effectful request through another command after an uncertain result.

@@ -21,6 +21,7 @@ from .source_start import _route_owner_state, accept_readiness, behavior_identit
 
 SCHEMA = "agent-dispatch.coordinator-serving-observation"
 VERSION = 1
+CUSTODY_VERSION = 1
 
 
 class ServingObservationError(RuntimeError):

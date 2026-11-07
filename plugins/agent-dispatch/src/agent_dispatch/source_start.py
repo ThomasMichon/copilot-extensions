@@ -322,6 +322,14 @@ def run_coordinator(
             ):
                 raise RuntimeError("selected coordinator owner changed during readiness")
             return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
+    retirement = payload.get("slot", {}).get("self_retire", {}) if old is not None else {}
+    manual_retirement = (
+        not start_if_missing and old is not None
+        and not (
+            isinstance(retirement, dict)
+            and retirement.get("enabled") is True and retirement.get("armed") is True
+        )
+    )
     if breadcrumb.read_breadcrumb(routing_root) is not None:
         raise RuntimeError("previous cutover remains unsettled; owner-led recovery is required")
 
@@ -349,6 +357,74 @@ def run_coordinator(
         if not probe(endpoint.client_host, endpoint.port, active=True):
             raise RuntimeError("published coordinator has not admitted its selected native owner")
 
+    def retire_predecessor(endpoint):
+        deadline = time.monotonic() + timeout
+
+        def remaining():
+            value = deadline - time.monotonic()
+            if value <= 0:
+                raise TimeoutError("coordinator predecessor retirement timed out")
+            return value
+
+        def successor(expected=None):
+            verify_selected()
+            table = routing.read_table(routing_root, strict=True) or {}
+            active = table.get("active")
+            target = routing.Endpoint.from_dict(active) if isinstance(active, dict) else None
+            handle = handles.get(target.port) if target is not None else None
+            if (
+                target is None or (expected is not None and active != expected)
+                or target.version != __version__ or handle is None or handle.pid != target.pid
+                or handle.poll() is not None or not target.process_start_time
+                or process_start_time(target.pid) != target.process_start_time
+                or not probe(target.client_host, target.port, active=True)
+            ):
+                raise RuntimeError("coordinator successor is unconfirmed")
+            remaining()
+            return active
+
+        try:
+            if endpoint != old:
+                raise RuntimeError("coordinator predecessor changed")
+            active = successor()
+            state = _route_owner_state(endpoint)
+            if state in {"dead", "reused"}:
+                return {"exit_confirmed": True, "reason": "already-exited"}
+            if state != "matching":
+                raise RuntimeError("coordinator predecessor identity is unconfirmed")
+            previous = read_health(endpoint.client_host, endpoint.port)
+            handle = SimpleNamespace(pid=endpoint.pid, poll=lambda: None if old_is_live() else 0)
+            if not accept_readiness(
+                previous, handle=handle, version=endpoint.version, config_identity=identity,
+            ):
+                raise RuntimeError("coordinator predecessor health is unconfirmed")
+            successor(active)
+            with selected_client(endpoint_url(endpoint.client_host, endpoint.port), remaining()) as client:
+                drained = client.drain(timeout=remaining(), poll=min(1.0, remaining()), force=False)
+                if (
+                    not isinstance(drained, dict) or drained.get("drained") is not True
+                    or drained.get("clean") is not True or drained.get("forced") is not False
+                ):
+                    raise RuntimeError("coordinator predecessor did not drain cleanly")
+                successor(active)
+                if _route_owner_state(endpoint) != "matching":
+                    raise RuntimeError("coordinator predecessor changed before shutdown")
+                shutdown = client.shutdown()
+                if not isinstance(shutdown, dict) or shutdown.get("shutdown") is not True:
+                    raise RuntimeError("coordinator predecessor shutdown is unconfirmed")
+            while True:
+                state = _route_owner_state(endpoint)
+                if state in {"dead", "reused"}:
+                    successor(active)
+                    return {"exit_confirmed": True, "reason": "drained-and-exited"}
+                if state != "matching":
+                    raise RuntimeError("coordinator predecessor exit is unconfirmed")
+                time.sleep(min(0.1, remaining()))
+        except Exception as error:
+            if callable(getattr(error, "retry_cleanup", None)):
+                raise
+            return {"exit_confirmed": False, "reason": type(error).__name__}
+
     orchestrator = CutoverOrchestrator(
         routing_root, bind="::" if cfg.host == "[::]" else cfg.host,
         version=__version__, spawn_passive=spawn, health_check=probe,
@@ -357,6 +433,10 @@ def run_coordinator(
         self_retirement=True, activate_successor=activate,
         serving_health_check=lambda host, port: probe(host, port, active=True),
         service="agent-dispatch",
+        **({
+            "retire_failed_predecessor": retire_predecessor,
+            "require_predecessor_retirement": True,
+        } if manual_retirement else {}),
         **({"routing_lock_timeout": min(5.0, timeout)} if not start_if_missing else {}),
     )
     return orchestrator.run(
