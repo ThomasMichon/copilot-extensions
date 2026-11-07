@@ -11,7 +11,9 @@ from typing import Callable
 from windows_qualification_contract import TRANSPORT_MARKER, TRANSPORT_REF, canonical, sha
 
 
-def command(argv: list[str], *, cwd: Path, data: str | None = None, check=True):
+def command(
+    argv: list[str], *, cwd: Path, data: str | None = None, check=True, transport_push=False,
+):
     """Run a bounded, caller-owned, captured command without a shell."""
     root = Path(__file__).resolve().parents[1]
     for relative in ("libs/agent-procutil/src", "plugins/agent-worktrees/src"):
@@ -20,8 +22,20 @@ def command(argv: list[str], *, cwd: Path, data: str | None = None, check=True):
             sys.path.insert(0, source)
     from agent_procutil.owned_process import run_caller_owned
     from agent_worktrees.git_repository_environment import repository_identity_env
+    environment = repository_identity_env()
+    if transport_push:
+        if (
+            len(argv) < 6
+            or argv[0] != "git"
+            or argv[-5:-2] != ["push", "--porcelain", "--no-follow-tags"]
+            or argv[-2].startswith("-")
+            or argv[-1].split(":")[1:] != [TRANSPORT_REF]
+        ):
+            raise ValueError("mediated transport must push only the reserved qualification ref")
+        sha(argv[-1].split(":")[0])
+        environment["AGENT_WORKTREES_PR_PUSH"] = "1"
     result = run_caller_owned(
-        argv, cwd=cwd, input_text=data, timeout=90, env=repository_identity_env(),
+        argv, cwd=cwd, input_text=data, timeout=90, env=environment,
         max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=1024 * 1024,
     )
     if check and result.returncode:
@@ -38,9 +52,12 @@ class Transport:
         self.root, self.remote, self.run = root, remote, run
         self.credential_args: list[str] = []
 
-    def git(self, *args, data=None, check=True):
+    def git(self, *args, data=None, check=True, transport_push=False):
         credentials = self.credential_args if args[0] in {"fetch", "push", "ls-remote"} else []
-        return self.run(["git", *credentials, *args], cwd=self.root, data=data, check=check)
+        return self.run(
+            ["git", *credentials, *args], cwd=self.root, data=data, check=check,
+            transport_push=transport_push,
+        )
 
     def scoped_credentials(self, login: str) -> None:
         """Use the native credential-pin owner's helper without changing Git config."""
@@ -110,10 +127,16 @@ class Transport:
                 "commit-tree", tree, *parents, data=body,
             ).stdout.strip())
             persist({"envelope_sha": envelope, "previous_tip": previous, "phase": "transport-attempt"})
-            result = self.git("push", "--porcelain", self.remote, envelope + ":" + TRANSPORT_REF, check=False)
+            result = self.git(
+                "push", "--porcelain", "--no-follow-tags", self.remote,
+                envelope + ":" + TRANSPORT_REF, check=False, transport_push=True,
+            )
             if result.returncode == 0:
                 persist({"envelope_sha": envelope, "phase": "transport-confirmed"})
                 return envelope
+            persist({"transport_failure": {
+                "returncode": result.returncode, "stderr": result.stderr[-8192:],
+            }})
             # A lost response can still have published this exact envelope.
             actual = self.tip()
             if actual and self.git(
@@ -124,5 +147,8 @@ class Transport:
             if actual != previous:
                 continue
             persist({"envelope_sha": envelope, "phase": "transport-unknown"})
-            raise RuntimeError("transport effect unknown or rejected; resume this request, do not replay")
+            raise RuntimeError(
+                "transport effect unknown or rejected; resume this request, do not replay: "
+                + result.stderr[-8192:].strip(),
+            )
         raise RuntimeError("transport contention limit reached; resume this request")
