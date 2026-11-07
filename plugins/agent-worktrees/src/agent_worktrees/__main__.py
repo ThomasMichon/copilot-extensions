@@ -461,22 +461,16 @@ def _build_active_paths(
             if rec.worktree_path and sessions.mux_session_name(rec.worktree_id) in mux_sessions:
                 active.add(sessions._normalize_path(rec.worktree_path))
     else:
-        # Batch list unavailable (mux missing or blocked): prefer the #4057
-        # cached liveness hint on the record (a free read, stamped by the
-        # authoritative verify at the action moments) when it is a FRESH
-        # ``True`` -- that short-circuits the slow per-worktree probe. A
-        # missing hint OR a fresh cached ``False`` both still fall through to
-        # the authoritative ``has_mux_session`` probe (cleanup-toctou-
-        # revalidation effort): a cached negative is not proof a session
-        # hasn't attached since the stamp, so it must never be trusted on its
-        # own to skip the fallback check.
+        # Unknown presence is not activity; cleanup has its own refusal gates.
+        # Only TMux may use per-session fallback; passive PSMux CLI execution
+        # can reap live servers during startup.
         for rec in records:
             if not rec.worktree_path:
                 continue
             hint = _fresh_mux_live_hint(rec)
             if hint is True:
                 active.add(sessions._normalize_path(rec.worktree_path))
-            elif sessions.has_mux_session(rec.worktree_id):
+            elif sessions.platform.system() != "Windows" and sessions.has_mux_session(rec.worktree_id):
                 active.add(sessions._normalize_path(rec.worktree_path))
     # #4057/#1416 bare-resume blind spot: a bare-resumed Copilot (cwd=home) is
     # invisible to BOTH the lock scan above (its session isn't registered under
@@ -1315,7 +1309,11 @@ def _worktree_to_dict(
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
         )
-    if mux_info is not None:
+    if mux_info is not None and not getattr(mux_info, "observed", True):
+        d["mux_observation_unavailable"] = True
+        if rec.mux_live is not None:
+            d["mux_last_known"] = {"present": rec.mux_live, "observed_at": rec.mux_live_at}
+    elif mux_info is not None:
         d["mux_session"] = mux_info.exists
         d["mux_clients"] = mux_info.clients
         d["mux_attached"] = mux_info.attached
@@ -3060,6 +3058,7 @@ def _monitor_sweep(
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
     from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
+    from .worktrees_producer import publish_project_rosters
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
     _monitor_registry_dir = _self_override("_monitor_registry_dir", _smr._monitor_registry_dir)
@@ -3088,7 +3087,15 @@ def _monitor_sweep(
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
-            if roster_failure is not None:
+            if sessions._is_psmux(mux_bin) and roster_publisher is not None:
+                # Publish independent facts without discovering, pruning or painting panes.
+                publish_project_rosters(
+                    picker_projects or set(), interval=interval, project_lock=project_lock,
+                    lifecycle_priority=lifecycle_priority, governance=governance,
+                    segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
+                    roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
+                )
+            if roster_failure is not None and not sessions._is_psmux(mux_bin):
                 roster_failure(RuntimeError("mux-session enumeration unavailable"))
             return -1
         from .status_monitor_discovery import discover_connected_worktrees
@@ -3312,33 +3319,12 @@ def _monitor_sweep(
                     raise
                 except Exception:
                     pass
-    for project in warm_projects:
-        _wait_for_lifecycle_priority(lifecycle_priority)
-        with project_lock if project_lock is not None else contextlib.nullcontext():
-            try:
-                _status_monitor_recheck(governance, "pre-mutation:warm-list-cache")
-                cfg.set_active_project(project)
-                config_scope = _config_cache.project_scope(config_cache_for_project, project)
-                with config_scope:
-                    if roster_publisher is not None:
-                        roster_publisher()
-                    else:
-                        _warm_list_cache_for_active_project(
-                            interval=interval,
-                            **({"cleanup_owner": segment_cache}
-                               if segment_cache is not None and git_ops._windows_observation() else {}),
-                        )
-            except _StatusMonitorGovernanceDeferred:
-                raise
-            except git_ops.push_timeout.ObservationCleanupError as exc:
-                if segment_cache is None:
-                    raise
-                segment_cache.retain_unclaimed_cleanup(project, None, exc)
-                if roster_publisher is not None:
-                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
-            except Exception as exc:
-                if roster_publisher is not None:
-                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
+    publish_project_rosters(
+        warm_projects, interval=interval, project_lock=project_lock,
+        lifecycle_priority=lifecycle_priority, governance=governance,
+        segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
+        roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
+    )
     return len(served)
 
 

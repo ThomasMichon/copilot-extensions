@@ -1186,6 +1186,9 @@ class MuxInfo:
     clients: int | None = None
     """Number of attached terminal clients, or None if unknown."""
 
+    observed: bool = True
+    """False only for an explicitly unavailable passive display observation."""
+
     @property
     def attached(self) -> bool | None:
         """Whether a human terminal is attached.
@@ -1405,14 +1408,20 @@ def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
     if platform.system() == "Windows":
-        cmd = ["psmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
-    else:
-        cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+        return None
+    cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
         if result.returncode != 0:
             return {} if is_empty_tmux_listing(cmd[0], result) else None
-        return parse_session_counts(result.stdout, strict=strict)
+        if (result.stderr or "").strip():
+            return None
+        try:
+            return parse_session_counts(result.stdout, strict=True)
+        except ValueError:
+            if strict:
+                raise
+            return None
     except (OSError, subprocess.TimeoutExpired):
         # OSError covers FileNotFoundError (mux not installed) as well as
         # spawn failures such as WinError 4551 (Application Control policy
@@ -1433,11 +1442,9 @@ def _mux_session_activity() -> dict[str, int]:
     import subprocess
 
     if platform.system() == "Windows":
-        cmd = ["psmux", "list-sessions", "-F",
-               "#{session_name}:#{session_activity}"]
-    else:
-        cmd = ["tmux", "list-sessions", "-F",
-               "#{session_name}:#{session_activity}"]
+        return {}
+    cmd = ["tmux", "list-sessions", "-F",
+           "#{session_name}:#{session_activity}"]
     out: dict[str, int] = {}
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -1457,9 +1464,12 @@ def _mux_session_activity() -> dict[str, int]:
 
 
 def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[str, MuxInfo]:
-    """Get mux status, requiring confirmed absence for authoritative callers.
-    """
+    """Get mux status, requiring confirmed absence for authoritative callers."""
+    import subprocess
+
     result: dict[str, MuxInfo] = {}
+    if not worktree_ids:
+        return result
 
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
@@ -1470,12 +1480,33 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
             else:
                 result[wt_id] = MuxInfo(exists=False, clients=0)
     else:
+        if platform.system() == "Windows" and not strict:
+            from .mux_list_result import MuxObservationUnavailable
+            raise MuxObservationUnavailable(
+                "Passive PSMux CLI observation is unsupported; mux presence is unknown",
+            )
         # Fallback: per-worktree has-session (no client count available)
         for wt_id in worktree_ids:
-            exists = has_mux_session(wt_id, strict=True) if strict else has_mux_session(wt_id)
+            try:
+                exists = has_mux_session(wt_id, strict=True)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                if strict:
+                    raise
+                from .mux_list_result import MuxObservationUnavailable
+                raise MuxObservationUnavailable("Passive mux presence observation failed") from exc
             result[wt_id] = MuxInfo(exists=exists, clients=None)
 
     return result
+
+
+def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
+    """Keep independent display facts usable without inventing mux negatives."""
+    from .mux_list_result import MuxObservationUnavailable
+
+    try:
+        return mux_status_many(worktree_ids)
+    except MuxObservationUnavailable:
+        return {wt_id: MuxInfo(observed=False) for wt_id in worktree_ids}
 
 
 def kill_tmux_session(worktree_id: str) -> bool:

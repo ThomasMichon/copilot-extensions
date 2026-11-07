@@ -396,6 +396,15 @@ def status_line_segments(markers, asset_hints, overflow, width):
     return segments
 
 
+def _mux_observation_unknown(w):
+    evidence = (w.get("fact_provenance") or {}).get("mux") or {}
+    return (
+        w.get("mux_observation_unavailable") is True
+        or evidence.get("quality") in {"unavailable", "stale"}
+        or (w.get("_availability") or {}).get("status") in {"stale", "advisory"}
+    )
+
+
 def _sess(w):
     """LIVE column value (operator feedback, 2026-09-29): ``MUX``/``ACP``/
     ``PROC``/``LOCK``/``-``, replacing the prior glyph set (``●N``/``○``).
@@ -404,6 +413,22 @@ def _sess(w):
     analogous ``ACP(n)`` count exists yet (deferred, not fabricated).
     ``PROC`` (live, bound, but neither muxed nor ACP-hosted) stays distinct
     -- a genuinely different hosting mechanism."""
+    if _mux_observation_unknown(w):
+        if (w.get("mux_last_known") or {}).get("present") or w.get("mux_session") or w.get("mux_attached"):
+            return "MUX(?)"
+        stale = bool(w.get("_availability"))
+        if w.get("interface") == "acp" and (
+            w.get("session_bridge_live") or w.get("session_ahp_live")
+            or w.get("session_bound_live") or w.get("execution_leg_live")
+        ):
+            return "ACP(?)" if stale else "ACP"
+        if w.get("session_bare_orphan"):
+            return "PROC(?)" if stale else "PROC"
+        return "HOST(?)" if (
+            w.get("session_lock_live") or w.get("session_bound_live")
+            or w.get("session_bridge_live") or w.get("session_ahp_live")
+            or w.get("execution_leg_live")
+        ) else "?"
     if w.get("mux_attached"):
         return f"MUX({w.get('mux_clients', 1)})"
     if w.get("mux_session"):
@@ -787,8 +812,9 @@ def norm(
             and _state(w, relation_label) != "ACTIVE"
             and w.get("dirty") == 0 and w.get("ahead") == 0
         ),
-        "attached": bool(w.get("mux_attached")),
-        "mux_live": bool(w.get("mux_session") or w.get("mux_attached")),
+        "attached": bool(w.get("mux_attached")) and not _mux_observation_unknown(w),
+        "mux_live": bool(w.get("mux_session") or w.get("mux_attached")) and not _mux_observation_unknown(w),
+        "mux_observation_unknown": _mux_observation_unknown(w),
         "active": w.get("status") == "active",
         # two-step-restore: the most-recent session id (shown in the row
         # sub-menu so the operator can ``/resume`` it), and whether a live

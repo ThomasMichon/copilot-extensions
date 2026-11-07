@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -13,12 +14,65 @@ from agent_worktrees.worktrees_runtime import WorktreesRuntime
 from agent_worktrees.hook_facts_publication import HookFactsPublisher
 
 
+def test_unavailable_windows_mux_does_not_hide_real_git_facts(tmp_path, monkeypatch):
+    from agent_procutil import no_window_kwargs
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    def git(*args):
+        subprocess.run(
+            ["git", "-C", str(checkout), "-c", "user.name=Example",
+             "-c", "user.email=example@example.invalid", *args],
+            check=True, capture_output=True, **no_window_kwargs(),
+        )
+
+    git("init", "--initial-branch=worktree/one")
+    git("commit", "--allow-empty", "-m", "Base")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    (checkout / "change.txt").write_text("committed")
+    git("add", "change.txt")
+    git("commit", "-m", "Ahead")
+    (checkout / "change.txt").write_text("dirty")
+    record = tracking.WorktreeRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=str(checkout),
+        repo="project", machine="host", platform="windows", title="Task",
+        started_at="", last_resumed_at="", resume_count=0,
+        status="active", completed_at=None, sessions=[],
+        mux_live=False, mux_live_at="2020-01-01T00:00:00",
+    )
+    monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
+    config_path = producer.cfg.project_dir("project") / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps({
+        "repos": {"project": {"anchor": str(checkout), "default_branch": "main"}},
+    }))
+    monkeypatch.setattr(tracking, "list_records", lambda *a, **kw: [record])
+    monkeypatch.setattr(sessions, "platform", SimpleNamespace(system=lambda: "Windows"))
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: sessions.SessionContext())
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *a, **kw: pytest.fail("PSMux probe"))
+    monkeypatch.setattr(reclaim, "bare_orphan_worktree_ids", lambda: set())
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    try:
+        assert producer.publish_active_project(owner) == 1
+        row = owner.handle({"contract_version": 1, "project": "project"})["worktrees"][0]
+        assert row["state"] != git_ops.WorktreeState.ACTIVE.value
+        assert row["dirty"] == 1 and row["ahead"] == 1 and row["behind"] == 0
+        assert row["fact_provenance"]["mux"]["quality"] == "unavailable"
+    finally:
+        owner.shutdown()
+
+
 @pytest.mark.parametrize(("failure", "managed_state"), [
     (None, None), (sqlite3.OperationalError, None), (KeyError, None),
     (None, "live"), (None, "stale"), (None, "other-project"),
     (None, "live-cleanup"),
+    ("mux-unavailable", None), ("mux-unavailable", "live"),
 ], ids=["direct", "sqlite-failure", "key-failure", "managed-live",
-        "managed-stale", "other-project", "managed-cleanup"])
+        "managed-stale", "other-project", "managed-cleanup",
+        "mux-unavailable", "managed-mux-unavailable"])
 def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
     tmp_path, monkeypatch, failure, managed_state,
 ):
@@ -63,6 +117,16 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
             ),
         },
     )
+    if failure == "mux-unavailable":
+        from agent_worktrees.mux_list_result import MuxObservationUnavailable
+
+        record.mux_live = True
+        record.mux_live_at = "2026-10-13T00:00:00"
+
+        def unavailable(_):
+            raise MuxObservationUnavailable("passive observation unsupported")
+
+        monkeypatch.setattr(sessions, "mux_status_many", unavailable)
     monkeypatch.setattr(
         core,
         "_classify_records_live",
@@ -108,9 +172,21 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
     result = owner.handle({"contract_version": 1, "project": "project", "worktree_id": "one"})
     row = result["worktrees"][0]
     assert row["dirty"] == 4
-    assert row["mux_session"] is (managed_state in (None, "live", "live-cleanup"))
-    if managed_state in ("live", "live-cleanup"):
-        assert row["mux_clients"] == 2 and row["mux_attached"] is True
+    if failure == "mux-unavailable":
+        assert "mux_session" not in row and "mux_clients" not in row
+        assert row["fact_provenance"]["mux"] == {
+            "quality": "unavailable", "observed_at": None,
+        }
+        assert row["mux_last_known"] == {
+            "present": True, "observed_at": record.mux_live_at,
+        }
+        v2 = owner.handle({"contract_version": 2, "project": "project"})
+        assert v2["worktrees"][0]["mux_last_known"] == row["mux_last_known"]
+        assert v2["worktrees"][0]["fact_provenance"]["mux"] == {"quality": "unavailable"}
+    else:
+        assert row["mux_session"] is (managed_state in (None, "live", "live-cleanup"))
+        if managed_state in ("live", "live-cleanup"):
+            assert row["mux_clients"] == 2 and row["mux_attached"] is True
     assert row["claims_assets"]["held_count"] == 1000
     assert len(row["claims_links"]) <= 8 and "resources" not in row
     assert row["checkout_present"] is True
@@ -118,7 +194,7 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
     assert "record_head_session" not in row
     hook_path = project / "worktrees" / "one" / "hook-facts" / f"{publisher.generation}.json"
     assert json.loads(hook_path.read_bytes())["facts"]["record_head_session"] == "canonical-head"
-    if failure is not None:
+    if failure is not None and failure != "mux-unavailable":
         error = failure("fixture producer publication failure")
         stream = owner.feed.stream({"contract_version": 1, "project": "project"}, lambda: False)
         try:
