@@ -5,7 +5,7 @@ source coverage. Original request: [purpose-first continuation](purpose-first.md
 Coordination: #8811.
 
 **Status: source plan reviewed in #10920; R1 provider source merged in
-#10935; R2 optional consumer pending.**
+#10935; R2 optional one-PR consumer source merged in #11194.**
 
 ## Existing boundary and intent
 
@@ -75,32 +75,34 @@ standing intent.
 
 ### R2 - Optional explicit one-PR consumer
 
-- [ ] Present recorded PR associations separately from resource claims in Graph.
+- [x] Present recorded PR associations separately from resource claims in Graph.
       Recorded `open`, `merged` or `closed` remains labelled record state, not
       current openness, review approval, content acceptance or claim release.
       Request the optional association form only after the original response
       declares support; absence retains the current claim-only view.
-- [ ] On explicit operator selection, inspect exactly one admitted association
+- [x] On explicit operator selection, inspect exactly one admitted association
       through the same resolved Worktrees executable's existing
       `pr-watch snapshot <repository> <number> --json` operation. Do not pass
       publisher-supplied argv, host overrides, credential commands or tokens.
       Require R1's actual declaration before using the operation.
-- [ ] Allow one caller-owned finite read in flight. Run it off the UI/render
+- [x] Allow one caller-owned finite read in flight. Run it off the UI/render
       path through the existing bounded process/Job owner. Closing, selection
       replacement or cancellation retains cleanup and rejects late replies.
       No additional permanent source worker, poller or subscription is created.
-- [ ] Validate the returned contract/version, exact provider/endpoint/repository/
+- [x] Validate the returned contract/version, exact provider/endpoint/repository/
       number and typed state/merged/head fields against the admitted association.
       Do not turn malformed, oversized, foreign or unsupported replies into
       empty success. Retain independent Summary, Claims and Timeline.
-- [ ] Show the actual point-read state, exact source and observation limitation:
+- [x] Show the actual point-read state, exact source and observation limitation:
       open, closed without merge, merged, or unknown/unavailable. A later explicit
       Refresh can read that same selected association again. Cached display is
       last observed, not continuously confirmed; browsing other evidence never
       refreshes its time. Revalidate the association and source selection first.
-- [ ] Keep review/check/mergeability fields as observed diagnostics only. This
+- [x] Keep review/check/mergeability fields as observed diagnostics only. This
       view cannot grant consent, satisfy a merge gate, request review, remediate,
       reply, merge, close, release a claim or change a PR/head.
+
+All six R2 rows: source merged in #11194.
 
 ## Compatibility and effects
 
@@ -143,11 +145,11 @@ performance, installed and archival gates remain unchanged.
       provider-open versus locally landed, closed-unmerged, merged, pending
       mergeability, foreign identity, malformed enums/booleans/object IDs,
       provider errors and bounded output failure. Do not mock beyond construction.
-- [ ] Real Textual controls cover explicit one-association selection, literal/
+- [x] Real Textual controls cover explicit one-association selection, literal/
       narrow rendering, Refresh, reassignment/head changes, old/unsupported
       providers, late replies and blocked-read dismissal with exact cleanup.
       All independent views remain usable; no action is performed on a PR.
-- [ ] Record source/private-process/Textual evidence separately from installed,
+- [x] Record source/private-process/Textual evidence separately from installed,
       native input-ready performance and any future admitted push coverage.
       Required review, green CI, actual merge and immediate whole-parent
       readback precede source completion.
@@ -311,3 +313,18 @@ source rows close. The joint Validation Plan rows stay open because they also
 require R2's consumer, codec and Textual controls. R2, full live topology and
 every original parent gate remain open. No rollout, real daemon wake, live Mux
 binding, model/data or head/baton operation was performed.
+
+### 2026-11-06 - R2 consumer source merged
+
+#11194 merged at 18:13:09 PST as `31d87f7750faf69b44955bfa6ed599834b7a2e12`
+after four independent review rounds and all required checks. Review fixes
+pinned the engine runtime, revalidated the association before the point read,
+invalidated a pending refresh before awaiting, kept literal Text labels and
+bound the read to the source project and creation nonce. The panel was split
+into its own module under the size guard; 305 curated Companion tests passed
+with verified cleanup. The six R2 rows and Validation rows 4-5 close. Rows 1-3
+stay open: they require actual private tracking records, real cross-version
+parser/process controls and the actual snapshot construction rather than
+fixture replies. Full live topology and every original parent gate remain
+open. No rollout, real daemon wake, live Mux binding, model/data or head/baton
+operation was performed.
