@@ -238,8 +238,10 @@ receives complete #11311 directly in OPEN #6917 as independent MR9/MRV10,
 preserving the reported fifteen-second deadline, native serializer and claim
 assertions, complete Windows capture and independent verification. Historical
 source findings are not a current-head fix or Windows qualification.
-The original remains OPEN pending review and a separate tracking judgment;
-814 whole OPEN remains 85 above fixed 729, with Phase 2 and all custody Active.
+After reviewed #11316 and fresh complete receiving/original audit, #11311
+retired only its redundant token NOT_PLANNED. Two complete equal scans measure
+813 whole OPEN, 84 above fixed 729, with 1,040 audited closure outcomes.
+Phase 2 and every technical acceptance and source/resource custodian stay Active.
 
 The [freshness design and inflow-history journal](<journal/2026/11.07 freshness-design-and-inflow-history.md>)
 records a genuinely new #11298 discussion, the bounded #11296/#11298 study
@@ -2945,8 +2947,9 @@ The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer
 retains complete #11311 and its source-research refinement in actual #6917.
 MR9/MRV10 stay unchecked and independently progressable; existing owners,
 all prior check states and every deadline/containment boundary remain.
-Review and fresh separate receiving/original judgment precede any tracking
-retirement. No root cause, native pass or technical completion is claimed.
+Reviewed #11316 and a fresh separate receiving/original judgment preceded
+#11311's NOT_PLANNED tracking retirement. No root cause, native pass or
+technical completion is claimed; 813 whole OPEN remains above fixed 729.
 
 The [freshness design and inflow-history journal](<journal/2026/11.07 freshness-design-and-inflow-history.md>)
 separates whole-discussion admission, attributed source findings, object
