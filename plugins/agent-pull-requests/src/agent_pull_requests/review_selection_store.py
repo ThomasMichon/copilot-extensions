@@ -120,11 +120,13 @@ class ReviewSelectionStore:
         self, original: dict, *, compose: Callable[..., dict], expires_at: int,
         checkpoint: Callable[[], None] | None = None,
         validate_intent: Callable[[dict], None] | None = None,
+        generation: dict | None = None, source_attachment: dict | None = None,
     ) -> dict:
-        """Allocate fresh comments/replies under owner custody before returning a preview.
+        """Allocate selected comments under owner custody before returning a preview.
 
         The trusted host must bind actual policy/profile/source before entering.
         Its synchronous compose callback is bounded pure preparation, never IO.
+        Automatic edits additionally require the protected generation/source.
         """
         from .review_preparation import validate
 
@@ -135,21 +137,41 @@ class ReviewSelectionStore:
             not callable(validate_intent) or inspect.iscoroutinefunction(validate_intent)
         ):
             raise ValueError("bounded synchronous selection validation required")
-        if any(action["kind"] == "edit_owned_comment" for action in original["actions"]):
-            raise ValueError("automatic owned edits require their original native identity binding")
+        generation, source_attachment = copy.deepcopy(generation), copy.deepcopy(source_attachment)
 
         def allocate(document: dict) -> dict:
             previous = self._previous(document, original)
             if previous is not None:
                 return {"status": "existing", "operation": previous}
+            baseline = {}
+            if any(action["kind"] == "edit_owned_comment" for action in original["actions"]):
+                if generation is None or source_attachment is None:
+                    raise ValueError("automatic owned edits require their original native identity binding")
+                from .review_executor import _check_selected_ownership, validate_review_selection
+
+                _, baseline = validate_review_selection(original, generation, source_attachment)
+                targets = [(action["thread_id"], action["comment_id"]) for action in original["actions"]
+                           if action["kind"] == "edit_owned_comment"]
+                if len(set(targets)) != len(targets):
+                    raise ValueError("one selected edit per native comment required")
+                for action in original["actions"]:
+                    _check_selected_ownership(action, baseline, original["scope"]["principal_id"])
             selected = copy.deepcopy(original)
             for action in selected["actions"]:
                 if "body" not in action:
                     continue
-                identity = {"comment_id": str(uuid.uuid4()), "write_id": str(uuid.uuid4())}
+                prior = None
+                if action["kind"] == "edit_owned_comment":
+                    from .review_edit_binding import previous_preparation
+
+                    prior = previous_preparation(document, original, action, baseline)
+                identity = {
+                    "comment_id": prior["identity"]["comment_id"] if prior is not None else str(uuid.uuid4()),
+                    "write_id": str(uuid.uuid4()),
+                }
                 prepared = compose(
                     action["kind"], action["body"], scope=copy.deepcopy(original["scope"]),
-                    **identity, previous=None,
+                    **identity, previous=prior,
                 )
                 if (
                     not isinstance(prepared, dict)
