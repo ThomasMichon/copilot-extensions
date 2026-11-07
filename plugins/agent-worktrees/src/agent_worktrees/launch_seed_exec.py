@@ -120,7 +120,7 @@ def _headed_admission_command(
     if index is None:
         return None
     wrapper = Path(command[index])
-    canonical = installer.install_dir() / "scripts" / (
+    canonical = installer.scripts_dir() / (
         "launch-command.ps1" if os.name == "nt" else "launch-command.sh"
     )
     delimiter = _wrapper_delimiter(command, index)
@@ -202,7 +202,7 @@ def _native_setup_command(
 
     outer = _script_index(command)
     suffix = ".sh" if posix else ".ps1"
-    wrapper = installer.install_dir() / "scripts" / ("launch-command" + suffix)
+    wrapper = installer.scripts_dir() / ("launch-command" + suffix)
     if outer is not None and Path(command[outer]).resolve() == wrapper.resolve():
         delimiter = _wrapper_delimiter(command, outer)
         if delimiter is None:
@@ -344,7 +344,7 @@ def _setup_command(
     if index is not None:
         script = Path(command[index])
         own_scripts = {
-            installer.install_dir() / "scripts",
+            installer.scripts_dir(),
             Path(__file__).resolve().parents[2] / "scripts",
         }
         if any(script.resolve() == (root / script.name).resolve() for root in own_scripts):

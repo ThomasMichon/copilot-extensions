@@ -13,7 +13,7 @@ from .native_arguments import bash_command_index, powershell_invocation
 
 
 def _normalized_setup_index(command) -> int | None:
-    scripts = installer.install_dir() / "scripts"
+    scripts = installer.scripts_dir()
     shell = PureWindowsPath(command[0]).stem.casefold() if command else ""
     if len(command) > 1 and shell == "bash" and Path(command[1]) == scripts / "default-setup.sh":
         return 1

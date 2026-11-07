@@ -490,12 +490,15 @@ def test_prompt_controls_require_receipt_before_launch(receipt):
 @pytest.mark.parametrize("admission", [False, True])
 @pytest.mark.parametrize("wrapped", [False, True])
 @pytest.mark.parametrize("peer_ready", [False, True])
+@pytest.mark.parametrize("packaged", [False, True], ids=["legacy", "application"])
 def test_normalized_setup_is_its_native_lifetime_owner_with_launch_owned_assets(
-    launch, monkeypatch, admission, wrapped, peer_ready,
+    launch, monkeypatch, admission, wrapped, peer_ready, packaged,
 ):
     record, runtime, assets = launch
-    scripts = runtime / "scripts"
-    scripts.mkdir()
+    package = runtime / "versions" / "current" / ".venv" / "agent_worktrees"
+    scripts = package / "_runtime_assets" / "scripts" if packaged else runtime / "scripts"
+    scripts.mkdir(parents=True)
+    monkeypatch.setattr(launch_seed_exec.installer, "__file__", str(package / "installer.py"))
     canonical = Path(__file__).resolve().parents[1] / "scripts"
     for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1", "reconcile-machine-settings.ps1"):
         shutil.copy2(canonical / name, scripts / name)
@@ -538,10 +541,13 @@ def test_normalized_setup_is_its_native_lifetime_owner_with_launch_owned_assets(
     assert {path.name: path.read_bytes() for path in copied.parent.iterdir()} == expected
 
 
-def test_native_pane_copies_engine_owned_console_helper_with_canonical_wrapper(launch, monkeypatch):
+@pytest.mark.parametrize("packaged", [False, True], ids=["legacy", "application"])
+def test_native_pane_copies_engine_owned_console_helper_with_canonical_wrapper(launch, monkeypatch, packaged):
     record, runtime, assets = launch
-    scripts = runtime / "scripts"
-    scripts.mkdir()
+    package = runtime / "versions" / "current" / ".venv" / "agent_worktrees"
+    scripts = package / "_runtime_assets" / "scripts" if packaged else runtime / "scripts"
+    scripts.mkdir(parents=True)
+    monkeypatch.setattr(launch_seed_exec.installer, "__file__", str(package / "installer.py"))
     helper = scripts / "native-seed-boundary.ps1"
     helper.write_text("# current engine fixture\n", encoding="utf-8")
     wrapper = assets / "pane-wrapper.ps1"

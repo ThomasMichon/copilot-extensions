@@ -16,6 +16,34 @@ from . import output, update_options
 PROBE_TIMEOUT = 30
 DELEGATION_SCHEMA = "copilot-extensions.project-update-delegation"
 DELEGATION_VERSION = 1
+_CONTROLLER_OWNS_MANAGER = object()
+
+
+def _project_integration_capability(prefix: Path) -> bool:
+    try:
+        from . import manager_launch_cli, manager_recovery, picker_profiles_cli, update_cli, update_integration
+
+        return (
+            all(Path(module.__file__).resolve().is_relative_to(prefix)
+                for module in (
+                    update_cli, update_integration, manager_launch_cli, manager_recovery, picker_profiles_cli,
+                ))
+            and getattr(update_cli, "PROJECT_INTEGRATION_CAPABILITY", None)
+            == getattr(update_integration, "PROJECT_INTEGRATION_CAPABILITY", None)
+            == "project-controller-integration/v1"
+            and getattr(picker_profiles_cli, "CONTROLLER_PROFILE_REFRESH_CAPABILITY", None)
+            == "controller-profile-refresh/v1"
+            and getattr(update_cli, "run_selected", None) is getattr(update_integration, "run_selected", None)
+            and callable(getattr(update_integration, "run_selected", None))
+            and callable(getattr(manager_recovery, "adopted_manager", None))
+            and callable(getattr(manager_recovery.Adoption, "verify", None))
+            and callable(getattr(manager_recovery, "controller_selection", None))
+            and callable(getattr(manager_recovery.ControllerSelection, "verify", None))
+            and callable(getattr(manager_launch_cli, "_worktree_manager_root", None))
+            and callable(getattr(picker_profiles_cli, "_refresh_terminal_profiles", None))
+        )
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return False
 
 
 def _targeted_payload_install_capability(prefix: Path) -> bool:
@@ -75,6 +103,7 @@ def delegation_capability():
         "schema": DELEGATION_SCHEMA, "version": DELEGATION_VERSION,
         "engine_fallback": True, "isolated_runtime_phase": True,
         "targeted_payload_install": _targeted_payload_install_capability(prefix),
+        "project_integration": _project_integration_capability(prefix),
     }
 
 
@@ -110,6 +139,17 @@ def dispatch_update(args, auth, manager, standalone) -> int:
                 output.err("A partial request cannot own the project update.")
                 return 1
             if getattr(args, "phase", None) or getattr(args, "target", None) is not None:
+                if getattr(args, "phase", None) == "integration":
+                    missing = object()
+                    previous = getattr(args, "_controller_owns_manager", missing)
+                    args._controller_owns_manager = _CONTROLLER_OWNS_MANAGER
+                    try:
+                        return standalone()
+                    finally:
+                        if previous is missing:
+                            del args._controller_owns_manager
+                        else:
+                            args._controller_owns_manager = previous
                 return standalone()
             controlled = None
         else:

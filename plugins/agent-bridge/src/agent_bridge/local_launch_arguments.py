@@ -89,6 +89,23 @@ def _prepared_script(script: Path, record: Path | None, name: str) -> bool:
     )
 
 
+def _packaged_script(script: Path, root: Path, name: str) -> bool:
+    root, script = root.resolve(), script.resolve()
+    try:
+        relative = script.relative_to(root / "versions")
+    except ValueError:
+        return False
+    parts = relative.parts
+    suffix = ("Lib", "site-packages", "agent_worktrees", "_runtime_assets", "scripts", name)
+    application = parts[1:] == (".venv", *suffix)
+    return (
+        bool(parts) and parts[0] != "dev"
+        and (application or parts[1:] == suffix)
+        and (root / "versions" / parts[0] / "application.json").is_file() == application
+        and script.is_file()
+    )
+
+
 def _owned_setup_index(command: list[str], record_path: str | None) -> int | None:
     if not any(value.casefold() == "-nativeargumentsjson" for value in command):
         return None
@@ -98,9 +115,13 @@ def _owned_setup_index(command: list[str], record_path: str | None) -> int | Non
     if index is None:
         return None
     setup = _worktrees_setup_script()
+    root = setup.parent.parent
     script = Path(command[index])
     prepared_wrapper = _prepared_script(script, record, "launch-command.ps1")
-    if script == setup.with_name("launch-command.ps1") or prepared_wrapper:
+    if (
+        script == setup.with_name("launch-command.ps1") or prepared_wrapper
+        or _packaged_script(script, root, "launch-command.ps1")
+    ):
         delimiter = index + 1
         if command[delimiter:delimiter + 1] == ["--recovery"]:
             delimiter += 1
@@ -113,7 +134,7 @@ def _owned_setup_index(command: list[str], record_path: str | None) -> int | Non
         if prepared_wrapper and inner.parent != script.parent:
             return None
         script = inner
-    if script == setup:
+    if script == setup or _packaged_script(script, root, "default-setup.ps1"):
         return index
     # Copied assets are bound to this resolver's record and selected runtime,
     # not recognized by a filename or a marker that a custom script can copy.
@@ -124,7 +145,7 @@ def _owned_setup_index(command: list[str], record_path: str | None) -> int | Non
             ["-LaunchSeedPreparation", "seed"], ["-LaunchSeedPreparation", "admission"],
         )
         and command[index + 3:index + 4] == ["-LaunchSeedNativeRoot"]
-        and Path(command[index + 4]) == setup.parent.parent
+        and Path(command[index + 4]) == root
         and command[index + 5:index + 6] == ["-LaunchSeedRecord"]
         and Path(command[index + 6]) == record
     ):

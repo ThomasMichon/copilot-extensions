@@ -2463,9 +2463,26 @@ from inventing a conversation, while preserving a real selected conversation.
 The optional Worktrees `tests/native/test_native_seed_application.py` constructs
 and installs the real wheel application through the canonical build/profile
 owners in a private home, removes its disposable source inputs, and checks
-current-runtime native admission. Its private project registry is empty and
+current-runtime native admission. It also builds the real installed CLI's launch
+command and invokes the packaged finite native provider after removing source
+inputs. Both scripts must belong to the installed nested environment, and the
+completion marker must remain unchanged. Its private project registry is empty and
 resident startup remains suppressed by the real pytest-owned test override.
 This first-touch check is distinct from full Manager/Copilot launch qualification.
+The focused `test_launch_cmd.py`, `test_session_shell.py`,
+`test_native_seed_shell.py` and `test_native_seed_phase_shell.py` controls retain
+legacy selection and literal argument transport, cover application-owned copying,
+and refuse flat-interpreter fallback for an incomplete application. The Bash
+controls use Git Bash on Windows; that is not native POSIX lifecycle evidence.
+Set `COPILOT_NATIVE_TEST_EXECUTABLE` for the real offline CLI through the installed
+command builder, wrapper and default setup. It reuses the startup/history
+control's literal two-turn fresh/resume assertions and synthetic local provider.
+Setup recovery suppresses host reconciliation; this does not qualify Manager,
+headed-broker admission, setup hooks or survival across caller cleanup Jobs.
+The single case builds the application only once, whether or not native checks
+are explicitly enabled; construction and consumers share its existing
+300-second case budget. Without that prerequisite it qualifies only admission,
+asset selection and the finite provider, not native Copilot history.
 
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
