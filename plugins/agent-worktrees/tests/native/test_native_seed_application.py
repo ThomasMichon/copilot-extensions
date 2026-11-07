@@ -28,8 +28,19 @@ def _run(arguments, *, cwd, env, deadline):
     return result
 
 
+def _literal(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 @pytest.mark.timeout(300)
-def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native_setup", [
+    False,
+    pytest.param(True, marks=pytest.mark.skipif(
+        not os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE"),
+        reason="Select the isolated offline native Copilot executable",
+    )),
+], ids=["admission", "native-setup"])
+def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch, native_setup):
     sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
     import materialize_main as materializer
@@ -45,6 +56,7 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
     deadline = time.monotonic() + 300
+    started = time.monotonic()
     inputs = tmp_path / "source-inputs"
     source, artifacts = inputs / "plugins" / "agent-worktrees", inputs / "wheels"
     source.mkdir(parents=True)
@@ -58,6 +70,7 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
     materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=SOURCE, dest_consumer_dir=source, canonical_root=ROOT,
     )
+    print(f"Application inputs materialized: {time.monotonic() - started:.2f}s", flush=True)
     with monkeypatch.context() as patch:
         patch.setattr(builder, "REPO", inputs)
         artifact = builder.build_source_artifacts(
@@ -65,6 +78,7 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
             dependencies=builder.resolve_vendored_libs(source),
             out_dir=artifacts, python=interpreter, toolchain=None,
         )
+    print(f"Application wheels built: {time.monotonic() - started:.2f}s", flush=True)
     engine = profiles.source_inputs.engine
     project = builder.tomllib.loads((source / "pyproject.toml").read_text())["project"]
     source_hash = engine.runtime_source.assembly_hash(source)
@@ -85,6 +99,7 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
         inputs, tmp_path / "profile", uv=uv, deadline=deadline,
         prepare_profile=True, component="agent-worktrees",
     )
+    print(f"Application profile prepared: {time.monotonic() - started:.2f}s", flush=True)
     assert prepared["install_ready"] is True
     application = Path(prepared["snapshot"]) / "applications" / "agent-worktrees"
     declaration = json.loads((application / "application.json").read_text())
@@ -113,6 +128,7 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
         if os.name == "nt" else [slot / "install"]
     installed = _run(install, cwd=caller, env=environment, deadline=deadline)
+    print(f"Application installed: {time.monotonic() - started:.2f}s", flush=True)
     assert json.loads(installed.stdout)["state"] == "installed"
     assert (root / "current-version").read_text().strip() == slot.name
     assert (root / "projects.yaml").read_text() == "projects: {}\n"
@@ -121,14 +137,64 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
     python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     checked = _run([
         python, "-I", "-B", "-c",
-        "import json,sys;from pathlib import Path;"
+        "import argparse,json,os,sys;from pathlib import Path;"
         "from agent_worktrees import config,launch_seed_native,status_monitor_runtime;"
         "assert not status_monitor_runtime._status_monitor_enabled();"
         "launch_seed_native.require_current_runtime(Path(sys.argv[1]));"
-        "print(json.dumps({'root':str(config.runtime_install_dir()),'prefix':sys.prefix}))",
+        "from agent_worktrees import __main__ as cli;"
+        "cwd=str(Path.cwd());platform='windows' if os.name=='nt' else 'linux';"
+        "configuration=config.Config(srcroot=cwd,machine='fixture',platform=platform,"
+        "repo_name='fixture',repos={'fixture':config.RepoConfig(anchor=cwd,worktree_root=cwd)});"
+        "command=cli._build_launch_cmd(configuration,"
+        "argparse.Namespace(recovery=True,copilot_args=[]),cwd);"
+        "print(json.dumps({'root':str(config.runtime_install_dir()),'prefix':sys.prefix,"
+        "'command':command}))",
         root,
     ], cwd=caller, env=environment, deadline=deadline)
     facts = json.loads(checked.stdout)
     assert Path(facts["prefix"]) == slot / ".venv"
     assert Path(facts["root"]) == root
+    command = facts["command"]
+    scripts = [Path(argument) for argument in command if argument.endswith((".ps1", ".sh"))]
+    assert len(scripts) == 2, command
+    assert all(script.is_file() for script in scripts), command
+    assert all(script.is_relative_to(slot / ".venv") for script in scripts), command
+    boundary = scripts[0].with_name("native-seed-boundary.ps1" if os.name == "nt" else "native-seed-boundary.sh")
+    if os.name == "nt":
+        described = _run([
+            shell, "-NoProfile", "-NoLogo", "-Command",
+            f". {_literal(boundary)}; $reply=Invoke-AwNativeSeedPhase {_literal(root)} "
+            "@('--describe-contract'); if (-not $reply) { throw 'Packaged native provider unavailable' }; "
+            "ConvertTo-Json -InputObject $reply -Depth 10 -Compress",
+        ], cwd=caller, env=environment, deadline=deadline)
+    else:
+        described = _run([
+            "bash", "-c", '. "$1"; aw_native_seed_phase "$2" --describe-contract',
+            "application", boundary, root,
+        ], cwd=caller, env=environment, deadline=deadline)
+    assert json.loads(described.stdout)["contract"] == "agent-worktrees.native-seed"
+    if native_setup:
+        from test_native_startup_prompt import _qualify_native_startup
+
+        def packaged_command(native, native_environment, directory):
+            selected = _run([
+                python, "-I", "-B", "-c",
+                "import argparse,json,os,sys;from pathlib import Path;"
+                "from agent_worktrees import __main__ as cli,config;"
+                "native=json.loads(sys.argv[1]);cwd=str(Path.cwd());"
+                "platform='windows' if os.name=='nt' else 'linux';"
+                "configuration=config.Config(srcroot=cwd,machine='fixture',platform=platform,"
+                "repo_name='fixture',repos={'fixture':config.RepoConfig(anchor=cwd,worktree_root=cwd,"
+                "copilot_path={platform:native[0]})});"
+                "print(json.dumps(cli._build_launch_cmd(configuration,"
+                "argparse.Namespace(recovery=True,copilot_args=native[1:]),cwd)))",
+                json.dumps(native),
+            ], cwd=directory, env=native_environment, deadline=deadline)
+            return json.loads(selected.stdout)
+
+        native_root = tmp_path / "native-flow"
+        native_root.mkdir()
+        _qualify_native_startup(
+            native_root, False, command_wrapper=packaged_command, environment=environment,
+        )
     assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion

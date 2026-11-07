@@ -2140,3 +2140,88 @@ installation. The source-removal/activation/cleanup fixture remains retained
 at the prior source: construction, ownership and discovery are unchanged;
 this scoped correction changes only the probe's callable/exit sequencing.
 Fresh exact-head hosted controls, review and CI remain required.
+
+### 2026-11-07 - Application-consumer slice merged; continue native setup
+
+#11334 merged at 14:50:21 UTC as
+`5d51060e7b74e2d58387ba88f77cd21642577e22`. Copilot review `5812896209`
+approves the exact `ac4ec44a8b` head, explicitly resolving the process-exit
+finding with no active issues. The inline thread is resolved. Final
+[CI 42383031729](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42383031729)
+passes, including required gate `128435532358`. The managed merge uses the
+repository-authorized Maintainer review exception, not a CI bypass.
+
+At the initial `a1845974a5` source, hosted Windows qualifies all forty Manager
+controls in 45.11 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42381467017))
+and all ten Worktrees controls in 27.80 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42381522609)),
+without skips. At the corrected `ac4ec44a8b` source, both new exit-order controls
+qualify in 41.02 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42382707736)).
+All returned source/selection/controller/run/attempt/Windows manifests are
+validated. The affected shutdown branch is armed on Python 3.12.10; this is
+not a native Python 3.13 installation claim. No new transport refs or
+qualification branches are created.
+
+Re-read the parent Plan and Validation Plan before continuing. Preserve both
+owned commits on a local backup, collect them without changing the source tree,
+and pull forward through the native owner. Incoming retained-bootstrap and
+constructor changes belong to their canonical owners and will be composed in
+the next real construction, not replaced with a surrogate.
+
+The next checkpoint is the actual packaged Worktrees/default-setup path and
+native Copilot action, followed by the complete Manager caller flow. Resource
+discovery and first-touch readiness do not close the fresh/resume/reuse,
+attached/new-window, all-caller-Job, auth-wait, pending-aware ACP or receiving
+matrix. The parent stays Active; no installed runtime or productive session
+is changed.
+
+### 2026-11-07 - Packaged Worktrees setup and finite native provider
+
+The actual launch builder and normalized/copy owners still selected flat
+runtime scripts. Four application controls fail while their four legacy
+counterparts pass. Route those existing consumers through the executing
+package's assets, preserving the legacy interpretation and refusing a
+damaged application's fallback to flat assets. Both finite shell selectors
+also require the application's nested interpreter: four new application and
+incomplete-application controls fail before the correction, while both legacy
+controls pass. An application declaration never permits flat-interpreter
+fallback when its nested environment is missing.
+
+The focused packet passes all forty controls in 10.70 seconds, including
+literal option transport, setup-owned copies, incomplete application refusals
+and legacy behavior. PowerShell is native Windows; the Bash controls use Git
+Bash, not native POSIX lifecycle evidence. Python F/E9 lint, install contract
+and headless-launch checks pass.
+
+The first real application attempt reaches its existing 300-second group
+limit before reporting the consumer. A diagnostic with a shorter 270-second
+case limit identifies materialization at 7.61 seconds, wheel construction at
+145.42, profile preparation at 240.11 and installation at 265.09; its terminal
+stack is in the additional installed-CLI subprocess. Restore the original
+300-second case limit and combine admission and selection in one interpreter,
+not a wider budget. The resulting first-touch case passes in 252.35 seconds
+(278.62 including runner preparation and cleanup): real build, profile,
+installation, source-input removal, installed launch-builder selection,
+packaged finite native provider and unchanged completion.
+
+The additional real offline CLI case reuses the existing literal fresh/resume
+history control through the application's actual builder, wrapper and default
+setup, under the same case budget. It passes in 277.56 seconds (349.58
+including runner preparation and cleanup): one native conversation, exactly
+two literal prompts, one resume and the preserved prior-turn history, after
+source-input removal. Setup recovery suppresses host reconciliation; this
+does not establish Manager, headed admission, hook behavior or all-caller-Job
+survival. The 300-second case/group and 600-second aggregate limits are
+unchanged. The parent stays Active with its broader Plan and Validation Plan
+open. No installed host runtime, productive conversation or shared mux is
+modified.
+
+Both original direct/source-setup native history cases still pass in 15.07
+seconds after sharing their helper. The admitted type-checking gate passes
+all forty strict projects for its declared Linux and Windows targets; pending
+projects remain pending. Source gates are not native POSIX qualification.
+The hosted application lane still lacks its required governed feed and is
+not substituted for this local first-touch/native result. Fresh hosted
+focused controls, final-head review and required CI remain publication gates.

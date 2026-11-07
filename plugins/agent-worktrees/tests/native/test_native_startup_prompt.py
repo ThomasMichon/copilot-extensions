@@ -20,6 +20,10 @@ pytestmark = pytest.mark.guard
 
 @pytest.mark.parametrize("normalized_setup", [False, True], ids=["direct", "normalized-setup"])
 def test_native_interactive_resume_preserves_literal_prompt_and_history(tmp_path, normalized_setup):
+    _qualify_native_startup(tmp_path, normalized_setup)
+
+
+def _qualify_native_startup(tmp_path, normalized_setup, *, command_wrapper=None, environment=None):
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable:
         pytest.skip("Set COPILOT_NATIVE_TEST_EXECUTABLE for isolated offline CLI qualification")
@@ -59,7 +63,7 @@ def test_native_interactive_resume_preserves_literal_prompt_and_history(tmp_path
     home.mkdir()
     cwd.mkdir()
     environment = {
-        key: value for key, value in os.environ.items()
+        key: value for key, value in (environment or os.environ).items()
         if not key.startswith(("COPILOT_", "AGENT_BRIDGE", "AGENT_WORKTREES", "WORKTREE_", "OTEL_"))
         and key not in {
             "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE", "PSMUX_PANE",
@@ -106,6 +110,8 @@ def test_native_interactive_resume_preserves_literal_prompt_and_history(tmp_path
                     shell, "-NoProfile", "-File", str(setup), "-Recovery",
                     "-NativeArgumentsJson", json.dumps({"args": seeded[1:]}),
                 ]
+            if command_wrapper is not None:
+                seeded = command_wrapper(seeded, environment, cwd)
             result = run_caller_owned(
                 seeded, cwd=str(cwd), env=environment,
                 timeout=30, max_stdout_bytes=65536, max_stderr_bytes=65536,

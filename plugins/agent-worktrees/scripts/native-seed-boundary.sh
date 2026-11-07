@@ -56,6 +56,7 @@ _aw_native_seed_runtime() {
     [[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$ ]] || return 3
     slot="$root/versions/$version"
     python="$slot/bin/python"
+    if [[ -f "$slot/application.json" ]]; then python="$slot/.venv/bin/python"; fi
     bootstrap="$slot/.runtime-bootstrap/runtime_launcher.py"
     [[ -f "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 4
     [[ -x "$python" ]] || return 3

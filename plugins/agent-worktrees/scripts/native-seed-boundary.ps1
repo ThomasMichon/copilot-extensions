@@ -9,7 +9,10 @@ function Get-AwNativeSeedRuntime {
         $version = [IO.File]::ReadAllText((Join-Path $Root 'current-version')).Trim()
         if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$') { return $null }
         $slot = Join-Path (Join-Path $Root 'versions') $version
-        $python = Join-Path $slot 'Scripts\python.exe'
+        $environment = if (Test-Path -LiteralPath (Join-Path $slot 'application.json') -PathType Leaf) {
+            Join-Path $slot '.venv'
+        } else { $slot }
+        $python = Join-Path $environment 'Scripts\python.exe'
         $bootstrap = Join-Path $slot '.runtime-bootstrap\runtime_launcher.py'
         foreach ($file in @($python, $bootstrap, (Join-Path $slot '.install-complete.json'))) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }

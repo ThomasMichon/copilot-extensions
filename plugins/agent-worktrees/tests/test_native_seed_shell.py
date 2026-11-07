@@ -24,6 +24,39 @@ def _literal(value: Path) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+@pytest.mark.parametrize("layout", ["legacy", "application", "incomplete-application"])
+def test_native_runtime_selection_preserves_the_application_environment(tmp_path, layout):
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "selected"
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir(parents=True)
+    bootstrap.touch()
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    legacy = slot / "Scripts" / "python.exe"
+    legacy.parent.mkdir()
+    legacy.touch()
+    python = legacy
+    if layout != "legacy":
+        (slot / "application.json").write_text("{}", encoding="utf-8")
+        python = slot / ".venv" / "Scripts" / "python.exe"
+        python.parent.mkdir(parents=True)
+        if layout == "application":
+            python.touch()
+    result = run_caller_owned([
+        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-Command",
+        f". {_literal(SCRIPT)}; $runtime=Get-AwNativeSeedRuntime {_literal(root)}; "
+        "ConvertTo-Json -InputObject $runtime -Compress",
+    ], cwd=tmp_path, timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 0, result.stderr
+    selected = json.loads(result.stdout)
+    if layout == "incomplete-application":
+        assert selected is None
+    else:
+        assert Path(selected["Python"]) == python
+        assert Path(selected["Bootstrap"]) == bootstrap
+
+
 def _run(
     tmp_path, *, child_exit=7, missing=False, uncertain=False, absent_end=False,
     stdin=None, child_stderr="", location=None, failed_sink=None,
