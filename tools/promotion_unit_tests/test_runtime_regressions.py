@@ -251,6 +251,34 @@ def test_strict_native_batch_rejects_incomplete_inputs_instead_of_skipping():
             )
 
 
+def test_mixed_batch_validates_all_calls_before_original_classifiers():
+    valid = {"name": "powershell", "args": {"command": "git pull --ff-only"}}
+    for tail in (None, {"name": "unknown"}, {"name": "edit", "cwd": "/other"}):
+        with pytest.raises(ValueError):
+            forms.mixed_mutation_targets(
+                {"toolCalls": [valid, tail]},
+                allowed_tools=frozenset({"edit", "powershell"}),
+                classify=lambda _event: pytest.fail("partial batch classification"),
+            )
+
+
+def test_mixed_batch_aggregates_original_targets_and_conservative_unknowns():
+    payload = {"toolCalls": [
+        {"name": "edit", "args": {"paths": ["one", "two"]}},
+        {"name": "powershell", "args": {"paths": []}},
+        {"name": "edit", "args": {"paths": ["two", "three"]}},
+    ]}
+    arguments = dict(
+        allowed_tools=frozenset({"edit", "powershell"}),
+        classify=lambda event: event["toolArgs"]["paths"],
+    )
+    assert forms.mixed_mutation_targets(payload, **arguments) == ["one", "two", "three"]
+    payload["toolCalls"][1]["args"]["paths"] = None
+    assert forms.mixed_mutation_targets(payload, **arguments) is None
+    payload["toolCalls"] = [{"name": "edit", "args": {"paths": list(map(str, range(129)))}}]
+    assert forms.mixed_mutation_targets(payload, **arguments) is None
+
+
 def test_native_batch_target_limit_is_shared_and_unknowns_keep_workspace():
     workspace = "/synthetic/workspace"
     writes = frozenset({"edit", "multi_edit"})

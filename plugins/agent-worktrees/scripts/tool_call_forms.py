@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Callable
 
 MAX_CALLS = 128
 PATH_KEYS = (
@@ -107,4 +108,24 @@ def native_mutation_targets(payload: dict, *, write_tools: frozenset[str], cwd: 
                 if len(targets) >= MAX_CALLS:
                     return None
                 targets.append(path)
+    return targets
+
+
+def mixed_mutation_targets(
+    payload: dict, *, allowed_tools: frozenset[str], classify: Callable[[dict], list[str] | None],
+) -> list[str] | None:
+    """Validate a complete mixed batch before invoking its original classifiers."""
+    events = tool_events(payload, strict=True)
+    if any(event["toolName"].lower() not in allowed_tools for event in events):
+        raise ValueError("unsupported mixed tool")
+    targets = []
+    for event in events:
+        selected = classify(event)
+        if selected is None:
+            return None
+        for target in selected:
+            if target not in targets:
+                if len(targets) >= MAX_CALLS:
+                    return None
+                targets.append(target)
     return targets

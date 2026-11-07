@@ -243,6 +243,9 @@ wrong-installation or old discovery skips the optional send. A connection or
 write failure has unknown acceptance and is not retried, replayed through
 another endpoint or replaced by Python. Provider rollback therefore retains
 the shell-safe advisory baseline, not a blocking compatibility call.
+The sender allocates an explicitly IPv4 client for its IPv4-only loopback
+endpoint, avoiding the modern runtime's default dual-mode socket selection.
+Client allocation remains inside the existing send clock.
 The sender first checks the runtime's IPv4 support. That capability query can
 initialize the socket subsystem on first use; its cost is part of whole-hook
 entry, not the 50-ms client-allocation/connect/write clock. No probe connection
@@ -333,8 +336,38 @@ invalidate their targets and use the original mutation wake.
 Reminders and late-guidance consumption run once per outer event, not per
 call. No current event is replayed, and a lost notification retains the
 existing refresh backstop rather than asserting fresh status. This source
-consumer does not qualify shell batches, installed behavior, cold/unprepared-cell/POSIX
+consumer does not qualify shell batches outside the mixed subset below, installed behavior, cold/unprepared-cell/POSIX
 entry, complete hook composition or actual throughput.
+
+### Windows mixed-batch consumer
+
+A prepared Windows batch may also contain the original shell aliases together
+with native writes and `view`, `rg` or `glob`. The complete strict shape, 128-call
+limit, canonical event/workspace/argument normalization and once-per-outer-event
+advisory accounting are unchanged. Unknown tools, extra per-call fields,
+malformed calls and empty/oversized batches retain the entire prior route.
+The outer tool name never overrides the batch's actual calls.
+
+The original receiver separately advertises `mixed-hook-batch-mutation-v1`.
+One send-only `mixedToolBatchMutation` uses the existing 64 KiB wire,
+generation/token/deadline, selected-installation, live admission, state-lock and
+50-ms connect/write contracts. Native-only batch or single-shell capabilities
+do not establish mixed-batch support. Missing support skips the optional
+notification while preserving shell advisory evaluation, not a blocking fallback.
+
+Before any effect, the receiver validates every call through the original
+strict normalizer and then reuses the native target extractor and single-shell
+mutation classifier. Read-only shells do not hide native targets; any
+conservatively mutating shell or aggregate target overflow invalidates all.
+Otherwise targets are deduplicated across the complete batch with a shared
+128-target bound. Entirely read-only batches renew idle demand without a sweep
+wake. Permission policy and legacy `postToolUse` behavior remain unchanged.
+
+No commands are executed to classify a batch. There is no reply, retry,
+current-event replay, new publisher, boot operation or durable notification.
+Lost delivery retains the existing refresh backstop and does not certify fresh
+status. These source consumers cover prepared legacy and eligible installation
+cells, not cold/directory/POSIX entry, installed composition or actual throughput.
 
 ### Windows single-shell consumer
 
@@ -346,7 +379,7 @@ Native-write support alone is not shell support. The same 1 MiB event,
 64 KiB newline-terminated wire, one-second generation-qualified deadline and
 combined 50 ms connect/write bound apply. Missing/old discovery skips the
 optional send. No reply, interpreter fallback, retry or event replay follows.
-Mixed shell/native batches retain their prior path.
+Mixed shell/native batches have the separately negotiated consumer below.
 
 The receiver reuses the original guard argument normalizer, including JSON
 strings and raw command strings. Its mutation-only classifier composes the

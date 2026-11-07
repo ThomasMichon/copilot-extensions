@@ -385,7 +385,8 @@ function Send-PostToolReadDemand {
             )
         }
         $batch = $null -ne $Mutation -and $Mutation.Contains('toolCalls')
-        $capability = if ($Shell) { 'shell-hook-mutation-v1' }
+        $capability = if ($Shell -and $batch) { 'mixed-hook-batch-mutation-v1' }
+        elseif ($Shell) { 'shell-hook-mutation-v1' }
         elseif ($batch) { 'native-hook-batch-mutation-v1' }
         elseif ($null -ne $Mutation) { 'native-hook-mutation-v1' }
         else { 'read-hook-demand-v1' }
@@ -407,7 +408,8 @@ function Send-PostToolReadDemand {
             deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 + 1.0
         }
         if ($null -ne $Mutation) {
-            $request.kind = if ($Shell) { 'shellToolMutation' }
+            $request.kind = if ($Shell -and $batch) { 'mixedToolBatchMutation' }
+            elseif ($Shell) { 'shellToolMutation' }
             elseif ($batch) { 'nativeToolBatchMutation' } else { 'nativeToolMutation' }
             $request.payload = $Mutation
         }
@@ -417,7 +419,7 @@ function Send-PostToolReadDemand {
         $limit = if ($null -ne $Mutation) { 65536 } else { 2048 }
         if ($bytes.Length -gt $limit) { return }
         $clock = [Diagnostics.Stopwatch]::StartNew()
-        $client = [Net.Sockets.TcpClient]::new()
+        $client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)
         if (-not $client.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait(50)) { return }
         $remaining = 50 - [int]$clock.ElapsedMilliseconds
         if ($remaining -le 0) { return }
@@ -476,10 +478,11 @@ function Invoke-PreparedPostToolRead {
         )
         $nativeBatch = $event.ContainsKey('toolCalls')
         $nativeWrite = $tool -is [string] -and $tool.ToLowerInvariant() -in $writeTools
-        $shellTool = -not $nativeBatch -and $tool -is [string] -and $tool.ToLowerInvariant() -in @(
+        $shellTools = @(
             'bash', 'sh', 'shell', 'powershell', 'pwsh', 'cmd', 'run', 'run_command',
             'execute', 'exec', 'terminal'
         )
+        $shellTool = -not $nativeBatch -and $tool -is [string] -and $tool.ToLowerInvariant() -in $shellTools
         if ($nativeBatch) {
             $calls = $event['toolCalls']
             if ($calls -isnot [Collections.IList] -or $calls.Count -lt 1 -or $calls.Count -gt 128) {
@@ -487,12 +490,13 @@ function Invoke-PreparedPostToolRead {
             }
             foreach ($call in $calls) {
                 if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
-                    $call['name'].ToLowerInvariant() -notin ($writeTools + @('view', 'rg', 'glob'))) {
+                    $call['name'].ToLowerInvariant() -notin ($writeTools + $shellTools + @('view', 'rg', 'glob'))) {
                     return $null
                 }
                 foreach ($key in $call.Keys) {
                     if ($key -cnotin @('name', 'args', 'id')) { return $null }
                 }
+                if ($call['name'].ToLowerInvariant() -in $shellTools) { $shellTool = $true }
             }
         } elseif ($tool -isnot [string] -or
             (-not $nativeWrite -and -not $shellTool -and $tool.ToLowerInvariant() -notin @('view', 'rg', 'glob'))) {
