@@ -58,6 +58,20 @@ starts a bare Copilot process instead. Use `--no-mux` (or
 `WORKTREE_NO_MUX=1`) only when you intentionally want the direct,
 non-persistent diagnostic path.
 
+Ordinary unseeded direct CLI plans with a selected native conversation now
+enter the same retained Driver core as headed setup. The original Worktrees
+owner keeps its admission fence, native process receipt and exit result.
+Canonical launch-command wrappers remain in the path; on Windows their copied
+startup manifest carries literal argv, including drive-qualified `-C=...`
+values, without a second PowerShell parameter-binding pass. Nonlocal,
+ambiguous and unsupported commands retain their existing path.
+
+This does not turn unknown mux state into absence or permit a cold seed.
+Admission-only execution cannot claim a pending prompt; a changed prompt
+blocks the launch. Staged seed handoff and special native-head recovery retain
+their cold-stop checks. In particular, negative PSMux evidence remains
+unqualified under the recovery policy below.
+
 > **Windows over SSH:** the interactive TUI picker auto-falls back to a simpler
 > flow (a ConPTY limitation), but the muxed-session model is the same. See
 > [picker.md](picker.md).

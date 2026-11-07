@@ -1,0 +1,9 @@
+{
+  "comment": "Route ordinary unseeded direct CLI plans through the common Driver core while retaining original admission and literal wrapper transport.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

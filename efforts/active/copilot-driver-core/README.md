@@ -1738,3 +1738,69 @@ external-venue tests do not apply to this isolated Windows fixture. The full
 Manager launch-session planner, all caller cleanup Jobs, auth-wait/recovery,
 pending-aware lifetime and receiving/skew gates remain open. No parent Plan
 or Validation item is closed solely by this narrower result.
+
+#11287 merged at 09:02:13 UTC as
+`348c386cbe8c3698ed4c1c06b269f408e775f581`. Copilot review `5811195429`
+approved exact head `a2b8909967d0d21b33de982c3be7cbe8692ee4cb` with no
+open issues or inline findings, and required
+[CI 42357638312](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42357638312)
+passed. The managed merge used the normal Maintainer CODEOWNER exception,
+not a CI bypass. Preserved the source head and synced through the native owner.
+Re-read the parent Plan/Validation gates: continue with the actual Manager
+launch-session planner and real caller matrix before pending-aware lifetime
+and receiving acceptance. The parent remains Active; no installed rollout
+or source-worktree finalization is implied.
+
+### 2026-11-07 - Actual Manager no-mux caller convergence
+
+The actual Manager launcher and Worktrees resolver exposed two gaps hidden by
+direct native fixtures: unseeded custom direct plans did not enter the common
+core, and Windows split a drive-qualified `-C=...` token at a PowerShell script
+boundary. Retain the canonical launch-command wrapper, copy it through the
+existing session-shell owner, and use its existing startup manifest to carry
+literal argv. The inner admission-only Python owner now invokes the retained
+core, keeps the creation fence through the wait and records the real native
+PID/birth and actual exit. No new launcher service or transport is introduced.
+
+Ordinary unseeded execution preserves its existing semantics: it cannot claim
+a seed or ignore changed intent, but does not require mux absence. The
+seeded and special native-head recovery paths retain their existing cold-stop
+checks. #11274 intentionally makes negative PSMux presence unknown; do not
+reintroduce a false absence to satisfy native tests. The current native
+fresh/resume and input-fencing controls therefore use explicit native startup
+input with unseeded admission. A real PowerShell cold-seed control verifies
+refusal before backend entry and preservation of the original staged seed.
+
+The actual Manager no-mux fresh/resume control passes in 63.09 seconds
+(85.28 seconds including preparation and cleanup), using one conversation and
+the common broker, with no installed runtime or shared mux mutation. Five
+initial focused owner/transport controls passed; the expanded affected
+shell/owner/resolver packet produced 297 passes and 15 platform/optional skips,
+plus one old Windows cold-seed expectation inconsistent with #11274. That
+expectation now checks refusal and non-entry rather than weakening admission.
+The combined native/corrected cold-refusal packet produced three passes and
+one native-input pane startup failure before its first owner marker, in
+93.04 seconds. Move that marker before optional imports and retain native
+stderr diagnostics; the failed native-input case alone then passes in
+24.40 seconds (83.98 seconds including preparation and cleanup). This does
+not claim the intermittent pre-entry startup symptom is solved. The actual
+Manager, direct broker and cold-refusal results were not repeated.
+
+Current F/E9 lint, all source module ceilings, headless launch, installation
+contract, documentation consistency and effort structure pass. The changed
+Worktrees project remains in the declared pending type-admission scope; no
+admitted strict project input changed, so the prior strict portfolio was not
+repeated or widened. These are isolated native real-consumer and portable
+unit contracts, not installation/rollout or desktop visibility proof. A full
+installer clean-room lane is not applicable because installation code is
+unchanged; fresh copied-shell behavior is covered in the isolated fixtures.
+No qualified external native CLI lane or observable desktop is supplied here.
+
+This closes part of the reviewed caller-convergence intent without changing
+CLI syntax, service schemas, independent peer support or the vision. The
+internal admission callback's cold-stop option is restricted to ordinary
+admission-only execution; it cannot be selected for seeded or special
+native-head recovery. Existing current-runtime wrapper support is checked
+before migration; unsupported forms retain their original path. No installed
+rollout, all-caller Job lifetime, complete pending-work evidence or receiving
+parity is claimed, and the broader parent items remain open.

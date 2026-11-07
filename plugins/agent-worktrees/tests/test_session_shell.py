@@ -3,6 +3,8 @@ import json
 import os
 import shutil
 import stat
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -107,6 +109,47 @@ def test_posix_setup_assets_include_literal_reader_and_survive_installation_remo
     shutil.rmtree(runtime)
     assert {path.name: path.read_bytes() for path in prepared.directory.iterdir()} == expected
     assert all(not path.is_symlink() for path in prepared.directory.iterdir())
+
+
+@pytest.mark.parametrize("platform_name", ["nt", "posix"])
+def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch, monkeypatch, platform_name):
+    from agent_worktrees import installer
+
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": platform_name}))
+    name = "launch-command.ps1" if platform_name == "nt" else "launch-command.sh"
+    wrapper = scripts / name
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts" / name, wrapper)
+    monkeypatch.setattr(installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    prefix = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(wrapper)] if platform_name == "nt" else [
+        "bash", str(wrapper),
+    ]
+    native = ["copilot", "--session-id", "chosen", "-i", "one\n' \" & $literal", r"-C=C:\two words"]
+    command = launch_seed_exec.deferred_command(
+        [*prefix, "--", *native], record, admission_only=True, preserve_seed_id="retained",
+    )
+    if platform_name == "nt":
+        copied = Path(command[4])
+        assert command[5] == "--startup-manifest"
+        manifest = Path(command[6])
+        handoff = json.loads(manifest.read_text(encoding="utf-8"))
+        assert handoff["wrapper"] == str(copied)
+        arguments = handoff["argv"]
+    else:
+        copied = Path(command[1])
+        arguments = command[2:]
+    assert arguments == [
+        "--", sys.executable, "-m", "agent_worktrees.launch_seed_exec",
+        "--record", str(record), "--admission-only", "--preserve-seed-id", "retained",
+        "--", *native,
+    ]
+    expected = wrapper.read_bytes()
+    shutil.rmtree(runtime)
+    assert copied.read_bytes() == expected
 
 
 @pytest.mark.parametrize("missing", ["native-seed-reply.sh", "native-seed-boundary.sh", "native-seed-setup.sh"])

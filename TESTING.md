@@ -2358,20 +2358,28 @@ existing native Copilot executable, and an existing PSMux/PowerShell installatio
 Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
 This focused lane uses the managed test environment, a loopback-only model
 provider, disposable Copilot state and the runner's private mux namespace.
-It checks a literal staged seed, fresh launch and same-session native resume,
+It checks literal startup input, fresh launch and same-session native resume,
 broker prompts, real child PID/birth receipts, seed non-replay and exact
 fixture retirement. A second control sends literal native terminal input,
 checks that the old broker refuses further prompt delivery, then explicitly
 stops through the original owner and resumes the same conversation through a
 new broker. Each control checks the exact user history and provider request
-count, with no replay of the rejected prompt.
+count, with no replay of the rejected prompt. A third `manager-no-mux`
+control invokes the actual Manager `launch-session.ps1` and Worktrees resolver,
+not a synthetic resolved plan, through the explicit no-mux path. It checks
+the same native history, broker, PID/birth and original-owner exit receipts.
+These controls use ordinary unseeded admission and an explicit native initial
+prompt; they do not claim staged-seed qualification. The existing real
+PowerShell cold-resume consumer instead verifies Windows refusal before the
+backend starts, with its seed retained, when mux absence is unconfirmed.
 Discovery uses a read-only adapter to the real private mux, not the host's
 default server or fabricated successful replies. The fixture preserves the
 runner's registry/lifecycle context while scrubbing Copilot settings and
 credentials. Its raw pane entrypoint uses the physical Python interpreter and
 the same managed test packages, avoiding the Windows venv redirector.
-It does not install a runtime or qualify copied setup, the full Manager/embody
-planner, guarded-head or auth-wait recovery, physical keyboard input or survival
+It does not install a runtime or qualify copied setup, Manager's muxed
+attached/new-window paths or the full embody planner, guarded-head or auth-wait
+recovery, physical keyboard input or survival
 after caller cleanup Jobs. Those remain separate acceptance lanes.
 
 Driver's explicit `tests/native/test_headed_extension.py` lane uses the same
