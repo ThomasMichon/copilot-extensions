@@ -4,8 +4,8 @@ Canonical parent: [complete effort](README.md), Step 6 topology and Step 7
 source coverage. Original request: [purpose-first continuation](purpose-first.md).
 Coordination: #8811.
 
-**Status: source plan reviewed in #10920; R1 source qualified and awaiting
-independent review; R2 implementation pending.**
+**Status: source plan reviewed in #10920; R1 provider source merged in
+#10935; R2 optional consumer pending.**
 
 ## Existing boundary and intent
 
@@ -40,17 +40,17 @@ standing intent.
 
 ### R1 - Passive owner association and runtime declaration
 
-- [ ] Extend the existing selected `worktree-status-bundle` response with an
+- [x] Extend the existing selected `worktree-status-bundle` response with an
       optional versioned PR-association fact and declaration for the existing
       snapshot operation. Keep all current facts, defaults and old readers
       compatible; no new standalone command or snapshot acquisition at opening.
       The new fact's construction is passive; the status command's existing
       Git/liveness/bootstrap behavior is unchanged, not newly declared passive.
-- [ ] Read exact canonical PR associations from the selected worktree record.
+- [x] Read exact canonical PR associations from the selected worktree record.
       Preserve their stable association ID/revision, provider, target repository,
       number, URL and recorded lifecycle state. A claim URL alone cannot supply
       a target, provider, endpoint, credentials or command.
-- [ ] Resolve each supported association against the existing read-only target
+- [x] Resolve each supported association against the existing read-only target
       binding without acquiring credentials, reading the forge, starting a
       service, fetching Git or altering a record. Unregistered, contradictory,
       incomplete and legacy targets remain explicitly unavailable/unknown.
@@ -61,14 +61,17 @@ standing intent.
       or re-enable their deliberately omitted related-PR configuration map.
       Reuse one read-configuration acquisition scope for the bounded selection;
       retain the original cache/core observation without repeating Git work.
-- [ ] Bound the projection to 24 associations and the existing body budget,
+- [x] Bound the projection to 24 associations and the existing body budget,
       retaining explicit omission and completeness. Use the original current
       record/worktree incarnation and recheck selection when needed; never
       borrow a latest session, suffix match or another worktree's PR.
-- [ ] Declare `companion-pr-observations-v1`, version 1, through this existing
+- [x] Declare `companion-pr-observations-v1`, version 1, through this existing
       response only when the executing owner implements the association contract
       and passive `agent-worktrees.pr-snapshot` version-1 read. The declaration
       is support, not observation freshness or merge authority.
+      #10935 merged as `38be37c9246321df1fa4230f5b28207b421036f3` after
+      current-head independent review and all required checks; the complete
+      parent and six linked contracts were read immediately afterward.
 
 ### R2 - Optional explicit one-PR consumer
 
@@ -297,3 +300,14 @@ plugin selection passed 647 controls and the existing related-acquisition
 promotion unit passed 152, both with verified cleanup. Only that unit's
 source binding was refreshed. R1 remains pending a fresh independent verdict,
 required checks and actual merge/readback; every original parent gate remains.
+
+### 2026-11-06 - R1 provider source merged
+
+#10935 merged at 13:00:32 PST as `38be37c9246321df1fa4230f5b28207b421036f3`
+after current-head independent review and all three required checks. The
+complete parent, the five original linked contracts and this plan were read
+immediately after actual merge, before this bookkeeping. Only the five R1
+source rows close. The joint Validation Plan rows stay open because they also
+require R2's consumer, codec and Textual controls. R2, full live topology and
+every original parent gate remain open. No rollout, real daemon wake, live Mux
+binding, model/data or head/baton operation was performed.
