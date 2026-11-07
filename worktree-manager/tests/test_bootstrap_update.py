@@ -223,10 +223,12 @@ def test_default_update_observes_a_retained_worker_instead_of_running_installers
     assert seen == (["worker"] if detach else ["worker", "wait"])
 
 
-@pytest.mark.parametrize("as_json", [False, True])
-@pytest.mark.parametrize("already_completed", [False, True])
+@pytest.mark.parametrize("phase,already_completed,as_json", [
+    ("launch", False, False), ("launch", False, True),
+    ("launch", True, False), ("launch", True, True), ("wait", False, False),
+])
 def test_worker_start_failure_retains_the_admitted_request(
-    tmp_path, monkeypatch, capsys, as_json, already_completed,
+    tmp_path, monkeypatch, capsys, as_json, phase, already_completed,
 ):
     import agent_procutil
     import bootstrap_update
@@ -253,22 +255,33 @@ def test_worker_start_failure_retains_the_admitted_request(
             return core.status(request.id, root=queue)
         return request
 
+    def worker(command, **kwargs):
+        if phase == "wait":
+            launches.append(("acknowledged-worker",))
+            return "acknowledged-worker"
+        return core.ensure_worker(command, root=queue, **kwargs)
+
+    def wait(identifier, **kwargs):
+        assert phase == "wait" and kwargs["worker"] == "acknowledged-worker"
+        raise core.SpawnError("fixture acknowledged worker exited before claim")
+
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority, StateError=core.StateError,
         default_root=lambda: queue,
         enqueue=enqueue,
-        ensure_worker=lambda command, **kwargs: core.ensure_worker(
-            command, root=queue, **kwargs,
-        ),
+        ensure_worker=worker,
         drain=lambda: pytest.fail("worker refusal became foreground execution"),
-        wait=lambda *args, **kwargs: pytest.fail("failed worker was observed as running"),
+        wait=wait,
     )
     args = SimpleNamespace(
         payload=tmp_path, root=tmp_path / "manager",
-        command=["update", "--detach", *(["--json"] if as_json else [])],
+        command=["update", *(["--detach"] if phase == "launch" else []),
+                 *(["--json"] if as_json else [])],
         repair_update=False, install_source=None,
     )
-    with pytest.raises(core.SpawnError, match="DaemonSpawnError"):
+    message = "DaemonSpawnError" if phase == "launch" else "exited before claim"
+    with pytest.raises(core.SpawnError, match=message):
         bootstrap_update.execute(args, driver, source_digest="a" * 64)
 
     request, = core.status(root=queue)
@@ -278,7 +291,8 @@ def test_worker_start_failure_retains_the_admitted_request(
         assert request.started_at is not None and request.finished_at is not None
     else:
         assert request.started_at is None and request.finished_at is None
-        assert "DaemonSpawnError" in request.error
+        if phase == "launch":
+            assert "DaemonSpawnError" in request.error
     assert len(launches) == 1
     output = capsys.readouterr()
     if as_json:
@@ -286,9 +300,23 @@ def test_worker_start_failure_retains_the_admitted_request(
         assert receipt["request_id"] == request.id
         assert receipt["log_path"] == str(request.log_path)
         assert receipt["state"] == expected_state and receipt["exit_code"] == expected_exit
-        assert "DaemonSpawnError" in receipt["error"]
+        assert message in receipt["error"]
     else:
         assert output.out == ""
+    assert f"Update request {request.id}; log: {request.log_path}" in output.err
+
+
+def test_foreground_json_refuses_before_bootstrap_admission(tmp_path, capsys):
+    import bootstrap_update
+
+    args = SimpleNamespace(
+        payload=tmp_path, root=tmp_path, command=["update", "--wait", "--json"],
+        repair_update=False, install_source=None,
+    )
+    with pytest.raises(SystemExit) as failure:
+        bootstrap_update.execute(args, SimpleNamespace(), source_digest="a" * 64)
+    assert failure.value.code == 2
+    assert capsys.readouterr().out == ""
 
 
 def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monkeypatch):

@@ -134,6 +134,8 @@ def execute(args, driver, *, source_digest: str) -> int:
                 cwd=payload, env=environment,
                 python_bootstrap_root=packages["agent-procutil"] / "src",
             )
+        if not options.detach:
+            result = driver.wait(request.id, output=sys.stderr, worker=worker)
     except Exception as error:
         if options.json:
             print(json.dumps({
@@ -144,7 +146,6 @@ def execute(args, driver, *, source_digest: str) -> int:
     if options.detach:
         _report(request, as_json=options.json)
         return 0
-    result = driver.wait(request.id, output=sys.stderr, worker=worker)
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Bootstrap update did not complete: {result.state}")
     return finish_update(observer_command, result.exit_code)

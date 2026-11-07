@@ -1922,6 +1922,12 @@ also uses the owner while preserving its status file and optional JSON output;
 `--indicator-state` remains read-only. These adapters do not replace the
 stager's own implementation or the installers' existing inner custody.
 
+If worker startup fails after admission, the failed JSON envelope retains the
+accepted `request_id` and `log_path`. Pre-admission refusals do not invent them.
+Inspect that same request with the owning status reader before another
+submission; the receipt does not establish a running worker, native exit or
+completed installation, and never authorizes replay or foreground fallback.
+
 On an interactive launch, the launcher reconciles the anchor repo's
 `.github/copilot/settings.json` `enabledPlugins`: for each
 `<name>@copilot-extensions` it ensures the **payload** is installed (throttled
