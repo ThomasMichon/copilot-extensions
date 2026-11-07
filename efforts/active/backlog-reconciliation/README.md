@@ -233,6 +233,14 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [freshness design and inflow-history journal](<journal/2026/11.07 freshness-design-and-inflow-history.md>)
+records a genuinely new #11298 discussion, the bounded #11296/#11298 study
+limitations, 132 recovered inflow histories and the new #4418 receiving
+relationship without source-budget renewal or closure credit. Two equal
+complete scans measure 814 whole OPEN, 85 above fixed 729; new #11311 retains
+its separate Windows qualification boundary. Phase 2 and all custodians remain
+Active; no completion checkbox changes.
+
 The [documentary and retained-wake study](<journal/2026/11.06 documentary-and-retained-wake-study.md>)
 keeps the three Manager/MCP contracts separate and preserves the complete
 eight-effort layout and retained-conversation wake obligations. Whole-source
@@ -2924,6 +2932,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [freshness design and inflow-history journal](<journal/2026/11.07 freshness-design-and-inflow-history.md>)
+separates whole-discussion admission, attributed source findings, object
+identity, uncertain prior scopes and Draft receiving plans from implemented,
+native or accepted-transfer evidence. The acquisition-bound deviation remains
+explicit and all technical and campaign completion checkboxes stay unchanged.
 
 The [admitted hook-source follow-through](<journal/2026/11.07 admitted-hook-source-followthrough.md>)
 records current whole-source qualification before complete reads and
