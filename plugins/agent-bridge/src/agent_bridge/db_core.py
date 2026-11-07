@@ -302,6 +302,18 @@ CREATE TABLE IF NOT EXISTS worktree_ownership (
     updated_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mux_question_answers (
+    inspection_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    state TEXT NOT NULL,
+    detail TEXT,
+    created_at REAL NOT NULL,
+    UNIQUE(session_id, fingerprint)
+);
+
 CREATE TABLE IF NOT EXISTS cli_mode_reservations (
     worktree_id TEXT PRIMARY KEY,
     reservation_id TEXT NOT NULL,

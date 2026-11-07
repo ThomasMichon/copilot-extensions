@@ -9,6 +9,38 @@ from .client_worktree_restart import _Base
 
 
 class AnswerClientMixin(_Base):
+    def _mux_question_request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        from .client_protocol_floor import protocol_floored_request
+        from .mux_questions import CAPABILITY
+
+        return protocol_floored_request(self, 1, capabilities={CAPABILITY: 1})(
+            method, path, **kwargs,
+        ) or {}
+
+    def mux_questions(self, session_id: str) -> dict[str, Any]:
+        """Inspect one local rendered form without granting input authority."""
+        return self._mux_question_request(
+            "GET", f"/api/v1/live-sessions/{quote(session_id, safe='')}/questions/mux",
+        )
+
+    def mux_question_answer(self, session_id: str, inspection_id: str) -> dict[str, Any]:
+        """Read the original durable audit without issuing another inspection."""
+        return self._mux_question_request(
+            "GET", f"/api/v1/live-sessions/{quote(session_id, safe='')}/questions/mux/answers/"
+            + quote(inspection_id, safe=""),
+        )
+
+    def answer_mux_question(
+        self, session_id: str, inspection_id: str, *, sender: str,
+        option: int | None = None, text: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit one inspection exactly once; never retry an uncertain input."""
+        return self._mux_question_request(
+            "POST", f"/api/v1/live-sessions/{quote(session_id, safe='')}/questions/mux",
+            body={"inspection_id": inspection_id, "sender": sender, "option": option, "text": text},
+            allow_retry=False, request_timeout=max(self._timeout, 70),
+        )
+
     def _question_request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         from .client_protocol_floor import protocol_floored_request
         from .live_questions import CAPABILITY

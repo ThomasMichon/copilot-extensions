@@ -3,7 +3,7 @@
 - **Slug:** `mux-question-answers`
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-07
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [interactive-session-representation](../../../visions/plugins/agent-bridge/README.md#interactive-session-representation)
 - **Umbrella issue:** #11371
 
@@ -71,25 +71,25 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 
 ### Phase 1 - Reviewed contract
 - [x] Claim #11371 and inspect native, session-binding and mux seams.
-- [ ] Land this plan before implementation.
+- [x] Land this plan before implementation.
 
 ### Phase 2 - Explicit degraded transport
-- [ ] Add independently negotiated mux-answer support and CLI inspection/
+- [x] Add independently negotiated mux-answer support and CLI inspection/
   answer selection without changing existing owned/native syntax.
-- [ ] Resolve the exact registered local native session through its configured
+- [x] Resolve the exact registered local native session through its configured
   worktree owner's authoritative live process-to-pane binding; never guess
   a pane, redirect to an alias, cross execution spaces or auto-start a daemon.
-- [ ] Parse only positively recognized single-question choice/freeform forms.
+- [x] Parse only positively recognized single-question choice/freeform forms.
   Refuse permissions, multi-field/multi-select, unsupported rendering, edited
   freeform state, absent or ambiguous cursor and oversized/control-bearing text.
-- [ ] Require an expiring one-use inspection token bound to the exact pane
+- [x] Require an expiring one-use inspection token bound to the exact pane
   incarnation, question and current screen. Prefer an available native path.
   Recheck identity and form before every key effect; stop on detected races.
-- [ ] Audit caller, answer, inspection and actual outcome in existing session
+- [x] Audit caller, answer, inspection and actual outcome in existing session
   observations. Consume admission before effects and never replay uncertain
   input. Verify a new matching answer echo and form disappearance, not merely
   successful key delivery. Report raced/unverified outcomes honestly.
-- [ ] Document that capture/send cannot form an atomic transaction with a
+- [x] Document that capture/send cannot form an atomic transaction with a
   human terminal; no atomic human-exclusion or SDK-acceptance claim is made.
 
 ### Phase 3 - Delivery and rollout
@@ -129,3 +129,31 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   its own inspected-form identity and truthful audit, not permission authority.
 - The implementation and qualification plan above is an agent recommendation
   within the assigned fallback scope. No existing form has been touched.
+
+### 2026-11-07 - Reviewed plan and private native controls
+
+- #11383 merged after exact-head approval and required CI.
+- The authenticated provider uses expiring one-use inspections, current native
+  request corroboration and the selected local Worktrees process/pane binding.
+  Durable admission precedes any key; original audit survives registration loss.
+- Initial focused packet passed 35 cases. The actual private native form then
+  qualified native and mux option answers; Other conservatively stopped before
+  Enter because selecting it expands the text box and shifts viewport history.
+- Added exact native Other-field recognition without weakening request,
+  question, option, cursor or process checks. All 38 focused/native cases passed,
+  including actual text acceptance and same-conversation continuation.
+- Required contract capture, final whole-surface audit, review, promotion and
+  authorized installed qualification remain open.
+
+### 2026-11-07 - Whole-surface admission audit
+
+- The expanded 40-case focused packet passed, including original audit reads,
+  exact selected owner and strict CLI/unsupported-provider controls. Nine
+  actor-free parser and completion cases passed; all 40 currently admitted
+  strict typing projects passed both analysis targets, with Bridge still
+  pending independent type admission.
+- The final audit added mutation-boundary exclusion for another in-flight or
+  uncertain answer, including a stale pre-read in another serving generation.
+  A preissued inspection cannot turn an unknown sibling result into a retry.
+- The current HTTP-52 controlled portfolio expands to 310 cases. Qualification
+  must be captured and independently verified before publication readiness.

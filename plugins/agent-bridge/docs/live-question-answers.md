@@ -100,6 +100,9 @@ pair cannot fit their text budget; `questions` remains the selector source.
 
 Older daemons, extensions or SDKs retain manual terminal answering. An
 unsupported or stale observation is unavailable, not an empty healthy snapshot.
+An explicit separately negotiated [mux fallback](mux-question-answers.md)
+can inspect and relay supported single-field choice forms when native answering
+is unavailable; it never substitutes a permission approval or uncertain retry.
 There is no interrupting-message fallback, automatic takeover, rollout or
 restart. Old callers and owned ACP routes retain their existing behavior;
 rollback to a provider without this capability refuses the optional operation.

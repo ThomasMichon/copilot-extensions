@@ -1,0 +1,269 @@
+"""Inspected mux effects through authenticated HTTP, with no ambient mux."""
+
+from __future__ import annotations
+
+import time
+from types import SimpleNamespace
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+import pytest
+
+from agent_bridge.auth import BearerAuthMiddleware
+from agent_bridge.live_questions import LiveQuestions
+from agent_bridge.live_representation import LiveEventStore
+from agent_bridge.mux_question_forms import MuxQuestionError, answer_text, completion_echo, parse_form
+from agent_bridge.mux_questions import MuxQuestions
+from agent_bridge.routes.mux_questions import router
+
+
+def panel(cursor=0, typed=""):
+    options = ["Blue", "Green", "Other (type your answer below)" if cursor == 2 else "Other (type your answer)"]
+    return "\n".join([
+        "Current turn", "Copilot needs information.", "Choose a fixture color",
+        "Color:", *[("❯ " if i == cursor else "  ") + label for i, label in enumerate(options)],
+        "↑↓ select · enter accept · esc cancel",
+        *(["❯ " + (typed or "Type your answer...")] if cursor == 2 else []),
+    ])
+
+
+class FixtureBackend:
+    def __init__(self):
+        self.cursor = 0
+        self.text = ""
+        self.done = False
+        self.screen = None
+        self.keys = []
+        self.identity = {"pane": "%7", "process": "fixture-incarnation"}
+        self.before_key = None
+
+    def binding(self, *_):
+        return dict(self.identity)
+
+    def capture(self, *_):
+        if self.screen is not None:
+            return self.screen
+        if self.done:
+            value = self.text or ["Blue", "Green"][self.cursor]
+            return "Asked user Choose a fixture color\n└ Color: " + value + "\nWorking"
+        return panel(self.cursor, self.text)
+
+    def key(self, binding, value, *, literal=False):
+        if self.before_key:
+            self.before_key()
+        self.keys.append((value, literal))
+        if literal:
+            self.text = value
+        elif value == "Down":
+            self.cursor += 1
+        elif value == "Up":
+            self.cursor -= 1
+        elif value == "Enter":
+            self.done = True
+
+
+@pytest.fixture
+def api(tmp_db):
+    tmp_db.register_live_session(
+        "native-1", machine=None, cwd=None, worktree_id="fixture-worktree", repo=None,
+        branch=None, pid=123, process_started_at=1.0, role=None, now=time.time(),
+    )
+    app = FastAPI()
+    app.state.db = tmp_db
+    app.state.live_questions = LiveQuestions()
+    app.state.live_event_store = LiveEventStore()
+    log = app.state.live_event_store.get_or_create("native-1", worktree_id="fixture-worktree")
+    log.append("ask_user_request", {
+        "tool_call_id": "fixture-question", "message": "Choose a fixture color",
+        "requested_schema": {"type": "object", "properties": {"color": {
+            "type": "string", "enum": ["Blue", "Green"],
+        }}},
+        "read_only": True,
+    })
+    app.state.mux_questions = MuxQuestions()
+    backend = app.state.mux_questions.backend = FixtureBackend()
+    app.add_middleware(BearerAuthMiddleware, token="synthetic-secret")
+    app.include_router(router)
+    scheme = "Bear" + "er "
+    headers = {"Authorization": scheme + "synthetic-secret"}
+    assert headers["Authorization"].endswith("synthetic-secret")
+    with TestClient(app, headers=headers) as client:
+        yield SimpleNamespace(
+            client=client, db=tmp_db, state=app.state, backend=backend, log=log,
+        )
+
+
+BASE = "/api/v1/live-sessions/native-1/questions/mux"
+
+
+def inspect(api):
+    response = api.client.get(BASE)
+    assert response.status_code == 200, response.text
+    return response.json()["inspection_id"]
+
+
+@pytest.mark.parametrize("selection,expected", [({"option": 2}, "Green"), ({"text": "custom answer"}, "custom answer")])
+def test_http_choice_and_freeform_are_verified_audited_and_single_use(api, selection, expected):
+    token = inspect(api)
+    def admitted_before_effect():
+        rows = api.db.execute_read("SELECT state,answer FROM mux_question_answers")
+        assert [(row["state"], row["answer"]) for row in rows] == [("admitted", expected)]
+    api.backend.before_key = admitted_before_effect
+    body = {"inspection_id": token, "sender": "delegated-controller", **selection}
+    response = api.client.post(BASE, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "answered" and response.json()["accepted"] is True
+    assert api.backend.keys[-1] == ("Enter", False)
+    count = len(api.backend.keys)
+    assert api.client.post(BASE, json=body).status_code == 409
+    assert len(api.backend.keys) == count
+    audit = api.client.get(BASE + "/answers/" + token).json()
+    assert audit["answer"] == expected and audit["sender"] == "delegated-controller"
+    assert audit["state"] == "answered"
+    events = [event for event in api.log.snapshot_history()[1] if event.event == "mux_question_answer"]
+    assert [event.data["phase"] for event in events] == ["admitted", "outcome"]
+    api.state.db.get_live_session = lambda _: None
+    assert api.client.get(BASE + "/answers/" + token).json()["state"] == "answered"
+
+
+@pytest.mark.parametrize("change", ["screen", "identity", "resolved", "permission", "superseded"])
+def test_terminal_first_and_changed_inputs_never_send_keys(api, change):
+    token = inspect(api)
+    if change == "identity":
+        api.backend.identity["process"] = "replacement"
+    elif change == "screen":
+        api.backend.screen = panel().replace("Choose", "Different")
+    elif change == "resolved":
+        api.backend.done = True
+    elif change == "permission":
+        api.log.append("permission_request", {"tool_call_id": "permission"})
+    else:
+        api.log.append("tool_call_update", {"tool_call_id": "fixture-question", "status": "completed"})
+    response = api.client.post(BASE, json={
+        "inspection_id": token, "sender": "controller", "option": 1,
+    })
+    assert response.status_code in {200, 409}
+    if response.status_code == 200:
+        assert response.json()["state"] == "raced"
+    assert api.backend.keys == []
+
+
+def test_restart_expiry_and_other_session_tokens_have_no_input_authority(api):
+    token = inspect(api)
+    api.state.mux_questions.inspections[token].expires -= 61
+    body = {"inspection_id": token, "sender": "controller", "option": 1}
+    assert api.client.post(BASE, json=body).status_code == 409
+    token = inspect(api)
+    api.state.mux_questions.inspections[token].session_id = "other"
+    assert api.client.post(BASE, json={**body, "inspection_id": token}).status_code == 409
+    api.state.mux_questions = MuxQuestions()
+    assert api.client.post(BASE, json={**body, "inspection_id": token}).status_code == 409
+    assert api.backend.keys == []
+
+
+def test_key_failure_is_unknown_and_blocks_reinspection_after_restart(api):
+    token = inspect(api)
+    def fail():
+        raise MuxQuestionError("synthetic key outcome unknown")
+    api.backend.before_key = fail
+    result = api.client.post(BASE, json={
+        "inspection_id": token, "sender": "controller", "option": 1,
+    }).json()
+    assert result["state"] == "unverified" and result["accepted"] is None
+    assert api.client.get(BASE).status_code == 409
+    api.state.mux_questions = MuxQuestions()
+    assert api.client.get(BASE).status_code == 409
+
+
+def test_pane_replacement_after_navigation_stops_before_enter(api):
+    token = inspect(api)
+    api.backend.before_key = lambda: api.backend.identity.update(process="replacement")
+    response = api.client.post(BASE, json={
+        "inspection_id": token, "sender": "controller", "option": 2,
+    })
+    assert response.json()["state"] == "unverified"
+    assert api.backend.keys == [("Down", False)]
+
+
+def test_preissued_inspection_cannot_bypass_an_uncertain_sibling_attempt(api):
+    first, second = inspect(api), inspect(api)
+    api.state.mux_questions.inspections[second].fingerprint = "different-observed-screen"
+    def fail():
+        raise MuxQuestionError("synthetic uncertain input")
+    api.backend.before_key = fail
+    body = {"sender": "controller", "option": 1}
+    assert api.client.post(BASE, json={**body, "inspection_id": first}).json()["state"] == "unverified"
+    original = api.db.execute_read
+    # A different serving generation can have observed no admission before the
+    # first write committed. The SQL mutation boundary must still refuse it.
+    api.db.execute_read = lambda sql, params=(): (
+        [] if "SELECT inspection_id" in sql else original(sql, params)
+    )
+    assert api.client.post(BASE, json={**body, "inspection_id": second}).status_code == 409
+    assert api.backend.keys == []
+
+
+def test_same_screen_has_one_admission_even_with_two_inspection_tokens(api):
+    first, second = inspect(api), inspect(api)
+    body = {"sender": "controller", "option": 1}
+    assert api.client.post(BASE, json={**body, "inspection_id": first}).json()["state"] == "answered"
+    assert api.client.post(BASE, json={**body, "inspection_id": second}).status_code == 409
+    assert api.backend.keys == [("Enter", False)]
+
+
+def test_authentication_and_malformed_permission_mixed_answers_have_no_effect(api):
+    assert api.client.get(BASE, headers={"Authorization": "invalid"}).status_code == 401
+    token = inspect(api)
+    for fields in (
+        {"option": 1, "text": "two"}, {"option": True}, {"option": 13},
+        {"option": 1, "permission": True}, {"text": "first\nsecond"},
+        {"text": "\x1b[A"}, {"option": 3},
+    ):
+        response = api.client.post(BASE, json={
+            "inspection_id": token, "sender": "controller", **fields,
+        })
+        assert response.status_code in {409, 422}, response.text
+    assert api.backend.keys == []
+
+
+def test_native_answering_and_multifield_or_permission_evidence_prevent_fallback(api):
+    from agent_bridge.live_questions import QuestionObservation
+
+    api.state.live_questions.publish("native-1", QuestionObservation.model_validate({
+        "generation": "extension", "pid": 123, "process_started_at": 1.0,
+        "requests": [{
+            "request_id": "native-request", "family": "elicitation", "answerable": True,
+            "message": "Choose", "requested_schema": {"type": "object", "properties": {}},
+        }],
+    }))
+    assert api.client.get(BASE).status_code == 409
+    api.state.live_questions = LiveQuestions()
+    api.log.append("ask_user_request", {
+        "tool_call_id": "fixture-question", "message": "Choose",
+        "requested_schema": {"properties": {"first": {}, "second": {}}},
+    })
+    assert api.client.get(BASE).status_code == 409
+    assert api.backend.keys == []
+
+
+@pytest.mark.parametrize("screen", [
+    panel().replace("Color:", "First:\nSecond:"),
+    panel().replace("Green", "❯ Green"),
+    panel().replace("Color:", "Permission approval:"),
+    panel().replace("Color:", "Question 1 of 2:"),
+    panel().replace("Green", "Blue"),
+    panel(2, "already typed"),
+    panel() + "\nCopilot needs information.\nColor:\n❯ Yes",
+])
+def test_ambiguous_rendering_never_parses_as_an_answerable_form(screen):
+    with pytest.raises(MuxQuestionError):
+        parse_form(screen)
+
+
+def test_completion_requires_a_new_exact_answer_echo_not_old_history():
+    form = parse_form(panel())
+    old = "Asked user Choose a fixture color\n└ Color: Blue\n"
+    assert not completion_echo(old, old + "Working", form, "Blue")
+    assert not completion_echo("", old, form, "Green")
+    assert completion_echo("", old, form, "Blue")
+    assert answer_text("-literal option-looking text") == "-literal option-looking text"
