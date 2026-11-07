@@ -48,9 +48,10 @@ pressure must not relax those protections.
 The proposal extends the vision's independent-capacity and sequential-reuse
 intent. It follows the existing configuration layering and optional owner
 composition contracts, not the unwired full-publication inventory foundation.
-The reviewed proposal, admission source and released-only lease receiver are
-merged. Sequential cross-effort reuse callers, release and selected
-installed/live consumer qualification remain open.
+The reviewed proposal, admission source, released-only lease receiver and first
+stopped-venue sequential-reuse consumer are merged. Release and selected
+installed/live consumer qualification remain open, as does generation-qualified
+recovery after an unpersisted shared-return acknowledgement.
 
 ## Request
 
@@ -88,13 +89,13 @@ and existing resource custody.
 
 ### Phase 3 - Prove safe sequential reuse
 - [x] Expand the native lease receiver with capability-advertised acquisition that refuses expired-but-unreleased holders. (#11306)
-- [ ] Migrate reuse callers only when the selected receiver supports released-only acquisition; missing support or rollback must never silently enable stale takeover.
-- [ ] Extend existing suitability/admission and borrow/return paths to reuse compatible same-account, same-repository venues across efforts, including explicit read-only and no-build review use.
-- [ ] Preserve retained files, branches, configuration and claims; reject incompatible active agents and live or unknown holders rather than inferring release from local absence.
-- [ ] Account for stopped-venue wake cost separately from owned slots, and retain current workstream reuse when valid.
-- [ ] Connect the normal creation/dispatch consumer to the same decision; a suggested reuse candidate is not a completed borrow or successful dispatch.
-- [ ] Prefer backward-compatible owner-internal configuration; if new CLI or JSON semantics are needed, expand receiver support first, discover selected-runtime capability before caller migration, and test mixed-version refusal and rollback.
-- [ ] Update the owning README, configuration reference and lifecycle/borrow skills, then publish and steward the complete reuse flow through merge.
+- [x] Migrate reuse callers only when the selected receiver supports released-only acquisition; missing support or rollback must never silently enable stale takeover. (#11319)
+- [x] Extend existing suitability/admission and borrow/return paths to reuse compatible same-account, same-repository venues across efforts, including explicit read-only and no-build review use. (#11319; stopped venues, source/synthetic consumer evidence)
+- [x] Preserve retained files, branches, configuration and claims; reject incompatible active agents and live or unknown holders rather than inferring release from local absence. (#11319; source controls, live qualification remains Phase 4)
+- [x] Account for stopped-venue wake cost separately from owned slots, and retain current workstream reuse when valid. (#11319)
+- [x] Connect the normal creation/dispatch consumer to the same decision; a suggested reuse candidate is not a completed borrow or successful dispatch. (#11319; ordinary create reserves, re-entrant connection/return exercised with synthetic adapters)
+- [x] Prefer backward-compatible owner-internal configuration; if new CLI or JSON semantics are needed, expand receiver support first, discover selected-runtime capability before caller migration, and test mixed-version refusal and rollback. (#11306, #11319)
+- [x] Update the owning README, configuration reference and lifecycle/borrow skills, then publish and steward the complete reuse flow through merge. (#11319; installed/live acceptance remains Phase 4)
 
 ### Phase 4 - Qualify release and selected consumers
 - [ ] Verify promoted source inclusion without treating dev ancestry as release proof.
@@ -102,17 +103,23 @@ and existing resource custody.
 - [ ] Exercise the installed read-only admission consumer and a separately authorized existing-venue sequential-use flow; retain current owners, unknown effects and cleanup obligations.
 - [ ] Resolve or transfer every validation gate to a named tracked objective before marking this effort Done.
 
+### Phase 4a - Review then prove generation-qualified return recovery
+- [ ] Review the receiver-first recovery proposal below before implementation. (#11343)
+- [ ] Expand only the existing native lease receiver, advertise selected-runtime support, and preserve the legacy baseline; merge its focused parser/store/compaction proof before migrating callers.
+- [ ] Capture the original generation before return and conditionally consume receiver-owned evidence through the existing return operation; unknown or unsupported evidence retains custody.
+- [ ] Prove interrupted return, successor preservation, bounded evidence eviction, compaction/GC and mixed-version refusal through the real native CLI and Codespaces consumer.
+
 ## Validation Plan
 
 - [x] Focused existing-suite regressions: below limit, stopped pool at limit with spare cores, running-core pressure, selected-account isolation and configurable ceiling.
 - [x] Unknown/truncated/failed inventory and unknown wake/create cost cannot masquerade as free capacity; explicit policy override remains distinct from provider refusal.
 - [x] Ordinary create and allocate agree; a synthetic provider quota race preserves bounded retry and does not broaden cleanup.
-- [ ] Sequential same-repository reuse preserves retained work and claims; read-only/no-build requests are supported, incompatible live agents and unknown ownership are refused.
-- [ ] A stopped reusable venue is admitted only with sufficient known wake headroom; valid existing-workstream reuse remains compatible.
+- [x] Sequential same-repository reuse preserves retained work and claims; read-only/no-build requests are supported, incompatible live agents and unknown ownership are refused. (#11319; source/synthetic evidence, not installed/live acceptance)
+- [x] A stopped reusable venue is admitted only with sufficient known wake headroom; valid existing-workstream reuse remains compatible. (#11319)
 - [x] Lightweight real CLI/subprocess consumer check with synthetic inventory and provider adapters proves admission/refusal without backend mutation.
 - [x] Fresh isolated configuration proves defaults and overrides without requiring Worktrees, installing a runtime or contacting a provider.
 - [x] Admission flow: run the existing focused tests, touched-Python lint and install-contract/required CI checks; add one changefile per touched plugin, never hand-edit versions. (#11228)
-- [ ] Sequential reuse flow: repeat focused tests, touched-Python lint, install-contract/required CI and the same changefile discipline before publication.
+- [x] Sequential reuse flow: repeat focused tests, touched-Python lint, install-contract/required CI and the same changefile discipline before publication. (#11319)
 - [ ] Run Windows and POSIX consumer checks in available owned lanes; record concrete unavailable-lane reasons rather than claiming parity from unit tests alone.
 - [ ] Record selected installed/live acceptance separately from source tests and release; obtain missing effect authority before any provider mutation.
 
@@ -121,6 +128,39 @@ and existing resource custody.
 The Plan and Validation Plan are agent-recommended implementation sequencing.
 Review this contract first. Source work must preserve truthful uncertainty and
 existing resource ownership, not solve quota pressure by destructive cleanup.
+
+### Recovery proposal for #11343
+
+This is an agent-recommended realization of the existing safe-return intent,
+not new allocation, deployment or cleanup authority. A fencing token changes
+on renewal; the native record's existing `lease_id` identifies the generation
+that an explicit release terminates. Persist that generation and its qualified
+holder in prepared local progress before sending the return.
+
+Expand the existing receiver first with opt-in `lease release
+--retain-return-proof`, advertised as `lease-return-proof-v1` through the
+selected runtime's existing version-1 readiness response. The normal syntax and
+version-1 lease records remain supported. Opt-in release upgrades only that
+resource to a strict version-2 lease payload containing at most 16 returned
+generation/holder/time entries. Acquisition, renewal, transfer and release
+preserve the entries; only a successful release appends evidence. Keep it in
+the current lease payload, not a new ref, receipt store, ledger or daemon.
+
+Existing `lease inspect` exposes the validated current payload; no new query
+verb or Git-history scan is needed. Native compaction preserves the bounded
+evidence in its minimal equivalent chain, so it survives intermediate-history
+GC. Eviction, absence, malformed evidence and legacy records mean unknown,
+never release. A successor's current state, expiry or native ledger retirement
+cannot manufacture a receipt for the original generation.
+
+Old callers keep their syntax against the expanded receiver. Older receivers
+that cannot parse an opted-in version-2 resource must refuse that resource
+truthfully on rollback, not overwrite or downgrade its evidence; unaffected
+version-1 resources retain their baseline. Migrate Codespaces only after the
+receiver merge, discover support before emitting the new flag, and retain the
+existing acknowledged-return path when optional recovery support is absent.
+Test both peer directions, strict typo rejection, opt-in and ordinary writes,
+compaction, eviction and successor noninterference before caller publication.
 
 ## Journal
 
