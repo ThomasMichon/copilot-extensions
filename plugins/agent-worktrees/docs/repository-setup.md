@@ -165,7 +165,7 @@ engine/Fleet-owned orchestration, not a new responsibility hidden in that script
 
 The engine's optional `fleet-ssh` extra declares its Fleet service-Gateway and
 SSH-client SDK dependencies. Select it through the existing complete Source/profile
-preparation (`local_install_profile.py --component agent-worktrees --extra fleet-ssh`,
+preparation (`local_install_profile.py --prepare-profile --component agent-worktrees --extra fleet-ssh`,
 with the normal source, output and UV arguments), using the associated Fleet and
 SSH first-party wheel inputs. This is a dependency selection, not a second installer
 or permission to install packages into a running engine. The normal construction
@@ -179,7 +179,7 @@ The SDK's `[tool.copilot-extensions.application-sources]` declaration maps
 an associated application input, not a UV vendored-library override. Prepare the
 input snapshot with the existing repeated `local_install_source.py --project`
 selections for `agent-worktrees`, `standalone:fleet-manager` and `agent-ssh`,
-then select `--component agent-worktrees --extra fleet-ssh` through the normal
+then select `--prepare-profile --component agent-worktrees --extra fleet-ssh` through the normal
 profile command. Existing application builders retain Fleet's resources.
 The profile reader checks the declaration against the actual associated wheel's
 project owner before registry compilation. A missing or different selected Fleet

@@ -4615,7 +4615,7 @@
     ],
     "sources": {
         "tools/application_sources.py": "3dba45b18c2597044205a98c8bdf7cd43c7bb529c4b1a4bcb898d04af2dbe9b0",
-        "tools/promotion_unit_tests/test_application_sources.py": "d548d2d1f120fea379400c3977dcde66a7dc2ecb30d110012eff38586f9aa9a7",
+        "tools/promotion_unit_tests/test_application_sources.py": "50fdff6cc9a3014f88ee4e461fd2f26603e66ce6b2c676e777fa9c0546da3f12",
         "tools/promotion_unit_tests/test_prepared_cell_membership.py": "0d46c2ef80b1507fb8f80beda2a903f25c4dda86ca38974d8ccd6bbdf1905be5",
         "plugins/agent-worktrees/scripts/managed_session.py": "373989e7c6c72b629f9e3e48093077ae758752bb16c7989a5589ec2febe2e09e",
         "plugins/agent-worktrees/scripts/execution_platform.py": "d04e459a34cba4d21d73cbdea6f22a1635f2a8ef504d98c6b4482c60aea2344a",
