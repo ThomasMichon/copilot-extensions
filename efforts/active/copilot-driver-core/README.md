@@ -106,9 +106,9 @@ Review of this proposal precedes implementation and is not deployment consent.
 
 ### Phase 3 - Common headed broker and all caller convergence
 
-- [ ] Move canonical mux creation, prerequisite composition and pane execution
+- [x] Move canonical mux creation, prerequisite composition and pane execution
   into the same core; preserve platform behavior and literal prompt/argument transport.
-- [ ] Connect the launch-injected, scoped trusted extension to Session Host.
+- [x] Connect the launch-injected, scoped trusted extension to Session Host.
   Headed mode uses the common broker, not a second conversation or Bridge-only inbox.
 - [ ] Migrate Manager launch-session and Worktrees embody/copilot, plus existing
   local/remote adapters, to the selected core entrypoints.
@@ -1522,3 +1522,53 @@ checks pass. This remains source qualification, not productive-session or
 fleet deployment. Refresh #11016's evidence, review and exact-head CI next;
 the complete parent acceptance matrix and the conditional peer-unblock
 notification remain owned by this effort.
+
+### 2026-11-07 - Headed broker source merged; caller and lifetime acceptance continues
+
+#11016 merged at 04:52:42 UTC as
+`d62de87ff737e387ef19213cb0b023f5d761ab89`. Copilot review `5810164430`
+approved exact head `44ea590495a28627f6892530ba3dc5515ab1fc43`; required
+[CI 42339864446](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42339864446)
+passed at that head, including freshly executed unit coverage, admitted
+typing, source/process guards, retained historical evidence, complete
+registry and generated payload checks. All five review threads are resolved.
+The managed merge used the normal repository-authorized Maintainer review
+exception, not a CI bypass. #10765 remains open.
+
+Re-read the Plan and Validation Plan after merge. The canonical headed
+execution and launch-injected broker connection are now delivered; mark those
+two implementation items complete. Do not mark the complete caller matrix,
+native restoration, all caller cleanup Jobs, pending-aware lifetime or
+receiving/skew qualification complete from this source slice.
+
+The owned workspace is pulled forward through the native synchronization
+owner. A first attempt safely auto-aborted while replaying the four original
+commits individually over their squash merge; a tree-identical local squash
+then allowed normal pull-forward without losing changes or rewriting shared
+history. The next stretch is the real-caller fresh/resume/reuse and
+attached/detached/new-window/no-mux matrix, followed by lifetime and receiving
+acceptance. Keep original-owner custody, unknown-effect holds and isolated
+fixture cleanup intact. No installed runtime or productive session changed.
+
+### 2026-11-07 - Native Worktrees launch-owner fresh/resume checkpoint
+
+The opt-in native Worktrees Python-owner test passes in 41.97 seconds
+(150.11 seconds including managed environment preparation and cleanup).
+It invokes the real launch/seed/admission/receipt owners with an existing
+native Copilot executable, a loopback-only model provider, isolated state
+and a runner-owned private PSMux namespace. A read-only adapter routes
+Worktrees discovery to that same real private server.
+
+Fresh launch consumes the literal staged seed once. Explicit native resume
+uses the same conversation with a different process incarnation; subsequent
+broker prompts preserve exactly one three-message user history. Correlated
+receipts identify the native child rather than its coordinator, both original
+owners return, and exact fixture processes and panes retire. No privileged
+extension permission or host-state opt-in is used.
+
+The first fixture attempted disposable installation and hit its item bound
+during setup, before native launch. The final focused test instead exercises
+the actual Python launch owner without reinstalling a runtime. This is not
+copied-setup, full Manager/embody planning, guarded-head recovery, physical
+terminal input or all-caller-Job survival acceptance. The complete caller,
+lifetime and receiving gates remain open; no installed rollout occurred.
