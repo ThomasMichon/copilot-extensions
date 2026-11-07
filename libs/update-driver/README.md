@@ -144,6 +144,11 @@ creation, not an implicit permission migration or a read-only status side effect
   a precise pending admission error, not an interrupted installation fence.
   Failed boot admission records a precise pending error before worker exit
   and never acknowledges startup; the accepted request remains durable.
+  Manager bootstrap and Worktrees' JSON-operation adapters preserve the admitted
+  request ID and log path in caller failure output. JSON operations retain their
+  failed envelope; they do not turn a launch error into accepted execution or a
+  fabricated native exit. Use the same ID with the owning status reader instead
+  of resubmitting because the caller failed.
   Existing global fences also refuse worker launch with `InterruptedError`.
 - `wait(id, *, root=None, timeout=None, output=None, poll_interval=.05, worker=None)`
   follows the logfile and returns the durable terminal Request. A completed

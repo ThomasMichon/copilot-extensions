@@ -223,6 +223,74 @@ def test_default_update_observes_a_retained_worker_instead_of_running_installers
     assert seen == (["worker"] if detach else ["worker", "wait"])
 
 
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("already_completed", [False, True])
+def test_worker_start_failure_retains_the_admitted_request(
+    tmp_path, monkeypatch, capsys, as_json, already_completed,
+):
+    import agent_procutil
+    import bootstrap_update
+    import runtime_install
+
+    queue = tmp_path / "queue"
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+    monkeypatch.setattr(update_driver_cli, "request_source_anchor", lambda: str(tmp_path))
+    monkeypatch.setattr(runtime_install.engine, "_package_roots", lambda payload: (tmp_path,))
+    monkeypatch.setattr(runtime_install.engine, "_package_name", lambda path: "agent-procutil")
+    launches = []
+
+    def refuse_spawn(*args, **kwargs):
+        launches.append(args)
+        raise agent_procutil.DaemonSpawnError("fixture caller Job forbids breakaway")
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", refuse_spawn)
+
+    def enqueue(spec, **kwargs):
+        request = core.enqueue(spec, root=queue, **kwargs)
+        if already_completed:
+            core.drain(root=queue, executor=lambda _transaction: 23)
+            return core.status(request.id, root=queue)
+        return request
+
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        default_root=lambda: queue,
+        enqueue=enqueue,
+        ensure_worker=lambda command, **kwargs: core.ensure_worker(
+            command, root=queue, **kwargs,
+        ),
+        drain=lambda: pytest.fail("worker refusal became foreground execution"),
+        wait=lambda *args, **kwargs: pytest.fail("failed worker was observed as running"),
+    )
+    args = SimpleNamespace(
+        payload=tmp_path, root=tmp_path / "manager",
+        command=["update", "--detach", *(["--json"] if as_json else [])],
+        repair_update=False, install_source=None,
+    )
+    with pytest.raises(core.SpawnError, match="DaemonSpawnError"):
+        bootstrap_update.execute(args, driver, source_digest="a" * 64)
+
+    request, = core.status(root=queue)
+    expected_state, expected_exit = ("completed", 23) if already_completed else ("pending", None)
+    assert request.state == expected_state and request.exit_code == expected_exit
+    if already_completed:
+        assert request.started_at is not None and request.finished_at is not None
+    else:
+        assert request.started_at is None and request.finished_at is None
+        assert "DaemonSpawnError" in request.error
+    assert len(launches) == 1
+    output = capsys.readouterr()
+    if as_json:
+        receipt = json.loads(output.out)
+        assert receipt["request_id"] == request.id
+        assert receipt["log_path"] == str(request.log_path)
+        assert receipt["state"] == expected_state and receipt["exit_code"] == expected_exit
+        assert "DaemonSpawnError" in receipt["error"]
+    else:
+        assert output.out == ""
+
+
 def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monkeypatch):
     execute = runpy.run_path(str(SCRIPT))["execute"]
     import bootstrap_inputs

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import sys
@@ -114,24 +115,32 @@ def execute(args, driver, *, source_digest: str) -> int:
         request = driver.enqueue(spec, runner=runner, coalesce_running=False)
     print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
     worker = None
-    if options.supervised_debug:
-        driver.drain()
-    else:
-        environment = {
-            **os.environ, "GIT_TERMINAL_PROMPT": "0",
-            "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
-        }
-        packages = {
-            engine._package_name(package): package for package in engine._package_roots(payload)
-        }
-        worker = driver.ensure_worker(
-            (
-                sys.executable, "-I", "-S", "-B", "-X", "utf8",
-                str(payload / "scripts" / "bootstrap_update.py"),
-            ),
-            cwd=payload, env=environment,
-            python_bootstrap_root=packages["agent-procutil"] / "src",
-        )
+    try:
+        if options.supervised_debug:
+            driver.drain()
+        else:
+            environment = {
+                **os.environ, "GIT_TERMINAL_PROMPT": "0",
+                "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
+            }
+            packages = {
+                engine._package_name(package): package for package in engine._package_roots(payload)
+            }
+            worker = driver.ensure_worker(
+                (
+                    sys.executable, "-I", "-S", "-B", "-X", "utf8",
+                    str(payload / "scripts" / "bootstrap_update.py"),
+                ),
+                cwd=payload, env=environment,
+                python_bootstrap_root=packages["agent-procutil"] / "src",
+            )
+    except Exception as error:
+        if options.json:
+            print(json.dumps({
+                "request_id": request.id, "log_path": str(request.log_path),
+                "state": request.state, "exit_code": request.exit_code, "error": str(error),
+            }))
+        raise
     if options.detach:
         _report(request, as_json=options.json)
         return 0
