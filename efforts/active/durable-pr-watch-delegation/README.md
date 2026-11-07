@@ -353,8 +353,14 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [x] Deliver finite pre-approval owner retention (#11251) and fresh
   comment/reply allocation (#11253), committing exact final bytes before
   preview and separating pending selection from execution admission.
-  Actual producer/receiver integration, automatic owned/legacy edit binding
-  and complete all-forge/installed adoption remain open.
+  Automatic owned/legacy edit binding and complete all-forge/installed
+  adoption remain open.
+- [x] Deliver the finite optional receiver-owned pre-approval source path
+  (#11299): negotiate actual receiver/storage support, commit final fresh
+  comment/reply previews before returning them, recover the original key
+  and preserve exact explicit admission/native receipts.
+  Normal host enrollment, automatic edits, other publishers, acquisition/DB
+  mapping, provider and installed/shadow acceptance remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -915,6 +921,15 @@ or silently expanding a bounded source claim.
   Bodyless votes remain bodyless; automatic edits refuse rather than infer
   native identity. This is not producer/wire, provider or installed acceptance.
 
+- [x] Qualify the optional pre-approval CLI/native/Fleet/Gateway source path
+  through the existing owner and protected synthetic execution (#11299).
+  Cover full-frame precommit limits, full source/target revisions, invalid
+  reply targets, normalized original input, original-key restart/lost-commit
+  and cache-independent recovery, exact admission/receipts and v1/v2/default/
+  rollback compatibility. The protected static-selection packet passes 146
+  cases; the final client/selection packet passes 77. These overlap and are
+  not live-provider, installed or all-publisher acceptance.
+
 - [x] Qualify the finite local preparation -> exact preview -> explicit
   native/Gateway submission -> durable reopen and confirmed retry source
   path for comments, replies and owned edits (#11237; 133 coupled cases).
@@ -1020,6 +1035,39 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Commit receiver-owned previews before approval
+
+- #11299 actually merged as `0b9cf2df611ba9d254fc3e3c6762b21e8a40b4d2`
+  after exact-head Copilot approval, the addressed review thread and latest
+  current-head CI `42364749821`, including its required PR gate, passed.
+  Managed completion retained the source backup and reconciled the existing
+  worktree; the parent remains Active.
+- The optional actual receiver/native/Fleet/CLI path negotiates explicit
+  selection adoption and trusted composition. Actual policy/profile/origin
+  resolution precedes the existing replay transaction; pure composition and
+  complete preview/submission frame validation precede retention. The first
+  committed v2 preview is recovered through the same original selection
+  without a second body, allocation, decoration, cache lookup or admission.
+- Review corrected oversized retained previews, partial target-revision
+  checks, missing/deleted reply targets and inconsistent original endpoint
+  normalization. The receiver reuses the executor's pure static selection
+  checks; actual protected submission remains a separate explicit operation.
+  Lost post-dispatch results preserve possible selection-commit uncertainty,
+  not a claim of native effects or permission for another key.
+- The bounded protected-selection packet passes 146 cases; the final
+  client/selection packet passes 77 with cleanup verified. The earlier
+  Gateway/owner boundary packet passes 141. These overlapping source controls
+  include actual CLI/Gateway/owner files and protected synthetic native
+  outcomes, not live provider or installed proof. Fatal lint, module,
+  documentation and install-contract gates pass. Pending plugin typing
+  under #9807 is not a strict-project pass.
+- Re-read the complete current Plan/Validation and credited only this finite
+  leaf. Next, qualify actual scoped/native identity binding before automatic
+  owned/legacy edit allocation, retaining normal host enrollment, all other
+  publisher, acquisition/mapping, full attention/CLI/Dispatch/provider and
+  installed/shadow gates. No rollout, live review effect, migration or
+  resource release follows from this source merge.
 
 ### 2026-11-06 - Allocate fresh identities inside original-selection custody
 
