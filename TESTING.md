@@ -212,6 +212,18 @@ demand does not trigger a mutation sweep and unadmitted events have no effect.
 The portable unit packet additionally exercises the original send-only handler
 and mutation-only parser with synthetic inputs; it is not native evidence.
 
+The separately path-gated `prepared-membership-native.yml` lane also selects
+`tests/test_post_tool_shell.py -k registered_prepared_cell` on Windows.
+Actual stamped cells, original membership/binding/current-row publishers and
+the registered PowerShell 5.1/7 entry compose read/native/batch/single-shell
+notifications. It checks installation-scoped discovery, changed-byte refusal,
+old membership routing, missing rows, live reminder opt-out, late guidance
+and non-replying peers. Warm interpreter/client and synchronous requests are
+trapped; incompatible membership explicitly retains its original admission
+lookup. Original 30-second item, 10-second child, 300-second group and 50-ms
+production-send limits remain unchanged. These are isolated source consumers,
+not installed, cold/directory/POSIX/recovery, composed or throughput acceptance.
+
 The path-gated, manually dispatchable legacy-monitor native lane also runs
 `test_anchor_write_guard.py -k braced_parameter_boundaries_match_native_bash`
 on Linux and Windows. Nine native Bash controls compare actual expansion and

@@ -132,14 +132,16 @@ function Test-PreparedWorktreesContent {
         $stream = [IO.FileStream]::new(
             $Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read
         )
-        $bytes = [byte[]]::new(1048577)
+        $openedLength = $stream.Length
+        if ($openedLength -gt 1048576) { return $false }
+        $bytes = [byte[]]::new([int]$openedLength + 1)
         $count = 0
         while ($count -lt $bytes.Length) {
             $read = $stream.Read($bytes, $count, $bytes.Length - $count)
             if ($read -eq 0) { break }
             $count += $read
         }
-        if ($count -gt 1048576) { return $false }
+        if ($count -eq $bytes.Length) { return $false }
         $null = Get-PreparedWorktreesPath $Path
         $hash = [Security.Cryptography.SHA256]::Create()
         $actual = [BitConverter]::ToString($hash.ComputeHash($bytes, 0, $count)).Replace('-', '').ToLowerInvariant()
@@ -195,14 +197,16 @@ function Test-PreparedManagedWorktreesSession {
             $marker, [IO.FileMode]::Open, [IO.FileAccess]::Read,
             [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
         )
-        $bytes = [byte[]]::new(1048577)
+        $openedLength = $stream.Length
+        if ($openedLength -gt 1048576) { return $false }
+        $bytes = [byte[]]::new([int]$openedLength + 1)
         $count = 0
         while ($count -lt $bytes.Length) {
             $read = $stream.Read($bytes, $count, $bytes.Length - $count)
             if ($read -eq 0) { break }
             $count += $read
         }
-        if ($count -gt 1048576) { return $false }
+        if ($count -eq $bytes.Length) { return $false }
         $text = ([Text.UTF8Encoding]::new($false, $true)).GetString($bytes, 0, $count)
         $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)
         if ($value -isnot [Collections.IDictionary] -or
