@@ -237,9 +237,17 @@ def run_coordinator(
             url = endpoint_url(parsed.hostname, parsed.port)
         return selected_client(url, timeout)
 
+    def read_health(host, port):
+        url = endpoint_url(host, port)
+        if not start_if_missing:
+            from .coordinator_observation import _local_health
+
+            return _local_health(url, token=token, timeout=probe_timeout)
+        with selected_client(url, probe_timeout) as client:
+            return client.health()
+
     def probe(host, port, *, active=False):
-        with selected_client(endpoint_url(host, port), probe_timeout) as client:
-            payload = client.health()
+        payload = read_health(host, port)
         handle = handles.get(port)
         if handle is None:
             if old is None or not old.process_start_time:
@@ -263,8 +271,7 @@ def run_coordinator(
             raise RuntimeError("selected coordinator owner changed during readiness")
         return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
     if old is not None:
-        with selected_client(endpoint_url(old.client_host, old.port), probe_timeout) as client:
-            payload = client.health()
+        payload = read_health(old.client_host, old.port)
         handle = SimpleNamespace(
             pid=old.pid,
             poll=lambda: None if process_start_time(old.pid) == old.process_start_time else 0,

@@ -84,6 +84,30 @@ def _local_client(url: str, *, token: str | None, timeout: float):
     )
 
 
+def _local_health(url: str, *, token: str | None, timeout: float) -> dict:
+    from .client_errors import DispatchError
+
+    with _local_client(url, token=token, timeout=timeout) as client:
+        payload = client.health()
+    if not isinstance(payload, dict):
+        raise ServingObservationError("coordinator health is invalid")
+    required = payload.get("data_auth_required")
+    if required is not None and (type(required) is not bool or required != (token is not None)):
+        raise ServingObservationError("coordinator data authentication differs")
+    if token is not None:
+        with _local_client(url, token=None, timeout=timeout) as client:
+            try:
+                client.health()
+            except DispatchError as error:
+                if error.status_code != 401:
+                    raise ServingObservationError(
+                        "coordinator data authentication is unconfirmed"
+                    ) from None
+            else:
+                raise ServingObservationError("coordinator data authentication is unconfirmed")
+    return payload
+
+
 def observe(
     cfg, routing_root: Path, *, run_dir: Path, token: str | None, environment: dict,
     timeout: float = 2.0,
@@ -120,8 +144,7 @@ def observe(
             raise ServingObservationError("routed coordinator ownership is unconfirmed")
         host = _loopback(endpoint.client_host)
         url = f"http://{routing.format_authority(host, endpoint.port)}"
-        with _local_client(url, token=token, timeout=min(timeout, 2.0)) as client:
-            health = client.health()
+        health = _local_health(url, token=token, timeout=min(timeout, 2.0))
         slot = health.get("slot") if isinstance(health, dict) else None
 
         def poll():

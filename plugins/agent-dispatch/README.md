@@ -211,11 +211,13 @@ Selected, complete physical Source or repair generations also provide
 `python -m agent_dispatch.coordinator_observation --probe` and `--apply`.
 The version-1 `agent-dispatch.coordinator-serving-observation` JSON contract
 reports a verified local serving generation, an evidenced inactive state, or
-an explicit unknown result. Observation checks routed process birth, health
-using the configured authentication, effective configuration and route
-identity; legacy discovery or an unverified endpoint is not treated as inactive. Local control
-uses loopback without environment proxies and does not pass update-driver
-custody to the daemon. `--apply`
+an explicit unknown result. Observation checks routed process liveness and
+birth, effective configuration and route identity. Health advertises only
+whether data authentication is required; when a token is configured, an
+unauthenticated health request must also be rejected, including by older
+coordinators that lack the advertisement. Legacy discovery or an unverified
+endpoint is not treated as inactive. Local control uses loopback without
+environment proxies and does not pass update-driver custody to the daemon. `--apply`
 reuses the existing guarded coordinator cutover without starting an absent
 service or running broad reaping. It does not update the supervisor or claim
 suite-wide readiness. Older runtimes without this module remain unchanged:

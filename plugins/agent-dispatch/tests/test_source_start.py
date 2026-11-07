@@ -447,7 +447,7 @@ def test_coordinator_legacy_listener_uses_native_bind_evidence(monkeypatch, occu
     assert coordinator_observation._legacy_listener(Config(host="127.0.0.1", port=43123)) is occupied
 
 
-@pytest.mark.parametrize("changed", ["none", "version", "birth", "config", "route", "remote"])
+@pytest.mark.parametrize("changed", ["none", "version", "birth", "config", "route", "remote", "auth", "auth-type"])
 def test_coordinator_observation_requires_authenticated_generation_and_birth(
     tmp_path, monkeypatch, changed,
 ):
@@ -469,6 +469,7 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
     active = routing.read_table(tmp_path, strict=True)["active"]
     health = {
         "status": "ok", "version": version, "runtime_config_identity": source_start.config_identity(cfg),
+        "data_auth_required": True,
         "slot": {"pid": pid, "process_start_time": birth, "role": "active", "active": active.copy()},
     }
     if changed == "version":
@@ -479,6 +480,10 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
         health["runtime_config_identity"] = "other"
     elif changed == "route":
         health["slot"]["active"]["port"] = 43124
+    elif changed == "auth":
+        health["data_auth_required"] = False
+    elif changed == "auth-type":
+        health["data_auth_required"] = "yes"
 
     calls = []
     local_transport = object()
@@ -489,7 +494,8 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
     class Client:
         def __init__(self, _url, *, token, timeout, transport):
             calls.append(_url)
-            assert token == "fixture"
+            assert token in ("fixture", None)
+            self.token = token
             assert transport is local_transport
 
         def __enter__(self):
@@ -499,6 +505,10 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
             pass
 
         def health(self):
+            if self.token is None:
+                from agent_dispatch.client_errors import DispatchError
+
+                raise DispatchError(401, "missing credential")
             return health
 
     monkeypatch.setattr(client, "DispatchClient", Client)
@@ -510,6 +520,98 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
             coordinator_observation.observe(cfg, tmp_path, run_dir=tmp_path, token="fixture", environment={})
         if changed == "remote":
             assert calls == []
+
+
+@pytest.mark.parametrize("enforced", [False, True])
+@pytest.mark.parametrize("advertised", [None, True])
+def test_coordinator_observation_challenges_legacy_auth_enforcement(tmp_path, monkeypatch, enforced, advertised):
+    import httpx
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+    from agent_dispatch import client, coordinator_observation, source_start
+    from agent_dispatch.config import Config
+    from agent_dispatch.coordinator_auth import _make_auth
+    from zdd import diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    pid, version = os.getpid(), "1.2.3"
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=version, process_start_time=birth,
+    )
+    active = routing.read_table(tmp_path, strict=True)["active"]
+    payload = {
+        "status": "ok", "version": version, "runtime_config_identity": source_start.config_identity(cfg),
+        "slot": {"pid": pid, "process_start_time": birth, "role": "active", "active": active},
+    }
+    if advertised is not None:
+        payload["data_auth_required"] = advertised
+    app = FastAPI(dependencies=[Depends(_make_auth("fixture-token" if enforced else None, None))])
+
+    @app.get("/health")
+    def health():
+        return payload
+
+    with TestClient(app) as service:
+        def local_client(url, *, token, timeout):
+            def send(request):
+                response = service.request(request.method, request.url.path, headers=request.headers)
+                return httpx.Response(response.status_code, content=response.content, request=request)
+
+            return client.DispatchClient(url, token=token, timeout=timeout, transport=httpx.MockTransport(send))
+
+        monkeypatch.setattr(coordinator_observation, "_local_client", local_client)
+        if enforced:
+            assert coordinator_observation.observe(
+                cfg, tmp_path, run_dir=tmp_path, token="fixture-token", environment={},
+            ) == {"state": "ready", "generation": version}
+        else:
+            with pytest.raises(coordinator_observation.ServingObservationError):
+                coordinator_observation.observe(
+                    cfg, tmp_path, run_dir=tmp_path, token="fixture-token", environment={},
+                )
+
+
+def test_reconcile_refuses_same_generation_without_configured_auth(tmp_path, monkeypatch):
+    from agent_dispatch import client, coordinator_observation, source_start
+    from agent_dispatch.config import Config
+    from zdd import diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"), token="fixture-token")
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=source_start.__version__, process_start_time=birth,
+    )
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return {
+                "status": "ok", "version": source_start.__version__, "data_auth_required": False,
+                "runtime_config_identity": source_start.config_identity(cfg),
+                "slot": {"pid": pid, "process_start_time": birth, "role": "active"},
+            }
+
+    monkeypatch.setattr(client, "DispatchClient", Client)
+    with pytest.raises(coordinator_observation.ServingObservationError):
+        source_start.run_coordinator(
+            cfg, tmp_path, token="fixture-token", spawn_passive=lambda _port: pytest.fail("unexpected start"),
+            pick_free_port=lambda: pytest.fail("unexpected allocation"), timeout=1.0,
+            verify_selected=lambda: None, start_if_missing=False, confirm_inactive=lambda _table: True,
+        )
 
 
 @pytest.mark.parametrize("exit_phase", ["before", "after-health"])
