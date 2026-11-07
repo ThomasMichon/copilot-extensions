@@ -106,6 +106,10 @@ actual canonical consumer and copied destination. They regenerate missing or
 stale declared outputs rather than relying on Dev mirrors. A changed candidate
 manifest or unsafe output plan refuses before the prepared source or preview
 metadata can be published; generation still never executes candidate tooling.
+The packaged toolkit includes its pinned generator and admission packager at
+their original relative paths, including the file-loaded tooling edges that
+static import closure alone cannot discover. Manager's separate preparer tool
+declaration includes the Invocation adapter it imports.
 
 The remaining canonical-first witness transition is still open: source-bound
 catalog checks and their current fixtures bind real consumer/helper bytes, and
