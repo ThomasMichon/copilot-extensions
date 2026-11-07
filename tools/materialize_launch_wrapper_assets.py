@@ -53,12 +53,30 @@ def materialize_into(
             )
         ]
     try:
-        manifest = lwar.load_manifest(source_consumer_dir, manifest_name=manifest_name)
+        manifests = lwar.load_manifest_groups(source_consumer_dir, manifest_name=manifest_name)
     except ValueError as exc:
         return [f"SKIP {source_consumer_dir}: {exc}"]
-    if manifest is None:
+    if not manifests:
         return []
 
+    for manifest in manifests:
+        refused = _materialize_group(
+            manifest, dest_consumer_dir, canonical_root, dest_root, reuse_existing, check_only=True,
+        )
+        if refused:
+            return refused
+    return [
+        entry for manifest in manifests
+        for entry in _materialize_group(
+            manifest, dest_consumer_dir, canonical_root, dest_root, reuse_existing,
+        )
+    ]
+
+
+def _materialize_group(
+    manifest: lwar.LaunchWrapperAssets, dest_consumer_dir: Path, canonical_root: Path,
+    dest_root: Path | None, reuse_existing: bool, *, check_only: bool = False,
+) -> list[str]:
     log: list[str] = []
     dest_root_r = (dest_root or dest_consumer_dir).resolve()
     bad_ancestor = _find_symlinked_ancestor(dest_consumer_dir, dest_root_r)
@@ -120,6 +138,8 @@ def materialize_into(
                 continue
             return [f"SKIP {dest_file}: already exists -- refusing to overwrite"]
 
+    if check_only:
+        return []
     dest_bin.mkdir(parents=True, exist_ok=True)
     for name in manifest.files:
         if name in retained:
@@ -127,7 +147,11 @@ def materialize_into(
         source = source_dir / name
         dest_file = dest_bin / name
         dest_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, dest_file)
+        try:
+            with source.open("rb") as incoming, dest_file.open("xb") as outgoing:
+                shutil.copyfileobj(incoming, outgoing)
+        except FileExistsError:
+            return [f"SKIP {dest_file}: already exists -- refusing to overwrite"]
         if os.name != "nt" and name.endswith(".sh"):
             shutil.copymode(source, dest_file)
         log.append(

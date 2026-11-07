@@ -130,6 +130,7 @@ def inventory():
         "project_controller_delegation": delegation_capability(),
         "runtime_sources": {
             "schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT,
+            "prepared_install_source": 1,
             "target_contract": {"schema": TARGET_SCHEMA, "version": TARGET_CONTRACT},
         },
     }

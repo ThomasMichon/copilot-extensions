@@ -297,6 +297,41 @@ def test_packaged_assets_include_standalone_manager_without_plugins(tmp_path: Pa
     ).read_bytes() == source.read_bytes()
 
 
+@pytest.mark.parametrize("fault", [None, "missing", "overlap", "escape"])
+def test_packaged_groups_project_multiple_roots_only_after_complete_preflight(tmp_path, fault):
+    root = tmp_path / "source"
+    consumer = root / "worktree-manager"
+    consumer.mkdir(parents=True)
+    _canonical_file(root, "tools/prepare.py", content="producer")
+    if fault != "missing":
+        _canonical_file(root, "libs/owned/helper.py", content="primitive")
+    groups = [
+        {"canonicalDir": "tools", "payloadDir": "scripts/provider/tools", "files": ["prepare.py"]},
+        {"canonicalDir": "libs/owned", "payloadDir": "scripts/provider/libs/owned", "files": ["helper.py"]},
+    ]
+    if fault == "overlap":
+        groups.append(dict(groups[0]))
+    if fault == "escape":
+        groups[1]["payloadDir"] = "../outside"
+    (consumer / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2, "groups": groups,
+    }))
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    report = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=consumer, dest_consumer_dir=destination, canonical_root=root,
+    )
+    if fault:
+        assert report and all(line.startswith("SKIP ") for line in report)
+        assert not list(destination.iterdir())
+    else:
+        assert len(report) == 2 and all(line.startswith("OK ") for line in report)
+        assert (destination / "scripts/provider/tools/prepare.py").read_text() == "producer"
+        assert (destination / "scripts/provider/libs/owned/helper.py").read_text() == "primitive"
+        with pytest.raises(ValueError, match="group-aware"):
+            lwar.load_manifest(consumer, manifest_name=lwar.PACKAGED_MANIFEST_NAME)
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 @pytest.mark.parametrize("changed", [False, True])
 def test_packaged_assets_retain_exact_bytes_only_when_requested(
@@ -309,6 +344,7 @@ def test_packaged_assets_retain_exact_bytes_only_when_requested(
     (consumer / "scripts").mkdir(parents=True)
     retained = consumer / "scripts" / "prepare.py"
     retained.write_text("changed\n" if changed else "canonical\n", encoding="utf-8")
+    original_bytes = retained.read_bytes()
     original_stat = retained.stat()
     (consumer / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
         "schema": "copilot-extensions.packaged-assets", "version": 1,
@@ -320,8 +356,15 @@ def test_packaged_assets_retain_exact_bytes_only_when_requested(
     )
     assert bool(report) is (not reuse or changed)
     assert all(line.startswith("SKIP ") for line in report)
-    assert retained.stat() == original_stat
-    assert retained.read_text() == ("changed\n" if changed else "canonical\n")
+    assert retained.read_bytes() == original_bytes
+    retained_stat = retained.lstat()
+    for field in (
+        "st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns",
+    ):
+        assert getattr(retained_stat, field) == getattr(original_stat, field), field
+    for field in ("st_birthtime_ns", "st_file_attributes", "st_reparse_tag"):
+        if hasattr(original_stat, field):
+            assert getattr(retained_stat, field) == getattr(original_stat, field), field
 
 
 @pytest.mark.parametrize("directory", ["../outside", "..\\outside", "C:\\outside"])

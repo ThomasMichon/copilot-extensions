@@ -70,9 +70,18 @@ def emit(
     primary = primary or (distribution if distribution in commands else next(iter(commands)))
     if primary not in commands:
         raise ValueError("primary application command is not declared")
+    python_platform = None
+    if target_environment is not None and target_environment["sys_platform"] == "win32":
+        python_platform = {
+            "amd64": "x86_64-pc-windows-msvc", "x86_64": "x86_64-pc-windows-msvc",
+            "arm64": "aarch64-pc-windows-msvc", "aarch64": "aarch64-pc-windows-msvc",
+            "x86": "i686-pc-windows-msvc", "i686": "i686-pc-windows-msvc",
+        }.get(target_environment["platform_machine"].lower())
+        if python_platform is None:
+            raise ValueError("application profile has an unsupported Windows Python architecture")
     launchers = {}
     for name, entry in commands.items():
-        for filename, content in slot_binstubs(name, entry).items():
+        for filename, content in slot_binstubs(name, entry, python_platform=python_platform).items():
             if filename in {"install", "install.cmd", "install.ps1", "install.sh"} and name != primary:
                 continue
             if filename in launchers:

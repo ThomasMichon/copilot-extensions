@@ -6,11 +6,27 @@ from pathlib import Path
 import subprocess
 import sys
 
-from agent_procutil import no_window_kwargs
+from typing import TYPE_CHECKING
 
-from .engine_environment import _engine_environment
-from .runtime_source import ResolvedSource
-from .self_install import _runtime_installer, _runtime_scripts, running_payload_dir
+from .runtime_application_inputs import prepare_application_inputs as prepare_application_inputs
+
+if TYPE_CHECKING:
+    from .runtime_source import ResolvedSource
+
+
+def _runtime_installer():
+    from .self_install import _runtime_installer as selected
+    return selected()
+
+
+def _runtime_scripts():
+    from .self_install import _runtime_scripts as selected
+    return selected()
+
+
+def running_payload_dir():
+    from .self_install import running_payload_dir as selected
+    return selected()
 
 
 def preparer() -> Path:
@@ -27,6 +43,9 @@ def preparer() -> Path:
 
 
 def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> dict:
+    from agent_procutil import no_window_kwargs
+    from .engine_environment import _engine_environment
+
     command = [
         sys.executable, "-I", "-B", "-X", "utf8", str(tool),
         "--source", str(resolved.checkout), "--commit", resolved.commit,
