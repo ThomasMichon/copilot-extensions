@@ -22,6 +22,6 @@ def dispatch(argv: list[str]) -> int:
     except ConfigurationError as exc:
         return output._json_error(str(exc), exit_code=3)
     payload = readiness.as_dict()
-    payload["capabilities"] = ["lease-acquire-released-only-v1"]
+    payload["capabilities"] = ["lease-acquire-released-only-v1", "lease-return-proof-v1"]
     print(json.dumps(payload, indent=2))
     return 0 if readiness.ready else 3
