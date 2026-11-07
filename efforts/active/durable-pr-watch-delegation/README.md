@@ -993,6 +993,28 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Retain structured prepared identity before native source adoption
+
+- #11207 actually merged as `4bb05db59c8f836d90bf494afab403d811c6d9b2`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. An earlier managed merge correctly refused an expected check from
+  the newer run; it was not replayed until that exact run completed successfully.
+  The source worktree reconciled through its normal completion path.
+- The explicit orthogonal storage extension retains structured original
+  comment/write/source identity and body binding under the current owner.
+  Old strict readers refuse the extension; existing layouts and legacy
+  operations/unknown receipts retain their meanings. No sender or serving
+  capability was enabled by the data-only source change.
+- Review corrected literal-boundary parity with the shared preparer. The final
+  storage/capture/conversation packet passes 102 cases; the legacy native/CLI
+  packet passes 106, both with bounded cleanup verified. The standalone
+  validator passes strict Linux/win32 checking; the overall plugin remains
+  pending type admission, not a strict-project pass.
+- Re-read the parent Plan/Validation and continue the explicitly selected
+  existing native executor and original receipt projection. Preserve default
+  v1, no implicit adoption/fallback, actual native actor/version checks and
+  separate feedback/echo, receiver, provider and installed gates.
+
 ### 2026-11-06 - Review original prepared-intent binding before its data extension
 
 - #11203 actually merged as `93d33164b35f5ce7f34928ecad959c3e1330c7f5`

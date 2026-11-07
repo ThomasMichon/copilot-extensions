@@ -485,6 +485,53 @@ def _ensure_venv(name, uv, reinstall=False):
     assert age.contract_source(Requirement("unrelated-package"), path, projects, tmp_path) is None
 
 
+@pytest.mark.parametrize("fault", [
+    None, "undeclared", "missing", "identity", "version", "extra",
+    "library-consumer", "unknown-project", "escape",
+])
+def test_explicit_application_source_requires_canonical_attributable_input(tmp_path, fault):
+    consumer = tmp_path / ("libs" if fault == "library-consumer" else "plugins") / "consumer"
+    selector = {
+        "unknown-project": "standalone:unregistered",
+        "escape": "../outside",
+    }.get(fault, "standalone:fleet-manager")
+    declaration = (
+        f'\n[tool.copilot-extensions.application-sources]\nowned-sdk = "{selector}"\n'
+        if fault != "undeclared" else ""
+    )
+    path = write(consumer / "pyproject.toml", (
+        '[project]\nname="consumer"\nversion="1"\n'
+        'dependencies=["owned-sdk[feature]>=1,<2"]\n' + declaration
+    ))
+    if fault != "missing":
+        write(tmp_path / "fleet-manager" / "pyproject.toml", (
+            '[project]\n'
+            f'name="{"different" if fault == "identity" else "owned-sdk"}"\n'
+            f'version="{"2" if fault == "version" else "1"}"\n'
+            '[project.optional-dependencies]\n'
+            f'{"different" if fault == "extra" else "feature"}=["external>=1"]\n'
+        ))
+    _, projects = age.inventory(tmp_path)
+    requirement = Requirement("owned-sdk[feature]>=1,<2")
+    if fault is None:
+        assert age.contract_source(requirement, path, projects, tmp_path) == (
+            tmp_path / "fleet-manager" / "pyproject.toml"
+        )
+        requested = []
+
+        def fetch(url):
+            requested.append(url)
+            return json.dumps({"releases": {"1": release()}})
+
+        assert age.audit(tmp_path, fetch=fetch, now=NOW)[1] == []
+        assert requested == ["https://pypi.org/pypi/external/json"]
+    elif fault == "undeclared":
+        assert age.contract_source(requirement, path, projects, tmp_path) is None
+    else:
+        with pytest.raises(age.DeclarationError):
+            age.contract_source(requirement, path, projects, tmp_path)
+
+
 @pytest.mark.parametrize("plugin,dependency,source", [
     ("agent-pull-requests", "fleet-manager", "fleet-manager"),
     ("agent-dispatch", "agent-pull-requests", "plugins/agent-pull-requests"),
