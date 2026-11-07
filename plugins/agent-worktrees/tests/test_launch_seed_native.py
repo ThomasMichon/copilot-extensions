@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -150,6 +151,205 @@ def test_native_spawn_and_actual_return_reuse_existing_receipts(record):
         native.returned(record, correlation, reply["operation_id"], exit_code=0)
 
 
+def test_headed_callback_finishes_seed_only_for_bound_native_identity(record, monkeypatch):
+    from agent_remote_driver.headed import receipt
+
+    seed = seeds.stage(record, kind="new", text="one headed native prompt")
+    reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id)
+    coordinator = os.getpid()
+    birth = locks.process_start_time(coordinator)
+    child_pid = coordinator + 100000
+    births = {coordinator: birth, child_pid: "123456789"}
+    monkeypatch.setattr(locks, "process_start_time", births.get)
+    monkeypatch.setattr(receipt, "process_start_time", births.get)
+    monkeypatch.setattr(receipt, "pid_alive", lambda pid: pid in births)
+    state_file = record.parent / "headed.json"
+    state = {
+        "version": 2, "mode": "headed", "process_receipt": receipt.PROCESS_RECEIPT,
+        "state": "native_starting", "session_id": "chosen", "nonce": "b" * 64,
+        "pid": coordinator, "host_pid": coordinator, "host_process_start_time": birth,
+        "child_pid": child_pid, "child_process_start_time": births[child_pid],
+    }
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    options = {
+        "pid": coordinator, "process_start_time": birth, "headed_state_file": state_file,
+        "headed_session_id": "chosen", "headed_nonce": "a" * 64,
+    }
+    with pytest.raises(ValueError, match="unconfirmed"):
+        native.spawned(record, _identity(reply), reply["operation_id"], **options)
+    assert seeds.peek(record).handoff_id
+    assert _saved(record, reply)["events"][-1]["phase"] == "seed-claimed"
+    state["nonce"] = options["headed_nonce"]
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    native.spawned(record, _identity(reply), reply["operation_id"], **options)
+    assert seeds.peek(record) is None
+    assert _saved(record, reply)["events"][-1]["details"] == {
+        "pid": child_pid, "process_start_time": "123456789", "boundary": "backend-command",
+    }
+    native.returned(record, _identity(reply), reply["operation_id"], exit_code=17)
+    assert _saved(record, reply)["events"][-1]["details"]["process_exit_code"] == 17
+
+
+def test_python_native_boundary_invokes_selected_core_and_records_actual_native_pid(record, monkeypatch):
+    from agent_remote_driver.headed import caller
+
+    seed = seeds.stage(record, kind="new", text="one original\nseed")
+    captured = {}
+
+    def execute(argv, **options):
+        captured.update(options)
+        assert argv == ["copilot", "--session-id", "chosen", "--interactive", seed.text]
+        assert seeds.peek(record).handoff_id
+        options["admit"]()
+        options["spawned"](os.getpid(), locks.process_start_time(os.getpid()))
+        assert seeds.peek(record) is None
+        return 17, True
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert legacy.launch(record, ["copilot", "--session-id", "chosen"], invoke=True) == 17
+    attempt = captured["attempt_directory"]
+    assert attempt.parent.parent == record.parent / "launch-attempts"
+    saved = audit.read(record.parent, attempt.parent.name, attempt.name)
+    assert saved["events"][-2]["details"]["pid"] == os.getpid()
+    assert saved["events"][-1]["details"]["process_exit_code"] == 17
+
+
+def test_unknown_coordinator_receipt_never_restores_or_completes_seed(record, monkeypatch):
+    from agent_remote_driver.headed import caller
+
+    seeds.stage(record, kind="new", text="retain this handoff")
+    captured = {}
+
+    def execute(_argv, **options):
+        captured.update(options)
+        options["admit"]()
+        return 0, False
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert legacy.launch(record, ["copilot", "--session-id", "chosen"], invoke=True) == 3
+    assert seeds.peek(record).handoff_id
+    attempt = captured["attempt_directory"]
+    saved = audit.read(record.parent, attempt.parent.name, attempt.name)
+    assert all(event["phase"] != "process-spawned" for event in saved["events"])
+    assert saved["events"][-1]["details"] == {
+        "exit_code": 3, "process_exit_code": 0, "receipt_uncertain": True,
+    }
+
+
+def test_changed_owner_cannot_admit_prepared_headed_native(record, monkeypatch, overwrite_record_nonce):
+    from agent_remote_driver.headed import caller
+
+    seeds.stage(record, kind="new", text="do not admit after owner replacement")
+
+    def execute(_argv, **options):
+        overwrite_record_nonce(record, uuid4().hex)
+        options["admit"]()
+        pytest.fail("A changed original owner must not admit native creation")
+
+    monkeypatch.setattr(caller, "execute", execute)
+    with pytest.raises(ValueError, match="identity or incarnation"):
+        legacy.launch(record, ["copilot", "--session-id", "chosen"], invoke=True)
+    assert seeds.peek(record).handoff_id
+
+
+@pytest.mark.parametrize("seeded", [False, True])
+def test_headed_prepare_retains_one_original_command_and_finite_live_recheck(record, monkeypatch, seeded):
+    from agent_remote_driver.headed import launcher, receipt
+
+    seed = seeds.stage(record, kind="new", text="one literal\n' seed") if seeded else None
+    captured = {}
+
+    def retain(argv, **kwargs):
+        captured.update(kwargs, argv=argv)
+        return ["physical-python", "retained-core", *argv]
+
+    monkeypatch.setattr(launcher, "prepare_headed_command", retain)
+    reply = native.prepare(record, ["copilot", "--model", "auto"], seed_id=seed.seed_id if seed else None, headed=True)
+    selected = reply["headed"]
+    assert selected["argv"] == captured["argv"]
+    assert selected["session_id"] == captured["session_id"]
+    assert selected["argv"].count("--session-id") == 1
+    assert selected["argv"][selected["argv"].index("--session-id") + 1] == selected["session_id"]
+    assert selected["argv"] == [
+        "copilot", "--model", "auto", *(["--interactive", seed.text] if seed else []),
+        "--session-id", selected["session_id"],
+    ]
+    assert captured["attempt_directory"].name == reply["operation_id"]
+    assert str(captured["state_file"]) == selected["state_file"]
+    assert len(reply["environment"][receipt.NONCE_ENV]) == 64
+    assert reply["argv"][:2] == ["physical-python", "retained-core"]
+    native.admit(record, _identity(reply), reply["operation_id"])
+    assert all(event["phase"] != "process-spawned" for event in _saved(record, reply)["events"])
+    if seed:
+        assert seeds.peek(record).handoff_id
+    else:
+        seeds.stage(record, kind="new", text="newer intent")
+        with pytest.raises(ValueError, match="intent changed"):
+            native.admit(record, _identity(reply), reply["operation_id"])
+
+
+@pytest.mark.parametrize("argv", [
+    ["custom-copilot"], ["copilot", "--connect"], ["copilot", "--continue"],
+    ["copilot", "--session-id", "one", "--connect=remote"],
+    ["copilot", "--connect=remote", "--session-id=one"],
+    ["copilot", "--ahp", "http://127.0.0.1:3210", "--resume=selected"],
+    ["copilot", "--ahp=http://127.0.0.1:3210", "--resume=selected"],
+    ["copilot", "--resume"], ["copilot", "-r"], ["copilot", "plugin", "list"],
+    ["copilot", "--session-id=one", "--resume=two"],
+    ["copilot", "--environment-host", "remote"], ["copilot", "--help"],
+    ["copilot", "--stdio"], ["copilot", "-p", "one prompt"],
+])
+def test_headed_prepare_leaves_nonlocal_and_ambiguous_commands_on_direct_path(record, argv):
+    reply = native.prepare(record, argv, seed_id=None, headed=True)
+    assert "headed" not in reply
+    assert reply["argv"] == argv
+
+
+def test_headed_prepare_preserves_selected_resume_and_prompt_flag_literals():
+    command = ["copilot", "--model", "auto", "--resume=chosen", "-i", "--connect"]
+    assert native._headed_command(command) == (command, "chosen")
+
+
+def test_uncertain_coordinator_return_records_actual_exit_without_completing_seed(record):
+    seed = seeds.stage(record, kind="new", text="not a confirmed native spawn")
+    reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id)
+    native.returned(record, _identity(reply), reply["operation_id"], exit_code=0, receipt_uncertain=True)
+    saved = _saved(record, reply)
+    assert saved["events"][-1]["details"] == {
+        "exit_code": 3, "process_exit_code": 0, "receipt_uncertain": True,
+    }
+    assert seeds.peek(record).handoff_id
+
+
+@pytest.mark.parametrize("extra", [
+    ["--phase", "setup"], ["--phase", "prepare", "--output-format", "nul"],
+    ["--phase", "prepare", "--environment-reply", "execution-hint"],
+    ["--phase", "spawn-failed"],
+])
+def test_headed_mode_refuses_other_boundaries_before_claim(record, monkeypatch, capsys, extra):
+    seed = seeds.stage(record, kind="new", text="no effects before negotiation")
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1", "--root", str(cfg.install_dir()),
+        "--record", str(record), "--backend-mode", "headed-live-owner-v1", *extra,
+    ])
+    assert native.main() == 3
+    assert not capsys.readouterr().out
+    assert seeds.peek(record) == seed
+
+
+@pytest.mark.parametrize("argv", [
+    ["custom-copilot", "--session-id", "chosen"],
+    ["copilot", "--acp", "--session-id", "chosen"],
+    ["copilot", "--ahp", "http://127.0.0.1:3210", "--resume=selected"],
+    ["copilot", "--ahp=http://127.0.0.1:3210", "--resume=selected"],
+    ["copilot", "--resume"], ["copilot"],
+    ["copilot", "--session-id", "one", "--resume", "two"],
+    ["copilot", "-i", "--session-id", "--"], ["copilot", "--", "--session-id", "literal"],
+])
+def test_unsupported_or_unselected_native_commands_do_not_get_silently_wrapped(argv):
+    assert legacy._headed_session(argv) is None
+
+
 def test_definite_spawn_failure_restores_once_without_automatic_retry(record):
     seed = seeds.stage(record, kind="new", text="retained after OS refusal")
     reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id)
@@ -273,6 +473,8 @@ def test_unconfirmed_finish_retains_claim_and_actual_spawn_observation(record, m
     ["--phase", "prepare", "--pid", "123", "--", "copilot"],
     ["--phase", "spawn-failed", "--", "copilot"],
     ["--phase", "returned", "--exit-code", "0"],
+    ["--phase", "prepare", "--headed-state-file", "never-read.json", "--", "copilot"],
+    ["--phase", "spawned", "--headed-session-id", "missing-state"],
 ])
 def test_cli_refuses_incomplete_or_cross_phase_outcomes(record, monkeypatch, capsys, extra):
     seed = seeds.stage(record, kind="new", text="no child on malformed request")
@@ -286,6 +488,18 @@ def test_cli_refuses_incomplete_or_cross_phase_outcomes(record, monkeypatch, cap
     assert not captured.out and "do not automatically retry" in captured.err
     assert seed.text not in captured.err
     assert seeds.peek(record) == seed
+
+
+def test_native_provider_declares_receipt_expansion_without_changing_legacy_reply(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["launch_seed_native", "--describe-contract"])
+    with pytest.raises(SystemExit) as result:
+        native.main()
+    assert result.value.code == 0
+    declaration = json.loads(capsys.readouterr().out)
+    assert declaration["backend_process_receipts"] == ["direct-v1", "headed-native-child-v1"]
+    assert declaration["backend_preparation_modes"] == ["direct-v1", "headed-live-owner-v1"]
+    assert declaration["version"] == 1
+    assert declaration["nul_reply_schema"] == native.NUL_REPLY_SCHEMA
 
 
 @pytest.mark.parametrize("fault", [None, "captured-old-slot", "missing-completion", "missing-bootstrap", "foreign-root"])
@@ -752,9 +966,205 @@ def test_selected_runtime_describes_literal_output_support_without_preparation()
         "preparation_environment_modes": ["full", "execution-hint"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["caller", "provider"],
-        "backend_execution_modes": ["posix-exec-v1", "posix-exec-env-v1"] if os.name == "posix" else [],
+        "backend_execution_modes": [
+            "posix-exec-v1", "posix-exec-env-v1", "posix-headed-env-v1",
+        ] if os.name == "posix" else [],
+        "backend_process_receipts": ["direct-v1", "headed-native-child-v1"],
+        "backend_preparation_modes": ["direct-v1", "headed-live-owner-v1"],
+        "setup_admission_modes": ["posix-live-owner-v1"] if os.name == "posix" else [],
     }
     assert not result.stderr
+
+
+@pytest.mark.parametrize("certain", [False, True])
+def test_posix_headed_owner_records_native_identity_and_keeps_actual_exit(
+    record, monkeypatch, tmp_path, certain,
+):
+    from agent_remote_driver.headed import caller
+    from agent_worktrees import launch_seed_posix as posix
+
+    seed = seeds.stage(record, kind="new", text="one literal\nprompt")
+    reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id)
+    correlation = _identity(reply)
+    complete = tmp_path / "completion"
+    monkeypatch.setattr(posix, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+    monkeypatch.setattr(posix, "_completion_file", lambda *a: os.open(
+        complete, os.O_CREAT | os.O_WRONLY, 0o600,
+    ))
+    monkeypatch.setattr(posix, "_backend_environment", lambda fd: {"LITERAL": "one\nvalue"})
+    original_birth = locks.process_start_time
+    monkeypatch.setattr(
+        locks, "process_start_time", lambda pid: "202001" if pid == 202 else original_birth(pid),
+    )
+
+    def execute(argv, **kwargs):
+        assert argv[0] == "copilot" and "--session-id" in argv
+        assert kwargs["interactive"] is True
+        assert kwargs["environment"] == {"LITERAL": "one\nvalue"}
+        assert kwargs["attempt_directory"].parts[-2:] == (
+            reply["attempt_id"], reply["operation_id"],
+        )
+        kwargs["admit"]()
+        if certain:
+            kwargs["spawned"](202, "202001")
+        return 17, certain
+
+    monkeypatch.setattr(caller, "execute", execute)
+    monkeypatch.setattr(posix, "execute", lambda *a, **k: pytest.fail("No direct replay"))
+    assert posix.execute_headed(
+        record, correlation, reply["operation_id"], reply["argv"], complete,
+        backend_environment_fd=3,
+    ) == 17
+    assert complete.read_text() == ("0\n" if certain else "3\n")
+    saved = _saved(record, reply)
+    if certain:
+        assert saved["events"][-1]["phase"] == "process-spawned"
+        assert saved["events"][-1]["details"]["pid"] == 202
+        assert seeds.peek(record) is None
+    else:
+        assert saved["events"][-1]["details"] == {
+            "exit_code": 17, "process_exit_code": 17, "receipt_uncertain": True,
+        }
+        assert seeds.peek(record).handoff_id
+
+
+def test_posix_headed_owner_keeps_unsupported_command_on_original_direct_path(monkeypatch, tmp_path):
+    from agent_remote_driver.headed import caller
+    from agent_worktrees import launch_seed_posix as posix
+
+    monkeypatch.setattr(posix, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+    monkeypatch.setattr(caller, "execute", lambda *a, **k: pytest.fail("Unsupported native mode"))
+    command = ["copilot", "--ahp", "http://127.0.0.1:3210", "--resume=chosen"]
+    calls = []
+    monkeypatch.setattr(posix, "execute", lambda *a, **k: calls.append((a, k)) or 7)
+    correlation = audit.Correlation("a" * 32, "b" * 32)
+    assert posix.execute_headed(
+        tmp_path, correlation, "c" * 32, command, tmp_path, backend_environment_fd=3,
+    ) == 7
+    assert calls == [((tmp_path, correlation, "c" * 32, command, tmp_path), {
+        "backend_environment_fd": 3, "admission_only": False,
+        "preserve_seed_id": None, "native_resume_session": None,
+    })]
+
+
+@pytest.mark.parametrize("preserved", [False, True])
+def test_posix_admission_owner_keeps_fence_through_core_wait_without_claiming_seed(
+    record, monkeypatch, tmp_path, preserved,
+):
+    from agent_remote_driver.headed import caller
+    from agent_worktrees import launch_seed_posix as posix
+
+    seed = seeds.stage(record, kind="new", text="preserved, never claimed") if preserved else None
+    options = {"admission_only": True, "preserve_seed_id": seed.seed_id if seed else None}
+    reply = native.prepare(record, ["copilot"], seed_id=None, **options)
+    complete = tmp_path / "completion"
+    monkeypatch.setattr(posix, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+    monkeypatch.setattr(posix, "_completion_file", lambda *a: os.open(
+        complete, os.O_CREAT | os.O_WRONLY, 0o600,
+    ))
+
+    def execute(argv, **kwargs):
+        assert "--interactive" not in argv
+        with pytest.raises(launch_admission.LaunchAdmissionBusy):
+            with launch_admission.guard(record):
+                pytest.fail("Creation fence was released before the core wait")
+        kwargs["admit"]()
+        kwargs["spawned"](os.getpid(), locks.process_start_time(os.getpid()))
+        assert seeds.peek(record) == seed
+        with pytest.raises(launch_admission.LaunchAdmissionBusy):
+            with launch_admission.guard(record):
+                pytest.fail("Native receipt cannot release the retained owner's fence")
+        return 17, True
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert posix.execute_headed(
+        record, _identity(reply), reply["operation_id"], reply["argv"], complete, **options,
+    ) == 17
+    assert complete.read_text() == "0\n"
+    with launch_admission.guard(record):
+        pass
+    native.returned(record, _identity(reply), reply["operation_id"], exit_code=17)
+    assert [event["phase"] for event in _saved(record, reply)["events"]] == [
+        "execution-requested", "process-spawned", "execution-returned",
+    ]
+    assert seeds.peek(record) == seed
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_direct_posix_admission_acquires_after_fd_scrub_and_fences_exec(
+    record, monkeypatch, tmp_path, changed,
+):
+    from agent_worktrees import launch_seed_posix as posix
+
+    reply = native.prepare(record, ["custom-backend"], seed_id=None, admission_only=True)
+    if changed:
+        seeds.stage(record, kind="new", text="newer intent must never be claimed")
+    complete = tmp_path / "completion"
+    events = []
+
+    def scrub(_writer):
+        events.append("scrub")
+        with launch_admission.guard(record):
+            pass
+
+    def execute(*_args):
+        assert not changed, "Changed intent must refuse before exec"
+        assert events == ["scrub"]
+        with pytest.raises(launch_admission.LaunchAdmissionBusy):
+            with launch_admission.guard(record):
+                pytest.fail("Final admission was not retained across exec")
+        events.append("exec")
+        raise RuntimeError("fixture exec boundary")
+
+    monkeypatch.setattr(posix, "os", SimpleNamespace(**{
+        **vars(os), "name": "posix", "fork": lambda: 123,
+        "waitpid": lambda *a: (123, 0), "execvpe": execute,
+        "write": lambda _descriptor, value: len(value),
+    }))
+    monkeypatch.setattr(posix, "_completion_file", lambda *a: os.open(
+        complete, os.O_CREAT | os.O_WRONLY, 0o600,
+    ))
+    monkeypatch.setattr(posix, "_close_inherited_descriptors", scrub)
+    with pytest.raises(ValueError if changed else RuntimeError, match="intent changed|fixture exec boundary"):
+        posix.execute(
+            record, _identity(reply), reply["operation_id"], reply["argv"], complete,
+            admission_only=True,
+        )
+    assert events == (["scrub"] if changed else ["scrub", "exec"])
+    with launch_admission.guard(record):
+        pass
+    assert [event["phase"] for event in _saved(record, reply)["events"]] == ["execution-requested"]
+    if changed:
+        assert seeds.peek(record).handoff_id is None
+
+
+def test_admission_backend_rechecks_preserved_seed_and_native_resume_before_creation(record, monkeypatch):
+    from agent_worktrees import session_liveness
+
+    seed = seeds.stage(record, kind="new", text="preserved")
+    monkeypatch.setattr(legacy.sessions, "has_mux_session", lambda *_: False)
+    monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "dead")
+    current = tracking.load_record(record)
+    current.head_session = "native-original"
+    current.sessions = [tracking.SessionEntry("native-original", current.started_at)]
+    tracking.save_record(current, record)
+    options = {
+        "admission_only": True, "preserve_seed_id": seed.seed_id,
+        "native_resume_session": "native-original",
+    }
+    reply = native.prepare(record, ["copilot", "--resume=native-original"], seed_id=None, **options)
+    with native.admission(record, _identity(reply), reply["operation_id"], **options) as check:
+        check()
+        assert seeds.peek(record) == seed
+        monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "alive")
+        with pytest.raises(ValueError, match="intent changed"):
+            check()
+    monkeypatch.setattr(session_liveness, "session_liveness", lambda *_: "dead")
+    replacement = seeds.stage(record, kind="new", text="superseded")
+    with pytest.raises(ValueError, match="intent changed"):
+        with native.admission(record, _identity(reply), reply["operation_id"], **options):
+            pytest.fail("Superseded preserved intent was admitted")
+    assert seeds.peek(record) == replacement
 
 
 def test_unknown_output_format_refuses_before_preparation(record, monkeypatch, capsys):
@@ -781,6 +1191,8 @@ def test_unknown_output_format_refuses_before_preparation(record, monkeypatch, c
     ["--operation-id", "c" * 32, "--completion-file", "missing", "--pid", "123"],
     ["--operation-id", "c" * 32, "--completion-file", "missing", "--receipt-uncertain"],
     ["--operation-id", "c" * 32, "--completion-file", "missing", "--seed-id", "seed"],
+    ["--operation-id", "c" * 32, "--completion-file", "missing", "--preserve-seed-id", "seed"],
+    ["--operation-id", "c" * 32, "--completion-file", "missing", "--native-resume-session", "original"],
 ])
 def test_exec_cli_refuses_incomplete_or_mixed_outcome_before_exec(
     record, monkeypatch, capsys, extra,
@@ -803,6 +1215,31 @@ def test_exec_cli_refuses_incomplete_or_mixed_outcome_before_exec(
     captured = capsys.readouterr()
     assert not captured.out and "unconfirmed" in captured.err
     assert seeds.peek(record) == seed
+
+
+@pytest.mark.parametrize("headed", [False, True])
+def test_exec_cli_routes_negotiated_admission_to_the_original_owner(record, monkeypatch, capsys, headed):
+    from agent_worktrees import launch_seed_posix
+
+    calls = []
+    selected = "execute_headed" if headed else "execute"
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    monkeypatch.setattr(launch_seed_posix, selected, lambda *a, **k: calls.append((a, k)) or 17)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record), "--phase", "exec",
+        "--launch-attempt-id", "a" * 32, "--launch-resolution-id", "b" * 32,
+        "--operation-id", "c" * 32, "--completion-file", "completion",
+        "--admission-only", "--preserve-seed-id", "preserved", "--native-resume-session", "original",
+        *(["--backend-mode", "headed-live-owner-v1"] if headed else []),
+        "--", "copilot", "--resume=original",
+    ])
+    assert native.main() == 17
+    assert calls == [((record, audit.Correlation("a" * 32, "b" * 32), "c" * 32,
+                      ["copilot", "--resume=original"], Path("completion")), {
+        "admission_only": True, "preserve_seed_id": "preserved", "native_resume_session": "original",
+    })]
+    assert not capsys.readouterr().out
 
 
 @pytest.mark.parametrize("option", [

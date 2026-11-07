@@ -17,13 +17,15 @@ from tests.test_live_keyed_receipt import rollover
 
 def prior_owners(monkeypatch):
     packet = json.loads(
-        (Path(__file__).parent / "fixtures/schema38-exact-rollback-source.json").read_text()
+        (Path(__file__).parent / "fixtures/schema38-exact-rollback-source.json").read_text(
+            encoding="utf-8",
+        )
     )
     assert packet["source_commit"] == "de0495f9eaa1e3d1b888c5c2ea24ce543cd117d4"
     modules = {}
     for source in packet["sources"]:
         fixture = Path(__file__).parent / "fixtures" / source["fixture_path"]
-        body = fixture.read_text()
+        body = fixture.read_text(encoding="utf-8")
         assert hashlib.sha256(body.encode()).hexdigest() == source["sha256"]
         name = Path(source["source_path"]).stem
         module = types.ModuleType(f"agent_bridge._schema38_{name}")
@@ -33,6 +35,18 @@ def prior_owners(monkeypatch):
         modules[name] = module
     modules["db_schema"].SCHEMA_VERSION = 38
     return modules
+
+
+def test_prior_owners_use_declared_utf8_not_locale(monkeypatch):
+    read_text = Path.read_text
+
+    def locale_read(path, encoding=None, errors=None):
+        return read_text(path, encoding=encoding or "cp1252", errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", locale_read)
+    assert set(prior_owners(monkeypatch)) == {
+        "db_schema", "inbox_custody", "db_live_session_aliases",
+    }
 
 
 def admitted(tmp_db, kind):

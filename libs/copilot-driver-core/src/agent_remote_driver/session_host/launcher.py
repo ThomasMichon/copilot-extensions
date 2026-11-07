@@ -816,10 +816,13 @@ def main(
     legacy: bool = False,
 ) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    lifetime_policies = ("legacy",) if legacy else ("acp", "legacy")
-    if argv == ["--support-json"]:
-        from importlib.util import find_spec
+    from importlib.util import find_spec
 
+    headed_available = not legacy and find_spec("agent_remote_driver.headed") is not None
+    lifetime_policies = ("legacy",) if legacy else (
+        ("acp", "legacy", "cli") if headed_available else ("acp", "legacy")
+    )
+    if argv == ["--support-json"]:
         websocket_available = (
             not legacy
             and find_spec("agent_remote_driver.session_host.ws_transport") is not None
@@ -828,11 +831,13 @@ def main(
         print(json.dumps({
             "contract": "agent-remote-driver.session-host",
             "version": 1,
-            "modes": ["headless"],
+            "modes": ["headless"] + (["headed"] if headed_available else []),
             "transports": ["tcp-frame"] + (["acp.v1"] if websocket_available else []),
             "protocol_version": proto.PROTOCOL_VERSION,
             "lifetime_policies": list(lifetime_policies),
             "startup_admission": ["live-owner-v1"],
+            "headed_process_receipts": ["native-child-v1"] if headed_available else [],
+            "headed_client": ["native-send-v1"] if headed_available else [],
             "automatic_idle_retirement": {
                 "availability": "unavailable",
                 "reason": "structured-runtime-work-inventory-unqualified",
@@ -859,9 +864,12 @@ def main(
     ap.add_argument("--active-reap-seconds", type=float, default=0.0)
     ap.add_argument("--local-birth-evidence", action="store_true")
     ap.add_argument("--repository-policy-context", default=None)
+    ap.add_argument("--mode", choices=("headless", "headed") if headed_available else ("headless",),
+                    default="headless")
+    ap.add_argument("--attempt-directory", default=None)
     ap.add_argument(
         "--lifetime-policy", choices=lifetime_policies,
-        default="legacy" if legacy else "acp",
+        default=None,
     )
     ap.add_argument("child", nargs=argparse.REMAINDER,
                     help="child command after `--` (e.g. -- copilot --acp --stdio)")
@@ -874,6 +882,42 @@ def main(
         child_argv = child_argv[1:]
     if not child_argv:
         ap.error("a child command is required after `--`")
+    lifetime_policy = args.lifetime_policy or (
+        "cli" if args.mode == "headed" else "legacy" if legacy else "acp"
+    )
+    if args.mode == "headed":
+        if (
+            lifetime_policy != "cli" or not args.attempt_directory
+            or not args.state_file or not args.session_id
+        ):
+            ap.error("headed execution requires cli lifetime, attempt directory, state file and session id")
+        if (
+            args.host_version or args.reverse_forward or args.local_birth_evidence
+            or args.active_reap_seconds != 0.0 or args.unexpected_reap_seconds != 60.0
+        ):
+            ap.error("headless-only options are unsupported for headed execution")
+        from ..headed.launcher import run_headed
+
+        # The same terminal event reaches native Copilot. Let it cancel or exit;
+        # a non-ignored Python handler is reset on exec rather than inherited as SIG_IGN.
+        interrupt_signals = [signal.SIGINT]
+        if hasattr(signal, "SIGBREAK"):
+            interrupt_signals.append(signal.SIGBREAK)
+        previous_handlers = {}
+        try:
+            for signum in interrupt_signals:
+                previous_handlers[signum] = signal.signal(signum, lambda _signal, _frame: None)
+            result = asyncio.run(run_headed(
+                child_argv, session_id=args.session_id, attempt_directory=args.attempt_directory,
+                state_file=args.state_file, cwd=args.cwd, port=args.port, ws_port=args.ws_port,
+                policy_context=args.repository_policy_context,
+            ))
+            return 128 - result if os.name == "posix" and result < 0 else result
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+    if lifetime_policy == "cli" or args.attempt_directory is not None:
+        ap.error("cli lifetime and attempt directory require headed execution")
 
     try:
         asyncio.run(run(
@@ -888,7 +932,7 @@ def main(
             active_reap_seconds=args.active_reap_seconds,
             local_birth_evidence=args.local_birth_evidence,
             policy_context=args.repository_policy_context,
-            lifetime_policy=args.lifetime_policy,
+            lifetime_policy=lifetime_policy,
             ws_port=args.ws_port,
         ))
     except KeyboardInterrupt:

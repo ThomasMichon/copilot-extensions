@@ -11,9 +11,11 @@ from agent_worktrees import launch_seed_contract as contract
 
 @pytest.mark.parametrize("fault", [
     None, "old", "full-environment-only", "malformed", "failed", "selector-changed", "custody-unknown",
+    "no-admission", "invalid-admission",
 ])
+@pytest.mark.parametrize("admission_only", [False, True])
 def test_discovery_queries_only_the_selected_completed_runtime_without_admission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None, admission_only: bool,
 ) -> None:
     root = tmp_path / "runtime"
     slot = root / "versions" / "selected"
@@ -36,6 +38,10 @@ def test_discovery_queries_only_the_selected_completed_runtime_without_admission
             ["full"] if fault == "full-environment-only" else ["full", "execution-hint"]
         ),
     }
+    if fault != "no-admission":
+        descriptor["setup_admission_modes"] = (
+            "posix-live-owner-v1" if fault == "invalid-admission" else ["posix-live-owner-v1"]
+        )
     queries = []
 
     def query(command: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -56,7 +62,8 @@ def test_discovery_queries_only_the_selected_completed_runtime_without_admission
         )
 
     monkeypatch.setattr(contract, "run_caller_owned", query)
-    assert contract.supports_posix_setup(root) is (fault is None)
+    expected = fault is None or not admission_only and fault in {"no-admission", "invalid-admission"}
+    assert contract.supports_posix_setup(root, admission_only=admission_only) is expected
     assert len(queries) == 1
     assert not list(root.rglob("*.execution.json"))
 
