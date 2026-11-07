@@ -8,6 +8,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
 from .base import ProviderError, PullResult
+from .observation_credentials import github_endpoint
 
 
 def observe_branch(provider, repo, branch, *, api_base="", token=None, run):
@@ -17,11 +18,16 @@ def observe_branch(provider, repo, branch, *, api_base="", token=None, run):
     branch = branch.removeprefix("refs/heads/")
     if not branch or branch.startswith("refs/") or any(ord(char) < 33 for char in branch):
         raise ProviderError("Branch observation needs a nonempty branch name")
-    host = provider.authority_endpoint(api_base)
+    host, endpoint = github_endpoint(provider.authority_endpoint(api_base))
+    env = provider._env(token, host=host)
+    if token:
+        env.update({name: token for name in (
+            "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+        )})
     proc = run(
         ["gh", "api", "--hostname", host, "--method", "GET",
-         f"repos/{quote(owner, safe='')}/{quote(name, safe='')}/git/ref/heads/{quote(branch, safe='')}"],
-        env=provider._env(token, host=host),
+         f"{endpoint}/repos/{quote(owner, safe='')}/{quote(name, safe='')}/git/ref/heads/{quote(branch, safe='')}"],
+        env=env,
     )
     if proc.returncode:
         detail = proc.stderr.strip() or proc.stdout.strip()

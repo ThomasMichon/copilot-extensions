@@ -156,8 +156,11 @@ repository's local receipt.
 
 With `--source-workspace` and `--expected-head`, the reachable-workspace adapter
 uses GitHub or Azure DevOps to read exact remote source and target branch tips.
-GitHub uses the selected endpoint and existing scoped `gh` credentials to read
-the exact commit ref; missing, mismatched or malformed refs refuse qualification.
+GitHub uses an absolute URL for the selected HTTPS endpoint, including its port,
+and existing scoped `gh` credentials to read the exact commit ref. An inherited
+API-host override cannot redirect that URL. Explicit tokens override all public
+and Enterprise aliases; absent tokens preserve ambient authentication. Missing,
+mismatched or malformed refs refuse qualification.
 Both tips are fenced before and after the local checks and read again after PR
 creation. A changed or unreadable post-create tip retains the PR identity for
 reconciliation, never automatic recreation. Local Git state alone is not

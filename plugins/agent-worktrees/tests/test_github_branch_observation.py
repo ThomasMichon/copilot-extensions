@@ -24,15 +24,21 @@ def test_branch_observation_pins_host_token_and_encoded_exact_ref(monkeypatch):
         return subprocess.CompletedProcess(args, 0, json.dumps(response()), "")
 
     monkeypatch.setattr(github, "run_cli", run)
+    monkeypatch.setenv("GH_ENTERPRISE_TOKEN", "ambient-must-not-win")
+    monkeypatch.setenv("GITHUB_ENTERPRISE_TOKEN", "ambient-must-not-win")
     result = pr_foreign_checks.observe(
         github.GitHubProvider(), "example/project", "topic/with#separator",
         api_base="https://forge.example:8443/api/v3", token="synthetic-token",
     )
     assert result == "a" * 40
     assert calls == [(
-        ["gh", "api", "--hostname", "forge.example:8443", "--method", "GET",
-         "repos/example/project/git/ref/heads/topic%2Fwith%23separator"],
-        {"env": {"GH_TOKEN": "synthetic-token", "GH_HOST": "forge.example:8443"}},
+        ["gh", "api", "--hostname", "forge.example", "--method", "GET",
+         "https://forge.example:8443/api/v3/repos/example/project/git/ref/heads/topic%2Fwith%23separator"],
+        {"env": {
+            "GH_TOKEN": "synthetic-token", "GITHUB_TOKEN": "synthetic-token",
+            "GH_ENTERPRISE_TOKEN": "synthetic-token", "GITHUB_ENTERPRISE_TOKEN": "synthetic-token",
+            "GH_HOST": "forge.example",
+        }},
     )]
 
 
