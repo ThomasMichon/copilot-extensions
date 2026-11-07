@@ -13,10 +13,10 @@ import socket
 from pathlib import Path
 from types import SimpleNamespace
 
-from zdd import breadcrumb, diagnostics, routing
+from zdd import breadcrumb, routing
 
 from . import rendezvous
-from .source_start import accept_readiness, config_identity
+from .source_start import _route_owner_state, accept_readiness, config_identity
 
 SCHEMA = "agent-dispatch.coordinator-serving-observation"
 VERSION = 1
@@ -115,7 +115,7 @@ def observe(
             or not isinstance(endpoint.version, str)
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,255}", endpoint.version) is None
             or endpoint.version.endswith(".") or not endpoint.process_start_time
-            or diagnostics.process_start_time(endpoint.pid) != endpoint.process_start_time
+            or _route_owner_state(endpoint) != "matching"
         ):
             raise ServingObservationError("routed coordinator ownership is unconfirmed")
         host = _loopback(endpoint.client_host)
@@ -123,10 +123,9 @@ def observe(
         with _local_client(url, token=token, timeout=min(timeout, 2.0)) as client:
             health = client.health()
         slot = health.get("slot") if isinstance(health, dict) else None
+
         def poll():
-            return None if (
-                diagnostics.process_start_time(endpoint.pid) == endpoint.process_start_time
-            ) else 0
+            return None if _route_owner_state(endpoint) == "matching" else 0
 
         handle = SimpleNamespace(pid=endpoint.pid, poll=poll)
         if (
@@ -136,7 +135,7 @@ def observe(
                 config_identity=config_identity(cfg), active=True,
             )
             or routing.read_table(root, strict=True) != table
-            or diagnostics.process_start_time(endpoint.pid) != endpoint.process_start_time
+            or _route_owner_state(endpoint) != "matching"
         ):
             raise ServingObservationError("routed coordinator readiness is unconfirmed")
         return {"state": "ready", "generation": endpoint.version}
@@ -187,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
                 results = []
                 code = coordinator_cli._cmd_cutover(
                     argparse.Namespace(
-                        json=True, health_timeout=args.timeout, drain_timeout=args.timeout,
+                        json=False, health_timeout=args.timeout, drain_timeout=args.timeout,
                         force=False, recover=False,
                     ),
                     source_environment=captured, reconcile_existing=True,
@@ -196,13 +195,18 @@ def main(argv: list[str] | None = None) -> int:
                 if code != 0 or len(results) != 1 or results[0].get("ok") is not True:
                     raise ServingObservationError("coordinator reconcile did not complete")
                 stage = "selection"
-                source_start.require_selected_generation()
+                if not source_start.require_selected_generation().samefile(root):
+                    raise ServingObservationError("selected coordinator installation changed")
             stage = "observation"
             observed = observe(
                 cfg, config.routing_dir(), run_dir=config.run_dir(), token=token,
                 environment=captured, timeout=args.timeout,
             )
             if args.apply:
+                stage = "selection"
+                if not source_start.require_selected_generation().samefile(root):
+                    raise ServingObservationError("selected coordinator installation changed")
+                stage = "observation"
                 inactive = results[0].get("status") == "inactive"
                 if (
                     (inactive and observed["state"] != "inactive")

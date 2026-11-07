@@ -512,6 +512,55 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
             assert calls == []
 
 
+@pytest.mark.parametrize("exit_phase", ["before", "after-health"])
+def test_coordinator_observation_rejects_exited_owner_with_readable_birth(tmp_path, monkeypatch, exit_phase):
+    from agent_procutil import _daemon_instance_identity
+    from agent_dispatch import coordinator_observation, source_start
+    from agent_dispatch.config import Config
+    from zdd import diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    pid, version = os.getpid(), "1.2.3"
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=version, process_start_time=birth,
+    )
+    active = routing.read_table(tmp_path, strict=True)["active"]
+    health = {
+        "status": "ok", "version": version, "runtime_config_identity": source_start.config_identity(cfg),
+        "slot": {"pid": pid, "process_start_time": birth, "role": "active", "active": active},
+    }
+    exited = exit_phase == "before"
+    original_birth = _daemon_instance_identity.birth_identity
+    calls = []
+
+    def live_birth(owner):
+        if exited:
+            raise ProcessLookupError(owner)
+        return original_birth(owner)
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            nonlocal exited
+            calls.append("health")
+            exited = True
+            return health
+
+    monkeypatch.setattr(_daemon_instance_identity, "birth_identity", live_birth)
+    monkeypatch.setattr(coordinator_observation, "_local_client", lambda *_args, **_kwargs: Client())
+    with pytest.raises(coordinator_observation.ServingObservationError):
+        coordinator_observation.observe(cfg, tmp_path, run_dir=tmp_path, token=None, environment={})
+    assert calls == ([] if exit_phase == "before" else ["health"])
+
+
 def test_coordinator_reconcile_probe_is_read_only_and_cli_is_strict(tmp_path, monkeypatch, capsys):
     import json
     from agent_dispatch import config, coordinator_cli, coordinator_observation, install_paths
@@ -572,6 +621,63 @@ def test_coordinator_reconcile_uses_selected_owner_without_starting_absent_servi
     assert os.environ["UPDATE_DRIVER_WITNESS"] == "fixture-witness"
     assert calls[0]["reconcile_existing"] is True
     assert json.loads(capsys.readouterr().out)["state"] == "inactive"
+
+
+def test_coordinator_reconcile_inhibition_emits_one_json_document(tmp_path, monkeypatch, capsys):
+    import json
+    from agent_dispatch import action_controls, config, coordinator_observation, install_paths, source_start
+
+    monkeypatch.setattr(install_paths, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(install_paths, "capture_service_environment", lambda _root: dict(os.environ))
+    monkeypatch.setattr(source_start, "require_selected_generation", lambda: tmp_path)
+    monkeypatch.setattr(config, "load_config", lambda: object())
+    monkeypatch.setattr(config, "client_token", lambda: None)
+    monkeypatch.setattr(action_controls, "action_decision", lambda *_args, **_kwargs: SimpleNamespace(
+        inhibited=True, scope="fixture", source="fixture", reason="fixture", error=None,
+    ))
+
+    assert coordinator_observation.main(["--apply"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result == {
+        "schema": coordinator_observation.SCHEMA, "version": 1, "ok": False,
+        "state": "unknown", "reason": "reconcile-unavailable",
+    }
+
+
+@pytest.mark.parametrize("inactive", [False, True])
+def test_coordinator_reconcile_rechecks_selection_after_observation(tmp_path, monkeypatch, capsys, inactive):
+    import json
+    from agent_dispatch import __version__, config, coordinator_cli, coordinator_observation, install_paths, source_start
+
+    monkeypatch.setattr(install_paths, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(install_paths, "capture_service_environment", lambda _root: dict(os.environ))
+    monkeypatch.setattr(config, "load_config", lambda: object())
+    monkeypatch.setattr(config, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "client_token", lambda: None)
+    deselected = False
+
+    def selected():
+        if deselected:
+            raise ValueError("selection changed")
+        return tmp_path
+
+    def cutover(_args, **kwargs):
+        kwargs["result_sink"]({"ok": True, "status": "inactive" if inactive else "current"})
+        return 0
+
+    def observe(*_args, **_kwargs):
+        nonlocal deselected
+        deselected = True
+        return {"state": "inactive" if inactive else "ready", "generation": None if inactive else __version__}
+
+    monkeypatch.setattr(source_start, "require_selected_generation", selected)
+    monkeypatch.setattr(coordinator_cli, "_cmd_cutover", cutover)
+    monkeypatch.setattr(coordinator_observation, "observe", observe)
+    assert coordinator_observation.main(["--apply"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "unknown"
+    assert result["reason"] == "selection-unavailable"
 
 
 def test_coordinator_reconcile_reports_unselected_owner_before_effects(tmp_path, monkeypatch, capsys):
