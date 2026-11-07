@@ -90,7 +90,8 @@ def test_unfenced_absence_after_clean_shutdown_checks_all_remembered_owners(tmp_
 @pytest.mark.parametrize(
     "reason", [
         "live", "unknown", "nonboolean", "saturated", "missing-birth",
-        "missing-history", "unrecorded", "lock", "changed",
+        "missing-history", "unrecorded", "float-pid", "float-generation",
+        "bad-version", "lock", "changed",
     ],
 )
 def test_shutdown_history_never_proves_absence_with_uncertain_owners(tmp_path, monkeypatch, reason):
@@ -107,6 +108,12 @@ def test_shutdown_history_never_proves_absence_with_uncertain_owners(tmp_path, m
         del table["publication_history"]
     elif reason == "unrecorded":
         table["previous"]["pid"] = 44
+    elif reason == "float-pid":
+        table["previous"]["pid"] = 43.0
+    elif reason == "float-generation":
+        table["previous"]["generation"] = 2.0
+    elif reason == "bad-version":
+        table["previous"]["version"] = "../invalid"
     elif reason == "lock":
         (tmp_path / "mux-daemon.lock").touch()
     path.write_text(json.dumps(table), encoding="utf-8")
@@ -141,6 +148,28 @@ def test_shutdown_history_requires_proof_within_the_observation_deadline(tmp_pat
     _cleared_mux_route(tmp_path, monkeypatch)
     ticks = iter((0.0, 2.0))
     monkeypatch.setattr(mux_serving_observation, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    with pytest.raises(mux_serving_observation.ServingObservationError):
+        mux_serving_observation.observe(tmp_path, timeout=1, ignore_custody_files=True)
+
+
+def test_shutdown_history_refuses_expiry_during_final_revalidation(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from zdd import process_exit, routing
+
+    _cleared_mux_route(tmp_path, monkeypatch)
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda *_args: True)
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr(mux_serving_observation, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    read = routing.read_table
+    calls = []
+
+    def slow_final_read(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 2:
+            clock.now = 2.0
+        return read(*args, **kwargs)
+
+    monkeypatch.setattr(routing, "read_table", slow_final_read)
     with pytest.raises(mux_serving_observation.ServingObservationError):
         mux_serving_observation.observe(tmp_path, timeout=1, ignore_custody_files=True)
 

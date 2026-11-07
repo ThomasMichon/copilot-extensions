@@ -95,13 +95,15 @@ def _closed_route_is_absent(root: Path, directory: Path, table: dict, deadline: 
     if (
         not isinstance(previous, dict)
         or set(previous) != {"bind", "port", "pid", "version", "generation", "process_start_time"}
-        or not isinstance(previous["version"], str) or not previous["version"]
+        or not isinstance(previous["version"], str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,255}", previous["version"]) is None
+        or previous["version"].endswith(".")
         or history is None or set(history) != {"version", "epoch", "saturated", "entries"}
         or history["saturated"] or not history["entries"]
     ):
         return False
-    fields = ("bind", "port", "pid", "process_start_time", "generation")
-    if {key: previous[key] for key in fields} not in history["entries"]:
+    previous_identity = publication_history._endpoint(previous)
+    if previous_identity is None or previous_identity not in history["entries"]:
         return False
     path = routing.routing_table_path(directory)
     before = path.lstat()
@@ -132,6 +134,7 @@ def _closed_route_is_absent(root: Path, directory: Path, table: dict, deadline: 
         and routing.read_table(directory, strict=True) == table
         and not os.path.lexists(mux_daemon.lock_path(root))
         and not os.path.lexists(breadcrumb.breadcrumb_path(directory))
+        and time.monotonic() < deadline
     )
 
 
