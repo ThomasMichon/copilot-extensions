@@ -2379,9 +2379,15 @@ canonical private mux routing, with raw pane argv separated from mux options
 by `--`. Two finite pane controls check actual script entry, PID and exit with
 default and null fixture configuration, always using a private data directory
 and rejecting inherited config/data overrides. PID and owner-result markers
-are published atomically. The SDK/broker and coordinator
-controls invoke native Copilot or Python directly; they do not qualify the
-Manager PowerShell pane wrapper. Unit isolation controls reject default,
+are published atomically. The SDK/broker control selects `direct` and
+`manager-wrapper` pane owners. The latter runs the actual Manager PowerShell 7
+pane wrapper with its normal pane Job enabled and a private home without an
+installed Worktrees runtime. Both owners preserve one native conversation
+across WebSocket and TCP prompts and check exact pane, CLI and extension exit.
+Run just these two controls with `-k native_headed_sdk`; this does not qualify
+the full Manager launch-session planner or survival after caller cleanup Jobs.
+The coordinator controls still invoke Python directly.
+Unit isolation controls reject default,
 foreign and whole-server routing before spawn, without mistaking child flags
 after `--` for mux routing.
 The focused `joined_session_reports_pending_read` control queries the executing

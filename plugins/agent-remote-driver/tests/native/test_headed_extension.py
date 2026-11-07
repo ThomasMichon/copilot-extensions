@@ -289,8 +289,9 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("pane_owner", ["direct", "manager-wrapper"])
 async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identity(
-    tmp_path, offline_cli, monkeypatch,
+    tmp_path, offline_cli, monkeypatch, pane_owner,
 ):
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
@@ -305,6 +306,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
     (offline_cli.home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
     class Owner:
         pid = None
+        pane_pid = None
         stops = 0
         returncode = None
 
@@ -355,6 +357,14 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
         "--screen-reader", "--plugin-dir", str(plugin), "--no-auto-update", "--disable-builtin-mcps",
         "--no-custom-instructions", "--no-color", "--no-ask-user", "--log-dir", str(offline_cli.logs),
     ]
+    pane_argv = native_argv
+    if pane_owner == "manager-wrapper":
+        pwsh = shutil.which("pwsh")
+        assert pwsh, "PowerShell 7 is required for the native Manager wrapper lane"
+        wrapper = Path(__file__).resolve().parents[4] / "worktree-manager" / "bin" / "pane-wrapper.ps1"
+        assert wrapper.is_file()
+        assert not (offline_cli.home / ".agent-worktrees").exists()
+        pane_argv = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(wrapper), *native_argv]
     fixture = FixtureMux(binary, offline_cli.home, environment)
     target, query = fixture.target, fixture.query
 
@@ -363,7 +373,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
         assert absent.returncode == 1, "The fixture target must be absent before creation"
         result = await asyncio.to_thread(
             query, "new-session", "-d", "-s", target, "-c", str(offline_cli.workspace),
-            "--", *native_argv,
+            "--", *pane_argv,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         observed = await asyncio.to_thread(
@@ -371,6 +381,10 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
         )
         assert observed.returncode == 0 and "|" in observed.stdout
         owner.identity = observed.stdout.strip()
+        pane = await asyncio.to_thread(query, "display-message", "-p", "-t", target, "#{pane_pid}")
+        assert pane.returncode == 0, pane.stderr
+        owner.pane_pid = int(pane.stdout.strip())
+        assert pid_alive(owner.pane_pid)
         owner.started.set()
 
     try:
@@ -386,6 +400,8 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
             )
             assert backend.native_pid and pid_alive(backend.native_pid)
             assert backend.extension_pid and pid_alive(backend.extension_pid)
+            if pane_owner == "manager-wrapper":
+                assert owner.pane_pid != backend.native_pid
             for _ in range(600):
                 event_file = offline_cli.home / "session-state" / native / "events.jsonl"
                 if event_file.is_file():
@@ -441,9 +457,10 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
             await asyncio.wait_for(host.wait_child(), 15)
             assert owner.returncode is not None and owner.stops == 1
             for _ in range(100):
-                if not pid_alive(backend.native_pid) and not pid_alive(backend.extension_pid):
+                if all(not pid_alive(pid) for pid in (owner.pane_pid, backend.native_pid, backend.extension_pid)):
                     break
                 await asyncio.sleep(0.05)
+            assert not pid_alive(owner.pane_pid)
             assert not pid_alive(backend.native_pid) and not pid_alive(backend.extension_pid)
             session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
             assert [path.parent.name for path in session_files] == [native]
