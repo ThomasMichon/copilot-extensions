@@ -2437,6 +2437,8 @@ existing Worktrees option table, not a new installed-peer capability. The
 coupled `test_ahp_launcher_contract.py` pins this delegation and the existing
 credential/post-exit boundaries. Environment prefixes retain assignments,
 unset/chdir flags and env's own terminator before locating native options.
+The supported env grammar uses the standard option parser, including attached
+short-option values and combined flags; incomplete options emit no command.
 Opaque env split-string forms are refused, not interpreted or silently rewritten.
 Driver's `tests/test_headed_launcher.py -k native_validator` checks
 selector-shaped values and missing-value refusal. The existing

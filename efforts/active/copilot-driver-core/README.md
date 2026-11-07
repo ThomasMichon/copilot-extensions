@@ -2018,3 +2018,22 @@ cleanup). This includes both final consumers, original contract guards and
 new custom environment-prefix regressions. The native application and retained
 core inputs are unchanged, so their prior actual passes remain scoped proof;
 the changed AHP helper still needs fresh hosted qualification, review and CI.
+
+At `1fd1d934a0`, all five selected custom-env and final-consumer cases qualify
+on hosted Windows, without skips, in 45.84 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42376106390)).
+The source/selection/controller/run/attempt/Windows manifest is validated.
+No new transport ref or source branch is needed for the published candidate.
+
+The fresh review then finds that valid attached env short options were refused.
+Use the standard option parser for the same supported env grammar, rather than
+maintaining a partial hand-written spelling parser. Attached unset/chdir values,
+combined short flags and split/long spellings retain the exact prefix. Add
+regressions for the three affected forms and explicit no-command refusal for
+an incomplete unset and an opaque split-string invocation.
+
+Thirty focused controls pass without skips in 47.86 seconds (142.33 seconds
+including preparation and cleanup), including both final consumers and the
+existing credential/post-exit contract guards. Native application and retained
+core inputs are unchanged. The new helper still requires fresh exact-source
+hosted evidence, review and required CI; no review gate is bypassed.

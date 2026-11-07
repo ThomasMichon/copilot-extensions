@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getopt
 import json
 from pathlib import PureWindowsPath
 import re
@@ -16,27 +17,17 @@ def _option_start(command: list[str]) -> int:
     while start < len(command):
         executable = PureWindowsPath(command[start]).stem.casefold()
         if executable == "env":
-            start += 1
-            options = True
-            while start < len(command):
-                argument = command[start]
-                if options and argument == "--":
-                    options = False
-                elif options and argument in {"-u", "--unset", "-C", "--chdir"}:
-                    if start + 1 == len(command):
-                        raise ValueError(f"Prepared env option {argument} requires a value")
-                    start += 1
-                elif options and (
-                    argument in {"-i", "--ignore-environment", "-v", "--debug"}
-                    or argument.startswith(("--unset=", "--chdir="))
-                ):
-                    pass
-                elif re.match(r"[A-Za-z_][A-Za-z0-9_]*=", argument):
-                    pass
-                elif options and argument.startswith("-"):
-                    raise ValueError(f"Unsupported prepared env option {argument}")
-                else:
-                    break
+            try:
+                _options, remaining = getopt.getopt(
+                    command[start + 1:], "iu:C:v",
+                    ["ignore-environment", "unset=", "chdir=", "debug"],
+                )
+            except getopt.GetoptError as error:
+                raise ValueError(f"Unsupported prepared env arguments: {error}") from error
+            start = len(command) - len(remaining)
+            if command[start:start + 1] == ["-"]:
+                start += 1
+            while start < len(command) and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", command[start]):
                 start += 1
             continue
         script = None

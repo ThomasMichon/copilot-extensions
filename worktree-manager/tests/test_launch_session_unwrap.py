@@ -232,6 +232,10 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
 
 
 @pytest.mark.parametrize("prefix", [
+    ["env", "-uOPTIONAL_TOKEN", "copilot"],
+    ["env", "-iv", "-C--resume=directory", "OTHER_FIXTURE=value",
+     "bash", "-lc", 'exec copilot "$@"', "copilot"],
+    ["env", "-iuOPTIONAL_TOKEN", "--chdir=--resume=directory", "copilot"],
     ["env", "COPILOT_FIXTURE=--resume=environment", "copilot"],
     ["env", "-u", "COPILOT_FIXTURE", "--", "OTHER_FIXTURE=value",
      "bash", "-lc", 'exec copilot "$@"', "copilot"],
@@ -261,6 +265,23 @@ def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path, prefix):
         *prefix, "--experimental", "--ahp", "http://127.0.0.1:1234",
         "--resume=authoritative", "--", "--resume=positional", "--experimental",
     ]
+
+
+@pytest.mark.parametrize("command", [
+    ["env", "-S", "copilot --resume=opaque"],
+    ["env", "-u"],
+])
+def test_ahp_binding_refuses_opaque_or_incomplete_env_before_emitting_command(tmp_path, command):
+    result = subprocess.run(
+        [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "json",
+         "http://127.0.0.1:1234", "authoritative", "--", *command],
+        cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
+            _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
+        )), capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode != 0 and not result.stdout
+    assert "Unsupported prepared env arguments" in result.stderr
 
 
 @pytest.mark.parametrize("command", [
