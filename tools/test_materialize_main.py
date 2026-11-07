@@ -147,6 +147,10 @@ def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path) ->
         source_consumer_dir=consumer, dest_consumer_dir=payload, canonical_root=source,
     )
     assert log and not any(line.startswith("SKIP") for line in log), log
+    shutil.copyfile(repo / "worktree-manager/setup.py", payload / "setup.py")
+    builder = payload.parent / "libs/versioned-runtime/standalone_build.py"
+    builder.parent.mkdir(parents=True)
+    shutil.copyfile(repo / "libs/versioned-runtime/standalone_build.py", builder)
     for name in ("generate.py", "runtime_admission.py"):
         (source / "libs/payload-invocation" / name).write_text(
             'raise RuntimeError("candidate tooling must never execute")\n',
@@ -161,9 +165,26 @@ import prepare_runtime_source
 prepare_runtime_source._materialize(source, "sample", output)
 assert b"sample.cli" in (output / "bin/sample.ps1").read_bytes()
 sys.path.insert(0, str(payload / "scripts"))
-import bootstrap_inputs, standalone_build
+import bootstrap_inputs, runpy
+from types import ModuleType
 assets = bootstrap_inputs._preparation_assets(source / "worktree-manager")
-resources = standalone_build.application_resources(payload, "worktree_manager")
+backend = ModuleType("setuptools")
+observed = {}
+backend.setup = lambda **kwargs: observed.update(kwargs)
+sys.modules["setuptools"] = backend
+run = runpy.run_path
+def selected_helper(path, *args, **kwargs):
+    assert pathlib.Path(path) == payload.parent / "libs/versioned-runtime/standalone_build.py"
+    helpers = run(path, *args, **kwargs)
+    def commands(project, package, canonical, *, companion_resources):
+        assert pathlib.Path(project) == payload and package == "worktree_manager"
+        assert pathlib.Path(canonical) == pathlib.Path(path).parent
+        return {"resources": companion_resources}
+    helpers["commands"] = commands
+    return helpers
+runpy.run_path = selected_helper
+run(str(payload / "setup.py"))
+resources = observed["cmdclass"]["resources"]
 for name in ("generate.py", "runtime_admission.py"):
     assert assets[pathlib.Path("scripts/libs/payload-invocation") / name] == (
         source / "libs/payload-invocation" / name

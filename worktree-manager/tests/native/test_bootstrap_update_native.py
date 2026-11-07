@@ -451,12 +451,19 @@ def test_retained_controller_prepares_dev_source_without_its_acquisition(
     import bootstrap_inputs
 
     _root, acquisition, driver, _start, _effects = bootstrap
-    manifest = SOURCE / "worktree-manager" / "packaged-assets.json"
-    shutil.copy2(manifest, acquisition / "worktree-manager" / manifest.name)
-    tools = acquisition / "tools"
-    tools.mkdir()
-    for name in json.loads(manifest.read_text(encoding="utf-8"))["files"]:
-        shutil.copy2(SOURCE / "tools" / name, tools / name)
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        manifest = SOURCE / "worktree-manager" / filename
+        declaration = json.loads(manifest.read_text(encoding="utf-8"))
+        shutil.copy2(manifest, acquisition / "worktree-manager" / filename)
+        for name in declaration["files"]:
+            relative = Path(declaration["canonicalDir"]) / name
+            target = acquisition / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SOURCE / relative, target)
+    shutil.copytree(
+        SOURCE / "libs/installer-engine", acquisition / "libs/installer-engine",
+        ignore=shutil.ignore_patterns("tests", "docs", "__pycache__", "*.pyc"),
+    )
     _git(acquisition, "add", ".")
     _git(
         acquisition, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
