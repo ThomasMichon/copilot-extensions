@@ -1,5 +1,7 @@
 """Real storage, handlers, protocol framing and protected synthetic transport."""
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import copy
@@ -8,11 +10,13 @@ import json
 from pathlib import Path
 import threading
 import time
+from typing import Any
 
 import pytest
-from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest
+from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest, ServiceResponse
 
 from test_review_executor import environment as environment
+from test_review_owner_store import prepared_intent as prepared_intent
 
 from agent_pull_requests.generation_cache import GenerationCache
 from agent_pull_requests.owner_read import OwnerReadBinding, OwnerReadHandler, PROFILE, PRINCIPAL_SEMANTICS
@@ -145,6 +149,246 @@ def integration(environment):
     native = NativeWorkspaceClient(operations, checkpoint=backend.checkpoint,
                                    expires_at=lambda: int(time.time()) + 600)
     return gateway, client, native, evidence, caller, binding
+
+
+@pytest.fixture
+def prepared_workspace(environment: tuple, integration: tuple, prepared_intent: dict) -> tuple:
+    store, selected, _, _, _, _ = environment
+    _, _, native, _, _, _ = integration
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600)
+    native.operations.prepared_reviews = True
+    selected["version"] = 2
+    selected["actions"][0].update({
+        key: copy.deepcopy(prepared_intent["actions"][0][key]) for key in ("body", "preparation")
+    })
+    return integration
+
+
+def prepared_request(environment: tuple) -> dict:
+    _, selected, _, attachment, _, _ = environment
+    return {
+        "number": selected["scope"]["number"], "intent": copy.deepcopy(selected),
+        "source_attachment": copy.deepcopy(attachment), "budget_seconds": 60,
+    }
+
+
+def test_actual_gateway_prepared_submission_and_receipt_reuse_the_existing_owner(
+    environment: tuple, prepared_workspace: tuple,
+) -> None:
+    store, selected, _, _, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+
+    async def scenario() -> None:
+        before = store.path.read_bytes()
+        with pytest.raises(RuntimeError, match="capability required"):
+            native.exchange("submit", prepared_request(environment))
+        assert backend.calls == [] and store.path.read_bytes() == before
+        capabilities = await client.capabilities()
+        assert capabilities["prepared_review_contract"]["intent_versions"] == [2]
+        assert "receipt" in capabilities["operations"]
+        assert native.exchange("capabilities", {}) == capabilities
+        result = await client.exchange("submit", prepared_request(environment))
+        assert result["result"]["status"] == "complete", result
+        before_bytes, before_calls = store.path.read_bytes(), len(backend.calls)
+        receipt = (await client.exchange("receipt", {
+            "number": 42, "operation_id": selected["operation_id"], "action_id": "finding",
+        }))["result"]
+        assert receipt["identity"] == selected["actions"][0]["preparation"]["identity"]
+        assert receipt["action_state"] == "confirmed" and receipt["fresh_native_read"] is False
+        assert receipt["receipt"]["platform_ids"] == {"thread_id": 100, "comment_id": 1}
+        assert store.path.read_bytes() == before_bytes and len(backend.calls) == before_calls
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("missing", ["mode", "storage"])
+def test_missing_prepared_receiver_contract_refuses_before_mutation_but_keeps_v1(
+    environment: tuple, integration: tuple, prepared_intent: dict, missing: str,
+) -> None:
+    store, selected, _, _, backend, _ = environment
+    gateway, client, native, _, caller, _ = integration
+    if missing == "mode":
+        store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600)
+    else:
+        native.operations.prepared_reviews = True
+    request = prepared_request(environment)
+    request["intent"]["version"] = 2
+    request["intent"]["actions"][0].update({
+        key: copy.deepcopy(prepared_intent["actions"][0][key]) for key in ("body", "preparation")
+    })
+
+    async def scenario() -> None:
+        capabilities = await client.capabilities()
+        assert "prepared_review_contract" not in capabilities and "receipt" not in capabilities["operations"]
+        before_calls, before_bytes = len(caller.calls), store.path.read_bytes()
+        with pytest.raises(WorkspaceClientError) as refused:
+            await client.exchange("submit", request)
+        assert refused.value.outcome_unknown is False
+        assert len(caller.calls) == before_calls and backend.calls == [] and store.path.read_bytes() == before_bytes
+        legacy = await client.exchange("submit", prepared_request(environment))
+        assert legacy["result"]["status"] == "complete" and backend.vote == 10
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_lost_prepared_wire_result_is_read_by_original_receipt_before_explicit_same_intent_replay(
+    environment: tuple, prepared_workspace: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_manager.gateway_service_channel import TransportError
+
+    _, selected, _, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = prepared_workspace
+    original = caller.request
+
+    async def lose(method: str, target: str, **kwargs: Any) -> ServiceResponse:
+        response = await original(method, target, **kwargs)
+        if target.endswith("/submit"):
+            raise TransportError("outcome-unknown", 502)
+        return response
+
+    async def scenario() -> None:
+        await client.capabilities()
+        with monkeypatch.context() as patch:
+            patch.setattr(caller, "request", lose)
+            with pytest.raises(WorkspaceClientError) as lost:
+                await client.exchange("submit", prepared_request(environment))
+            assert lost.value.outcome_unknown is True
+        receipt = (await client.exchange("receipt", {
+            "number": 42, "operation_id": selected["operation_id"], "action_id": "finding",
+        }))["result"]
+        assert receipt["action_state"] == "confirmed"
+        assert receipt["identity"] == selected["actions"][0]["preparation"]["identity"]
+        writes_before = len([call for call in backend.calls if call[0] != "GET"])
+        repeated = await client.exchange("submit", prepared_request(environment))
+        assert repeated["result"]["status"] == "complete" and repeated["result"]["entered_writes"] == 0
+        assert len([call for call in backend.calls if call[0] != "GET"]) == writes_before
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_prepared_receiver_withdrawal_is_not_authorized_by_cached_capability(
+    environment: tuple, prepared_workspace: tuple,
+) -> None:
+    store, _, _, _, backend, _ = environment
+    gateway, client, native, _, caller, _ = prepared_workspace
+
+    async def scenario() -> None:
+        await client.capabilities()
+        native.operations.prepared_reviews = False
+        before = store.path.read_bytes()
+        with pytest.raises(WorkspaceClientError) as refused:
+            await client.exchange("submit", prepared_request(environment))
+        assert refused.value.http_status == 503 and refused.value.outcome_unknown is True
+        assert backend.calls == [] and store.path.read_bytes() == before
+        refreshed = await client.capabilities()
+        assert "receipt" not in refreshed["operations"]
+        count = len(caller.calls)
+        with pytest.raises(WorkspaceClientError) as unsupported:
+            await client.exchange("submit", prepared_request(environment))
+        assert unsupported.value.outcome_unknown is False and len(caller.calls) == count
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_malformed_prepared_capability_does_not_disable_legacy_metadata_or_allow_v2(
+    environment: tuple, prepared_workspace: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    _, _, generation, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = prepared_workspace
+    original = caller.request
+
+    async def malformed(method: str, target: str, **kwargs: Any) -> ServiceResponse:
+        response = await original(method, target, **kwargs)
+        if target.endswith("/capabilities"):
+            value = json.loads(response.body)
+            value["prepared_review_contract"]["intent_versions"] = [2.0]
+            value["unavailable_operations"] = "malformed optional diagnostics"
+            return replace(response, body=json.dumps(value).encode())
+        return response
+
+    async def scenario() -> None:
+        monkeypatch.setattr(caller, "request", malformed)
+        capabilities = await client.capabilities()
+        assert "receipt" not in capabilities["operations"]
+        assert capabilities["unavailable_operations"]["receipt"] == "unsupported_prepared_review_contract"
+        lookup = await client.exchange("lookup", {"number": 42})
+        assert lookup["result"]["descriptor"]["id"] == generation["id"]
+        count = len(caller.calls)
+        with pytest.raises(WorkspaceClientError):
+            await client.exchange("submit", prepared_request(environment))
+        assert len(caller.calls) == count and backend.calls == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_prepared_receipt_response_must_match_the_selected_original_operation(
+    environment: tuple, prepared_workspace: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    _, selected, _, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = prepared_workspace
+    original = caller.request
+
+    async def mismatch(method: str, target: str, **kwargs: Any) -> ServiceResponse:
+        response = await original(method, target, **kwargs)
+        if target.endswith("/receipt"):
+            value = json.loads(response.body)
+            value["result"]["operation_id"] = "another-operation"
+            return replace(response, body=json.dumps(value).encode())
+        return response
+
+    async def scenario() -> None:
+        await client.capabilities()
+        await client.exchange("submit", prepared_request(environment))
+        before = len(backend.calls)
+        monkeypatch.setattr(caller, "request", mismatch)
+        with pytest.raises(WorkspaceClientError, match="invalid_prepared_receipt_response"):
+            await client.exchange("receipt", {
+                "number": 42, "operation_id": selected["operation_id"], "action_id": "finding",
+            })
+        assert len(backend.calls) == before
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_older_native_prepared_discovery_cannot_restore_withdrawn_support(
+    environment: tuple, prepared_workspace: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, native, _, _, _ = prepared_workspace
+    original = native.operations.execute
+    entered, release = threading.Event(), threading.Event()
+    waiting = [True]
+
+    def paused(operation: str, payload: dict, **kwargs: Any) -> dict:
+        value = original(operation, payload, **kwargs)
+        if operation == "capabilities" and waiting[0]:
+            waiting[0] = False
+            entered.set()
+            assert release.wait(5)
+        return value
+
+    monkeypatch.setattr(native.operations, "execute", paused)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        older = pool.submit(native.exchange, "capabilities", {})
+        try:
+            assert entered.wait(2)
+            native.operations.prepared_reviews = False
+            assert "receipt" not in native.exchange("capabilities", {})["operations"]
+        finally:
+            release.set()
+        with pytest.raises(RuntimeError, match="discovery superseded"):
+            older.result(timeout=2)
+    with pytest.raises(RuntimeError, match="capability required"):
+        native.exchange("receipt", {"number": 42, "operation_id": "unknown", "action_id": "finding"})
 
 
 def test_native_and_wire_materialize_same_generation_and_strict_watch_remains_compatible(environment, integration):

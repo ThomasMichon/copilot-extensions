@@ -2106,6 +2106,14 @@ authorize runtime selection. Frozen source provenance and isolated installed
 health precede canonical completion, and candidate custody is retained through
 selection and update-triggered mux cutover.
 
+Installed plugin discovery uses the canonical runtime layout resolver for both
+historical direct-slot environments and prepared applications with a slot-local
+`.venv`. Root attribution and complete-slot selection still apply; a same-named
+command on `PATH` is not an engine selection. Engine bytecode caches remain
+outside the selected slot in either layout. Picker monitor reuse compares the
+selected interpreter's environment prefix with the monitor's recorded prefix,
+so a healthy nested environment does not cause another launch attempt.
+
 Package versions and runtime generations are distinct: a repair adds the
 canonical `+repair.<identity>` qualifier (or `.repair.<identity>` after a local
 version). Existing source-qualified identities retain their canonical identity.

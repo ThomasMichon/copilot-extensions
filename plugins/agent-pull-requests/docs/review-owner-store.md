@@ -148,8 +148,10 @@ acquire preparation evidence from body markers. The default intent parser and
 protected executor still select v1. A separate
 [explicit native execution selection](protected-review-executor.md#prepared-native-intent-and-original-receipt-projection)
 can use v2 and read original receipt correlation; the data extension alone
-activates neither. No new CLI/HTTP operation, capability advertisement, runtime
-adoption or installed/provider qualification is claimed. Rollback cannot remove
+activates neither. A separately selected
+[workspace receiver](workspace-integration.md#optional-prepared-review-receiver)
+can expose the adopted contract; data adoption alone advertises no capability
+or installed/provider qualification. Rollback cannot remove
 the extension or downgrade a file with unresolved v2 records.
 
 ## Explicit remaining boundary
