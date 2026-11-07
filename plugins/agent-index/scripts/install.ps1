@@ -809,9 +809,9 @@ print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executab
             } else {
                 foreach ($version in '3.13', '3.12', '3.11', '3') {
                     $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import sys; print(sys.executable)'
+                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
                     ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String).Trim() }
+                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
                 }
             }
         } catch { }

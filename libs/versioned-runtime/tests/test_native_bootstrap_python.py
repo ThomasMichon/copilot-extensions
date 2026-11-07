@@ -1,5 +1,6 @@
 """Native ingress discovers prerequisites before any installer driver action."""
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -7,19 +8,27 @@ import sys
 
 import pytest
 
-from test_runtime_source_native import _quote, _run
+from test_runtime_source_native import _quote as _ascii_quote, _run
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows native ingress")
 
 
+def _quote(value):
+    if not str(value).isascii():
+        return "(ConvertFrom-Json " + _ascii_quote(json.dumps(str(value))) + ")"
+    return _ascii_quote(value)
+
+
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize(
-    "scenario", ["path", "launcher-unc", "launcher-selector", "known-root", "unsupported", "missing", "removal"],
+    "scenario", ["path", "launcher-unc", "launcher-selector", "launcher-selector-unicode", "known-root", "unsupported", "missing", "removal"],
 )
 def test_native_ingress_qualifies_before_driver(tmp_path, host, scenario):
     root = tmp_path / "runtime"
     old = tmp_path / "old" / "python.exe"
     supported = tmp_path / "Programs" / "Python" / "Python313" / "python.exe"
+    if scenario == "launcher-selector-unicode":
+        supported = supported.parent / chr(0x4F8B) / "python.exe"
     alias = tmp_path / "WindowsApps" / "python.exe"
     launcher = tmp_path / "py.exe"
     inside = root / "python.exe"
@@ -31,6 +40,7 @@ def test_native_ingress_qualifies_before_driver(tmp_path, host, scenario):
         "path": {"python3": [old, alias, supported]},
         "launcher-unc": {"py": [launcher]},
         "launcher-selector": {"py": [launcher]},
+        "launcher-selector-unicode": {"py": [launcher]},
         "known-root": {},
         "unsupported": {"python": [old, alias]},
         "missing": {},
@@ -71,11 +81,17 @@ function Invoke-Hidden {{
     if ($FilePath -eq {_quote(launcher)}) {{
         $global:LASTEXITCODE=0
         if ($ArgList[0] -eq '-0p') {{
-            if ({_quote(scenario)} -eq 'launcher-selector') {{ $global:LASTEXITCODE=1; return }}
+            if ({_quote(scenario)} -like 'launcher-selector*') {{ $global:LASTEXITCODE=1; return }}
             return " -V:3.9 * {_quote(old)[1:-1]}`n -V:3.13 {_quote(unc)[1:-1]}"
         }}
-        if ($ArgList[0] -eq '-3.12') {{ return {_quote(supported)} }}
-        return {_quote(old)}
+        $base=if ($ArgList[0] -eq '-3.12') {{ {_quote(supported)} }} else {{ {_quote(old)} }}
+        $prefix='import sys; sys.stdout.reconfigure(encoding="cp1252",errors="strict"); sys.executable=' +
+            (ConvertTo-Json -Compress ([string]$base)) + '; '
+        $code=$ArgList[[array]::IndexOf($ArgList, '-c')+1]
+        $captured=''
+        return Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
+            '-I','-S','-B','-c',($prefix+$code)
+        ) -ErrorOutput ([ref]$captured)
     }}
     $version=if ($FilePath -eq {_quote(old)}) {{ '(3,9)' }} else {{ '(3,13)' }}
     $base=if ($FilePath -eq {_quote(inside)}) {{ {_quote(inside)} }} else {{ {_quote(supported)} }}
@@ -104,12 +120,15 @@ try {{
     if ($_.Exception.Message -notlike 'Native install and uninstall require*') {{ throw }}
     $refused=$true
 }}
+if ($selected) {{ $selected=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($selected)) }}
 @{{selected=$selected;refused=$refused;driverCalls=$driverCalls;calls=@($calls.ToArray());
     pathUnchanged=($env:PATH -ceq $before)}} | ConvertTo-Json -Compress
 """
     result = _run(host, script, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     details = json.loads(result.stdout)
+    if details["selected"]:
+        details["selected"] = base64.b64decode(details["selected"]).decode("utf-8")
     refused = scenario in {"unsupported", "missing", "removal"}
     assert details["refused"] is refused
     assert details["driverCalls"] == (0 if refused else 1)

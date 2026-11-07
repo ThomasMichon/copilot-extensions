@@ -75,6 +75,8 @@ any driver action: application commands, launcher-listed local or UNC paths,
 compatible launcher selectors when listing is unavailable, then standard
 Windows installation roots. It skips WindowsApps aliases without changing PATH
 or installing Python. Removal still requires the base outside the target runtime.
+Selector results use ASCII-safe JSON so redirected legacy Python output can
+preserve non-ASCII installation paths.
 
 Because plugins are pulled **independently** from the marketplace, the file
 cannot be a shared runtime import — it must physically exist in each plugin. So
