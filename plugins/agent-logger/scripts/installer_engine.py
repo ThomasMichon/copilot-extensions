@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import ModuleType
@@ -620,7 +620,7 @@ def _construct(
 
 def _prepare_installed(
     inputs: FrozenInputs, slot: Path, python: Path, callable_name: str,
-    data: dict, descriptor: int, timeout: float,
+    data: dict, descriptor: int, timeout: float, payload: FrozenInputs,
 ) -> None:
     module, separator, function = callable_name.partition(":")
     if not separator or not module or not function:
@@ -640,7 +640,7 @@ getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
 """
     _child(
         [str(python), "-I", "-B", "-c", probe, str(slot), module, function,
-         json.dumps({**data, "frozen_plugin": str(inputs.plugin)}),
+         json.dumps({**data, "frozen_plugin": str(payload.plugin)}),
          hashlib.sha256(inputs.source_wheels.canonical).hexdigest()
          if inputs.source_wheels is not None else ""],
         inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
@@ -854,6 +854,21 @@ def _candidate(
                     slot = runtime.slot(root, version)
                     environment = slot / ".venv" if application is not None else slot
                     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+                    if construction_callable is not None:
+                        # UV's non-editable metadata projection is a build input,
+                        # not the selected source payload copied by preparation.
+                        temporary = retained.enter_context(_temporary_inputs(None))
+                        with _source_phase("payload-snapshot", child_timeout, {}) as progress:
+                            deadline = _source_deadline(progress)
+                            if inputs.wheel_inputs is not None:
+                                deadline = min(deadline, inputs.wheel_inputs.deadline)
+                            frozen = freeze_inputs(
+                                inputs.plugin, _private_retained_root(Path(temporary)) / "source",
+                                deadline=deadline, on_progress=progress.renew,
+                            )
+                        payload = replace(inputs, plugin=frozen.plugin, packages=frozen.packages)
+                        _revalidate_input_content(payload)
+                        _assert_source_pin(payload.plugin, expected_source_identity)
                     inputs = retained.enter_context(_retained_inputs(
                         inputs, uv, python, refresh=False, timeout=child_timeout,
                     ))
@@ -903,10 +918,14 @@ def _candidate(
                             ) / name
                             shutil.copyfile(source, bootstrap / name)
                     if construction_callable is not None:
+                        _revalidate_input_content(payload)
+                        _assert_source_pin(payload.plugin, expected_source_identity)
                         _prepare_installed(
                             inputs, slot, python, construction_callable,
-                            construction_data or {}, descriptor, child_timeout,
+                            construction_data or {}, descriptor, child_timeout, payload,
                         )
+                        _revalidate_input_content(payload)
+                        _assert_source_pin(payload.plugin, expected_source_identity)
                     _verify_installed(
                         inputs, slot, python, health_module, descriptor, child_timeout,
                         health_callable=health_callable,

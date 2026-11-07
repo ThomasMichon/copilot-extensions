@@ -24,6 +24,7 @@ APPLICATION_RESOURCES = {
         "scripts/daemon_instances.*", "scripts/daemon_instance_runtime.pyz",
         "scripts/installer-instance-reconcile.*",
         "scripts/runtime-source-tools/**/*",
+        "scripts/runtime-input-provider/**/*",
         "bin/**/*",
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),

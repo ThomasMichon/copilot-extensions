@@ -64,6 +64,8 @@ from public_toolchain_source import (  # noqa: E402
 )
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS  # noqa: E402
 from seasoned_uv import DependencyPolicyError, run_uv_install  # noqa: E402
+from installer_dependency_policy import retain_uv_install  # noqa: E402
+from build_toolchain_queries import execution_options as _execution_options, query_versions  # noqa: E402
 
 #: The exact packages a locked build-toolchain venv pins -- every
 #: `pyproject.toml` under `plugins/` and `libs/` uses the same
@@ -80,9 +82,17 @@ from seasoned_uv import DependencyPolicyError, run_uv_install  # noqa: E402
 _LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel", "packaging")
 
 
-def _seasoned_install(arguments: list[str], env: dict) -> subprocess.CompletedProcess:
+def _seasoned_install(
+    arguments: list[str], env: dict, *, uv: str = "uv", deadline: float | None = None,
+) -> subprocess.CompletedProcess:
     try:
-        return run_uv_install("uv", arguments, env=env, capture_output=True, text=True)
+        if deadline is None:
+            return run_uv_install(uv, arguments, env=env, capture_output=True, text=True)
+        with retain_uv_install(uv, arguments, env=env, deadline=deadline) as transaction:
+            return subprocess.run(
+                list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
+                capture_output=True, text=True, **_execution_options(deadline),
+            )
     except DependencyPolicyError as exc:
         raise ArtifactBuildError(f"build-toolchain dependency seasoning refused: {exc}") from exc
 
@@ -403,7 +413,9 @@ class ToolchainLock:
         return record
 
 
-def _resolve_interpreter_identity(python: str | None, env: dict) -> str:
+def _resolve_interpreter_identity(
+    python: str | None, env: dict, *, uv: str = "uv", deadline: float | None = None,
+) -> str:
     """A canonical identity for whatever interpreter ``python`` would
     ACTUALLY resolve to right now, used for provenance persistence/
     comparison instead of the caller's selector TEXT -- a bare command
@@ -430,11 +442,13 @@ def _resolve_interpreter_identity(python: str | None, env: dict) -> str:
     would record the same approximate identity and falsely compare equal,
     silently reusing a venv built for a different interpreter -- exactly
     the false-match hazard this function exists to prevent."""
-    cmd = ["uv", "python", "find", "--no-config"]
+    cmd = [uv, "python", "find", "--no-config"]
     if python:
         cmd.append(python)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=env, **_execution_options(deadline),
+        )
     except OSError as exc:
         raise ArtifactBuildError(
             f"could not resolve interpreter identity for "
@@ -450,44 +464,13 @@ def _resolve_interpreter_identity(python: str | None, env: dict) -> str:
     return str(Path(result.stdout.strip()).resolve())
 
 
-def _query_toolchain_versions(venv_python: Path) -> dict[str, str]:
-    """Queries ``venv_python`` for its own installed
-    ``_LOCKED_TOOLCHAIN_PACKAGES`` versions via `importlib.metadata`,
-    raising `ArtifactBuildError` if the query fails, produces unparseable
-    output, or any locked package is missing. Called BEFORE a freshly
-    built staging venv is published (marker written + renamed) -- never
-    only afterward -- so a broken install (malformed output, a missing
-    package) is caught while it is still disposable staging state, never
-    published as a "complete" venv a later reuse check would trust and
-    poison forever."""
-    query = subprocess.run(
-        [
-            str(venv_python), "-I", "-c",
-            "import importlib.metadata as m, json, sys\n"
-            "print(json.dumps({p: m.version(p) for p in sys.argv[1:]}))",
-            *_LOCKED_TOOLCHAIN_PACKAGES,
-        ],
-        capture_output=True, text=True, env=sanitize_subprocess_env(),
+def _query_toolchain_versions(
+    venv_python: Path, *, deadline: float | None = None,
+) -> dict[str, str]:
+    """Verify every declared build tool through the selected isolated interpreter."""
+    return query_versions(
+        venv_python, _LOCKED_TOOLCHAIN_PACKAGES, sanitize_subprocess_env(), deadline=deadline,
     )
-    if query.returncode != 0:
-        raise ArtifactBuildError(
-            f"could not read installed toolchain versions from {venv_python}:\n"
-            f"{query.stdout}\n{query.stderr}"
-        )
-    try:
-        packages = json.loads(query.stdout)
-    except json.JSONDecodeError as exc:
-        raise ArtifactBuildError(
-            f"{venv_python}: toolchain version query produced non-JSON output: {exc}"
-        ) from exc
-    missing = [p for p in _LOCKED_TOOLCHAIN_PACKAGES if not packages.get(p)]
-    if missing:
-        raise ArtifactBuildError(
-            f"{venv_python}: locked toolchain venv is missing required "
-            f"package(s) {missing} -- refusing to record an incomplete "
-            "toolchain lock"
-        )
-    return packages
 
 
 def _toml_escape(value: str) -> str:
@@ -561,9 +544,14 @@ def _publish_staging_venv(
 def resolve_toolchain_lock(
     venv_dir: Path, *, python: str | None = None,
     source_policy: str = "governed", min_age_days: int | None = None,
+    uv: str | Path | None = None, deadline: float | None = None,
 ) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
+
+    Optional ``uv`` pins an absolute executable; ``deadline`` bounds governed
+    preparation with one caller-owned monotonic budget. Bounded public discovery
+    is unavailable; omitting both options preserves the legacy entry.
 
     If ``venv_dir`` already holds a venv matching this call's EXACT
     provenance (validated index AND resolved interpreter identity,
@@ -596,11 +584,23 @@ def resolve_toolchain_lock(
     staging venv's own installed versions are validated
     (`_query_toolchain_versions`) -- so neither an interrupted setup nor
     a broken install ever gets published as "complete"."""
+    _execution_options(deadline)
+    execution = {}
+    if uv is not None:
+        selected_uv = Path(uv)
+        if not selected_uv.is_absolute() or not selected_uv.is_file():
+            raise ArtifactBuildError("toolchain UV selection requires an absolute executable file")
+        execution["uv"] = str(selected_uv.resolve(strict=True))
+    if deadline is not None:
+        execution["deadline"] = deadline
+    queries = {"deadline": deadline} if deadline is not None else {}
     env = dict(os.environ)
     if source_policy not in ("governed", "seasoned-public"):
         raise ArtifactBuildError(f"unknown toolchain source policy: {source_policy!r}")
     if source_policy == "governed" and min_age_days is not None:
         raise ArtifactBuildError("min_age_days applies only to seasoned-public toolchains")
+    if deadline is not None and source_policy == "seasoned-public":
+        raise ArtifactBuildError("deadline-bound public toolchain discovery is unavailable")
     age = DEFAULT_MIN_AGE_DAYS if min_age_days is None else min_age_days
     public = resolve_public_source(_LOCKED_TOOLCHAIN_PACKAGES, age) if source_policy == "seasoned-public" else None
     validated = (public.provenance["index"], None) if public else _validated_trusted_index_url(env)
@@ -633,7 +633,7 @@ def resolve_toolchain_lock(
     # two silently disagree about which interpreter is actually in play.
     sanitized_env = sanitize_subprocess_env(env)
     strip_package_source_env_vars(sanitized_env, strip_credentials=public is not None)
-    python_identity = _resolve_interpreter_identity(python, sanitized_env)
+    python_identity = _resolve_interpreter_identity(python, sanitized_env, **execution)
     # Resolved as the LAST thing before the reuse/build decision itself
     # (immediately below), not any earlier -- a check performed earlier
     # (e.g. right after `python_identity` is known) would leave a window
@@ -681,7 +681,7 @@ def resolve_toolchain_lock(
             # unambiguous: `uv venv --python <absolute path>` uses
             # exactly that interpreter, with nothing left to re-resolve.
             venv_cmd = [
-                "uv",
+                execution.get("uv", "uv"),
                 "venv",
                 "--no-config",
                 str(staging_venv_dir),
@@ -689,7 +689,8 @@ def resolve_toolchain_lock(
                 python_identity,
             ]
             result = subprocess.run(
-                venv_cmd, capture_output=True, text=True, env=sanitized_env
+                venv_cmd, capture_output=True, text=True, env=sanitized_env,
+                **_execution_options(deadline),
             )
             if result.returncode != 0:
                 raise ArtifactBuildError(
@@ -744,7 +745,7 @@ def resolve_toolchain_lock(
                     *(["--only-binary", ":all:"] if public else []),
                     "--python", str(staging_venv_python),
                     *(public.install_args(staging_venv_dir) if public else _LOCKED_TOOLCHAIN_PACKAGES),
-                ], install_env,
+                ], install_env, **execution,
             )
             if install.returncode != 0:
                 raise ArtifactBuildError(
@@ -757,7 +758,7 @@ def resolve_toolchain_lock(
             # validating only AFTER publish would let it poison the
             # shared slot forever (every retry trusting the same broken
             # venv and failing again, rather than rebuilding).
-            packages = _query_toolchain_versions(staging_venv_python)
+            packages = _query_toolchain_versions(staging_venv_python, **queries)
             if public:
                 public.verify(packages)
             # Remove the credential-bearing index-config file NOW, before
@@ -780,6 +781,7 @@ def resolve_toolchain_lock(
             # venv to our deterministic alternate slot instead of failing,
             # only when `target_dir` is still the original shared slot).
             _write_provenance_marker(staging_venv_dir, provenance_source, python_identity)
+            _execution_options(deadline)
             target_dir, venv_python, fresh = _publish_staging_venv(
                 staging_venv_dir, target_dir, provenance_source, python_identity,
                 venv_dir=venv_dir, allow_redirect=(target_dir == venv_dir),
@@ -788,7 +790,7 @@ def resolve_toolchain_lock(
                 # Lost the race to a venv matching OUR OWN identity --
                 # our own staging `packages` describes a venv that no
                 # longer exists at this path; re-query the actual winner.
-                packages = _query_toolchain_versions(venv_python)
+                packages = _query_toolchain_versions(venv_python, **queries)
         finally:
             # `index_config_path` (when still set -- the success path
             # above already removed and cleared it before publishing)
@@ -797,7 +799,7 @@ def resolve_toolchain_lock(
             if staging_venv_dir.exists():
                 shutil.rmtree(staging_venv_dir, ignore_errors=True)
     else:
-        packages = _query_toolchain_versions(venv_python)
+        packages = _query_toolchain_versions(venv_python, **queries)
 
     if public:
         public.verify(packages)
@@ -805,6 +807,7 @@ def resolve_toolchain_lock(
         **source_provenance(provenance_source), "source_policy": source_policy,
         "python": python_identity,
     }
+    _execution_options(deadline)
     return ToolchainLock(venv_python, packages, provenance=provenance)
 
 

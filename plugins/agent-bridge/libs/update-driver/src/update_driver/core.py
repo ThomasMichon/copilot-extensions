@@ -10,7 +10,6 @@ import math
 import os
 import re
 import sqlite3
-import stat
 import sys
 import time
 import uuid
@@ -21,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence, TextIO
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
-from . import authority, boot, foundation_state
+from . import _invocation, authority, boot, foundation_state
 from ._directory import create_queue_directory
 
 SCHEMA = 4
@@ -134,41 +133,7 @@ def _vector(value: object) -> tuple[str, ...]:
 
 
 def _spec(spec: RequestSpec) -> RequestSpec:
-    if (
-        not isinstance(spec, RequestSpec) or not isinstance(spec.backend, str)
-        or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", spec.backend)
-    ):
-        raise InvalidRequestError("backend must be a bounded adapter identifier")
-    if not isinstance(spec.context, (list, tuple)):
-        raise InvalidRequestError("safe context must contain bounded key/value pairs")
-    context = tuple(spec.context)
-    if len(context) > 64 or any(
-        not isinstance(item, (list, tuple)) or len(item) != 2 for item in context
-    ):
-        raise InvalidRequestError("safe context must contain bounded key/value pairs")
-    pairs = tuple(sorted((_text(k), _text(v)) for k, v in context))
-    if type(spec.repair) is not bool:
-        raise InvalidRequestError("repair selection must be an explicit boolean")
-    if spec.authority not in ("", "standalone", "project") or (
-        spec.authority == "project" and not spec.project
-    ):
-        raise InvalidRequestError("update authority must name a selected project or standalone")
-    killswitch_path = _text(spec.killswitch_path)
-    if killswitch_path and not Path(killswitch_path).is_absolute():
-        raise InvalidRequestError("request KillSwitch path must be absolute")
-    if len({k for k, _v in pairs}) != len(pairs):
-        raise InvalidRequestError("safe context keys must be unique")
-    cwd = _text(spec.cwd)
-    if cwd:
-        if not Path(cwd).is_absolute():
-            raise InvalidRequestError("request cwd must be absolute")
-        cwd = os.path.normcase(os.path.normpath(cwd))
-    return RequestSpec(
-        spec.backend, _vector(spec.argv), _text(spec.project), cwd, _text(spec.source), pairs,
-        spec.repair,
-        killswitch_path,
-        spec.authority,
-    )
+    return _invocation.validate_spec(spec)
 
 
 def _spec_document(spec: RequestSpec) -> dict:
@@ -256,72 +221,27 @@ def _automatic_update_inhibited(spec: RequestSpec) -> bool:
 
 
 def _runner(runner: TrustedRunner) -> TrustedRunner:
-    if not isinstance(runner, TrustedRunner):
-        raise InvalidRequestError("trusted adapter runner is required")
-    argv = _vector(runner.argv)
-    cwd = _text(runner.cwd)
-    if not argv or not Path(argv[0]).is_absolute() or not Path(cwd).is_absolute():
-        raise InvalidRequestError("trusted runner executable and cwd must be absolute")
-    if (
-        isinstance(runner.timeout, bool) or not isinstance(runner.timeout, (int, float))
-        or not math.isfinite(runner.timeout) or runner.timeout <= 0
-    ):
-        raise InvalidRequestError("runner timeout must be finite and positive")
-    env = runner.env.items() if isinstance(runner.env, Mapping) else runner.env
-    try:
-        pairs = tuple(sorted((_text(k), _text(v)) for k, v in env))
-    except (TypeError, ValueError) as error:
-        raise InvalidRequestError("runner environment must contain key/value pairs") from error
-    if any(k not in {"__PYVENV_LAUNCHER__", "PYTHONPATH"} for k, _v in pairs):
-        raise InvalidRequestError("runner environment accepts only Python import mapping")
-    if len({k for k, _v in pairs}) != len(pairs):
-        raise InvalidRequestError("runner environment keys must be unique")
-    context_keys = _vector(runner.context_keys)
-    if len(context_keys) > 64 or len(set(context_keys)) != len(context_keys) or any(
-        not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", key)
-        or key.startswith("UPDATE_DRIVER_")
-        or key in {"PYTHONPATH", "__PYVENV_LAUNCHER__"}
-        for key in context_keys
-    ):
-        raise InvalidRequestError("runner context keys must be unique environment identifiers")
-    return TrustedRunner(argv, cwd, runner.timeout, pairs, tuple(sorted(context_keys)))
+    return _invocation.validate_runner(runner)
 
 
 def runtime_command(
     module: str, args: Sequence[str] = (),
 ) -> tuple[tuple[str, ...], dict[str, str]]:
     """Construct this runtime's retained module invocation, not a latest-slot lookup."""
-    from agent_procutil import direct_python
+    return _invocation.runtime_command(module, args)
 
-    if not isinstance(module, str) or not re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*", module):
-        raise InvalidRequestError("runtime module must be an import identifier")
-    executable, env = direct_python(sys.executable)
-    prefix = Path(sys.prefix)
-    application = prefix.name == ".venv" and prefix.parent.parent.name == "versions"
-    slot = prefix.parent if application else prefix
-    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
-    installed = (
-        (slot / ".install-complete.json").exists()
-        or (slot / ".install-complete.json").is_symlink()
-        or bootstrap.parent.exists() or bootstrap.parent.is_symlink()
-        or not application and slot.parent.name == "versions"
-    )
-    if bootstrap.exists() or bootstrap.is_symlink():
-        info = bootstrap.lstat()
-        if (
-            not stat.S_ISREG(info.st_mode) or bootstrap.is_symlink()
-            or getattr(info, "st_file_attributes", 0) & 0x400
-            or bootstrap.parent.resolve() != bootstrap.parent
-        ):
-            raise StateError("retained runtime bootstrap is linked or unsafe")
-    if bootstrap.is_file():
-        return (
-            executable, "-I", "-S", "-B", "-X", "utf8", str(bootstrap), "-m", module,
-            *_vector(args),
-        ), env
-    if installed:
-        raise StateError("installed runtime is missing its retention bootstrap")
-    return (executable, "-m", module, *_vector(args)), env
+
+def runtime_script_command(
+    path: str | os.PathLike[str], args: Sequence[str] = (),
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Construct this runtime's retained absolute-script invocation."""
+    return _invocation.runtime_script_command(path, args)
+
+
+def _runtime_command(
+    entry: tuple[str, ...], args: Sequence[str],
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    return _invocation.retained_runtime_command(entry, args)
 
 
 def _json(value: object) -> str:
@@ -514,6 +434,7 @@ change_authority = authority.change
 def enqueue(
     spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
     coalesce_running: bool = False,
+    _exclusive_custody: OperationLock | None = None,
 ) -> Request:
     """Commit acceptance; only trusted adapters with pinned targets may share active work."""
     root = _root(root)
@@ -529,10 +450,17 @@ def enqueue(
     spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
     with authority.submission(root, spec):
-        _reconcile_lost_owner(root)
-        _assert_foundation_clear(root)
+        if _exclusive_custody is None:
+            _reconcile_lost_owner(root)
+        else:
+            _exclusive_custody.assert_owned()
+        _assert_foundation_clear(root, include_running=_exclusive_custody is not None)
         with _database(root, create=True) as db:
             db.execute("BEGIN IMMEDIATE")
+            if _exclusive_custody is not None and db.execute(
+                "SELECT 1 FROM requests WHERE state IN ('pending','running') LIMIT 1",
+            ).fetchone() is not None:
+                raise StateError("request-local execution requires an idle queue; nothing replayed")
             if _has_fence(db, root):
                 raise InterruptedError("installation queue fenced; explicit positive settlement required")
             row = None
@@ -611,9 +539,11 @@ def _foundation_operation(root: Path) -> foundation_state.FoundationOperation | 
         raise StateError(str(error)) from error
 
 
-def _assert_foundation_clear(root: Path) -> None:
+def _assert_foundation_clear(root: Path, *, include_running: bool = False) -> None:
     operation = _foundation_operation(root)
-    if operation is not None and operation.state == "interrupted" and operation.fenced:
+    if operation is not None and operation.fenced and (
+        include_running or operation.state == "interrupted"
+    ):
         raise InterruptedError("installation queue fenced by unsettled foundation construction")
 
 
@@ -779,6 +709,7 @@ def _execute(transaction: Transaction) -> int:
 
 def drain(
     *, root: Path | None = None, executor: Callable[[Transaction], int] | None = None,
+    _request_id: str | None = None, _custody: OperationLock | None = None,
 ) -> int:
     """Finite worker or supervised debug; always the same kernel/journal authority.
 
@@ -802,7 +733,11 @@ def drain(
         reason = "boot_identity_malformed" if isinstance(error, StateError) else admission_failure
         detail = f"worker admission failed: {reason}:{type(error).__name__}"
         with _database(root, writable=True) as db, db:
-            db.execute("UPDATE requests SET error=? WHERE state='pending'", (detail,))
+            db.execute(
+                "UPDATE requests SET error=? WHERE state='pending'"
+                + (" AND id=?" if _request_id is not None else ""),
+                (detail, _request_id) if _request_id is not None else (detail,),
+            )
         raise StateError(detail) from error
     startup = os.environ.pop("UPDATE_DRIVER_STARTUP", "")
     if re.fullmatch(r"[0-9a-f]{32}", startup):
@@ -817,33 +752,39 @@ def drain(
             pending.rename(root / f".worker-started-{startup}")
         finally:
             pending.unlink(missing_ok=True)
-    lock = OperationLock(root / "execution.lock")
-    while True:
-        try:
-            lock.acquire()
-            break
-        except OperationLockedError:
-            time.sleep(.05)
+    lock = _custody or OperationLock(root / "execution.lock")
+    if _custody is None:
+        while True:
+            try:
+                lock.acquire()
+                break
+            except OperationLockedError:
+                time.sleep(.05)
+    reconcile = _reconcile_foundation if _request_id is None else (
+        lambda root, custody: _assert_foundation_clear(root, include_running=True)
+    )
     try:
-        with _database(root, writable=True) as db:
-            db.execute("BEGIN IMMEDIATE")
-            _upgrade_schema(db, root, lock)
-            db.commit()
-        _reconcile_foundation(root, lock)
+        if _request_id is None:
+            with _database(root, writable=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                _upgrade_schema(db, root, lock)
+                db.commit()
+        reconcile(root, lock)
         with _database(root, create=True) as db:
             with db:
                 db.execute("BEGIN IMMEDIATE")
                 _has_fence(db, root)
-                db.execute(
-                    """UPDATE requests SET state='interrupted',error=?,finished_at=?
-                    WHERE state='running'""",
-                    ("previous owner lost custody; descendant settlement unconfirmed", time.time()),
-                )
+                if _request_id is None:
+                    db.execute(
+                        """UPDATE requests SET state='interrupted',error=?,finished_at=?
+                        WHERE state='running'""",
+                        ("previous owner lost custody; descendant settlement unconfirmed", time.time()),
+                    )
             if _has_fence(db, root):
                 raise InterruptedError("installation queue fenced by unsettled prior transaction")
         while True:
             lock.assert_owned()
-            _reconcile_foundation(root, lock)
+            reconcile(root, lock)
             with _database(root, create=True) as db:
                 db.execute("BEGIN IMMEDIATE")
                 if _has_fence(db, root):
@@ -854,6 +795,8 @@ def drain(
                 if row is None:
                     db.commit()
                     return 0
+                if _request_id is not None and row["id"] != _request_id:
+                    raise StateError("request-local execution cannot consume another queued request")
                 request = _request(row, root)
                 reason = authority.refusal(root, request.spec, db=db) or automatic_update_refusal(request.spec)
                 if reason is not None:
@@ -864,6 +807,8 @@ def drain(
                     )
                     db.commit()
                     print(f"Update request {request.id}: {reason}", file=sys.stderr)
+                    if _request_id is not None:
+                        return 0
                     continue
                 db.execute(
                     "UPDATE requests SET state='running',started_at=?,boot_id=?,error=NULL WHERE id=?",
@@ -884,7 +829,7 @@ def drain(
                     raise
                 transaction._close()
                 transaction.assert_owned()
-                _reconcile_foundation(root, lock)
+                reconcile(root, lock)
                 if type(code) is not int:
                     raise StateError("executor did not return an integer exit status")
                 if request.log_path.exists():
@@ -914,6 +859,46 @@ def drain(
                 raise
             finally:
                 _active_transaction.reset(scope)
+            if _request_id is not None:
+                return 0
+    finally:
+        if _custody is None:
+            lock.release()
+
+
+def run_explicit(
+    spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
+    executor: Callable[[Transaction], int] | None = None,
+) -> Request:
+    """Run only a newly admitted explicit operation; never drain or repair peers."""
+    root = _root(root)
+    with _database(root, create=True):
+        pass
+    lock = OperationLock(root / "execution.lock")
+    try:
+        lock.acquire()
+    except OperationLockedError as error:
+        raise StateError("request-local execution is busy; no request admitted") from error
+    try:
+        _assert_foundation_clear(root, include_running=True)
+        with _database(root, writable=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT 1 FROM requests WHERE state IN ('pending','running') LIMIT 1",
+            ).fetchone() is not None or _has_fence(db, root):
+                raise StateError("request-local execution requires an idle, unfenced queue; nothing replayed")
+            _upgrade_schema(db, root, lock)
+            db.commit()
+        request = enqueue(spec, runner=runner, root=root, _exclusive_custody=lock)
+        try:
+            drain(root=root, executor=executor, _request_id=request.id, _custody=lock)
+        except BaseException as error:
+            setattr(error, "request_id", request.id)
+            raise
+        result = status(request.id, root=root)
+        if not isinstance(result, Request):
+            raise StateError("request-local execution returned no request")
+        return result
     finally:
         lock.release()
 

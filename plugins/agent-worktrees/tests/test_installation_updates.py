@@ -238,17 +238,24 @@ def test_old_engine_installer_cannot_recover_manager_as_target_effect(tmp_path, 
 
 
 @pytest.mark.parametrize("prepared_supported", [False, True])
-def test_isolated_engine_checks_execution_artifact_not_authority(tmp_path, prepared_supported):
+@pytest.mark.parametrize("declared", [False, True])
+def test_isolated_engine_checks_execution_artifact_not_authority(tmp_path, prepared_supported, declared):
     authority, prepared = tmp_path / "authority", tmp_path / "prepared"
     for payload, supported in ((authority, not prepared_supported), (prepared, prepared_supported)):
         (payload / "scripts").mkdir(parents=True)
         for extension in ("sh", "ps1"):
-            (payload / "scripts" / f"install.{extension}").write_text(
+            (payload / "scripts" / f"{'construct' if declared else 'install'}.{extension}").write_text(
                 "AGENT_WORKTREES_TARGETED_UPDATE" if supported else "old installer",
             )
+        if declared:
+            (payload / "source-install.json").write_text(json.dumps({
+                "schema": "copilot-extensions.native-source-install", "version": 1,
+                "windows": {"script": "scripts/construct.ps1", "argument": "-FromBundle"},
+                "posix": {"script": "scripts/construct.sh", "argument": "--from-bundle"},
+            }))
     step = update_runtime_plan.RuntimeUpdateStep(
         "agent-worktrees", "engine_runtime", authority,
-        source=SimpleNamespace(payload=prepared),
+        source=SimpleNamespace(payload=prepared, install_source=tmp_path / "inputs" if declared else None),
     )
     if prepared_supported:
         assert owner.isolated_engine_step(step).environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"

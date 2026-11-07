@@ -129,7 +129,11 @@ def _select_inputs(
             if step.name != "agent-index":
                 source.validate(step.name, step.payload, environment)
                 project = (project or Path.cwd()).resolve()
-            source_target = plan_target(source, step.name, step.payload, root, environment)
+            source.installer_arguments("windows" if sys.platform == "win32" else "posix")
+            source_target = (
+                plan_target(source, step.name, step.payload, root, environment)
+                if source.install_source is None else None
+            )
             if source_target is not None:
                 environment[TARGET_ENV] = source_target.document
             environment.update({
@@ -271,7 +275,10 @@ def plan_registered(
             return dataclasses.replace(step, status="installer not found")
         _, argv = built
     else:
-        prefix = _shell_prefix(pdir, platform_name, allow_init=True)
+        prefix = _shell_prefix(
+            pdir, platform_name, allow_init=True,
+            **({"prepared": True} if source and source.install_source is not None else {}),
+        )
         if isinstance(prefix, str):
             return dataclasses.replace(step, status=prefix)
         shell_prefix, has_update = prefix
@@ -280,6 +287,8 @@ def plan_registered(
         argv = [*shell_prefix, *(["update"] if has_update else (
             ["-Force" if platform_name == "windows" else "--force"] if force else []
         ))]
+        if source is not None:
+            argv += source.installer_arguments(platform_name)
     try:
         deadline = runtime._installer_timeout(name, environment, pdir)
     except (OSError, ValueError) as error:
@@ -288,13 +297,21 @@ def plan_registered(
 
 
 def _shell_prefix(
-    pdir: Path, platform_name: str, *, allow_init: bool = False,
+    pdir: Path, platform_name: str, *, allow_init: bool = False, prepared: bool = False,
 ) -> tuple[list[str], bool] | str:
     windows = platform_name == "windows"
     extension = "ps1" if windows else "sh"
     installer = pdir / "scripts" / f"install.{extension}"
     has_update = installer.exists()
-    if allow_init and not has_update:
+    if prepared:
+        from .update_runtime_source import source_install_entry
+
+        entry = source_install_entry(pdir, platform_name)
+        if entry is None:
+            return "prepared source installer declaration not found"
+        installer = pdir / entry["script"]
+        has_update = True
+    elif allow_init and not has_update:
         installer = pdir / "scripts" / f"init.{extension}"
     if not installer.exists():
         return "installer not found"
@@ -349,11 +366,16 @@ def plan_module(
         return dataclasses.replace(step, status="SKIPPED (current)")
     # Modules historically use install/update even in a selected cell. Never
     # replace that contract with the registered-runtime init/cell-provision path.
-    prefix = _shell_prefix(pdir, platform_name)
+    prefix = _shell_prefix(
+        pdir, platform_name,
+        **({"prepared": True} if source and source.install_source is not None else {}),
+    )
     if isinstance(prefix, str):
         return dataclasses.replace(step, status=prefix)
     shell_prefix, _ = prefix
     update_args = ["update"]
+    if source is not None:
+        update_args += source.installer_arguments(platform_name)
     if reconcile._zero_downtime_update(pdir):
         if platform_name == "windows":
             update_args.append("-ZeroDowntime")
@@ -365,7 +387,12 @@ def plan_module(
         return dataclasses.replace(step, status=runtime.installer_deadline_status(error))
     return dataclasses.replace(
         step, argv=tuple([*shell_prefix, *update_args]),
-        fallback_argv=() if name == "agent-bridge" else tuple([*shell_prefix, "install"]),
+        fallback_argv=() if name == "agent-bridge" or (
+            source is not None and source.install_source is not None
+        ) else tuple([
+            *shell_prefix, "install",
+            *(source.installer_arguments(platform_name) if source else []),
+        ]),
         deadline_s=deadline,
     )
 
@@ -464,6 +491,7 @@ def plan_engine(
     plugin_dir: Path, platform_name: str, *, force: bool,
     source: PreparedRuntimeSource | None = None, project_root: Path | None = None,
     check_footprint: bool = True,
+    action: str = "update",
 ) -> RuntimeUpdateStep:
     from . import update_cli
 
@@ -484,12 +512,19 @@ def plan_engine(
             and (not check_footprint or _runtime_footprint_current(step))):
         if "COPILOT_EXTENSIONS_CONTEXT" in environment or not reconcile.hook_shims_drifted(plugin_dir):
             return dataclasses.replace(step, status="SKIPPED (current)")
-    prefix = _shell_prefix(plugin_dir, platform_name)
+    prefix = _shell_prefix(
+        plugin_dir, platform_name,
+        **({"prepared": True} if source and source.install_source is not None else {}),
+    )
     if isinstance(prefix, str):
         return dataclasses.replace(step, status=prefix)
     shell_prefix, _ = prefix
-    argv = [*shell_prefix, "update", "-InstallDir" if platform_name == "windows" else "--install-dir",
+    if action not in {"install", "update", "repair"}:
+        raise ValueError("Unsupported native engine installation action")
+    argv = [*shell_prefix, action, "-InstallDir" if platform_name == "windows" else "--install-dir",
             str(root)]
+    if source is not None:
+        argv += source.installer_arguments(platform_name)
     try:
         deadline = max(600, update_cli._installer_timeout("agent-worktrees", environment, plugin_dir))
     except (OSError, ValueError) as error:

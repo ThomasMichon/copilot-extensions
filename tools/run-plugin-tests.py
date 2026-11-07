@@ -63,7 +63,7 @@ from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 from plugin_test_cache import (
-    clear_cache_contents, dependency_fingerprint, has_dev_extra,
+    clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
     ordinary_cache_root, source_resolution_arguments,
 )
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
@@ -213,10 +213,6 @@ def _has_pyproject(name: str) -> bool:
     return (_plugin_dir(name) / "pyproject.toml").is_file()
 
 
-def _has_dev_extra(name: str) -> bool:
-    return has_dev_extra(_plugin_dir(name))
-
-
 def all_plugins_with_suites() -> list[str]:
     if not PLUGINS.is_dir():
         return []
@@ -287,11 +283,18 @@ def _dep_fingerprint(name: str) -> str:
     """Bind cached installs to source bytes and the selected installation shape."""
     fingerprint = dependency_fingerprint(
         name, _plugin_dir(name), REPO,
-        (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
+        declared_test_tooling_requirements(name) if name in SOURCE_ONLY_TEST_TARGETS
+        else (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
     )
     if name == "worktree-manager":
         return hashlib.sha256(f"{fingerprint}:non-editable-manager-v1".encode()).hexdigest()
     return fingerprint
+
+
+def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
+    return declared_test_requirements(
+        _plugin_dir(name), (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
+    )
 
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
@@ -350,7 +353,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
     if fresh or reinstall:
         if _has_pyproject(name) and name not in SOURCE_ONLY_TEST_TARGETS:
             # Use the project cwd so uv reads its declared local sources.
-            spec = ".[dev]" if _has_dev_extra(name) else "."
+            spec = ".[dev]" if has_dev_extra(_plugin_dir(name)) else "."
             cmd = [uv, "pip", "install", "--python", str(py)]
             # Manager embeds first-party imports that must outlive retained build inputs.
             cmd.extend([spec] if name == "worktree-manager" else ["-e", spec])
@@ -396,8 +399,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
             # Source-only targets and pyproject-less plugins import their
             # owning scripts directly; they need test tooling, not an editable.
             run_uv_install(
-                uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
-                     *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
+                uv, ["--python", str(py), *declared_test_tooling_requirements(name)],
                 env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")

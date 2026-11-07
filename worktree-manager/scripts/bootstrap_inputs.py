@@ -20,29 +20,55 @@ def _preparation_assets(payload: Path) -> dict[Path, Path]:
     if (
         not isinstance(declaration, dict)
         or declaration.get("schema") != "copilot-extensions.packaged-assets"
-        or type(declaration.get("version")) is not int or declaration["version"] != 1
-        or declaration.get("canonicalDir") != "tools"
-        or declaration.get("payloadDir") != "scripts/runtime-source-tools"
-        or not isinstance(declaration.get("files"), list) or not declaration["files"]
+        or type(declaration.get("version")) is not int
     ):
         raise ValueError("Unsupported Manager source preparation assets")
+    legacy = declaration["version"] == 1
+    if legacy:
+        if (
+            declaration.get("canonicalDir") != "tools"
+            or declaration.get("payloadDir") != "scripts/runtime-source-tools"
+        ):
+            raise ValueError("Unsupported Manager source preparation assets")
+        groups = [declaration]
+    elif (
+        declaration["version"] == 2 and set(declaration) == {"schema", "version", "groups"}
+        and isinstance(declaration["groups"], list) and 1 <= len(declaration["groups"]) <= 32
+    ):
+        groups = declaration["groups"]
+    else:
+        raise ValueError("Unsupported Manager source preparation assets")
+
+    def relative(value):
+        if (
+            not isinstance(value, str) or not value or "\\" in value or ":" in value
+            or any(part in {"", ".", ".."} for part in value.split("/"))
+        ):
+            raise ValueError("Invalid Manager source preparation asset name")
+        return Path(value)
+
     assets = {}
-    names = set()
-    for name in declaration["files"]:
-        if not isinstance(name, str) or name in {"", ".", ".."} or Path(name).name != name:
-            raise ValueError("Invalid Manager source preparation asset name")
-        if "/" in name or "\\" in name or ":" in name:
-            raise ValueError("Invalid Manager source preparation asset name")
-        if name in names:
-            raise ValueError("Duplicate Manager source preparation asset name")
-        names.add(name)
-        target = Path(declaration["payloadDir"]) / name
-        if (payload / target).is_file():
-            continue
-        source = payload.parent / "tools" / name
-        if source.resolve() != source or not source.is_file():
-            raise ValueError(f"Manager source preparation asset is unavailable: {name}")
-        assets[target] = source
+    targets = set()
+    directories = set()
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("files"), list) or not group["files"]:
+            raise ValueError("Unsupported Manager source preparation assets")
+        canonical, destination = relative(group.get("canonicalDir")), relative(group.get("payloadDir"))
+        for name in group["files"]:
+            member = relative(name)
+            if legacy and member.name != name:
+                raise ValueError("Invalid Manager source preparation asset name")
+            target = destination / member
+            if target in targets or target in directories or any(parent in targets for parent in target.parents):
+                raise ValueError("Duplicate Manager source preparation asset name or overlapping targets")
+            targets.add(target)
+            directories.update(target.parents)
+            if (payload / target).is_file():
+                continue
+            source = payload.parent / canonical / member
+            if source.resolve() != source or not source.is_file():
+                raise ValueError(f"Manager source preparation asset is unavailable: {name}")
+            assets[target] = source
     return assets
 
 

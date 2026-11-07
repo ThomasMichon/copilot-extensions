@@ -167,6 +167,54 @@ def test_preparation_assets_are_retained_addressed_and_rechecked(preparation_ass
         helper.retain(payload, driver)
 
 
+def test_grouped_preparation_assets_retain_each_declared_root(preparation_assets):
+    helper, payload, driver, tool = preparation_assets
+    library = payload.parent / "libs" / "example" / "helper.py"
+    library.parent.mkdir(parents=True)
+    library.write_text("VALUE = 2\n", encoding="utf-8")
+    groups = [
+        {"canonicalDir": "tools", "payloadDir": "scripts/runtime-source-tools", "files": [tool.name]},
+        {"canonicalDir": "tools", "payloadDir": "scripts/runtime-input-provider/tools", "files": [tool.name]},
+        {"canonicalDir": "libs/example", "payloadDir": "scripts/runtime-input-provider/libs/example",
+         "files": [library.name]},
+    ]
+    (payload / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2, "groups": groups,
+    }), encoding="utf-8")
+    retained, _share = helper.retain(payload, driver)
+    for group in groups:
+        for name in group["files"]:
+            assert (retained / group["payloadDir"] / name).read_bytes() == (
+                payload.parent / group["canonicalDir"] / name
+            ).read_bytes()
+    assert helper.retain(payload, driver)[0] == retained
+    library.write_text("VALUE = 3\n", encoding="utf-8")
+    assert helper.retain(payload, driver)[0] != retained
+
+
+@pytest.mark.parametrize("failure", ["traversal", "absolute", "duplicate", "overlap"])
+def test_grouped_preparation_assets_refuse_unsafe_or_overlapping_targets(
+    preparation_assets, failure,
+):
+    helper, payload, driver, tool = preparation_assets
+    group = {"canonicalDir": "tools", "payloadDir": "scripts/runtime-source-tools", "files": [tool.name]}
+    groups = [group]
+    if failure == "traversal":
+        group["canonicalDir"] = "../outside"
+    elif failure == "absolute":
+        group["payloadDir"] = "/outside"
+    elif failure == "duplicate":
+        groups.append(dict(group))
+    else:
+        groups.append({"canonicalDir": "tools", "payloadDir": "scripts", "files": ["runtime-source-tools"]})
+    (payload / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2, "groups": groups,
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid|Duplicate"):
+        helper.retain(payload, driver)
+    assert not driver.exists()
+
+
 def test_preparation_asset_change_during_freezing_is_not_published(preparation_assets, monkeypatch):
     helper, payload, driver, tool = preparation_assets
     freeze = helper.engine.freeze_inputs

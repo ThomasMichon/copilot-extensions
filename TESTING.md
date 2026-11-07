@@ -3303,13 +3303,31 @@ refuses a missing sibling. The real application handoff and changed-wheel,
 installed-content and origin controls in `tools/test_local_install_source.py`
 exercise that companion loading through staged nested environments.
 
-The same file's `application_adapter` packet qualifies the explicit prepared
-downstream composition API. Four refusal controls stop changed selection,
+The same file's `application_adapter` refusal controls check the explicit prepared
+downstream composition API. Four controls stop changed selection,
 missing application, mismatched construction and Manager-native ownership
-before construction. Its contained synthetic application executes real UV
+before construction. `tools/test_application_adapter_journey.py` retains the
+contained synthetic application journey: real UV
 construction, setup/start, unchanged repeat, changed-declaration refusal before
-callbacks, failed-start selector rollback, distinct repair with the new
-declaration and the published stable command. The source receipt and application are fixtures,
+callbacks, a failed-start selected generation with unchanged last-known-good, distinct repair
+with the new declaration and the published stable command.
+The `application-adapter` contract in `tools/run-manager-runtime-acceptance.py`
+explicitly selects the ordered source-input, application-preparation, selection, install, repeat, refusal,
+failed-start, retry and physical-command items for both plugin and standalone
+forms. Each form retains one disposable source/application/runtime across its
+phases. Every item has 30 seconds, including its fixture work; one contained
+300-second group includes all application preparation, both forms and cleanup.
+Source freezing and application-profile construction remain separate bounded
+items; both retain the complete original dependency graph and production checks.
+The existing managed `agent-worktrees` test environment must already be prepared;
+this contract never bootstraps tooling or prepares an application outside that group.
+It is a changed per-phase allocation, **not** an original single-30-second pass.
+The runner supplies exact node order and requires all 16 unique, successful
+JUnit cases before accepting the journey. A later phase without its predecessors
+refuses; an independently selected phase reports only partial coverage.
+Function-scoped environment restoration and canonical group cleanup retain
+custody on failure and timeout. Native child and routing deadlines are unchanged.
+The source receipt and application are fixtures,
 not authenticated release/deployment evidence. Native Windows qualification
 does not qualify Linux, resident-service readiness or an adopter's host rollout;
 these cases do not expand required unit-only CI.
@@ -6284,6 +6302,39 @@ imports must survive private-input cleanup. Other plugin targets and the
 separately prepared Bridge remain editable. Production installation and test
 selection are unchanged.
 
+The `TestSelectedManagerMaterialization` source-equivalence class is one ordered,
+fresh-fixture sequence: fixture creation, full compose, selected compose,
+full equivalence, then all 161 SDK byte comparisons and trailing rewrite checks.
+Select the complete class, not an individual method. Partial/reordered collection
+and missing predecessors fail; the class finalizer removes its owned workspace
+and rejects incomplete evidence. Whole-tree equivalence alone has a 60-second
+item limit; fixture creation, both compose phases, and SDK comparison retain
+30 seconds each.
+The native packet retains one 300-second clock from before fixture creation
+through cleanup. This allocation does not turn the former compound item's
+30-second timeout into a monolithic pass.
+
+Closed-wheel deadline negatives use `negative_source_plugin`: a fresh real
+three-package local source graph with non-Python resources, not the full
+procutil/ZDD process-owner input. Invalid deadlines use an absent source path
+to prove refusal before source lookup. The full `plugin` fixture remains
+unchanged for native construction, child lifetime and positive consumers;
+the negative graph does not qualify those integrations or replace cold proof.
+
+Source-only tooling preparation selects the owning project's declared `dev`
+extra (or flat `dev` dependency group) through
+`declared_test_tooling_requirements`, plus the existing runner requirements.
+The group is a fallback only when the extra is absent. Malformed metadata
+tables or non-flat selected lists refuse before installation; group inclusion
+objects are not implicitly resolved.
+It does not promote runtime dependencies or `first-party-core` build inputs
+into tooling. Source-only cache identity includes that selected requirement
+set, so a pre-selection environment cannot silently retain missing dev tools.
+A selected packet still uses each owner's source-bound native
+environment and lease; package-cache warming alone is not preparation evidence.
+The optional declared-tooling proof checks a real isolated tooling environment's
+import after canonical retained installation, not application construction.
+
 Worktrees' managed-session admission packet is explicitly selectable:
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
 It uses temporary profiles, real hook subprocesses, both available PowerShell
@@ -8033,6 +8084,24 @@ outside ordinary unit discovery; pure asset and registry controls remain in
 their owning unit suites.
 
 Manager's cold canonical-adopter acceptance has an explicit native lane:
+
+The separate `tools/run-manager-runtime-acceptance.py --contract provider
+--root <ignored-output>` packet builds
+the actual Manager wheel with its canonical resource hooks, installs it into a
+fresh dependency-free environment, removes its disposable build checkout, and
+invokes the installed provider through an explicitly prepared native tooling
+interpreter. Tooling is a separate disposable environment populated from
+Manager's declared development requirements through the canonical seasoned
+registry installer, not an editable Manager or Bridge application install.
+Tooling preparation and cleanup share the same 300-second group.
+The complete-profile/compiler, admission and offline application
+lock pipeline runs without mocked producer calls. Synthetic associated
+first-party inputs have no registry dependencies; this is not production-feed
+transport or the full real Manager dependency closure. Wrong source identity
+and corrupt wheel inputs refuse without changing completed output or activating
+a runtime. The existing 300-second group, 180-second native child and 30-second
+assertion limits remain unchanged. This packet does not qualify the separate
+multi-install adapter's existing deadline failure, default routing or rollout.
 
 The focused `tests/native/test_manager_runtime_install.py -k
 preparation_completed_units` packet separately connects the real Manager copy

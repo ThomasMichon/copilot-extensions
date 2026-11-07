@@ -9,11 +9,13 @@ import subprocess
 import time
 import zipfile
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import core_release_delivery as delivery
 import core_release_inputs as intake
 import promotion_bundle_members as bundle_members
+import build_toolchain_queries as toolchain_queries
 import pytest
 from artifact_attestation import PromotionArtifactError
 
@@ -21,6 +23,42 @@ COMMIT = "a" * 40
 DEV = "b" * 40
 TREE = "c" * 40
 CONTENT = "d" * 40
+
+
+@pytest.mark.parametrize("outcome", ["ok", "failed", "invalid", "missing"])
+def test_toolchain_versions_retain_deadline_and_validate_response(monkeypatch, outcome):
+    packages = ("setuptools", "wheel")
+    versions = {"setuptools": "83.0", "wheel": "0.45"}
+    environment = {"TOOLCHAIN": "selected"}
+
+    def remaining(deadline, *, error_type):
+        assert deadline == 123.0 and error_type is toolchain_queries.ArtifactBuildError
+        return 4.5
+
+    def run(command, **options):
+        assert command[0] == "selected-python" and command[-2:] == list(packages)
+        assert options["env"] is environment
+        assert options["timeout"] == 4.5
+        assert options["capture_output"] and options["text"]
+        return SimpleNamespace(
+            returncode=9 if outcome == "failed" else 0,
+            stdout="noise" if outcome == "invalid" else json.dumps(
+                {} if outcome == "missing" else versions,
+            ),
+            stderr="selected probe failed",
+        )
+
+    monkeypatch.setattr(toolchain_queries, "remaining_timeout", remaining)
+    monkeypatch.setattr(toolchain_queries.subprocess, "run", run)
+    if outcome == "ok":
+        assert toolchain_queries.query_versions(
+            Path("selected-python"), packages, environment, deadline=123.0,
+        ) == versions
+    else:
+        with pytest.raises(toolchain_queries.ArtifactBuildError):
+            toolchain_queries.query_versions(
+                Path("selected-python"), packages, environment, deadline=123.0,
+            )
 
 
 def test_promotion_bundle_members_keep_manifest_first_and_wheels_sorted():
