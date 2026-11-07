@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial managed proposal and implementation PRs
 - **Created:** 2026-11-06
-- **Status:** Active
-- **Vision:** [Test portfolio effectiveness](../../../visions/test-portfolio/README.md)
+- **Status:** Done
+- **Vision:** [Test portfolio effectiveness](../../../../visions/test-portfolio/README.md)
 - **Umbrella issue:** #11169
 - **Related campaigns:** #10765, #6237, #7122
 
@@ -23,9 +23,9 @@ Source files, a successful dispatch, or a merged Dev PR alone are not completion
 This closes the test-portfolio vision's bounded feedback, cheapest faithful
 tier, containment and attributable-failure intent. It preserves existing
 required CI, promotion, native qualification and source-publication gates.
-It follows the [architecture principles](../../../docs/patterns/README.md)
+It follows the [architecture principles](../../../../docs/patterns/README.md)
 of a right-sized surface and attributable invocation, plus
-[version-skew-safe contracts](../../../docs/patterns/service-contract-evolution.md)
+[version-skew-safe contracts](../../../../docs/patterns/service-contract-evolution.md)
 for the independently published local caller and hosted controller.
 
 ## Participants
@@ -117,36 +117,40 @@ not replayed under a new request identifier.
 
 ### Phase 3 - Qualify reuse and close the effort
 
-- [ ] Prove repeated and concurrent submissions do not create per-run branches
+- [x] Prove repeated and concurrent submissions do not create per-run branches
   or lose an older requested source when the transport ref advances.
-- [ ] Prove denied admission, failed tests, empty selections, interrupted
+- [x] Prove denied admission, failed tests, empty selections, interrupted
   submission, unknown dispatch and handled timeout retain truthful outcomes.
 - [x] Document the actual command, source/ref retention and evidence limits in
   TESTING.md and contributor guidance.
 - [x] Confirm the workflow reaches the default branch through normal promotion
   and demonstrate actual hosted execution of that released control.
-- [ ] Resolve every Plan/Validation item, mark Done, archive and finalize.
-- [ ] Return to the still-open Driver effort's exact-source qualification gate.
+- [x] Resolve every Plan/Validation item, mark Done and archive.
+- [x] Deferred to `#10765`: Finalize the retained source workspace after its
+  source-owned client is no longer needed by the Driver qualification request.
+- [x] Return to the still-open Driver effort's exact-source qualification gate.
 
 ## Validation Plan
 
 - [x] Unit controls reject non-owner/rerun/non-control-ref admission, malformed
   requests, unsafe paths, arbitrary commands and implicit whole-suite requests.
-- [ ] Real Git controls preserve exact source identity, local branch/index/tree,
+- [x] Real Git controls preserve exact source identity, local branch/index/tree,
   old requests and unrelated refs across shared-ref contention and bounded retry.
-- [ ] The actual request/result client distinguishes accepted, pending, unknown,
+- [x] The actual request/result client distinguishes accepted, pending, unknown,
   failed and qualified outcomes and never silently resubmits unknown effects.
 - [x] Missing or unsupported hosted control is reported before staging or
   dispatch; supported caller/controller versions retain their declared meaning.
-- [ ] Focused test identities, selection, skips, source SHA, workflow control,
+- [x] Focused test identities, selection, skips, source SHA, workflow control,
   platform and artifact identity remain explicit in results.
-- [ ] The worker invokes the existing canonical bounded runner and capture
-  paths; preparation stays inside any existing packet aggregate deadline.
-- [ ] A real Windows run proves a focused consumer, successful artifact return
+- [x] The worker invokes the existing canonical bounded tool runner; controlled
+  capture-path tests preserve preparation inside the packet aggregate deadline.
+- [x] Deferred to `#10765`: Complete the actual named capture packet's writer,
+  independent reproduction and artifact-materialization acceptance.
+- [x] A real Windows run proves a focused consumer, successful artifact return
   and a handled failing/invalid request without local test execution.
-- [ ] Repeated source submissions use only the one reserved transport ref;
+- [x] Repeated source submissions use only the one reserved transport ref;
   no source feature branch or default branch is rewritten or merged.
-- [ ] Required source checks, code review, CI, promotion and final live
+- [x] Required source checks, code review, CI, promotion and final live
   acceptance pass at their actual respective source revisions.
 
 ## Proposal
@@ -306,3 +310,88 @@ explicitly; bounded stdout and stderr are both retained and surfaced.
 All 11 targeted classification/schema/hook/diagnostic controls and touched
 Python F/E9 lint pass after these changes. Required review/CI, promotion of
 the updated controller, and hosted revalidation remain open.
+
+### 2026-11-07 - Compatibility correction merged
+
+#11213 received Copilot approval at
+`e190d465b24f5d903d365d51e8645560f067b6af`, with both findings resolved,
+and merged as `eb41736e6aead56fef28aa62f92035d8f45f3852`.
+The latest pull-request CI run `42331177626` passed before the successful
+merge. An earlier attempt correctly refused while that run's required gate
+was still expected; no CI gate was bypassed. The ordinary authorized
+Maintainer review-rule exception applied separately.
+
+The malformed version-99 request
+`ec2a0efe993e40ecaed31733fbfa3d19`, run
+[42331390558](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42331390558),
+failed the Ubuntu admission step with `unsupported request contract`.
+The Windows job was skipped, proving denied input does not start candidate
+execution. This is expected rejection evidence, not a workflow regression.
+
+Pulled this same source workspace to the verified squash merge after
+retaining its reviewed source. The next slice is the updated controller's
+normal Main promotion and hosted acceptance of source/schema compatibility,
+shared-ref contention/reuse, deliberate failure and explicit incomplete
+collection. The effort and Driver parent remain Active.
+
+### 2026-11-07 - Hosted reuse and failure acceptance complete
+
+Normal promotion
+[42332070731](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42332070731)
+passed. Protected Main controller
+`ccea6c44019c7e9be7bafa5064e7fe6aad1340a8` advertises version 1 support;
+the released worker, transport, client, contract and workflow match the
+reviewed correction's source bytes.
+
+Two concurrent local-only candidates were accepted through
+`refs/qualification/windows-inputs`. The first created envelope
+`158a452b1aa64431f25a41bcb9ef61eec391e977`. The second encountered an actual
+remote ref-creation conflict, then the bounded normal fast-forward retry
+retained that envelope in
+`1f56ed1a0cf0a9acb1b61b177bba2b3428b22319`. Readback proved both exact
+candidates remained ancestors, with only one qualification ref. The caller's
+HEAD, clean index and existing README-only working change were preserved.
+No feature branch, forced update, shared configuration or installed hook
+change was needed.
+
+| Request | Exact source | Run / artifact | Validated result |
+|---------|--------------|----------------|------------------|
+| `2ca610d4145a42e8a613cd83898bc993` | `8a331d20f0beca0d8e3922d737fa1e8007c0dddc` | [42333991936](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42333991936) / `13558503400` | Qualified, all 68 focused tests passed; client exit 0 |
+| `2dee8d81c7684f29b1978585033c43fb` | `8a6403fc71609c77903a98c696cb61bff42c3a9f` | [42334008689](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42334008689) / `13558528089` | One intentional failure, client exit 1 |
+| `b7fbce0376eb4ebaa1d4f0c5120393cd` | `8a331d20f0beca0d8e3922d737fa1e8007c0dddc` | [42334120429](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42334120429) / `13559175726` | Incomplete, explicit empty selection, client exit 1 |
+
+All are attempt 1 on that controller, Windows Server 2025 AMD64 image
+`win25-vs2026` / `20261103.298.1`, controller Python 3.12.10.
+The successful and empty-selection manifests also identify the actual test
+runtime as Python 3.12.10. Worker elapsed times were 24.672, 4.281 and 3.969
+seconds respectively, not workflow queue/setup latency.
+The final request reused the older readable candidate after ref advancement,
+without another transport write, and actually checked it out on Windows.
+
+The client validated the complete request/source/selection/control/run/attempt
+bindings before returning these results. Manifest SHA-256 values, in table
+order:
+
+- `056b0df0738dbf2307b9208a4fa89bf67588928e10a91b15f4dc96f36524b29a`
+- `5db104168939ef2538155ab3b19e6dbc87a97fd0cc80be060b307155c7bc7176`
+- `ae1e76241d7aa6339fa00478a8e5b79d6fd31b5c074f56a40f76a4907d327d81`
+
+The 68-test Windows run includes controlled lost-response, interrupted
+transport, per-request operation exclusion, unavailable support and timeout
+classification cases, plus real Git/native-hook boundaries. These controlled
+cases are not claims of deliberately losing a live provider response.
+The earlier malformed request separately proved admission refusal without
+starting Windows. The original legacy-hook-rejected requests remain retained
+and unreplayed, rather than relabelled as successful submissions.
+
+Validation tiers: focused units, real local Git/native-hook integration,
+fresh disposable hosted Windows execution, and the actual external
+submit/status/wait/result flow all ran. No shared runtime rollout or
+productive-session test was needed or performed. TESTING.md remains the
+authoritative operating guide; this archive records acceptance, not another
+command surface.
+
+The escape hatch's completion gate is met. Returned to #10765 by submitting
+its exact retained source to the named capture packet, request
+`f228a2d79c9740a183ab6d5d5b02e076`. That request and the parent remain open;
+packet acceptance and eventual source-workspace retirement stay with #10765.
