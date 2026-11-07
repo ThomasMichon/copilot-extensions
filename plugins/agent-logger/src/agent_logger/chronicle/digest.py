@@ -100,6 +100,7 @@ def build_digest_manifest(
                 "created_at": s.created_at,
                 "updated_at": s.updated_at,
                 "segment_ref": s.ref.key,
+                "metrics": s.metrics,
             }
             for s in digest.sessions
         ],

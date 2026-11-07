@@ -134,6 +134,11 @@ class DiscoveredSession:
     #: sessions use index 0; a source that splits continuation sessions sets
     #: one DiscoveredSession per reserved segment.
     ref: SegmentRef | None = None
+    #: Caller-supplied evidence-based metrics for this session -- one
+    #: ``sessions[i].metrics`` block of ``agent-logger metrics --json`` --
+    #: carried into the digest manifest verbatim. Never populated or estimated
+    #: by discovery; ``None`` means no measurement is available.
+    metrics: dict | None = None
 
     def __post_init__(self) -> None:
         if self.ref is None:
