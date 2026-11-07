@@ -63,7 +63,7 @@ class FixtureBackend:
 
 
 @pytest.fixture
-def api(tmp_db):
+def mux_api(tmp_db):
     tmp_db.register_live_session(
         "native-1", machine=None, cwd=None, worktree_id="fixture-worktree", repo=None,
         branch=None, pid=123, process_started_at=1.0, role=None, now=time.time(),
@@ -96,154 +96,154 @@ def api(tmp_db):
 BASE = "/api/v1/live-sessions/native-1/questions/mux"
 
 
-def inspect(api):
-    response = api.client.get(BASE)
+def inspect(mux_api):
+    response = mux_api.client.get(BASE)
     assert response.status_code == 200, response.text
     return response.json()["inspection_id"]
 
 
 @pytest.mark.parametrize("selection,expected", [({"option": 2}, "Green"), ({"text": "custom answer"}, "custom answer")])
-def test_http_choice_and_freeform_are_verified_audited_and_single_use(api, selection, expected):
-    token = inspect(api)
+def test_http_choice_and_freeform_are_verified_audited_and_single_use(mux_api, selection, expected):
+    token = inspect(mux_api)
     def admitted_before_effect():
-        rows = api.db.execute_read("SELECT state,answer FROM mux_question_answers")
+        rows = mux_api.db.execute_read("SELECT state,answer FROM mux_question_answers")
         assert [(row["state"], row["answer"]) for row in rows] == [("admitted", expected)]
-    api.backend.before_key = admitted_before_effect
+    mux_api.backend.before_key = admitted_before_effect
     body = {"inspection_id": token, "sender": "delegated-controller", **selection}
-    response = api.client.post(BASE, json=body)
+    response = mux_api.client.post(BASE, json=body)
     assert response.status_code == 200, response.text
     assert response.json()["state"] == "answered" and response.json()["accepted"] is True
-    assert api.backend.keys[-1] == ("Enter", False)
-    count = len(api.backend.keys)
-    assert api.client.post(BASE, json=body).status_code == 409
-    assert len(api.backend.keys) == count
-    audit = api.client.get(BASE + "/answers/" + token).json()
+    assert mux_api.backend.keys[-1] == ("Enter", False)
+    count = len(mux_api.backend.keys)
+    assert mux_api.client.post(BASE, json=body).status_code == 409
+    assert len(mux_api.backend.keys) == count
+    audit = mux_api.client.get(BASE + "/answers/" + token).json()
     assert audit["answer"] == expected and audit["sender"] == "delegated-controller"
     assert audit["state"] == "answered"
-    events = [event for event in api.log.snapshot_history()[1] if event.event == "mux_question_answer"]
+    events = [event for event in mux_api.log.snapshot_history()[1] if event.event == "mux_question_answer"]
     assert [event.data["phase"] for event in events] == ["admitted", "outcome"]
-    api.state.db.get_live_session = lambda _: None
-    assert api.client.get(BASE + "/answers/" + token).json()["state"] == "answered"
+    mux_api.state.db.get_live_session = lambda _: None
+    assert mux_api.client.get(BASE + "/answers/" + token).json()["state"] == "answered"
 
 
 @pytest.mark.parametrize("change", ["screen", "identity", "resolved", "permission", "superseded"])
-def test_terminal_first_and_changed_inputs_never_send_keys(api, change):
-    token = inspect(api)
+def test_terminal_first_and_changed_inputs_never_send_keys(mux_api, change):
+    token = inspect(mux_api)
     if change == "identity":
-        api.backend.identity["process"] = "replacement"
+        mux_api.backend.identity["process"] = "replacement"
     elif change == "screen":
-        api.backend.screen = panel().replace("Choose", "Different")
+        mux_api.backend.screen = panel().replace("Choose", "Different")
     elif change == "resolved":
-        api.backend.done = True
+        mux_api.backend.done = True
     elif change == "permission":
-        api.log.append("permission_request", {"tool_call_id": "permission"})
+        mux_api.log.append("permission_request", {"tool_call_id": "permission"})
     else:
-        api.log.append("tool_call_update", {"tool_call_id": "fixture-question", "status": "completed"})
-    response = api.client.post(BASE, json={
+        mux_api.log.append("tool_call_update", {"tool_call_id": "fixture-question", "status": "completed"})
+    response = mux_api.client.post(BASE, json={
         "inspection_id": token, "sender": "controller", "option": 1,
     })
     assert response.status_code in {200, 409}
     if response.status_code == 200:
         assert response.json()["state"] == "raced"
-    assert api.backend.keys == []
+    assert mux_api.backend.keys == []
 
 
-def test_restart_expiry_and_other_session_tokens_have_no_input_authority(api):
-    token = inspect(api)
-    api.state.mux_questions.inspections[token].expires -= 61
+def test_restart_expiry_and_other_session_tokens_have_no_input_authority(mux_api):
+    token = inspect(mux_api)
+    mux_api.state.mux_questions.inspections[token].expires -= 61
     body = {"inspection_id": token, "sender": "controller", "option": 1}
-    assert api.client.post(BASE, json=body).status_code == 409
-    token = inspect(api)
-    api.state.mux_questions.inspections[token].session_id = "other"
-    assert api.client.post(BASE, json={**body, "inspection_id": token}).status_code == 409
-    api.state.mux_questions = MuxQuestions()
-    assert api.client.post(BASE, json={**body, "inspection_id": token}).status_code == 409
-    assert api.backend.keys == []
+    assert mux_api.client.post(BASE, json=body).status_code == 409
+    token = inspect(mux_api)
+    mux_api.state.mux_questions.inspections[token].session_id = "other"
+    assert mux_api.client.post(BASE, json={**body, "inspection_id": token}).status_code == 409
+    mux_api.state.mux_questions = MuxQuestions()
+    assert mux_api.client.post(BASE, json={**body, "inspection_id": token}).status_code == 409
+    assert mux_api.backend.keys == []
 
 
-def test_key_failure_is_unknown_and_blocks_reinspection_after_restart(api):
-    token = inspect(api)
+def test_key_failure_is_unknown_and_blocks_reinspection_after_restart(mux_api):
+    token = inspect(mux_api)
     def fail():
         raise MuxQuestionError("synthetic key outcome unknown")
-    api.backend.before_key = fail
-    result = api.client.post(BASE, json={
+    mux_api.backend.before_key = fail
+    result = mux_api.client.post(BASE, json={
         "inspection_id": token, "sender": "controller", "option": 1,
     }).json()
     assert result["state"] == "unverified" and result["accepted"] is None
-    assert api.client.get(BASE).status_code == 409
-    api.state.mux_questions = MuxQuestions()
-    assert api.client.get(BASE).status_code == 409
+    assert mux_api.client.get(BASE).status_code == 409
+    mux_api.state.mux_questions = MuxQuestions()
+    assert mux_api.client.get(BASE).status_code == 409
 
 
-def test_pane_replacement_after_navigation_stops_before_enter(api):
-    token = inspect(api)
-    api.backend.before_key = lambda: api.backend.identity.update(process="replacement")
-    response = api.client.post(BASE, json={
+def test_pane_replacement_after_navigation_stops_before_enter(mux_api):
+    token = inspect(mux_api)
+    mux_api.backend.before_key = lambda: mux_api.backend.identity.update(process="replacement")
+    response = mux_api.client.post(BASE, json={
         "inspection_id": token, "sender": "controller", "option": 2,
     })
     assert response.json()["state"] == "unverified"
-    assert api.backend.keys == [("Down", False)]
+    assert mux_api.backend.keys == [("Down", False)]
 
 
-def test_preissued_inspection_cannot_bypass_an_uncertain_sibling_attempt(api):
-    first, second = inspect(api), inspect(api)
-    api.state.mux_questions.inspections[second].fingerprint = "different-observed-screen"
+def test_preissued_inspection_cannot_bypass_an_uncertain_sibling_attempt(mux_api):
+    first, second = inspect(mux_api), inspect(mux_api)
+    mux_api.state.mux_questions.inspections[second].fingerprint = "different-observed-screen"
     def fail():
         raise MuxQuestionError("synthetic uncertain input")
-    api.backend.before_key = fail
+    mux_api.backend.before_key = fail
     body = {"sender": "controller", "option": 1}
-    assert api.client.post(BASE, json={**body, "inspection_id": first}).json()["state"] == "unverified"
-    original = api.db.execute_read
+    assert mux_api.client.post(BASE, json={**body, "inspection_id": first}).json()["state"] == "unverified"
+    original = mux_api.db.execute_read
     # A different serving generation can have observed no admission before the
     # first write committed. The SQL mutation boundary must still refuse it.
-    api.db.execute_read = lambda sql, params=(): (
+    mux_api.db.execute_read = lambda sql, params=(): (
         [] if "SELECT inspection_id" in sql else original(sql, params)
     )
-    assert api.client.post(BASE, json={**body, "inspection_id": second}).status_code == 409
-    assert api.backend.keys == []
+    assert mux_api.client.post(BASE, json={**body, "inspection_id": second}).status_code == 409
+    assert mux_api.backend.keys == []
 
 
-def test_same_screen_has_one_admission_even_with_two_inspection_tokens(api):
-    first, second = inspect(api), inspect(api)
+def test_same_screen_has_one_admission_even_with_two_inspection_tokens(mux_api):
+    first, second = inspect(mux_api), inspect(mux_api)
     body = {"sender": "controller", "option": 1}
-    assert api.client.post(BASE, json={**body, "inspection_id": first}).json()["state"] == "answered"
-    assert api.client.post(BASE, json={**body, "inspection_id": second}).status_code == 409
-    assert api.backend.keys == [("Enter", False)]
+    assert mux_api.client.post(BASE, json={**body, "inspection_id": first}).json()["state"] == "answered"
+    assert mux_api.client.post(BASE, json={**body, "inspection_id": second}).status_code == 409
+    assert mux_api.backend.keys == [("Enter", False)]
 
 
-def test_authentication_and_malformed_permission_mixed_answers_have_no_effect(api):
-    assert api.client.get(BASE, headers={"Authorization": "invalid"}).status_code == 401
-    token = inspect(api)
+def test_authentication_and_malformed_permission_mixed_answers_have_no_effect(mux_api):
+    assert mux_api.client.get(BASE, headers={"Authorization": "invalid"}).status_code == 401
+    token = inspect(mux_api)
     for fields in (
         {"option": 1, "text": "two"}, {"option": True}, {"option": 13},
         {"option": 1, "permission": True}, {"text": "first\nsecond"},
         {"text": "\x1b[A"}, {"option": 3},
     ):
-        response = api.client.post(BASE, json={
+        response = mux_api.client.post(BASE, json={
             "inspection_id": token, "sender": "controller", **fields,
         })
         assert response.status_code in {409, 422}, response.text
-    assert api.backend.keys == []
+    assert mux_api.backend.keys == []
 
 
-def test_native_answering_and_multifield_or_permission_evidence_prevent_fallback(api):
+def test_native_answering_and_multifield_or_permission_evidence_prevent_fallback(mux_api):
     from agent_bridge.live_questions import QuestionObservation
 
-    api.state.live_questions.publish("native-1", QuestionObservation.model_validate({
+    mux_api.state.live_questions.publish("native-1", QuestionObservation.model_validate({
         "generation": "extension", "pid": 123, "process_started_at": 1.0,
         "requests": [{
             "request_id": "native-request", "family": "elicitation", "answerable": True,
             "message": "Choose", "requested_schema": {"type": "object", "properties": {}},
         }],
     }))
-    assert api.client.get(BASE).status_code == 409
-    api.state.live_questions = LiveQuestions()
-    api.log.append("ask_user_request", {
+    assert mux_api.client.get(BASE).status_code == 409
+    mux_api.state.live_questions = LiveQuestions()
+    mux_api.log.append("ask_user_request", {
         "tool_call_id": "fixture-question", "message": "Choose",
         "requested_schema": {"properties": {"first": {}, "second": {}}},
     })
-    assert api.client.get(BASE).status_code == 409
-    assert api.backend.keys == []
+    assert mux_api.client.get(BASE).status_code == 409
+    assert mux_api.backend.keys == []
 
 
 @pytest.mark.parametrize("screen", [
