@@ -25,7 +25,7 @@ SEED_STATES = pytest.mark.parametrize(
 
 
 def test_http47_capture_source_lookup_scans_the_proof_only_at_admission():
-    from bridge_http47_runtime import _source_lookup
+    from bridge_http47_runtime import _source_locator
 
     class Proof(dict):
         scans = 0
@@ -40,7 +40,7 @@ def test_http47_capture_source_lookup_scans_the_proof_only_at_admission():
         "tools/source.py": {},
         "tools/not-python.json": {},
     })
-    lookup = _source_lookup(proof)
+    lookup = _source_locator(proof)
     for _ in range(10):
         assert lookup(r"C:\retained\pkg\source.py") == "libs/core/src/pkg/source.py"
         assert lookup("/retained/source.py") == "libs/other/src/source.py"

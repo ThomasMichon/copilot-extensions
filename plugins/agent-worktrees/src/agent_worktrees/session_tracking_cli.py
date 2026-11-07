@@ -26,17 +26,9 @@ def _core_helper(name: str, local):
 
 
 def add_head_parser(sub) -> None:
-    sp = sub.add_parser(
-        "head-session",
-        help="Show a worktree's asserted head (current) session + state (JSON)",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or 4-char suffix)",
-    )
+    sp = sub.add_parser("head-session", help="Show a worktree's asserted head (current) session + state (JSON)")
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id", required=True,
+                    help="Worktree ID (full or 4-char suffix)")
     sp.add_argument("--json", action="store_true", help="Emit JSON (default; accepted for caller compatibility)")
 
 

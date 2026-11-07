@@ -1458,3 +1458,28 @@ published head now reports a genuine upstream conflict, so preserve this
 qualified source and artifact before normal managed reconciliation. Any
 changed execution closure needs impact-selected revalidation; this result
 does not qualify an unexamined rebase or complete the parent.
+
+### 2026-11-07 - Reconcile the qualified checkpoint with current development
+
+Preserved the qualified source and generated outputs before reducing the owned
+17-commit stack to one tree-identical local commit. Rebased that net change
+onto `b206e572a1`, resolving the source conflict once: retain upstream's
+precomputed suffix lookup and the distinct per-interpreter capture logs.
+Update the focused lookup control to exercise that canonical implementation.
+Both upstream's caller-association additions and the bounded head reader
+remain in the shared CLI module, within its unchanged 1,000-line ceiling.
+
+The canonical registry codec and locked publication owner retain every
+provenance record from both histories: 10,874 HTTP records and 91 Session Host
+records. The shared CLI source declaration names the genuinely merged bytes;
+this is not new capture evidence. Regenerated the canonical lifecycle archive,
+all 13 adopter copies, the nested Worktrees copy and the affected footprint
+producer hashes from current source. All 652 admitted unit-source hashes,
+installation-context synchronization, the Worktrees payload generator,
+changed-module ceilings and focused F/E9 checks pass.
+
+The current complete packet contains 270 cases, not the earlier 245. The prior
+hosted result remains valid for its original source only. This reconciled
+closure still requires fresh hosted controls, canonical writer, independent
+same-source reproduction, contract verification and receipt-bound artifact
+return before refreshing #11016 for review and required CI.
