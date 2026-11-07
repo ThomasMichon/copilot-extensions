@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -67,6 +68,10 @@ def venue(monkeypatch, tmp_path):
     ledger = {"new-worktree": set()}
 
     def ownership(args, **kwargs):
+        if args[:2] == ["claims", "owner"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({
+                "kind": "codespace", "ref": args[3], "owners": [],
+            }), "")
         assert args[:3] == ["--project", "project", "claims"] and args[-1] == "--json"
         worktree = args[3]
         outbound = [
@@ -250,6 +255,274 @@ def test_tokened_legacy_return_does_not_infer_absence_from_unreadable_ledger(ven
     assert venue.shared["returned"].state == "leased"
     assert not any(event[0] in ("release", "settle") for event in venue.events)
 
+
+@pytest.mark.parametrize("later_state", ["leased", "released"])
+def test_settlement_failure_remains_recoverable_after_cross_host_reuse(
+    venue, monkeypatch, capsys, later_state,
+):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    settle = coordination.settle_obligation
+    monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
+    with pytest.raises(RuntimeError, match="settlement.*retained"):
+        lease.release_claim("returned", "new-worktree")
+    assert venue.shared["returned"].state == "released"
+    venue.shared["returned"] = coordination.L2Lease(
+        "returned", "other-machine/project/second-worktree", later_state == "leased",
+        token="d" * 40, state=later_state,
+    )
+    later = vars(venue.shared["returned"]).copy()
+    release_count = sum(event[0] == "release" for event in venue.events)
+    monkeypatch.setattr(coordination, "settle_obligation", settle)
+    assert lease.release_claim("returned", "new-worktree")
+    assert not venue.ledger["new-worktree"]
+    assert lease.get_lease("returned") is None
+    assert vars(venue.shared["returned"]) == later
+    assert sum(event[0] == "release" for event in venue.events) == release_count
+
+
+def test_overlapping_return_cannot_settle_same_owner_reacquisition(venue, monkeypatch, capsys):
+    from agent_codespaces import reuse
+
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    settle = coordination.settle_obligation
+    entered = False
+
+    def overlapping_settle(name, holder, **kwargs):
+        nonlocal entered
+        if not entered:
+            entered = True
+            for action in (
+                lambda: lease.release_claim(name, "new-worktree"),
+                lambda: lease.claim(name, "new-worktree", holder_ref=holder),
+                lambda: lease.heartbeat(name),
+                lambda: lease.borrow("other-effort", name, force=True),
+                lambda: reuse.reserve(name, "example/project", venue.config, "selected", {}),
+            ):
+                with pytest.raises(RuntimeError, match="busy"):
+                    action()
+        return settle(name, holder, **kwargs)
+
+    monkeypatch.setattr(coordination, "settle_obligation", overlapping_settle)
+    assert lease.release_claim("returned", "new-worktree")
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    assert lease.get_lease("returned").worktree == "new-worktree"
+    assert venue.ledger["new-worktree"] == {"returned"}
+    assert sum(event[0] == "settle" for event in venue.events) == 1
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("entry", ["cli", "connect"])
+def test_native_claim_journaling_is_inside_claim_return_exclusion(venue, monkeypatch, capsys, entry):
+    monkeypatch.setattr(lease, "active_worktree_ids", lambda: {"new-worktree"})
+    journal = coordination.journal_obligation
+
+    def acquire(name, holder, **kwargs):
+        venue.shared[name] = coordination.L2Lease(
+            name, holder, True, token="b" * 40, state="leased",
+        )
+        return coordination.L2Result("ok", token="b" * 40)
+
+    def overlapping_journal(name, holder, **kwargs):
+        with pytest.raises(RuntimeError, match="busy"):
+            lease.release_claim(name, "new-worktree")
+        # Journaling is a native RPC, not part of the short store transaction.
+        with lease._lease_lock():
+            assert lease._read_leases()[name].worktree == "new-worktree"
+        return journal(name, holder, **kwargs)
+
+    monkeypatch.setattr(coordination, "acquire", acquire)
+    monkeypatch.setattr(coordination, "journal_obligation", overlapping_journal)
+    if entry == "cli":
+        assert cli.main(["claim", "returned", "--owner", "new-worktree"]) == 0
+    else:
+        assert lease.claim_for_connect("returned") == "machine/project/new-worktree"
+    assert venue.ledger["new-worktree"] == {"returned"}
+    assert lease.release_claim("returned", "new-worktree")
+    assert not venue.ledger["new-worktree"]
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+def test_preselected_return_cannot_release_a_replacement_same_owner_claim(venue, monkeypatch, capsys, bulk):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    release = lease.release_claim
+    replacement = None
+
+    def delayed_release(name, owner, **kwargs):
+        nonlocal replacement
+        assert release(name, owner)
+        assert cli.main(["create", "example/project", "--no-wait"]) == 0
+        replacement = lease.LEASE_FILE.read_bytes()
+        return release(name, owner, **kwargs)
+
+    monkeypatch.setattr(lease, "release_claim", delayed_release)
+    with pytest.raises(RuntimeError, match="changed"):
+        if bulk:
+            lease.release_worktree_claims("new-worktree")
+        else:
+            lease.release("returned")
+    assert replacement is not None and lease.LEASE_FILE.read_bytes() == replacement
+    assert venue.ledger["new-worktree"] == {"returned"}
+    assert venue.shared["returned"].state == "leased"
+    capsys.readouterr()
+
+
+def test_unsettled_return_survives_other_writes_and_blocks_owner_reentry(venue, monkeypatch, capsys):
+    from agent_codespaces import reuse
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
+    with pytest.raises(RuntimeError, match="settlement"):
+        lease.release_claim("returned", "new-worktree")
+    saved = json.loads(lease.LEASE_FILE.read_text(encoding="utf-8"))[RETURN_KEY]
+    lease.borrow("other-effort", "other-0")
+    assert lease.heartbeat("other-0")
+    assert json.loads(lease.LEASE_FILE.read_text(encoding="utf-8"))[RETURN_KEY] == saved
+    # The unchanged tolerant reader still sees the exact legacy claim record.
+    assert lease._read_leases()["returned"] == reuse.local_snapshot()["returned"]
+    assert lease.get_lease("returned", ttl=0) is not None
+    assert "returned" not in lease.sweep_dead(active=set(), ttl=0)
+    before = lease.LEASE_FILE.read_bytes()
+    for action in (
+        lambda: lease.claim("returned", "new-worktree", holder_ref="machine/project/new-worktree"),
+        lambda: lease.heartbeat("returned"),
+        lambda: lease.borrow("other-effort", "returned", force=True),
+        lambda: reuse.reserve("returned", "example/project", venue.config, "selected", {}),
+    ):
+        with pytest.raises(RuntimeError, match="unsettled|local holder"):
+            action()
+        assert lease.LEASE_FILE.read_bytes() == before
+
+
+@pytest.mark.parametrize("damage", ["version", "holder", "snapshot", "phase", "missing-lease"])
+def test_malformed_return_progress_never_becomes_an_empty_claim_set(venue, monkeypatch, capsys, damage):
+    from agent_codespaces import reuse
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
+    with pytest.raises(RuntimeError):
+        lease.release_claim("returned", "new-worktree")
+    raw = json.loads(lease.LEASE_FILE.read_text(encoding="utf-8"))
+    progress = raw[RETURN_KEY]["returns"]["returned"]
+    if damage == "version":
+        raw[RETURN_KEY]["version"] = 2
+    elif damage == "holder":
+        progress["holder"] = "new-worktree"
+    elif damage == "snapshot":
+        progress["lease"]["lease_token"] = "e" * 40
+    elif damage == "phase":
+        progress["phase"] = "finished"
+    else:
+        del raw["returned"]
+    lease.LEASE_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    before = lease.LEASE_FILE.read_bytes()
+    for action in (
+        reuse.local_snapshot,
+        lambda: lease.release_claim("returned", "new-worktree"),
+        lambda: lease.borrow("other-effort", "other-0"),
+    ):
+        with pytest.raises(RuntimeError, match="progress.*malformed"):
+            action()
+        assert lease.LEASE_FILE.read_bytes() == before
+
+
+def test_claim_guard_excludes_a_real_child_and_releases_after_process_exit(venue):
+    from agent_procutil import no_window_flags
+    from agent_codespaces.claim_guard import claim_guard
+
+    script = """
+import os, sys
+from pathlib import Path
+from agent_codespaces import lease
+from agent_codespaces.claim_guard import claim_guard
+lease.LEASE_FILE = Path(sys.argv[1])
+try:
+    with claim_guard("returned"):
+        os._exit(0)
+except RuntimeError as error:
+    assert "busy" in str(error)
+    sys.exit(7)
+"""
+    def child():
+        return subprocess.run(
+            [sys.executable, "-c", script, str(lease.LEASE_FILE)],
+            env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+            capture_output=True, text=True, timeout=15, creationflags=no_window_flags(),
+        )
+
+    with claim_guard("returned"):
+        result = child()
+        assert result.returncode == 7, result.stderr
+        # A different target remains independent while the original is held.
+        with claim_guard("other-0"):
+            pass
+    result = child()
+    assert result.returncode == 0, result.stderr
+    with claim_guard("returned"):
+        pass
+
+
+def test_old_writer_losing_progress_never_confirms_another_borrowers_return(venue, monkeypatch, capsys):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    settle = coordination.settle_obligation
+    monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
+    with pytest.raises(RuntimeError, match="settlement"):
+        lease.release_claim("returned", "new-worktree")
+    legacy = {name: vars(record) for name, record in lease._read_leases().items()}
+    lease.LEASE_FILE.write_text(json.dumps(legacy), encoding="utf-8")
+    venue.shared["returned"] = coordination.L2Lease(
+        "returned", "other-machine/project/second-worktree", False,
+        token="d" * 40, state="released",
+    )
+    monkeypatch.setattr(coordination, "settle_obligation", settle)
+    before = lease.LEASE_FILE.read_bytes()
+    with pytest.raises(RuntimeError, match="unconfirmed"):
+        lease.release_claim("returned", "new-worktree")
+    assert lease.LEASE_FILE.read_bytes() == before
+    assert venue.ledger["new-worktree"] == {"returned"}
+
+
+@pytest.mark.parametrize("phase", ["prepared", "released"])
+@pytest.mark.parametrize("published", [False, True])
+def test_progress_publication_failure_never_settles_before_recoverable_release(
+    venue, monkeypatch, capsys, phase, published,
+):
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    write = lease._write_private_json
+    original = lease._read_leases()["returned"]
+
+    def failing_write(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("returned")
+        if progress and progress["phase"] == phase:
+            if published:
+                write(path, payload)
+            raise OSError("publication acknowledgement unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(lease, "_write_private_json", failing_write)
+    with pytest.raises(OSError, match="publication"):
+        lease.release_claim("returned", "new-worktree")
+    assert lease._read_leases()["returned"] == original
+    assert venue.ledger["new-worktree"] == {"returned"}
+    assert not any(event[0] == "settle" for event in venue.events)
+    assert venue.shared["returned"].state == ("leased" if phase == "prepared" else "released")
+    monkeypatch.setattr(lease, "_write_private_json", write)
+    assert lease.release_claim("returned", "new-worktree")
+    assert not venue.ledger["new-worktree"]
+    assert sum(event[0] == "release" for event in venue.events) == 1
+
+
 def test_quota_retry_reserves_the_returned_venue_instead_of_creating_again(venue, monkeypatch, capsys):
     venue.config.max_owned_codespaces = 31
     venue.rows[0].state = "Available"
@@ -432,7 +705,7 @@ def test_return_keeps_local_custody_when_confirmation_is_missing(venue, monkeypa
         venue.shared["returned"].token = "d" * 40
     with pytest.raises(RuntimeError, match="retained"):
         lease.release_claim("returned", "new-worktree")
-    assert lease.LEASE_FILE.read_bytes() == before
+    assert json.loads(lease.LEASE_FILE.read_bytes())["returned"] == json.loads(before)["returned"]
     if failure != "settle-unknown":
         assert not any(event[0] == "settle" for event in venue.events)
 

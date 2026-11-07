@@ -682,6 +682,25 @@ legacy local claims retain the optional-peer fallback. Ordinary `claim` journals
 responsibility like the connection path. Return accepts a missing legacy ledger
 entry only after a complete qualified native read confirms absence or prior
 release, never after a failed lookup.
+Claim, advisory borrow, heartbeat, sequential reservation and return share a
+per-CodeSpace local OS-held exclusion. Return holds it through native settlement
+and local cleanup; ordinary claim journaling stays inside it too, outside the
+short lease-file transaction. Concurrent operations report busy, and a process
+exit releases the guard without deleting or age-stealing its lock identity.
+Generic and bulk return also pin their preselected local snapshots; a delayed
+selection cannot release a replacement claim from the same owner.
+The existing `leases.json` retains pending returns in the reserved
+`__agent_codespaces_returns_v1__` entry: original local snapshot, qualified
+owner and prepared/confirmed-release phase. Ordinary lease records keep their
+legacy shape. After confirmed release, a settlement retry uses that saved
+owner without rereleasing or inspecting a later borrower's lease. Unknown
+progress or settlement retains custody; unrelated current writes preserve it.
+Older tolerant readers still see ordinary holders; older strict admission
+readers refuse the extra entry. Older writers do not join the new exclusion
+and may discard progress: serialize mixed-version writers during rollout or
+rollback. Lost progress is unknown, not proof another borrower's return
+settled the original claim. No automatic replay or cross-version concurrency
+guarantee is implied.
 The existing per-target lifecycle lock covers final inventory/user checks,
 local reservation, binding confirmation and eligibility-marker removal, so a
 managed destructive operation cannot interleave with that commit sequence.

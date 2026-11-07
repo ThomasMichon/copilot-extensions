@@ -21,6 +21,7 @@ from agent_procutil import no_window_flags
 from ssh_manager.locks import pid_alive
 
 from . import coordination
+from .claim_guard import serialize_claim
 from .config import RUNTIME_DIR, ensure_runtime_dir
 
 log = logging.getLogger("agent-codespaces")
@@ -158,10 +159,9 @@ def _read_leases() -> dict[str, Lease]:
 
 def _write_leases(leases: dict[str, Lease]) -> None:
     """Atomically write leases.json."""
-    _write_private_json(
-        LEASE_FILE,
-        {codespace: asdict(lease) for codespace, lease in leases.items()},
-    )
+    from .claim_return import pending_returns, write_leases
+
+    write_leases(leases, pending_returns())
 
 
 def _read_records(path, record_type, *, fail_closed: bool = False):
@@ -184,6 +184,12 @@ def _read_records(path, record_type, *, fail_closed: bool = False):
         return {}
     records = {}
     for key, rec in (raw or {}).items():
+        if path == LEASE_FILE and record_type is Lease:
+            from .claim_return import RETURN_KEY, validate_pending
+
+            if key == RETURN_KEY:
+                validate_pending(rec, raw)
+                continue
         try:
             records[key] = record_type(**rec)
         except TypeError as exc:
@@ -318,9 +324,12 @@ def _is_stale(lease: Lease, ttl: float) -> bool:
 
 def _prune(leases: dict[str, Lease], ttl: float) -> dict[str, Lease]:
     """Drop stale leases in-place and return the cleaned dict."""
+    from .claim_return import pending_returns
+
+    pending = pending_returns()
     live = {}
     for codespace, lease in leases.items():
-        if _is_stale(lease, ttl):
+        if codespace not in pending and _is_stale(lease, ttl):
             log.info(
                 "Reclaiming stale lease: %s (effort=%s, host=%s, pid=%s)",
                 codespace, lease.effort, lease.host, lease.pid,
@@ -342,6 +351,7 @@ def list_leases(ttl: float = DEFAULT_TTL, prune: bool = True) -> list[Lease]:
         return list(leases.values())
 
 
+@serialize_claim(1)
 def borrow(
     effort: str,
     codespace: str,
@@ -404,13 +414,17 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
     with _lease_lock():
         leases = _read_records(LEASE_FILE, Lease, fail_closed=True)
         selected = [
-            (c, _claim_owner(lease)) for c, lease in leases.items()
+            (c, lease) for c, lease in leases.items()
             if c == target or lease.effort == target
         ]
-    released = [release_claim(c, owner, ttl=ttl) for c, owner in selected]
+    released = [
+        release_claim(c, _claim_owner(held), ttl=ttl, expected=held)
+        for c, held in selected
+    ]
     return bool(released) and all(released)
 
 
+@serialize_claim()
 def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
     """Refresh the local heartbeat and best-effort renew any L2 token."""
     with _lease_lock():
@@ -748,12 +762,15 @@ def sweep_dead(
     active: set[str] | None = None, ttl: float = DEFAULT_TTL
 ) -> list[str]:
     """Release claims whose owning worktree is positively gone."""
+    from .claim_return import pending_returns
+
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
+        pending = pending_returns()
         released: list[str] = []
         for cs, lease in list(leases.items()):
             owner = _claim_owner(lease)
-            if lease.worktree and not _worktree_alive(owner, active):
+            if cs not in pending and lease.worktree and not _worktree_alive(owner, active):
                 log.info(
                     "Auto-releasing claim on '%s' -- owner worktree '%s' is gone",
                     cs, owner,
@@ -765,6 +782,7 @@ def sweep_dead(
         return released
 
 
+@serialize_claim()
 def claim(
     codespace: str,
     owner: str,
@@ -775,6 +793,7 @@ def claim(
     holder_ref: str | None = None,
     coordinate: bool = True,
     preflight_result: coordination.PreflightResult | None = None,
+    journal: bool = False,
 ) -> Lease:
     """Acquire or refresh an exclusive worktree claim on ``codespace``.
 
@@ -882,7 +901,10 @@ def claim(
             )
             leases[codespace] = lease
             _write_leases(leases)
-            return lease
+    if hold is None:
+        if journal and holder_ref:
+            coordination.journal_obligation(codespace, holder_ref)
+        return lease
     if release_after_reject:
         try:
             coordination.release(codespace, release_after_reject)
@@ -924,14 +946,8 @@ def claim_for_connect(
     claim(
         codespace, claim_owner, force=force,
         active=active_worktree_ids(), holder_ref=fence_holder_ref,
+        journal=True,
     )
-    if fence_holder_ref and coordination.journal_obligation(
-        codespace, fence_holder_ref,
-    ):
-        log.info(
-            "Journaled CodeSpace %s as an obligation on %s",
-            codespace, fence_holder_ref,
-        )
     return fence_holder_ref
 
 
@@ -946,20 +962,25 @@ def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
         return None
 
 
-def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
+def release_claim(
+    codespace: str, owner: str, ttl: float = DEFAULT_TTL, *, expected: Lease | None = None,
+) -> bool:
     """Release ``codespace``'s claim when ``owner`` still holds it."""
     from .claim_return import release_claim as confirmed_release
 
-    return confirmed_release(codespace, owner)
+    return confirmed_release(codespace, owner, expected=expected)
 
 
 def release_worktree_claims(owner: str, ttl: float = DEFAULT_TTL) -> list[str]:
     """Release every claim owned by ``owner`` and tombstone any L2 leases."""
     with _lease_lock():
         leases = _read_records(LEASE_FILE, Lease, fail_closed=True)
-        names = [
-            cs
+        selected = [
+            (cs, lease)
             for cs, lease in leases.items()
             if _claim_owner(lease) == owner
         ]
-    return [name for name in names if release_claim(name, owner, ttl=ttl)]
+    return [
+        name for name, held in selected
+        if release_claim(name, owner, ttl=ttl, expected=held)
+    ]

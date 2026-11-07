@@ -1139,6 +1139,7 @@ record = {"resource": {"kind": "codespace", "key": "venue-0"},
 calls = []
 obligations = []
 uncertain = False
+settlement_unknown = False
 def transport(args, **kwargs):
     calls.append(args)
     if args == ["--project", "project", "coordination-readiness"]:
@@ -1170,6 +1171,8 @@ def transport(args, **kwargs):
                 "ref": "venue-0", "state": "active"}
     elif args[:2] == ["claims", "settle"]:
         assert "--released" in args
+        if settlement_unknown:
+            return subprocess.CompletedProcess(args, 4, "", "settlement unavailable")
         obligations.clear()
         data = {"worktree_id": "current-worktree", "ref": "venue-0", "disposition": "released"}
     else:
@@ -1183,12 +1186,26 @@ retained.write_bytes(b"prior effort work")
 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
     reused = cli.main(["create", "example/project", "--no-wait"])
     connected = lease.claim("venue-0", "current-worktree", holder_ref="machine/project/current-worktree")
+    settlement_unknown = True
+    try:
+        lease.release_claim("venue-0", "current-worktree")
+    except RuntimeError as error:
+        assert "settlement" in str(error)
+    else:
+        raise AssertionError("unconfirmed settlement")
+    record.update(state="leased", live=True, token="d" * 40,
+                  holder="other-machine/project/next-worktree")
+    later = dict(record)
+    settlement_unknown = False
     returned = lease.release_claim("venue-0", "current-worktree")
 assert reused == 0 and connected.lease_token == "b" * 40 and returned
+assert record == later
+assert len([args for args in calls if args[:2] == ["lease", "release"]]) == 1
 assert retained.read_bytes() == b"prior effort work"
 assert pool_rows[0].branch == "retained-feature"
 assert account_binding.bound_account("venue-0") == "fixture-owner"
 assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 1
+record.update(state="released", live=False)
 uncertain = True
 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
     assert cli.main(["create", "example/project", "--no-wait"]) == 4

@@ -100,10 +100,18 @@ def reserve(
     name: str, repo: str, config, account: str, environment: dict, *, branch=None,
 ) -> lease.Lease:
     """Reserve without waking, resetting, provisioning or taking over a holder."""
+    from .claim_guard import claim_guard
+    from .lifecycle_lock import lifecycle_lock
+
+    # Destructive lifecycle consumers already hold this outer lock on return.
+    with lifecycle_lock(name), claim_guard(name):
+        return _reserve(name, repo, config, account, environment, branch=branch)
+
+
+def _reserve(name, repo, config, account, environment, *, branch=None) -> lease.Lease:
     from .account_binding import bind
     from .allocation import intended_cores, list_account_codespaces
     from .live_users import codespaces_in_use
-    from .lifecycle_lock import lifecycle_lock
     from .pool import DEFAULT_BUDGET_CORES, build_pool
     from .status import clear_status
     from .worktrees import ContextRefused, validate_context
@@ -133,48 +141,47 @@ def reserve(
             f"{acquired.detail or acquired.status}"
         )
     try:
-        with lifecycle_lock(name):
-            rows = list_account_codespaces(account, environment=environment)
-            members, budget = build_pool(
-                codespaces=rows, account=account, leases=[], markers={}, l2_leases={},
-                clean_records={}, live={}, budget_cores=DEFAULT_BUDGET_CORES,
-                max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
-            )
-            matches = [item for item in members if item.name == name]
-            member = matches[0] if len(matches) == 1 else None
-            from .driving_worktrees import _matches_workstream_repo
+        rows = list_account_codespaces(account, environment=environment)
+        members, budget = build_pool(
+            codespaces=rows, account=account, leases=[], markers={}, l2_leases={},
+            clean_records={}, live={}, budget_cores=DEFAULT_BUDGET_CORES,
+            max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
+        )
+        matches = [item for item in members if item.name == name]
+        member = matches[0] if len(matches) == 1 else None
+        from .driving_worktrees import _matches_workstream_repo
 
-            requested_cores = intended_cores(config, repo)
-            if (
-                member is None or member.state != "Shutdown"
-                or not _matches_workstream_repo(repo, member.repository)
-                or (branch is not None and member.branch != branch)
-                or not budget.owned_inventory_complete or budget.unknown_cores_count
-                or requested_cores <= 0 or member.cores < requested_cores
-                or member.cores > budget.headroom_cores
-            ):
-                raise RuntimeError("Selected venue or its wake headroom changed before reservation")
-            users = codespaces_in_use([name])
-            if users is None or users.get(name):
-                raise RuntimeError("Selected venue has live or unknown local users")
-            with lease._lease_lock():
-                records = _local_records()
-                holds = lease._read_live_records(
-                    lease._DEPLOY_HOLDS_FILE, lease.DeployHold, lease.DEPLOY_HOLD_TTL,
-                )
-                if name in records or name in holds:
-                    raise RuntimeError("Selected venue acquired a local holder or lifecycle hold")
-                now = time.time()
-                reservation = lease.Lease(
-                    codespace=name, effort="", worktree=owner, host=lease._this_host(),
-                    pid=os.getpid(), acquired_at=now, heartbeat_at=now,
-                    lease_token=acquired.token,
-                )
-                records[name] = reservation
-                lease._write_leases(records)
-            bind(name, account, repo=member.repository, strict=True)
-            clear_status(name)
-            return reservation
+        requested_cores = intended_cores(config, repo)
+        if (
+            member is None or member.state != "Shutdown"
+            or not _matches_workstream_repo(repo, member.repository)
+            or (branch is not None and member.branch != branch)
+            or not budget.owned_inventory_complete or budget.unknown_cores_count
+            or requested_cores <= 0 or member.cores < requested_cores
+            or member.cores > budget.headroom_cores
+        ):
+            raise RuntimeError("Selected venue or its wake headroom changed before reservation")
+        users = codespaces_in_use([name])
+        if users is None or users.get(name):
+            raise RuntimeError("Selected venue has live or unknown local users")
+        with lease._lease_lock():
+            records = _local_records()
+            holds = lease._read_live_records(
+                lease._DEPLOY_HOLDS_FILE, lease.DeployHold, lease.DEPLOY_HOLD_TTL,
+            )
+            if name in records or name in holds:
+                raise RuntimeError("Selected venue acquired a local holder or lifecycle hold")
+            now = time.time()
+            reservation = lease.Lease(
+                codespace=name, effort="", worktree=owner, host=lease._this_host(),
+                pid=os.getpid(), acquired_at=now, heartbeat_at=now,
+                lease_token=acquired.token,
+            )
+            records[name] = reservation
+            lease._write_leases(records)
+        bind(name, account, repo=member.repository, strict=True)
+        clear_status(name)
+        return reservation
     except Exception as error:
         # The native shared lease and obligation retain custody, even if the
         # local write/binding failed. Never blindly replay acquisition or create.

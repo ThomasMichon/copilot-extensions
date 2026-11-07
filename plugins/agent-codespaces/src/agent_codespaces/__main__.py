@@ -4182,6 +4182,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             active=active_worktree_ids(),
             holder_ref=holder_ref,
             preflight_result=readiness,
+            journal=True,
         )
     except ClaimConflict as exc:
         print(f"[BUSY] {exc} Use --force-claim to take over.", file=sys.stderr)
@@ -4192,8 +4193,6 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return _COORDINATION_EXIT
-    if holder_ref:
-        coordination.journal_obligation(lease.codespace, holder_ref)
     print(f"[OK] Claimed {lease.codespace} for {owner}")
     return 0
 

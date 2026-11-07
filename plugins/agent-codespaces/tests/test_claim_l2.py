@@ -250,7 +250,7 @@ def test_generic_and_bulk_return_keep_unknown_shared_custody(leases, monkeypatch
     monkeypatch.setattr(coord, "release", lambda *a, **kw: coord.L2Result("unavailable"))
     with pytest.raises(RuntimeError, match="retained"):
         release()
-    assert lease_mod.LEASE_FILE.read_bytes() == before
+    assert json.loads(lease_mod.LEASE_FILE.read_bytes())["cs-one"] == json.loads(before)["cs-one"]
 
 
 def test_return_from_another_caller_settles_original_qualified_owner(leases, monkeypatch):
