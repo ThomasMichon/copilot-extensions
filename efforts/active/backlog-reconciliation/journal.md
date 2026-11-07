@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-07 - Serving-owner and attribution-event research](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
+
 - [2026-11-07 - Provider merge and inflow study](<journal/2026/11.07 provider-merge-and-inflow-study.md>)
 
 - [2026-11-07 - Caller-owned transport planning](<journal/2026/11.07 caller-owned-transport-planning.md>)
