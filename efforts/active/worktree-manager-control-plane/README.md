@@ -5874,3 +5874,21 @@ complete current receiving readback and separate source judgments remain.
   limits and exact three-helper mirror checks passed. These are isolated
   source and artifact controls, not deployed application, native sign-in or
   complete fresh-machine acceptance; required PR review and CI remain.
+- Follow-up review in #11259 exposed unhidden diagnostic subprocesses and
+  credential creation by stale-endpoint probes. Reuse the captured-child
+  no-window primitive and the existing non-creating credential reader; retain
+  explicit unavailable observations without requiring credentials for inactive
+  services or changing mutating client defaults.
+- The review controls reproduced six failures with two positive controls,
+  then all eight passed. The native observer exercises Git and inert
+  PowerShell console children twice from a windowless parent, without scanning
+  foreign processes. The complete named compatibility packet passed 223 cases,
+  with four opt-in Workers cases skipped and seven unrelated host/termination
+  cases deselected. Its controller-copy fixture retains real required files
+  and canonical scripts without materializing the unrelated library graph;
+  no deadline was enlarged.
+- The actor-free automatic-policy selection passed 32 cases, including the
+  resource resolver. Refresh only changed admitted-source bindings and the
+  generated admission helper; retain the unit budget, old nodes and effect
+  prohibitions. Required exact-head CI and a fresh review remain separate
+  publication gates.

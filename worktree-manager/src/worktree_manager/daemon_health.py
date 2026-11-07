@@ -22,16 +22,32 @@ def _candidates(root: Path) -> list[diagnostics.DaemonCandidate]:
     ]
 
 
-def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
+def _context(
+    root: Path | None = None, *, credential_findings: list[dict] | None = None,
+) -> diagnostics.DiagnosticContext:
     resolved_root = root if root is not None else default_root()
 
     def _reachability_check(host: str, port: int) -> bool:
+        from .mux_serving_observation import _existing_token
+
+        try:
+            token, _identity = _existing_token(resolved_root)
+        except Exception:
+            if credential_findings is not None:
+                credential_findings.append({
+                    "kind": "control_credential_unavailable",
+                    "summary": "existing Manager control credential is unavailable; endpoint reachability is unconfirmed",
+                    "repairable": False,
+                    "blocked_reason": "credential observation unavailable",
+                })
+            return False
         try:
             return bool(
                 mux_daemon_cutover.ControlClient(
                     f"http://{mux_daemon_cutover.routing.format_authority(host, port)}",
                     root=resolved_root,
                     timeout=5.0,
+                    token=token,
                 ).health()
             )
         except Exception:
@@ -59,7 +75,14 @@ def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
 
 
 def doctor_report(*, root: Path | None = None, apply: bool) -> dict[str, object]:
-    ctx = _context(root)
+    credential_findings: list[dict] = []
+    ctx = _context(root, credential_findings=credential_findings)
     if apply:
         return diagnostics.apply_daemon_health(ctx)
-    return diagnostics.audit_daemon_health(ctx)
+    report = diagnostics.audit_daemon_health(ctx)
+    if credential_findings:
+        report["findings"].extend(credential_findings)
+        report["counts"]["total"] += len(credential_findings)
+        kind = "control_credential_unavailable"
+        report["counts"][kind] = report["counts"].get(kind, 0) + len(credential_findings)
+    return report

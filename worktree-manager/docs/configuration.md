@@ -72,6 +72,11 @@ existing prerequisite, core, daemon, catalog and registration observations;
 command completion is not proof of every application's health or first-task
 readiness. Other components retain their own diagnostic owners, and the
 standalone observation-only `doctor --json` behavior is unchanged.
+Read-only health probes use existing control credentials without creating or
+replacing them; unavailable credential observations remain explicit findings,
+not proof that an endpoint is healthy. Inactive services do not acquire a new
+credential prerequisite. Captured Windows Git and PowerShell probes stay
+windowless.
 
 ### Automatic update controls
 

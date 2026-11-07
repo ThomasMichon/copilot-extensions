@@ -263,16 +263,34 @@ def test_downlevel_controller_never_receives_unconditional_mutation(
 def test_materialized_payload_keeps_both_canonical_controllers(
     switch_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import shutil
+    import tomllib
     import worktree_manager
 
-    source = Path(__file__).resolve().parents[1]
+    original = Path(__file__).resolve().parents[1]
+    source = tmp_path / "source"
+    source.mkdir()
+    for relative in self_install._SLOT_KEY_FILES:
+        target = source / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(original / relative, target)
+    project = tomllib.loads((original / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    # Full dependency-graph delivery belongs to the wheel/sdist round-trip packet.
+    (source / "pyproject.toml").write_text(
+        f"[project]\nname = {project['name']!r}\nversion = {project['version']!r}\n",
+        encoding="utf-8",
+    )
+    canonical = original.parent / "libs/bootstrap-killswitch"
+    scripts = source / "scripts"
+    scripts.mkdir(exist_ok=True)
+    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
+        shutil.copy2(canonical / name, scripts / name)
     payload = tmp_path / "payload"
     self_install._copy_payload(source, payload)
     legacy_package = tmp_path / "legacy-package"
     legacy_package.mkdir()
     monkeypatch.setattr(worktree_manager, "__file__", str(legacy_package / "__init__.py"))
     monkeypatch.setattr(self_install, "running_payload_dir", lambda: payload)
-    canonical = source.parent / "libs/bootstrap-killswitch"
     for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
         assert (payload / "scripts" / name).read_bytes() == (canonical / name).read_bytes()
     assert Path(policy._guard_command()[-1]).parent == payload / "scripts"
