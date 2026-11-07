@@ -85,6 +85,51 @@ def test_installed_dependency_archive_preserves_native_wheel_identity(tmp_path, 
     assert facts.version == distribution.version
 
 
+def test_cohort_registry_retains_runtime_build_and_extra_dependency_closure():
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _registry_distributions
+
+    projects = {"application": {"project": {
+        "dependencies": ["base"],
+        "optional-dependencies": {
+            "host": ["application[authentication]", "transport"],
+            "authentication": ["crypto"],
+            "dev": ["test-only"],
+        },
+    }}}
+    distributions = {
+        ("base", "1"): SimpleNamespace(requires=[]),
+        ("transport", "1"): SimpleNamespace(requires=[
+            "extra-child; extra == 'client'", "wrong-platform; sys_platform == 'unselected'",
+        ]),
+        ("crypto", "1"): SimpleNamespace(requires=["old-child"]),
+        ("crypto", "2"): SimpleNamespace(requires=["new-child"]),
+        ("old-child", "1"): SimpleNamespace(requires=[]),
+        ("new-child", "1"): SimpleNamespace(requires=[]),
+        ("extra-child", "1"): SimpleNamespace(requires=[]),
+        ("build-tool", "1"): SimpleNamespace(requires=["build-child"]),
+        ("build-child", "1"): SimpleNamespace(requires=[]),
+        ("test-only", "1"): SimpleNamespace(requires=[]),
+    }
+    selected = _registry_distributions(projects, distributions, [
+        "application[host]", "transport[client]", "build-tool",
+    ])
+    assert set(selected) == set(distributions) - {("test-only", "1")}
+    assert all(selected[key] is distributions[key] for key in selected)
+
+
+def test_cohort_registry_refuses_missing_prepared_dependency():
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _registry_distributions
+
+    with pytest.raises(AssertionError, match="prepared dependency closure is missing absent"):
+        _registry_distributions({}, {
+            ("runtime", "1"): SimpleNamespace(requires=["absent"]),
+        }, ["runtime"])
+
+
 def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):
     from threading import Barrier, Lock
     from types import SimpleNamespace
