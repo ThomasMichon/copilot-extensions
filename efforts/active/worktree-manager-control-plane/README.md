@@ -5837,3 +5837,90 @@ complete current receiving readback and separate source judgments remain.
   onboarding lanes; #3005, #8545/#356, #542 and the remaining workbench waves
   retain their original scope, custody and acceptance. No runtime, credential,
   installation, live environment, service or rollout action was performed.
+
+### 2026-11-06 - Explicit Manager diagnostic action claim
+
+- `shiny-actuator` reserved #11245 after fresh open health/doctor issue and PR
+  searches. This is a bounded follow-up to completed #8877, closing the existing
+  Configuration Workbench installation-and-updates intent without taking its
+  remaining native or installed acceptance.
+- Reuse the native Manager doctor text report from an explicitly activated
+  Manager-row action in Installation & Updates. Preserve observation-only JSON
+  behavior, selected-engine context, existing command/result boundaries and
+  non-mutating browse. Show diagnostic-specific pending and terminal messages,
+  not configuration application or a claim that every application is healthy.
+- Qualify production navigation and explicit activation, successful and failed
+  native reports, real child-command transport and isolated-state preservation.
+  Other component health, authentication, first-task admission, live receiving
+  and rollout remain separate outcomes; no new supervisor or readiness schema
+  is introduced.
+- The affected sealed-package packet exposed the existing bootstrap-control
+  lookup using a legacy payload's `scripts` directory instead of Manager's
+  runtime-resource resolver. Include the bounded resolver correction and a
+  real canonical-controller packaged-resource regression in this same source
+  slice; do not waive the failed control or alter controller policy.
+- Qualify actual wheel and source-distribution delivery as well as lookup:
+  the canonical build-resource declaration also omitted the controller pair
+  and mutation helper. Retain its exact-byte mirrored build helpers and their
+  required changefiles; other applications' resource selection is unchanged.
+- Source candidate `81f3bc744` passed the affected installation, automatic
+  controls, doctor and production Configuration packet: 96 passed, with four
+  existing opt-in Workers cases unrun because no dispatch interpreter was
+  selected. The native diagnostic success/failure, selected-cell context,
+  packaged controller and retained-payload fallback controls are included.
+- Both actual Manager and Worktrees wheel/source-distribution round trips
+  passed, including canonical controller bytes and source immutability.
+  Ruff, installation/documentation contracts, seven changed source-module
+  limits and exact three-helper mirror checks passed. These are isolated
+  source and artifact controls, not deployed application, native sign-in or
+  complete fresh-machine acceptance; required PR review and CI remain.
+- Follow-up review in #11259 exposed unhidden diagnostic subprocesses and
+  credential creation by stale-endpoint probes. Reuse the captured-child
+  no-window primitive and the existing non-creating credential reader; retain
+  explicit unavailable observations without requiring credentials for inactive
+  services or changing mutating client defaults.
+- The review controls reproduced six failures with two positive controls,
+  then all eight passed. The native observer exercises Git and inert
+  PowerShell console children twice from a windowless parent, without scanning
+  foreign processes. The complete named compatibility packet passed 223 cases,
+  with four opt-in Workers cases skipped and seven unrelated host/termination
+  cases deselected. Its controller-copy fixture retains real required files
+  and canonical scripts without materializing the unrelated library graph;
+  no deadline was enlarged.
+- The actor-free automatic-policy selection passed 32 cases, including the
+  resource resolver. Refresh only changed admitted-source bindings and the
+  generated admission helper; retain the unit budget, old nodes and effect
+  prohibitions. Required exact-head CI and a fresh review remain separate
+  publication gates.
+- A fresh review found report-mode cutover-lock creation, including Windows
+  initialization of an existing empty lock. Report mode now takes a
+  non-creating native read lock when one exists; explicit repair retains the
+  existing writer serialization. Twelve focused controls passed, covering
+  repeated empty-root serving observations, unchanged empty/nonempty lock
+  bytes, busy report/apply refusal and actual successful/failed child reports.
+  The child fixtures retain the real daemon-health wiring with an isolated
+  root and inert process census. These are source controls, not installed or
+  live-environment acceptance; current-head review and CI remain required.
+- A later transport review reproduced UTF-8 report corruption through an
+  actual CP1252 parent, for both successful and failed children. Decode
+  synchronous command stdout/stderr explicitly as UTF-8, matching the existing
+  child environment. Both native regressions passed in the first 19 completed
+  result controls. The wider run then hit an older refresh test waiting for
+  an idle state that the current automatic replacement read skips. Retain the
+  real stale-read fence and both command/form paths, but assert the fresh rows
+  without adding a manual refetch. The residual selection passed 34 controls
+  with one existing installed-Workers opt-in skipped; no deadline increased
+  and the interrupted run is not represented as a complete packet pass.
+- Required CI identified the generated admission copy of the new read-lock
+  helper as stale. Regenerated it through the declared Worktrees payload
+  manifest and verified the snapshot; no unrelated archive or source binding
+  is changed.
+- Companion encoding coverage reproduced four report-loss cases with inherited
+  ANSI Python streams or raw non-UTF-8 stdout/stderr, while the two original
+  UTF-8 controls stayed green. Pin the stream setting only for synchronous
+  contributed commands and decode invalid bytes with replacement, preserving
+  their output and actual exit status. The complete affected result,
+  transport and Configuration packet passed 57 controls with one existing
+  installed-Workers opt-in skipped, including all six native encoding cases.
+  No global engine environment, streaming transport, deadline or live runtime
+  was changed.

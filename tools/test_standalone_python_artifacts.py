@@ -606,6 +606,10 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
         ).items()
     }
     assert expected
+    if package == "worktree_manager":
+        canonical = ROOT / "libs" / "bootstrap-killswitch"
+        for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
+            assert expected[f"{package}/_runtime_assets/scripts/{name}"] == (canonical / name).read_bytes()
     expected.update({name: path.read_bytes() for name, path in embedded.items()})
     before = {path: path.read_bytes() for path in project.rglob("*.py")}
     archives = tmp_path / "archives"
