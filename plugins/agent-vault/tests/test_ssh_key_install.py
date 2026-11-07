@@ -253,8 +253,9 @@ def test_strict_service_read_is_existing_validated_record_only(isolated, monkeyp
     assert request(svc, isolated, action="ssh-key-read")["code"] == "needs_unlock"
 
 
+@pytest.mark.parametrize("pinned", [False, True])
 def test_cli_installs_with_selected_context_and_public_only_output(
-    isolated, monkeypatch, capsys, record, tmp_path,
+    isolated, monkeypatch, capsys, record, tmp_path, pinned,
 ):
     destination = tmp_path / "keys"
     sent = []
@@ -265,9 +266,11 @@ def test_cli_installs_with_selected_context_and_public_only_output(
         return {"ok": True} if payload["action"] == "ping" else {"ok": True, "value": record}
 
     monkeypatch.setattr(cli, "send_command", send)
+    selected = ssh_key._read_record(record)
+    pin = ["--expected-fingerprint", selected["fingerprint"]] if pinned else []
     assert cli.main([
         "ssh-key", "install", "--entry", "SSH/node-a", "--directory", str(destination),
-        "--require-running", "--json",
+        "--require-running", "--json", *pin,
     ]) == 0
     output = capsys.readouterr()
     assert json.loads(output.out)["status"] == "installed"
@@ -278,6 +281,36 @@ def test_cli_installs_with_selected_context_and_public_only_output(
         "group": "", "allow_prompt": False,
     }
     assert kwargs == {"timeout": 90.0, "strict_endpoint": True}
+
+@pytest.mark.parametrize("pin", ["different", "malformed"])
+def test_cli_public_pin_refuses_before_local_publication(
+    isolated, monkeypatch, capsys, record, tmp_path, pin,
+):
+    destination = tmp_path / "keys"
+    sent = []
+    fingerprint = ssh_key._read_record(record)["fingerprint"]
+    expected = (
+        fingerprint[:-1] + ("E" if fingerprint[-1] == "A" else "A")
+        if pin == "different" else "SHA256:" + "A" * 42 + "B"
+    )
+    monkeypatch.setattr(cli, "ensure_service", Mock(side_effect=AssertionError))
+
+    def send(payload, **kwargs):
+        sent.append(payload["action"])
+        return {"ok": True} if payload["action"] == "ping" else {"ok": True, "value": record}
+
+    monkeypatch.setattr(cli, "send_command", send)
+    assert cli.main([
+        "ssh-key", "install", "--entry", "SSH/node-a", "--directory", str(destination),
+        "--require-running", "--json", "--expected-fingerprint", expected,
+    ]) == 1
+    output = capsys.readouterr()
+    assert json.loads(output.out)["error"] == (
+        "key_mismatch" if pin == "different" else "invalid_fingerprint"
+    )
+    assert sent == (["ping", "ssh-key-read"] if pin == "different" else [])
+    assert not destination.exists()
+    assert record not in output.out + output.err and "BEGIN OPENSSH" not in output.out + output.err
 
 
 @pytest.mark.parametrize("response,error", [

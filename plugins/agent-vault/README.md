@@ -294,6 +294,9 @@ enrollment or automatic mesh setup; attachment import/export remains unchanged.
 selected owner-private local directory. It never initializes a missing record,
 overwrites a different key or repairs existing permissions. Both commands support
 `--require-running` to prohibit service activation and first-touch provisioning.
+Selected setup consumers can require `ssh-key-install-pin-v1` from the owning
+invocation contract and pass `--expected-fingerprint` to refuse a changed public
+identity before local key publication; existing unpinned callers are unchanged.
 
 ## Shared owner-key setup
 
