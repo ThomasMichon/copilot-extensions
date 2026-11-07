@@ -64,7 +64,9 @@ Repeated Ctrl+C cannot interrupt their dedicated close/join worker or release
 the disposable lifetime early; an uncertain close start is held, not replayed.
 Close failures are reported only after the captured request threads retire.
 
-`GatewayConfig.load()` consumes strict bounded JSON:
+`GatewayConfig.load()` consumes strict bounded JSON. The version-1 baseline
+below stays unchanged; separately selected version 2 additionally supports
+[protected review credential delivery](gateway-protected-review.md).
 
 - `schema: fleet-manager.gateway`, `version: 1`, `role: gateway`;
 - `fleet`, stable Gateway `installation`, receipt `issuer` and identity `audience`;
@@ -229,6 +231,9 @@ ingestion are consumer integrations; **actual index CLI Gateway routing/offload
 is not delivered**.
 
 ## Subscribed credential control and consumption
+
+The separate optional [protected review SDK](gateway-protected-review.md) never
+reinterprets the observation contracts below or enables a native writer.
 
 `credential.get` uses the same request identity fields. Its parameters are
 `{job, source, account, audience, scopes, action, recipient}` for index workers.
