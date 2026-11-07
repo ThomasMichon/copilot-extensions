@@ -43,6 +43,7 @@ _EXIT_CONFLICT = 3  # LeaseConflict / LeaseLost
 _EXIT_COORDINATION_REJECTED = 5
 _PREFLIGHT_VERSION = 1
 RELEASED_ONLY_CAPABILITY = "lease-acquire-released-only-v1"
+RETURN_PROOF_CAPABILITY = "lease-return-proof-v1"
 _PREFLIGHT_REJECTION_CODES = frozenset({
     "knowledge_binding_required",
     "state_root_resolution_failed",
@@ -624,11 +625,21 @@ def renew(
     return L2Result("unavailable", detail=(proc.stderr or "").strip())
 
 
-def release(key: str, token: str, *, origin: str | None = None) -> L2Result:
+def release(
+    key: str, token: str, *, origin: str | None = None,
+    retain_return_proof: bool = False, preflight_result: PreflightResult | None = None,
+) -> L2Result:
     """Release (tombstone) the L2 lease with its current token; best-effort."""
     if not token:
         return L2Result("unavailable", detail="no L2 token")
+    if retain_return_proof and (
+        preflight_result is None or not preflight_result.ready
+        or RETURN_PROOF_CAPABILITY not in preflight_result.capabilities
+    ):
+        return L2Result("rejected", detail="Selected lease receiver has not confirmed return-proof support")
     args = ["lease", "release", KIND, key, "--token", token]
+    if retain_return_proof:
+        args.append("--retain-return-proof")
     if origin:
         args += ["--origin", origin]
     proc = _run(args)

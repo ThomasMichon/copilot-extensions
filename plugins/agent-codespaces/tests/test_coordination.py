@@ -377,6 +377,33 @@ def test_release_without_token_is_unavailable():
     assert coord.release("cs-one", "").unavailable
 
 
+@pytest.mark.parametrize("readiness", [
+    None, coord.PreflightResult("absent"), coord.PreflightResult("ready"),
+    coord.PreflightResult("rejected", capabilities=frozenset({"lease-return-proof-v1"})),
+])
+def test_return_proof_release_requires_selected_support_before_effects(readiness):
+    assert coord.release(
+        "cs-one", "a" * 40, retain_return_proof=True, preflight_result=readiness,
+    ).rejected
+
+
+@pytest.mark.parametrize("exit_code", [0, 2, 4])
+def test_return_proof_release_never_replays_baseline(monkeypatch, exit_code):
+    readiness = coord.PreflightResult("ready", capabilities=frozenset({coord.RETURN_PROOF_CAPABILITY}))
+    seen = []
+
+    def run(args, **kwargs):
+        seen.append(args)
+        return _proc(exit_code, "{}", "fixture release result unknown")
+
+    monkeypatch.setattr(coord, "_run", run)
+    result = coord.release(
+        "cs-one", "a" * 40, retain_return_proof=True, preflight_result=readiness,
+    )
+    assert result.ok is (exit_code == 0)
+    assert seen == [["lease", "release", "codespace", "cs-one", "--token", "a" * 40, "--retain-return-proof"]]
+
+
 def test_owner_ref_from_binstub(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(0, "example-dev6/example-web/wt-123\n"))
