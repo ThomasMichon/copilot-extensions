@@ -357,12 +357,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     provisioning_start_event=provisioning_start_event,
                 )
                 lifecycle_completed = True
-                if kind == "mixedToolBatchMutation":
-                    targets = hook_policy.mixed_batch_targets(payload)
-                elif kind == "nativeToolBatchMutation":
-                    targets = hook_policy.native_batch_targets(payload)
-                else:
-                    targets = hook_policy.mutation_targets(payload) if kind in {"postToolUse", "nativeToolMutation", "shellToolMutation"} else None
+                targets = hook_policy.native_batch_targets(payload, include_shell=kind == "mixedToolBatchMutation") if kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"} else hook_policy.mutation_targets(payload) if kind in {"postToolUse", "nativeToolMutation", "shellToolMutation"} else None
                 if _kind_wakes_sweep(kind, targets):
                     # Mutations and explicit wake kinds bypass the backstop.
                     # Read-only calls do not wake recomputation.
