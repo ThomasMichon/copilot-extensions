@@ -233,6 +233,12 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [account-relay and consumer-source study](<journal/2026/11.06 account-relay-and-consumer-source-closeout.md>)
+records #8551's finite delivered source completion and keeps current typing,
+controller, namespace and native-digest gaps distinct from changed-file identity.
+Two identical complete scans measure 810 whole OPEN, 81 above fixed 729;
+Phase 2, original acceptance and all source/resource custody remain Active.
+
 The [canonical-copy and current-inflow study](<journal/2026/11.06 canonical-copy-sync-and-current-inflow.md>)
 records #8972's verified source-only completion and retains incomplete native,
 consumer, monitoring and streaming work at its actual evidence boundaries.
