@@ -585,3 +585,12 @@ adopter pilot feedback gates subsequent widening.
   Production probe deadlines and the concurrent creation-repair assertions are
   unchanged. Current-head CI/review/merge, the retained external-fixture
   disposition and broader inactive support remain open.
+
+### 2026-11-07 — Platform-independent retirement test cut
+- Addressed the next concrete review finding by targeting the later
+  post-deletion parent barrier explicitly. POSIX's earlier synchronization
+  inside rename is allowed to finish while the retirement copy still exists;
+  the test retains its exact post-removal and original-operation assertions.
+- Both focused native retirement cuts passed. This is a test-only correction;
+  production behavior/deadlines, the existing creation-repair concurrency/seed
+  assertions and the broader Active completion gate are unchanged.
