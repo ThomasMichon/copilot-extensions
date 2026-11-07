@@ -1573,6 +1573,23 @@ The next CI attempt exposed two admitted files whose local Windows CRLF bytes
 differed from their canonical LF Git blobs. Their source bindings now use the
 committed bytes; exact-byte verification and unit effect restrictions remain
 unchanged. No host Git configuration or unrelated source was rewritten.
+The response now owns one watchdog from construction through close, including
+redirect-handler reads and read-error settlement; HTTP error responses also
+close that owner. Actual 301/302/303/307/308 streaming redirects, ordinary
+streaming/framing, successful redirects and HTTP rejection are covered with
+explicit watchdog cleanup checks. The focused feed/collector packet passes
+101 cases, Manager identity controls pass 11 and payload-local toolkit controls
+pass three, with verified cleanup.
+
+The payload guard exposed an independent coupling from source acquisition
+through read-only payload discovery into Manager's installer adapter. Resource
+discovery now lives in the existing runtime-identity owner, with compatibility
+exports retained. The canonical generator synchronizes the Worktrees admission
+toolkit; all thirteen payload manifests, the four source AST guards and thirteen
+install contracts pass. The coverage verifier now names a bounded set of tests
+missing production call coverage without changing acceptance. Identifying and
+correcting the actual full-packet coverage failure remains required; focused
+assertion success is not accepted full-packet evidence.
 The broader historical workflow test selection still encounters the
 [previously recorded non-enrolled recipe gap](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6627995884)
 and [retired-workflow fixture failures](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6282693571).

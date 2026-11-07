@@ -9,7 +9,6 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -31,7 +30,7 @@ def _file(upload_time: str, *, yanked: bool = False) -> dict:
 
 
 @pytest.mark.parametrize("framing", ["length", "chunked", "chunk-header"])
-def test_default_fetch_deadline_interrupts_continuous_response_bytes(monkeypatch, framing):
+def test_response_deadline_interrupts_continuous_bytes(framing):
     reader, writer = socket.socketpair()
     stop = threading.Event()
     header = b"Content-Length: 100000\r\n" if framing == "length" else b"Transfer-Encoding: chunked\r\n"
@@ -48,15 +47,12 @@ def test_default_fetch_deadline_interrupts_continuous_response_bytes(monkeypatch
             pass
 
     producer = threading.Thread(target=stream)
-    monkeypatch.setattr(
-        spf, "_deadline_opener",
-        lambda deadline: SimpleNamespace(open=lambda *args, **kwargs: response),
-    )
     producer.start()
     started = time.monotonic()
     try:
         with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
-            spf._default_fetch("https://pypi.org/pypi/pkg/json", deadline=started + 0.15)
+            with spf._response_deadline(response, started + 0.15):
+                response.read()
         assert time.monotonic() - started < 0.75
     finally:
         stop.set()
@@ -67,61 +63,81 @@ def test_default_fetch_deadline_interrupts_continuous_response_bytes(monkeypatch
     assert not producer.is_alive()
 
 
-def test_default_fetch_completes_response_before_deadline(monkeypatch):
+def test_response_completes_before_deadline():
     reader, writer = socket.socketpair()
     writer.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
     response = http.client.HTTPResponse(reader)
     response.begin()
-    monkeypatch.setattr(
-        spf, "_deadline_opener",
-        lambda deadline: SimpleNamespace(open=lambda *args, **kwargs: response),
-    )
     try:
-        assert spf._default_fetch("https://pypi.org/pypi/pkg/json", deadline=time.monotonic() + 1) == b"{}"
+        with spf._response_deadline(response, time.monotonic() + 1):
+            assert response.read() == b"{}"
     finally:
         response.close()
         reader.close()
         writer.close()
 
 
-@pytest.mark.parametrize("prefix,slow", [
-    (b"HTTP/1.1 200", True),
-    (b"HTTP/1.1 200 OK\r\nX-Slow: ", True),
-    (b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", False),
+@pytest.mark.parametrize("prefix,chunk,followup", [
+    (b"HTTP/1.1 200", b"x", None),
+    (b"HTTP/1.1 200 OK\r\nX-Slow: ", b"x", None),
+    (b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"x", None),
+    (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n", b"1\r\nx\r\n", None),
+    (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1", b"1", None),
+    *[(f"HTTP/1.1 {code} Redirect\r\nLocation: /final\r\nContent-Length: 100000\r\n\r\n".encode(),
+       b"x", None) for code in (301, 302, 303, 307, 308)],
+    (b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", None, None),
+    (b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\n{}", None, None),
+    (b"HTTP/1.1 302 Redirect\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n", None,
+     b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"),
 ])
-def test_default_fetch_bounds_actual_header_parsing(monkeypatch, prefix, slow):
+def test_default_fetch_bounds_response_lifetime(monkeypatch, prefix, chunk, followup):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     listener.settimeout(1)
     stop, streaming = threading.Event(), threading.Event()
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    timers = []
+    real_timer = spf.threading.Timer
+
+    def timer(*args, **kwargs):
+        created = real_timer(*args, **kwargs)
+        timers.append(created)
+        return created
+
+    monkeypatch.setattr(spf.threading, "Timer", timer)
 
     def stream():
-        with listener.accept()[0] as connection:
-            connection.settimeout(1)
-            request = b""
-            while b"\r\n\r\n" not in request:
-                block = connection.recv(4096)
-                if not block:
-                    return
-                request += block
-            try:
-                connection.sendall(prefix)
-                streaming.set()
-                while slow and not stop.wait(0.02):
-                    connection.sendall(b"x")
-            except OSError:
-                pass
+        for content in [prefix, *([followup] if followup is not None else [])]:
+            with listener.accept()[0] as connection:
+                connection.settimeout(1)
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    block = connection.recv(4096)
+                    if not block:
+                        return
+                    request += block
+                try:
+                    connection.sendall(content)
+                    streaming.set()
+                    end = time.monotonic() + 1.2
+                    while chunk is not None and not stop.wait(0.02) and time.monotonic() < end:
+                        connection.sendall(chunk)
+                except OSError:
+                    pass
 
     producer = threading.Thread(target=stream)
     producer.start()
     started = time.monotonic()
     try:
         url = f"http://127.0.0.1:{listener.getsockname()[1]}/metadata"
-        if slow:
+        if chunk is not None:
             with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
                 spf._default_fetch(url, deadline=started + 0.35)
+        elif prefix.startswith(b"HTTP/1.1 404"):
+            with pytest.raises(spf.urllib.error.HTTPError) as rejected:
+                spf._default_fetch(url, deadline=started + 1)
+            assert rejected.value.code == 404
         else:
             assert spf._default_fetch(url, deadline=started + 1) == b"{}"
         assert streaming.is_set()
@@ -131,6 +147,7 @@ def test_default_fetch_bounds_actual_header_parsing(monkeypatch, prefix, slow):
         producer.join(timeout=1)
         listener.close()
     assert not producer.is_alive()
+    assert timers and not any(timer.is_alive() for timer in timers)
 
 
 def test_release_retains_only_selected_seasoned_file_hashes():

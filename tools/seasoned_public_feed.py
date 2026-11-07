@@ -156,9 +156,31 @@ def _response_deadline(response: http.client.HTTPResponse, deadline: float):
 
 def _deadline_opener(deadline: float):
     class Response(http.client.HTTPResponse):
-        def begin(self):
-            with _response_deadline(self, deadline):
-                return super().begin()
+        def __init__(self, *args, **kwargs):
+            self._deadline_scope = None
+            super().__init__(*args, **kwargs)
+            scope = _response_deadline(self, deadline)
+            try:
+                scope.__enter__()
+            except BaseException:
+                super().close()
+                raise
+            self._deadline_scope = scope
+
+        def read(self, amt=None):
+            try:
+                return super().read(amt)
+            except BaseException:
+                self.close()
+                raise
+
+        def close(self):
+            scope, self._deadline_scope = self._deadline_scope, None
+            try:
+                super().close()
+            finally:
+                if scope is not None:
+                    scope.__exit__(None, None, None)
 
     class HTTPConnection(http.client.HTTPConnection):
         response_class = Response
@@ -168,10 +190,16 @@ def _deadline_opener(deadline: float):
 
     class HTTPHandler(urllib.request.HTTPHandler):
         def http_open(self, request):
+            request.timeout = min(request.timeout, deadline - time.monotonic())
+            if request.timeout <= 0:
+                raise SeasonedVersionError("public toolchain resolution deadline exceeded")
             return self.do_open(HTTPConnection, request)
 
     class HTTPSHandler(urllib.request.HTTPSHandler):
         def https_open(self, request):
+            request.timeout = min(request.timeout, deadline - time.monotonic())
+            if request.timeout <= 0:
+                raise SeasonedVersionError("public toolchain resolution deadline exceeded")
             return self.do_open(HTTPSConnection, request, context=self._context)
 
     return urllib.request.build_opener(HTTPHandler(), HTTPSHandler())
@@ -193,9 +221,12 @@ def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
     if deadline is None:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read()
-    with _deadline_opener(deadline).open(request, timeout=timeout) as response:
-        with _response_deadline(response, deadline):
+    try:
+        with _deadline_opener(deadline).open(request, timeout=timeout) as response:
             return response.read()
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
 
 
 def _resolve_seasoned_release(

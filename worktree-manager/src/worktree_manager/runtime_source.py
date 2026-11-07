@@ -23,7 +23,7 @@ import time
 from agent_procutil import no_window_kwargs
 
 from .runtime_source_config import RuntimeSource
-from .self_install_runtime import running_payload_dir, runtime_scripts
+from .runtime_identity import running_payload_dir, runtime_scripts
 from .source_config import absolute_local_source, default_root
 
 _GIT_ROUTING_ENV = {
