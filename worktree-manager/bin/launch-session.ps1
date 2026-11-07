@@ -1097,6 +1097,7 @@ if ($plan.cmd) {
         $planCmd[3] -eq '-File' -and [IO.Path]::GetFileName($planCmd[4]) -eq 'launch-command.ps1') {
         $ownerIndex = if ($planCmd[5] -eq '--recovery') { 7 } else { 6 }
         if ($planCmd[$ownerIndex - 1] -eq '--' -and
+            [IO.Path]::GetFileNameWithoutExtension($planCmd[$ownerIndex]) -in @('python', 'python3') -and
             $planCmd[$ownerIndex + 1] -eq '-m' -and
             $planCmd[$ownerIndex + 2] -eq 'agent_worktrees.launch_seed_exec') {
             $planCmd[$ownerIndex] = $VenvPython
@@ -1273,9 +1274,21 @@ if ($CopilotPassthrough.Count -gt 0) {
 }
 
 if ($ahpArgs.Count -gt 0) {
+    $valueOptionsJson = & $VenvPython -c 'import json; from agent_worktrees.native_arguments import VALUE_OPTIONS, SETUP_VALUE_OPTIONS; print(json.dumps(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"})))'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not load native argument boundaries for the AHP binding.'
+    }
+    $valueOptions = @($valueOptionsJson | ConvertFrom-Json)
     $filteredCmd = [System.Collections.Generic.List[string]]::new()
     $skipNext = $false
+    $keepNext = $false
+    $hasExperimental = $false
     foreach ($arg in $cmd) {
+        if ($keepNext) {
+            $filteredCmd.Add([string]$arg)
+            $keepNext = $false
+            continue
+        }
         if ($skipNext) {
             $skipNext = $false
             continue
@@ -1288,9 +1301,13 @@ if ($ahpArgs.Count -gt 0) {
             continue
         }
         $filteredCmd.Add([string]$arg)
+        if ($arg -ceq '--experimental') {
+            $hasExperimental = $true
+        }
+        $keepNext = $arg -cin $valueOptions -or $arg.ToLowerInvariant() -in $valueOptions
     }
     $cmd = @($filteredCmd)
-    if ($cmd -notcontains '--experimental') {
+    if (-not $hasExperimental) {
         $cmd += '--experimental'
     }
     $cmd += $ahpArgs

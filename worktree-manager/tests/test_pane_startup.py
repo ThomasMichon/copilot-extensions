@@ -91,7 +91,11 @@ def test_picker_startup_handoff_reaches_real_copied_reader(tmp_path, direct):
 
 
 @pytest.mark.parametrize("resume_args", [["--resume=original"], ["--resume", "original"]])
-def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, resume_args):
+@pytest.mark.parametrize("literal_args", [
+    ["-i", "--resume", "--model", "--ahp=literal", "--agent", "--experimental"],
+    ["--interactive", "--resume=literal", "--model", "--ahp"],
+])
+def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, resume_args, literal_args):
     shell = _copied_setup(tmp_path)
     record = tmp_path / "fixture.yaml"
     capture = tmp_path / "capture.py"
@@ -99,7 +103,7 @@ def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, 
     literal = "literal\n' \" & $value"
     command = [
         PWSH, "-NoProfile", "-NoLogo", "-File", str(shell / "launch-command.ps1"),
-        "--", sys.executable, str(capture), *resume_args, r"-C=C:\two words", literal,
+        "--", sys.executable, str(capture), *resume_args, *literal_args, r"-C=C:\two words", literal,
     ]
     source = WRAPPER.with_name("launch-session.ps1").read_text(encoding="utf-8")
     unpack = source[source.index("if ($plan.cmd) {"):source.index("# Apply environment variables")]
@@ -135,26 +139,28 @@ def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, 
     )
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(probe), str(plan), sys.executable],
-        capture_output=True, text=True, encoding="utf-8", timeout=15, env=_test_env(tmp_path),
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
+        env=dict(_test_env(tmp_path), PYTHONPATH=str(SETUP_SCRIPTS.parent / "src")),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [
-        r"-C=C:\two words", literal, "--experimental",
+        *literal_args, r"-C=C:\two words", literal, "--experimental",
         "--ahp", "http://127.0.0.1:1234", "--resume=authoritative",
     ]
     assert not list((shell / "pane-args").glob("*.json"))
 
 
 @pytest.mark.parametrize("recovery", [False, True])
-def test_manager_refreshes_the_inner_runtime_before_startup_serialization(tmp_path, recovery):
+@pytest.mark.parametrize("native", [False, True])
+def test_manager_refreshes_the_inner_runtime_before_startup_serialization(tmp_path, recovery, native):
     shell = _copied_setup(tmp_path)
     record = tmp_path / "fixture.yaml"
     stale = str(tmp_path / "old-runtime" / "python.exe")
     command = [
         PWSH, "-NoProfile", "-NoLogo", "-File", str(shell / "launch-command.ps1"),
         *(["--recovery"] if recovery else []),
-        "--", stale, "-m", "agent_worktrees.launch_seed_exec", "--record", str(record),
+        "--", "copilot" if native else stale, "-m", "agent_worktrees.launch_seed_exec", "--record", str(record),
         "--admission-only", "--", "copilot", "--resume=original",
     ]
     source = WRAPPER.with_name("launch-session.ps1").read_text(encoding="utf-8")
@@ -175,7 +181,7 @@ def test_manager_refreshes_the_inner_runtime_before_startup_serialization(tmp_pa
     )
     assert result.returncode == 0, result.stdout + result.stderr
     arguments = json.loads(result.stdout)
-    assert arguments[arguments.index("-m") - 1] == sys.executable
+    assert arguments[arguments.index("-m") - 1] == ("copilot" if native else sys.executable)
     assert stale not in arguments and arguments[-1] == "--resume=original"
     assert not (shell / "pane-args").exists()
 

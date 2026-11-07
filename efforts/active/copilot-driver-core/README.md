@@ -1845,3 +1845,25 @@ timeout increase or claim of startup stability is made. The copied-payload
 qualification does not stand in for source-checkout, installed, auth-wait,
 attached/new-window or all-caller Job qualification. Current scoped source
 gates pass; the corrected head still needs fresh review and required CI.
+
+The next review found that hoisting Bash ahead of the admission owner bypassed
+the existing effective-`BASH_ENV` guard. A startup primer can exit or exec before
+that inner owner runs. The headed and native-setup paths now share that guard
+and the existing `env BASH_ENV=` prefix: nonempty or unknown mux environments
+retain outer admission, while an explicitly empty plan is pinned before Bash.
+Real POSIX exit/exec refusal controls complement the portable composition tests.
+
+The same correction preserves selector-shaped native option values during
+AHP rebinding on both platforms, using the existing canonical argument tables.
+Only real options count for experimental-mode insertion. Inner runtime refresh
+also requires a Python executable, so a native model argument cannot resemble
+and replace the owner. Nine focused Worktrees controls pass in 1.30 seconds
+(70.19 seconds including preparation and cleanup); twelve Manager controls pass
+in 29.95 seconds (184.17 seconds total), with two native-Bash cases skipped on
+Windows. The new real Bash primer controls require a POSIX lane; portable
+branch checks are not equivalent evidence. The binding path adds one
+local interpreter invocation to read the selected runtime's existing argument
+tables, without a new CLI/schema or optional peer feature. No settled native
+Windows lifecycle test was repeated for these scoped argument/environment
+changes. Parent acceptance and the source-location startup discrepancy remain
+open; this correction still needs fresh review and required CI.

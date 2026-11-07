@@ -2414,6 +2414,14 @@ controls refresh the inner runtime before serialization, including recovery
 commands. The producer's Windows capability-absence
 control leaves older callers on their legacy path. These are isolated contract
 controls with a synthetic binding/token, not an authenticated AHP connection.
+They preserve selector-shaped interactive/model/agent values and reject
+runtime replacement of a native executable whose literal arguments resemble
+the Python owner. Matching native-Bash AHP controls live in
+`tests/test_launch_session_unwrap.py -k shell_ahp_binding`.
+Worktrees' `tests/test_session_shell.py -k headed_bash` checks effective
+`BASH_ENV` selection before copying and explicit empty-value pinning.
+On POSIX, the same selection executes real Bash exit/exec primers against
+refused admission; neither primer may run before the outer owner.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,

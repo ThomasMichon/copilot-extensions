@@ -62,19 +62,18 @@ def deferred_command(
     environment: dict[str, str] | None = None,
     mux: bool = False,
 ) -> list[str]:
+    native = None
     if admission_only and prepare_native and native_resume_session is None:
-        headed = _headed_admission_command(
+        native = _headed_admission_command(
             command, record_path, preserve_seed_id=preserve_seed_id, correlation=correlation,
+            environment=environment, mux=mux,
         )
-        if headed is not None:
-            return headed
-    native = _native_setup_command(
-        command, record_path, seed_id=seed_id, admission_only=admission_only,
-        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-        correlation=correlation,
-        environment=environment,
-        mux=mux,
-    ) if prepare_native else None
+    if native is None and prepare_native:
+        native = _native_setup_command(
+            command, record_path, seed_id=seed_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            correlation=correlation, environment=environment, mux=mux,
+        )
     if native is not None:
         if os.name == "posix" and (environment or {}).get("BASH_ENV") == "":
             utility = shutil.which("env", path=os.defpath)
@@ -99,14 +98,23 @@ def deferred_command(
     return [*prefix, "--", *command]
 
 
+def _posix_environment_allows_native(environment: dict[str, str] | None, mux: bool) -> bool:
+    if mux and "BASH_ENV" not in (environment or {}):
+        return False
+    return not (environment or {}).get("BASH_ENV", os.environ.get("BASH_ENV"))
+
+
 def _headed_admission_command(
     command: list[str], record_path: Path, *, preserve_seed_id: str | None,
     correlation: launch_execution.Correlation | None,
+    environment: dict[str, str] | None = None, mux: bool = False,
 ) -> list[str] | None:
     from . import session_shell
     from .manager_launch_cli import _worktree_manager_root
 
     if os.name == "nt" and os.environ.get("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST") != "1":
+        return None
+    if os.name == "posix" and not _posix_environment_allows_native(environment, mux):
         return None
     index = _script_index(command)
     if index is None:
@@ -227,9 +235,7 @@ def _native_setup_command(
     if posix and not copy_only:
         from .launch_seed_contract import supports_posix_setup
 
-        if mux and "BASH_ENV" not in (environment or {}):
-            return None
-        if (environment or {}).get("BASH_ENV", os.environ.get("BASH_ENV")):
+        if not _posix_environment_allows_native(environment, mux):
             return None
         try:
             for value in (str(record_path), *command):

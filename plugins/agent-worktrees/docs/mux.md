@@ -72,6 +72,11 @@ refreshing the inner runtime and applying the authoritative AHP binding.
 It serializes only at the final launch boundary. Older Manager callers keep
 the existing plan path; older Worktrees providers can ignore the declaration
 without accepting new CLI syntax.
+POSIX hoisting requires a known empty effective `BASH_ENV`; nonempty values
+or an unknown mux-server environment retain the outer admission owner.
+An explicitly empty planned value is pinned with `env BASH_ENV=` before Bash
+starts. Authoritative AHP rebinding preserves literal option values rather
+than treating prompt/model/agent text as connection selectors.
 
 This does not turn unknown mux state into absence or permit a cold seed.
 Admission-only execution cannot claim a pending prompt; a changed prompt

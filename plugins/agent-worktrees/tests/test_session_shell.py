@@ -1,8 +1,10 @@
 from pathlib import Path
 import json
 import os
+import shlex
 import shutil
 import stat
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -119,6 +121,7 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
     scripts = runtime / "scripts"
     scripts.mkdir()
     monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": platform_name}))
+    monkeypatch.delenv("BASH_ENV", raising=False)
     monkeypatch.setenv("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST", "1")
     name = "launch-command.ps1" if platform_name == "nt" else "launch-command.sh"
     wrapper = scripts / name
@@ -154,6 +157,76 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
     expected = wrapper.read_bytes()
     shutil.rmtree(runtime)
     assert copied.read_bytes() == expected
+
+
+@pytest.mark.parametrize("ambient, environment, mux, legacy", [
+    (None, {"BASH_ENV": "selected-primer.sh"}, False, True),
+    ("ambient-primer.sh", None, False, True),
+    ("ambient-primer.sh", {"BASH_ENV": ""}, False, False),
+    (None, None, True, True),
+    (None, {"BASH_ENV": ""}, True, False),
+    (None, None, False, False),
+])
+def test_headed_bash_keeps_admission_outside_unsafe_shell_startup(
+    launch, monkeypatch, ambient, environment, mux, legacy,
+):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    wrapper = scripts / "launch-command.sh"
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts" / wrapper.name, wrapper)
+    monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    if ambient is None:
+        monkeypatch.delenv("BASH_ENV", raising=False)
+    else:
+        monkeypatch.setenv("BASH_ENV", ambient)
+    monkeypatch.setattr(launch_seed_exec.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/env")
+    command = ["bash", str(wrapper), "--", "copilot", "--session-id", "selected"]
+    prepared = launch_seed_exec.deferred_command(
+        command, record, admission_only=True, environment=environment, mux=mux,
+    )
+    if legacy:
+        assert prepared[:3] == [sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
+        assert prepared[-len(command):] == command
+        assert not (record.parent / "launch-attempts").exists()
+    else:
+        if (environment or {}).get("BASH_ENV") == "":
+            assert prepared[:2] == ["/usr/bin/env", "BASH_ENV="]
+            prepared = prepared[2:]
+        assert prepared[0] == "bash"
+        assert Path(prepared[1]).is_relative_to(record.parent / "launch-attempts")
+        assert prepared[2:6] == ["--", sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
+        assert prepared[-3:] == ["copilot", "--session-id", "selected"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native Bash startup admission")
+@pytest.mark.parametrize("termination", ["exit 0", "exec /bin/true"])
+def test_headed_bash_startup_cannot_skip_refused_admission(launch, monkeypatch, termination):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    wrapper = scripts / "launch-command.sh"
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts" / wrapper.name, wrapper)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    entered = record.parent / "bash-entered"
+    primer = record.parent / "primer.sh"
+    primer.write_text(f"printf unsafe > {shlex.quote(str(entered))}\n{termination}\n", encoding="utf-8")
+    monkeypatch.setenv("BASH_ENV", str(primer))
+    command = launch_seed_exec.deferred_command(
+        ["/bin/bash", str(wrapper), "--", "copilot", "--session-id", "selected"],
+        record, admission_only=True,
+    )
+    record.unlink()
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "Could not hand off staged launch prompt:" in result.stderr
+    assert not entered.exists()
 
 
 def test_windows_headed_wrapper_keeps_legacy_callers_off_the_new_transport(launch, monkeypatch):
