@@ -122,7 +122,7 @@ PROBES = {
     "test_http_choice_and_freeform_are_verified_audited_and_single_use": 2,
     "test_terminal_first_and_changed_inputs_never_send_keys": 5,
     "test_restart_expiry_and_other_session_tokens_have_no_input_authority": 1,
-    "test_key_failure_is_unknown_and_blocks_reinspection_after_restart": 1,
+    "test_key_failure_is_unknown_and_blocks_reinspection_after_restart": 3,
     "test_pane_replacement_after_navigation_stops_before_enter": 1,
     "test_preissued_inspection_cannot_bypass_an_uncertain_sibling_attempt": 1,
     "test_same_screen_has_one_admission_even_with_two_inspection_tokens": 1,
