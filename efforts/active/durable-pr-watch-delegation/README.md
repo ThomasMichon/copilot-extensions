@@ -993,6 +993,25 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Negotiate prepared review submission through existing workspaces
+
+- #11224 actually merged as `083c198ce7` after exact-head Copilot approval
+  with no open issues and the latest current-head CI and required PR gate
+  green. The existing source worktree reconciled through managed completion.
+- The optional existing CLI/tool/client/Gateway path negotiates prepared v2
+  submissions and scoped original receipts. Current receiver/storage/native
+  gates remain authoritative; cached support cannot authorize execution.
+  Prior/default bindings remain v1, with no silent fallback or storage adoption.
+- The final workspace, source-checkpoint and native-custody packet passes
+  125 cases with bounded cleanup verified. The corrected credential-denial
+  fixture targets the actual typed producer and proves no credential read
+  started; no SDK or runtime authority was changed.
+- Re-read the full parent Plan and Validation Plan. Continue an optional local
+  producer before final preview and approval, retaining caller-selected IDs
+  and existing profile/source owners. Automatic allocation, all-publisher
+  coverage, native/provider/installed adoption and full parent acceptance
+  remain open. No deployment or operational effect was introduced.
+
 ### 2026-11-06 - Correlate explicitly selected native prepared effects
 
 - #11214 actually merged as `7ef86b52f3a091e3bda3c8e308e64f6833e62f37`

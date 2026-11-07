@@ -1,0 +1,9 @@
+{
+  "comment": "Compose optional local comment preparation before review preview and explicit submission",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
