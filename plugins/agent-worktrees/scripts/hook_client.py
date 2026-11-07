@@ -415,11 +415,26 @@ def _write_session_guidance(
         if target is None:
             return False
         return _RUNTIME.write_guidance(
-            target, lambda: _guidance_content(enriched, home, decision_context),
+            target, lambda: _render_guidance(enriched, home, decision_context),
             enriched, claim_launch=claim_launch,
         )
     except (OSError, RuntimeError, ValueError):
         return False
+
+
+def _floor_document(reason: str, payload: dict) -> str:
+    floor = _RUNTIME.guidance_floor(reason, Path(__file__).resolve().parent)
+    return _GUIDANCE_HEADER + floor + "\n" + _RUNTIME.guidance_marker(payload)
+
+
+def _render_guidance(enriched: dict, home: Path, decision_context: str) -> str:
+    try:
+        return _guidance_content(enriched, home, decision_context)
+    except Exception as error:
+        # Degrade inside the locked, launch-ordered writer instead of dropping guidance.
+        reason = _guidance_degraded_reason(error)
+        sys.stderr.write(f"[agent-worktrees] Session guidance degraded (reason: {reason}).\n")
+        return _floor_document(reason, enriched)
 
 
 def _write_guidance_floor(payload: dict, reason: str, *, home: Path | None = None) -> bool:
@@ -437,12 +452,9 @@ def _write_guidance_floor(payload: dict, reason: str, *, home: Path | None = Non
         },
     }
     try:
-        scripts = Path(__file__).resolve().parent
-        content = _GUIDANCE_HEADER + _RUNTIME.guidance_floor(reason, scripts) + "\n"
         target = _RUNTIME.guidance_target(home or Path.home(), session_id)
         return target is not None and _RUNTIME.write_guidance(
-            target, lambda: content + _RUNTIME.guidance_marker(owned),
-            owned, claim_launch=True,
+            target, lambda: _floor_document(reason, owned), owned, claim_launch=True,
         )
     except Exception:
         return False

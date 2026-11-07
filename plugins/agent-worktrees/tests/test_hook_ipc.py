@@ -2172,9 +2172,33 @@ def test_session_start_catalog_import_error_keeps_guidance_floor(
         "agent-worktrees.ps1" if os.name == "nt" else "agent-worktrees"
     )
     assert f"`{payload_command}`: `get worktree-dir`" in content
-    assert "`state-root --pair --json`" in content
+    assert "`state-root --json` returns the resolved state root" in content
+    assert "`state-root --pair --json` returns any paired sibling worktree" in content
     assert "ParamSpec" not in content
     assert "## Current machine identity" in content
+
+
+def test_session_start_render_failure_writes_guidance_floor(
+    monkeypatch, tmp_path, capsys
+):
+    def registration(*_):
+        raise OSError("registration lookup failed")
+
+    monkeypatch.setattr(hook_client, "_registration_context", registration)
+    payload = {
+        "sessionId": "render-session", "cwd": str(tmp_path), "timestamp": 1000,
+        "source": "new", "_agentWorktrees": {"pluginVersion": "1.0.0"},
+    }
+    assert hook_client._write_session_guidance(payload, home=tmp_path)
+    assert capsys.readouterr().err == (
+        "[agent-worktrees] Session guidance degraded (reason: session-start-error).\n"
+    )
+    content = _guidance_file(tmp_path, "render-session").read_text(encoding="utf-8")
+    assert content.count("[agent-worktrees] Warning:") == 1
+    assert "session guidance is degraded (reason: session-start-error)" in content
+    assert "registration lookup failed" not in content
+    marker = hook_client._RUNTIME.guidance_marker(payload)
+    assert marker and content.endswith(marker)
 
 
 class _OldInterpreter:
@@ -2234,6 +2258,7 @@ def test_session_start_main_writes_guidance_floor_when_enrichment_fails(
     assert content.count("[agent-worktrees] Warning:") == 1
     assert f"session guidance is degraded (reason: {reason})" in content
     assert "`get worktree-dir`" in content
+    assert "`state-root --json`" in content
     assert "`state-root --pair --json`" in content
     assert "ParamSpec" not in content and "Traceback" not in content
     assert "<!-- agent-worktrees:session-guidance " in content

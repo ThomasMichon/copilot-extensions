@@ -240,8 +240,8 @@ def guidance_floor(reason: str, scripts: Path) -> str:
         "the session command catalog is unavailable this session.\n\n"
         f"Obtain lifecycle facts directly with {invoke}: `get worktree-dir` "
         "returns this session's managed worktree directory (empty outside one), "
-        "and `state-root --pair --json` returns the resolved state root and any "
-        "paired worktree."
+        "`state-root --json` returns the resolved state root, and "
+        "`state-root --pair --json` returns any paired sibling worktree."
     )
 
 
