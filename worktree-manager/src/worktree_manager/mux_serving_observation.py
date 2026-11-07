@@ -117,6 +117,7 @@ def observe(root: Path, *, timeout: float = 2.0) -> dict:
         token, token_identity = _existing_token(root)
         health = mux_daemon_cutover.ControlClient(
             endpoint.base_url, root=root, timeout=min(timeout, 2.0), token=token,
+            completion_timeout_s=min(timeout, 2.0),
         ).health()
         if (
             not isinstance(health, dict) or health.get("status") != "ready"

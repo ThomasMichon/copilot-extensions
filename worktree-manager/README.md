@@ -951,7 +951,8 @@ credentials and native ownership around publication, and never terminates a
 candidate whose publication is uncertain. Its version-1 result reports
 `ready`, `inactive` or `unknown`; an uncertain effect must not be replayed
 through another command. The timeout bounds individual waits, not the whole
-transaction. Neither observation nor reconciliation alone authorizes selector
+transaction; each bounded health request and its release share one completion
+budget. Neither observation nor reconciliation alone authorizes selector
 settlement or rollback; a coordinating caller must hold the appropriate
 native ownership and recheck the result.
 Normal mux-daemon startup uses the

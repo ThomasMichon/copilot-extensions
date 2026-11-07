@@ -186,26 +186,39 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
 class ControlClient:
     def __init__(
         self, base_url: str, *, root: Path | None = None, timeout: float = 5.0,
-        token: str | None = None,
+        token: str | None = None, completion_timeout_s: float | None = None,
     ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
             raise ValueError(f"invalid mux-daemon cutover URL: {base_url!r}")
         if token is not None and (not isinstance(token, str) or not token.strip()):
             raise ValueError("invalid mux-daemon control credential")
+        if completion_timeout_s is not None and (
+            type(completion_timeout_s) not in (int, float)
+            or not math.isfinite(completion_timeout_s) or completion_timeout_s <= 0
+        ):
+            raise ValueError("invalid mux-daemon completion timeout")
         self.host = parsed.hostname
         self.port = int(parsed.port)
         self.base_url = base_url
         self.token = token if token is not None else load_or_create_control_token(root)
         self.root = root if root is not None else default_root()
         self.timeout = timeout
+        self.completion_timeout_s = completion_timeout_s
 
     def _request(self, kind: str, payload: dict | None = None, *, key: str = "control") -> dict:
         from work_coalescing_singleton import client as wcs_client
 
         client_id = wcs_client.new_client_id()
+        deadline = (
+            time.monotonic() + self.completion_timeout_s
+            if self.completion_timeout_s is not None else None
+        )
         try:
-            return wcs_client.request(
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError("mux-daemon request completion deadline expired")
+            result = wcs_client.request(
                 self.host,
                 self.port,
                 self.token,
@@ -214,11 +227,19 @@ class ControlClient:
                 payload=payload or {},
                 request_deadline_s=self.timeout,
                 client_id=client_id,
+                **({"completion_timeout_s": remaining} if remaining is not None else {}),
             )
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("mux-daemon request completion deadline expired")
+            return result
         finally:
-            wcs_client.release(
-                self.host, self.port, self.token, client_id, timeout=self.timeout
-            )
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is None or remaining > 0:
+                wcs_client.release(
+                    self.host, self.port, self.token, client_id,
+                    timeout=self.timeout if remaining is None else min(self.timeout, remaining),
+                    **({"completion_timeout_s": remaining} if remaining is not None else {}),
+                )
 
     def health(self) -> dict[str, Any]:
         # A request-unique key (never the shared "control" default) so
@@ -321,6 +342,7 @@ def _health_check(
         token, _identity = _existing_token(root)
         status = ControlClient(
             f"http://{routing.format_authority(host, port)}", root=root, token=token, timeout=timeout,
+            **({"completion_timeout_s": timeout} if expected_pid is not None else {}),
         ).health()
         if (
             expected_pid is not None and type(status.get("pid")) is int
@@ -730,7 +752,10 @@ def activate_after_update(
         else:
             load_or_create_control_token(resolved_root)
         route = routed_endpoint(resolved_root)
-        if _already_at_version(route, version, root=resolved_root):
+        if (
+            guarded and route is not None and route.version == version
+            or not guarded and _already_at_version(route, version, root=resolved_root)
+        ):
             if guarded:
                 admit()
             summary["reason"] = "already-active-version"

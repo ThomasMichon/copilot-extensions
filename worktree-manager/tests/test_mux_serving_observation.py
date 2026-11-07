@@ -55,6 +55,111 @@ def test_explicit_control_credential_never_creates_one(tmp_path, monkeypatch):
     assert not mux_daemon_cutover.control_token_path(tmp_path).exists()
 
 
+@pytest.mark.parametrize("phase", ["health", "release"])
+def test_observation_bounds_fragmented_health_and_release(tmp_path, phase):
+    import os
+    import socket
+    import threading
+    import time
+    from zdd import diagnostics, routing
+
+    stop = threading.Event()
+    errors = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(3)
+        host, port = listener.getsockname()
+        pid = os.getpid()
+        birth = diagnostics.process_start_time(pid)
+        assert birth
+        routing.publish_active(
+            mux_daemon_cutover.routing_dir(tmp_path), bind=host, port=port,
+            pid=pid, version="1.2.3", process_start_time=birth,
+        )
+        mux_daemon_cutover.control_token_path(tmp_path).write_text("fixture-control", encoding="utf-8")
+        health = json.dumps({
+            "version": 1,
+            "result": {
+                "status": "ready", "active": True, "runtime_generation": "1.2.3",
+                "pid": pid, "process_start_time": birth,
+            },
+        }).encode() + b"\n"
+
+        def serve():
+            try:
+                with listener.accept()[0] as connection:
+                    connection.settimeout(3)
+                    assert connection.recv(65536)
+                    if phase == "release":
+                        connection.sendall(health)
+                    else:
+                        connection.sendall(b'{"version":1,')
+                        deadline = time.monotonic() + 1.5
+                        while time.monotonic() < deadline and not stop.wait(0.03):
+                            connection.sendall(b" ")
+                if phase == "release":
+                    with listener.accept()[0] as connection:
+                        connection.settimeout(3)
+                        assert connection.recv(65536)
+                        connection.sendall(b'{"version":1,')
+                        deadline = time.monotonic() + 1.5
+                        while time.monotonic() < deadline and not stop.wait(0.03):
+                            connection.sendall(b" ")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            except BaseException as error:
+                errors.append(error)
+
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        try:
+            started = time.monotonic()
+            if phase == "health":
+                with pytest.raises(mux_serving_observation.ServingObservationError):
+                    mux_serving_observation.observe(tmp_path, timeout=0.2)
+            else:
+                assert mux_serving_observation.observe(tmp_path, timeout=0.2) == {
+                    "state": "ready", "generation": "1.2.3",
+                }
+            assert time.monotonic() - started < 1.0
+        finally:
+            stop.set()
+            worker.join(timeout=3)
+        assert not worker.is_alive()
+        assert not errors
+
+
+@pytest.mark.parametrize("elapsed", [0.75, 1.1])
+def test_control_release_uses_only_the_remaining_completion_budget(tmp_path, monkeypatch, elapsed):
+    from types import SimpleNamespace
+    from work_coalescing_singleton import client
+
+    clock = SimpleNamespace(value=10.0)
+    monkeypatch.setattr(mux_daemon_cutover, "time", SimpleNamespace(monotonic=lambda: clock.value))
+    releases = []
+
+    def request(*_args, **kwargs):
+        assert kwargs["completion_timeout_s"] == pytest.approx(1.0)
+        clock.value += elapsed
+        return {"status": "ready"}
+
+    monkeypatch.setattr(client, "request", request)
+    monkeypatch.setattr(client, "release", lambda *_args, **kwargs: releases.append(kwargs))
+    owner = mux_daemon_cutover.ControlClient(
+        "http://127.0.0.1:43123", root=tmp_path, token="fixture-control",
+        timeout=5.0, completion_timeout_s=1.0,
+    )
+    if elapsed < 1:
+        assert owner.health() == {"status": "ready"}
+        assert releases[0]["timeout"] == pytest.approx(0.25)
+        assert releases[0]["completion_timeout_s"] == pytest.approx(0.25)
+    else:
+        with pytest.raises(TimeoutError, match="completion deadline"):
+            owner.health()
+        assert not releases
+
+
 @pytest.fixture
 def serving(tmp_path, monkeypatch):
     from agent_procutil import _daemon_instance_identity
@@ -84,9 +189,10 @@ def serving(tmp_path, monkeypatch):
     })
 
     class Client:
-        def __init__(self, base_url, *, root, timeout, token):
+        def __init__(self, base_url, *, root, timeout, token, completion_timeout_s):
             assert base_url == "http://127.0.0.1:43123"
             assert token == "fixture-control"
+            assert completion_timeout_s == timeout
 
         def health(self):
             return dict(health)
