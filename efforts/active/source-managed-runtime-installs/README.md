@@ -1590,6 +1590,16 @@ install contracts pass. The coverage verifier now names a bounded set of tests
 missing production call coverage without changing acceptance. Identifying and
 correcting the actual full-packet coverage failure remains required; focused
 assertion success is not accepted full-packet evidence.
+An explicit Linux diagnostic run on that published head identified all four
+missing call contexts: the two portfolio-CLI cases and two elapsed-budget
+refusals call already admitted source-preparation modules that were omitted
+from production measurement. Both modules are now explicit coverage targets;
+no case, byte binding or effect restriction is removed. Those four functional
+controls pass, as do fourteen profile-association controls. Post-reconciliation
+Worktrees inventory/copy controls pass 63 cases with three explicit platform
+skips, with verified cleanup. Full exact-head Linux packet verification remains
+the acceptance gate. Historical journal count phrases now describe their
+recorded adopter selection rather than claim today's complete plugin roster.
 The broader historical workflow test selection still encounters the
 [previously recorded non-enrolled recipe gap](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6627995884)
 and [retired-workflow fixture failures](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6282693571).
