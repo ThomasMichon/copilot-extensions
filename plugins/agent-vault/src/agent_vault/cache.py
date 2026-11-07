@@ -110,7 +110,7 @@ class PersistentCache:
         return self._available
 
     def _get_fernet(self, *, readonly: bool = False):
-        if self._fernet is not None:
+        if self._fernet is not None and not readonly:
             return self._fernet
         if not self._crypto_available():
             return None
@@ -142,6 +142,8 @@ class PersistentCache:
         if self._key_file.exists():
             blob = self._key_file.read_bytes()
             if kek.is_wrapped(blob):
+                if readonly and not IS_WINDOWS and blob.startswith(kek.WRAP_MAGIC + b"D"):
+                    raise CacheProtectionError("cache key requires an unavailable Windows wrapping backend")
                 key = kek.unwrap_bytes(blob)
             else:
                 # Legacy plaintext key file -> migrate to a wrapped (DPAPI on
@@ -170,6 +172,13 @@ class PersistentCache:
 
     def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
         if not self._cache_file.exists():
+            if strict:
+                from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
+
+                if self._key_file.exists():
+                    self._get_fernet(readonly=True)
+                elif self._fernet is not None and not isinstance(self._fernet, DpapiCacheCipher):
+                    raise CacheProtectionError("cache key disappeared; cache was not replaced")
             return {"v": 1, "entries": {}}
         if not self._key_file.exists():
             from .cache_dpapi import MAGIC, CacheProtectionError
@@ -286,14 +295,41 @@ class PersistentCache:
     # -- public API --------------------------------------------------------
 
     @staticmethod
-    def _field_record(store: dict, entry: str, field: str):
+    def _field_record(store: dict, entry: str, field: str, *, strict: bool = False):
+        from .cache_dpapi import CacheProtectionError
+
         entries = store.get("entries")
         if not isinstance(entries, dict):
             return None
         fields = entries.get(entry)
+        if strict and entry in entries and not isinstance(fields, dict):
+            raise CacheProtectionError("Selected protected cache entry is invalid")
         if not isinstance(fields, dict):
             return None
-        return fields.get(field)
+        record = fields.get(field)
+        if strict and field in fields:
+            valid = isinstance(record, dict)
+            if valid and "rotation" in record:
+                rotation = record["rotation"]
+                previous = rotation.get("previous") if isinstance(rotation, dict) else None
+                valid = (
+                    isinstance(rotation, dict)
+                    and {"candidate", "operation", "previous"} <= rotation.keys()
+                    and isinstance(rotation["candidate"], str)
+                    and type(rotation["operation"]) is int
+                    and (
+                        previous is None
+                        or (
+                            isinstance(previous, dict) and "rotation" not in previous
+                            and isinstance(previous.get("value"), str)
+                        )
+                    )
+                )
+            else:
+                valid = valid and isinstance(record.get("value"), str)
+            if not valid:
+                raise CacheProtectionError("Selected protected cache record is invalid")
+        return record
 
     @staticmethod
     def _fields_for_write(store: dict, entry: str) -> tuple[dict, dict]:
@@ -323,17 +359,10 @@ class PersistentCache:
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
         )
-        rec = self._field_record(store, entry, field)
-        if readonly and rec is not None and (
-            not isinstance(rec, dict)
-            or ("rotation" not in rec and not isinstance(rec.get("value"), str))
-        ):
-            from .cache_dpapi import CacheProtectionError
-
-            raise CacheProtectionError("Selected protected cache record is invalid")
-        if not readonly and rec is None and legacy_entry and legacy_entry != entry:
-            rec = self._field_record(store, legacy_entry, field)
-            if rec is not None:
+        rec = self._field_record(store, entry, field, strict=readonly)
+        if rec is None and legacy_entry and legacy_entry != entry:
+            rec = self._field_record(store, legacy_entry, field, strict=readonly)
+            if rec is not None and not readonly:
                 self.migrate_entry(legacy_entry, entry, field)
                 migrated = self._field_record(self._read_store(), entry, field)
                 if migrated is not None:
@@ -354,13 +383,22 @@ class PersistentCache:
         field: str,
         value: str,
         generation: int = 0,
+        *,
+        strict: bool = False,
+        legacy_entry: str | None = None,
     ) -> bool:
         """Cache a value (cache-through). No-op when disabled."""
         if not self.enabled:
             return False
         try:
             with self._store_lock():
-                store = self._read_store()
+                store = self._read_store(readonly=True, strict=True) if strict else self._read_store()
+                if strict:
+                    current = self._field_record(store, entry, field, strict=True)
+                    if current is None and legacy_entry and legacy_entry != entry:
+                        legacy = self._field_record(store, legacy_entry, field, strict=True)
+                        if legacy is not None:
+                            entry = legacy_entry
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
                 if isinstance(current, dict) and "rotation" in current:
@@ -516,6 +554,9 @@ class PersistentCache:
         field: str,
         value: str,
         generation: int | None = None,
+        *,
+        strict: bool = False,
+        legacy_entry: str | None = None,
     ) -> bool:
         """Apply a confirmed live value, clearing a pending replacement journal.
 
@@ -527,7 +568,13 @@ class PersistentCache:
             return False
         try:
             with self._store_lock():
-                store = self._read_store()
+                store = self._read_store(readonly=True, strict=True) if strict else self._read_store()
+                if strict:
+                    current = self._field_record(store, entry, field, strict=True)
+                    if current is None and legacy_entry and legacy_entry != entry:
+                        legacy = self._field_record(store, legacy_entry, field, strict=True)
+                        if legacy is not None:
+                            entry = legacy_entry
                 _, fields = self._fields_for_write(store, entry)
                 current = fields.get(field)
                 if (
