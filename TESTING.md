@@ -2376,16 +2376,32 @@ control invokes the actual Manager `launch-session.ps1` and Worktrees resolver,
 using an unmodified private copy of the Manager scripts rather than a synthetic
 resolved plan, through the explicit no-mux path. It checks
 the same native history, broker, PID/birth and original-owner exit receipts.
+The `manager-mux` control invokes that same Manager launcher without
+`--no-mux`, from a separate private caller pane. It requires the caller to
+return while the Manager-created pane and native broker remain alive, then
+invokes the real caller from a newly named private outer pane before each
+fresh/resume broker prompt. Manager reuse must
+preserve the mux incarnation and native process births without another mux
+creation or startup-input replay. Native execution completion is read from
+the backend receipt, not inferred from the earlier successful caller return.
 These controls use ordinary unseeded admission and an explicit native initial
 prompt; they do not claim staged-seed qualification. The existing real
 PowerShell cold-resume consumer instead verifies Windows refusal before the
 backend starts, with its seed retained, when mux absence is unconfirmed.
-Discovery uses a read-only adapter to the real private mux, not the host's
-default server or fabricated successful replies. The fixture preserves the
+Discovery uses an adapter to the real private mux, not the host's
+default server or fabricated successful replies. Its only writes are creation
+and session options/configuration for the fixture's UUID-named Manager target.
+Outer fixture panes explicitly propagate their private PATH/profile with mux
+environment flags and verify selection before invoking Manager; inherited
+profile variables alone can be rewritten by PSMux. Cleanup pins both caller
+and Manager session incarnations. The fixture preserves the
 runner's registry/lifecycle context while scrubbing Copilot settings and
-credentials. Its raw pane entrypoint uses the physical Python interpreter and
-the same managed test packages, avoiding the Windows venv redirector.
-It does not install a runtime or qualify copied setup, Manager's muxed
+credentials. Its raw pane entrypoint uses the physical Python interpreter
+with the same managed test packages, avoiding the
+Windows venv redirector and ambient Python site initialization. The fixture
+disables the wrapper's post-error display hold, not native execution or its
+required process/exit receipts.
+It does not install a runtime or qualify copied setup, Manager's externally
 attached/new-window paths or the full embody planner, guarded-head or auth-wait
 recovery, physical keyboard input or survival
 after caller cleanup Jobs. Those remain separate acceptance lanes.
