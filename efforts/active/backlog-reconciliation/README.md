@@ -233,6 +233,11 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+After reviewed #11252 and complete actual #6394 receiving/readback, #11181
+is separately retired NOT_PLANNED without technical completion or custody
+release. Two complete equal scans measure 812 whole OPEN, 83 above fixed
+729; 516 original-cohort and 296 inflow remain. Phase 2 continues.
+
 The [exact-session receiving contract](<journal/2026/11.06 exact-session-receiving-contract.md>)
 receives #11181's complete admission, retirement and RPC-boundary requirements
 directly in OPEN #6394, preserving its original alternatives, all existing
