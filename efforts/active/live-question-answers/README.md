@@ -231,3 +231,14 @@ requested protocol-only scope.
 - The current HTTP-52 portfolio includes these controls (285 total). The PR
   is temporarily draft while the corrected source receives fresh evidence;
   no review, CI or permission gate is bypassed.
+
+### 2026-11-07 - Corrected source requalified
+
+- The corrected source passed all 285 HTTP-52 capture cases, independent
+  no-write verification, immutable historical publication guards and canonical
+  export in Actions run 42371932573.
+- The native artifact owner materialized all 150 verified outputs against
+  the exact source checkpoint. The independent contract guard passed with
+  two contracts and 1,061 retained fixtures; historical generations are intact.
+- The budget correction and its evidence are ready for renewed ordinary
+  review. Required CI, actual merge and effort closeout remain open.
