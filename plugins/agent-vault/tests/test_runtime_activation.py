@@ -358,17 +358,16 @@ def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path
     failure = {"state": "failed", "detail": "fixture invalid configuration"}
     if reason == "repository-context-missing":
         failure["reason"] = reason
-    (payload / "scripts" / "runtime-activation.py").write_text(
-        (
-            "import sys\nsys.stderr.write('fixture reader startup failed\\n')\n"
-            "raise SystemExit(3)\n"
-            if reason == "startup" else
+    reader = payload / "scripts" / "runtime-activation.py"
+    if reason == "startup":
+        reader.unlink()
+    else:
+        reader.write_text(
             "import json\n"
             f"print(json.dumps({failure!r}))\n"
-            "raise SystemExit(3)\n"
-        ),
-        encoding="utf-8",
-    )
+            "raise SystemExit(3)\n",
+            encoding="utf-8",
+        )
     script = str(payload / "scripts" / "runtime-activation.ps1").replace("'", "''")
     project = str(tmp_path).replace("'", "''")
     python = str(sys.executable).replace("'", "''")
@@ -386,7 +385,7 @@ def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path
     )
     assert result.returncode == 3, result.stdout + result.stderr
     if reason == "startup":
-        assert "fixture reader startup failed" in result.stderr
+        assert "can't open file" in result.stderr
     elif reason:
         assert "repository context is missing" in result.stderr
         assert "<repo> vault unlock" in result.stderr
