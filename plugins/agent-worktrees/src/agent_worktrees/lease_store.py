@@ -16,12 +16,12 @@ from agent_procutil import no_window_kwargs
 
 from . import git_ops
 from .lease_config import LeaseSettings
+from .lease_history import validate_transition
 from .lease_protocol import (
     LeaseRecord,
     ProtocolError,
     Resource,
     format_timestamp,
-    parse_record,
     parse_timestamp,
     ref_for,
     resource,
@@ -30,6 +30,11 @@ from .lease_protocol import (
     validate_context,
     validate_holder,
     validate_oid,
+)
+from .service_custody_protocol import (
+    CoordinationRecord,
+    ServiceCustodyRecord,
+    parse_coordination_record,
 )
 
 
@@ -50,6 +55,17 @@ class LeaseConflict(RuntimeError):
 
 class LeaseLost(RuntimeError):
     """The supplied fencing token is no longer the resource's current OID."""
+
+
+class ServiceCustodyConflict(LeaseLost):
+    """Task operations cannot reinterpret or replace permanent service custody."""
+
+    def __init__(self, snapshot: ServiceCustodySnapshot) -> None:
+        self.snapshot = snapshot
+        super().__init__(
+            f"{snapshot.record.resource['identity']} has permanent service custody "
+            f"{snapshot.record.custody_id}; task lease operations are forbidden"
+        )
 
 
 class _CASConflict(RuntimeError):
@@ -77,6 +93,23 @@ class LeaseSnapshot:
             }
         )
         return result
+
+
+@dataclass(frozen=True)
+class ServiceCustodySnapshot:
+    """Permanent protection has no task TTL, deadline or renewable holder."""
+
+    ref: str
+    oid: str
+    record: ServiceCustodyRecord
+
+    def to_dict(self) -> dict[str, object]:
+        result = asdict(self.record)
+        result.update({"ref": self.ref, "token": self.oid, "custody_type": "service"})
+        return result
+
+
+ResourceSnapshot = LeaseSnapshot | ServiceCustodySnapshot
 
 
 class GitLeaseStore:
@@ -328,9 +361,9 @@ class GitLeaseStore:
         """
         cutoff = self._utc_now() - timedelta(days=retention_days)
         squashed: list[dict[str, str]] = []
-        for snapshot in self.list(kind=kind):
+        for snapshot in self.list_resources(kind=kind):
             record = snapshot.record
-            if record.state != "released":
+            if not isinstance(record, LeaseRecord) or record.state != "released":
                 continue
             if parse_timestamp(record.renewed_at) > cutoff:
                 continue
@@ -431,6 +464,15 @@ class GitLeaseStore:
             return oid
 
     def inspect(self, kind: str, key: str) -> LeaseSnapshot | None:
+        """Read a task lease; service custody is an explicit protected conflict."""
+        snapshot = self.inspect_resource(kind, key)
+        if isinstance(snapshot, ServiceCustodySnapshot):
+            raise ServiceCustodyConflict(snapshot)
+        return snapshot
+
+    status = inspect
+
+    def inspect_resource(self, kind: str, key: str) -> ResourceSnapshot | None:
         """Read and validate the resource's current ref directly from the remote."""
         item = resource(kind, key)
         ref = ref_for(self.settings.ref_prefix, item)
@@ -444,23 +486,32 @@ class GitLeaseStore:
                 if attempt == 2:
                     raise LeaseLost("lease ref changed repeatedly while reading") from None
                 continue
+            if isinstance(record, ServiceCustodyRecord):
+                return ServiceCustodySnapshot(ref=ref, oid=oid, record=record)
             return self._snapshot(item, oid, record, self._utc_now())
         raise AssertionError("unreachable")
 
-    status = inspect
-
     def list(self, *, kind: str | None = None) -> list[LeaseSnapshot]:
+        """Read task leases without silently omitting protected service records."""
+        snapshots: list[LeaseSnapshot] = []
+        for snapshot in self.list_resources(kind=kind):
+            if isinstance(snapshot, ServiceCustodySnapshot):
+                raise ServiceCustodyConflict(snapshot)
+            snapshots.append(snapshot)
+        return snapshots
+
+    def list_resources(self, *, kind: str | None = None) -> list[ResourceSnapshot]:
         """List and strictly validate every resource ref in the namespace."""
         if kind is not None:
             resource(kind, "_validation_only")
         prefix = self.settings.ref_prefix
         rows = self._ls_remote(f"{prefix}/*")
-        snapshots: list[LeaseSnapshot] = []
+        snapshots: list[ResourceSnapshot] = []
         for _oid, ref in rows:
             item = resource_from_ref(prefix, ref)
             if kind is not None and item.kind != kind:
                 continue
-            snapshot = self.inspect(item.kind, item.key)
+            snapshot = self.inspect_resource(item.kind, item.key)
             if snapshot is None:
                 raise LeaseLost(f"lease ref {ref} disappeared while listing")
             snapshots.append(snapshot)
@@ -521,7 +572,7 @@ class GitLeaseStore:
             rows.append((validate_oid(parts[0]), parts[1]))
         return rows
 
-    def _read_record(self, ref: str, expected_oid: str, item: Resource) -> LeaseRecord:
+    def _read_record(self, ref: str, expected_oid: str, item: Resource) -> CoordinationRecord:
         with tempfile.TemporaryDirectory(prefix="agent-leases-read-") as temp:
             repo = Path(temp) / "repo.git"
             self._git(["init", "--bare", str(repo)])
@@ -552,13 +603,13 @@ class GitLeaseStore:
         repo: Path,
         head_oid: str,
         item: Resource,
-    ) -> LeaseRecord:
+    ) -> CoordinationRecord:
         """Validate the complete linear, empty-tree lease history."""
         empty_tree = self._git(
             [f"--git-dir={repo}", "hash-object", "-t", "tree", "--stdin"],
             input_text="",
         ).stdout.strip()
-        chain: list[tuple[str, LeaseRecord]] = []
+        chain: list[tuple[str, CoordinationRecord]] = []
         oid = head_oid
         while True:
             raw = self._git(
@@ -583,89 +634,21 @@ class GitLeaseStore:
                 raise ProtocolError("lease commits must use the empty tree")
             if len(parents) > 1:
                 raise ProtocolError("lease history must be linear")
-            chain.append((oid, parse_record(message, item)))
+            chain.append((oid, parse_coordination_record(message, item)))
             if not parents:
                 break
             oid = validate_oid(parents[0])
 
-        previous: LeaseRecord | None = None
-        for _oid, current in reversed(chain):
-            self._validate_transition(previous, current)
+        previous: CoordinationRecord | None = None
+        parent_oid = ""
+        for current_oid, current in reversed(chain):
+            validate_transition(
+                previous, current, parent_oid=parent_oid,
+                clock_skew_seconds=self.settings.clock_skew_seconds,
+            )
             previous = current
+            parent_oid = current_oid
         return chain[0][1]
-
-    def _validate_transition(
-        self,
-        previous: LeaseRecord | None,
-        current: LeaseRecord,
-    ) -> None:
-        """Validate one event against its exact parent record."""
-        if previous is None:
-            if current.event != "acquire":
-                raise ProtocolError("the root lease commit must be an acquire event")
-            return
-
-        issued = datetime.strptime(
-            current.issued_at, "%Y-%m-%dT%H:%M:%SZ"
-        ).replace(tzinfo=timezone.utc)
-        renewed = datetime.strptime(
-            current.renewed_at, "%Y-%m-%dT%H:%M:%SZ"
-        ).replace(tzinfo=timezone.utc)
-        prior_renewed = datetime.strptime(
-            previous.renewed_at, "%Y-%m-%dT%H:%M:%SZ"
-        ).replace(tzinfo=timezone.utc)
-
-        if current.event == "acquire":
-            if previous.state != "released":
-                raise ProtocolError("a non-root acquire must follow a release tombstone")
-            if current.lease_id == previous.lease_id:
-                raise ProtocolError("a new acquisition must use a new lease_id")
-            if issued < prior_renewed:
-                raise ProtocolError("acquisition time precedes its release parent")
-            return
-
-        if previous.state != "leased":
-            raise ProtocolError(f"{current.event} must follow leased state")
-        if current.event == "takeover":
-            deadline = previous.expires() + timedelta(
-                seconds=self.settings.clock_skew_seconds
-            )
-            if current.lease_id == previous.lease_id:
-                raise ProtocolError("a takeover must use a new lease_id")
-            if issued <= deadline:
-                raise ProtocolError("takeover occurred before expiry plus clock skew")
-            return
-        if current.event == "transfer":
-            deadline = previous.expires() - timedelta(
-                seconds=self.settings.clock_skew_seconds
-            )
-            if current.lease_id == previous.lease_id:
-                raise ProtocolError("a transfer must use a new lease_id")
-            if current.holder == previous.holder:
-                raise ProtocolError("transfer must change the holder")
-            if current.issued_at != current.renewed_at:
-                raise ProtocolError("transfer must issue and renew together")
-            if issued < prior_renewed:
-                raise ProtocolError("transfer moved renewed_at backward")
-            if issued > previous.expires():
-                raise ProtocolError("transfer occurred after lease expiry")
-            if issued > deadline:
-                # Once the old holder has crossed its own safe deadline, the
-                # transfer must be treated like a lost lease and restarted by
-                # acquisition/takeover.
-                raise ProtocolError("transfer occurred after the prior safe deadline")
-            return
-
-        if current.lease_id != previous.lease_id:
-            raise ProtocolError(f"{current.event} changed the lease_id")
-        if current.holder != previous.holder:
-            raise ProtocolError(f"{current.event} changed the holder")
-        if current.issued_at != previous.issued_at:
-            raise ProtocolError(f"{current.event} changed issued_at")
-        if renewed < prior_renewed:
-            raise ProtocolError(f"{current.event} moved renewed_at backward")
-        if current.event == "release" and current.context != previous.context:
-            raise ProtocolError("release changed diagnostic context")
 
     def _transition(self, item: Resource, expected_oid: str, record: LeaseRecord) -> str:
         ref = ref_for(self.settings.ref_prefix, item)
