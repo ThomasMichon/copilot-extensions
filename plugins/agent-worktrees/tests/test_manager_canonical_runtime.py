@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 
@@ -61,6 +63,51 @@ def test_legacy_launcher_contract_remains_unchanged(selected):
         "uv", "run", "--quiet", "--project", str(slot), "python", "-m",
         "worktree_manager", "--version",
     ]]
+
+
+@pytest.mark.parametrize("fault", [None, "no-bootstrap", "no-python", "foreign", "missing", "malformed"])
+def test_application_launcher_uses_only_current_retained_resources(selected, monkeypatch, fault):
+    root, slot, calls = selected
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir()
+    bootstrap.touch()
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    assets = slot / ".venv" / "package" / "_runtime_assets" / "bin"
+    assets.mkdir(parents=True)
+    script = assets / ("launch-session.ps1" if os.name == "nt" else "launch-session.sh")
+    script.touch()
+    recovery = root / "versions" / "older"
+    (recovery / "Scripts").mkdir(parents=True)
+    (recovery / "Scripts" / "python.exe").touch()
+    (root / "last-known-good").write_text(recovery.name, encoding="utf-8")
+    if fault == "no-bootstrap":
+        bootstrap.unlink()
+    elif fault == "no-python":
+        python.unlink()
+        (slot / "Scripts").mkdir()
+        (slot / "Scripts" / "python.exe").touch()
+    elif fault == "missing":
+        script.unlink()
+
+    def probe(command):
+        calls.append(command)
+        relative = "../foreign" if fault == "foreign" else str(assets.relative_to(slot))
+        report = "not-json" if fault == "malformed" else json.dumps({"launcher_directory": relative})
+        return (0, 6, 44, 1), subprocess.CompletedProcess(command, 0, "worktree-manager 0.6.44-dev1\n" + report)
+
+    monkeypatch.setattr(manager, "_probe_worktree_manager_version", probe)
+    assert manager._usable_worktree_manager_launcher_dir() == (assets if fault is None else None)
+    if fault in {"no-bootstrap", "no-python"}:
+        assert not calls
+    else:
+        assert len(calls) == 1
+        assert calls[0] == [
+            str(python), "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
+            str(Path(manager.__file__).with_name("manager_application_probe.py")),
+        ]
 
 
 def test_normal_update_does_not_bootstrap_an_unusable_manager(monkeypatch):

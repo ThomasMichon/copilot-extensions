@@ -2037,3 +2037,89 @@ including preparation and cleanup), including both final consumers and the
 existing credential/post-exit contract guards. Native application and retained
 core inputs are unchanged. The new helper still requires fresh exact-source
 hosted evidence, review and required CI; no review gate is bypassed.
+
+### 2026-11-07 - Direct-launch integration merged; continue caller convergence
+
+#11294 merged at 13:38:52 UTC as
+`b830d4ab3d4d33e0794d0ce2aaa6f4ac625e2832`. Genuine Copilot review
+`5812478895` approves the exact `10b5ce6d81` head with no active issues; all
+four inline threads are resolved. Final same-head CI
+[42377533233](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42377533233)
+passes, including required gate `128418959411`. The managed merge uses the
+repository-authorized Maintainer review exception, not a CI bypass.
+
+The final attached/combined-env and consumer selection also qualifies all five
+cases on hosted Windows, without skips, in 49.16 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42377184559)).
+The exact-source, selection, protected-controller, run/attempt and Windows
+manifest is validated. The earlier real local Worktrees application proof
+remains distinct from the explicitly unavailable hosted governed-feed lane.
+No new transport ref or source branch was created.
+
+Re-read the parent Plan and Validation Plan. No broad caller/lifetime item is
+closed by this slice. Preserve the owned pre-merge history, collect only its
+eleven commits into a tree-identical local commit, and pull forward through
+the native owner; the source now equals the merged default. Incoming changes
+include canonical application/source-recovery and readiness owners, which the
+next fixture must compose rather than reimplement.
+
+Continue with real Manager wheel-application construction and its Worktrees
+launcher/default-setup consumer. The source-location startup discrepancy,
+complete fresh/resume/reuse and attached/new-window matrix, all caller cleanup
+Jobs, native auth-wait/recovery, pending-aware ACP lifetime and ordinary/hoisted
+receiving gates remain open. No installed runtime or productive session is
+changed, and the parent remains Active.
+
+### 2026-11-07 - Real Manager application and launcher-discovery acceptance
+
+Compose the current canonical source materializer, standalone closure builder,
+wheel profile and slot-local application installer in a disposable private home.
+The first real construction installs thirteen packages, then refuses Manager's
+own running application as belonging to another installation. The existing
+engine deliberately uses an extended native Windows Python path; lexical
+root/package comparisons do not establish physical identity. This failure
+reproduces in 122.82 seconds (186.94 seconds including preparation and cleanup),
+before resident activation or Worktrees launcher discovery.
+
+Self-install now uses the existing installation-context physical equality and
+containment helpers. Bootstrap activation uses the same root comparison.
+Twenty focused self-install controls pass in 4.90 seconds (115.45 seconds total),
+covering root/prefix/package aliases, foreign roots/packages and the existing
+qualification/activation failures. Twenty activation outcome, base-interpreter,
+alias/foreign-root and explicit-start controls pass in 1.70 seconds (96.28
+seconds total). No root, qualification or startup guard is removed.
+
+The real retry successfully installs and activates Manager, then reaches
+Worktrees' incorrect flat-interpreter discovery branch. Its warning also exposes
+the fixture probe's default Windows encoding. That run fails in 175.72 seconds
+(253.17 seconds total); the fixture now uses explicit UTF-8 for those reads.
+The framework settles the contained run and removes its private registry.
+Strengthen the fixture's cleanup-receipt assertion to run on body failures too,
+rather than infer successful cleanup from the inner assertion result.
+
+Worktrees now selects only the current application's nested interpreter and
+runs one read-only resource probe through the existing retention bootstrap.
+The probe executes Manager's actual CLI version check, then its existing
+packaged-launcher locator, returning only a slot-relative directory. Legacy
+flat retained-payload and source paths remain unchanged; missing bootstrap or
+interpreter, malformed/foreign/missing assets and recovery-generation fallback
+are refused. This adds neither an installed-peer command nor another process.
+Ten focused consumer controls pass in 0.98 seconds (69.36 seconds total).
+
+The complete real first-touch flow then passes in 168.25 seconds (191.00 seconds
+including preparation and cleanup): canonical build and installation, actual
+resident activation, source-input removal, packaged assets, real retained
+Worktrees discovery, unchanged completion evidence and nonempty, settled owned
+daemon cleanup receipts. Home, project state and mux data are private; the
+resident uses the native renewable test lifecycle under the original 300-second
+case deadline. No shared service, productive session or installed runtime changes.
+
+This closes an incoming-readiness prerequisite under
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement),
+not outgoing retirement or caller-lifetime acceptance. No incumbent keeper is
+changed, automatic/manual classification and operator state remain intact,
+independent connectivity is preserved and cleanup remains with its existing
+owner. Documentation and both consumer patch declarations accompany this slice;
+fresh source gates, review and CI still gate publication. The actual
+Manager/default-setup Copilot flow, broader caller matrix and parent lifetime/
+receiving gates remain open.
