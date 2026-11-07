@@ -1146,3 +1146,23 @@ implementation. The exact support closure follows the consumer trace and tests.
   Re-admitted that one test source without changing node inventory or coverage
   targets. The complete corrected Windows packet and final-head CI remain
   required; the earlier 60-case partial result is not qualification.
+- The module-size gate caught growth in the existing registry store. Moved
+  the protection transaction into its existing record-operation owner without
+  raising a ceiling. The final focused native custody controls pass five
+  cases; shared registry/cleanup controls pass 63 with eight platform skips.
+- The optional Windows whole-unit run completed 4,522 passes, three skips,
+  22 deliberate deselections and three framework warnings in 372.23 seconds.
+  Its no-skip evidence gate refused qualification. The skipped positions
+  correspond to the three explicitly POSIX filesystem/kernel controls;
+  required Linux CI and optional native qualification remain separate.
+- Reconciled newer `dev` while preserving the independent current CLI source
+  binding. The same retained-writer fixture correction had independently
+  arrived upstream; its bytes are retained rather than duplicated.
+- The fresh review resolved the ready-writer ordering finding, but its summary
+  raises crash safety without inline findings. Current-process registry
+  protection prevents voluntary later retirement of a pending pin owner; it
+  cannot preserve that pin if its owner crashes. Assess the SDK's existing
+  finite `RetirementCustody` owner before claiming durable native retirement.
+  No new resident service, watchdog or retirement protocol is authorized or
+  needed by that assessment. The PR stays draft; merge, release, rollout and
+  the parent acceptance remain open.
