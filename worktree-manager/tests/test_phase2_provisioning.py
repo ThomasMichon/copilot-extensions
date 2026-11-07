@@ -144,6 +144,37 @@ def test_python_prerequisite_without_candidates_is_missing(monkeypatch):
     assert status.path is None
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+def test_python_prerequisite_empty_path_entry_searches_current_directory(
+    monkeypatch, tmp_path,
+):
+    import os
+
+    from worktree_manager import prereqs
+
+    older = tmp_path / "older Python"
+    current = tmp_path / "current"
+    older.mkdir()
+    current.mkdir()
+    filename = "python3.exe" if os.name == "nt" else "python3"
+    for directory in (older, current):
+        executable = directory / filename
+        executable.write_bytes(b"synthetic version-probe fixture\n")
+        executable.chmod(0o700)
+    monkeypatch.chdir(current)
+    monkeypatch.setenv("PATH", str(older) + os.pathsep)
+    monkeypatch.setenv("NoDefaultCurrentDirectoryInExePath", "1")
+    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", (filename,))
+    monkeypatch.setattr(
+        prereqs, "_probe_version",
+        lambda path: "3.9.5" if Path(path).samefile(older / filename) else "3.11.9",
+    )
+    status = detect_prereq(Prereq("python3", min="3.10"))
+    assert status.satisfied
+    assert Path(status.path).samefile(current / filename)
+
+
 @pytest.mark.parametrize("supported_available", [False, True])
 @pytest.mark.parametrize("platform", ["windows", "linux"])
 def test_python_prerequisite_windowsapps_alias_is_windows_only(

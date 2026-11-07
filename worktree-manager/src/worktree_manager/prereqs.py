@@ -94,7 +94,7 @@ def _python_candidates(first: str | None) -> Iterator[str]:
         yield first
     for exe in _EXE_ALIASES["python3"]:
         for directory in os.get_exec_path():
-            found = shutil.which(exe, path=directory)
+            found = shutil.which(exe, path=directory or os.curdir)
             if found:
                 yield found
 
