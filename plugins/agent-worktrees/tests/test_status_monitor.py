@@ -4566,8 +4566,8 @@ def test_guarded_undrain_reuses_native_routing_custody_in_actual_monitor(tmp_pat
     from agent_worktrees import status_monitor_recovery_contract as recovery
 
     directory = tmp_path / "status-monitor-routing"
-    monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "fixture-build")
-    monkeypatch.setattr("agent_worktrees.status_monitor_health.PROCESS_GENERATION", "fixture-build")
+    monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "a" * 32)
+    monkeypatch.setattr("agent_worktrees.status_monitor_health.PROCESS_GENERATION", "a" * 32)
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
@@ -4709,6 +4709,7 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
 
 @pytest.mark.parametrize("kind,idle_gap", [
     ("preToolUse", False), ("postToolUse", False), ("readHookDemand", False), ("readHookDemand", True),
+    ("worktreeChanged", False), ("worktreeChanged", True),
 ])
 def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind, idle_gap):
     from zdd import lifecycle
@@ -4718,7 +4719,7 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     from agent_worktrees.status_monitor_handover import MonitorHandover
 
     clock = {"now": 0.0, "advanced": 0}
-    sweeps, servers, replies = [], [], []
+    sweeps, servers, replies, changes = [], [], [], []
     gap = {"guard": False, "injected": False}
     entered, finished = threading.Event(), threading.Event()
     late_callers = []
@@ -4762,13 +4763,14 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     endpoint = tmp_path / "hook-endpoint.json"
 
     def dial(server):
-        if kind == "readHookDemand":
+        if kind in {"readHookDemand", "worktreeChanged"}:
             import socket
 
             with socket.create_connection(server.server.server_address, timeout=1) as conn:
                 conn.sendall(json.dumps({
                     "version": 1, "token": server.token, "kind": kind,
                     "hook_generation": server.generation, "deadline": time.time() + 1,
+                    **({"payload": {"cwd": str(tmp_path)}} if kind == "worktreeChanged" else {}),
                 }).encode() + b"\n")
                 assert conn.recv(1) == b""
             replies.append(server.has_recent_hook_demand())
@@ -4784,6 +4786,13 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
 
     class Server(hook_ipc.HookIpcServer):
         def __init__(self, decide, **kwargs):
+            changed = kwargs.get("worktree_changed")
+            if kind == "worktreeChanged":
+                def record_change(cwd):
+                    changes.append(cwd)
+                    if changed is not None:
+                        changed(cwd)
+                kwargs["worktree_changed"] = record_change
             super().__init__(decide, **kwargs)
             self._clock = lambda: clock["now"]
             servers.append(self)
@@ -4798,6 +4807,15 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
                 entered.set()
             try:
                 super()._on_read_demand(request)
+            finally:
+                if gap["injected"]:
+                    finished.set()
+
+        def _on_worktree_changed(self, request):
+            if gap["injected"]:
+                entered.set()
+            try:
+                super()._on_worktree_changed(request)
             finally:
                 if gap["injected"]:
                     finished.set()
@@ -4837,9 +4855,12 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
         return 0
 
     monkeypatch.setattr(m, "_monitor_sweep", sweep)
-    deadline = time.monotonic() + 5
+    deadline = None
 
     def wait(event, interval):
+        nonlocal deadline
+        if deadline is None:
+            deadline = time.monotonic() + 5
         assert time.monotonic() < deadline, "monitor did not reach true idle expiry"
         assert not [event for event in lifecycle.read_events(tmp_path / "routing")
                     if event["action"] == "monitor-exit"], "hot sweeps must not write exit diagnostics"
@@ -4860,6 +4881,7 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
             assert not caller.is_alive()
     assert replies == ([True, True, False] if idle_gap else [True, True])
     assert gap["injected"] is idle_gap
+    assert changes == ([str(tmp_path), str(tmp_path)] if kind == "worktreeChanged" else [])
     assert sweeps == list(range(0, 271, 30))
     exits = [event for event in lifecycle.read_events(tmp_path / "routing")
              if event["action"] == "monitor-exit"]
@@ -5255,7 +5277,7 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
 
 
 @pytest.mark.parametrize("kind", [
-    "handoffWake", "nativeToolMutation", "native-unadmitted",
+    "handoffWake", "worktreeChanged", "nativeToolMutation", "native-unadmitted",
     "nativeToolBatchMutation", "batch-unadmitted", "batch-reads",
     "legacy-batch-shell", "legacy-batch-native", "legacy-batch-read",
     "shellToolMutation", "shell-unadmitted", "shell-read",
@@ -5373,9 +5395,11 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         payload.update(toolName="powershell", toolArgs={"command": "git commit -m test"})
                     elif kind == "legacy-batch-read":
                         payload.update(toolName="view")
+                if kind == "worktreeChanged":
+                    payload = {"cwd": str(tmp_path)}
                 request = {
                     "version": 1, "token": self.token,
-                    "kind": "postToolUse" if legacy else "shellToolMutation" if shell else "nativeToolBatchMutation" if batch else "nativeToolMutation",
+                    "kind": "worktreeChanged" if kind == "worktreeChanged" else "postToolUse" if legacy else "shellToolMutation" if shell else "nativeToolBatchMutation" if batch else "nativeToolMutation",
                     "hook_generation": self.generation, "deadline": time.time() + 1,
                     "payload": payload,
                 }
@@ -5383,6 +5407,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                     conn.sendall(json.dumps(request).encode() + b"\n")
                     if legacy:
                         dial_results.append(json.loads(conn.makefile("rb").readline())["result"] == {})
+                        assert conn.recv(1) == b""
                     else:
                         dial_results.append(conn.recv(1) == b"")
                 assert self.has_recent_hook_demand() is (

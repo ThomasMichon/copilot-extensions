@@ -91,6 +91,278 @@ def test_read_demand_uses_original_idle_grace_without_policy_or_reply():
         server.close()
 
 
+@pytest.mark.parametrize("coalesced", [False, True])
+def test_worktree_change_is_generation_bound_and_does_not_wait_for_reply(tmp_path, coalesced):
+    seen = []
+    entered, release = threading.Event(), threading.Event()
+
+    def changed(cwd):
+        seen.append(cwd)
+        entered.set()
+        assert release.wait(timeout=2)
+
+    server = HookIpcServer(
+        lambda *args: pytest.fail("owner notification must not run a tool policy"),
+        worktree_changed=changed,
+    )
+    server.start()
+    try:
+        cwd = None if coalesced else str(tmp_path)
+        endpoint = server.rendezvous()
+        assert hook_ipc.WORKTREE_CHANGE_CAPABILITY in endpoint["hook_capabilities"]
+        lock = tmp_path / "owner.lock"
+        lock.write_text(json.dumps(endpoint), encoding="utf-8")
+        assert hook_ipc.send_best_effort(
+            hook_ipc.WORKTREE_CHANGE_KIND, {"cwd": cwd},
+            lock_path=lock, required_capability=hook_ipc.WORKTREE_CHANGE_CAPABILITY,
+            send_only=True,
+        )
+        assert entered.wait(timeout=1)
+        assert not release.is_set()
+        assert seen == [cwd]
+    finally:
+        release.set()
+        server.close()
+
+
+def test_worktree_change_rejects_bad_generation_payload_deadline_and_closed_owner(tmp_path):
+    seen = []
+    server = HookIpcServer(lambda *args: {}, worktree_changed=seen.append)
+    server.start()
+    try:
+        request = {
+            "version": 1, "token": server.token, "kind": hook_ipc.WORKTREE_CHANGE_KIND,
+            "hook_generation": server.generation, "deadline": time.time() + 1,
+            "payload": {"cwd": str(tmp_path)},
+        }
+
+        def send(change=None):
+            value = {**request, "deadline": time.time() + 1, **(change or {})}
+            with socket.create_connection(server.server.server_address, timeout=1) as conn:
+                conn.sendall(json.dumps(value).encode() + b"\n")
+                conn.shutdown(socket.SHUT_WR)
+                assert conn.recv(1) == b""
+
+        for change in (
+            {"hook_generation": "b" * 32}, {"token": "wrong"}, {"version": True},
+            {"payload": {"cwd": "relative"}}, {"payload": {"cwd": str(tmp_path), "extra": True}},
+            {"payload": []}, {"deadline": time.time() - 1}, {"deadline": float("nan")},
+            {"deadline": time.time() + 60}, {"deadline": True}, {"extra": "unknown"},
+        ):
+            send(change)
+        server.close_admission()
+        send()
+        assert seen == []
+        server.open_admission()
+        server._read_demand_admitted = lambda: False
+        send()
+        assert seen == []
+        server._read_demand_admitted = None
+        send()
+        assert seen == [str(tmp_path)]
+        server._worktree_changed = None
+        assert hook_ipc.WORKTREE_CHANGE_CAPABILITY not in server.capabilities()
+        send()
+        assert seen == [str(tmp_path)]
+    finally:
+        server.close()
+
+
+def test_worktree_change_does_not_dial_a_legacy_or_unqualified_peer(tmp_path, monkeypatch):
+    lock = tmp_path / "owner.lock"
+    endpoint = {
+        "hook_transport": "tcp", "hook_endpoint": "127.0.0.1:12345",
+        "hook_token": "fixture-token", "hook_generation": "a" * 32,
+        "hook_capabilities": ["session-lifecycle-v1"],
+    }
+    monkeypatch.setattr(
+        hook_ipc.socket, "create_connection",
+        lambda *args, **kwargs: pytest.fail("unsupported notification dialed a peer"),
+    )
+    for document in (
+        None, [],
+        *(
+            {**endpoint, "hook_capabilities": capabilities}
+            for capabilities in (None, "worktree-change-v1", ["session-lifecycle-v1"])
+        ),
+    ):
+        lock.write_text(json.dumps(document), encoding="utf-8")
+        assert not hook_ipc.send_best_effort(
+            hook_ipc.WORKTREE_CHANGE_KIND, {"cwd": str(tmp_path)},
+            lock_path=lock, required_capability=hook_ipc.WORKTREE_CHANGE_CAPABILITY,
+            send_only=True,
+        )
+
+
+@pytest.mark.parametrize("peer_kind", [
+    "current", "legacy", "different-installation", "different-source", "missing",
+    "lock-receipt", "lock-marketplace", "lock-root",
+])
+@pytest.mark.parametrize("mode", ["legacy", "namespaced"])
+def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_kind, mode):
+    seen = []
+    received = threading.Event()
+    connections = []
+
+    class Server(HookIpcServer):
+        def _on_request_accepted(self):
+            connections.append(True)
+            super()._on_request_accepted()
+
+    def changed(cwd):
+        seen.append(cwd)
+        received.set()
+
+    server = Server(lambda *args: {}, worktree_changed=changed)
+    server.start()
+    try:
+        runtime = tmp_path / "runtime"
+        runtime.mkdir()
+        endpoint = server.rendezvous()
+        receipt = str(runtime / "install.json")
+        if mode == "namespaced":
+            endpoint.update(installReceipt=receipt, marketplaceId="fixture-marketplace", pluginRoot=str(runtime))
+        if peer_kind == "lock-receipt":
+            endpoint["installReceipt"] = str(tmp_path / "foreign" / "install.json")
+        if peer_kind == "lock-marketplace":
+            endpoint["marketplaceId"] = "foreign-marketplace"
+        if peer_kind == "lock-root":
+            endpoint["pluginRoot"] = str(tmp_path / "foreign")
+        if peer_kind == "legacy":
+            endpoint["hook_capabilities"] = ["session-lifecycle-v1"]
+        (runtime / "status-monitor.lock").write_text(json.dumps(endpoint), encoding="utf-8")
+        session = tmp_path / "session"
+        instructions = session / "instructions" / "agent-worktrees"
+        instructions.mkdir(parents=True)
+        identity = {
+            "runtimeRoot": str(runtime), "pluginId": "agent-worktrees",
+            "installationId": "fixture-installation", "sourceFingerprint": "fixture-source",
+            "mode": mode,
+        }
+        if mode == "namespaced":
+            identity.update(installReceipt=receipt, installGeneration=1, activationGeneration=1)
+        catalog = {
+            "schema": "copilot-extensions.session-command-catalog", "version": 1,
+            "plugin": "agent-worktrees",
+            "binding": {
+                "status": "selected", "installation": identity,
+                "source": {"fingerprint": "fixture-source", "marketplaceId": "fixture-marketplace",
+                           "pluginId": "agent-worktrees"},
+            },
+            "residentControl": {**identity, "marketplaceId": "fixture-marketplace", "version": 1},
+        }
+        if peer_kind == "different-installation":
+            catalog["residentControl"]["runtimeRoot"] = str(tmp_path / "foreign")
+        if peer_kind == "different-source":
+            catalog["residentControl"]["sourceFingerprint"] = "foreign-source"
+        if peer_kind != "missing":
+            (instructions / "session-guidance.instructions.md").write_text(
+                "## agent-worktrees session command catalog\n\n```json\n"
+                + json.dumps(catalog) + "\n```\n", encoding="utf-8",
+            )
+        module = _SCRIPT.parents[1] / "extensions" / "agent-worktrees" / "worktree-changed.mjs"
+        script = (
+            "const {notifyWorktreeChanged}=await import(process.argv[1]);"
+            "console.log(JSON.stringify(await notifyWorktreeChanged("
+            "{sessionDirectory:process.argv[2],cwd:process.argv[3]})));"
+        )
+        result = subprocess.run(
+            [shutil.which("node"), "--input-type=module", "-e", script,
+             module.as_uri(), str(session), str(tmp_path)],
+            capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        accepted = peer_kind == "current" or mode == "legacy" and peer_kind == "lock-root"
+        assert json.loads(result.stdout) is accepted
+        if accepted:
+            assert received.wait(2)
+            assert seen == [str(tmp_path)]
+            assert connections == [True]
+        else:
+            assert seen == []
+            assert connections == []
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("operation", ["tracking", "reclaim"])
+def test_worktree_mutations_wake_owner_without_waiting_for_a_poll(tmp_path, monkeypatch, operation):
+    from agent_worktrees import reclaim_cli, tracking, worktrees_client
+    from agent_worktrees.worktrees_runtime import WorktreesRuntime
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    records = tmp_path / "records"
+    records.mkdir()
+    monkeypatch.setattr(reclaim_cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(reclaim_cli.cfg, "tracking_dir", lambda *args, **kwargs: records)
+    monkeypatch.setattr(reclaim_cli.cfg, "project_name", lambda: "project")
+    record = tracking.WorktreeRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=str(tmp_path / "checkout"),
+        repo="project", machine="fixture-host", platform="windows", title="Fixture",
+        started_at="2026-11-07T01:00:00", last_resumed_at=None,
+        resume_count=0, status="active", completed_at=None,
+        creation_nonce="fixture-creation", codename="quiet-torch",
+    )
+    path = records / "one.yaml"
+    if operation == "reclaim":
+        tracking.save_record(record, path=path)
+    wake, cancel = threading.Event(), threading.Event()
+    seen = []
+
+    def changed(cwd):
+        seen.append(cwd)
+        wake.set()
+
+    server = HookIpcServer(lambda *args: {}, worktree_changed=changed)
+    server.start()
+    (root / "status-monitor.lock").write_text(json.dumps(server.rendezvous()), encoding="utf-8")
+    owner = None
+    worker = None
+    try:
+        if operation == "tracking":
+            tracking.save_record(record, path=path)
+            assert wake.wait(timeout=2), "committed record did not notify its resident"
+        else:
+            owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+            owner.activate()
+
+            def publish(live):
+                observed = time.time()
+                owner.publish("project", [{
+                    "id": "one", "session_bound_live": live, "mux_session": False,
+                    "fact_provenance": {
+                        name: {"quality": "current", "observed_at": observed}
+                        for name in ("record", "git", "mux", "session")
+                    },
+                }], observed_at=observed)
+
+            publish(True)
+
+            def observe_after_event():
+                if wake.wait(timeout=3) and not cancel.is_set():
+                    publish(False)
+
+            worker = threading.Thread(target=observe_after_event)
+            worker.start()
+            monkeypatch.setattr(
+                worktrees_client, "read_current", lambda request, **kwargs: owner.handle(request),
+            )
+            result = reclaim_cli._confirm_clear_publication("one", after=time.time(), timeout=1.5)
+            assert result["confirmed"], result
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+        assert seen == [record.worktree_path]
+    finally:
+        cancel.set()
+        wake.set()
+        if worker is not None:
+            worker.join(timeout=3)
+        server.close()
+        if owner is not None:
+            owner.shutdown()
+
+
 def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
     calls = []
     admitted = [True]

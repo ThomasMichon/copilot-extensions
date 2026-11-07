@@ -260,8 +260,7 @@ class WorktreesView:
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         add(eng.tab_bar(width, sel == ("M", 0)))
-        if eng.cmd_mode or eng.list_view.query or eng.list_view.sort_index:
-            add(eng._cmd_bar_row(width))
+        add(eng._cmd_bar_row(width))
         if eng.button_set():
             add(Text(""))  # breathing room above the buttons
             add(eng.new_worktree_row(width, btn_focus, eng.btn_idx),

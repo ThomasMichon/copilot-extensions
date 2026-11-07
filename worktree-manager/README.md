@@ -29,6 +29,26 @@ and full claim inspection. Inspection does not repair or release resources.
 Re-homed resources without a worktree row retain the compact `o: Doctor`
 footer shortcut to their existing inspection screen.
 
+## Worktree list controls
+
+The default list keeps **Active** separate and combines dormant and completed
+work in **Recent**, ordered by USED. The always-visible controls row exposes
+`s` **Sort** (used/title/state), `g` **Group** (Active/Recent, detailed status,
+or none), `f` **Status** (all/live/unfinished/completed), and `/` **Search**.
+Unowned and controller-owned workspaces retain their separate safety sections.
+
+Search still preserves live rows. An explicit nonlive status filter may hide
+them and visibly says **live hidden**. Escape clears search, then a status
+filter, before collapsing selection or asking to quit. Grouping and sorting
+remain selected. Live reordering preserves source-qualified focus, range
+anchor and multiselection; filtering never changes an action's target identity.
+
+USED and its default sort share the latest real worktree message timestamp
+when the selected engine supplies the optional versioned message fact.
+Older engines retain resume/completion/start fallback. See the
+[engine contract](../plugins/agent-worktrees/docs/engine-picker-contract.md#message-activity-and-native-mutation-wakes)
+for message, timezone and compatibility semantics.
+
 ## Staged launch prompts
 
 Launch prompts require a freshly confirmed cold target. A confirmed live target

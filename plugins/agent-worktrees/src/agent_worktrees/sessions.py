@@ -65,6 +65,9 @@ class SessionContext:
     last_activity: dict[str, str] = field(default_factory=dict)
     """normalized_path → ISO updated_at of the most-recent session"""
 
+    last_message_at: dict[str, str] = field(default_factory=dict)
+    """normalized_path → latest real root user/assistant message instant."""
+
     context_pct: dict[str, int] = field(default_factory=dict)
     """normalized_path → context-window utilization % of the most-recent session"""
 
@@ -444,41 +447,9 @@ def _count_user_turns(entry: Path) -> int:
     file shrank/rotated or the sidecar is unreadable. Best-effort: a read/write
     hiccup never raises (returns the best count it has).
     """
-    events = entry / "events.jsonl"
-    try:
-        size = events.stat().st_size
-    except OSError:
-        return 0
-    prev_size = 0
-    prev_turns = 0
-    sidecar = entry / _TURNS_SIDECAR
-    try:
-        d = json.loads(sidecar.read_text(encoding="utf-8"))
-        prev_size = int(d.get("size", 0))
-        prev_turns = int(d.get("turns", 0))
-    except Exception:
-        prev_size = prev_turns = 0
-    if prev_size == size and size > 0:
-        return prev_turns
-    # Grown file: resume from the cached boundary; otherwise full recount.
-    resume = 0 < prev_size < size
-    start = prev_size if resume else 0
-    turns = prev_turns if resume else 0
-    try:
-        with open(events, "rb") as f:
-            if start:
-                f.seek(start)
-            for line in f:
-                if b'"user.message"' in line:
-                    turns += 1
-    except OSError:
-        return prev_turns
-    try:
-        sidecar.write_text(
-            json.dumps({"size": size, "turns": turns}), encoding="utf-8")
-    except OSError:
-        pass
-    return turns
+    from .sessions_messages import read
+
+    return read(entry)[0]
 
 
 def _session_entry_lock_state(
@@ -601,14 +572,19 @@ def _enrich_session_dir(
 
     norm_path = _normalize_path(worktree_path)
 
-    # Turn count from events.jsonl (incremental, size-keyed sidecar).
+    from . import sessions_messages
+
+    # Turn count and message activity share the same incremental metadata read.
     events_file = entry / "events.jsonl"
-    if events_file.exists():
-        turns = _count_user_turns(entry)
+    if events_file.exists() or (entry / "substatus.json").exists():
+        turns, message_at = sessions_messages.read(entry)
         if turns > 0:
             ctx.turn_count[norm_path] = (
                 ctx.turn_count.get(norm_path, 0) + turns
             )
+        latest = sessions_messages.newest(ctx.last_message_at.get(norm_path), message_at)
+        if latest:
+            ctx.last_message_at[norm_path] = latest
 
     # Summary from workspace.yaml
     ws_file = entry / "workspace.yaml"

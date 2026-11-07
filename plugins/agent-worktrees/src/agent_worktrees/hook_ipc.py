@@ -20,6 +20,8 @@ READ_DEMAND_CAPABILITY = "read-hook-demand-v1"
 NATIVE_MUTATION_CAPABILITY = "native-hook-mutation-v1"
 NATIVE_BATCH_MUTATION_CAPABILITY = "native-hook-batch-mutation-v1"
 SHELL_MUTATION_CAPABILITY = "shell-hook-mutation-v1"
+WORKTREE_CHANGE_CAPABILITY = "worktree-change-v1"
+WORKTREE_CHANGE_KIND = "worktreeChanged"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
 ]
@@ -100,6 +102,11 @@ class _Handler(socketserver.StreamRequestHandler):
                 if owner is not None and len(raw) <= 65536 and raw.endswith(b"\n"):
                     owner._on_native_mutation(request)
                 return
+            if kind == WORKTREE_CHANGE_KIND:
+                owner = self.server.owner
+                if owner is not None and len(raw) <= 65536 and raw.endswith(b"\n"):
+                    owner._on_worktree_changed(request)
+                return
             payload = request.get("payload")
             deadline = float(request.get("deadline") or 0)
             payload_valid = isinstance(payload, dict)
@@ -154,6 +161,7 @@ class HookIpcServer:
         self, decide: Decision, *, read_demand_admitted: Callable[[], bool] | None = None,
         read_demand_lock=None,
         native_mutation_decide: Callable[[str, dict, float], dict | None] | None = None,
+        worktree_changed: Callable[[str | None], None] | None = None,
     ):
         self.token = secrets.token_urlsafe(32)
         self.generation = secrets.token_hex(16)
@@ -172,6 +180,7 @@ class HookIpcServer:
         self._last_completed_hook: float | None = None
         self._read_demand_admitted = read_demand_admitted
         self._native_mutation_decide = native_mutation_decide
+        self._worktree_changed = worktree_changed
         self._read_demand_lock = read_demand_lock if read_demand_lock is not None else threading.RLock()
 
     def start(self) -> None:
@@ -191,6 +200,7 @@ class HookIpcServer:
         return [
             *_CAPABILITIES,
             *([READ_DEMAND_CAPABILITY] if self._read_demand_admitted is not None else []),
+            *([WORKTREE_CHANGE_CAPABILITY] if self._worktree_changed is not None else []),
             *(
                 [NATIVE_MUTATION_CAPABILITY, NATIVE_BATCH_MUTATION_CAPABILITY, SHELL_MUTATION_CAPABILITY]
                 if self._native_mutation_decide is not None else []
@@ -284,6 +294,44 @@ class HookIpcServer:
         finally:
             self._read_demand_lock.release()
 
+    def _on_worktree_changed(self, request: dict) -> None:
+        if (
+            set(request) != {"version", "token", "kind", "hook_generation", "deadline", "payload"}
+            or type(request.get("version")) is not int
+            or request.get("hook_generation") != self.generation
+            or type(request.get("deadline")) not in (int, float)
+            or not isinstance(request.get("payload"), dict)
+            or set(request["payload"]) != {"cwd"}
+            or self._worktree_changed is None
+        ):
+            return
+        deadline, cwd = request["deadline"], request["payload"]["cwd"]
+        if not math.isfinite(deadline) or not 0 < deadline - time.time() <= 1.0:
+            return
+        try:
+            if cwd is not None and (
+                not isinstance(cwd, str) or "\x00" in cwd
+                or len(cwd.encode("utf-8")) > 4096 or not Path(cwd).is_absolute()
+            ):
+                return
+        except (ValueError, UnicodeError):
+            return
+        if not self._read_demand_lock.acquire(timeout=0.05):
+            return
+        try:
+            with self._active_handlers_lock:
+                if self.server.admission_closed or deadline <= time.time() or (
+                    self._read_demand_admitted is not None and not self._read_demand_admitted()
+                ):
+                    return
+            try:
+                self._worktree_changed(cwd)
+            except Exception:
+                return
+            self._on_hook_completed(WORKTREE_CHANGE_KIND)
+        finally:
+            self._read_demand_lock.release()
+
     def _on_request_accepted(self) -> None:
         with self._active_handlers_lock:
             self._active_handlers += 1
@@ -298,7 +346,7 @@ class HookIpcServer:
 
     def _on_hook_completed(self, kind: str) -> None:
         """Record admitted response completion before handler settlement."""
-        if kind in {"preToolUse", "postToolUse"}:
+        if kind in {"preToolUse", "postToolUse", WORKTREE_CHANGE_KIND}:
             with self._active_handlers_lock:
                 self._last_completed_hook = self._clock()
 
@@ -351,6 +399,8 @@ def send_best_effort(
     *,
     lock_path: Path | None = None,
     timeout: float = _DEFAULT_CLIENT_TIMEOUT_S,
+    required_capability: str | None = None,
+    send_only: bool = False,
 ) -> bool:
     """Send a fire-and-forget hook-ipc request to the resident monitor, if
     one is running and reachable through the current install's rendezvous
@@ -380,6 +430,9 @@ def send_best_effort(
     not reachable from that bootstrap-sensitive context either. Both sides
     implement the same small wire format described in this module's server
     classes above.
+
+    ``send_only`` requires a qualified advertised capability and generation.
+    It reports only that bytes were sent, never acceptance or publication.
     """
     try:
         from . import config as cfg
@@ -389,6 +442,21 @@ def send_best_effort(
     except Exception:
         return False
     if not isinstance(endpoint, dict) or endpoint.get("hook_transport") != "tcp":
+        return False
+    if required_capability is not None:
+        capabilities = endpoint.get("hook_capabilities")
+        if (
+            not isinstance(required_capability, str) or not required_capability
+            or not isinstance(capabilities, list)
+            or not all(isinstance(value, str) for value in capabilities)
+            or required_capability not in capabilities
+        ):
+            return False
+    if send_only and (
+        required_capability is None
+        or not isinstance(endpoint.get("hook_generation"), str)
+        or not endpoint["hook_generation"]
+    ):
         return False
     try:
         if not _lock_matches_installation_context(endpoint):
@@ -423,10 +491,13 @@ def send_best_effort(
                 "token": token,
                 "kind": kind,
                 "payload": payload,
-                "deadline": time.time() + timeout,
+                "deadline": time.time() + (1.0 if send_only else timeout),
+                **({"hook_generation": endpoint["hook_generation"]} if send_only else {}),
             },
             separators=(",", ":"),
         ).encode("utf-8") + b"\n"
+        if send_only and len(request) > 65536:
+            return False
     except (TypeError, ValueError):
         # A non-JSON-serializable payload or an invalid timeout must not
         # propagate into the caller -- an already-persisted handoff's
@@ -436,6 +507,8 @@ def send_best_effort(
         with socket.create_connection((host, port), timeout=timeout) as conn:
             conn.settimeout(timeout)
             conn.sendall(request)
+            if send_only:
+                return True
             raw = b""
             while b"\n" not in raw and len(raw) < 2 * 1024 * 1024:
                 chunk = conn.recv(4096)

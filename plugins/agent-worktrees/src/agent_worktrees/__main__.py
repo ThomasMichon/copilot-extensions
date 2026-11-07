@@ -1322,6 +1322,7 @@ def _worktree_to_dict(
     if session_ctx is not None:
         norm = sessions._normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
+        d["message_activity"] = {"version": 1, "last_message_at": session_ctx.last_message_at.get(norm)}
         # Legacy records with no registry retain the scan-derived count.  Once
         # a registry exists, its journal is authoritative even when a session
         # directory is temporarily unavailable.

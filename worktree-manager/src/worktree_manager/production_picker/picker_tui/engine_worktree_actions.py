@@ -724,12 +724,12 @@ class PickerScreenWorktreeActionsMixin:
         visible = self._wt_visible_records()
         target_visible = any(
             (r.get("raw") or {}).get("id") == wid for r in visible)
-        if not target_visible and self.list_view.query:
+        if not target_visible and (self.list_view.query or self.list_view.status_index):
             full_match = any(
                 (r.get("raw") or {}).get("id") == wid
                 for r in self.list_records())
             if full_match:
-                self._wt_remap(self.list_view.clear)
+                self._wt_remap(self.list_view.clear_filters)
         records = self._wt_visible_records()
         target_i = next(
             (i for i, r in enumerate(records)

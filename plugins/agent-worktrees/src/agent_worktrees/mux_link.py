@@ -587,17 +587,13 @@ def _deep_copy_entry(entry: dict) -> dict:
     return copied
 
 
-def build_compute(cache: ManagedMuxCache) -> Callable[[str, dict], dict]:
-    """Wrap ``cache.apply_observation`` into a ``CoalescingServer``-shaped
-    ``compute(kind, payload)`` callback, rejecting any request whose ``kind``
-    is not :data:`KIND`."""
+def build_compute(
+    cache: ManagedMuxCache, *, on_change: Callable[[dict], None] | None = None,
+) -> Callable[[str, dict], dict]:
+    """Validate mapping requests and optionally wake the resident after a change."""
+    from .mux_link_notifications import build_compute as build
 
-    def _compute(kind: str, payload: dict) -> dict:
-        if kind != KIND:
-            raise ValueError(f"mux_link daemon does not serve kind={kind!r}")
-        return cache.apply_observation(payload)
-
-    return _compute
+    return build(cache, kind=KIND, stale_after=MAPPING_STALE_AFTER_SECONDS, on_change=on_change)
 
 
 def start_server(
@@ -888,14 +884,17 @@ class InProcessRuntime:
         self._lifecycle_lock = threading.RLock()
         self._retirement: _MuxRetirement | None = None
 
-    def start(self, persist_path: Path | str | None = None) -> None:
+    def start(
+        self, persist_path: Path | str | None = None, *,
+        on_change: Callable[[dict], None] | None = None,
+    ) -> None:
         with self._lifecycle_lock:
             if self.server is not None:
                 raise RuntimeError("managed-mux runtime is already serving")
             try:
                 self._retirement = owner = _MuxRetirement(persist_path)
                 self.cache = owner.cache = ManagedMuxCache(persist_path=persist_path)
-                self.server = owner.server = start_server(build_compute(self.cache))
+                self.server = owner.server = start_server(build_compute(self.cache, on_change=on_change))
                 self.server.start()
             except BaseException as error:
                 try:
