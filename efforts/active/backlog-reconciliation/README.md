@@ -233,6 +233,12 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
+qualifies complete originals and a new author refinement, and identifies a
+canonical MCP exception/fallback mismatch without claiming a deployed fix.
+Both actionable contracts remain OPEN; stopped intakes supply no contract
+credit. Two complete equal scans measure 820 whole OPEN, 91 above fixed 729.
+
 The [provider merge and inflow study](<journal/2026/11.07 provider-merge-and-inflow-study.md>)
 records two newly merged providers without inventing a direct requirement
 crosswalk. Three original contracts and two new inflow originals remain OPEN;
@@ -2960,6 +2966,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
+distinguishes guarded source inspection, attributed native witness results,
+selected-runtime construction and actual serving acceptance. Complete
+current author/roster qualification does not replace whole-source guards;
+failed prebody sequencing is not retrospectively repaired. Original
+acceptance, foreign-owner/no-replay safeguards and every completion checkbox
+remain unchanged; no new native matrix or generic acknowledgement gate is added.
 
 The [provider merge and inflow study](<journal/2026/11.07 provider-merge-and-inflow-study.md>)
 independently verifies both merge identities and complete changed-path
