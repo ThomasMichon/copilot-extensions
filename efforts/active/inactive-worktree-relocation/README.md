@@ -605,3 +605,17 @@ adopter pilot feedback gates subsequent widening.
   real flow and emitted one parseable JSON object on stdout with its diagnostic
   on stderr. The focused native control passed. This is not a production
   output redesign or a change to the concurrent creation-repair assertions.
+
+### 2026-11-07 — Fresh interpreter transport custody
+- Addressed the next concrete review finding: parent-only mux scoping did not
+  isolate fresh CLI/recovery interpreters. A fixture-owned shared bootstrap now
+  validates the exact runner namespace and installs the command guard before
+  application work, preserving the actual module CLI entry point. Invalid or
+  missing scope exits before native work rather than continuing unguarded.
+- Every fixture child inherits the scoped transport and bootstrap; no runtime
+  routing policy, operator endpoint, service, default or production module was
+  changed. The Linux namespace fixture uses the same explicit bootstrap.
+- Actual CLI, exited-caller recovery, workspace/ledger JSON refusals,
+  stale-lock output and fresh-child guard/refusal controls passed **9 cases**.
+  The negative guard control uses a nonexistent fixture executable, so a failed
+  bootstrap cannot accidentally query another host namespace.
