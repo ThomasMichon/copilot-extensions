@@ -769,6 +769,15 @@ Request status, recovery and authentication inspection instead use the current
 CLI outside installation submission. Read-only queries never authorize implicit
 fence repair; explicit recovery does not enqueue a new job that would hold its
 own recovery lock. Structured results remain on stdout, separate from diagnostics.
+If worker startup fails after bootstrap admission, detached JSON mode returns the
+admitted request ID, log path and admission snapshot with the caller error.
+The caller still fails; a pending receipt is not a running worker or completed
+installation. Inspect that same request before any further submission. The
+receipt does not authorize replay, foreground fallback or a different launch
+boundary.
+Foreground waits preserve the admitted identity on stderr when a worker exits
+between acknowledgment and claiming the request. Foreground `--json` remains
+unsupported and is rejected before admission; this receipt does not enable it.
 POSIX dispatch also waits when it owns a completion scope but deliberately
 forwards no witness. An unowned non-update
 launch retains process replacement. Source-only entries resolve their current
