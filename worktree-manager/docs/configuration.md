@@ -77,6 +77,9 @@ replacing them; unavailable credential observations remain explicit findings,
 not proof that an endpoint is healthy. Inactive services do not acquire a new
 credential prerequisite. Captured Windows Git and PowerShell probes stay
 windowless.
+Report mode neither creates a cutover lock nor initializes an existing empty
+one. It observes an existing lock without writing it and reports a busy cutover
+without running a census; explicitly requested repair retains its writer lock.
 
 ### Automatic update controls
 

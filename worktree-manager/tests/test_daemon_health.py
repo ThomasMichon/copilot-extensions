@@ -84,3 +84,49 @@ def test_inactive_diagnostics_do_not_require_control_credentials(tmp_path, monke
     report = daemon_health.doctor_report(root=tmp_path, apply=False)
     assert report["counts"].get("control_credential_unavailable", 0) == 0
     assert not cutover.control_token_path(tmp_path).exists()
+
+
+def test_empty_report_preserves_inactive_serving_observation(tmp_path, monkeypatch):
+    from worktree_manager import mux_serving_observation
+
+    monkeypatch.setattr(daemon_health.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: set())
+    before = mux_serving_observation.observe(tmp_path)
+    for _ in range(2):
+        report = daemon_health.doctor_report(root=tmp_path, apply=False)
+        assert report["mode"] == "report" and not report["cutover_in_progress"]
+        assert list(tmp_path.iterdir()) == []
+        assert mux_serving_observation.observe(tmp_path) == before
+
+
+@pytest.mark.parametrize("content", [b"", b"\0"])
+def test_report_preserves_existing_cutover_lock(tmp_path, monkeypatch, content):
+    cutover = daemon_health.mux_daemon_cutover
+    lock = cutover._cutover_lock_path(tmp_path)
+    lock.parent.mkdir()
+    lock.write_bytes(content)
+    monkeypatch.setattr(cutover, "_iter_mux_daemon_pids", lambda: set())
+    before = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    for _ in range(2):
+        report = daemon_health.doctor_report(root=tmp_path, apply=False)
+        assert not report["cutover_in_progress"]
+        assert before == {
+            path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+        }
+
+
+def test_report_and_apply_respect_busy_cutover_lock(tmp_path, monkeypatch):
+    cutover = daemon_health.mux_daemon_cutover
+    lock = cutover._cutover_lock_path(tmp_path)
+    lock.parent.mkdir()
+    lock.write_bytes(b"retained")
+    lease = cutover._acquire_cutover_lock(tmp_path, timeout_s=0)
+    monkeypatch.setattr(cutover, "_iter_mux_daemon_pids", lambda: pytest.fail("busy census"))
+    try:
+        for apply in (False, True):
+            report = daemon_health.doctor_report(root=tmp_path, apply=apply)
+            assert report["cutover_in_progress"] if not apply else report["before"]["cutover_in_progress"]
+            if apply:
+                assert report["actions"][0]["blocked"]
+    finally:
+        lease.release()
+    assert lock.read_bytes() == b"retained"

@@ -348,7 +348,8 @@ def test_diagnostic_runs_native_report_through_actual_child_transport(tmp_path, 
         "d.self_status=lambda:N(installed_version='fixture',binstub='fixture',root=Path('fixture'))\n"
         "d.coverage=lambda:N(source_kind='checkout',ok=True,uncovered=(),phantom=(),published_prereq_gaps=())\n"
         "d.mis_registered_repos=lambda:[]\n"
-        "d.daemon_health.doctor_report=lambda **kw:{'findings':[]}\n"
+        f"d.daemon_health.default_root=lambda:Path({str(home / '.worktree-manager')!r})\n"
+        "d.daemon_health.mux_daemon_cutover._iter_mux_daemon_pids=lambda:set()\n"
         "raise SystemExit(ui.main())\n",
         encoding="utf-8",
     )

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 from zdd import diagnostics
 
 from . import mux_daemon, mux_daemon_cutover
+from .mux_file_lock import _try_read_lock_file_once
 from .self_install import default_root
 
 
@@ -22,8 +24,23 @@ def _candidates(root: Path) -> list[diagnostics.DaemonCandidate]:
     ]
 
 
+def _report_cutover_guard(root: Path):
+    try:
+        handle = mux_daemon_cutover._cutover_lock_path(root).open("rb")
+    except FileNotFoundError:
+        return nullcontext()
+    try:
+        if not _try_read_lock_file_once(handle):
+            raise TimeoutError("mux-daemon cutover lock busy")
+        return mux_daemon_cutover._CutoverLease(handle)
+    except BaseException:
+        handle.close()
+        raise
+
+
 def _context(
-    root: Path | None = None, *, credential_findings: list[dict] | None = None,
+    root: Path | None = None, *, apply: bool = False,
+    credential_findings: list[dict] | None = None,
 ) -> diagnostics.DiagnosticContext:
     resolved_root = root if root is not None else default_root()
 
@@ -58,9 +75,9 @@ def _context(
         config_dir=mux_daemon_cutover.routing_dir(resolved_root),
         read_lock=lambda: mux_daemon.read_lock_data(mux_daemon.lock_path(resolved_root)),
         list_candidates=lambda: _candidates(resolved_root),
-        acquire_cutover_guard=lambda timeout: mux_daemon_cutover._acquire_cutover_lock(
-            resolved_root,
-            timeout_s=timeout,
+        acquire_cutover_guard=lambda timeout: (
+            mux_daemon_cutover._acquire_cutover_lock(resolved_root, timeout_s=timeout)
+            if apply else _report_cutover_guard(resolved_root)
         ),
         repair_supported=(sys.platform != "darwin"),
         is_superseded=lambda pid, generation: mux_daemon_cutover.is_superseded(
@@ -76,7 +93,7 @@ def _context(
 
 def doctor_report(*, root: Path | None = None, apply: bool) -> dict[str, object]:
     credential_findings: list[dict] = []
-    ctx = _context(root, credential_findings=credential_findings)
+    ctx = _context(root, apply=apply, credential_findings=credential_findings)
     if apply:
         return diagnostics.apply_daemon_health(ctx)
     report = diagnostics.audit_daemon_health(ctx)

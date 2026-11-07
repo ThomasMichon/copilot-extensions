@@ -5892,3 +5892,12 @@ complete current receiving readback and separate source judgments remain.
   generated admission helper; retain the unit budget, old nodes and effect
   prohibitions. Required exact-head CI and a fresh review remain separate
   publication gates.
+- A fresh review found report-mode cutover-lock creation, including Windows
+  initialization of an existing empty lock. Report mode now takes a
+  non-creating native read lock when one exists; explicit repair retains the
+  existing writer serialization. Twelve focused controls passed, covering
+  repeated empty-root serving observations, unchanged empty/nonempty lock
+  bytes, busy report/apply refusal and actual successful/failed child reports.
+  The child fixtures retain the real daemon-health wiring with an isolated
+  root and inert process census. These are source controls, not installed or
+  live-environment acceptance; current-head review and CI remain required.
