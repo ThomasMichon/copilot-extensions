@@ -363,7 +363,16 @@ child, replacing any inherited value:
 {
   "schema": "copilot-extensions.repository-setup-engine",
   "version": 1,
-  "argv": ["<selected-python>", "-I", "-m", "agent_worktrees"]
+  "argv": ["<selected-python>", "-I", "-m", "agent_worktrees"],
+  "capabilities": {
+    "new_admission": {
+      "contract": "agent-worktrees.new-admission",
+      "version": 1,
+      "required_applications": 1,
+      "configuration": "require_application_readiness",
+      "read_only": true
+    }
+  }
 }
 ```
 
@@ -380,6 +389,19 @@ It does not search PATH, bootstrap another engine or advertise package versions
 as capabilities. Existing scripts may ignore this additive environment contract;
 new consumers requiring it must refuse its absence or an unsupported shape.
 They must not retry a different engine or weaker operation after refusal.
+
+`capabilities` is additive to the version-one engine context. `new_admission`
+projects `new-admission-v1.json` packaged beside the executing Worktrees module,
+not metadata from the repository being set up, an inherited context, or a newer
+payload. The same selected interpreter still executes the supplied argv.
+Existing setup scripts may ignore this field. A consumer requiring application
+admission must validate this contract and its required capability before its
+dependent setup effects or mandatory configuration opt-in. An older or rolled-back
+provider without this declaration means unknown support: retain an explicit
+unsupported-requirement refusal, not a package-version guess or a retry with
+weaker policy. No legacy field or request/result form is retired. This projection
+neither enables the policy nor qualifies authentication, application health,
+installation delivery or the separate knowledge prerequisite.
 
 The descriptor grants no folder trust. A trusted setup entry that explicitly
 needs native repository configuration may invoke:
