@@ -4690,7 +4690,12 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_single_consumer_canonical_reference_refreshes_support_before_conversion[stale]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_single_consumer_canonical_reference_refreshes_support_before_conversion[foreign]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_planned_output_ancestor_conflicts_refuse_before_writes[source]",
-        "tools/promotion_unit_tests/test_invocation_materialization.py::test_planned_output_ancestor_conflicts_refuse_before_writes[candidate]"
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_planned_output_ancestor_conflicts_refuse_before_writes[candidate]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_source_preparation_materializes_declared_invocation_outputs[absent]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_source_preparation_materializes_declared_invocation_outputs[stale]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer[absent]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer[stale]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer[foreign-manifest]"
     ],
     "sources": {
         "tools/application_sources.py": "3dba45b18c2597044205a98c8bdf7cd43c7bb529c4b1a4bcb898d04af2dbe9b0",
@@ -4745,7 +4750,7 @@
         "tools/core_release_inputs.py": "b4f14520dd52527eb0b5608bb366b00ce6a58a5c6037e5c027b530e94f2f3867",
         "tools/local_install_profile.py": "050d186227eb64c9e9d626234cc49b3ab0ba9383c533c16c357fa6c9cbc5bc5c",
         "tools/local_install_source.py": "c50aa4766bea36049155e051f42b53c55620e72d848eb440fa954438e34171c1",
-        "tools/prepare_runtime_source.py": "08158978596a3bd8b5fde8ab01dc8cfc10a5dbe1037372783a6abae37fc17af8",
+        "tools/prepare_runtime_source.py": "736b7e76c62b37286f6b3e1e6c4ea1d4b6503746e232d7beb6a6564151bfe65f",
         "tools/runtime_profile_bundle.py": "4710950140ca7f8e7b9a0d497e2ae4225765f9aae25b2d1d34764ef6dc28b876",
         "tools/runtime_profile_delivery.py": "e16d787834f4b8c8a64438fe267d8f1a68d0fcecb5f2e215c72531c7ed157fe8",
         "worktree-manager/scripts/install_source.py": "b4e4a24a6a42de8e8c412cb88840c75d238db948f199ce8fb34167c985b91f99",
@@ -5065,7 +5070,7 @@
         "tools/launch_wrapper_assets_ref.py": "d0f578fa6c35edbb4a16cf680a1bb0b267db94b0180e50bab7b19f6f8139c28d",
         "tools/materialize_installer_engine.py": "0ff1a8f5ec36e8eb42a10c85f14120587372ef4aef6b0c92ce07a05c7f2e21dc",
         "tools/materialize_launch_wrapper_assets.py": "84a81fb3101143754c82facce392f77817be34c62de07ec51e5534bab0b07308",
-        "tools/materialize_main.py": "1b643c0781860e2e53a51927413afbefc6d79178fff2f2a48fc39bf2587369d4",
+        "tools/materialize_main.py": "49b927a3b74138522b9d1bcdc9a52bf8c4e440246632e92da9b24944df4e91b5",
         "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
         "tools/native_daemon_artifacts.py": "c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
         "tools/native_qualification_contract.py": "2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",
@@ -5356,8 +5361,8 @@
         "tools/promotion_unit_tests/test_mux_question_forms.py": "a3040e5cbffffbb723e7030a826af8a1a3efc65dc17732ad86f51955099fb375",
         "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
-        "tools/materialize_payload_invocation.py": "72358c48a4bdce3bdb53291145c25609f0b27ace9a6104c489411be2b645df4e",
-        "tools/promotion_unit_tests/test_invocation_materialization.py": "8cd11deb5f89ccbd9b4d11774e7bad4ee2b1b5e6db3fe15b6dc7a39dd98dc8d4"
+        "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",

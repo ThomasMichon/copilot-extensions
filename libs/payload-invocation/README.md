@@ -101,6 +101,12 @@ claim that existing output bytes match. `--check` retains actual-output
 comparison; the candidate materializer additionally verifies exact binary/text
 bytes and executable modes after writing, before composition can freeze.
 
+Source preparation and single-plugin previews use this same owner with their
+actual canonical consumer and copied destination. They regenerate missing or
+stale declared outputs rather than relying on Dev mirrors. A changed candidate
+manifest or unsafe output plan refuses before the prepared source or preview
+metadata can be published; generation still never executes candidate tooling.
+
 The remaining canonical-first witness transition is still open: source-bound
 catalog checks and their current fixtures bind real consumer/helper bytes, and
 the normal checker has no qualified source-versus-materialized phase input.

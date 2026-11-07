@@ -541,6 +541,15 @@ def materialize_launch_wrapper_assets(dest: Path, *, canonical_root: Path) -> li
     return mlwa.materialize_all(dest, canonical_root=canonical_root)
 
 
+def materialize_payload_invocation_into(
+    *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
+) -> list[str]:
+    """Generate one copied consumer's Invocation assets with the normal owner."""
+    return mpiv.materialize(
+        dest_consumer_dir, canonical_root=canonical_root, source_consumer=source_consumer_dir,
+    )
+
+
 def materialize(
     dest: Path, *, canonical_root: Path,
     file_pointer_candidates: list[Path] | None = None,
