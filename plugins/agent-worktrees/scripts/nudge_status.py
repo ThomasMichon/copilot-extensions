@@ -38,6 +38,15 @@ disposition write reaches **>= AGENT_WORKTREES_NUDGE_CALLS** (25) tool calls OR
 resets, so the next one needs another full threshold (no per-call spam).
 
 Kill switch: ``AGENT_WORKTREES_NUDGE=off`` (or ``0``/``false``/``no``).
+
+**Agenda nudge.** When the effective ``agendas.default`` preference is
+``expected`` and this worktree has no detected agenda lane, a second, separately
+throttled reminder suggests adopting one via the ``driving-effort-agendas``
+skill. It shares the same sidecar/lock and the same call/minute thresholds, but
+keeps its own window (a disposition write does not reset it). The policy and
+lane are resolved only on a due tick, so the per-call cost is unchanged; any
+resolution failure (or policy ``off``) is silent. Adoption is never automatic.
+Kill switch: ``AGENT_WORKTREES_AGENDA_NUDGE=off``.
 """
 
 from __future__ import annotations
@@ -208,6 +217,84 @@ def _nudge_text(calls: int, minutes: int) -> str:
     )
 
 
+_AGENDA_EXPECTED = "expected"
+_WORKTREE_PATH_RE = re.compile(r"^worktree_path:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _agenda_nudge_text() -> str:
+    return (
+        "[agent-worktrees] This project expects an agenda for this session "
+        "(agendas.default: expected), but no agenda lane was found for this "
+        "worktree. Adopt one via the `driving-effort-agendas` skill: "
+        "`agenda_outline.py from-effort <effort README.md>` (or "
+        "`agenda_backfill.py preview <session-folder>` to rebuild from this "
+        "session), then `preview` and `adopt`. You own and edit the agenda; "
+        "nothing is adopted automatically."
+    )
+
+
+def agenda_lane_state(yaml_path: Path, worktree_id: str) -> str:
+    """Return ``present``/``absent``/``unknown`` from cheap local evidence only.
+
+    Evidence: a managed ``agendas`` placement in the project's worktree-data
+    descriptor, or a non-empty worktree-local ``.effort-agenda/`` home.
+    """
+    try:
+        descriptor = (
+            Path(yaml_path).parent.parent / "worktree-state" / worktree_id / "descriptor.json"
+        )
+        if descriptor.is_file():
+            if descriptor.stat().st_size > 1_048_576:
+                return "unknown"
+            value = json.loads(descriptor.read_text("utf-8"))
+            placements = value.get("placements") if isinstance(value, dict) else None
+            if not isinstance(placements, list):
+                return "unknown"
+            if any(isinstance(p, dict) and p.get("domain") == "agendas" for p in placements):
+                return "present"
+        match = _WORKTREE_PATH_RE.search(Path(yaml_path).read_text("utf-8", errors="replace"))
+        if match:
+            home = Path(match.group(1).strip().strip("'\"")) / ".effort-agenda"
+            if home.is_dir() and any(child.is_dir() for child in home.iterdir()):
+                return "present"
+        return "absent"
+    except (OSError, ValueError, TypeError):
+        return "unknown"
+
+
+def _default_agenda_policy(yaml_path: Path) -> str | None:
+    """Resolve the live policy through the owner loader; ``None`` on any failure."""
+    try:
+        src = Path(__file__).resolve().parents[1] / "src"
+        if "agent_worktrees" not in sys.modules and src.is_dir() and str(src) not in sys.path:
+            sys.path.append(str(src))
+        from agent_worktrees import config as cfg
+
+        project = Path(yaml_path).parent.parent.name.lstrip(".")
+        return cfg.load_project_config(
+            project, include_control_plane_related_pr=False,
+        ).agenda_default
+    except Exception:
+        return None
+
+
+def _agenda_nudge(yaml_path, worktree_id, agenda_policy) -> str | None:
+    if _read_record_fields(yaml_path)[1] in _TERMINAL_STATES:
+        return None
+    try:
+        policy = (
+            agenda_policy() if callable(agenda_policy)
+            else _default_agenda_policy(yaml_path)
+        )
+    except Exception:
+        return None
+    if policy != _AGENDA_EXPECTED:
+        return None
+    if agenda_lane_state(yaml_path, worktree_id) != "absent":
+        return None
+    return _agenda_nudge_text()
+
+
 def _worker_definitely_gone(owner: object) -> bool:
     if (
         not isinstance(owner, dict) or type(owner.get("pid")) is not int
@@ -376,12 +463,15 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
 def decide(
     payload: dict, *, env=None, home=None, now: float | None = None,
     tracking_record=_UNSET, deadline: float | None = None, tracking_lookup=None,
+    agenda_policy=None,
 ) -> str | None:
     """Return the ``additionalContext`` reminder string, or None for a no-op.
 
     Pure/injectable for tests: reads+writes the per-worktree sidecar under
     ``<home>/.agent-worktrees/nudge-state/`` and reads the worktree tracking yaml
-    (per-project) at ``<home>/.<project>/worktrees/<id>.yaml``.
+    (per-project) at ``<home>/.<project>/worktrees/<id>.yaml``. *agenda_policy*
+    is an optional zero-argument callable returning the effective
+    ``agendas.default``; when omitted it is resolved via the owner loader.
     """
     env = env if env is not None else os.environ
     home = Path(home) if home is not None else Path.home()
@@ -407,7 +497,46 @@ def decide(
     with _counter_lock(aw, worktree_id, deadline) as acquired:
         if not acquired:
             return None
-        return _update_counter(aw, worktree_id, yaml_path, env, now, deadline)
+        text = _update_counter(aw, worktree_id, yaml_path, env, now, deadline)
+        agenda_due = _agenda_tick(aw, worktree_id, env, now, deadline)
+    if agenda_due and not (deadline is not None and time.time() >= deadline):
+        agenda_text = _agenda_nudge(yaml_path, worktree_id, agenda_policy)
+        if agenda_text:
+            text = f"{text}\n\n{agenda_text}" if text else agenda_text
+    return text
+
+
+def _agenda_tick(aw, worktree_id, env, now, deadline) -> bool:
+    """Advance the agenda window; True when a policy/lane check is due."""
+    if _truthy_off(env.get("AGENT_WORKTREES_AGENDA_NUDGE")):
+        return False
+    sidecar = aw / "nudge-state" / f"{worktree_id}.agenda.json"
+    try:
+        data = json.loads(sidecar.read_text("utf-8")) if sidecar.is_file() else {}
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    if "window_start" not in data:
+        data = {"count": 0, "window_start": now}
+    try:
+        count = int(data.get("count", 0)) + 1
+        elapsed_min = (now - float(data["window_start"])) / 60.0
+    except (TypeError, ValueError):
+        count, elapsed_min, data = 1, 0.0, {"window_start": now}
+    due = (
+        count >= _int_env(env, "AGENT_WORKTREES_NUDGE_CALLS", _DEFAULT_CALLS)
+        or elapsed_min >= _int_env(env, "AGENT_WORKTREES_NUDGE_MINUTES", _DEFAULT_MINUTES)
+    )
+    data = {"count": 0, "window_start": now} if due else {**data, "count": count}
+    if deadline is not None and time.time() >= deadline:
+        return False
+    try:
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        return False
+    return due
 
 
 def _update_counter(aw, worktree_id, yaml_path, env, now, deadline):
@@ -467,6 +596,7 @@ def _clear_sidecar(aw: Path, worktree_id: str) -> None:
         if acquired:
             try:
                 (aw / "nudge-state" / f"{worktree_id}.json").unlink(missing_ok=True)
+                (aw / "nudge-state" / f"{worktree_id}.agenda.json").unlink(missing_ok=True)
             except OSError:
                 pass
 

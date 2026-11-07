@@ -191,6 +191,25 @@ Temporary same-generation recovery admits a new snapshot without resetting
 sequence or source-store fences; a replaced writer remains fenced and its new
 generation must requalify current roster/cache data before observation.
 
+## Default-on policy
+
+The portable `agendas.default` preference (see
+[Configuration reference](config-reference.md#default-on-agendas)) makes an
+agenda the expected way to run a session. With `expected`, session-start
+guidance adds an `Agenda:` line stating whether this worktree already has a
+lane (`present`, `absent`, or `unknown` with the
+`worktree-data-read --inventory --json` command to check) and the next commands
+from the `driving-effort-agendas` skill: derive from an effort
+(`agenda_outline.py from-effort`), rebuild from the session history
+(`agenda_backfill.py preview <session-folder>`), or author an outline, then
+`preview` and `adopt`. A throttled post-tool reminder repeats while no lane is
+detected. Lane detection is local and read-only: a managed `agendas` placement
+in the worktree-data inventory or a non-empty worktree `.effort-agenda/` home.
+
+The policy is guidance, not automation or a lock. Agent-worktrees never adopts,
+creates or edits an agenda; the agent decides whether to adopt, owns its edits,
+and may deviate when the work calls for it. `off` (the default) changes nothing.
+
 ## Ownership, durability and recovery
 
 Membership comes from the current owned roster; identity and head come from

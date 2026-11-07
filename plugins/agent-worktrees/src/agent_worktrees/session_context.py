@@ -184,6 +184,93 @@ def _pr_summary(config: Any) -> str:
     )
 
 
+def agenda_lane_state(project: str, record: Any) -> str:
+    """Return ``present``/``absent``/``unknown`` for this worktree's agenda lane.
+
+    Cheap, local and read-only: a managed ``agendas`` placement in the
+    worktree-data inventory, or a non-empty worktree-local ``.effort-agenda/``.
+    Any refusal or error yields ``unknown`` rather than failing session start.
+    """
+    from pathlib import Path
+
+    from . import worktree_data_store
+    from .worktree_data_contract import WorktreeDataError
+
+    try:
+        inventory = worktree_data_store.read_worktree_data(
+            project, str(getattr(record, "worktree_id", "") or ""),
+        )
+    except (WorktreeDataError, OSError, ValueError):
+        return "unknown"
+    if inventory is not None and any(
+        placement.domain == "agendas" for placement in inventory.placements
+    ):
+        return "present"
+    try:
+        home = Path(str(getattr(record, "worktree_path", "") or "")) / ".effort-agenda"
+        if home.is_dir() and any(child.is_dir() for child in home.iterdir()):
+            return "present"
+    except OSError:
+        return "unknown"
+    return "absent"
+
+
+def render_agenda_guidance(
+    config: Any, record: Any, *, session_id: str | None = None,
+) -> str:
+    """Render the ``Agenda:`` block when ``agendas.default`` is ``expected``.
+
+    Returns ``""`` when the policy is off. Guidance only: nothing is adopted or
+    mutated here, and the agent keeps full control of whether and how to adopt.
+    """
+    if getattr(config, "agenda_default", cfg.AGENDA_DEFAULT_OFF) != cfg.AGENDA_DEFAULT_EXPECTED:
+        return ""
+    project = cfg.active_project() or _clean(getattr(record, "repo", ""))
+    try:
+        lane = agenda_lane_state(project, record)
+    except Exception:
+        lane = "unknown"
+    check = f"agent-worktrees --project {project} worktree-data-read --inventory --json"
+    session_folder = (
+        f"~/.copilot/session-state/{session_id}" if session_id else "<session-folder>"
+    )
+    lines = [
+        "Agenda: expected for this session (agendas.default: expected); "
+        f"lane={lane}.",
+    ]
+    if lane == "present":
+        lines.append(
+            "- Resume and keep the existing agenda current via the "
+            "`driving-effort-agendas` skill."
+        )
+    else:
+        if lane == "unknown":
+            lines.append(f"- Check for an existing lane: `{check}`.")
+        lines.append(
+            "- Adopt one via the `driving-effort-agendas` skill (its `scripts/`): "
+            "`agenda_outline.py from-effort <effort README.md>`, or "
+            f"`agenda_backfill.py preview {session_folder}` to rebuild from this "
+            "session, or author an outline; then `agenda_outline.py preview` and "
+            "`agenda_outline.py adopt <outline> --state-home .effort-agenda/<lane>/`."
+        )
+    lines.append(
+        "- You own and edit the agenda; adoption is never automatic and it is "
+        "a guide, not a lock."
+    )
+    return "\n".join(lines)
+
+
+def with_agenda_guidance(
+    message: str, config: Any, record: Any, *, session_id: str | None = None,
+) -> str:
+    """Append :func:`render_agenda_guidance`; never raises into session start."""
+    try:
+        agenda = render_agenda_guidance(config, record, session_id=session_id)
+    except Exception:
+        return message
+    return f"{message}\n{agenda}" if agenda else message
+
+
 def render_registry_context(
     config: Any,
     record: Any,

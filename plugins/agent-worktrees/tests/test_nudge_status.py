@@ -157,3 +157,57 @@ def test_nudge_mentions_both_summary_and_title(tmp_path, scope_key):
     text = nudge.decide(_payload(cwd), env=env, home=home, now=1000.0)
     assert text is not None
     assert f"--{scope_key}" in text
+
+
+_AGENDA_ENV = {"AGENT_WORKTREES_NUDGE_CALLS": "3", "AGENT_WORKTREES_NUDGE_MINUTES": "999"}
+
+
+def _agenda_runs(home, cwd, policy, calls=6, env=_AGENDA_ENV):
+    return [
+        nudge.decide(_payload(cwd), env=env, home=home, now=1000.0 + i,
+                     agenda_policy=lambda: policy)
+        for i in range(calls)
+    ]
+
+
+def _has_agenda(out):
+    return bool(out) and "driving-effort-agendas" in out
+
+
+def test_agenda_nudge_silent_when_policy_off(tmp_path):
+    home, cwd = _make_home(tmp_path)
+    assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "off"))
+
+
+def test_agenda_nudge_throttled_when_expected_and_lane_missing(tmp_path):
+    home, cwd = _make_home(tmp_path)
+    outs = _agenda_runs(home, cwd, "expected")
+    assert [i for i, o in enumerate(outs) if _has_agenda(o)] == [2, 5]
+    assert "agendas.default: expected" in outs[2]
+
+
+def test_agenda_nudge_silent_when_worktree_lane_exists(tmp_path):
+    home, cwd = _make_home(tmp_path)
+    wt = tmp_path / "wt"
+    (wt / ".effort-agenda" / "main").mkdir(parents=True)
+    yaml_path = home / ".dotfiles" / "worktrees" / f"{_WID}.yaml"
+    yaml_path.write_text(
+        yaml_path.read_text("utf-8") + f"worktree_path: '{wt}'\n", encoding="utf-8",
+    )
+    assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "expected"))
+
+
+def test_agenda_nudge_silent_when_descriptor_has_agendas_placement(tmp_path):
+    import json
+
+    home, cwd = _make_home(tmp_path)
+    descriptor = home / ".dotfiles" / "worktree-state" / _WID / "descriptor.json"
+    descriptor.parent.mkdir(parents=True)
+    descriptor.write_text(json.dumps({"placements": [{"domain": "agendas"}]}), "utf-8")
+    assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "expected"))
+
+
+def test_agenda_nudge_kill_switch(tmp_path):
+    home, cwd = _make_home(tmp_path)
+    env = {**_AGENDA_ENV, "AGENT_WORKTREES_AGENDA_NUDGE": "off"}
+    assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "expected", env=env))

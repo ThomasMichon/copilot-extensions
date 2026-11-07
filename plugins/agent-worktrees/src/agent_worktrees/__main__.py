@@ -3990,6 +3990,13 @@ def _load_hook_client_module():
     return None
 
 
+def _resident_agenda_policy() -> str | None:
+    """Effective ``agendas.default`` for the hook's already-activated project."""
+    if not cfg.active_project():
+        return None
+    return cfg.load_config(include_control_plane_related_pr=False).agenda_default
+
+
 class _ResidentHookPolicy:
     """Warm hook policy inputs that previously required per-event discovery."""
 
@@ -4088,7 +4095,8 @@ class _ResidentHookPolicy:
             pass
         try:
             text = module.decide(
-                payload, home=Path.home(), tracking_record=found, deadline=deadline
+                payload, home=Path.home(), tracking_record=found, deadline=deadline,
+                agenda_policy=_resident_agenda_policy,
             )
         except Exception:
             return {}

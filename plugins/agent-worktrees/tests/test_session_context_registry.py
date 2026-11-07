@@ -435,3 +435,60 @@ def test_context_truncates_to_checkout_and_state_under_path_pressure(
 
     assert len(context.encode("utf-8")) <= session_context.MAX_TOPOLOGY_BYTES
     assert "[agent-worktrees context truncated]" in context
+
+
+def _agenda_setup(monkeypatch, tmp_path: Path, policy: str, placements=()):
+    from agent_worktrees import config as cfg
+    from agent_worktrees import worktree_data_store
+
+    monkeypatch.setattr(cfg, "active_project", lambda: "control")
+    inventory = SimpleNamespace(placements=list(placements))
+    monkeypatch.setattr(
+        worktree_data_store, "read_worktree_data", lambda project, wid: inventory,
+    )
+    return SimpleNamespace(agenda_default=policy), _record(tmp_path)
+
+
+def test_agenda_guidance_absent_when_policy_off(monkeypatch, tmp_path: Path):
+    config, record = _agenda_setup(monkeypatch, tmp_path, "off")
+
+    assert session_context.render_agenda_guidance(config, record, session_id="s1") == ""
+    assert session_context.with_agenda_guidance("msg", config, record) == "msg"
+
+
+def test_agenda_guidance_expected_without_lane(monkeypatch, tmp_path: Path):
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    text = session_context.render_agenda_guidance(config, record, session_id="s1")
+
+    assert text.startswith("Agenda: expected for this session")
+    assert "lane=absent" in text
+    assert "agenda_outline.py from-effort" in text
+    assert "agenda_backfill.py preview ~/.copilot/session-state/s1" in text
+    assert "adoption is never automatic" in text
+    assert "Agenda:" in session_context.with_agenda_guidance("msg", config, record)
+
+
+def test_agenda_guidance_detects_existing_lane(monkeypatch, tmp_path: Path):
+    (tmp_path / ".effort-agenda" / "main").mkdir(parents=True)
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    text = session_context.render_agenda_guidance(config, record)
+
+    assert "lane=present" in text
+    assert "from-effort" not in text
+
+
+def test_agenda_guidance_unknown_on_inventory_failure(monkeypatch, tmp_path: Path):
+    from agent_worktrees import worktree_data_store
+
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    def boom(project, wid):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(worktree_data_store, "read_worktree_data", boom)
+    text = session_context.render_agenda_guidance(config, record)
+
+    assert "lane=unknown" in text
+    assert "worktree-data-read --inventory --json" in text

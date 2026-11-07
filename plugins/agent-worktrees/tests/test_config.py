@@ -2369,6 +2369,24 @@ class TestKnowledgeConfigOverlay:
         assert conf.headless is True                # from the knowledge overlay
         assert conf.auto_fast_forward is False       # from the knowledge overlay
 
+    @pytest.mark.parametrize("machine_line, expected", [
+        ("", "expected"),
+        ("agendas:\n  default: \"off\"\n", "off"),
+    ])
+    def test_overlay_grafts_agenda_default(
+        self, tmp_path, monkeypatch, machine_line, expected
+    ):
+        h = self._mk_harness(tmp_path, stateless=True)
+        k = self._mk_knowledge(tmp_path, "agendas:\n  default: expected\n")
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\n"
+            "knowledge_repo: knowledge\n" + machine_line +
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8")
+        assert cfg.load_config(mfile).agenda_default == expected
+
     def test_overlay_may_arm_profile_assignment(self, tmp_path, monkeypatch):
         h = self._mk_harness(tmp_path, stateless=True)
         k = self._mk_knowledge(
@@ -2601,6 +2619,43 @@ class TestAutoFastForwardConfig:
         self._write(cfgfile, "auto_fast_forward: false\n")
         conf = cfg.load_config(cfgfile)
         assert conf.auto_fast_forward is False
+
+    def test_agenda_default_off_when_absent(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile)
+        assert cfg.load_config(cfgfile).agenda_default == "off"
+
+    @pytest.mark.parametrize(
+        "line, expected",
+        [
+            ("agendas:\n  default: expected\n", "expected"),
+            ("agendas:\n  default: EXPECTED\n", "expected"),
+            ("agendas:\n  default: off\n", "off"),  # YAML bare off -> False
+        ],
+    )
+    def test_agenda_default_values(self, tmp_path: Path, line, expected):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, line)
+        assert cfg.load_config(cfgfile).agenda_default == expected
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "agendas:\n  default: always\n",
+            "agendas:\n  default: true\n",
+            "agendas:\n  mode: expected\n",
+            "agendas: expected\n",
+        ],
+    )
+    def test_agenda_default_invalid_rejected(self, tmp_path: Path, line):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, line)
+        with pytest.raises(ValueError, match="agendas"):
+            cfg.load_config(cfgfile)
+
+    def test_agenda_policy_error_messages(self):
+        assert cfg.agenda_policy_error({"default": "expected"}) is None
+        assert "one of off, expected" in cfg.agenda_policy_error({"default": "x"})
 
 
 # ---------------------------------------------------------------------------
