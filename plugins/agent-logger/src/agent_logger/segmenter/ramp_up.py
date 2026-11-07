@@ -43,6 +43,7 @@ import json
 import os
 import subprocess
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -51,16 +52,17 @@ from agent_logger.segmenter.collate import (
     DEFAULT_MAX_TOOL_OUTPUT,
     DEFAULT_SEGMENT_SIZE,
     SESSION_STATE_SUBDIR,
+    TurnStats,
+    TurnStream,
     _format_checkpoints,
     _format_metadata,
-    _format_stats,
     _format_turn,
+    _format_turn_stats,
     _is_quip_session,
     _normalize_cwd,
     _workspace_cwd,
     find_copilot_dir,
     fmt_ts,
-    parse_events,
     read_checkpoints,
     read_rewind_index,
     read_workspace,
@@ -287,8 +289,13 @@ def _render_brief(
     tail_turns: int,
     digest_dir: Path,
     other_count: int,
+    turn_stats: TurnStats | None = None,
 ) -> str:
-    """Render the human-facing takeover brief."""
+    """Render the human-facing takeover brief.
+
+    ``turns`` is the session's full turn list, or -- when ``turn_stats`` gives
+    the whole-session counts -- just its last ``tail_turns`` turns.
+    """
     parts: list[str] = []
     parts.append("# Session Ramp-Up Brief\n")
     parts.append(
@@ -305,10 +312,11 @@ def _render_brief(
     # signal of accumulated work.
     parts.extend(_format_checkpoints(checkpoints))
 
-    parts.extend(_format_stats(turns, checkpoints, snapshots))
+    stats = turn_stats if turn_stats is not None else TurnStats.of(turns)
+    parts.extend(_format_turn_stats(stats, checkpoints, snapshots))
 
     # The tail: the last few turns, verbatim from the transcript.
-    total = len(turns)
+    total = stats.turns
     if total == 0:
         parts.append("## Where It Left Off\n")
         parts.append("_No conversation turns were recorded in this session._")
@@ -322,7 +330,8 @@ def _render_brief(
             f"(turns {first}-{total}). Checkpoints above cover earlier work.\n"
         )
         for i in range(first, total + 1):
-            parts.append(_format_turn(turns[i - 1], i))
+            # ``turns`` ends with turn ``total`` whether it is complete or a tail.
+            parts.append(_format_turn(turns[len(turns) - 1 - (total - i)], i))
             parts.append("")
 
     # Deep-dive pointer.
@@ -534,13 +543,22 @@ def main() -> None:
     workspace = read_workspace(session_dir)
     checkpoints = read_checkpoints(session_dir)
     snapshots = read_rewind_index(session_dir)
-    parsed = parse_events(session_dir, cutoff=None, max_tool_output=args.max_tool_output)
+    stream = TurnStream(session_dir, cutoff=None, max_tool_output=args.max_tool_output)
+    # Stream turns into the digest, keeping only the counts and the brief's tail.
+    stats = TurnStats()
+    tail: deque[dict[str, Any]] = deque(maxlen=max(args.tail_turns, 0))
+
+    def _observed_turns():
+        for turn in stream:
+            stats.add(turn)
+            tail.append(turn)
+            yield turn
 
     write_segments(
         workspace=workspace,
-        session_start=parsed["session_start"],
+        session_start=stream.session_start,
         checkpoints=checkpoints,
-        turns=parsed["turns"],
+        turns=_observed_turns(),
         snapshots=snapshots,
         cutoff_time=None,
         output_dir=out_dir,
@@ -548,15 +566,7 @@ def main() -> None:
         max_tool_output=args.max_tool_output,
     )
 
-    turns = parsed["turns"]
     if args.json:
-        total_tools = sum(len(t.get("tool_calls", [])) for t in turns)
-        failed_tools = sum(
-            1
-            for t in turns
-            for tc in t.get("tool_calls", [])
-            if tc.get("success") is False
-        )
         print(
             json.dumps(
                 {
@@ -568,9 +578,9 @@ def main() -> None:
                     "branch": chosen.get("branch", ""),
                     "name": chosen.get("name", ""),
                     "updated_at": chosen.get("updated_at", ""),
-                    "turns": len(turns),
-                    "tool_calls": total_tools,
-                    "failed_tool_calls": failed_tools,
+                    "turns": stats.turns,
+                    "tool_calls": stats.tool_calls,
+                    "failed_tool_calls": stats.failed_tool_calls,
                     "checkpoints": len(checkpoints),
                     "other_sessions": len(sessions) - 1,
                 },
@@ -583,13 +593,14 @@ def main() -> None:
         _render_brief(
             session=chosen,
             workspace=workspace,
-            session_start=parsed["session_start"],
+            session_start=stream.session_start,
             checkpoints=checkpoints,
-            turns=turns,
+            turns=list(tail),
             snapshots=snapshots,
             tail_turns=args.tail_turns,
             digest_dir=out_dir,
             other_count=len(sessions) - 1,
+            turn_stats=stats,
         )
     )
 
