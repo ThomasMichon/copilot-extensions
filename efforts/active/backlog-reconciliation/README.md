@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [independent managed-validation intake](<journal/2026/11.06 independent-managed-validation-intake.md>)
+preserves complete #11263/#11266 directly in OPEN #6917 as independent
+MR7/MR8 and MRV8/MRV9 lanes. Existing acceptance, check states, discussions,
+and source/resource custody remain unchanged; both originals stay OPEN
+pending review and separate tracking judgments. Two equal complete scans
+measure unchanged 814 whole OPEN, 85 above fixed 729; Phase 2 continues.
+
 After reviewed #11261 and a separate fresh source audit, #11219 is CLOSED
 COMPLETED without a runtime or custody claim. Two complete equal scans measure
 814 whole OPEN: new #11263/#11266 inflow outweighed that one source closure.
@@ -2884,6 +2891,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [independent managed-validation intake](<journal/2026/11.06 independent-managed-validation-intake.md>)
+records actual complete receiving and readback, not fixture repair, accepted
+flakiness, installed-consumer acceptance, native permission, or custody
+transfer. Loaded agenda semantics and actual installed-wheel/source-root
+validation remain independent and unchecked. Normal review and separate
+current tracking judgments remain owed; campaign completion is unchanged.
 
 The [reviewed source-closure follow-through](<journal/2026/11.06 branch-observation-and-streaming-followthrough.md>)
 resolves #11219's separate finite tracker judgment after exact-head review/CI
