@@ -457,8 +457,8 @@ def test_run_delegates_execute_finalizes_only_eligible(monkeypatch):
 def test_finalize_target_parses_banner_noise(monkeypatch):
     monkeypatch.setattr(
         delegate_cli.list_views_cli,
-        "_local_binstub",
-        lambda project: project,
+        "_local_project_argv",
+        lambda project: [project],
     )
     monkeypatch.setattr(
         delegate_cli.subprocess,
@@ -484,7 +484,7 @@ def test_finalize_target_parses_banner_noise(monkeypatch):
 @pytest.mark.parametrize("local", [True, False])
 def test_finalize_target_uses_shared_headless_flags_for_local_and_ssh(monkeypatch, local):
     calls = []
-    monkeypatch.setattr(delegate_cli.list_views_cli, "_local_binstub", lambda _: "fixture")
+    monkeypatch.setattr(delegate_cli.list_views_cli, "_local_project_argv", lambda _: ["fixture"])
     monkeypatch.setattr(
         delegate_cli.subprocess, "run",
         lambda argv, **kwargs: calls.append((argv, kwargs)) or SimpleNamespace(

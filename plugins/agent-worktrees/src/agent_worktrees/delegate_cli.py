@@ -333,7 +333,7 @@ def _finalize_target(
         if is_local:
             proc = subprocess.run(
                 [
-                    list_views_cli._local_binstub(project),
+                    *list_views_cli._local_project_argv(project),
                     "finalize",
                     "--json",
                     "--worktree-id",

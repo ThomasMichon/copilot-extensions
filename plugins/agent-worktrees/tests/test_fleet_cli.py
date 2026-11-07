@@ -8,14 +8,18 @@ partial result rather than failing the whole call.
 
 from __future__ import annotations
 
+import base64
 import io
 import json
+import shlex
 import subprocess
 from contextlib import redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import config as cfg
 from agent_worktrees import list_views_cli as fleet
@@ -43,16 +47,46 @@ def _fake_config(tmp_path, *, machine="atlas-core", platform="wsl"):
     )
 
 
-def _run_json(argv, entries, config, *, run_side_effect):
+def _run_json(argv, entries, config, *, run_side_effect, project="agent-worktrees"):
     buf = io.StringIO()
     with patch.object(fleet.cfg, "load_config", return_value=config), \
          patch.object(fleet.cfg, "load_machines_yaml", return_value=entries), \
-         patch.object(fleet.cfg, "project_name", return_value="agent-worktrees"), \
+         patch.object(fleet.cfg, "project_name", return_value=project), \
          patch.object(fleet.subprocess, "run", side_effect=run_side_effect), \
          redirect_stdout(buf):
         rc = fleet.run_fleet(argv)
     assert rc == 0
     return json.loads(buf.getvalue())
+
+
+def _record_calls(calls, stdout='{"worktrees": []}'):
+    def _fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    return _fake_run
+
+
+def _decode_pwsh(remote_cmd):
+    """Return the script inside a ``pwsh ... -EncodedCommand <b64>`` command."""
+    return base64.b64decode(remote_cmd.split()[-1]).decode("utf-16-le")
+
+
+def _bash_argv(remote_cmd):
+    """Return the argv a ``bash -lc '<inner>'`` command actually runs."""
+    bash, flag, inner = shlex.split(remote_cmd)
+    assert (bash, flag) == ("bash", "-lc")
+    return shlex.split(inner)
+
+
+def _three_targets():
+    """Local WSL env plus a remote Windows (pwsh) and a remote Linux (bash) env."""
+    return {
+        "atlas-core": _entry("atlas-core", envs=[
+            ("windows", "atlas-core"), ("wsl", "atlas-core-wsl"),
+        ]),
+        "ember": _entry("ember", envs=[("linux", "ember")]),
+    }
 
 
 def test_one_call_per_ssh_target_never_per_worktree(tmp_path):
@@ -133,8 +167,8 @@ def test_banner_noise_containing_brackets_does_not_break_parsing():
 
 
 def test_local_environment_runs_locally_not_over_ssh(tmp_path):
-    """The current machine's own environment is run directly via the local
-    binstub (still a subprocess, not an ssh hop), matching the machine/
+    """The current machine's own environment is run directly by the local
+    runtime (still a subprocess, not an ssh hop), matching the machine/
     platform this test pretends to be."""
     entries = {
         "atlas-core": _entry("atlas-core", envs=[
@@ -150,7 +184,7 @@ def test_local_environment_runs_locally_not_over_ssh(tmp_path):
 
     _run_json(["--json"], entries, config, run_side_effect=_fake_run)
 
-    # Exactly one of the two calls is a local binstub invocation (no "ssh"
+    # Exactly one of the two calls is a local runtime invocation (no "ssh"
     # in argv[0]); the other targets the Windows env over ssh.
     ssh_calls = [c for c in calls if c[0] == "ssh"]
     local_calls = [c for c in calls if c[0] != "ssh"]
@@ -203,3 +237,152 @@ def test_config_load_failure_is_reported_not_swallowed(capsys):
     assert rc == 1
     assert "could not load config" in capsys.readouterr().err
 
+
+
+def test_local_row_launches_without_a_project_binstub(tmp_path):
+    """The local row must not depend on a ``<project>`` launcher file. On
+    Windows the launchers are ``.ps1``/``.cmd`` shims that an argv-list
+    ``subprocess.run`` cannot start, which used to fail the local row with
+    "file not found". The local argv starts from a real interpreter and
+    passes the project explicitly before the verb."""
+    entries = {"atlas-core": _entry("atlas-core", envs=[("wsl", "atlas-core-wsl")])}
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    calls = []
+
+    result = _run_json(["--json"], entries, config, run_side_effect=_record_calls(calls))
+
+    assert result["hosts"][0]["reachable"] is True
+    (cmd, _kwargs), = calls
+    assert Path(cmd[0]).is_file()
+    assert cmd[1:] == [
+        "-X", "utf8", "-m", "agent_worktrees",
+        "--project", "agent-worktrees", "list", "--json",
+    ]
+
+
+def test_local_project_argv_runs_the_real_cli():
+    """End to end: the local argv prefix starts the actual CLI (no binstub
+    needed), and its top-level help surfaces the ``fleet`` verb."""
+    proc = subprocess.run(
+        [*fleet._local_project_argv("example"), "--help"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120, stdin=subprocess.DEVNULL, **no_window_kwargs(),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "fleet [--json]" in proc.stdout
+    assert "selected project only" in proc.stdout
+
+
+def test_selected_project_reaches_local_and_remote_commands(tmp_path):
+    """``--project <p> fleet`` lists ``<p>`` on every host: the local argv and
+    both remote shell forms name it explicitly through the owner command,
+    so a host needs no ``<p>`` binstub."""
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    calls = []
+
+    _run_json(
+        ["--json"], _three_targets(), config,
+        run_side_effect=_record_calls(calls), project="proj-x",
+    )
+
+    expected = ["agent-worktrees", "--project", "proj-x", "list", "--json"]
+    local = [cmd for cmd, _ in calls if cmd[0] != "ssh"]
+    remote = {cmd[-2]: cmd[-1] for cmd, _ in calls if cmd[0] == "ssh"}
+    assert len(local) == 1
+    assert local[0][-4:] == ["--project", "proj-x", "list", "--json"]
+    assert _bash_argv(remote["ember"]) == [
+        "AGENT_WORKTREES_NO_SELFPROVISION=1", *expected,
+    ]
+    script = _decode_pwsh(remote["atlas-core"])
+    assert "& 'agent-worktrees' '--project' 'proj-x' 'list' '--json';" in script
+
+
+def test_children_close_stdin_stay_headless_and_never_self_provision(tmp_path):
+    """Every child gets a closed stdin (ssh must never read the caller's
+    stdin) and no console window; the local child and both remote shells
+    disable runtime self-provisioning so ``fleet`` stays a passive read."""
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    calls = []
+
+    _run_json(["--json"], _three_targets(), config, run_side_effect=_record_calls(calls))
+
+    assert len(calls) == 3
+    for _cmd, kwargs in calls:
+        assert kwargs["stdin"] is subprocess.DEVNULL
+        for key, value in no_window_kwargs().items():
+            assert kwargs[key] == value
+    (local_kwargs,) = [kwargs for cmd, kwargs in calls if cmd[0] != "ssh"]
+    assert local_kwargs["env"]["AGENT_WORKTREES_NO_SELFPROVISION"] == "1"
+    remote = {cmd[-2]: cmd[-1] for cmd, _ in calls if cmd[0] == "ssh"}
+    assert "$env:AGENT_WORKTREES_NO_SELFPROVISION='1';" in _decode_pwsh(remote["atlas-core"])
+    assert _bash_argv(remote["ember"])[0] == "AGENT_WORKTREES_NO_SELFPROVISION=1"
+
+
+def test_remote_command_quotes_hostile_values():
+    """A project or pass-through value containing quotes or separators stays
+    one literal argument in both shells -- never executable syntax."""
+    hostile = "a'b;c $(x) `y`"
+    assert _bash_argv(fleet._remote_list_cmd("bash", hostile, ["--tracking-status", hostile])) == [
+        "AGENT_WORKTREES_NO_SELFPROVISION=1", "agent-worktrees",
+        "--project", hostile, "list", "--json", "--tracking-status", hostile,
+    ]
+    script = _decode_pwsh(fleet._remote_list_cmd("pwsh", hostile, []))
+    assert "'--project' 'a''b;c $(x) `y`' 'list'" in script
+
+
+def test_missing_command_or_bad_output_is_a_gap_not_zero(tmp_path):
+    """A host whose owner command is missing (exit 127), whose launch fails,
+    or whose output is unparseable is unknown coverage -- ``reachable:
+    false`` with an ``error`` -- never a reachable host with zero worktrees.
+    A failing host never drops another host's rows."""
+    entries = {
+        name: _entry(name, envs=[("linux", name)])
+        for name in ("missing", "nolaunch", "garbled", "empty", "busy")
+    }
+    config = _fake_config(tmp_path, machine="observer", platform="wsl")
+    outcomes = {
+        "missing": SimpleNamespace(
+            returncode=127, stdout="", stderr="agent-worktrees: command not found",
+        ),
+        "garbled": SimpleNamespace(returncode=0, stdout="not json", stderr=""),
+        "empty": SimpleNamespace(returncode=0, stdout='{"worktrees": []}', stderr=""),
+        "busy": SimpleNamespace(
+            returncode=0, stdout='{"worktrees": [{"id": "w1", "state": "active"}]}', stderr="",
+        ),
+    }
+
+    def _fake_run(cmd, **kwargs):
+        if cmd[-2] == "nolaunch":
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+        return outcomes[cmd[-2]]
+
+    result = _run_json(["--json"], entries, config, run_side_effect=_fake_run)
+
+    rows = {row["machine"]: row for row in result["hosts"]}
+    for name in ("missing", "nolaunch", "garbled"):
+        assert rows[name]["reachable"] is False
+        assert rows[name]["error"]
+        assert rows[name]["worktrees"] == []
+    assert "command not found" in rows["missing"]["error"]
+    assert rows["empty"] == {
+        "machine": "empty", "env": "linux", "reachable": True, "worktrees": [],
+    }
+    assert rows["busy"]["reachable"] is True
+    assert [w["id"] for w in rows["busy"]["worktrees"]] == ["w1"]
+
+
+def test_cache_only_is_passed_through_to_every_host(tmp_path):
+    """``fleet --cache-only`` asks each host for its cached ``list --json``."""
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    calls = []
+
+    _run_json(
+        ["--json", "--cache-only"], _three_targets(), config,
+        run_side_effect=_record_calls(calls),
+    )
+
+    local = [cmd for cmd, _ in calls if cmd[0] != "ssh"]
+    remote = {cmd[-2]: cmd[-1] for cmd, _ in calls if cmd[0] == "ssh"}
+    assert local[0][-3:] == ["list", "--json", "--cache-only"]
+    assert _bash_argv(remote["ember"])[-3:] == ["list", "--json", "--cache-only"]
+    assert "'list' '--json' '--cache-only';" in _decode_pwsh(remote["atlas-core"])

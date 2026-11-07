@@ -7,6 +7,14 @@ single JSON payload with ``machine``/``env`` tagged on every row. An
 unreachable/offline host degrades to a partial result (marked
 ``reachable: false``) instead of failing the whole call.
 
+Each row is the host's own ``list --json`` record, so it carries both the
+lifecycle ``status`` (active/complete/finalized/...) and the derived
+``state`` (active/wip/dirty/convo/unused/completed). Live work is
+``state == "active"``; many ``status == "active"`` rows are idle. The call
+covers the selected project only (each host runs ``agent-worktrees
+--project <project> list``), so an all-projects inventory runs it once per
+project.
+
 Manually dispatched from ``__main__.py`` (mirrors ``lease``/``pr``'s own
 top-level verb pattern -- see the ``if args_list[0] == "lease":`` block) so
 this module owns its own argparse and never grows the already-at-its-
@@ -26,10 +34,12 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+
+from agent_procutil import no_window_kwargs
 
 from . import config as cfg
 
@@ -42,8 +52,8 @@ def _fleet_targets(config):
     """Yield ``(machine_key, env_name, alias, shell, is_local)`` for every
     Copilot-enabled, ssh-ready machine x environment in ``machines.yaml``,
     plus the current machine's own environment (``is_local=True``, run
-    locally via the binstub rather than over a loopback SSH hop -- not
-    literally in-process).
+    locally via :func:`_local_project_argv` rather than over a loopback SSH
+    hop -- a child process, not literally in-process).
 
     A machine with no per-environment alias falls back to its top-level
     ``alias`` (one row, ``env_name=""``) -- mirrors
@@ -76,29 +86,69 @@ def _fleet_targets(config):
             yield key, "", entry.alias, "bash", is_local
 
 
+#: Set for every child ``list`` so a host whose runtime is missing reports a
+#: gap instead of self-provisioning one -- ``fleet`` stays a passive read.
+NO_SELFPROVISION_ENV = "AGENT_WORKTREES_NO_SELFPROVISION"
+
+#: The owner command the installer always deploys on every host; project
+#: binstubs are thin ``<owner> --project <project>`` wrappers that a
+#: registered repository need not have.
+OWNER_COMMAND = "agent-worktrees"
+
+
 def _remote_list_cmd(shell: str, project: str, extra_args: list[str]) -> str:
-    """Build the remote command string invoking ``<project> list --json``.
+    """Build the remote command running
+    ``agent-worktrees --project <project> list --json``.
 
     Mirrors ``claimant.py``'s ``_remote_probe_cmd`` (pwsh EncodedCommand on
     Windows, ``bash -lc`` elsewhere) for the same reason: robust against a
-    cmd.exe default sshd shell.
+    cmd.exe default sshd shell. Uses the owner command with an explicit
+    ``--project`` rather than a ``<project>`` binstub, which a registered
+    repository on the remote host may not have.
 
-    Builds the inner command as a properly quoted argv (``shlex.join``)
-    rather than naive string concatenation -- ``extra_args`` (e.g. a
-    ``--tracking-status`` value) is caller-influenced and must never be
-    interpolated into a shell string unescaped (review #3134).
+    Every argument is quoted for the target shell (PowerShell single quotes
+    or ``shlex``) rather than concatenated -- ``extra_args`` (e.g. a
+    ``--tracking-status`` value) and the project name are caller-influenced
+    and must never be interpolated into a shell string unescaped (review
+    #3134). Both shapes set :data:`NO_SELFPROVISION_ENV` (matching
+    ``pr_sweep_transport``) and propagate the command's exit status, so a
+    missing runtime or project surfaces as a nonzero exit.
     """
-    inner = shlex.join([project, "list", "--json", *extra_args])
+    argv = [OWNER_COMMAND, "--project", project, "list", "--json", *extra_args]
     if shell == "pwsh":
-        enc = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
-        return f"pwsh -NoProfile -WindowStyle Hidden -EncodedCommand {enc}"
+        def quoted(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        # A missing owner command exits 127 with bash's wording, so both
+        # shells report it the same way; otherwise the exit status of
+        # `list` is propagated unchanged.
+        script = (
+            "$ProgressPreference='SilentlyContinue';"
+            f"$env:{NO_SELFPROVISION_ENV}='1';"
+            f"if (-not (Get-Command {quoted(OWNER_COMMAND)} -ErrorAction SilentlyContinue))"
+            f" {{ [Console]::Error.WriteLine({quoted(OWNER_COMMAND + ': command not found')}); exit 127 }};"
+            f"& {' '.join(map(quoted, argv))};exit $LASTEXITCODE"
+        )
+        enc = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        return f"pwsh -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {enc}"
+    inner = f"{NO_SELFPROVISION_ENV}=1 " + shlex.join(argv)
     return f"bash -lc {shlex.quote(inner)}"
 
 
-def _local_binstub(project: str) -> str:
-    """Resolve the local project binstub path, falling back to PATH lookup."""
-    binstub = Path.home() / ".local" / "bin" / project
-    return str(binstub) if binstub.exists() else project
+def _local_project_argv(project: str) -> list[str]:
+    """Return the argv prefix that runs a project-scoped command locally.
+
+    Invokes this same runtime as ``python -m agent_worktrees --project
+    <project>`` -- what the owner command and every project binstub
+    ultimately exec -- instead of a launcher file. Launchers are
+    platform-shaped (an extensionless script on POSIX, ``.cmd``/``.ps1``
+    shims on Windows), and an argv-list ``subprocess.run`` cannot launch a
+    ``.ps1`` or reliably resolve PATHEXT, so a binstub lookup made the local
+    fleet row fail on Windows. ``sys.executable`` keeps the child on the
+    same interpreter and inherited environment as the caller on every
+    platform, and needs no ``<project>`` binstub at all.
+    """
+    return [sys.executable, "-X", "utf8", "-m", "agent_worktrees", "--project", project]
 
 
 def _parse_list_payload(raw: str) -> list | None:
@@ -149,11 +199,17 @@ def _probe_host(
         "machine": machine_key, "env": env_name,
         "reachable": False, "worktrees": [],
     }
+    # stdin is closed so neither child can read (or block on) the caller's
+    # stdin. A local timeout ends only the local client: some SSH servers
+    # keep the remote command running after the client disconnects.
     try:
         if is_local:
-            cmd = [_local_binstub(project), "list", "--json", *extra_args]
+            cmd = [*_local_project_argv(project), "list", "--json", *extra_args]
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout + 4,
+                cmd, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=timeout + 4,
+                stdin=subprocess.DEVNULL, env={**os.environ, NO_SELFPROVISION_ENV: "1"},
+                **no_window_kwargs(),
             )
         else:
             remote_cmd = _remote_list_cmd(shell, project, extra_args)
@@ -161,7 +217,9 @@ def _probe_host(
                 ["ssh", "-o", "BatchMode=yes",
                  "-o", f"ConnectTimeout={max(1, int(timeout))}",
                  alias, remote_cmd],
-                capture_output=True, text=True, timeout=timeout + 4,
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=timeout + 4,
+                stdin=subprocess.DEVNULL, **no_window_kwargs(),
             )
     except (subprocess.SubprocessError, OSError) as exc:
         row["error"] = str(exc)[:500]
@@ -182,14 +240,24 @@ def run_fleet(argv: list[str]) -> int:
     """Entry point for the ``fleet`` verb (manual dispatch from ``__main__.py``)."""
     parser = argparse.ArgumentParser(
         prog="agent-worktrees fleet",
-        description="Aggregate `list --json` across every reachable machine "
-        "x environment -- one invocation per SSH target, never per-worktree "
-        "(#2732). An unreachable host degrades to a partial result.",
+        description="Aggregate one project's `list --json` across every "
+        "reachable machine x environment -- one invocation per SSH target, "
+        "never per-worktree (#2732). Covers the selected project only (the "
+        "current or `--project <project>` one), not every project on a host. "
+        "A host that is unreachable, times out, lacks the owner command or "
+        "exits nonzero degrades to a partial row (`reachable: false` with an "
+        "`error`), which means unknown, not zero worktrees. Registration is "
+        "not checked per host: confirm a host's empty list against that "
+        "host's `repos list --json`. Rows carry both the lifecycle `status` "
+        "and the derived `state`; live work is `state == \"active\"`.",
     )
     parser.add_argument("--json", action="store_true", help="JSON output (default: human summary)")
     parser.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT,
-        help=f"Per-host SSH connect timeout in seconds, > 0 (default {DEFAULT_TIMEOUT})",
+        help=f"Per-host timeout in seconds, > 0 (default {DEFAULT_TIMEOUT}): the SSH "
+        "connect timeout, after which the local client also gives up shortly. "
+        "It does not stop a remote command on SSH servers that keep it running "
+        "after the client disconnects",
     )
     parser.add_argument(
         "--tracking-status", default=None,
@@ -199,6 +267,11 @@ def run_fleet(argv: list[str]) -> int:
     parser.add_argument(
         "--all", action="store_true",
         help="Passed through to each host's own `list --json --all`",
+    )
+    parser.add_argument(
+        "--cache-only", action="store_true",
+        help="Passed through to each host's own `list --json --cache-only` "
+        "(cached rows without live probes)",
     )
     args = parser.parse_args(argv)
     # Fail fast on a bad --timeout (0/negative/NaN/inf) -- an uncaught one
@@ -225,6 +298,8 @@ def run_fleet(argv: list[str]) -> int:
         extra_args += ["--tracking-status", args.tracking_status]
     if args.all:
         extra_args.append("--all")
+    if args.cache_only:
+        extra_args.append("--cache-only")
 
     try:
         targets = list(_fleet_targets(config))
