@@ -671,8 +671,9 @@ selected creation-scope check excludes unrelated saved logins and hosts.
 Malformed allocation metadata or account-binding fields produce an actionable
 refusal, not an uncaught parser failure. Devcontainer discovery and creation
 share the admitted account environment rather than rediscovering credentials.
-GitHub.com identity verification, qualified inventory, creation, bound status
-and activation pin their host independently of an ambient enterprise `GH_HOST`.
+GitHub.com saved-account resolution, identity verification, qualified inventory,
+creation, bound status/activation and token-pinned recovery SSH/deletion pin
+their host independently of an ambient enterprise `GH_HOST`.
 Allocation metadata checks include display names and branch text before pool
 parsing.
 

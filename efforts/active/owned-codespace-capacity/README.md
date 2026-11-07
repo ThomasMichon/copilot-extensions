@@ -118,6 +118,11 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Saved credential and recovery host continuity
+- Reproduced four failures in the actual saved-login credential resolver and token-pinned SSH/delete adapters with an ambient enterprise host.
+- Pinned the named token command to GitHub.com and retained that host in resolved-account environments, recovery SSH configuration/connection environments and deletion. Unresolved-token fallback behavior and reclaim safety gates remain unchanged.
+- All 153 affected account, SSH source, lifecycle and quota-recovery tests, touched-Python lint and the 13-plugin install contract passed. Fresh exact-head review/CI remain required; no live authentication, venue or deployment effects occurred.
+
 ### 2026-11-07 - Host pin and remaining text metadata
 - Reproduced seven failures covering display/branch field shapes and an ambient enterprise host redirecting GitHub.com identity/admission.
 - Validated remaining pool text metadata and pinned GitHub.com across credential discovery, verification, qualified inventory, creation and bound status/activation, without changing global authentication.

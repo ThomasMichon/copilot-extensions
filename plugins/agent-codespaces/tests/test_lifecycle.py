@@ -985,6 +985,21 @@ def _cs(name, state):
 
 
 class TestStopCodespace:
+    def test_recovery_delete_adapter_retains_pinned_host_and_token(self, monkeypatch):
+        monkeypatch.setenv("GH_HOST", "github.example.com")
+        observed = []
+
+        def run(argv, **kwargs):
+            assert argv[:3] == ["gh", "codespace", "delete"]
+            observed.append(kwargs["env"])
+            assert kwargs["env"]["GH_HOST"] == "github.com"
+            assert kwargs["env"]["GH_TOKEN"] == "exact-token"
+            return MagicMock(returncode=0, stderr="")
+
+        monkeypatch.setattr(lifecycle.subprocess, "run", run)
+        delete_codespace("fixture-venue", account="selected-owner", token="exact-token")
+        assert len(observed) == 1
+
     def test_explicit_stop_preserves_context_refusal(self, monkeypatch):
         from agent_codespaces.worktrees import ContextRefused
 

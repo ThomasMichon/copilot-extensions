@@ -773,7 +773,7 @@ def delete_codespace(
     log.info("Deleting codespace: %s", name)
 
     if token is not None:
-        env = dict(os.environ)
+        env = dict(os.environ, GH_HOST="github.com")
         env["GH_TOKEN"] = token
         env.pop("GITHUB_TOKEN", None)
     else:
