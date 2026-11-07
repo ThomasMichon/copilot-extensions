@@ -213,6 +213,9 @@ def _materialize(
         source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=snapshot,
         reuse_existing=True,
     ))
+    log.extend(materializer.materialize_payload_invocation_into(
+        source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=snapshot,
+    ))
     refusals = [entry for entry in log if entry.startswith("SKIP ")]
     _remaining(deadline)
     if refusals:

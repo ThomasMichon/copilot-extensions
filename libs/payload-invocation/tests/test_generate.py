@@ -308,6 +308,10 @@ def test_binding_human_assets_do_not_require_worktrees_source(tmp_path: Path, mo
     project = root / "plugins/agent-machines/pyproject.toml"
     project.parent.mkdir(parents=True)
     project.write_text("", encoding="utf-8")
+    invocation = root / "libs/payload-invocation"
+    shutil.copytree(REPO / "libs/payload-invocation/templates", invocation / "templates")
+    for name in ("command_binding.py", "command_lifecycle.py"):
+        shutil.copyfile(REPO / "libs/payload-invocation" / name, invocation / name)
     monkeypatch.setattr(generator, "REPO", root)
 
     assert not (root / "plugins/agent-worktrees").exists()
@@ -2466,6 +2470,25 @@ def test_check_detects_drift(tmp_path: Path) -> None:
         "stale\n", encoding="utf-8"
     )
     assert generator.process_manifest(manifest, check=True)
+
+
+@pytest.mark.parametrize("blocked", ["output-directory", "parent-file"])
+def test_source_check_rejects_unwritable_output_types(tmp_path: Path, blocked: str) -> None:
+    manifest = _manifest(tmp_path)
+    output = manifest.parent / "bin" / "agent-example.ps1"
+    if blocked == "output-directory":
+        output.mkdir(parents=True)
+    else:
+        output.parent.write_bytes(b"not a directory")
+    with pytest.raises(ValueError, match="generated output has unsafe custody"):
+        generator.source_check(manifest)
+
+
+def test_source_check_accepts_absent_generated_outputs(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    assert generator.source_check(manifest) == []
+    generator.process_manifest(manifest, check=False)
+    assert generator.process_manifest(manifest, check=True) == []
 
 
 def test_manifest_validation_fails_closed(tmp_path: Path) -> None:

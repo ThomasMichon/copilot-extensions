@@ -12,17 +12,19 @@ import installer_engine as engine
 import versioned_runtime as runtime
 
 
-def _preparation_assets(payload: Path) -> dict[Path, Path]:
-    manifest = payload / "packaged-assets.json"
+def _preparation_asset_group(
+    payload: Path, manifest_name: str, schema: str, canonical: str, destination: str,
+) -> dict[Path, Path]:
+    manifest = payload / manifest_name
     if not manifest.is_file():
         return {}
     declaration = json.loads(manifest.read_text(encoding="utf-8"))
     if (
         not isinstance(declaration, dict)
-        or declaration.get("schema") != "copilot-extensions.packaged-assets"
+        or declaration.get("schema") != schema
         or type(declaration.get("version")) is not int or declaration["version"] != 1
-        or declaration.get("canonicalDir") != "tools"
-        or declaration.get("payloadDir") != "scripts/runtime-source-tools"
+        or declaration.get("canonicalDir") != canonical
+        or declaration.get("payloadDir") != destination
         or not isinstance(declaration.get("files"), list) or not declaration["files"]
     ):
         raise ValueError("Unsupported Manager source preparation assets")
@@ -39,11 +41,24 @@ def _preparation_assets(payload: Path) -> dict[Path, Path]:
         target = Path(declaration["payloadDir"]) / name
         if (payload / target).is_file():
             continue
-        source = payload.parent / "tools" / name
+        source = payload.parent / canonical / name
         if source.resolve() != source or not source.is_file():
             raise ValueError(f"Manager source preparation asset is unavailable: {name}")
         assets[target] = source
     return assets
+
+
+def _preparation_assets(payload: Path) -> dict[Path, Path]:
+    return {
+        **_preparation_asset_group(
+            payload, "packaged-assets.json", "copilot-extensions.packaged-assets",
+            "tools", "scripts/runtime-source-tools",
+        ),
+        **_preparation_asset_group(
+            payload, "launch-wrapper-assets.json", "copilot-extensions.launch-wrapper-assets",
+            "libs/payload-invocation", "scripts/libs/payload-invocation",
+        ),
+    }
 
 
 def retain(
