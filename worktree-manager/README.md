@@ -939,9 +939,21 @@ emits the version-1 `worktree-manager.mux-serving-observation` result. It
 reads the existing authenticated route and native process identity without
 starting a daemon or creating a control credential. It reports `ready` with
 the actual serving generation, `inactive` only when no route or ownership
-markers exist, and otherwise `unknown`. This observation alone does not
-authorize selection or cutover; callers coordinating changes must hold the
-appropriate native ownership and recheck the result.
+markers exist, and otherwise `unknown`. Health binds the routed PID and birth
+identity; older health replies are admitted only when the authenticated
+rendezvous independently matches the route.
+
+The selected, complete physical Manager runtime also provides
+`python -m worktree_manager.mux_serving_reconcile --root <manager-root>`.
+It leaves an inactive Manager stopped, or uses the existing cutover owner to
+replace a verified incumbent with the selected generation. It checks selection,
+credentials and native ownership around publication, and never terminates a
+candidate whose publication is uncertain. Its version-1 result reports
+`ready`, `inactive` or `unknown`; an uncertain effect must not be replayed
+through another command. The timeout bounds individual waits, not the whole
+transaction. Neither observation nor reconciliation alone authorizes selector
+settlement or rollback; a coordinating caller must hold the appropriate
+native ownership and recheck the result.
 Normal mux-daemon startup uses the
 [external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
 under Manager's durable root. Explicitly read-only retention/bootstrap controls

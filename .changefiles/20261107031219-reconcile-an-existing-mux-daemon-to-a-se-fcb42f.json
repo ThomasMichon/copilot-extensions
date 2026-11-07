@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile an existing mux daemon to a selected runtime with verified process identity",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
