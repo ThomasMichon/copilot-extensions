@@ -399,6 +399,39 @@ def test_installer_reference_materialization_preserves_comments_and_refuses_ambi
         assert (target / f"scripts/install.{ext}").read_text() == text
 
 
+@pytest.mark.parametrize("ext", ["ps1", "sh"])
+@pytest.mark.parametrize("case", ["corruption", "source-drift"])
+def test_native_installer_copy_is_verified_before_entrypoint_rewrite(tmp_path, monkeypatch, ext, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source, target = canonical / "plugins/example", destination / "plugins/example"
+    text = engine.canonical_line(ext) + "\n"
+    _write(source / f"scripts/install.{ext}", text)
+    script = target / f"scripts/install.{ext}"
+    _write(script, text)
+    canonical_engine = canonical / f"libs/installer-engine/installer-engine.{ext}"
+    _write(canonical_engine, "# admitted engine\n")
+    output = target / f"scripts/installer-engine.{ext}"
+    copyfile = installers.shutil.copyfile
+    copied = []
+
+    def copy_then_fault(src, dst, *args, **kwargs):
+        result = copyfile(src, dst, *args, **kwargs)
+        if Path(src) == canonical_engine and Path(dst) == output:
+            copied.append((src, dst))
+            (output if case == "corruption" else canonical_engine).write_bytes(b"# changed engine\n")
+        return result
+
+    monkeypatch.setattr(installers.shutil, "copyfile", copy_then_fault)
+    log = installers.materialize_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=target,
+        canonical_root=canonical, dest_root=destination,
+    )
+    assert copied == [(canonical_engine, output)]
+    assert len(log) == 1 and log[0].startswith("SKIP"), log
+    assert ("postwrite bytes" if case == "corruption" else "canonical source changed") in log[0]
+    assert script.read_text() == text
+
+
 @pytest.mark.parametrize("case", ["stale", "absent", "foreign", "absent-bad-digest"])
 def test_declared_human_initializer_refresh_uses_source_preimage(tmp_path, case):
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
