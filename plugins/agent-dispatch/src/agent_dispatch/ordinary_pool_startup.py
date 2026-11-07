@@ -81,6 +81,7 @@ def prepare_owned_workspace(
                     "creation_nonce": reservation.get("creation_nonce"),
                 }, driver="ordinary-bridge", creating_host=machine,
                 worktree_writer_requirement=writer_requirement(reservation[REQUIREMENT]),
+                timeout=timeout,
             )
             return client.get_reservation(reservation["key"])
         return reservation
@@ -102,6 +103,7 @@ def prepare_owned_workspace(
     record_prepared(
         client, reservation, prepared, driver="ordinary-bridge", creating_host=machine,
         **({"worktree_writer_requirement": requirement} if requirement is not None else {}),
+        timeout=timeout,
     )
     current = client.get_reservation(reservation["key"])
     if (

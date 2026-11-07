@@ -83,6 +83,16 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+Dispatch's `--test-file tests/test_pool_startup_client.py --test-file
+tests/test_ordinary_pool_startup.py --test-file tests/test_workspace_continuity.py
+--test-file tests/test_pool_placement_client.py --allow-explicit-tiers` packet
+checks the ordinary startup observation budget through governed preparation.
+Its actual HTTP regression delays the original relationship owner beyond the
+baseline ten-second read timeout and requires one allocation and bound request
+before native creation. Other controls preserve longer/disabled reads, legacy
+preparation and unrelated request budgets. Owner/native responses are fixtures;
+this is not installed-cohort or full running-lifecycle acceptance.
+
 Dispatch's `--test-file tests/test_submission_consumer.py --test-file
 tests/test_submission_preparation.py --test-file tests/test_submission_readiness.py
 --test-file tests/test_submission_advancement.py --test-file

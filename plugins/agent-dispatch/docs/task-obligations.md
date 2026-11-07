@@ -249,6 +249,13 @@ successful protection. A failed or lost response retains the original request,
 worker and allocation; it cannot report a successfully admitted assignment.
 Exact direct-claim retries and required workspace retries reconcile that same
 request rather than allocating another claim.
+Ordinary Bridge startup carries its existing observation timeout into governed
+workspace preparation, including a retained attachment retry. The client applies
+that budget only to this request's HTTP read phase, without shortening a longer
+or disabled read timeout or changing connect/write/pool and unrelated requests.
+Legacy ungoverned preparation retains its original transport budget. A read
+timeout is still an unresolved original operation, not permission for an
+automatic mutation retry.
 Initial direct-claim acknowledgments and replays require a bound reconciliation
 result and a fresh consistent read of the original claimed status, worker,
 generation and assignment event. Cancellation during reconciliation reports a
