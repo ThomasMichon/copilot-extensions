@@ -135,6 +135,20 @@ def _read_canonical_snapshot(path: Path, root: Path) -> tuple[bytes, tuple[int, 
     return content, _derived_identity(after), stat.S_IMODE(after.st_mode)
 
 
+def _verify_derived_write(target: Path, root: Path, content: bytes) -> None:
+    if problem := derived_path_problem(target, root, required=True):
+        raise ValueError(problem)
+    identity = target.lstat()
+    observed = target.read_bytes()
+    after = target.lstat()
+    if observed != content:
+        raise ValueError(f"{target}: postwrite bytes differ from admitted canonical content")
+    if _derived_identity(identity) != _derived_identity(after):
+        raise ValueError(f"{target}: derived identity changed during postwrite verification")
+    if problem := derived_path_problem(target, root, required=True):
+        raise ValueError(problem)
+
+
 def materialize_derived_files(
     dest: Path, *, canonical_root: Path, copied_consumer: tuple[Path, Path] | None = None,
     file_names: frozenset[str] | None = None,
@@ -182,17 +196,7 @@ def materialize_derived_files(
             if os.name != "nt":
                 target.chmod(mode)
         for source, target, content, _before, _mode in plan:
-            if problem := derived_path_problem(target, dest, required=True):
-                return [f"SKIP {problem}"]
-            identity = target.lstat()
-            observed = target.read_bytes()
-            after = target.lstat()
-            if observed != content:
-                return [f"SKIP {target}: postwrite bytes differ from admitted canonical content"]
-            if _derived_identity(identity) != _derived_identity(after):
-                return [f"SKIP {target}: derived identity changed during postwrite verification"]
-            if problem := derived_path_problem(target, dest, required=True):
-                return [f"SKIP {problem}"]
+            _verify_derived_write(target, dest, content)
         for source, snapshot in canonical.items():
             if problem := derived_path_problem(source, canonical_root, required=True):
                 return [f"SKIP {problem}"]
@@ -335,10 +339,23 @@ def materialize_ref_into(
         if support_assets is not None:
             continue
 
-        dest_engine.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(canonical, dest_engine)
-        if os.name != "nt":
-            shutil.copymode(canonical, dest_engine)
+        try:
+            for path, root, required in (
+                (canonical, canonical_root_r, True), (dest_engine, dest_root_r, False),
+            ):
+                if problem := derived_path_problem(path, root, required=required):
+                    raise ValueError(problem)
+            snapshot = _read_canonical_snapshot(canonical, canonical_root_r)
+            dest_engine.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(canonical, dest_engine)
+            if os.name != "nt":
+                shutil.copymode(canonical, dest_engine)
+            _verify_derived_write(dest_engine, dest_root_r, snapshot[0])
+            if _read_canonical_snapshot(canonical, canonical_root_r) != snapshot:
+                raise ValueError(f"{canonical}: canonical source changed during composition")
+        except (OSError, ValueError) as error:
+            log.append(f"SKIP installer native asset: {error}")
+            return log
         if not ier.rewrite_to_local(dest_script, ext):
             try:
                 dest_engine.unlink()
