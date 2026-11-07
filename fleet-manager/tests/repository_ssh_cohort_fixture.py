@@ -14,10 +14,50 @@ import time
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from test_client_distribution import PROJECT, run
 from test_gateway_host_distribution import _installed_wheel
+
+
+def _registry_distributions(projects, distributions, requirements):
+    candidates = {}
+    for (name, _version), distribution in distributions.items():
+        candidates.setdefault(name, []).append(distribution)
+    pending = [Requirement(text) for text in requirements]
+    selected = {}
+    environment = default_environment()
+    while pending:
+        requirement = pending.pop()
+        name = canonicalize_name(requirement.name)
+        extras = {"", *(canonicalize_name(extra) for extra in requirement.extras)}
+        if name in selected and extras <= selected[name]:
+            continue
+        selected.setdefault(name, set()).update(extras)
+        if name in projects:
+            project = projects[name]["project"]
+            children = list(project.get("dependencies", []))
+            for extra in selected[name] - {""}:
+                children.extend(project.get("optional-dependencies", {}).get(extra, []))
+        else:
+            assert name in candidates, f"prepared dependency closure is missing {name}"
+            children = [
+                text for distribution in candidates[name]
+                for text in distribution.requires or []
+            ]
+        for text in children:
+            child = Requirement(text)
+            if child.marker is None or any(
+                child.marker.evaluate({**environment, "extra": extra})
+                for extra in selected[name]
+            ):
+                pending.append(child)
+    return {
+        key: distribution for key, distribution in distributions.items()
+        if key[0] in selected
+    }
 
 
 def _prepare_profiles(snapshot, output, profiles, uv, progress, started):
@@ -60,6 +100,7 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
     from test_installer_wheel_acquisition import CERTIFICATE
     import local_install_profile as profiles
     import local_install_source as sources
+    from build_toolchain_lock import _LOCKED_TOOLCHAIN_PACKAGES
 
     progress("normal Source cohort: source owners imported")
     uv = shutil.which("uv")
@@ -91,14 +132,13 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
         "standalone:worktree-manager", "agent-worktrees",
         "standalone:fleet-manager", "agent-ssh",
     )
-    first_party = set()
+    first_party = {}
     for relative in (
         "worktree-manager", "plugins/agent-worktrees", "fleet-manager", "plugins/agent-ssh",
     ):
-        first_party.update(
-            profiles.source_inputs.engine._package_name(package)
-            for package in profiles.source_inputs.engine._package_roots(snapshot / "source" / relative)
-        )
+        for package in profiles.source_inputs.engine._package_roots(snapshot / "source" / relative):
+            metadata = profiles.dependencies._toml(package / "pyproject.toml")
+            first_party[canonicalize_name(metadata["project"]["name"])] = metadata
     archives = tmp_path / "registry"
     archives.mkdir()
     distributions = {}
@@ -106,6 +146,14 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
         name = canonicalize_name(distribution.metadata["Name"])
         if name not in first_party:
             distributions.setdefault((name, distribution.version), distribution)
+    distributions = _registry_distributions(first_party, distributions, [
+        *first_party, *_LOCKED_TOOLCHAIN_PACKAGES,
+        "agent-worktrees[fleet-ssh]", "fleet-manager[construction,gateway-host,ssh-client]",
+        *(
+            requirement for metadata in first_party.values()
+            for requirement in metadata.get("build-system", {}).get("requires", [])
+        ),
+    ])
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     files = {}
     for (name, _version), distribution in sorted(distributions.items()):
