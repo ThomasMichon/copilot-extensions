@@ -233,6 +233,14 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer-intake.md>)
+receives complete #11311 directly in OPEN #6917 as independent MR9/MRV10,
+preserving the reported fifteen-second deadline, native serializer and claim
+assertions, complete Windows capture and independent verification. Historical
+source findings are not a current-head fix or Windows qualification.
+The original remains OPEN pending review and a separate tracking judgment;
+814 whole OPEN remains 85 above fixed 729, with Phase 2 and all custody Active.
+
 The [freshness design and inflow-history journal](<journal/2026/11.07 freshness-design-and-inflow-history.md>)
 records a genuinely new #11298 discussion, the bounded #11296/#11298 study
 limitations, 132 recovered inflow histories and the new #4418 receiving
@@ -2932,6 +2940,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer-intake.md>)
+retains complete #11311 and its source-research refinement in actual #6917.
+MR9/MRV10 stay unchecked and independently progressable; existing owners,
+all prior check states and every deadline/containment boundary remain.
+Review and fresh separate receiving/original judgment precede any tracking
+retirement. No root cause, native pass or technical completion is claimed.
 
 The [freshness design and inflow-history journal](<journal/2026/11.07 freshness-design-and-inflow-history.md>)
 separates whole-discussion admission, attributed source findings, object
