@@ -54,6 +54,7 @@ def test_native_bootstrap_performance_samples(tmp_path, capsys, phase):
         )
         python.parent.mkdir(parents=True)
         python.write_text("current interpreter metadata fixture\n", encoding="utf-8")
+        python.chmod(0o755)
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
         "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),

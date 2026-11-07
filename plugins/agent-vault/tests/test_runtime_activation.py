@@ -610,11 +610,29 @@ def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path, host)
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path / "actual cold reader", "legacy")
     configuration = home / ".agent-vault.json"
     configuration.write_bytes(b'{"enabled":false}')
+    console_receipt = home / "reader-console.json"
+    reader = payload / "scripts" / "runtime-activation.py"
+    reader.write_text(
+        reader.read_text(encoding="utf-8").replace(
+            "import argparse\n",
+            "import argparse\nimport ctypes\nimport json\nfrom pathlib import Path\n"
+            "_kernel = ctypes.WinDLL('kernel32', use_last_error=True)\n"
+            "_kernel.GetConsoleWindow.restype = ctypes.c_void_p\n"
+            f"Path({str(console_receipt)!r}).write_text(json.dumps("
+            "{'console_window': _kernel.GetConsoleWindow()}), encoding='utf-8')\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
     script = str(payload / "scripts" / "runtime-activation.ps1").replace("'", "''")
     project = str(home).replace("'", "''")
     selected_root = str(runtime).replace("'", "''")
     command = (
         "Set-StrictMode -Version 2; $ErrorActionPreference='Stop'; $before=$env:PATH; "
+        "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; "
+        "public static class ConsoleProbe { [DllImport(\"kernel32.dll\")] "
+        "public static extern IntPtr GetConsoleWindow(); }'; "
+        "if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 92 }; "
         f". '{script}'; Get-VaultRuntimeActivation -Project '{project}' -RuntimeRoot '{selected_root}' "
         "| ConvertTo-Json -Compress; if ($before -cne $env:PATH) { exit 91 }"
     )
@@ -629,6 +647,7 @@ def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path, host)
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["state"] == "configuration-empty"
+    assert json.loads(console_receipt.read_text(encoding="utf-8"))["console_window"] is None
     assert configuration.read_bytes() == b'{"enabled":false}'
     assert not runtime.exists()
     assert not (home / ".copilot-extensions").exists()
