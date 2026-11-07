@@ -17,14 +17,14 @@ class Authentication:
     diagnostic: str
 
 
-def authenticate(client: list[str], directory: Path) -> Authentication:
+def authenticate(client: list[str], directory: Path, *, env=None) -> Authentication:
     argv = [*client, "-v", "-N", "-T", "127.0.0.1"]
     log_path = directory / ("ssh-auth-" + uuid.uuid4().hex + ".log")
     authenticated = False
     with log_path.open("wb") as log:
         child = subprocess.Popen(
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log,
-            **no_window_kwargs(),
+            env=env, **no_window_kwargs(),
         )
         try:
             deadline = time.monotonic() + 10

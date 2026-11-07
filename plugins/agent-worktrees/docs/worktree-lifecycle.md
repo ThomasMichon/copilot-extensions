@@ -90,6 +90,10 @@ The readiness JSON also advertises optional receiver support in an additive
 `capabilities` array. `lease-acquire-released-only-v1` describes the
 [no-stale-takeover acquisition mode](../skills/worktree/references/leases.md#acquisition-without-stale-takeover);
 it does not change `ready`, grant ownership or make expiry a release.
+`lease-return-proof-v1` describes optional
+[generation-qualified return evidence](../skills/worktree/references/leases.md#generation-qualified-return-evidence)
+in the existing lease payload. Callers must discover support before opting a
+resource into that contract; legacy receivers refuse opted-in state on rollback.
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
 configured remote and chooses the fetched remote default branch as the start

@@ -9,7 +9,7 @@ loosely-coupled resource plugins can shell into it:
 
     agent-worktrees lease acquire <kind> <key> --holder <ref> [--ttl N]
     agent-worktrees lease renew   <kind> <key> --token <oid> [--ttl N]
-    agent-worktrees lease release <kind> <key> --token <oid>
+    agent-worktrees lease release <kind> <key> --token <oid> [--retain-return-proof]
     agent-worktrees lease inspect <kind> <key> [--pretty]
     agent-worktrees lease list [--kind <kind>] [--pretty]
 
@@ -112,7 +112,9 @@ def _run(args: argparse.Namespace) -> int:
         _print(snapshot, pretty=args.pretty)
         return 0
     if command == "release":
-        _print(store.release(args.kind, args.resource, args.token), pretty=args.pretty)
+        _print(store.release(
+            args.kind, args.resource, args.token, retain_return_proof=args.retain_return_proof,
+        ), pretty=args.pretty)
         return 0
     if command in {"inspect", "status"}:
         _print(store.inspect(args.kind, args.resource), pretty=args.pretty)
@@ -182,6 +184,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     release = resource_command("release", "append a release tombstone")
     release.add_argument("--token", required=True, help="current commit OID fencing token")
+    release.add_argument(
+        "--retain-return-proof", action="store_true",
+        help="retain bounded generation-qualified return evidence on this resource",
+    )
     resource_command("inspect", "inspect one lease")
     resource_command("status", "inspect one lease")
     listing = subs.add_parser("list", help="list leases in the namespace")

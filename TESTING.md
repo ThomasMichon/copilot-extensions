@@ -2518,6 +2518,16 @@ Manager's focused `test_self_install.py -k app_only_self_install` and
 qualification, activation and startup-outcome refusals while accepting native
 path aliases. These are distinct from full native Copilot launch, desktop or
 all-caller-cleanup-Job qualification.
+With both `COPILOT_NATIVE_TEST_EXECUTABLE` and
+`COPILOT_DRIVER_HEADED_MUX_E2E=1`, that same application case also invokes its
+actual packaged Manager launcher through the existing private native
+`manager-no-mux` flow. Fresh and resumed offline Copilot conversations must
+expose the common broker, retain one history and publish exact native
+process/exit receipts after disposable Manager source inputs are gone.
+Application construction, native calls and resident cleanup share the existing
+300-second case deadline. The Worktrees resolver remains the managed test
+runtime; this does not qualify an installed Worktrees application, Manager mux
+metadata, desktop attachment or caller cleanup-Job escape.
 
 Manager's `tests/test_shutdown_exit.py` also runs the application probe in
 bounded children with the CPython 3.13 shutdown-workaround branch armed.
@@ -4669,10 +4679,24 @@ fixture, public-only preparation and pinned protected installation, then uses
 that exact pair for the existing listener's command/context, authorization,
 preservation and teardown assertions. Locked new setup refuses while the
 materialized pair remains usable; no system agent or production Vault is used.
-`-k 'not vault-pair'` preserves the independent synthetic-key/outer-shell packet.
+`-k 'not vault-pair and not encrypted-pair'` preserves the independent
+synthetic-key/outer-shell packet.
 On Linux, retain the disposable-account/host-state prerequisites below.
 This is current-source first-touch consumer proof, not installed setup,
 encrypted-key signing or user-logon lifetime. Default runs skip the Vault case.
+
+The same packet's Windows-only `AGENT_SSH_ENCRYPTED_NATIVE=1` /
+`-k encrypted-pair` case generates an encrypted disposable peer key. An
+already-available .NET Framework compiler builds a GUI-subsystem askpass
+fixture; no compiler or signer is installed. Its captured stdout is checked
+before the native consumer runs. BatchMode must refuse without invoking the
+helper, refused fixture unlock must not authenticate, and explicit fixture
+unlock must complete the existing pinned listener's command/context,
+refresh/withdrawal, forwarding-refusal and teardown controls. Private-key
+bytes/timestamp remain unchanged. Select this opt-in under the same contained
+runner and60s item/180s aggregate limits. The helper substitutes a synthetic
+human response; it is not an attended operator unlock, selected production
+signer, installed user-logon setup or lifetime proof. Default runs skip it.
 
 The independent `ssh_service=true` selector runs the contained standalone
 `services/ssh` suite on Linux and Windows. It covers installed foreground
