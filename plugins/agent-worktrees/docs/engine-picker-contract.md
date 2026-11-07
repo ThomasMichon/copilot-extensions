@@ -561,12 +561,16 @@ There is no reply, policy invocation, service bootstrap or new publication
 authority. Stale generations, malformed frames and closed/unadmitted owners
 decline the frame. A successful send means bytes written, not accepted work
 or a publication receipt.
+Admission, the wake callback and idle-demand renewal share the final-idle
+decision lock, with a 50 ms acquisition bound and deadline recheck after entry.
 
 Record commits defer bounded metadata-only wakes until all record/pair holds
 have released, without enabling optional record/receipt evidence capture.
 The session extension uses its injected selected-installation catalog and
 the actual owner's advertised capability, never a package version, PATH
-lookup or per-message subprocess. Missing/legacy support skips only the
+lookup or per-message subprocess. Before connecting, the lock's namespaced
+receipt/marketplace/root tuple must match the selected binding; legacy mode
+refuses namespaced receipt or marketplace markers. Missing/legacy support skips only the
 optional wake; existing lifecycle and periodic correctness paths remain.
 Managed mux mapping changes and restored freshness wake the same owner;
 timestamp-only heartbeats do not. That owner uses its own fresh,

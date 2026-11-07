@@ -117,6 +117,7 @@ def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, 
 
 @pytest.mark.parametrize("case", [
     "current", "generation", "closed", "revoked", "legacy", "deadline", "payload", "version",
+    "contended", "expired-after-lock",
 ])
 def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api, case):
     seen = []
@@ -144,6 +145,16 @@ def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api, cas
             request["payload"]["cwd"] = "relative-worktree"
         elif case == "version":
             request["version"] = True
+        elif case == "contended":
+            api.owner._read_demand_lock = SimpleNamespace(
+                acquire=lambda **kwargs: False,
+                release=lambda: pytest.fail("unowned worktree-change lock release"),
+            )
+        elif case == "expired-after-lock":
+            def acquire(**kwargs):
+                api.clock["wall"] = 101.0
+                return True
+            api.owner._read_demand_lock = SimpleNamespace(acquire=acquire, release=lambda: None)
 
     assert api.dispatch(change) is None
     assert seen == ([cwd] if case == "current" else [])

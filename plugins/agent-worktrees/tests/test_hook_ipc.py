@@ -196,21 +196,38 @@ def test_worktree_change_does_not_dial_a_legacy_or_unqualified_peer(tmp_path, mo
 
 @pytest.mark.parametrize("peer_kind", [
     "current", "legacy", "different-installation", "different-source", "missing",
+    "lock-receipt", "lock-marketplace", "lock-root",
 ])
-def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_kind):
+@pytest.mark.parametrize("mode", ["legacy", "namespaced"])
+def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_kind, mode):
     seen = []
     received = threading.Event()
+    connections = []
+
+    class Server(HookIpcServer):
+        def _on_request_accepted(self):
+            connections.append(True)
+            super()._on_request_accepted()
 
     def changed(cwd):
         seen.append(cwd)
         received.set()
 
-    server = HookIpcServer(lambda *args: {}, worktree_changed=changed)
+    server = Server(lambda *args: {}, worktree_changed=changed)
     server.start()
     try:
         runtime = tmp_path / "runtime"
         runtime.mkdir()
         endpoint = server.rendezvous()
+        receipt = str(runtime / "install.json")
+        if mode == "namespaced":
+            endpoint.update(installReceipt=receipt, marketplaceId="fixture-marketplace", pluginRoot=str(runtime))
+        if peer_kind == "lock-receipt":
+            endpoint["installReceipt"] = str(tmp_path / "foreign" / "install.json")
+        if peer_kind == "lock-marketplace":
+            endpoint["marketplaceId"] = "foreign-marketplace"
+        if peer_kind == "lock-root":
+            endpoint["pluginRoot"] = str(tmp_path / "foreign")
         if peer_kind == "legacy":
             endpoint["hook_capabilities"] = ["session-lifecycle-v1"]
         (runtime / "status-monitor.lock").write_text(json.dumps(endpoint), encoding="utf-8")
@@ -220,7 +237,10 @@ def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_
         identity = {
             "runtimeRoot": str(runtime), "pluginId": "agent-worktrees",
             "installationId": "fixture-installation", "sourceFingerprint": "fixture-source",
+            "mode": mode,
         }
+        if mode == "namespaced":
+            identity.update(installReceipt=receipt, installGeneration=1, activationGeneration=1)
         catalog = {
             "schema": "copilot-extensions.session-command-catalog", "version": 1,
             "plugin": "agent-worktrees",
@@ -252,12 +272,15 @@ def test_native_extension_notification_uses_actual_selected_peer(tmp_path, peer_
             capture_output=True, text=True, timeout=10, **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
-        assert json.loads(result.stdout) is (peer_kind == "current")
-        if peer_kind == "current":
+        accepted = peer_kind == "current" or mode == "legacy" and peer_kind == "lock-root"
+        assert json.loads(result.stdout) is accepted
+        if accepted:
             assert received.wait(2)
             assert seen == [str(tmp_path)]
+            assert connections == [True]
         else:
             assert seen == []
+            assert connections == []
     finally:
         server.close()
 

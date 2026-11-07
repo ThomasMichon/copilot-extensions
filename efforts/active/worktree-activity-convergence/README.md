@@ -268,6 +268,29 @@ focus, selection, range anchors and action targets.
 
 ## Journal
 
+### 2026-11-07 - Final-idle and selected-lock admission corrections
+- The next exact-head review identified a final-idle admission gap and a
+  missing check on the Node sender's actual rendezvous lock. Worktree-change
+  admission, callback and demand renewal now share the existing final-idle
+  lock, with the existing 50 ms acquisition bound and a deadline recheck.
+  The sender applies the existing legacy/namespaced lock-identity semantics
+  before opening a socket, not merely consistency within the session catalog.
+- Real Node transport fixtures passed for both modes, including mismatched
+  lock receipts, marketplaces and roots and an assertion that rejected
+  targets are not dialed. The shared legacy rule still ignores a root-only
+  marker when both namespaced markers are absent.
+- The actual final-idle-gap fixture covers both read demand and worktree
+  changes; late admission is refused before its callback while normal wakes
+  retain demand. All 6 idle controls passed. Its 5-second loop clock now
+  starts at the first loop wait, separately from cold fixture/bootstrap
+  work; the outer test/operation bounds and production clocks are unchanged.
+- The connected event-only publication into two consumers and the open
+  native Picker passed again. Actor-free handler controls passed 76 tests,
+  including contention and expiry after lock acquisition; exact source/node
+  admission retains the complete rejection and coverage contracts.
+- Review and required CI must pass on the new head before merge. The
+  implementation is not released or installed yet.
+
 ### 2026-11-07 - Cross-timezone and repeated-hour corrections
 - The second review confirmed both native-selection fixes, then identified
   two previously missed recency defects. Historical naive message values now

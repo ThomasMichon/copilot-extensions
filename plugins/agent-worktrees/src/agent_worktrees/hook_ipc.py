@@ -316,16 +316,21 @@ class HookIpcServer:
                 return
         except (ValueError, UnicodeError):
             return
-        with self._active_handlers_lock:
-            if self.server.admission_closed or (
-                self._read_demand_admitted is not None and not self._read_demand_admitted()
-            ):
-                return
-        try:
-            self._worktree_changed(cwd)
-        except Exception:
+        if not self._read_demand_lock.acquire(timeout=0.05):
             return
-        self._on_hook_completed(WORKTREE_CHANGE_KIND)
+        try:
+            with self._active_handlers_lock:
+                if self.server.admission_closed or deadline <= time.time() or (
+                    self._read_demand_admitted is not None and not self._read_demand_admitted()
+                ):
+                    return
+            try:
+                self._worktree_changed(cwd)
+            except Exception:
+                return
+            self._on_hook_completed(WORKTREE_CHANGE_KIND)
+        finally:
+            self._read_demand_lock.release()
 
     def _on_request_accepted(self) -> None:
         with self._active_handlers_lock:

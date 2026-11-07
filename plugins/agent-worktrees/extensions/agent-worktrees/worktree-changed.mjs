@@ -35,6 +35,16 @@ function endpoint(sessionDirectory) {
       !peer.hook_capabilities.includes("worktree-change-v1") ||
       typeof peer.hook_generation !== "string" || !peer.hook_generation ||
       typeof peer.hook_token !== "string" || !peer.hook_token) return null;
+  const lockField = key => String(peer[key] || "").trim();
+  if (installation.mode === "legacy") {
+    if (lockField("installReceipt") || lockField("marketplaceId")) return null;
+  } else if (installation.mode === "namespaced") {
+    if (typeof installation.installReceipt !== "string" ||
+        !isAbsolute(installation.installReceipt) ||
+        lockField("installReceipt") !== installation.installReceipt.trim() ||
+        lockField("marketplaceId") !== value.binding.source.marketplaceId.trim() ||
+        lockField("pluginRoot") !== installation.runtimeRoot.trim()) return null;
+  } else return null;
   const address = peer.hook_endpoint?.match(/^127\.0\.0\.1:([0-9]+)$/);
   const port = Number(address?.[1]);
   if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
