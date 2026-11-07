@@ -120,7 +120,7 @@ document the existing trusted-operator boundary.
   as though that remaining native compatibility qualification ran.
 - [x] Run affected lint, unit/contract checks and mandatory source gates;
   audit public artifacts for private context.
-- [x] Deferred to `#11311`: qualify the separate Windows full-capture
+- [x] Deferred to `#6917` (MR9/MRV10): qualify the separate Windows full-capture
   retained-writer fixture deadline without weakening the existing assertion.
 - [x] Verify actual provider merge and resolve every remaining gate or
   transfer it explicitly to a named tracked objective.
@@ -255,9 +255,20 @@ requested protocol-only scope.
   actual pending interactive forms without aborting or replacing the turn.
   Tool permissions and trusted-human operations remain outside the path.
 - #4418 remains open for separate native legacy `user_input` qualification;
-  #11311 retains the independent Windows full-capture fixture investigation.
+  #6917 (MR9/MRV10) retains the independent Windows full-capture fixture
+  investigation after tracking-only retirement of #11311.
   Neither gap is represented as qualified by the current structured-form
   native proof or the complete Linux contract portfolio.
 - This source-work effort is complete and archived. Release promotion and
   any shared-host rollout are separate operations, not performed or authorized
   by this effort; no pre-existing session was answered or interrupted.
+
+### 2026-11-07 - Closeout review reconciliation
+
+- The closeout review identified a concurrent tracking-only consolidation:
+  #11311 was retired NOT_PLANNED after its complete unfinished outcome was
+  received by open #6917 as MR9/MRV10. Updated the explicit transfer and index;
+  the historical source-research journal remains unchanged.
+- Repaired the inbound backlog journal link to this dated archive. No native
+  Windows capture qualification or resource release follows from tracker
+  retirement, and no implementation behavior changed.
