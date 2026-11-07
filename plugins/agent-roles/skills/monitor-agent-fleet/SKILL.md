@@ -224,10 +224,13 @@ become a second busy loop or consume the coordinator it is supporting.
 
 Learn as you go. Record each monitor difficulty (a reader that failed, a
 blind spot, a recurring worker pattern) as one line in the supervisory record
-during the sweep, never stopping the sweep to fix it. Fold the lines into the
-consuming repository's adapter at the end of the sweep, and promote lessons
-that apply to any repository into this skill's owner as a batched,
-anonymized change rather than one per observation.
+during the sweep, never stopping the sweep to fix it. Report them as proposed
+improvements at the end of the sweep. Applying one is a source change, not
+observation: only with recorded source-change and publication authority, and
+through each owner's contribution flow, fold facility lessons into the
+consuming repository's adapter and promote lessons that apply to any
+repository to this skill's owner as a batched, anonymized change rather than
+one per observation.
 
 Finish a finite sweep with a private per-agent report, ranked interventions and
 coverage limits. Report source changes, publication and deployment separately.

@@ -199,6 +199,7 @@ def test_parked_questions_are_answered_only_under_answer_scope() -> None:
         SKILL / "references" / "fabric-readers.md"
     ).split())
     assert "(references/pending-input.md)" in skill
+    assert "only with recorded source-change and publication authority" in skill
     for requirement in (
         "**turn state alone does not rule out pending input**",
         "a read-only or steering grant does not authorize answers",
