@@ -656,6 +656,13 @@ def test_busy_cutover_diagnostic_does_not_recommend_force(
 # ── token-path pid keying (the cross-attempt collision fix) ───────────────
 
 
+@pytest.fixture(autouse=True)
+def explicit_control_namespace(tmp_path, monkeypatch):
+    from agent_mcp import ipc
+
+    monkeypatch.setattr(ipc, "default_socket_path", lambda: tmp_path / "serve.sock")
+
+
 def test_control_token_path_is_keyed_by_pid(tmp_path):
     """Regression test: a single shared token filename let a second cutover
     attempt read a stale token left behind by an unrelated (e.g. previously
@@ -895,7 +902,31 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
     exited (not just been asked to), and the fixed client-facing handle a
     plain data-plane client dials -- unaware anything happened -- resolves
     to the new generation."""
-    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    config_home = tmp_path / "configuration"
+    config_home.mkdir()
+    fixed = tmp_path / "sockets" / "current" / "serve.sock"
+    fixed.parent.mkdir(parents=True)
+    from agent_mcp import ipc
+
+    monkeypatch.setattr(ipc, "default_socket_path", lambda: fixed)
+    monkeypatch.setenv("AGENT_MCP_HOME", str(config_home))
+    monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", str(fixed))
+    upstream = tmp_path / "configuration_upstream.py"
+    upstream.write_text(
+        "import json,os,sys\n"
+        "for line in sys.stdin:\n"
+        " m=json.loads(line)\n"
+        " if 'id' not in m: continue\n"
+        " result={'protocolVersion':'2024-11-05','capabilities':{},'serverInfo':{'name':'fixture','version':'1'}}\n"
+        " if m.get('method')=='tools/call': result={'content':[{'type':'text','text':os.environ['AGENT_MCP_HOME']}]}\n"
+        " print(json.dumps({'jsonrpc':'2.0','id':m['id'],'result':result}),flush=True)\n",
+        encoding="utf-8",
+    )
+    bridges = config_home / "bridges"
+    bridges.mkdir()
+    (bridges / "sample.json").write_text(json.dumps({
+        "server": {"type": "stdio", "command": [sys.executable, str(upstream)]},
+    }), encoding="utf-8")
     env = dict(os.environ)
 
     # Redirect to a log file, not subprocess.PIPE: nothing in this test ever
@@ -905,7 +936,7 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
     log_path = tmp_path / "old.log"
     with open(log_path, "ab") as log_fh:
         old = subprocess.Popen(
-            [sys.executable, "-m", "agent_mcp", "serve", "--idle-timeout", "0"],
+            [sys.executable, "-m", "agent_mcp", "serve", "--socket", str(fixed), "--idle-timeout", "0"],
             env=env, stdout=log_fh, stderr=subprocess.STDOUT,
         )
     # Popen() dup()s the fd for the child on POSIX; closing our copy here
@@ -913,15 +944,14 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
     # -- the child keeps its own independent copy and keeps writing fine.
     try:
         deadline = time.monotonic() + 10
-        fixed = tmp_path / "serve.sock"
         while time.monotonic() < deadline and not fixed.exists():
             time.sleep(0.05)
         assert fixed.exists(), "old daemon never bound the fixed handle"
         # Custody history can exist before the active endpoint is published.
-        active = routing.read_active_endpoint(tmp_path)
+        active = routing.read_active_endpoint(fixed.parent)
         while time.monotonic() < deadline and (active is None or active.pid != old.pid):
             time.sleep(0.05)
-            active = routing.read_active_endpoint(tmp_path)
+            active = routing.read_active_endpoint(fixed.parent)
         assert active is not None and active.pid == old.pid, (
             "old daemon never published its control endpoint"
         )
@@ -948,7 +978,20 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
             reply = json.loads(sock.recv(4096).decode())
         finally:
             sock.close()
-        assert reply == {"ok": True, "pong": True, "sessions": 0, "attached": 0}
+        assert {key: reply[key] for key in ("ok", "pong", "sessions", "attached")} == {
+            "ok": True, "pong": True, "sessions": 0, "attached": 0,
+        }
+        assert reply["ready"] is True
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as caller:
+            caller.connect(str(fixed))
+            caller.sendall((json.dumps({
+                "op": "call", "bridge": "sample", "tool": "configuration-home", "arguments": {},
+            }) + "\n").encode())
+            caller.settimeout(5)
+            with caller.makefile("rb") as stream:
+                configured = json.loads(stream.readline())
+        assert configured["ok"] is True
+        assert configured["content"] == str(config_home)
     finally:
         if old.poll() is None:
             old.terminate()
@@ -956,7 +999,7 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
                 old.wait(timeout=5)
         # Reap the promoted generation too (test isolation; a real deploy
         # leaves it running).
-        _reap_promoted(tmp_path)
+        _reap_promoted(fixed.parent)
 
 
 def _reap_promoted(config_dir) -> None:

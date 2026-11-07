@@ -125,7 +125,7 @@ def run_contained(
                 raise
             raise owner.UnreapedProcessError(
                 f"{unreaped}; environment audit also failed: "
-                f"{type(audit_error).__name__}: {audit_error}"
+                f"{type(audit_error).__name__}: {audit_error}", job=unreaped.job,
             ) from unreaped
     if changed:
         return 125
