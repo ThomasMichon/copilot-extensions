@@ -4,6 +4,20 @@ codespaces_requires_install_transaction() {
     [[ "${1:-}" != status ]] && { [[ "${1:-}" != uninstall ]] || [[ "${2:-false}" != true ]]; }
 }
 
+_codespaces_install_lock_identity_matches() {
+    local path="$1" fd="$2" opened named
+    [[ -f "$path" && ! -L "$path" ]] || return 1
+    if [[ "${OSTYPE:-}" == darwin* ]]; then
+        # With no pathname, BSD stat uses fstat(stdin), not the /dev/fd filesystem.
+        opened="$(/usr/bin/stat -f '%d:%i' <&"$fd")" || return 1
+        named="$(/usr/bin/stat -f '%d:%i' "$path")" || return 1
+        [[ "$opened" == "$named" ]] || return 1
+    else
+        [[ "$path" -ef "/dev/fd/$fd" ]] || return 1
+    fi
+    [[ ! -L "$path" ]]
+}
+
 enter_codespaces_install_transaction() {
     local timeout="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-300}" py reply fd root home unsafe native_flock=1
     [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || timeout=300
@@ -34,7 +48,8 @@ enter_codespaces_install_transaction() {
         done
         [[ "$fd" -lt 64 ]] || return 1
         eval "exec $fd<>\"\$root/.install.lock\"" || return 1
-        if ! flock -w "$timeout" "$fd" || [[ ! "$root/.install.lock" -ef "/dev/fd/$fd" ]]; then
+        if ! flock -w "$timeout" "$fd" ||
+            ! _codespaces_install_lock_identity_matches "$root/.install.lock" "$fd"; then
             eval "exec $fd>&-"
             echo 'Install transaction admission failed; refusing to proceed unlocked' >&2
             return 1
