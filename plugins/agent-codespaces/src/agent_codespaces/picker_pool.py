@@ -24,7 +24,7 @@ def snapshot(args, *, annotate=None) -> dict:
         if annotate is not None:
             annotate(members)
         payload = pool.picker_payload(members, budget)
-    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as exc:
         auth = {
             **auth, "status": "error",
             "message": f"CodeSpaces inventory failed ({type(exc).__name__}); refresh to retry.",

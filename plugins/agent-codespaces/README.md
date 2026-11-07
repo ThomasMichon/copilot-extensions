@@ -660,6 +660,10 @@ account binding take precedence over a newly active account, so an account
 switch does not hide its retained venue. Explicit repository mappings still
 win; unrelated bindings do not select an account. Binding contention or an
 unavailable selected credential refuses admission rather than switching users.
+Admission opts into content-strict reads of the existing binding store: corrupt,
+malformed or unreadable state refuses before account switching, without changing
+legacy readers or replacing the stored bytes. A genuinely absent store stays
+empty.
 An expired or malformed ambient identity may fall back only to that bound
 account's qualified credential. Creation-scope checks run after reuse admission
 and use the admitted environment, not an unrelated ambient token.
@@ -686,6 +690,8 @@ budget. A partial selected-account view can still advise already-running own
 venue reuse without additional compute, but cannot admit creation or a stopped
 venue's wake; its headroom is unqualified. Invalid native configuration reports
 a diagnostic error and can be repaired before retrying, without silent defaults.
+Picker snapshots retain their JSON error envelope for invalid configuration,
+and active subscriptions recover after configuration repair without a restart.
 
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through

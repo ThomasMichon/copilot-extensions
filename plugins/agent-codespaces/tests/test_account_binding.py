@@ -44,9 +44,8 @@ def test_bound_account_corrupt_file_is_none(monkeypatch, tmp_path):
 
 def test_bound_account_or_raise_corrupt_file_still_degrades_to_none(monkeypatch, tmp_path):
     """A corrupt/missing FILE is this store's own documented, intentional
-    degrade -- ``_read()`` already treats it as an empty store for every
-    caller, including the strict variant. Only lock CONTENTION propagates
-    from the strict variant, never file corruption."""
+    degrade for the legacy bound readers. Only lock CONTENTION propagates
+    from this lock-strict variant; content-strict admission is opt-in."""
     _redirect_store(monkeypatch, tmp_path)
     binding_mod.BINDINGS_FILE.write_text("{not json", encoding="utf-8")
     assert binding_mod.bound_account_or_raise("cs-one") is None
@@ -117,3 +116,62 @@ def test_read_tolerates_unknown_keys(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     assert binding_mod.bound_account("cs-one") == "acct-a"
+    assert binding_mod.list_bindings(strict=True)[0].account == "acct-a"
+
+
+@pytest.mark.parametrize("data", ["{corrupt", "[]", '{"cs-one": []}', '{"cs-one": {"account": "acct-a"}}'])
+def test_strict_admission_read_rejects_bad_store_without_replacing_it(monkeypatch, tmp_path, data):
+    _redirect_store(monkeypatch, tmp_path)
+    binding_mod.BINDINGS_FILE.write_text(data, encoding="utf-8")
+    assert binding_mod.list_bindings() == []
+    with pytest.raises(RuntimeError, match="binding"):
+        binding_mod.list_bindings(strict=True)
+    assert binding_mod.BINDINGS_FILE.read_text(encoding="utf-8") == data
+
+
+def test_strict_admission_read_preserves_missing_store_as_empty(monkeypatch, tmp_path):
+    _redirect_store(monkeypatch, tmp_path)
+    assert binding_mod.list_bindings(strict=True) == []
+    assert not binding_mod.BINDINGS_FILE.exists()
+
+
+def test_strict_admission_read_distinguishes_permission_failure(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    _redirect_store(monkeypatch, tmp_path)
+    binding_mod.BINDINGS_FILE.write_text("{}", encoding="utf-8")
+    original = Path.read_text
+
+    def unreadable(path, *args, **kwargs):
+        if path == binding_mod.BINDINGS_FILE:
+            raise PermissionError("fixture permission denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    assert binding_mod.list_bindings() == []
+    with pytest.raises(RuntimeError, match="binding"):
+        binding_mod.list_bindings(strict=True)
+
+
+@pytest.mark.parametrize("data,error", [(b'["bad"]', AttributeError), (b"\xff", UnicodeDecodeError)])
+def test_strict_reader_does_not_change_legacy_unhandled_format_errors(monkeypatch, tmp_path, data, error):
+    _redirect_store(monkeypatch, tmp_path)
+    binding_mod.BINDINGS_FILE.write_bytes(data)
+    with pytest.raises(error):
+        binding_mod.list_bindings()
+    with pytest.raises(RuntimeError, match="binding"):
+        binding_mod.list_bindings(strict=True)
+    assert binding_mod.BINDINGS_FILE.read_bytes() == data
+
+
+def test_strict_admission_read_normalizes_lock_access_failure_only_when_opted_in(monkeypatch, tmp_path):
+    _redirect_store(monkeypatch, tmp_path)
+
+    def denied():
+        raise PermissionError("fixture lock access denied")
+
+    monkeypatch.setattr(binding_mod, "_binding_lock", denied)
+    with pytest.raises(PermissionError):
+        binding_mod.list_bindings()
+    with pytest.raises(RuntimeError, match="binding"):
+        binding_mod.list_bindings(strict=True)

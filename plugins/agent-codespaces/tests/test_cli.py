@@ -988,7 +988,7 @@ def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatc
     peer.claims_owner = claims
     monkeypatch.setitem(sys.modules, "agent_worktrees", peer)
     monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "fixture-worktree")
-    monkeypatch.setattr(account_binding, "list_bindings", lambda: [
+    monkeypatch.setattr(account_binding, "list_bindings", lambda **kw: [
         account_binding.AccountBinding("retained-venue", "original-owner", 0, "example/project"),
     ])
     for name in ("GH_TOKEN", "GITHUB_TOKEN"):

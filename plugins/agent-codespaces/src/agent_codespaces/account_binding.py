@@ -74,29 +74,47 @@ def _binding_lock(
         _LOCK_FILE.unlink(missing_ok=True)
 
 
-def _read() -> dict[str, AccountBinding]:
-    """Read the binding file -> {codespace: AccountBinding}. {} if absent/corrupt.
+def _read(*, strict: bool = False) -> dict[str, AccountBinding]:
+    """Read bindings; legacy calls return {} for absent or corrupt state.
 
-    Tolerant of unknown keys (forward-compat) by filtering each record to the
-    dataclass fields, so a newer writer's extra fields never drop a record.
+    Unknown keys remain forward-compatible. Strict admission reads distinguish
+    absent state from corruption or read failure; legacy readers stay tolerant.
     """
-    if not BINDINGS_FILE.exists():
-        return {}
     try:
         raw = json.loads(BINDINGS_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise RuntimeError("Account binding store is unreadable or corrupt") from exc
+        if not isinstance(exc, (OSError, json.JSONDecodeError)):
+            raise
         log.warning("account-bindings.json unreadable; treating as empty")
         return {}
+    if strict and not isinstance(raw, dict):
+        raise RuntimeError("Malformed account binding store")
     known = {"codespace", "account", "bound_at", "repo"}
     out: dict[str, AccountBinding] = {}
     for name, rec in (raw or {}).items():
         if not isinstance(rec, dict):
+            if strict:
+                raise RuntimeError("Malformed account binding record")
             continue
         fields = {k: v for k, v in rec.items() if k in known}
         fields.setdefault("codespace", name)
         try:
-            out[name] = AccountBinding(**fields)
-        except TypeError:
+            record = AccountBinding(**fields)
+            if strict and (
+                not name or record.codespace != name
+                or not isinstance(record.account, str) or not record.account
+                or not isinstance(record.repo, str)
+                or type(record.bound_at) not in (int, float)
+            ):
+                raise ValueError("Invalid binding fields")
+            out[name] = record
+        except (TypeError, ValueError) as exc:
+            if strict:
+                raise RuntimeError("Malformed account binding record") from exc
             continue
     return out
 
@@ -176,10 +194,15 @@ def unbind(codespace: str) -> bool:
         return True
 
 
-def list_bindings() -> list[AccountBinding]:
-    """Return all CodeSpace account bindings."""
-    with _binding_lock():
-        return list(_read().values())
+def list_bindings(*, strict: bool = False) -> list[AccountBinding]:
+    """Return bindings; opt-in strict admission refuses damaged or unreadable state."""
+    try:
+        with _binding_lock():
+            return list(_read(strict=strict).values())
+    except OSError as exc:
+        if strict:
+            raise RuntimeError("Account binding store is unavailable") from exc
+        raise
 
 
 def bound_accounts() -> tuple[str, ...]:

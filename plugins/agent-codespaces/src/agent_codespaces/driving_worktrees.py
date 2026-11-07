@@ -126,7 +126,7 @@ def current_workstream_account(repo: str) -> str | None:
         return None
     from .account_binding import list_bindings
     try:
-        bindings = list_bindings()
+        bindings = list_bindings(strict=True)
         if any(
             not isinstance(value, str)
             for binding in bindings for value in (binding.codespace, binding.account, binding.repo)
