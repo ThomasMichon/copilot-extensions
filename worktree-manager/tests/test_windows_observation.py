@@ -256,11 +256,12 @@ def test_hooks_use_registering_thread_no_skip_flags_and_checked_unhook(probe):
     assert not hooks.handles and user.UnhookWinEvent.call_count == 2
 
 
-def test_hooks_report_callback_failure_without_ctypes_discarding_it(probe):
+@pytest.mark.parametrize("error", [RuntimeError("callback witness"), KeyboardInterrupt("callback cancelled")])
+def test_hooks_report_callback_failure_without_ctypes_discarding_it(probe, error):
     hooks, _, receive, failure = hooks_fixture()
-    receive.side_effect = RuntimeError("callback witness")
+    receive.side_effect = error
     hooks.callback(11, 3, 20, 0, 0, 99, 1)
-    assert isinstance(failure.call_args.args[0], RuntimeError)
+    assert failure.call_args.args[0] is error
 
 
 def test_partial_hook_registration_still_retires_exact_first_hook(probe):
@@ -319,9 +320,11 @@ def test_native_positive_controls_require_new_visible_effect_consent(probe, tmp_
     (True, 20, "positive-control-activation-failed"),
     (True, 10, "positive-control-restoration-failed"),
 ])
+@pytest.mark.parametrize("finalizer", [None, "api", "observer"])
 def test_positive_control_explicitly_shows_a_hidden_startup_window(
     probe: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     becomes_visible: bool, rejected_focus: int | None, blocker: str | None,
+    finalizer: str | None,
 ) -> None:
     module = importlib.import_module("windows_controls")
     state = SimpleNamespace(visible=False, foreground=10, events=[])
@@ -358,6 +361,8 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
             pass
 
         def packet(self) -> dict:
+            if finalizer == "observer":
+                raise RuntimeError("observer finalizer failed")
             return {
                 "sealed": True, "hooks_closed": True, "hooks_registered": 2,
                 "samples": 2, "maximum_observation_gap_seconds": 0.1,
@@ -371,7 +376,7 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
     )
     api = SimpleNamespace(
         user=user, facts=DesktopStub(probe).facts, foreground=lambda: state.foreground,
-        _check=check, close=Mock(),
+        _check=check, close=Mock(side_effect=RuntimeError("api finalizer failed") if finalizer == "api" else None),
     )
     monkeypatch.setattr(module, "WinAPI", lambda: api)
     monkeypatch.setattr(module, "WindowObserver", Observer)
@@ -381,21 +386,26 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
     monkeypatch.setattr(module.fixtures, "private_directory",
                         lambda root: (root.mkdir(), root)[1])
     output = tmp_path / "controls"
-    if blocker is None:
+    if blocker is None and finalizer is None:
         report = module.run_controls(output, allow_visible_controls=True)
         assert report["passed"] is True
         assert state.foreground == 10
+        assert report["original_foreground"] == report["final_foreground"] == 10
+        assert report["activation_observed"] is True
+        assert report["focus_restoration_observed"] is True
     else:
-        with pytest.raises(probe.NativeBlocked, match=blocker):
+        with pytest.raises((probe.NativeBlocked, RuntimeError), match=blocker or finalizer):
             module.run_controls(output, allow_visible_controls=True)
         report = json.loads((output / "observer-controls.json").read_text())
         assert report["passed"] is False
-        assert "WinError" not in report["error"]
+        assert "WinError" not in report.get("error", "")
+        if finalizer:
+            assert report["finalization_failures"][0]["traceback_available"] is True
         if not becomes_visible:
             user.SetForegroundWindow.assert_not_called()
     user.SetWindowPos.assert_called_once()
     user.DestroyWindow.assert_called_once_with(20)
-    assert report["cleanup_verified"] is (rejected_focus != 10)
+    assert report["cleanup_verified"] is (rejected_focus != 10 and finalizer is None)
     api.close.assert_called_once()
 
 
@@ -467,3 +477,144 @@ def test_original_hook_error_and_separate_cleanup_error_both_survive(probe):
     assert packet["observer_error"] == "RuntimeError: registration failed"
     assert packet["cleanup_error"] == "RuntimeError: unhook failed"
     assert packet["passed"] is False
+
+
+def test_failure_stack_rendering_waits_for_quiescence_and_retains_first_callback(probe, monkeypatch):
+    module = importlib.import_module("windows_observation")
+    render = Mock(wraps=module.failure_details)
+    monkeypatch.setattr(module, "failure_details", render)
+    observer = probe.WindowObserver(DesktopStub(probe))
+    try:
+        raise KeyboardInterrupt("first callback")
+    except KeyboardInterrupt as exc:
+        observer.callback_failed(exc)
+    observer.callback_failed(ValueError("later callback"))
+    live = observer.packet()
+    render.assert_not_called()
+    assert live["failure_details_status"] == "pending-quiescence"
+    assert live["failure_details"] == {}
+    observer.sealed = True
+    observer.ended = observer.started
+    packet = observer.packet()
+    assert packet["failure_details"]["callback"]["message"] == "first callback"
+    assert packet["failure_details"]["callback"]["traceback_available"] is True
+    assert packet["passed"] is False
+    observer.callback_failed(RuntimeError("after sealing"))
+    assert observer.packet() == packet
+    assert render.call_count == 1
+
+
+def test_unprintable_callback_error_cannot_escape_or_pass(probe):
+    class UnprintableError(Exception):
+        def __str__(self):
+            raise RuntimeError("message unavailable")
+
+    observer = probe.WindowObserver(DesktopStub(probe))
+    observer.callback_failed(UnprintableError())
+    packet = observer.packet()
+    assert packet["callback_error"] == "UnprintableError: <exception message unavailable>"
+    assert packet["passed"] is False
+
+
+@pytest.mark.parametrize("method", ["windows", "raw_windows"])
+def test_enumeration_visibility_callback_retains_cancellation_cause(probe, method):
+    api = probe.WinAPI.__new__(probe.WinAPI)
+    api.callback = lambda function: function
+    primary = KeyboardInterrupt("visibility cancelled")
+    api.user = SimpleNamespace(
+        IsWindowVisible=Mock(side_effect=primary), EnumWindows=lambda callback, _: callback(20, 0),
+    )
+    with pytest.raises(probe.NativeBlocked) as raised:
+        getattr(api, method)()
+    assert raised.value.__cause__ is primary
+
+
+def test_api_close_attempts_all_owned_handles_and_keeps_failed_handle(probe, monkeypatch):
+    api = probe.WinAPI.__new__(probe.WinAPI)
+    api.handles = {1: 11, 2: 22}
+    api.cleanup_failures = []
+    api.kernel = SimpleNamespace(CloseHandle=Mock(side_effect=[False, True]))
+    monkeypatch.setattr(probe.ct, "get_last_error", lambda: 5, raising=False)
+    with pytest.raises(probe.NativeBlocked, match="inspection-cleanup-failed") as raised:
+        api.close()
+    assert api.kernel.CloseHandle.call_count == 2
+    assert api.handles == {1: 11}
+    assert raised.value.__cause__ is not None
+
+
+@pytest.mark.parametrize("fault", ["no-original", "restore-timeout", "destroy", "report"])
+def test_positive_control_failures_keep_focus_unknown_and_cleanup_truth(
+    probe, monkeypatch, tmp_path, fault,
+):
+    module = importlib.import_module("windows_controls")
+    front = [0 if fault == "no-original" else 10]
+
+    def activate(hwnd):
+        if not (fault == "restore-timeout" and hwnd == 10):
+            front[0] = hwnd
+        return True
+
+    def check(value, action):
+        if not value:
+            raise RuntimeError(action)
+
+    def poll(action, accept, **kwargs):
+        value = action()
+        if not accept(value):
+            raise TimeoutError(kwargs["label"])
+        return value
+
+    class Observer:
+        def __init__(self, _api):
+            self.thread = SimpleNamespace(is_alive=lambda: False)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def packet(self):
+            return {
+                "sealed": True, "hooks_closed": True, "hooks_registered": 2,
+                "samples": 1, "maximum_observation_gap_seconds": 0.1, "passed": False,
+                "raw_events": [
+                    {"kind": "show-event", "hwnd": 20},
+                    {"kind": "foreground-event", "hwnd": 20},
+                    {"kind": "foreground-event", "hwnd": 10},
+                ],
+            }
+
+    user = SimpleNamespace(
+        CreateWindowExW=Mock(return_value=20), SetWindowPos=Mock(return_value=True),
+        IsWindowVisible=Mock(return_value=True), SetForegroundWindow=Mock(side_effect=activate),
+        DestroyWindow=Mock(return_value=fault != "destroy"),
+    )
+    api = SimpleNamespace(user=user, foreground=lambda: front[0], facts=DesktopStub(probe).facts,
+                          _check=check, close=Mock())
+    monkeypatch.setattr(module, "WinAPI", lambda: api)
+    monkeypatch.setattr(module, "WindowObserver", Observer)
+    monkeypatch.setattr(module, "until", poll)
+    monkeypatch.setattr(module.fixtures, "private_directory", lambda root: (root.mkdir(), root)[1])
+    output = tmp_path / "controls"
+    if fault == "report":
+        def failed_write(*args, **kwargs):
+            raise OSError("report unavailable")
+        monkeypatch.setattr(Path, "write_text", failed_write)
+    with pytest.raises((probe.NativeBlocked, TimeoutError, RuntimeError, OSError)):
+        module.run_controls(output, allow_visible_controls=True)
+    api.close.assert_called_once()
+    if fault == "report":
+        assert not (output / "observer-controls.json").exists()
+    else:
+        report = json.loads((output / "observer-controls.json").read_text())
+        assert report["passed"] is False
+        assert report["failure"]["traceback_available"] is True
+        assert report["cleanup_verified"] is False
+        if fault in {"no-original", "restore-timeout"}:
+            assert report["focus_restoration_observed"] is None
+        if fault == "no-original":
+            user.CreateWindowExW.assert_not_called()
+        if fault == "destroy":
+            assert user.DestroyWindow.call_count == 2
+            assert report["window_cleanup_failures"]

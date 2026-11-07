@@ -215,6 +215,11 @@ capture brackets, per-stage costs and first/last channel coverage. Readiness
 precedes any fixture launch. Final capture, queue drain, checked unhook and
 observer join precede sealing; repeated packet reads cannot extend observation
 time. Original case errors and separate cleanup errors are retained.
+The first failure in each observer category retains its exception and causal
+stack. Stack formatting waits for a sealed, quiescent observer; live packets
+explicitly mark those details pending. Callback cancellation, visibility-query
+failures and checked handle/hook cleanup cannot silently become successful
+observation. Completed packets remain immutable.
 
 Success requires actual two-cycle timing, exact registered-command execution,
 the contained-control Job-closure witness and surviving authenticated worker
@@ -256,10 +261,24 @@ reports a hidden control, not a possibly stale last-error value. Native SHOW
 and both foreground-event witnesses are still required. Denied activation or
 restoration likewise reports that operation directly, without inventing a
 last-error result; failed restoration remains a cleanup failure.
+The report separately records original/final foreground, activation and
+restoration attempts, API acceptance and observed completion. Unperformed or
+unknown observations remain null. An absent original foreground blocks before
+window creation. Cleanup restores focus only while the owned window remains
+foreground, and verifies restoration by observation rather than API return.
+Window, observer and inspection-handle cleanup have independent verdicts.
 
 Reports and per-case logs remain in the caller's scratch directory. On any
 cleanup deadline failure, retain that directory and diagnose it; the probe
 does not force-stop an unverified process.
+Failure JSON retains bounded causal stacks without locals; primary, cleanup
+and pin-close failures remain distinct. All owned pin closes are attempted.
+Selected-case reports identify active work and missing, unreadable or retained
+case results, reading only the known case's diagnostic JSON. Unavailable
+reports are not complete evidence. Polling consumes an inherited
+`APERTURE_TEST_DEADLINE` when present, including checks before and after each
+action and bounded sleeps; it adds no independent cleanup grace or preemption
+guarantee for blocking APIs. Raw reports and stacks remain private.
 
 The isolated devcontainer regression is selected explicitly with:
 

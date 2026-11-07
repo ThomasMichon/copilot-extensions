@@ -9,7 +9,7 @@ import subprocess
 from typing import Any
 
 import fixtures
-from identity import ProcessPin, read_event, until
+from identity import ProcessPin, failure_details, read_event, until
 import native
 
 
@@ -129,6 +129,39 @@ def cleanup(
         raise AssertionError("fixture cleanup left canonical custody held")
     if unit is not None:
         native.retire(root, unit)
+
+
+def finish_case(root: Path, result: dict, pins: list[ProcessPin], finalize: Any) -> None:
+    failures = []
+    try:
+        finalize()
+        result["cleanup_verified"] = True
+    except BaseException as exc:
+        result.update(
+            passed=False, cleanup_verified=False, cleanup_error=f"{type(exc).__name__}: {exc}",
+            cleanup_failure=failure_details(exc),
+        )
+        failures.append(exc)
+    pin_failures = []
+    for pin in pins:
+        try:
+            pin.close()
+        except BaseException as exc:
+            pin_failures.append(failure_details(exc))
+            failures.append(exc)
+    if pin_failures:
+        result.update(passed=False, cleanup_verified=False, pin_failures=pin_failures)
+    try:
+        (root / "probe/result.json").write_text(
+            json.dumps(result, sort_keys=True, indent=2), encoding="utf-8",
+        )
+    except BaseException as exc:
+        result.update(passed=False, report_failure=failure_details(exc))
+        if failures:
+            raise exc from failures[0]
+        raise
+    if failures:
+        raise failures[0]
 
 
 def case(
@@ -307,10 +340,12 @@ def case(
         result["passed"] = True
         return result
     except BaseException as exc:
-        result.update(passed=False, error=f"{type(exc).__name__}: {exc}")
+        result.update(
+            passed=False, error=f"{type(exc).__name__}: {exc}", failure=failure_details(exc),
+        )
         raise
     finally:
-        try:
+        def finalize() -> None:
             if windows_session is not None:
                 try:
                     windows_session.close_job()
@@ -319,16 +354,8 @@ def case(
                     windows_session.retire()
             else:
                 cleanup(root, manager, env, pins, handles, unit)
-            result["cleanup_verified"] = True
-        except (OSError, ValueError, RuntimeError, AssertionError, subprocess.SubprocessError) as exc:
-            result.update(passed=False, cleanup_error=f"{type(exc).__name__}: {exc}")
-            raise
-        finally:
-            for pin in pins:
-                pin.close()
-            (root / "probe/result.json").write_text(
-                json.dumps(result, sort_keys=True, indent=2), encoding="utf-8",
-            )
+
+        finish_case(root, result, pins, finalize)
 
 
 def signal_drain_case(
@@ -372,16 +399,8 @@ def signal_drain_case(
             raise AssertionError("cooperative signal stop unexpectedly restarted the worker")
         result.update(passed=True, sigterm_drained_active_cycle=True, restart_suppressed=True)
         return result
+    except BaseException as exc:
+        result.update(passed=False, error=f"{type(exc).__name__}: {exc}", failure=failure_details(exc))
+        raise
     finally:
-        try:
-            cleanup(root, manager, env, pins, [], unit)
-            result["cleanup_verified"] = True
-        except (OSError, ValueError, RuntimeError, AssertionError, subprocess.SubprocessError) as exc:
-            result.update(passed=False, cleanup_error=f"{type(exc).__name__}: {exc}")
-            raise
-        finally:
-            for pin in pins:
-                pin.close()
-            (root / "probe/result.json").write_text(
-                json.dumps(result, sort_keys=True, indent=2), encoding="utf-8",
-            )
+        finish_case(root, result, pins, lambda: cleanup(root, manager, env, pins, [], unit))

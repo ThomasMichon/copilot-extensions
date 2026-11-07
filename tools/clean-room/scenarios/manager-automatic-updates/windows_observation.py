@@ -10,6 +10,7 @@ import time
 from typing import TYPE_CHECKING, Protocol
 
 from native import UnsupportedNative
+from identity import failure_details
 
 if TYPE_CHECKING:
     from windows_api import WinAPI
@@ -57,6 +58,7 @@ class WindowObserver:
         self.error: str | None = None
         self.cleanup_error: str | None = None
         self.callback_error: str | None = None
+        self.failures: dict[str, BaseException] = {}
         self.overflow = False
         self.hook_count = 0
         self.hooks_closed = False
@@ -91,8 +93,17 @@ class WindowObserver:
         self.events.append(record)
         self._pending_neighbors.append(record)
 
-    def callback_failed(self, exc: Exception) -> None:
-        self.callback_error = f"{type(exc).__name__}: {exc}"
+    def _failed(self, category: str, exc: BaseException) -> str:
+        with self.lock:
+            first = self.failures.setdefault(category, exc)
+        try:
+            message = str(first)[:4096]
+        except BaseException:
+            message = "<exception message unavailable>"
+        return f"{type(first).__name__}: {message}"
+
+    def callback_failed(self, exc: BaseException) -> None:
+        self.callback_error = self._failed("callback", exc)
 
     def event(self, event: int, hwnd: int, object_id: int, child_id: int,
               source_thread: int, generated_ms: int, delivery_delay_ms: int = 0) -> None:
@@ -112,7 +123,7 @@ class WindowObserver:
                 if delivery_delay_ms > self.MAX_GAP * 1000:
                     self._record("delayed-event-delivery", hwnd=hwnd,
                                  delivery_delay_ms=delivery_delay_ms)
-        except Exception as exc:
+        except BaseException as exc:
             self.callback_failed(exc)
 
     def _coverage(self, channel: str, start: float, end: float) -> None:
@@ -136,9 +147,9 @@ class WindowObserver:
             try:
                 foreground = self.api.foreground()
                 identity = self.api.window_identity(foreground) if foreground else None
-            except Exception as exc:
+            except BaseException as exc:
                 self._record("foreground-identity-failed", hwnd=foreground,
-                             error=f"{type(exc).__name__}: {exc}")
+                             error=self._failed("foreground", exc))
             end = time.monotonic()
             self._coverage("foreground", start, end)
             sample["foreground"] = {
@@ -155,9 +166,9 @@ class WindowObserver:
             start = time.monotonic()
             try:
                 windows = self.api.raw_windows()
-            except Exception as exc:
+            except BaseException as exc:
                 windows = None
-                self._record("visible-capture-failed", error=f"{type(exc).__name__}: {exc}")
+                self._record("visible-capture-failed", error=self._failed("visible", exc))
             end = time.monotonic()
             self._coverage("visible", start, end)
             sample["visible"] = {"start": start, "end": end,
@@ -200,8 +211,8 @@ class WindowObserver:
                     start = time.monotonic()
                     try:
                         self.api.require_desktop()
-                    except Exception as exc:
-                        self._record("desktop-unobservable", error=f"{type(exc).__name__}: {exc}")
+                    except BaseException as exc:
+                        self._record("desktop-unobservable", error=self._failed("desktop", exc))
                     with self.lock:
                         self._coverage("desktop", start, time.monotonic())
                 self.ready.set()
@@ -209,15 +220,15 @@ class WindowObserver:
                     break
             self.sample()
             self._pump(hooks)
-        except Exception as exc:
-            self.error = f"{type(exc).__name__}: {exc}"
+        except BaseException as exc:
+            self.error = self._failed("observer", exc)
         finally:
             if hooks is not None:
                 try:
                     hooks.close()
                     self.hooks_closed = True
-                except Exception as exc:
-                    self.cleanup_error = f"{type(exc).__name__}: {exc}"
+                except BaseException as exc:
+                    self.cleanup_error = self._failed("cleanup", exc)
             with self.lock:
                 self.ended = time.monotonic()
                 for channel in ("foreground", "visible", "hooks"):
@@ -243,7 +254,7 @@ class WindowObserver:
         self.stop.set()
         self.thread.join(timeout=5)
         if self.thread.is_alive():
-            self.error = "window observer did not quiesce"
+            self.error = self._failed("observer", RuntimeError("window observer did not quiesce"))
         else:
             with self.lock:
                 self.sealed = True
@@ -262,8 +273,8 @@ class WindowObserver:
                     "ambiguous-console-host" if process.image in self.api.console_images else
                     f"ambiguous-desktop-{event['kind']}"
                 )
-            except Exception as exc:
-                result["identity_error"] = f"{type(exc).__name__}: {exc}"
+            except BaseException as exc:
+                result["identity_error"] = self._failed("attribution", exc)
         return result
 
     def packet(self) -> dict:
@@ -271,6 +282,7 @@ class WindowObserver:
             if self._packet is not None:
                 return deepcopy(self._packet)
             violations = [self._violation(event) for event in self.events if event["violation"]]
+            quiescent = self.sealed and not self.thread.is_alive()
             packet = {
                 "baseline_visible_windows": len(self.baseline), "samples": self.samples,
                 "observed_seconds": (self.ended if self.ended is not None else
@@ -287,6 +299,11 @@ class WindowObserver:
                 "violations": violations, "observer_error": self.error,
                 "cleanup_error": self.cleanup_error, "callback_error": self.callback_error,
                 "sealed": self.sealed,
+                "failure_details_status": "available" if quiescent else "pending-quiescence",
+                "failure_details": (
+                    {key: failure_details(exc) for key, exc in self.failures.items()}
+                    if quiescent else {}
+                ),
                 "passed": bool(
                     self.sealed and not self.thread.is_alive() and self.hook_count == 2
                     and self.hooks_closed and not violations and self.error is None

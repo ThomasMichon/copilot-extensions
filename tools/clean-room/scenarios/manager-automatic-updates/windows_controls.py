@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import fixtures
-from identity import until
+from identity import failure_details, until
 from windows_api import NativeBlocked, WinAPI, WindowObserver, require_desktop
 
 
@@ -27,22 +27,47 @@ def sensitivity(packet: dict, hwnd: int, original: int) -> bool:
     )
 
 
+def restore_focus(api: WinAPI, original: int, report: dict) -> None:
+    report["focus_restoration_attempted"] = True
+    accepted = bool(api.user.SetForegroundWindow(original))
+    report["focus_restoration_api_accepted"] = accepted
+    if not accepted:
+        raise NativeBlocked(
+            "positive-control-restoration-failed",
+            "SetForegroundWindow did not restore the original foreground",
+        )
+    report["final_foreground"] = until(
+        api.foreground, lambda value: value == original, timeout=2,
+        label="original foreground restoration",
+    )
+    report["focus_restoration_observed"] = True
+
+
 def run_controls(workdir: Path, *, allow_visible_controls: bool) -> dict:
     if not allow_visible_controls:
         raise NativeBlocked(
             "visible-control-consent-required",
             "this control briefly shows one owned window and changes/restores foreground focus",
         )
-    api = WinAPI()
+    api = None
     observer = None
     report = {
         "schema": 1, "passed": False, "kind": "native-observer-positive-controls",
         "zero_window_qualification": False, "cleanup_verified": False,
+        "original_foreground": None, "final_foreground": None,
+        "activation_attempted": False, "activation_api_accepted": None,
+        "activation_observed": None,
+        "focus_restoration_attempted": False, "focus_restoration_api_accepted": None,
+        "focus_restoration_observed": None, "focus_restoration_required": None,
+        "window_cleanup_verified": False, "observer_cleanup_verified": False,
+        "api_cleanup_verified": False,
     }
     hwnd = 0
     original = 0
     output = None
+    primary = None
     try:
+        api = WinAPI()
         require_desktop(api.facts())
         output = fixtures.private_directory(workdir)
         signatures = (
@@ -57,6 +82,9 @@ def run_controls(workdir: Path, *, allow_visible_controls: bool) -> dict:
         for function, arguments, result in signatures:
             function.argtypes, function.restype = arguments, result
         original = api.foreground()
+        report["original_foreground"] = original
+        if not original:
+            raise NativeBlocked("foreground-unavailable", "original foreground disappeared before control")
         observer = WindowObserver(api)
         with observer:
             try:
@@ -76,46 +104,93 @@ def run_controls(workdir: Path, *, allow_visible_controls: bool) -> dict:
                         "positive-control-not-visible",
                         "owned window remained hidden after the explicit show request",
                     )
-                if not api.user.SetForegroundWindow(hwnd):
+                report["activation_attempted"] = True
+                report["activation_api_accepted"] = bool(api.user.SetForegroundWindow(hwnd))
+                if not report["activation_api_accepted"]:
                     raise NativeBlocked(
                         "positive-control-activation-failed",
                         "SetForegroundWindow did not activate the owned control",
                     )
                 until(api.foreground, lambda value: value == hwnd, timeout=2,
                       label="positive-control foreground")
-                if not api.user.SetForegroundWindow(original):
-                    raise NativeBlocked(
-                        "positive-control-restoration-failed",
-                        "SetForegroundWindow did not restore the original foreground",
-                    )
-                until(api.foreground, lambda value: value == original, timeout=2,
-                      label="original foreground restoration")
+                report["activation_observed"] = True
+                report["focus_restoration_required"] = True
+                restore_focus(api, original, report)
                 api._check(api.user.DestroyWindow(hwnd), "destroy owned positive-control window")
                 hwnd = 0
-                report["cleanup_verified"] = True
+            except BaseException as exc:
+                primary = exc
+                report["failure"] = failure_details(exc)
+                raise
             finally:
+                failures = []
                 if hwnd:
-                    failures = []
-                    if api.foreground() == hwnd and not api.user.SetForegroundWindow(original):
-                        failures.append("original foreground restoration failed")
-                    if not api.user.DestroyWindow(hwnd):
-                        failures.append("owned window destruction failed")
-                    report["cleanup_verified"] = not failures
-                    if failures:
-                        report["cleanup_error"] = "; ".join(failures)
+                    try:
+                        foreground = api.foreground()
+                        report["final_foreground"] = foreground
+                        report["focus_restoration_required"] = foreground == hwnd
+                        if foreground == hwnd:
+                            restore_focus(api, original, report)
+                    except BaseException as exc:
+                        failures.append(exc)
+                    try:
+                        api._check(api.user.DestroyWindow(hwnd), "destroy owned positive-control window")
+                        hwnd = 0
+                    except BaseException as exc:
+                        failures.append(exc)
+                report["window_cleanup_verified"] = not failures and not hwnd
+                if failures:
+                    report["window_cleanup_failures"] = [failure_details(exc) for exc in failures]
+                    if primary is None:
+                        raise failures[0]
         packet = observer.packet()
         report["observation"] = packet
-        report["passed"] = sensitivity(packet, report["control_hwnd"], original) and report["cleanup_verified"]
+        report["passed"] = sensitivity(packet, report["control_hwnd"], original)
         return report
     except BaseException as exc:
+        primary = primary or exc
+        report["passed"] = False
         report["error"] = f"{type(exc).__name__}: {exc}"
+        report.setdefault("failure", failure_details(exc))
         raise
     finally:
+        failures = []
         if observer is not None:
-            report["observation"] = observer.packet()
-        if observer is None or not observer.thread.is_alive():
-            api.close()
+            try:
+                report["observation"] = observer.packet()
+                report["observer_cleanup_verified"] = bool(
+                    report["observation"].get("sealed")
+                    and report["observation"].get("hooks_closed")
+                    and not report["observation"].get("cleanup_error")
+                    and not observer.thread.is_alive()
+                )
+            except BaseException as exc:
+                failures.append(exc)
+        else:
+            report["observer_cleanup_verified"] = True
+        if api is not None:
+            if observer is None or not observer.thread.is_alive():
+                try:
+                    api.close()
+                    report["api_cleanup_verified"] = True
+                except BaseException as exc:
+                    failures.append(exc)
+            else:
+                report["api_cleanup_status"] = "unconfirmed-observer-alive"
+        report["cleanup_verified"] = all(report[key] for key in (
+            "window_cleanup_verified", "observer_cleanup_verified", "api_cleanup_verified",
+        ))
+        if failures or not report["cleanup_verified"]:
+            report["passed"] = False
+        if failures:
+            report["finalization_failures"] = [failure_details(exc) for exc in failures]
         if output is not None:
-            (output / "observer-controls.json").write_text(
-                json.dumps(report, sort_keys=True, indent=2), encoding="utf-8",
-            )
+            try:
+                (output / "observer-controls.json").write_text(
+                    json.dumps(report, sort_keys=True, indent=2), encoding="utf-8",
+                )
+            except BaseException as exc:
+                report.update(passed=False, report_failure=failure_details(exc))
+                failures.append(exc)
+        if failures and primary is None:
+            raise failures[0]

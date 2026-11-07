@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 from pathlib import Path
 import subprocess
 import sys
 import time
+from typing import Callable
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -17,9 +20,53 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fixtures  # noqa: E402
 import lifecycle  # noqa: E402
 import native  # noqa: E402
+from identity import failure_details  # noqa: E402
 
 
 CASES = ("all", "handover", "failed-successor", "signal-drain")
+
+
+def run_selected(
+    report: dict, key: str, root: Path, function: Callable[..., dict],
+    source: Path, manager: dict, **kwargs: object,
+) -> dict:
+    report["active_case"] = key
+    states = report.setdefault("case_results", {})
+    states[key] = {"status": "running"}
+    try:
+        result = function(source, root, manager, **kwargs)
+        states[key] = {"status": "returned"}
+        report[key] = result
+        if result.get("passed") is not True:
+            raise RuntimeError("selected lifecycle case did not pass")
+        return result
+    except BaseException:
+        try:
+            deadline = os.environ.get("APERTURE_TEST_DEADLINE")
+            absolute = float(deadline) if deadline is not None else None
+            if absolute is not None:
+                if not math.isfinite(absolute):
+                    raise ValueError("case report requires a finite inherited work deadline")
+                if time.time() >= absolute:
+                    raise TimeoutError("case report read exceeds inherited work deadline")
+            with (root / "probe/result.json").open("rb") as stream:
+                content = stream.read((1 << 20) + 1)
+            if absolute is not None and time.time() >= absolute:
+                raise TimeoutError("case report read exceeded inherited work deadline")
+            if len(content) > 1 << 20:
+                raise ValueError("case report exceeds its bounded diagnostic capture")
+            result = json.loads(content)
+            if not isinstance(result, dict):
+                raise ValueError("case report must be an object")
+            report[key] = result
+            states[key] = {"status": "retained-failure-report"}
+        except BaseException as exc:
+            states[key] = {
+                "status": "deadline" if isinstance(exc, TimeoutError) else
+                "missing" if isinstance(exc, FileNotFoundError) else "unreadable",
+                "failure": failure_details(exc),
+            }
+        raise
 
 
 def qualify(
@@ -46,13 +93,31 @@ def qualify(
     manager = fixtures.load_manager(source)
     from agent_procutil.daemon_instances import daemon_test_lifecycle, default_registry_root
 
-    with daemon_test_lifecycle(
-        owner="manager-automatic-updates-qualification", registry_root=default_registry_root(),
-    ) as instance_environment:
-        return _qualify_cases(
-            source, workdir, manager, cycles=cycles, native_startup=native_startup,
-            instance_environment=instance_environment, case=case,
-        )
+    report = None
+    try:
+        with daemon_test_lifecycle(
+            owner="manager-automatic-updates-qualification", registry_root=default_registry_root(),
+        ) as instance_environment:
+            report = _qualify_cases(
+                source, workdir, manager, cycles=cycles, native_startup=native_startup,
+                instance_environment=instance_environment, case=case,
+            )
+        return report
+    except BaseException as exc:
+        if report is not None:
+            report.update(passed=False, lifecycle_finalization_failure=failure_details(exc))
+            try:
+                deadline = os.environ.get("APERTURE_TEST_DEADLINE")
+                if deadline is not None:
+                    absolute = float(deadline)
+                    if not math.isfinite(absolute) or time.time() >= absolute:
+                        raise TimeoutError("qualification report has no remaining work budget")
+                (workdir / "qualification.json").write_text(
+                    json.dumps(report, sort_keys=True, indent=2), encoding="utf-8",
+                )
+            except BaseException as reporting_error:
+                raise reporting_error from exc
+        raise
 
 
 def _qualify_cases(
@@ -79,18 +144,21 @@ def _qualify_cases(
 
             api = WinAPI()
             observer = None
+            primary = None
             try:
                 observer = WindowObserver(api)
                 with observer:
                     if case in ("all", "handover"):
-                        report["handover"] = lifecycle.case(
-                            source, workdir / "h", manager, cycles=cycles,
+                        report["handover"] = run_selected(
+                            report, "handover", workdir / "h", lifecycle.case,
+                            source=source, manager=manager, cycles=cycles,
                             native_startup=True, windows_observer=observer,
                             instance_environment=instance_environment,
                         )
                     if case in ("all", "failed-successor"):
-                        report["failed_successor"] = lifecycle.case(
-                            source, workdir / "f", manager, cycles=1,
+                        report["failed_successor"] = run_selected(
+                            report, "failed_successor", workdir / "f", lifecycle.case,
+                            source=source, manager=manager, cycles=1,
                             failing_standby=True, native_startup=True, windows_observer=observer,
                             instance_environment=instance_environment,
                         )
@@ -105,34 +173,64 @@ def _qualify_cases(
                 report["windows_window_and_job_lifetime_proved"] = "handover" in report
                 report["passed"] = True
                 return report
+            except BaseException as exc:
+                primary = exc
+                report["passed"] = False
+                raise
             finally:
+                failures = []
                 if observer is not None:
-                    report["windows_observation"] = observer.packet()
+                    try:
+                        report["windows_observation"] = observer.packet()
+                    except BaseException as exc:
+                        failures.append(exc)
                 if observer is None or not observer.thread.is_alive():
-                    api.close()
+                    try:
+                        api.close()
+                    except BaseException as exc:
+                        failures.append(exc)
+                else:
+                    failures.append(NativeBlocked("observer-cleanup-unconfirmed", "observer is still alive"))
+                if failures:
+                    report.update(
+                        passed=False,
+                        windows_finalization_failures=[failure_details(exc) for exc in failures],
+                    )
+                    if primary is None:
+                        raise failures[0]
         if case in ("all", "handover"):
-            report["handover"] = lifecycle.case(
-                source, workdir / "handover", manager, cycles=cycles, native_startup=native_startup,
+            report["handover"] = run_selected(
+                report, "handover", workdir / "handover", lifecycle.case,
+                source=source, manager=manager, cycles=cycles, native_startup=native_startup,
                 instance_environment=instance_environment,
             )
         if case in ("all", "failed-successor"):
-            report["failed_successor"] = lifecycle.case(
-                source, workdir / "failed-successor", manager, cycles=1, failing_standby=True,
+            report["failed_successor"] = run_selected(
+                report, "failed_successor", workdir / "failed-successor", lifecycle.case,
+                source=source, manager=manager, cycles=1, failing_standby=True,
                 native_startup=native_startup,
                 instance_environment=instance_environment,
             )
         if native_startup and case in ("all", "signal-drain"):
-            report["native_signal_drain"] = lifecycle.signal_drain_case(
-                source, workdir / "native-signal-drain", manager,
+            report["native_signal_drain"] = run_selected(
+                report, "native_signal_drain", workdir / "native-signal-drain", lifecycle.signal_drain_case,
+                source=source, manager=manager,
                 instance_environment=instance_environment,
             )
         report["passed"] = True
         return report
+    except BaseException as exc:
+        report.update(passed=False, failure=failure_details(exc))
+        raise
     finally:
         report["case_elapsed_seconds"] = time.monotonic() - started
-        (workdir / "qualification.json").write_text(
-            json.dumps(report, sort_keys=True, indent=2), encoding="utf-8",
-        )
+        try:
+            (workdir / "qualification.json").write_text(
+                json.dumps(report, sort_keys=True, indent=2), encoding="utf-8",
+            )
+        except BaseException:
+            report["passed"] = False
+            raise
 
 
 def main() -> int:
@@ -173,12 +271,19 @@ def main() -> int:
             "passed": False, "blocked": True, "unsupported": True,
             "blocker_code": getattr(exc, "code", "native-precondition"),
             "blocker": str(exc),
+            "failure": failure_details(exc),
         }))
         return 2
     except (OSError, ValueError, RuntimeError, AssertionError, ImportError,
             subprocess.SubprocessError) as exc:
-        print(json.dumps({"passed": False, "error": f"{type(exc).__name__}: {exc}"}))
+        print(json.dumps({
+            "passed": False, "error": f"{type(exc).__name__}: {exc}",
+            "failure": failure_details(exc),
+        }))
         return 1
+    except BaseException as exc:
+        print(json.dumps({"passed": False, "failure": failure_details(exc)}))
+        return 130 if isinstance(exc, KeyboardInterrupt) else 1
     return 0
 
 

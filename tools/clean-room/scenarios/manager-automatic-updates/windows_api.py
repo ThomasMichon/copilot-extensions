@@ -115,7 +115,8 @@ def create_private_directory(path: Path) -> None:
             kernel.LocalFree(descriptor)
         if sid_text:
             kernel.LocalFree(ct.cast(sid_text, wt.LPVOID))
-        kernel.CloseHandle(token)
+        if not kernel.CloseHandle(token):
+            raise ct.WinError(ct.get_last_error())
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,7 @@ class WinAPI:
         self.advapi = ct.WinDLL("advapi32", use_last_error=True)
         self.callback = ct.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
         self.handles: dict[int, int] = {}
+        self.cleanup_failures: list[BaseException] = []
         self.infos: dict[int, ProcessInfo] = {}
         self.parents: dict[int, int] = {}
         self.lock = threading.RLock()
@@ -196,6 +198,13 @@ class WinAPI:
         if not value:
             raise NativeBlocked("win32-inspection-failed", f"{action}: WinError {ct.get_last_error()}")
 
+    def _close_inspection(self, handle: int, action: str) -> None:
+        try:
+            self._check(self.kernel.CloseHandle(handle), action)
+        except BaseException as exc:
+            self.cleanup_failures.append(exc)
+            raise
+
     def elevated(self, process: int) -> bool:
         token, elevation, size = wt.HANDLE(), wt.DWORD(), wt.DWORD()
         self._check(self.advapi.OpenProcessToken(process, 0x8, ct.byref(token)), "OpenProcessToken")
@@ -207,7 +216,7 @@ class WinAPI:
             )
             return bool(elevation.value)
         finally:
-            self.kernel.CloseHandle(token)
+            self._close_inspection(token, "close inspection token")
 
     def session(self, pid: int) -> int:
         session = wt.DWORD()
@@ -246,7 +255,11 @@ class WinAPI:
                 current = self.user.GetThreadDesktop(self.kernel.GetCurrentThreadId())
                 matches = self._object_name(desktop) == self._object_name(current) == "Default"
             finally:
-                self.user.CloseDesktop(desktop)
+                try:
+                    self._check(self.user.CloseDesktop(desktop), "close input desktop inspection")
+                except BaseException as exc:
+                    self.cleanup_failures.append(exc)
+                    raise
         current_session = self.session(os.getpid())
         return DesktopFacts(
             elevated=self.elevated(self.kernel.GetCurrentProcess()),
@@ -280,7 +293,7 @@ class WinAPI:
                 raise NativeBlocked("process-snapshot-failed", "Process32NextW failed")
             self.parents = parents
         finally:
-            self.kernel.CloseHandle(handle)
+            self._close_inspection(handle, "close process snapshot")
 
     def process(self, pid: int) -> ProcessInfo:
         with self.lock:
@@ -311,7 +324,7 @@ class WinAPI:
             self.handles[pid], self.infos[pid] = handle, info
             return info
         except BaseException:
-            self.kernel.CloseHandle(handle)
+            self._close_inspection(handle, "close failed process inspection")
             raise
 
     def lineage(self, pid: int) -> tuple[tuple[int, int], ...]:
@@ -336,24 +349,23 @@ class WinAPI:
 
         @self.callback
         def visit(hwnd: int, _data: int) -> bool:
-            if self.user.IsWindowVisible(hwnd):
-                try:
+            try:
+                if self.user.IsWindowVisible(hwnd):
                     pid = wt.DWORD()
                     self._check(
                         self.user.GetWindowThreadProcessId(hwnd, ct.byref(pid)), "visible window PID",
                     )
                     result[int(hwnd)] = WindowInfo(int(hwnd), self.process(pid.value), self.lineage(pid.value))
-                except Exception as exc:
-                    # ctypes otherwise prints and discards Python callback exceptions.
-                    failure.append(NativeBlocked(
-                        "window-callback-failed", f"{type(exc).__name__}: {exc}",
-                    ))
-                    return False
+            except BaseException as exc:
+                # ctypes otherwise prints and discards Python callback exceptions.
+                if not failure:
+                    failure.append(exc)
+                return False
             return True
 
         enumerated = self.user.EnumWindows(visit, 0)
         if failure:
-            raise failure[0]
+            raise NativeBlocked("window-callback-failed", "visible window inspection failed") from failure[0]
         self._check(enumerated, "EnumWindows")
         return result
 
@@ -373,30 +385,39 @@ class WinAPI:
 
         @self.callback
         def visit(hwnd: int, _data: int) -> bool:
-            if self.user.IsWindowVisible(hwnd):
-                try:
+            try:
+                if self.user.IsWindowVisible(hwnd):
                     result[int(hwnd)] = self.window_identity(hwnd)
-                except Exception as exc:
-                    failure.append(NativeBlocked(
-                        "visible-window-identity-failed", f"HWND {int(hwnd)}: {type(exc).__name__}: {exc}",
-                    ))
-                    return False
+            except BaseException as exc:
+                if not failure:
+                    failure.append(exc)
+                return False
             return True
 
         enumerated = self.user.EnumWindows(visit, 0)
         if failure:
-            raise failure[0]
+            raise NativeBlocked(
+                "visible-window-identity-failed", "visible window identity capture failed",
+            ) from failure[0]
         self._check(enumerated, "raw EnumWindows")
         return result
 
     def require_desktop(self) -> None:
         require_desktop(self.facts())
 
-    def event_hooks(self, receive: Callable, on_error: Callable[[Exception], None]) -> HookPump:
+    def event_hooks(self, receive: Callable, on_error: Callable[[BaseException], None]) -> HookPump:
         from windows_events import WinEventHooks
         return WinEventHooks(self.user, self.kernel, receive, on_error)
 
     def close(self) -> None:
-        for handle in self.handles.values():
-            self.kernel.CloseHandle(handle)
-        self.handles.clear()
+        failures = list(self.cleanup_failures)
+        for pid, handle in tuple(self.handles.items()):
+            try:
+                self._check(self.kernel.CloseHandle(handle), "close pinned inspection handle")
+                del self.handles[pid]
+            except BaseException as exc:
+                failures.append(exc)
+        if failures:
+            raise NativeBlocked(
+                "inspection-cleanup-failed", "one or more pinned inspection handles remain unclosed",
+            ) from failures[0]

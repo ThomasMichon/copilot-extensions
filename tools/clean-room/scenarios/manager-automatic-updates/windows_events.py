@@ -16,7 +16,7 @@ EventCallback = getattr(ct, "WINFUNCTYPE", ct.CFUNCTYPE)(
 
 class WinEventHooks:
     def __init__(self, user: object, kernel: object, receive: Callable,
-                 on_error: Callable[[Exception], None]) -> None:
+                 on_error: Callable[[BaseException], None]) -> None:
         self.user, self.kernel, self.receive, self.on_error = user, kernel, receive, on_error
         self.owner = threading.get_ident()
         self.handles: list[int] = []
@@ -39,7 +39,7 @@ class WinEventHooks:
         try:
             delay = (int(self.kernel.GetTickCount64()) - generated_ms) & 0xffffffff
             self.receive(event, int(hwnd or 0), object_id, child_id, source_thread, generated_ms, delay)
-        except Exception as exc:
+        except BaseException as exc:
             self.on_error(exc)
 
     def _owner(self) -> None:
@@ -73,12 +73,19 @@ class WinEventHooks:
         failures = []
         try:
             self.drain()
-        except Exception as exc:
-            failures.append(f"{type(exc).__name__}: {exc}")
+        except BaseException as exc:
+            failures.append(exc)
         for handle in tuple(self.handles):
-            if not self.user.UnhookWinEvent(handle):
-                failures.append(f"UnhookWinEvent: WinError {ct.get_last_error()}")
-            else:
+            try:
+                if not self.user.UnhookWinEvent(handle):
+                    raise NativeBlocked(
+                        "event-unhook-failed", f"UnhookWinEvent: WinError {ct.get_last_error()}",
+                    )
                 self.handles.remove(handle)
+            except BaseException as exc:
+                failures.append(exc)
         if failures:
-            raise NativeBlocked("event-hook-cleanup-failed", "; ".join(failures))
+            raise NativeBlocked(
+                "event-hook-cleanup-failed",
+                "; ".join(f"{type(exc).__name__}: {str(exc)[:4096]}" for exc in failures),
+            ) from failures[0]
