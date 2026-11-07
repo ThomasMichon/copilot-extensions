@@ -273,7 +273,8 @@ def test_grouped_preparation_assets_retain_each_declared_root(preparation_assets
     retained, _share = helper.retain(payload, driver)
     for group in groups:
         for name in group["files"]:
-            assert (retained / group["payloadDir"] / name).read_bytes() == (
+            target = Path(helper.engine._native_retained_path(retained / group["payloadDir"] / name))
+            assert target.read_bytes() == (
                 payload.parent / group["canonicalDir"] / name
             ).read_bytes()
     assert helper.retain(payload, driver)[0] == retained
