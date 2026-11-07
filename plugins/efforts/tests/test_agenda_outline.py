@@ -95,6 +95,35 @@ def test_adopt_replays_progress_into_new_state_home(tmp_path: Path) -> None:
         OUTLINE.adopt(outline, home)
 
 
+def test_replayed_outcomes_are_judgment_not_measured(tmp_path: Path) -> None:
+    outline = {"source": {"kind": "task", "ref": "fixture"}, "items": [
+        {"action": "Asserted done", "status": "done"}, {"action": "Next"}]}
+    home = tmp_path / "lane"
+
+    OUTLINE.adopt(outline, home)
+
+    text = json.dumps(importlib.import_module("agenda_store").read(home)["records"])
+    assert '"judgment"' in text
+    assert '"measured"' not in text
+
+
+def test_render_text_keeps_subqueue_whose_parent_item_was_bounded_out() -> None:
+    outline = {"source": {"kind": "task", "ref": "fixture"},
+               "caps": {"max_pending_items": 128}, "items": [
+        {"action": "Early parent", "status": "done", "children": [
+            {"action": "Early child", "status": "done"}]},
+        *({"action": f"Later step {index}", "status": "done"} for index in range(100)),
+        {"action": "Current step", "status": "current"}]}
+
+    graph = OUTLINE.preview(outline)["graph"]
+    labels = {item["label"] for item in graph["items"]}
+    assert "Early parent" not in labels and "Early child" in labels
+
+    text = OUTLINE.render_text(graph)
+    assert "(omitted parent) subqueue: Early parent" in text
+    assert "Early child" in text
+
+
 def test_from_effort_outlines_open_remainder(tmp_path: Path) -> None:
     readme = tmp_path / "efforts" / "active" / "demo" / "README.md"
     readme.parent.mkdir(parents=True)

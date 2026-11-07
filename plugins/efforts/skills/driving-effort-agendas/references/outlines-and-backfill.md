@@ -23,6 +23,8 @@ through the normal agenda commands, under the adopting agent's control.
 
 - `source.kind` is `effort`, `task` or `aside`; `provenance` is `authored`,
   `derived` (from an effort) or `reconstructed` (from session history).
+  Replayed outcomes are recorded as `judgment` evidence regardless of
+  provenance: an outline asserts results, it does not measure them.
 - Item fields: `action` (required), `label`, `exit` (string or list; defaults
   to "<label> is complete."), `status` (`queued`, `current`, `done`,
   `waiting`), `children`, `evidence`, `id`, `source_ref`. Children of a `done`

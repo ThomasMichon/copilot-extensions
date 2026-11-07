@@ -19,7 +19,7 @@ never a rigid lock or an automatic mutation.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Agenda-adoption host agent | All slices (efforts helpers, agent-worktrees switch and guidance, samples) | copilot-extensions worktree `lambda-core-wsl-20261107-143326-ba88` |
+| Agenda-adoption host agent | All slices (efforts helpers, agent-worktrees switch and guidance, samples) | the host's copilot-extensions worktree (named in its private checkpoint) |
 
 ## Coordination
 

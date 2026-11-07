@@ -193,9 +193,9 @@ def expand(outline: dict[str, Any], *, operation_id: str | None = None) -> tuple
 
 
 def _proof(exits: list[str], node: dict[str, Any], provenance: str) -> list[dict[str, str]]:
-    kind = "measured" if provenance == "authored" else "judgment"
+    # An outline asserts outcomes; it never measured them, so replayed proof is judgment.
     ref = node["value"].get("evidence") or f"outline-{provenance}"
-    return [{"criterion": criterion, "kind": kind, "ref": ref, "inputs": "outline replay"}
+    return [{"criterion": criterion, "kind": "judgment", "ref": ref, "inputs": "outline replay"}
             for criterion in exits]
 
 
@@ -329,6 +329,14 @@ def render_text(rendered: dict[str, Any], title: str | None = None) -> str:
     for root in children.get(None, []):
         lines.append(f"{root['label']} [{root['state']}]")
         frame_lines(root, "  ")
+    # The item bound can drop a parent item while keeping the subqueue it opened.
+    shown = {item["id"] for item in rendered["items"]}
+    for via, frames in children.items():
+        if via is None or via in shown:
+            continue
+        for frame in frames:
+            lines.append(f"  … (omitted parent) {frame['label']} [{frame['state']}]")
+            frame_lines(frame, "      ")
     omitted = rendered.get("omitted", {})
     if omitted.get("items") or omitted.get("frames"):
         lines.append(f"  … {omitted.get('items', 0)} items / {omitted.get('frames', 0)} frames omitted")
