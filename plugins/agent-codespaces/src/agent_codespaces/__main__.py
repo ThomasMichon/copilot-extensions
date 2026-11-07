@@ -3267,6 +3267,7 @@ def _config_show() -> int:
 
     print("\nDefaults:")
     print(f"  machine_type: {config.default_machine_type}")
+    print(f"  max_owned_codespaces: {config.max_owned_codespaces}")
     print(f"  location: {config.default_location}")
     if config.dotfiles_repo:
         print(f"  dotfiles_repo: {config.dotfiles_repo}")
@@ -3820,7 +3821,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
-def _reclaim_for_quota(err: str) -> str | None:
+def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
     """On a CodeSpace-create quota error, attempt ONE safe reclaim so a retry
     can succeed. Returns a human note describing what it freed, or None.
 
@@ -3847,10 +3848,22 @@ def _reclaim_for_quota(err: str) -> str | None:
         or "you have reached" in low
         or ("reached" in low and "codespace" in low and "limit" in low)
     )
+    account_rows = None
+    if account and (total_limit or running_limit):
+        from .lifecycle import list_account_codespaces
+
+        try:
+            account_rows = list_account_codespaces(account)
+        except ContextRefused:
+            raise
+        except RuntimeError:
+            return None
 
     if total_limit:
         for rec in sorted(list_by_state(STATE_PRUNABLE), key=lambda s: s.state_at):
             name = rec.codespace
+            if account_rows is not None and not any(cs.name == name for cs in account_rows):
+                continue
             from ssh_manager import TargetBusyError
 
             from .lifecycle_lock import lifecycle_lock
@@ -3876,7 +3889,8 @@ def _reclaim_for_quota(err: str) -> str | None:
         try:
             from .lifecycle import _SHUTDOWN_STATE
 
-            running = [c for c in list_codespaces() if c.state != _SHUTDOWN_STATE]
+            rows = account_rows if account_rows is not None else list_codespaces()
+            running = [c for c in rows if c.state != _SHUTDOWN_STATE]
         except RuntimeError:
             return None
         # Only stop a running box that is already finalized (eligible) -- never
@@ -3916,18 +3930,25 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     config = load_merged_config()
 
-    # Phase 2b (#708): resume this workstream's own claimed box, never a
-    # stranger's idle one; degrade-safe. ``--force-create`` skips this.
+    from .lifecycle import allocation_account
+
+    account = allocation_account(args.repo)
     if not getattr(args, "force_create", False):
         try:
             from .driving_worktrees import resolve_current_workstream_box
-            _members, _budget = pool_mod.build_pool()
+            _members, _budget = pool_mod.build_pool(
+                account=account,
+                max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
+            )
             decision = pool_mod.plan_allocation(
                 _members, _budget, repo=args.repo,
                 new_cores=_intended_cores(config, args.repo),
                 workstream_box=resolve_current_workstream_box(_members, args.repo))
-        except Exception:
-            decision = None
+        except ContextRefused:
+            raise
+        except RuntimeError as exc:
+            print(f"[pressure] {exc}", file=sys.stderr)
+            return _ALLOC_PRESSURE_EXIT
         if decision is not None and decision.action == pool_mod.ALLOC_REUSE:
             print(f"[reuse] {decision.reason}")
             print(
@@ -3941,13 +3962,17 @@ def _cmd_create(args: argparse.Namespace) -> int:
         if decision is not None and decision.action == pool_mod.ALLOC_PRESSURE:
             print(f"[pressure] {decision.reason}", file=sys.stderr)
             print(
-                "Free budget (finalize/prune a box) or pass --force-create to "
-                "override.",
+                "Reuse an eligible venue, resolve unknown capacity, or pass "
+                "--force-create to override the local policy. Cleanup requires "
+                "its existing ownership and safety gates.",
                 file=sys.stderr,
             )
             return _ALLOC_PRESSURE_EXIT
         # CREATE / RECYCLE -> proceed; a RECYCLE's reclaim is handled by the
         # on-quota retry below.
+
+    else:
+        print("[override] --force-create bypasses local capacity policy, not provider limits", file=sys.stderr)
 
     print(f"Creating CodeSpace for {args.repo}...")
 
@@ -3956,12 +3981,13 @@ def _cmd_create(args: argparse.Namespace) -> int:
             args.repo, config, branch=args.branch,
             display_name=getattr(args, "display_name", None),
             devcontainer_path=getattr(args, "devcontainer_path", None),
+            account=account,
         )
 
     try:
         info = _create()
     except RuntimeError as exc:
-        note = _reclaim_for_quota(str(exc))
+        note = _reclaim_for_quota(str(exc), account=account)
         if not note:
             raise
         print(f"[..] Codespace quota hit; {note}. Retrying create...")
@@ -4181,8 +4207,7 @@ def _intended_cores(config, repo: str) -> int:
     """Cores a *new* box for ``repo`` would spend -- the machine tier ``create``
     would pick (the repo's ``machine_type`` else the config default), mapped to a
     core count. Feeds the budget-fit check in ``allocate`` / the ``create`` guard.
-    Best-effort: an unresolvable tier yields 0 (the planner then treats it as a
-    conservative 1)."""
+    An unresolvable tier yields 0, which refuses additional compute allocation."""
     try:
         from .config import RepoConfig
         repo_config = config.repos.get(repo, RepoConfig())
@@ -4213,17 +4238,25 @@ def _cmd_allocate(args: argparse.Namespace) -> int:
         args.stale_after if args.stale_after is not None
         else pool_mod.DEFAULT_STALE_AFTER
     )
-    members, budget = pool_mod.build_pool(
-        budget_cores=budget_cores, stale_after=stale_after,
-    )
     try:
+        from .lifecycle import allocation_account
         from .driving_worktrees import resolve_current_workstream_box
-        workstream_box = resolve_current_workstream_box(members, args.repo)
-    except Exception:
-        workstream_box = None
-    decision = pool_mod.plan_allocation(
-        members, budget, repo=args.repo, new_cores=new_cores,
-        workstream_box=workstream_box)
+
+        members, budget = pool_mod.build_pool(
+            budget_cores=budget_cores, stale_after=stale_after,
+            account=allocation_account(args.repo),
+            max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
+        )
+        decision = pool_mod.plan_allocation(
+            members, budget, repo=args.repo, new_cores=new_cores,
+            workstream_box=resolve_current_workstream_box(members, args.repo),
+        )
+    except ContextRefused:
+        raise
+    except RuntimeError as exc:
+        decision = pool_mod.AllocationDecision(
+            action=pool_mod.ALLOC_PRESSURE, codespace=None, reason=str(exc),
+        )
     if args.json_output:
         print(json.dumps(decision.to_dict()))
     else:
@@ -4250,6 +4283,7 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     )
     members, budget = pool_mod.build_pool(
         budget_cores=budget_cores, stale_after=stale_after,
+        max_owned_codespaces=load_merged_config().max_owned_codespaces,
     )
 
     # Self-recognition (#1362 / agent-claim-awareness): mark the box(es) THIS
@@ -4271,9 +4305,14 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     )
     print(
         f"Budget: {budget.spent_cores}/{budget.total_cores} cores in use, "
-        f"{budget.headroom_cores} free  "
+        f"{'at most ' if budget.unknown_cores_count else ''}{budget.headroom_cores} free  "
         f"({budget.running_count} running / {budget.total_count} total){unknown}"
     )
+    counts = ", ".join(
+        f"{account}: {count}/{budget.max_owned_codespaces}"
+        for account, count in sorted(budget.owned_by_account.items())
+    )
+    print(f"Owned venues by account (observed counts; completeness unqualified): {counts or 'none'}")
     if not members:
         print("No CodeSpaces in the pool.")
         return 0

@@ -14,9 +14,12 @@ def snapshot(args, *, annotate=None) -> dict:
     if auth["status"] != "ready":
         return picker_auth.blocked_payload(auth)
     try:
+        from .config import load_merged_config
+
         members, budget = pool.build_pool(
             budget_cores=args.budget if args.budget is not None else pool.DEFAULT_BUDGET_CORES,
             stale_after=args.stale_after if args.stale_after is not None else pool.DEFAULT_STALE_AFTER,
+            max_owned_codespaces=load_merged_config().max_owned_codespaces,
         )
         if annotate is not None:
             annotate(members)

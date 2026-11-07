@@ -77,6 +77,23 @@ def test_layered_codespace_real_load_and_knowledge_file_ownership(layered_codesp
     assert not (machine / "adopted-repos.yaml").exists()
 
 
+def test_layered_owned_limit_defaults_and_exact_override(layered_codespace_context):
+    base, knowledge, _, _ = layered_codespace_context
+    assert load_merged_config().max_owned_codespaces == 30
+    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": 35}})
+    _write_codespace_layer(knowledge, {"defaults": {"max_owned_codespaces": 40}})
+    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": 45}}, local=True)
+    assert load_merged_config().max_owned_codespaces == 45
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "30"])
+def test_owned_limit_rejects_invalid_native_values(layered_codespace_context, value):
+    base, _, _, _ = layered_codespace_context
+    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": value}})
+    with pytest.raises(ValueError, match="positive integer"):
+        load_merged_config()
+
+
 def test_layered_codespace_selected_context_not_shadowed_by_adoption(
     layered_codespace_context, tmp_path, monkeypatch,
 ):

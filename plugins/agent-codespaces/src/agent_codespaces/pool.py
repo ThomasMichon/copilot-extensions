@@ -57,6 +57,7 @@ FAILED = "failed"        # transient/terminal: will not become usable on its own
 # The account's default concurrent-core budget. The operator's account allows
 # ~64 cores' worth of *running* CodeSpaces at once; a Shutdown box spends none.
 DEFAULT_BUDGET_CORES = 64
+DEFAULT_MAX_OWNED_CODESPACES = 30
 # An unheld, unmarked, running CodeSpace idle longer than this ages to ``stale``
 # (a recycle candidate). Deliberately generous; Phase 4 (#710) owns the actual
 # recycling policy -- here it only *classifies*.
@@ -294,7 +295,7 @@ class PoolMember:
 
 @dataclass
 class Budget:
-    """The pool's concurrent-core budget accounting."""
+    """Independent owned-venue and concurrent-core accounting."""
 
     total_cores: int
     spent_cores: int
@@ -302,6 +303,10 @@ class Budget:
     running_count: int
     total_count: int
     unknown_cores_count: int  # running boxes whose cores couldn't be determined
+    max_owned_codespaces: int = DEFAULT_MAX_OWNED_CODESPACES
+    account: str | None = None
+    owned_inventory_complete: bool = True
+    owned_by_account: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -311,6 +316,14 @@ class Budget:
             "running_count": self.running_count,
             "total_count": self.total_count,
             "unknown_cores_count": self.unknown_cores_count,
+            "max_owned_codespaces": self.max_owned_codespaces,
+            "account": self.account,
+            "owned_inventory_complete": self.owned_inventory_complete,
+            "owned_by_account": self.owned_by_account,
+            "owned_headroom": (
+                self.max_owned_codespaces - self.total_count
+                if self.owned_inventory_complete else None
+            ),
         }
 
 
@@ -325,6 +338,8 @@ def build_pool(
     l2_leases: dict | None = None,
     clean_records: dict | None = None,
     live: dict | None = None,
+    account: str | None = None,
+    max_owned_codespaces: int = DEFAULT_MAX_OWNED_CODESPACES,
 ) -> tuple[list[PoolMember], Budget]:
     """Derive the full pool view (members + budget) from the owning layers.
 
@@ -350,8 +365,20 @@ def build_pool(
     import time as _time
 
     now = _time.time() if now is None else now
+    supplied = codespaces is not None
     if codespaces is None:
-        codespaces = list_codespaces()
+        if account:
+            from .lifecycle import list_account_codespaces
+
+            codespaces = list_account_codespaces(account)
+        else:
+            codespaces = list_codespaces()
+    if account:
+        codespaces = [cs for cs in codespaces if cs.account.casefold() == account.casefold()]
+    owned_by_account: dict[str, int] = {}
+    for cs in codespaces:
+        key = cs.account.casefold() or "ambient"
+        owned_by_account[key] = owned_by_account.get(key, 0) + 1
     if leases is None:
         leases = list_leases()
     if markers is None:
@@ -462,6 +489,10 @@ def build_pool(
         running_count=running_count,
         total_count=len(members),
         unknown_cores_count=unknown_running,
+        max_owned_codespaces=max_owned_codespaces,
+        account=account,
+        owned_inventory_complete=bool(account) or (supplied and len(owned_by_account) <= 1),
+        owned_by_account=owned_by_account,
     )
     return members, budget
 
@@ -517,39 +548,14 @@ def plan_allocation(
     new_cores: int = 0,
     workstream_box: str | None = None,
 ) -> AllocationDecision:
-    """Resolve a venue request for ``repo`` to a reuse/create/recycle/pressure
-    decision -- the pure core of ``persist-for-workstream`` + ``budget-not-exceeded``
-    (Phase 2b / #708, superseding Phase 2's cross-workstream reuse).
+    """Plan within selected-account owned-slot and running-core capacity.
 
-    ``workstream_box`` names the CodeSpace the requesting workstream (effort, or
-    else its driving worktree) already claimed on a prior request, if any --
-    resolved by the caller (see ``driving_worktrees.resolve_workstream_box``),
-    never guessed here. Precedence (first match wins):
-
-      1. **Resume** ``workstream_box`` when it is still in the pool -- this
-         workstream's own persistent box, running or stopped, reused
-         regardless of its disposition. A workstream never falls back to
-         borrowing a DIFFERENT idle/clean box for ``repo`` just because one
-         happens to be free: that box belongs to no one *yet*, not to this
-         request, and grabbing it would strand whichever workstream created it
-         once it comes looking for it again. When ``workstream_box`` no longer
-         exists (recycled, deleted out of band), falls through to create.
-      2. Else **create** a fresh box when the intended machine (``new_cores``)
-         fits the headroom -- always a **new**, dedicated box for this
-         workstream, never someone else's idle one.
-      3. Else (no headroom) **recycle** a running *stale* box to reclaim its
-         cores, then create -- but only when the reclaim actually makes the
-         fresh create fit. (Staleness recycling itself is Phase 4 / #710; this
-         planner only consumes the disposition, never decides *when* a box
-         ages to stale.)
-      4. Else **pressure**: the pool is full and nothing is recyclable --
-         surface it (``N/M cores``) rather than silently over-provision or
-         fail opaquely.
-
-    Pure + side-effect-free (a planner, not an executor). ``new_cores`` is the
-    intended new box's core cost; ``0``/unknown is treated as a conservative
-    ``1`` so a full pool still blocks a create. Budget-correct: no returned
-    action pushes ``spent`` past the ceiling.
+    A caller-resolved workstream venue is reused first; waking it needs known
+    available cores but no new owned slot. New creation requires complete
+    inventory, a free owned slot and known compute costs. Only core pressure
+    can suggest recycling a stale running member; it never treats stopping
+    as freeing an owned slot. All acquisition, rescue and reclaim safety gates
+    remain with the executor. This function does not acquire a venue.
     """
     needed = new_cores if new_cores > 0 else 1
     headroom = budget.headroom_cores
@@ -557,7 +563,15 @@ def plan_allocation(
     if workstream_box:
         mine = next((m for m in members if m.name == workstream_box), None)
         if mine is not None:
-            cost = 0 if mine.running else (mine.cores if mine.cores > 0 else 1)
+            cost = 0 if mine.running else mine.cores
+            if not mine.running and (
+                cost <= 0 or budget.unknown_cores_count or headroom < cost
+            ):
+                return AllocationDecision(
+                    action=ALLOC_PRESSURE, codespace=None,
+                    reason=f"cannot wake '{mine.name}': insufficient or unknown running-core headroom",
+                    headroom_cores=headroom, needed_cores=cost,
+                )
             return AllocationDecision(
                 action=ALLOC_REUSE, codespace=mine.name,
                 reason=(
@@ -574,7 +588,29 @@ def plan_allocation(
         # different box, which would be exactly the cross-workstream reuse
         # this planner retires.
 
-    # 2. Create a fresh, dedicated box when it fits the headroom.
+    if not budget.owned_inventory_complete:
+        return AllocationDecision(
+            action=ALLOC_PRESSURE, codespace=None,
+            reason="owned CodeSpace inventory is incomplete; refresh the selected account before creating",
+            headroom_cores=headroom, needed_cores=needed,
+        )
+    if budget.total_count >= budget.max_owned_codespaces:
+        return AllocationDecision(
+            action=ALLOC_PRESSURE, codespace=None,
+            reason=(
+                f"owned CodeSpace limit reached: {budget.total_count}/"
+                f"{budget.max_owned_codespaces}; stopped venues still consume owned slots"
+            ),
+            headroom_cores=headroom, needed_cores=needed,
+        )
+    if new_cores <= 0 or budget.unknown_cores_count:
+        return AllocationDecision(
+            action=ALLOC_PRESSURE, codespace=None,
+            reason="running-core capacity is unknown; resolve machine costs before creating",
+            headroom_cores=headroom, needed_cores=new_cores,
+        )
+
+    # 2. Create a fresh, dedicated box when it fits both ceilings.
     if headroom >= needed:
         return AllocationDecision(
             action=ALLOC_CREATE, codespace=None,

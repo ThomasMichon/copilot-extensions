@@ -640,6 +640,24 @@ automatically. Without `--force-create`, `create` first consults the pool
 planner: it reuses a suitable idle CodeSpace or refuses when the configured core
 budget is already under pressure.
 
+Allocation and ordinary creation also enforce `defaults.max_owned_codespaces`
+(conservative policy default 30) under the target repository's selected account.
+Stopped venues still consume owned slots; stopping one only frees running
+cores. Failed, malformed or truncated selected-account inventory refuses
+ordinary creation with pressure (exit 4), rather than falling through to a
+blind provider call. Unknown machine costs also refuse additional compute;
+a stopped claimed venue needs known wake headroom.
+`--force-create` explicitly bypasses local capacity/reuse policy, not provider
+limits or authentication. Any quota retry retains existing rescue, liveness
+and cleanup gates and is restricted to that account.
+
+The merged `pool` and Picker views expose `owned_by_account`,
+`max_owned_codespaces` and `owned_inventory_complete`; their merged discovery
+counts are observations, not complete selected-account admission evidence.
+`owned_headroom` is null when completeness is unqualified. Selected-account
+admission uses the stricter inventory read without changing the ordinary
+discovery contract or integrating the private owner-wave foundation.
+
 ### Agent-bridge integration (automatic)
 
 Once agent-codespaces is installed, its sessionStart hook drops a

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed proposal and implementation PRs
 - **Created:** 2026-11-06
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [agent-codespaces](../../../visions/plugins/agent-codespaces/README.md), `bounded-shared-pool`, `reuse-over-recreate`, `cross-machine-allocation`
 - **Umbrella issue:** #4187 (bounded admission/reuse slice only)
 
@@ -47,7 +47,8 @@ pressure must not relax those protections.
 The proposal extends the vision's independent-capacity and sequential-reuse
 intent. It follows the existing configuration layering and optional owner
 composition contracts, not the unwired full-publication inventory foundation.
-Runtime realization is pending the proposal's review and merge.
+The reviewed proposal is accepted; runtime realization and consumer
+qualification remain open.
 
 ## Request
 
@@ -72,15 +73,15 @@ and existing resource custody.
 ## Plan
 
 ### Phase 1 - Review intent and admission contract
-- [ ] Merge this vision clarification and proposal through the normal review/CI gate before runtime implementation.
-- [ ] Confirm the existing selected-account/configuration and borrow/return seams; retain other owners and define actionable unknown-capacity outcomes.
+- [x] Merge this vision clarification and proposal through the normal review/CI gate before runtime implementation. (#11223)
+- [x] Confirm the existing selected-account/configuration and borrow/return seams; retain other owners and define actionable unknown-capacity outcomes.
 
 ### Phase 2 - Prove independent capacity admission
-- [ ] Extend native configuration and the existing pool decision with a configurable owned-count policy (conservative default 30), independent running-core accounting and selected-account scope.
-- [ ] Require complete selected-account inventory for creation admission; distinguish valid empty results, partial/truncated inventory, authentication failures and unknown machine cost.
-- [ ] Keep `allocate`, `pool`, ordinary `create` and their presenters consistent: a full stopped pool cannot yield blind creation, and stopping alone cannot free an owned slot.
-- [ ] Preserve explicit `--force-create` as an intentional policy override with truthful diagnostics; it never supplies access, changes provider limits or permits broader reclaim.
-- [ ] Preserve provider-side quota refusal and bounded existing retry/reclaim semantics after concurrent capacity changes; no local snapshot promises a global reservation.
+- [x] Extend native configuration and the existing pool decision with a configurable owned-count policy (conservative default 30), independent running-core accounting and selected-account scope.
+- [x] Require complete selected-account inventory for creation admission; distinguish valid empty results, partial/truncated inventory, authentication failures and unknown machine cost.
+- [x] Keep `allocate`, `pool`, ordinary `create` and their presenters consistent: a full stopped pool cannot yield blind creation, and stopping alone cannot free an owned slot.
+- [x] Preserve explicit `--force-create` as an intentional policy override with truthful diagnostics; it never supplies access, changes provider limits or permits broader reclaim.
+- [x] Preserve provider-side quota refusal and bounded existing retry/reclaim semantics after concurrent capacity changes; no local snapshot promises a global reservation.
 - [ ] Publish the first complete admission flow after focused checks, then steward it through merge.
 
 ### Phase 3 - Prove safe sequential reuse
@@ -98,13 +99,13 @@ and existing resource custody.
 
 ## Validation Plan
 
-- [ ] Focused existing-suite regressions: below limit, stopped pool at limit with spare cores, running-core pressure, selected-account isolation and configurable ceiling.
-- [ ] Unknown/truncated/failed inventory and unknown wake/create cost cannot masquerade as free capacity; explicit policy override remains distinct from provider refusal.
-- [ ] Ordinary create and allocate agree; a synthetic provider quota race preserves bounded retry and does not broaden cleanup.
+- [x] Focused existing-suite regressions: below limit, stopped pool at limit with spare cores, running-core pressure, selected-account isolation and configurable ceiling.
+- [x] Unknown/truncated/failed inventory and unknown wake/create cost cannot masquerade as free capacity; explicit policy override remains distinct from provider refusal.
+- [x] Ordinary create and allocate agree; a synthetic provider quota race preserves bounded retry and does not broaden cleanup.
 - [ ] Sequential same-repository reuse preserves retained work and claims; read-only/no-build requests are supported, incompatible live agents and unknown ownership are refused.
 - [ ] A stopped reusable venue is admitted only with sufficient known wake headroom; valid existing-workstream reuse remains compatible.
-- [ ] Lightweight real CLI/subprocess consumer check with synthetic inventory and provider adapters proves admission/refusal without backend mutation.
-- [ ] Fresh isolated configuration proves defaults and overrides without requiring Worktrees, installing a runtime or contacting a provider.
+- [x] Lightweight real CLI/subprocess consumer check with synthetic inventory and provider adapters proves admission/refusal without backend mutation.
+- [x] Fresh isolated configuration proves defaults and overrides without requiring Worktrees, installing a runtime or contacting a provider.
 - [ ] Run the existing focused tests, touched-Python lint and install-contract/required CI checks; add one changefile per touched plugin, never hand-edit versions.
 - [ ] Run Windows and POSIX consumer checks in available owned lanes; record concrete unavailable-lane reasons rather than claiming parity from unit tests alone.
 - [ ] Record selected installed/live acceptance separately from source tests and release; obtain missing effect authority before any provider mutation.
@@ -116,6 +117,17 @@ Review this contract first. Source work must preserve truthful uncertainty and
 existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
+
+### 2026-11-06 - Independent admission source qualified
+- Reproduced the stopped-pool failure: ordinary planning still selected creation at the owned limit, while valid existing-venue reuse passed.
+- Added selected-account owned-slot policy and known-compute admission, preserved explicit override and narrowed quota retry to the same account without relaxing rescue or live-holder gates.
+- The five related Windows source suites passed 353 tests, including the real CLI subprocess flow and fresh layered configuration. Eight focused lifecycle controls then passed after native inventory-failure normalization and credential-pinning coverage. Touched-Python lint and install-contract checks passed.
+- Merged discovery remains a legible, explicitly unqualified observation; a selected account's 50-row bound refuses ordinary admission rather than asserting completeness. No global capacity reservation is claimed.
+- Publish and review this complete admission flow next. Sequential sharing, native POSIX consumer qualification, release and installed/live acceptance remain open. Live venue effects require their existing authority and readiness; none occurred in this slice.
+
+### 2026-11-06 - Reviewed intent accepted
+- #11223 merged after current-head approval and green required checks; pulled the source worktree forward.
+- Begin Phase 2 with owned-count admission and stopped-venue wake accounting. Sequential cross-effort reuse, release and installed/live acceptance remain open.
 
 ### 2026-11-06 - Proposal
 - Claimed the bounded admission/reuse slice of #4187 after issue/PR deduplication.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,7 +87,63 @@ class TestListCodespaces:
         assert len(seen) == 2
 
 
+@pytest.mark.parametrize("response", ["", "null", "{}", '[{"name":"venue"}]'])
+def test_allocation_listing_refuses_malformed_success(monkeypatch, response):
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: {"GH_TOKEN": "fixture-token"},
+    )
+    monkeypatch.setattr(
+        lifecycle.subprocess, "run",
+        lambda *args, **kwargs: MagicMock(returncode=0, stdout=response),
+    )
+    with pytest.raises(RuntimeError, match="Malformed"):
+        lifecycle.list_account_codespaces("selected-owner")
+
+
+def test_allocation_listing_keeps_selected_owner_and_marks_truncation(monkeypatch):
+    calls = []
+    rows = []
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: {"selected-account": account},
+    )
+
+    def run(argv, **kwargs):
+        calls.append(kwargs["env"]["selected-account"])
+        return MagicMock(returncode=0, stdout=json.dumps(rows))
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    assert lifecycle.list_account_codespaces("selected-owner") == []
+    rows.extend({"name": f"venue-{index}", "state": "Shutdown"} for index in range(50))
+    with pytest.raises(RuntimeError, match="truncated"):
+        lifecycle.list_account_codespaces("selected-owner")
+    assert calls == ["selected-owner", "selected-owner"]
+
+
+@pytest.mark.parametrize("error", [OSError("fixture read failed"), subprocess.TimeoutExpired("gh", 30)])
+def test_allocation_listing_reports_native_failure_as_unknown(monkeypatch, error):
+    monkeypatch.setattr(
+        lifecycle, "_list_codespaces_under",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+    with pytest.raises(RuntimeError, match="account inventory failed"):
+        lifecycle.list_account_codespaces("selected-owner")
+
+
 class TestCreateCodespace:
+    def test_creation_preserves_admitted_account_environment(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.owner_inventory.qualified_environment",
+            lambda account: {"fixture-account": account},
+        )
+        with patch.object(lifecycle.subprocess, "run", return_value=MagicMock(
+            returncode=0, stdout="created-venue",
+        )) as run:
+            info = create_codespace("org/repo", CodespacesConfig(), account="selected-owner")
+        assert run.call_args.kwargs["env"] == {"fixture-account": "selected-owner"}
+        assert info.account == "selected-owner"
+
     @patch("agent_codespaces.lifecycle.subprocess.run")
     def test_uses_config_defaults(self, mock_run):
         mock_run.return_value = MagicMock(

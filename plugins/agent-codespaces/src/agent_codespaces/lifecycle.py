@@ -184,6 +184,26 @@ def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> lis
     return codespaces
 
 
+def allocation_account(repo: str) -> str:
+    from . import gh_account
+
+    account = gh_account.account_for_repo(repo) or gh_account.active_account()
+    if not account:
+        raise RuntimeError("CodeSpace allocation account is unavailable")
+    return account
+
+
+def list_account_codespaces(account: str) -> list[CodespaceInfo]:
+    """Require a complete, credential-pinned single-account allocation view."""
+    try:
+        rows = _list_codespaces_under(account, qualified=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"CodeSpace account inventory failed: {exc}") from exc
+    if len(rows) >= 50:
+        raise RuntimeError("CodeSpace account inventory is truncated at the 50-venue listing limit")
+    return rows
+
+
 def account_for_codespace(name: str) -> str | None:
     """Return the gh account that owns CodeSpace ``name``, or None.
 
@@ -648,6 +668,8 @@ def create_codespace(
     branch: str | None = None,
     display_name: str | None = None,
     devcontainer_path: str | None = None,
+    *,
+    account: str | None = None,
 ) -> CodespaceInfo:
     """Create a CodeSpace for the given repo using config defaults.
 
@@ -683,11 +705,17 @@ def create_codespace(
 
     from . import gh_account
 
-    account = gh_account.account_for_repo(repo)
+    if account:
+        from .owner_inventory import qualified_environment
+
+        environment = qualified_environment(account)
+    else:
+        account = gh_account.account_for_repo(repo)
+        environment = gh_account.env_for_account(account) if account else None
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=300,
         creationflags=_creation_flags(),
-        env=gh_account.env_for_account(account) if account else None,
+        env=environment,
     )
 
     if result.returncode != 0:

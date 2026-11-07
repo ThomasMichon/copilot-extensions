@@ -581,6 +581,10 @@ class TestCreateScopeGate:
     `codespace` scope, before any create work -- rather than 403/404-ing minutes
     in after provisioning starts."""
 
+    @pytest.fixture(autouse=True)
+    def selected_account(self, monkeypatch):
+        monkeypatch.setattr("agent_codespaces.lifecycle.allocation_account", lambda repo: "selected-owner")
+
     def test_create_blocked_when_scope_missing(self, capsys):
         import agent_codespaces.__main__ as m
         with patch.object(m, "_ambient_codespace_scope",
@@ -593,13 +597,14 @@ class TestCreateScopeGate:
 
     def test_create_proceeds_when_scope_ok(self):
         import agent_codespaces.__main__ as m
+        from agent_codespaces.config import CodespacesConfig
         from agent_codespaces.pool import build_pool
         # Scope OK + an empty pool -> the planner returns CREATE, so `create`
         # proceeds. Stub create so we only prove neither gate blocks (--no-wait).
         info = type("I", (), {"name": "cs-new"})()
         empty = build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
         with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
-             patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m, "load_merged_config", return_value=CodespacesConfig()), \
              patch.object(m.pool_mod, "build_pool", return_value=empty), \
              patch.object(m, "create_codespace", return_value=info) as create:
             rc = main(["create", "owner/repo", "--no-wait"])
@@ -663,6 +668,10 @@ class TestCreateReuseGuard:
     #708) before spending an account slot: it declines to create when a suitable
     idle box exists or the pool is at budget, and `--force-create` bypasses it."""
 
+    @pytest.fixture(autouse=True)
+    def selected_account(self, monkeypatch):
+        monkeypatch.setattr("agent_codespaces.lifecycle.allocation_account", lambda repo: "selected-owner")
+
     def _decision(self, **kw):
         from agent_codespaces.pool import AllocationDecision
         return AllocationDecision(**kw)
@@ -713,22 +722,41 @@ class TestCreateReuseGuard:
         create.assert_called_once()
         plan.assert_not_called()                      # guard skipped entirely
 
-    def test_planner_failure_degrades_to_plain_create(self):
+    def test_planner_failure_refuses_plain_create(self, capsys):
         import agent_codespaces.__main__ as m
-        # Any planner error must not wedge a legit create -- it proceeds.
         info = type("I", (), {"name": "cs-new"})()
         with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
              patch.object(m, "load_merged_config", return_value={}), \
              patch.object(m.pool_mod, "build_pool", side_effect=RuntimeError("gh down")), \
              patch.object(m, "create_codespace", return_value=info) as create:
             rc = main(["create", "owner/repo", "--no-wait"])
-        assert rc == 0
-        create.assert_called_once()
+        assert rc == 4
+        create.assert_not_called()
+        assert "gh down" in capsys.readouterr().err
+
+
+    @pytest.mark.parametrize("command", ["create", "allocate"])
+    def test_capacity_read_preserves_context_refusal(self, command, monkeypatch, capsys):
+        from agent_codespaces import __main__ as cli
+        from agent_codespaces.worktrees import ContextRefused
+
+        monkeypatch.setattr(cli, "load_merged_config", lambda: {})
+        monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation: None)
+        monkeypatch.setattr(
+            cli.pool_mod, "build_pool",
+            lambda **kwargs: (_ for _ in ()).throw(ContextRefused("fixture context refused")),
+        )
+        assert main([command, "example/project"]) == cli._COORDINATION_EXIT
+        assert "context refused" in capsys.readouterr().err
 
 
 class TestAllocateCommand:
     """`agent-codespaces allocate <repo>` surfaces the venue-request decision
     (Phase 2 / #708) -- advisory, JSON or human, exit 4 on pressure."""
+
+    @pytest.fixture(autouse=True)
+    def selected_account(self, monkeypatch):
+        monkeypatch.setattr("agent_codespaces.lifecycle.allocation_account", lambda repo: "selected-owner")
 
     def test_allocate_json_emits_decision(self, capsys):
         import agent_codespaces.__main__ as m
@@ -755,6 +783,79 @@ class TestAllocateCommand:
             rc = main(["allocate", "owner/repo"])
         assert rc == 4
         assert "pressure" in capsys.readouterr().out
+
+
+    def test_allocate_unknown_inventory_is_actionable_json(self, monkeypatch, capsys):
+        from agent_codespaces import __main__ as cli
+
+        monkeypatch.setattr(cli, "load_merged_config", lambda: {})
+        monkeypatch.setattr(
+            cli.pool_mod, "build_pool",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("selected account listing failed")),
+        )
+        assert main(["allocate", "owner/repo", "--json"]) == 4
+        decision = json.loads(capsys.readouterr().out)
+        assert decision["action"] == "pressure"
+        assert decision["reason"] == "selected account listing failed"
+
+
+def test_owned_capacity_real_cli_process_preserves_override():
+    import subprocess
+    import sys
+
+    from agent_procutil import no_window_kwargs
+
+    script = r'''
+import contextlib
+import io
+import json
+from agent_codespaces import __main__ as cli, lifecycle, pool, coordination
+from agent_codespaces.config import CodespacesConfig
+from agent_codespaces.lifecycle import CodespaceInfo
+
+cli.load_merged_config = CodespacesConfig
+cli._require_codespace_scope = lambda operation: None
+cli.validate_context = lambda: None
+cli._gh_binary_available = lambda: True
+lifecycle.allocation_account = lambda repo: "fixture-owner"
+pool.list_leases = lambda: []
+pool.list_status = lambda: []
+pool.codespaces_in_use = lambda names: {}
+coordination.list_leases = lambda: {}
+coordination.list_cleanliness = lambda: {}
+created = []
+cli.create_codespace = lambda *args, **kwargs: (
+    created.append(kwargs["account"]) or
+    type("Created", (), {"name": "fixture-created"})()
+)
+results = []
+for count, force, failed in ((29, False, False), (30, False, False), (31, False, False),
+                             (30, True, False), (0, False, True)):
+    def listing(account):
+        if failed:
+            raise RuntimeError("fixture inventory unavailable")
+        return [CodespaceInfo(
+            name=f"venue-{index}", display_name="", repository="example/project",
+            branch="main", state="Shutdown", machine="premiumLinux", account=account,
+        ) for index in range(count)]
+    lifecycle.list_account_codespaces = listing
+    argv = ["create", "example/project", "--no-wait"]
+    if force:
+        argv.append("--force-create")
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        create_result = cli.main(argv)
+        allocate_result = cli.main(["allocate", "example/project", "--json"])
+    results.append([create_result, allocate_result])
+print(json.dumps({"results": results, "created": created}))
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True,
+        timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["results"] == [[0, 0], [4, 4], [4, 4], [0, 4], [4, 4]]
+    assert observed["created"] == ["fixture-owner", "fixture-owner"]
 
 
 # --- Top-level --project (command-surface <repo> <slug> surface) ---

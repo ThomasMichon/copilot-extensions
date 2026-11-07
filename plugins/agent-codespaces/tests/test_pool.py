@@ -1231,12 +1231,8 @@ def test_plan_resumes_this_workstreams_stopped_box_when_it_fits_headroom():
     assert d.needed_cores == 16       # boot cost, not the create hint
 
 
-def test_plan_workstream_box_still_resumes_even_over_headroom():
-    # Resuming your own persistent box is not gated by headroom at all in this
-    # planner -- it is the SAME box the workstream already spent budget on;
-    # Phase 4 staleness recycling (not this planner) is what would ever
-    # reclaim it if truly abandoned.
-    from agent_codespaces.pool import ALLOC_REUSE
+def test_plan_stopped_workstream_box_refuses_over_headroom():
+    from agent_codespaces.pool import ALLOC_PRESSURE
     d = _plan(
         [
             _cs("filler", state="Available", machine="xLargePremiumLinux",
@@ -1247,8 +1243,8 @@ def test_plan_workstream_box_still_resumes_even_over_headroom():
         repo="web", new_cores=4, budget_cores=40,
         leases=[_lease_for("filler")], workstream_box="warm",
     )
-    assert d.action == ALLOC_REUSE
-    assert d.codespace == "warm"
+    assert d.action == ALLOC_PRESSURE
+    assert d.codespace is None
 
 
 def test_plan_missing_workstream_box_falls_through_to_create():
@@ -1290,6 +1286,31 @@ def test_plan_no_reuse_with_headroom_creates():
     assert d.action == ALLOC_CREATE
     assert d.codespace is None
     assert d.needed_cores == 8
+
+
+def test_plan_owned_limit_counts_stopped_venues():
+    from agent_codespaces.pool import ALLOC_CREATE, ALLOC_PRESSURE
+
+    for count, expected in ((29, ALLOC_CREATE), (30, ALLOC_PRESSURE), (31, ALLOC_PRESSURE)):
+        decision = _plan(
+            [_cs(f"stopped-{index}", state="Shutdown") for index in range(count)],
+            repo="web", new_cores=8,
+        )
+        assert decision.action == expected
+        if expected == ALLOC_PRESSURE:
+            assert "owned" in decision.reason
+
+
+def test_plan_running_own_box_reuses_at_owned_limit():
+    from agent_codespaces.pool import ALLOC_REUSE
+
+    decision = _plan(
+        [_cs("mine", repo="o/web-codespaces")]
+        + [_cs(f"stopped-{index}", state="Shutdown") for index in range(29)],
+        repo="web", new_cores=8, workstream_box="mine",
+    )
+    assert decision.action == ALLOC_REUSE
+    assert decision.codespace == "mine"
 
 
 def test_plan_recycle_stale_running_when_full_then_create():
@@ -1339,8 +1360,6 @@ def test_plan_pressure_when_full_and_nothing_recyclable():
 
 
 def test_plan_unknown_new_cores_still_blocks_a_full_pool():
-    # new_cores=0 (unknown) is treated as a conservative 1 so a full pool still
-    # blocks a create rather than pretending a zero-cost box fits.
     from agent_codespaces.pool import ALLOC_PRESSURE
     d = _plan(
         [_cs("busy", state="Available", machine="premiumLinux", repo="o/other")],
@@ -1348,7 +1367,37 @@ def test_plan_unknown_new_cores_still_blocks_a_full_pool():
         leases=[_lease_for("busy")],
     )
     assert d.action == ALLOC_PRESSURE
-    assert d.needed_cores == 1
+    assert d.needed_cores == 0
+
+
+def test_plan_unknown_running_cost_refuses_new_compute():
+    from agent_codespaces.pool import ALLOC_PRESSURE
+
+    decision = _plan([_cs("unknown", machine="mystery")], repo="web", new_cores=8)
+    assert decision.action == ALLOC_PRESSURE
+    assert "unknown" in decision.reason
+
+
+def test_owned_policy_is_account_scoped_and_configurable():
+    from agent_codespaces.pool import ALLOC_CREATE, ALLOC_PRESSURE, plan_allocation
+
+    rows = [_cs(f"selected-{index}", state="Shutdown") for index in range(30)]
+    for row in rows:
+        row.account = "selected-owner"
+    other = _cs("other-running", machine="xLargePremiumLinux")
+    other.account = "another-owner"
+    members, budget = build_pool(
+        codespaces=rows + [other], account="selected-owner", max_owned_codespaces=31,
+        leases=[], markers={}, l2_leases={}, clean_records={}, live={},
+    )
+    assert budget.spent_cores == 0
+    assert budget.to_dict()["owned_headroom"] == 1
+    assert plan_allocation(members, budget, repo="web", new_cores=8).action == ALLOC_CREATE
+    budget.max_owned_codespaces = 30
+    assert plan_allocation(members, budget, repo="web", new_cores=8).action == ALLOC_PRESSURE
+    budget.owned_inventory_complete = False
+    assert budget.to_dict()["owned_headroom"] is None
+    assert "incomplete" in plan_allocation(members, budget, repo="web", new_cores=8).reason
 
 
 def test_allocation_decision_to_dict_shape():
