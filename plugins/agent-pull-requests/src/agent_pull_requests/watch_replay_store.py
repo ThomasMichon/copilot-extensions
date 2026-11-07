@@ -163,6 +163,14 @@ class ReplayStore:
         version = document.get("version")
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
         prepared = "review_intent_version" in document
+        selections = "review_selection_version" in document
+        if selections:
+            names.add("review_selection_version")
+            if (
+                type(document["review_selection_version"]) is not int
+                or document["review_selection_version"] != 1 or not prepared
+            ):
+                raise ReplayStoreInvalid("unsupported pre-approval selection storage contract")
         if prepared:
             names.add("review_intent_version")
             if type(document["review_intent_version"]) is not int or document["review_intent_version"] != 2:
@@ -207,6 +215,7 @@ class ReplayStore:
         review_intent.validate_operations(
             document["reviews"], receipt_bytes=capacities["receipt_bytes"], review_bytes=capacities["review_bytes"],
             versions=(1, 2) if prepared else (1,),
+            selections=selections,
         )
         if version in (3, 4, 5, 6):
             from .conversation_journal import ConversationJournal
@@ -327,6 +336,8 @@ class ReplayStore:
         operation = next((row for row in document["reviews"] if row["intent"]["operation_id"] == operation_id), None)
         if operation is None or operation["intent"]["scope"] != scope:
             raise ValueError("review operation missing or outside selected scope")
+        if operation.get("selection", {}).get("stage") == "prepared":
+            raise ValueError("pre-approval selection is not execution-admitted")
         return operation
 
     def admit_review(self, selected: dict, *, expires_at: int, checkpoint=None) -> dict:
@@ -342,15 +353,12 @@ class ReplayStore:
             if previous is not None:
                 if previous["intent_id"] != digest or previous["intent"] != selected:
                     raise ValueError("review operation ID already has a different immutable intent")
+                if previous.get("selection", {}).get("stage") == "prepared":
+                    previous["selection"]["stage"] = "admitted"
+                    return {"status": "admitted", "operation": previous}
                 return {"status": "existing", "operation": previous}
-            operation = {
-                "intent": copy.deepcopy(selected), "intent_id": digest, "created_at": self.clock(),
-                "actions": [{"id": action["id"], "state": "unattempted", "attempt_id": None, "receipt": None}
-                            for action in selected["actions"]],
-            }
-            operation["reserved_bytes"] = (
-                len(review_intent.encoded(operation))
-                + len(selected["actions"]) * (document["capacities"]["receipt_bytes"] + 512) + 1024
+            operation = review_intent.new_operation(
+                selected, created_at=self.clock(), receipt_bytes=document["capacities"]["receipt_bytes"],
             )
             document["reviews"].append(operation)
             return {"status": "admitted", "operation": operation}

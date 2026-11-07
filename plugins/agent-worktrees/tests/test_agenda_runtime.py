@@ -220,6 +220,173 @@ def test_v2_control_publication_and_held_feed_preserve_exact_committed_body(
         assert advanced["observation"] == observation_v2(2)
 
 
+def graphed(revision=1):
+    body = observation_v2(revision)
+    body["graph"] = {
+        "version": 1,
+        "revision": revision,
+        "cursor": {"frame": "child", "item": "probe", "stack": ["root", "child"]},
+        "frames": [
+            {"id": "root", "parent": None, "via": None, "state": "active",
+             "label": "task:assignment", "returns": None},
+            {"id": "child", "parent": "root", "via": "parent", "state": "active",
+             "label": "subqueue: Run parent", "returns": "Reassess parent"},
+        ],
+        "items": [
+            {"id": "parent", "frame": "root", "label": "Run parent", "state": "replanning",
+             "attempts": 1},
+            {"id": "tail", "frame": "root", "label": "Tail item", "state": "queued", "attempts": 0},
+            {"id": "probe", "frame": "child", "label": "Probe", "state": "running", "attempts": 1},
+        ],
+        "history": [
+            {"at": "2026-11-01T07:00:00.000001Z", "kind": "expansion", "frame": "root",
+             "item": "parent", "text": "expanded: Reassess parent"},
+        ],
+        "omitted": {"frames": 0, "items": 0, "history": 0},
+    }
+    return body
+
+
+def test_graph_is_negotiated_acknowledged_and_stripped_for_readers_that_did_not_opt_in(owned):
+    owner, *_rest = owned
+    assert contract.GRAPH_CAPABILITY in owner.health()["capabilities"]
+    body = graphed()
+    accepted = owner.agendas.publish(publication(owner, body, contract_version=2))
+    assert accepted["ok"] is True and accepted["observation"] == body
+    plain = owner.agendas.read(request(contract_version=2))
+    assert plain["observation"] == {k: v for k, v in body.items() if k != "graph"}
+    contract.validate_reply(plain, request(contract_version=2), plain["generation"])
+    rich = owner.agendas.read(request(contract_version=2, graph=1))
+    assert rich["observation"] == body
+    contract.validate_reply(rich, request(contract_version=2, graph=1), rich["generation"])
+    with pytest.raises(contract.AgendaError, match="not requested"):
+        contract.validate_reply(rich, request(contract_version=2), rich["generation"])
+    for wrong in (request(graph=1), request(contract_version=2, graph=2),
+                  request(contract_version=2, graph=True)):
+        assert owner.agendas.read(wrong)["ok"] is False
+
+
+def test_graph_projection_does_not_split_one_committed_revision(owned):
+    owner, *_rest = owned
+    plain = observation_v2()
+    assert owner.agendas.publish(publication(owner, plain, contract_version=2))["ok"] is True
+    # Upgrade: the same revision is retried once the publisher can carry the graph.
+    upgraded = owner.agendas.publish(publication(owner, graphed(), contract_version=2))
+    assert upgraded["ok"] is True and upgraded["observation"] == graphed()
+    assert owner.agendas.read(request(contract_version=2, graph=1))["observation"] == graphed()
+    # Rollback: a graph-unaware publisher retries it again without the graph.
+    assert owner.agendas.publish(publication(owner, plain, contract_version=2))["ok"] is True
+    assert owner.agendas.read(request(contract_version=2, graph=1))["observation"] == plain
+    changed = graphed()
+    changed["snapshot"]["root"] = "different root"
+    rejected = owner.agendas.publish(publication(owner, changed, contract_version=2))
+    assert rejected["error"]["code"] == "revision-conflict"
+
+
+def test_graph_is_stored_beside_a_cache_older_residents_can_still_read(owned):
+    owner, *_rest = owned
+    assert owner.agendas.publish(publication(owner, graphed(), contract_version=2))["ok"] is True
+
+    def durable():
+        with sqlite3.connect(owner.store.db_path) as conn:
+            cached = conn.execute("SELECT payload FROM worktrees_agenda_cache").fetchone()[0]
+            graphs = conn.execute("SELECT count(*) FROM worktrees_agenda_graph").fetchone()[0]
+        return json.loads(cached), graphs
+
+    # A graph-unaware resident reopening the cache sees exactly the fields it knows.
+    cached, graphs = durable()
+    assert cached == observation_v2() and graphs == 1
+    owner.close_admission("superseded")
+    successor = WorktreesRuntime(owner.store.db_path)
+    successor.activate()
+    try:
+        successor.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
+        assert successor.agendas.read(request(contract_version=2, graph=1))[
+            "observation"
+        ] == graphed()
+        successor.close_admission("superseded")
+        # A rolled-back resident advances the cache without touching the graph table.
+        with sqlite3.connect(owner.store.db_path) as conn:
+            conn.execute(
+                "UPDATE worktrees_agenda_cache SET payload=?",
+                (contract.observation(observation_v2(2)),),
+            )
+        upgraded = WorktreesRuntime(owner.store.db_path)
+        upgraded.activate()
+        try:
+            upgraded.publish("project", [{"id": "full-worktree-id"}], observed_at=3)
+            stale = upgraded.agendas.read(request(contract_version=2, graph=1))
+            assert stale["observation"] == observation_v2(2)
+            assert upgraded.agendas.publish(
+                publication(upgraded, observation_v2(2), contract_version=2)
+            )["ok"] is True
+            assert durable()[1] == 0
+        finally:
+            upgraded.shutdown()
+    finally:
+        successor.shutdown()
+
+
+def test_cli_publication_of_a_graph_requests_and_accepts_its_echo(monkeypatch, capsys):
+    from agent_worktrees import agenda_cli as cli
+
+    body = graphed()
+    calls = []
+
+    class Client:
+        def _request(self, action, payload=None, **bounds):
+            calls.append(action)
+            if action == "health":
+                return {"capabilities": [contract.CAPABILITY, contract.V2_CAPABILITY,
+                                         contract.GRAPH_CAPABILITY],
+                        "worktrees": {"status": "ready", "generation": "a" * 32}}
+            assert payload["observation"] == body
+            return {"ok": True, "contract_version": 2, "generation": "a" * 32, "sequence": 1,
+                    "project": "project", "worktree_id": body["source"]["worktree"],
+                    "session_id": body["source"]["session"], "availability": "observed",
+                    "observation": body}
+
+    monkeypatch.setattr(cli, "_control_client", Client)
+    monkeypatch.setattr(cli.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(body)))
+    args = SimpleNamespace(command="agenda-publish", json=True, contract_version=2)
+    assert cli.cmd_agenda(args) == 0, capsys.readouterr()
+    assert json.loads(capsys.readouterr().out)["observation"] == body
+    assert calls == ["health", "agenda-publish"]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        lambda g: g["cursor"].update(frame="root"),
+        lambda g: g["cursor"].update(item="missing"),
+        lambda g: g["items"][0].update(state="sideways"),
+        lambda g: g["items"][0].update(frame="elsewhere"),
+        lambda g: g["frames"].reverse(),
+        lambda g: g["frames"][1].update(returns=None),
+        lambda g: g.update(revision=2),
+        lambda g: g["history"][0].update(at="yesterday"),
+        lambda g: g["omitted"].update(items=-1),
+        lambda g: g.update(extra=True),
+        lambda g: g["frames"][0].update(state=[]),
+        lambda g: g["frames"][1].update(parent={"id": "root"}),
+        lambda g: g["items"][0].update(state={}),
+        lambda g: g["items"][0].update(frame=["root"]),
+        lambda g: g["cursor"].update(stack=[["root"]]),
+        lambda g: g["cursor"].update(item=["probe"]),
+        lambda g: g["cursor"].update(item="parent"),
+    ],
+)
+def test_graph_shape_is_strict(owned, fault):
+    owner, *_rest = owned
+    body = graphed()
+    fault(body["graph"])
+    assert owner.agendas.publish(publication(owner, body, contract_version=2))["ok"] is False
+    legacy = observation()
+    legacy["graph"] = graphed()["graph"]
+    assert owner.agendas.publish(publication(owner, legacy, contract_version=2))["ok"] is False
+
+
 def test_observation_upgrade_cannot_rewrite_same_revision_or_add_snapshot_fields(owned):
     owner, *_rest = owned
     assert owner.agendas.publish(publication(owner))["ok"] is True

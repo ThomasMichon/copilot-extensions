@@ -10,10 +10,7 @@ root, state = Path(root), Path(state)
 sys.path.insert(0, str(root / "plugins/agent-worktrees/src"))
 for library in ("lazy-cli-dispatch", "work-coalescing-singleton", "update-telemetry"):
     sys.path.insert(0, str(root / "libs" / library / "src"))
-from agent_worktrees import __main__ as main, config as cfg, config_authority, tracking
-from agent_worktrees import locks, session_binding_cli, session_tracking_cli, status_monitor_runtime, tracking_write
-from agent_worktrees import resource_relationship as relationship
-from agent_worktrees.tracking_relationship_write import apply_resource_relationship
+from agent_worktrees import config as cfg, tracking
 
 project = state / "project"
 records = project / "worktrees"
@@ -33,10 +30,11 @@ cfg.load_config = lambda *a, **k: config
 cfg.project_dir = lambda *a, **k: project
 cfg.tracking_dir = lambda *a, **k: records
 cfg.active_project = lambda: project_name
-config_authority.load_project_authority_config = lambda *a, **k: config
-session_tracking_cli._all_tracking_dirs = lambda: [records]
-session_binding_cli._spawn_status_updater = lambda *a, **k: None
-relationship.writer_identity = lambda: json.loads((state / "writer-identity.json").read_text())
+command = argv[2:] if argv[:1] == ["--project"] else argv
+if command[:1] not in (["snapshot"], ["record"], ["head-session"]):
+    from agent_worktrees import resource_relationship as relationship
+
+    relationship.writer_identity = lambda: json.loads((state / "writer-identity.json").read_text())
 with (state / "calls").open("a", encoding="utf-8") as stream:
     stream.write(json.dumps(argv) + "\n")
 path = records / f"{worktree_id}.yaml"
@@ -48,6 +46,8 @@ if not path.exists():
         "local", "linux", records,
     )
 if argv == ["protect"]:
+    from agent_worktrees.tracking_relationship_write import apply_resource_relationship
+
     result = apply_resource_relationship({
         "schema": relationship.SCHEMA, "version": 1, "operation": "reserve",
         "input": {"kind": "bridge", "namespace": "example", "request_id": "original-task",
@@ -65,6 +65,34 @@ elif argv == ["snapshot"]:
         "sessions": [item.session_id for item in record.sessions],
     }))
 else:
+    if command[:1] in (["record"], ["head-session"]) or command[:2] == ["resource-relationship", "capabilities"]:
+        import argparse
+        from importlib import import_module
+
+        parser = argparse.ArgumentParser(allow_abbrev=False)
+        parser.add_argument("--project", choices=(project_name,))
+        sub = parser.add_subparsers(dest="command", required=True)
+        module, handler_name = {
+            "record": ("record_cli", "cmd_record"),
+            "head-session": ("session_tracking_cli", "cmd_head_session"),
+            "resource-relationship": ("resource_producer_cli", "cmd_resource_relationship"),
+        }[command[0]]
+        provider = import_module("agent_worktrees." + module)
+        if command[0] == "head-session":
+            provider._all_tracking_dirs = lambda: [records]
+        if command[0] == "head-session":
+            provider.add_head_parser(sub)
+        elif command[0] == "resource-relationship":
+            provider.add_relationship_parser(sub)
+        else:
+            provider.add_parsers(sub)
+        args = parser.parse_args(argv)
+        cfg.set_active_project(args.project or project_name)
+        sys.exit(getattr(provider, handler_name)(args))
+    from agent_worktrees import config_authority, locks
+    from agent_worktrees import status_monitor_runtime, tracking_write
+
+    config_authority.load_project_authority_config = lambda *a, **k: config
     os.environ.pop("PYTEST_CURRENT_TEST", None)
     assert status_monitor_runtime._status_monitor_enabled()
 
@@ -88,6 +116,10 @@ else:
             "tracking_write_verb_versions": {"session_register": 3, "session_link_succession": 2},
         }), encoding="utf-8")
         status_monitor_runtime._monitor_lock_path = lambda: lock
+        from agent_worktrees import __main__ as main, session_binding_cli, session_tracking_cli
+
+        session_tracking_cli._all_tracking_dirs = lambda: [records]
+        session_binding_cli._spawn_status_updater = lambda *a, **k: None
         sys.exit(main.main(argv))
     finally:
         server.close()

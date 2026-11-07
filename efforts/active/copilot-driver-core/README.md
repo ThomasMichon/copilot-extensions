@@ -102,13 +102,13 @@ Review of this proposal precedes implementation and is not deployment consent.
   identity, prompt acceptance and reconnection without a target coordination suite.
 - [x] Migrate Bridge creation and resume through that core while preserving
   policy, workspace, preference, cancellation and retained-host custody.
-- [ ] Publish the first complete functional flow and steward its PR to merge.
+- [x] Publish the first complete functional flow and steward its PR to merge.
 
 ### Phase 3 - Common headed broker and all caller convergence
 
-- [ ] Move canonical mux creation, prerequisite composition and pane execution
+- [x] Move canonical mux creation, prerequisite composition and pane execution
   into the same core; preserve platform behavior and literal prompt/argument transport.
-- [ ] Connect the launch-injected, scoped trusted extension to Session Host.
+- [x] Connect the launch-injected, scoped trusted extension to Session Host.
   Headed mode uses the common broker, not a second conversation or Bridge-only inbox.
 - [ ] Migrate Manager launch-session and Worktrees embody/copilot, plus existing
   local/remote adapters, to the selected core entrypoints.
@@ -563,3 +563,1022 @@ Full contract validation passes both contracts and 1,022 fixtures; all 26
 capture/frozen-corpus controls pass in 8.58 seconds. No historical capture
 was rewritten. Updated publication and the new exact-head review/CI remain
 the immediate Phase 2 merge gates.
+
+### 2026-11-06 - Headless functional slice merged; headed flow next
+
+#10863 merged at 06:01 UTC as
+`8d6b04509c4abc277e05093b23aa3cc3c6086dd5`. The exact published head
+`a509439da8fdf140586f56fa7fe17ade98eaac78` received a fresh Copilot
+Comment review with no open issues and green required CI (run 42171121737).
+The review explicitly retains unavailable Windows desktop visibility and
+deferred POSIX acceptance; neither is represented as passing evidence.
+Verified that #10765 remains open.
+
+Phase 2's complete headless flow is now published. Continue Phase 3 in the same
+source workspace: establish the supported scoped extension-loading contract,
+connect headed execution to the common Host and converge the real callers.
+All parent validation, pending-work-aware lifetime, caller-Job durability and
+receiving/skew gates remain open. No installed runtime or retained session
+was updated, migrated or retired.
+
+### 2026-11-06 - Headed broker seam and native-fixture isolation correction
+
+Worktrees' short mux check/create implementation now lives in the independent
+core, with an import-only compatibility adapter. Its existing creation-custody
+and neutral-directory controls pass (63 tests), together with 18 core controls
+including a real isolated-process literal-argument check.
+
+The launch-bound SDK backend connects to the same Session Host and WS adapter.
+The SDK edge declares no tools, permission callback, hooks or sensitive
+environment access. An isolated native observer loads through launch-scoped
+experimental/plugin arguments without a saved permission grant. This is native
+extension-loading evidence, not full headed acceptance. The adapter preserves
+native input revocation, reports unsupported creation/restoration honestly and
+never replays an uncertain send. CLI detach does not retire its native owner.
+
+The first redirected interactive controls did not establish a durable headed
+session. A subsequent real-mux fixture invocation was interrupted during a
+reported mux crash and has no terminal result. Inspection found an unsafe
+whole-server cleanup command relying only on environment-based isolation.
+It could address a shared mux; exact crash causality is not established.
+Removed that cleanup, introduced an explicit unique socket namespace on every
+fixture command, and restricted commands to the exact fixture session.
+Whole-server operations, foreign targets and routing overrides now refuse
+before process creation. The native mux lane requires a separate explicit
+opt-in and has not been rerun after the incident. No native headed pass is
+claimed, and no existing mux was stopped or repaired during recovery.
+
+The recovery packet passes 52 Python tests without launching a native mux,
+seven SDK-adapter race controls, F/E9 lint and the actual daemon census.
+Phase 3 remains in progress: native headed acceptance, durable execution,
+Manager and remaining caller convergence, distribution and final review/CI
+are still outstanding. The parent effort remains Active.
+
+The selected native mux's read-only namespace control confirms that a live
+default-namespace session is absent under a fresh explicit fixture namespace.
+After the safety regression packet passed, the private native lane was
+explicitly selected. Collection first exposed a missing test-helper import;
+the corrected lane then exposed an incorrectly joined executable path at the
+pane boundary. Matching the real caller's executable-name and single-quoted
+file transport fixes that fixture error without changing process permissions.
+
+The namespaced native lane now passes in 14.61 seconds: one original literal
+seed, a second prompt through WS, a third through TCP, one native history,
+detach survival and exact native/extension cleanup through the fixture's
+identity-checked session. Whole-server cleanup remains prohibited. This is
+isolated native headed-broker evidence, not all-caller convergence, caller-Job
+durability, desktop-visibility qualification or installed rollout.
+
+### 2026-11-06 - Standalone headed execution coordinator
+
+The explicit headed entrypoint now runs in the caller's existing pane, retaining
+the exact native child and its original interactive argv. It verifies the
+selected session, rechecks original startup admission, injects only its retained
+extension and publishes broker readiness after the SDK's session/PID binding.
+Native startup and full restoration remain distinct. SDK connection loss or
+broker setup failure after creation retains the interactive session without
+replay; explicit stop targets the retained child handle, never a mux name.
+
+The canonical receiving export includes those same headed modules and extension
+resources. Its command composer retains the content-addressed executable under
+the original caller attempt and uses a physical base interpreter rather than
+the caller's environment. Selected support is queried before launch effects.
+The ordinary app supports WS and TCP; the compact export remains TCP-only.
+
+Both explicitly selected private native mux coordinator cases pass (27.53 seconds
+test execution, 58.12 seconds including preparation and cleanup): ordinary WS
+and retained-artifact TCP, one literal original seed, a second prompt, physical
+native PID in the broker handshake, detach survival, explicit exact-child stop
+and confirmed coordinator/native/extension exit. The first coordinator run
+exposed a fixture cleanup observation race after the functional assertions;
+bounded absence confirmation fixes it without weakening identity checks.
+The final focused Python packet passes 52 tests, F/E9 lint passes, and both
+headless launch and daemon-coverage guards pass.
+
+Manager, Worktrees and headed Bridge caller migration is still open. In
+particular, original native-seed receipts must retain the actual Copilot PID,
+not substitute the new coordinator's PID. No Phase 3 publication, installed
+rollout, caller-Job durability, complete restoration or parent completion is
+claimed by this checkpoint.
+
+Tracing the original native console owner exposed one additional coordinator
+requirement: Ctrl+C/Break must reach Copilot without cancelling Python's wait
+and retiring the session. The headed CLI now defers those terminal events with
+a callable handler (not an inherited `SIG_IGN`) and restores the caller's
+handlers afterward. The focused coordinator packet passes ten tests, including
+an actual raised SIGINT during its wait; F/E9 lint passes. This signal control
+is not a native keyboard/desktop qualification.
+
+### 2026-11-06 - Original-owner headed receipts and first invocation adapter
+
+The core now advertises and publishes a physical native process receipt,
+distinct from coordinator creation. Its bounded reader rejects duplicate
+fields, unsupported state, another session/nonce and stale or unavailable
+coordinator/native identities. Worktrees expands its finite provider first:
+old direct callbacks and preparation frames keep their semantics, while a
+negotiated headed callback resolves Copilot through the original caller's
+private binding. Tokens remain off the command line.
+
+The selected-session Python invocation boundary now calls the same retained
+core executable. A live original-owner channel rechecks the original attempt,
+incarnation, current seed and cold worktree immediately before native creation.
+Only the physical native receipt completes the staged seed. A missing receipt
+retains the wait and handoff, records the actual return separately from receipt
+certainty and never replays or restores an admitted launch. Terminal events
+continue to be owned by native Copilot. Consoleless coordinator/native
+creation uses the existing no-window primitive.
+
+The core receipt/caller packet passes 32 tests; the new Worktrees invocation
+and unsupported-command controls pass ten. The prior finite-provider packet
+passed 74 cases with two fixture expectation failures; the corrected
+14-case residual passes, including both failures and parser/discovery controls.
+Both original direct native coordinator paths pass in separately selected
+ordinary and receiving runs. The first combined attempt stalled before
+ordinary binding without useful retained diagnostics; a bounded exact-fixture
+pane capture was added, and the ordinary diagnostic rerun passed in 20.68
+seconds. This does not establish that the earlier stall's cause is resolved.
+
+A third, real original-owner process lane passes in 24.05 seconds: the live
+admission callback runs once, the parent receives the distinct native PID,
+one literal seed and a second broker prompt share the native history,
+detach retains the session, and exact stop confirms all four fixture processes
+exit. This is native core-caller evidence, not a full native Worktrees/Manager
+launch or caller-Job durability proof. Copied Windows/POSIX shell migration,
+ordinary unselected-session launch, Manager and headed Bridge convergence
+remain open; Phase 3 and the parent effort remain Active.
+
+The refreshed regression packet passes 72 core/headed/broker tests in 46.52
+seconds and 111 affected finite-provider/seed-lifecycle controls in 45.14
+seconds. F/E9 lint, the actual headless-launch guard and daemon coverage audit
+all pass. The latter classifies the new original-caller coordinator spawn as
+venue-agent execution, not a durable service. No installed footprint changed.
+
+### 2026-11-06 - Copied Windows original-owner convergence
+
+The finite provider now separately advertises headed backend preparation,
+restricted to full JSON prepare replies. The selected original attempt retains
+the independent core and one local native session identity. A copied Windows
+setup discovers support against a captured completed immutable slot; old
+providers keep direct execution without receiving new syntax. Each finite call
+still refuses a changed current selection before effects.
+
+The retained PowerShell owner, not another Python waiter, serves the bounded
+private startup channel. It verifies its exact coordinator handle, PID/birth,
+nonce and original native argv/session/cwd, then invokes the original finite
+policy recheck before granting native creation. The headed callback records
+Copilot's distinct physical PID and finishes the seed. Lost admission/receipt
+confirmation keeps the original wait and handoff without restore or replay;
+uncertain return observations preserve the actual exit independently.
+Ordinary no-seed native setup anchors this path in its retained setup record.
+Custom no-seed launchers keep their existing direct invocation.
+
+The first installed consumer check exposed a real artifact bug: zipapp's
+generated entrypoint ignored the headed function's return value, reporting a
+nonzero native exit as zero. The retained artifact now includes an explicit
+exit-propagating entrypoint in its content-addressed source closure. A real
+retained-executable regression confirms native exit 17. Both fresh disposable
+installed-runtime consumers now pass (293.03 seconds test execution): seeded
+and no-seed copied setup, one selected identity, the core's injected extension
+asset, distinct physical native/coordinator/owner identities, exact native
+receipt, seed settlement and actual exit 7. These use a synthetic native
+executable, not Copilot SDK or complete Manager acceptance.
+
+The regression packets pass 51 core/headed/artifact cases and 184 Worktrees
+provider/copied-owner/shell-asset cases with 16 platform skips. Six new shell
+controls cover both owners, changed argv, duplicate request fields, policy
+refusal and a lost native receipt. Their initial fixture failure used a venv
+trampoline that changed the coordinator's parent; the corrected fixture uses
+the production physical-interpreter boundary. The original packaging failure
+is fixed, not waived. F/E9 lint, the actual headless-launch guard and whitespace
+checks pass.
+
+Tracing Manager also confirmed its hidden `--ahp` client form. Both Worktrees
+selectors and the independent core explicitly exclude AHP and remote-connect
+from local native creation. The final focused selector/provider packet passes
+24 cases and the pre-effect core refusal packet passes seven. Manager mux
+creation, POSIX copied shells, headed Bridge, full native caller evidence,
+caller-Job durability and Phase 4 remain open. No Phase 3 publication,
+installed rollout or parent completion is claimed.
+
+### 2026-11-06 - Manager Windows shared creation consumer
+
+The selected core now provides a finite, duplicate-refusing literal JSON
+creation boundary with its own read-only support declaration. Manager
+captures the executing interpreter and physical entrypoint before creation,
+then delegates to the canonical check/create-or-join engine without acquiring
+its old lease. Selected older providers retain the pre-effect legacy path.
+Manager still owns terminal attachment, UI, session options, handoff and
+original native admission. Unknown or lost replies preserve the handoffs and
+cannot trigger legacy retry or owned-session cleanup.
+
+The focused packet passes 14 core parser controls, 20 Manager process/legacy
+controls and 19 Worktrees/native lease controls. The latter runs actual
+Manager PowerShell and Worktrees Python against a disposable native mux
+protocol executable, in both creation orders and with both current and
+legacy Manager selection. They join at discovery, release the same kernel
+lease before client return, preserve literal argv and allow another target
+to create concurrently. The Manager process controls also drain large stderr
+and preserve unknown results without fallback. These are isolated synthetic
+protocol controls, not native Copilot or full Manager UI/attachment evidence.
+POSIX shells, headed Bridge, caller-Job durability and Phase 4 remain open;
+the parent effort stays Active and no installed rollout occurred.
+
+### 2026-11-06 - Seeded POSIX original-owner adapter
+
+The selected native provider separately advertises `posix-headed-env-v1`.
+Copied seeded POSIX setup selects it before preparation, without changing
+the version-1 NUL reply. Its existing long-lived exec owner delegates eligible
+local native commands to the retained core caller. Admission remains live
+and tied to the original attempt; the native callback records Copilot's
+distinct PID/birth and finishes the seed. Lost native binding preserves the
+handoff and actual process exit without replay. Older providers and
+unsupported commands retain their existing direct exec semantics.
+
+The original mixed packet reports 154 passes, eight platform skips and three
+fixture failures. Two old shell fixtures had replaced setup discovery but
+not the newly selected backend capability; they now explicitly model both
+legacy and headed support. The third supplied a nonnumeric synthetic birth,
+which the real execution-receipt validator correctly refused; it now uses a
+valid birth while preserving real identities for other processes. The
+seven-case residual passes, including all three original failures and both
+support selections. No failure is waived or deadline enlarged.
+
+The shared CLI also maps negative POSIX native signal exits to conventional
+shell status, while the retained state keeps the raw native result. The
+68-case core/parser/artifact packet passes, including the ordinary retained
+native exit and signal-conversion control. A native POSIX signal-artifact
+case is separately platform-selected. F/E9, no-window and whitespace checks
+pass. This Windows host has no development WSL distribution; only the Docker
+internal distribution is present and was not used. These results do not
+qualify native POSIX terminal/SDK behavior. Admission-only/no-seed POSIX
+setup, Manager POSIX creation, headed Bridge and the parent Phase 3/4 gates
+remain open. No source publication or installed rollout is claimed.
+
+### 2026-11-06 - POSIX admission-only retained owner
+
+The provider now separately advertises `posix-live-owner-v1` setup admission.
+The planner and copied shell require it before migrating no-seed setup.
+Setup and backend preparation explicitly carry admission-only, preserved-seed
+and native-resume constraints, without claiming a prompt. The original headed
+owner retains the kernel creation lease across the core wait and repeats its
+original intent/liveness check in the native callback. Direct/custom exec
+acquires the lease after descriptor scrubbing and retains it through exec,
+with kernel close-on-exec release. Unsupported providers keep the legacy
+owner before effects; late intent changes refuse rather than claim or replay.
+
+The first focused packet reports 194 passes, 14 platform skips and three
+new fixture failures: a mocked fork had no observer retaining the pipe reader,
+and the native-resume fixture named a head without its required session entry.
+The corrected portable controls retain real kernel-lease contention and
+exercise the intended exec boundary without a fictitious reader. Both
+failed direct cases and the resume case pass in the 20-case residual.
+The final packet passes 27 admission/CLI/Bash controls with six native POSIX
+skips. Added native cases cover actual exec identity, close-on-exec release
+and late-intent refusal, but remain unexecuted on this Windows host. The
+copied native setup fixture now waits for the no-seed backend's receipt too.
+No deadline or assertion was waived. Native POSIX terminal/SDK qualification,
+Manager POSIX creation, headed Bridge and the parent Phase 3/4 gates remain
+open; this source slice is not parent completion or installed rollout.
+
+### 2026-11-06 - Manager POSIX finite creation consumer
+
+The shared core separately advertises `posix-tmux-create-or-join`; Manager's
+Bash launcher discovers it from the selected Worktrees runtime before
+creation effects and captures the physical interpreter/entrypoint. Literal
+JSON requests preserve pane argv and environment flags; bounded caller-owned
+provider processes preserve AHP auth scrubbing. Missing support keeps the
+legacy path before effects. Once selected, rejection or unknown results never
+enter legacy retry or owned-session cleanup, and unknown creation retains the
+original AHP token handoff. A confirmed concurrent join follows the existing
+attach-only path without pane creation or new-seed delivery.
+
+The core's POSIX consumer checks the exact target before preparing a pane.
+Nonzero dispatched clients are uncertain, including a native creation race;
+neither the finite CLI nor Worktrees can mistake them for confirmed creation
+or clean up a potentially admitted pane's arguments. The focused packets pass
+22 core parser/creation cases, 22 Manager copied-Bash/auth/handoff cases and
+63 existing Worktrees creation/lease/CWD controls. These are isolated source
+and synthetic-protocol controls, not native POSIX tmux/Copilot or full Manager
+UI evidence. Native POSIX qualification, headed Bridge and Phase 4 remain
+open; the parent effort stays Active and no installed rollout occurred.
+
+### 2026-11-06 - Bridge headed delivery on the common broker
+
+The headed Bridge launch owners already delegate creation and native resume
+to Worktrees, but its inbox extension still had an independent SDK sender.
+That sender would look like foreign input to the new core adapter and revoke
+its control. The original core launch now supplies a private versioned
+client declaration and retains a bounded JavaScript TCP client alongside
+the SDK edge. Bridge selects that client for retained inbox delivery,
+preserving SQLite final admission, original handoffs and consumption history.
+Ordinary old launches keep their selection; no global mode default changed.
+
+The additive, explicitly advertised `copilot-driver/native-send` operation
+preserves queued/immediate urgency and returns the actual SDK message ID,
+not inferred completion. Standard ACP prompt semantics stay unchanged.
+Both SDK uncertainty and native user input hold control without replay;
+the client never reconnects or consumes a prior controller's buffered RPCs.
+Portable native loadout observations still gate the common send, including
+duplicate/missing-root refusal. Shutdown closes only the broker client,
+never the native conversation. Old peer, missing support and selected-client
+failure cannot fall through to a raw SDK send or the old driver.
+
+The final JavaScript packet passes 57 controls, including actual extension
+body wiring, retained receipt recovery, old-driver compatibility and the
+new framed client/SDK edge. The core Python packet passes 58 cases with one
+native POSIX skip; it includes the staged Node client talking to the real
+Python Session Host and retained artifact tests. The isolated Windows native
+Bridge-client case passes in 22.03 seconds: actual Copilot SDK loading, one
+original seed plus one connector-delivered prompt in the same conversation,
+native acceptance, detach survival, and all exact private fixture identities
+retired. It uses an offline local model and the reserved private mux wrapper;
+no shared mux, productive session or installed runtime was changed.
+
+These are real connector/SDK observations, not full Bridge acquisition/UI,
+ordinary/hoisted restoration, all caller cleanup-Job or remaining Phase 4
+qualification. Controller restoration after a previous attachment remains
+explicitly unqualified. The parent stays Active; source publication and
+required final-head checks/review still remain.
+
+### 2026-11-06 - Current contract refresh preparation
+
+The committed headed implementation's current preference-authority capture
+and no-write verification pass at `91af896dd9e2b6ed29c53775c68af4cd2e11a882`.
+The publication guard identified stale registrations for the Bridge extension,
+its selected-driver adapter and the core Host. The Host's non-semantic H1
+registration now describes its separately selected CLI policy; historical
+framing vectors remain unchanged. The current HTTP-52 owner's prepare pass
+updates semantic source declarations for the two Bridge consumers. Those
+declarations are not execution evidence: the bounded HTTP-52 capture and
+readback still must pass before publication. Install-contract and canonical
+library-sync checks pass. No historical generation or semantic source
+classification was weakened.
+
+The first HTTP-52 execution ran 133 passing cases but correctly refused
+publication because three link controls had an unconditional Windows skip.
+The host already supports the same native file/directory symlink operations
+under its current user permissions. Removing that platform-only exclusion
+preserves the real linked inputs and original assertions; all ten slot/
+generation controls pass in 2.61 seconds, including the three skipped cases.
+No elevation, OS setting, mock replacement, portfolio reduction or deadline
+change was used. The complete capture must rerun from this committed source;
+the earlier partial packet is not capture evidence.
+
+The complete HTTP-52 writer and independent no-write verification both pass
+all 136 cases from `29c76c46190445bba676d611ed1d4d3cd7af5861`, without skips.
+The writer publishes only its 110 planned current outputs; historical
+generations remain unchanged. The full contract guard passes two contracts
+and 1,022 fixtures. Scoped module-size, documentation consistency, final-blob
+size and changefile-presence checks also pass. Required CI/review, publication
+and the parent's unresolved caller/lifetime/receiving gates remain open.
+
+Self-review moved the POSIX existence query after the existing joined-gate
+decision, preserving an admitted join without another native query or pane
+preparation. The shared parser/creation packet passes 24 cases, including
+both-platform negative controls. The default type checker completed its first
+scopes, then refused an existing target-list artifact in a shared prepared
+environment. That retained file was not overwritten or deleted. An existing
+supported independent interpreter is selected for clean checker preparation;
+the complete admitted-scope result remains pending.
+
+The independent existing Python 3.11 checker, explicitly prepared through its
+normal hash-locked owner, passes all 40 admitted strict projects on both
+declared platforms. The retained Python 3.12 target-list artifact remains
+untouched; no ownership check or pending-project classification changed.
+
+An additional native-input control expires the original argv-seed exception
+when the first controlled send is admitted. Missing an early seed event
+cannot exempt a later identical human message. The final JavaScript packet
+passes 58 controls; the isolated native Bridge connector flow is refreshed
+and passes in 21.86 seconds with the same exact cleanup assertions. Upstream
+has advanced during this slice, so the committed source must pull forward
+before publication and refresh any genuinely affected evidence.
+
+### 2026-11-06 - Upstream integration and current headed consumer evidence
+
+Pulled forward the current contribution branch without changing the owned
+runtime implementation. The conflicts were confined to generated contract
+evidence. Canonical materialization confirms that upstream retained the
+original session-host contract unchanged; its current authority update is
+preserved. The HTTP registry reconciles disjoint source declarations and
+retains both complete provenance histories, including upstream's current
+consumer fixes. Immutable archived prefixes and historical generations are
+unchanged.
+
+The committed combined source's HTTP-52 writer and independent no-write
+reproduction both pass all 150 controls without skips. This includes the
+upstream additions rather than substituting the earlier 136-case packet.
+The writer publishes only its 110 planned current outputs. Install contract,
+canonical library sync, scoped module/final-blob size, changefile presence,
+documentation consistency, headless-launch checks and focused F/E9 lint pass.
+All 40 admitted strict type projects pass on both declared platforms; the
+32 pending projects remain unqualified.
+
+The full dependency-age audit reports four public npm TLS-handshake failures
+with certificate validation enabled and no Python age violation. This is
+unavailable local npm transport evidence, not a seasoning pass or a reason to
+disable TLS. Required CI must independently pass the complete audit.
+
+Complete contract validation passes both contracts and all 1,022 fixtures.
+Publication, exact-head review and required CI remain the immediate gates.
+The isolated native connector evidence does not
+resolve the complete native caller matrix, all launching cleanup Jobs,
+restoration, receiving/skew or pending-work-aware ACP lifetime. Those remain
+the active parent objective; no installed runtime was updated.
+
+The next publication attempt encountered another reviewed upstream expansion:
+the retained acquisition writer adds real delegated CLI controls and expands
+the current HTTP-52 packet to 190 cases. Its generated metadata was reconciled
+without dropping either source history. The headed implementation is unchanged.
+
+The expanded packet correctly refused publication after a failed case and the
+existing 300-second suite bound. All 13 new writer controls pass without capture
+instrumentation, but the committed-source writer case exceeds its unchanged
+120-second limit. Live interpreter observations show serial helper/CLI startup,
+with no rejected source. The fixture unnecessarily imports the full CLI before
+its read-only snapshot and protect helpers. Deferring those CLI imports keeps
+each real subprocess and all canonical command/parser/writer checks while
+removing unrelated startup from those helpers. No deadline, portfolio or source
+guard was relaxed. Committed-source requalification remains pending.
+
+The narrower helper imports remove the failing control, but the complete
+packet still reaches only 182 passing cases before its unchanged suite bound.
+The capture guard also repeatedly scans the complete source-path portfolio
+for every Python execution event. Its immutable path mapping is now indexed
+once per interpreter admission; each matching execution still rereads and
+verifies its bytes and code and retains the same durable receipt.
+
+Nine focused lookup, real-process tamper and missing-receipt controls pass in
+15.62 seconds under the original limits. The narrow runtime-import control
+uses actual runtime bytes and an isolated request rather than constructing
+the unrelated full historical publication cohort. Historical publication
+tests and their corpus are unchanged. The full current-generation capture,
+independent reproduction and publication gates remain pending.
+
+The indexed capture completes within the original suite bound: 189 controls
+pass and one correctly exposes PID reuse in the interpreter receipt filename.
+The guard formerly refused a new process whenever Windows recycled an earlier
+PID. Each admission now exclusively allocates a distinct receipt while retaining
+the actual PID, parent, source/code checks and aggregate launch/entrypoint
+matching. Existing receipts are never overwritten or deleted. Eleven lookup,
+PID-reuse, real-process tamper and missing-receipt controls pass in 16.12 seconds.
+The complete writer and independent reproduction must still pass.
+
+All 190 assertions subsequently pass, but startup and cleanup exceed the same
+300-second contained-run bound, so publication still refuses. Receipt writes
+now use one interpreter-lifetime stream instead of reopening the file for every
+event. A lock serializes records; every record still flushes and fsyncs before
+returning. The eleven focused guard controls pass again in 17.70 seconds.
+The complete contained run, not the inner pytest summary alone, remains the gate.
+
+### 2026-11-06 - Preserve actual Windows launch and entrypoint audit coverage
+
+The complete 190-case HTTP-52 portfolio passed in 287.31 seconds, with a
+successful contained-runner exit, but capture correctly refused publication
+at interpreter coverage. A bounded actual-owner reproduction found 27 child
+entrypoints and zero launch receipts. Windows caller-owned execution uses
+native CreateProcess rather than Popen, while ordinary Windows Popen audits
+carry a command-line string, not an argv list. Venv redirectors also introduced
+an intermediate native parent.
+
+The native creation boundary now emits the standard subprocess audit before
+creation, including refusal propagation. Capture decodes ordinary Windows
+command lines through the native parser. The two record-owner fixtures select
+the existing direct interpreter helper and preserve their venv environment,
+without changing native PID/parent receipts or weakening launch counts.
+Two native audit/refusal controls and eight argument-shape controls pass;
+focused F/E9 lint passes. Exact committed-source capture, independent no-write
+capture and the registry gate remain outstanding. No evidence was published
+from the rejected run.
+
+The corrected exact-source writer passes all 190 cases in 281.51 seconds;
+the contained runner exits successfully in 295.47 seconds. Full entrypoint,
+launch, installation-source and portfolio verification accepts the run and
+publishes 135 source-bound outputs. The original 300-second suite and
+120-second item limits are unchanged. Independent no-write reproduction and
+the complete registry checker still gate readiness; the functional headed
+slice is being published as a draft while those run.
+
+Managed draft publication stopped before pushing because upstream moved again.
+The pinned integration contained 132 generated-contract conflicts and no runtime
+conflict. Canonical registry reconciliation preserves both complete histories
+(9,074 HTTP and 86 Host provenance records), the upstream source changes and
+seven additional inspection controls. The 190-case result remains scoped to
+its original committed source. The now-197-case writer, independent no-write
+check and full registry validation still gate readiness. A draft preserves the
+functional slice for iteration rather than requesting review of stale evidence.
+
+Draft #11016 is open, with no parent-closing reference. Its initial CI found
+the native caller-owned source admission hash and six shared-library consumer
+changefiles missing; both are corrected without changing the admitted node
+inventory or budget. The first combined 197-case capture stopped at case 169,
+the expanded actual-owner flow. A bounded single-case reproduction likewise
+reached the final read-only snapshot at its original item deadline, with all
+31 launches matching 31 interpreter starts. Neither rejected run publishes
+evidence.
+
+Repeated state assertions now use the canonical Worktrees record reader in
+the test process, rather than cold-starting an extra interpreter for each
+observation. Protection and every actual capability/read/parser/writer command
+still run in separate real owner processes, each retaining the reachable
+unqualified-resident trap. No write assertion, launch/entrypoint/source check,
+portfolio item or timeout is removed. Requalification is still outstanding.
+
+The state-reader change alone did not settle the captured case. A guarded
+single-command profile measured 4.63 seconds and about 360 imports for an
+ordinary capability query through the unrelated full CLI front door. The
+finite owner fixture now composes the existing production parser and handler
+for capabilities and exact record reads, retaining explicit project binding,
+the reachable resident trap and separate native processes. Session writes
+still traverse the full front door. This is a fixture cost reduction, not a
+new production dispatch path or a mocked provider response.
+
+All twelve changed-scope refusal controls pass. The actual owner flow passes
+without capture in 47.24 seconds after correcting the narrow parser's active
+project selection. Exact-source captured qualification remains required.
+The complete changefile check now covers all fourteen additional shared-library
+consumers; source admission verifies all 607 sources with the original 4,318
+unit nodes unchanged.
+
+### 2026-11-06 - Combined headed evidence reproduced
+
+The complete 197-case HTTP-52 writer passes in 284.76 seconds, including the
+seven upstream inspection cases. Its contained runner succeeds in 300.97
+seconds including preparation and cleanup. The canonical source, role,
+portfolio and launch/entrypoint verifier accepts all 132 bound outputs.
+An independent run against the same committed runtime, without preparation or
+write mode, also passes all 197 cases in 285.53 seconds; its contained runner
+succeeds in 342.88 seconds including preparation and cleanup. The original
+300-second suite, per-item limits and evidence checks are unchanged.
+
+The two CI-reported process-census counts now include the added finite Windows
+launch seams: three Worktrees and four Manager `Process.Start` sites. Both
+retain their inspected caller-contained classification. The census check and
+all 607 admitted source hashes pass without changing source admission, unit
+inventory, lifetime classification or resource budgets. Full registry and
+final-head required CI/review remain separate readiness gates. No installed
+runtime, retained session or fleet is changed; the parent effort stays Active.
+
+The full registry subsequently passes with two contracts and 1,044 fixtures.
+Refreshed install-contract, canonical-library sync, documentation consistency,
+headless-launch, changed-module size and complete changefile-presence guards
+also pass. These source results do not close the native caller, cleanup-Job,
+receiving, restoration or pending-work-aware lifetime acceptance matrix.
+
+### 2026-11-06 - Preserve Windows admission-only launch intent
+
+The first review of #11016 identified a real Windows copied-setup regression:
+the headed backend lost admission-only, preserved-seed and native-resume
+constraints after setup. Propagate those constraints through actual backend
+preparation and the final pre-creation admission callback. Ordinary outcome
+callbacks still accept only their original execution identity.
+
+Nine focused controls pass, including the actual finite admission CLI's
+preserved-seed, replacement-seed and now-live native-resume decisions and the
+copied shell's preparation/admission argument transport. Three disposable
+installed-runtime copied-shell cases pass in 242.29 seconds, with a successful
+264.12-second contained runner: no seed, ordinary seeded execution and a
+preserved seed. The last remains staged with no handoff or prompt argument.
+This is real provider/copy/core composition with a synthetic native executable,
+not another native Copilot or installed shared-runtime adoption claim.
+
+The exact-branch CI run on the prior head passed unit coverage, strict typing,
+dependency seasoning, AST/process census and the contract registry, then
+reported a stale generated procutil copy in the payload admission closure.
+Canonical payload generation repairs that copy; all thirteen manifests now
+verify, changed Python passes F/E9, and all 609 current admitted sources verify.
+
+The next pinned upstream integration auto-merges runtime code and source
+admission; all 132 conflicts are generated contract evidence. Canonical
+registry publication preserves both complete histories (9,481 HTTP and 86 Host
+provenance rows). The core, native launch boundaries and headed client remain
+unchanged by integration. New combined capture and exact-head review/CI remain
+required after this review fix; the prior 197-case evidence is source-scoped.
+
+The expanded 229-case monolithic capture reaches its unchanged 300-second
+group limit and publishes nothing. A guarded diagnostic selects all 32 added
+cases and both observer variants: all 34 pass in 115.46 seconds, with a
+129.34-second contained runner. Named timings identify the new actual retained
+serializer case at 75.43 seconds, rather than a hung child or failed assertion.
+
+The HTTP-52 capture now separates its two independent real-owner flows from
+the protocol controls. Each runner retains its original group/item/process/
+memory/storage limits. Both groups share the original 600-second Windows or
+240-second POSIX probe deadline, not a fresh allowance per group. The final
+verifier still requires the exact complete portfolio, one unchanged source
+proof, all interpreter/launch/role/source-closure receipts and the expected
+observer report. This does not claim a monolithic 300-second or native
+performance pass. Six contained controls pass for literal report transport,
+complete partitioning, omitted/duplicate/foreign cases and aggregate expiry.
+The new real-owner fixture also uses the existing direct interpreter helper
+to preserve the selected venv without a Windows redirector parent.
+
+The partitioned capture declares its exact observer count to the existing
+verifier. Both observer entrypoints must be proven, with missing, extra or
+entry-less observers refused. Single-group callers retain the original
+one-observer default, and child launch/role/source-closure requirements are
+unchanged. All five focused observer controls pass.
+
+The first partitioned attempt passes the existing actual-owner flow, then
+refuses the new fixture before its reachable-resident assertion: Bridge's
+normal environment scrub removed the direct interpreter's selected venv.
+Restore that explicit interpreter environment after the scrub, as the existing
+owner fixture already does. No evidence is published by the rejected attempt.
+
+### 2026-11-06 - Complete 229-case evidence accepted
+
+The corrected real serializer case passes in 85.58 seconds, including its
+78.09-second call, and the unchanged child verifier accepts its actual
+interpreter/source/native-parent receipts. The complete writer then passes
+all 229 cases: two real-owner flows in 156.68 seconds and 227 protocol controls
+in 241.47 seconds. Their contained runners succeed in 169.48 and 255.69
+seconds including preparation and cleanup.
+
+An independent run against the same committed runtime, without preparation or
+write mode, also passes all 229 cases: 163.29 and 228.46 seconds for the two
+groups, with successful contained runners of 218.84 and 243.03 seconds.
+Both captures satisfy the original shared probe deadline and every exact
+portfolio, observer, role, launch/entrypoint and required-source check. The
+writer publishes 139 bound outputs; this is grouped functional evidence, not
+a monolithic 300-second or native-readiness performance claim.
+
+The complete registry passes with two contracts and 1,050 fixtures. Refreshed
+process census, install-contract (13 plugins), canonical-library sync (four
+libraries), documentation consistency (24 plugins), headless-launch checks
+(13 adopters), effort structure, all 13 generated payload manifests and all
+609 admitted source hashes pass. Final-head review and required CI remain
+independent gates; the parent caller/lifetime/receiving matrix stays Active.
+
+### 2026-11-06 - Final generated-consumer and authority repairs
+
+The existing finite CLI compatibility packet passes all 126 cases in 30.67
+seconds, with a successful 131.55-second contained runner. The final six
+capture/report controls also pass after the exact-observer integration.
+
+Required CI then identifies the caller-lifetime source archive as stale.
+Canonical installation-context synchronization regenerates its source archive
+and thirteen consumer copies, followed by the Worktrees payload generator for
+its nested admission copy. All installation-context and thirteen payload
+manifest checks pass. An actual isolated archive consumer proves that its
+audit hook can refuse native creation before the fixture child writes its
+marker. No installed archive or service is changed.
+
+The next review confirms the admission-only finding is resolved and identifies
+three stale current-authority digests. Canonical final-source authority capture
+and its independent no-write check pass; all 26 authority corpus/capture
+controls pass in 6.54 seconds, with a successful 96.92-second runner. The full
+registry still passes with two contracts and 1,050 fixtures.
+
+These repairs change generated archives, current vectors and their
+registry/provenance only. Their changed paths do not overlap the verified
+HTTP-52 source closure, and all 609 admitted source hashes still verify.
+The complete 229-case writer/no-write results remain scoped to that unchanged
+runtime rather than being rerun for unrelated generated bytes. New-head
+review and required CI remain mandatory before merge.
+
+### 2026-11-06 - Reconcile the expanded CLI writer portfolio
+
+Further upstream integration adds portable configuration and explicit keyed
+creation CLI coverage. Runtime, the real-owner fixture and source admission
+auto-merge; all 139 conflicts are generated contract evidence. Canonical
+publication preserves both complete histories (9,895 HTTP and 91 Host rows).
+The core, native boundaries, admission-only fix and headed client remain
+byte-identical, and the current authority digest still matches its 17 modules.
+
+The complete 245-case writer passes: two real-owner flows in 161.71 seconds
+(238.81 including preparation/cleanup) and 243 protocol/CLI controls in
+229.46 seconds (245.31 including preparation/cleanup). Independent no-write
+reproduction against the same committed source also passes all 245 cases:
+161.44 and 230.79 seconds, with successful runners of 250.05 and 246.03
+seconds. All 139 outputs satisfy the unchanged aggregate deadline, exact
+portfolio and observer/child/native-parent/source-closure requirements.
+
+The full registry passes with two contracts and 1,050 fixtures. Final source
+guards identify MCP's producer hash as another dependency of the generated
+archive change. Canonical footprint refresh changes only that scripts digest;
+contract revision 36, effects and runtime source are unchanged. Its path does
+not overlap the captured HTTP source closure. Install-contract, library sync,
+docs, headless launch, effort structure, all generated consumers and all 615
+admitted source hashes then pass. New-head review and required CI still gate
+merge; the parent effort remains Active.
+
+### 2026-11-06 - Narrow native symlink prerequisite handling
+
+Exact-head CI passes at the integrated 245-case head. Copilot's next review
+identifies a portability gap in the linked-slot controls: an unprovisioned
+Windows account can receive privilege error 1314 before the refusal assertion.
+Use the existing test-capability pattern to skip only that actual Windows
+error. All other link errors still fail; the three linked cases still create
+real links and exercise their original refusal assertions on provisioned hosts.
+The canonical capture continues to reject any skipped portfolio item.
+
+All twelve focused controls pass, including the ten slot cases and explicit
+1314-versus-other-error regressions, in 6.97 seconds with a successful
+88.91-second contained runner. Changed Python passes F/E9, and all 615 admitted
+sources still verify. Reproduce the complete capture on this changed fixture
+source before updating the PR; a passing prior head is not its qualification.
+
+The first refreshed capture passes the existing owner flow, then the other
+real serializer flow reaches its original 90-second item limit in the final
+lineage write. It publishes no evidence. Use the same canonical parent-side
+record reader already used by the first flow for four assertion-only
+snapshots, rather than cold-starting more helper interpreters. The protected
+reservation, reachable unqualified resident, every actual capability/read/
+parser/writer command, ordering assertion and full CLI session-write path
+remain real and unchanged. No item/group/deadline or receipt check is widened.
+
+The first guarded single-case run after that reader change still reaches the
+original item limit, with only an async wait in its final stack. The existing
+log does not identify the active owner operation. Add capture-only start/end
+timestamps around the real asynchronous owner command and synchronous lineage
+command, forwarding every argument and result unchanged. This supplies named
+phase evidence for the next diagnostic instead of another blind full rerun.
+
+The timed diagnostic passes in 87.15 seconds and proves all actual interpreter
+receipts, but leaves little margin under the original 90-second item limit.
+Every repeated owner operation takes roughly three to four seconds; no single
+stuck operation appears. The read-only head handler forces the full CLI import
+only to retrieve controller projection functions already defined by tracking.
+Use those canonical functions when the CLI is absent and preserve its
+already-loaded overrides. The finite fixture composes that existing head
+parser/handler, with the original project binding and reachable resident trap;
+all session writes still traverse the full CLI.
+
+All seven focused reader controls pass in 3.39 seconds, including existing
+head-command behavior, canonical projections without importing the CLI and
+loaded overrides, with a successful 90.84-second contained runner. F/E9 and
+all 615 admitted source hashes pass. Guarded real-flow timing and the complete
+capture remain required; this is not yet a new qualification result.
+
+The named two-case diagnostic identifies the original acquisition flow reaching
+its 90-second limit during `note-handoff`; it terminates before the keyed flow
+starts. The finite owner unnecessarily boots and closes a resident server for
+every bounded record, head and capability read. Dispatch those same real
+read-only parsers and handlers before constructing the server. All session
+writes still use the full CLI with the reachable unqualified-resident trap.
+Add the same capture-only command timings to acquisition so either flow's
+next failure names its phase. Preserve all commands, assertions and deadlines.
+
+The next trace completes the handoff in 88.31 seconds but reaches the same
+90-second limit during inspection. A guarded import profile measures repeated
+record/head/capability cold starts at 2.33/2.73/3.55 seconds and the full session
+CLI at 5.99 seconds. Receipt `fsync` accounts for only 0.06–0.16 seconds, so its
+checks and durability remain unchanged. Defer mutation-only imports from the
+bounded head/capability frontends and share their existing parser definitions
+with focused registration helpers. Preserve full-CLI compatibility and every
+actual write, read and negative control in the real-process fixtures.
+
+All 68 focused controls pass in 43.49 seconds, including fresh-interpreter
+refusal of unrelated mutation imports, canonical/loaded head projections,
+relationship CLI, producer request, full-parser consistency and conclusion CLI.
+The contained runner succeeds in 131.81 seconds; F/E9 passes. The earlier broad
+334-case selection reached its original 300-second group limit and is not a
+completed-suite result. Guarded flows and the complete 245-case capture still
+owe fresh source-specific evidence before publication.
+
+The guarded acquisition flow still reaches the 90-second limit during its
+handoff, with every completed command returning normally. The operator
+explicitly approves increasing only the two actual-owner cases to 120 seconds
+after reviewing those measurements. The original 300-second group safety
+limit, 600-second Windows aggregate deadline, complete portfolio and all
+source/interpreter/receipt checks remain unchanged. This is a declared
+per-case budget adjustment, not evidence that the earlier 90-second contract
+passed and not authorization for installed or fleet effects.
+
+The full capture at the approved-budget source publishes no outputs: both
+actual-owner cases fail at the separate, unchanged production lineage command
+timeout of ten seconds. Acquisition reaches `note-handoff`; keyed creation
+cannot complete its legacy-resident probe. After the contained runner exits,
+an aggregate host sample reports 98% CPU utilization with memory and disk
+headroom. Preserve the production limit and wait for execution capacity before
+one further bounded attempt. This is a pending qualification gate, not a pass,
+an accepted flake, or permission to bypass source evidence, review or CI.
+
+The capacity-admitted full retry passes both actual-owner flows in 171.27
+seconds (189.75 including preparation/cleanup), then the 243-case protocol
+group reaches its unchanged 300-second limit and publishes no evidence. Stop
+the capacity watcher. A named protocol-only diagnostic passes all 243 cases
+in 279.43 seconds (302.36 including preparation/cleanup), with observer and
+record-writer receipts verifying 728 executed sources. These separate results
+do not establish the complete aggregate capture gate.
+
+Twelve real receiving-side refusal controls dominate that protocol trace at
+roughly 9–14 seconds each. Keep their real protection operation, complete
+receiving CLI and resident-fallback trap; replace only the two assertion
+snapshot subprocesses per case with a canonical nonce read and a stronger
+unchanged-record-bytes assertion. This removes 24 assertion-only interpreter
+starts without deleting a receiving command or weakening refusal coverage.
+Full captures now retain named pytest progress and the slowest durations,
+while preserving the quoted JUnit path and every original group/aggregate,
+portfolio and source/receipt check.
+
+All six contained capture-report controls pass in 0.97 seconds, including
+paths with spaces/backslashes, named-output selection, the shared deadline,
+and rejection of missing, duplicate or foreign portfolio entries. Changed
+Python passes F/E9. The next complete capture must qualify this fixture and
+reporting source; the earlier disjoint diagnostic is not substituted.
+
+The changed-module guard catches the reader at 1,005 lines, above its existing
+1,000-line cap. Stop the in-flight capture before changing its source. Compact
+only the newly factored import and simple parser flag without altering import
+order or behavior; all 24 changed modules now satisfy their existing ceilings.
+The nine focused reader/parser controls pass in 4.65 seconds (122.25 including
+preparation/cleanup), and F/E9 passes. The stopped capture is not qualification;
+the final source still requires complete writer and independent reproduction.
+
+### 2026-11-07 - Hosted qualification enabler accepted; exact-source packet pending
+
+The owner-only Windows escape hatch in #11169 is now released and accepted:
+its focused 68-test Windows run passed, actual concurrent submissions retained
+both source commits through one append-only non-branch ref, and deliberate
+failure and empty selection returned non-success. This avoids another local
+full capture on the constrained development host.
+
+Submitted this effort's exact retained source
+`d79a4c4a81814b0f65601836df4ccfab1b1522f7` to the canonical
+`bridge-http52` packet, request `f228a2d79c9740a183ab6d5d5b02e076`,
+through protected controller
+`ccea6c44019c7e9be7bafa5064e7fe6aad1340a8`.
+The original request is accepted, not yet qualified. It owns the canonical
+writer, separate same-source reproduction, contract verifier and artifact
+export; existing portfolio, receipt and aggregate limits remain unchanged.
+No local environment prewarming, shared runtime rollout or production-session
+effect was performed.
+
+This effort retains the packet's original request/result custody, validated
+artifact materialization, #11016 review/CI/merge and every remaining parent
+gate. It also retains eventual retirement of the qualification source
+workspace after its source-owned client is no longer needed. Completing the
+escape hatch does not complete this refactor.
+
+The original hosted packet completed as a failed result in run
+[42334415067](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42334415067),
+artifact `13558912228`. Its protocol group passed 241 cases but failed the
+two rollback observations; the independent reproduction and export did not
+run. It is not qualification or a timeout. The source fixture loader used
+the Windows default text encoding. Decoding the captured UTF-8 bytes as
+CP1252 exactly reproduces the hosted mismatched hash; UTF-8 reproduces the
+unchanged expected hash. Select UTF-8 explicitly for both the manifest and
+captured sources, with a focused locale-regression test. Preserve the actual
+fixture bytes, expected source hashes, complete portfolio and all deadlines.
+
+### 2026-11-07 - Exact-source hosted capture and artifact return accepted
+
+The focused CP1252-default regression qualified source
+`b2b771d829b03b1518c726a210457844de040195` in run
+[42335440675](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42335440675).
+Then the same source's canonical packet, request
+`4c32c68fa58e470ea88fde4dd8b83f52`, qualified in run
+[42335682232](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42335682232),
+attempt 1, artifact `13559319605`, protected controller
+`72eb9adc4cf670dd6e70e5d1e3146be67853f53f`.
+The result client validated the complete binding and returned exit 0.
+Result-manifest SHA-256:
+`3ce62539139e1d7382c9e799e6b04952a7999219e13e0f310185af18b62ae075`.
+
+The canonical writer passed both real-owner controls in 45.81 seconds and all
+243 protocol/CLI controls in 110.55 seconds. Independent same-source no-write
+reproduction passed the same complete portfolio in 41.04 and 94.56 seconds.
+No skips, partial-packet stitching or enlarged item/group/aggregate limits
+were needed. Worker phases, including source/selection and preparation, ended
+at 447.750 seconds: writer at 232.969, independent reproduction at 432.844,
+contract verification at 443.297 and export at 447.641.
+
+This ran on disposable hosted Windows Server 2025 AMD64 image
+`win25-vs2026` / `20261103.298.1`, controller Python 3.12.10, not the
+development machine. The existing independent registry verifier passed.
+The source-owned materializer verified export-manifest SHA-256
+`19055c151f46d09809d4fa0bf2e07aab3de385dd7df8ae0d0effb781c1f0dcf1`
+against the actual export receipt, source identity, 245-case inventory and
+all input preimages, then published all 139 canonical outputs successfully.
+The earlier failed request remains retained and is not relabelled as a pass.
+
+Fresh review and required CI on #11016 remain separate gates. Its current
+published head now reports a genuine upstream conflict, so preserve this
+qualified source and artifact before normal managed reconciliation. Any
+changed execution closure needs impact-selected revalidation; this result
+does not qualify an unexamined rebase or complete the parent.
+
+### 2026-11-07 - Reconcile the qualified checkpoint with current development
+
+Preserved the qualified source and generated outputs before reducing the owned
+17-commit stack to one tree-identical local commit. Rebased that net change
+onto `b206e572a1`, resolving the source conflict once: retain upstream's
+precomputed suffix lookup and the distinct per-interpreter capture logs.
+Update the focused lookup control to exercise that canonical implementation.
+Both upstream's caller-association additions and the bounded head reader
+remain in the shared CLI module, within its unchanged 1,000-line ceiling.
+
+The canonical registry codec and locked publication owner retain every
+provenance record from both histories: 10,874 HTTP records and 91 Session Host
+records. The shared CLI source declaration names the genuinely merged bytes;
+this is not new capture evidence. Regenerated the canonical lifecycle archive,
+all 13 adopter copies, the nested Worktrees copy and the affected footprint
+producer hashes from current source. All 652 admitted unit-source hashes,
+installation-context synchronization, the Worktrees payload generator,
+changed-module ceilings and focused F/E9 checks pass.
+
+The current complete packet contains 270 cases, not the earlier 245. The prior
+hosted result remains valid for its original source only. This reconciled
+closure still requires fresh hosted controls, canonical writer, independent
+same-source reproduction, contract verification and receipt-bound artifact
+return before refreshing #11016 for review and required CI.
+
+### 2026-11-07 - Reconciled 270-case hosted packet accepted
+
+Exact source `312c243959b8f1ed6181839336d37b4aab1d3ee2` passes the five
+focused lookup/log controls in hosted
+[run 42338419548](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42338419548).
+The complete packet, request `c0a2f2d751ed445f81437a338ed355fe`, then qualifies
+in [run 42338550494](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42338550494),
+attempt 1, artifact `13561445297`, protected controller
+`de36510694d459d212e0d1854e3f5e975969d634`.
+The result client validates the original request, source, selection,
+controller, Windows platform and run/attempt binding. Result-manifest SHA-256:
+`26a72ac28835a2fd12a21a11715c04abf95e682e67424a651436f14c502d788b`.
+
+The canonical writer passes both real-owner controls in 50.51 seconds and all
+268 protocol/CLI controls in 115.82 seconds. Runner-inclusive durations are
+88.14 and 126.11 seconds. Independent same-source no-write reproduction passes
+the same complete portfolio in 48.85 and 122.42 seconds, with runner-inclusive
+durations of 80.36 and 133.64 seconds. No skips, stitched selections, local
+prewarming or enlarged limits are used. The existing per-capture aggregate,
+group, item, native-parent, observer and execution-closure requirements pass.
+
+The separate contract verifier accepts 2 contracts and 1,054 fixtures.
+All worker phases complete at 553.828 seconds: canonical capture at 272.313,
+independent reproduction at 533.672, contract verification at 547.969 and
+export at 553.688. The disposable hosted image is Windows Server 2025 AMD64,
+`win25-vs2026` / `20261103.298.1`, Python 3.12.10.
+The source-owned materializer verifies export-manifest SHA-256
+`ecafd077bb39c195e64480aeae30120321b162a261f9383c98a0734124ed4780`,
+the actual export receipt, exact source and all input preimages before
+publishing all 143 outputs. Earlier qualified sources and failed requests
+remain retained under their own identities.
+
+Refreshed installation, library synchronization, documentation, headless
+launch, daemon census, changefile, effort-structure and changed-Python F/E9
+checks pass. This remains source qualification, not productive-session or
+fleet deployment. Refresh #11016's evidence, review and exact-head CI next;
+the complete parent acceptance matrix and the conditional peer-unblock
+notification remain owned by this effort.
+
+### 2026-11-07 - Headed broker source merged; caller and lifetime acceptance continues
+
+#11016 merged at 04:52:42 UTC as
+`d62de87ff737e387ef19213cb0b023f5d761ab89`. Copilot review `5810164430`
+approved exact head `44ea590495a28627f6892530ba3dc5515ab1fc43`; required
+[CI 42339864446](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42339864446)
+passed at that head, including freshly executed unit coverage, admitted
+typing, source/process guards, retained historical evidence, complete
+registry and generated payload checks. All five review threads are resolved.
+The managed merge used the normal repository-authorized Maintainer review
+exception, not a CI bypass. #10765 remains open.
+
+Re-read the Plan and Validation Plan after merge. The canonical headed
+execution and launch-injected broker connection are now delivered; mark those
+two implementation items complete. Do not mark the complete caller matrix,
+native restoration, all caller cleanup Jobs, pending-aware lifetime or
+receiving/skew qualification complete from this source slice.
+
+The owned workspace is pulled forward through the native synchronization
+owner. A first attempt safely auto-aborted while replaying the four original
+commits individually over their squash merge; a tree-identical local squash
+then allowed normal pull-forward without losing changes or rewriting shared
+history. The next stretch is the real-caller fresh/resume/reuse and
+attached/detached/new-window/no-mux matrix, followed by lifetime and receiving
+acceptance. Keep original-owner custody, unknown-effect holds and isolated
+fixture cleanup intact. No installed runtime or productive session changed.
+
+### 2026-11-07 - Native Worktrees launch-owner fresh/resume checkpoint
+
+The opt-in native Worktrees Python-owner test passes in 41.97 seconds
+(150.11 seconds including managed environment preparation and cleanup).
+It invokes the real launch/seed/admission/receipt owners with an existing
+native Copilot executable, a loopback-only model provider, isolated state
+and a runner-owned private PSMux namespace. A read-only adapter routes
+Worktrees discovery to that same real private server.
+
+Fresh launch consumes the literal staged seed once. Explicit native resume
+uses the same conversation with a different process incarnation; subsequent
+broker prompts preserve exactly one three-message user history. Correlated
+receipts identify the native child rather than its coordinator, both original
+owners return, and exact fixture processes and panes retire. No privileged
+extension permission or host-state opt-in is used.
+
+The first fixture attempted disposable installation and hit its item bound
+during setup, before native launch. The final focused test instead exercises
+the actual Python launch owner without reinstalling a runtime. This is not
+copied-setup, full Manager/embody planning, guarded-head recovery, physical
+terminal input or all-caller-Job survival acceptance. The complete caller,
+lifetime and receiving gates remain open; no installed rollout occurred.
+
+Review strengthened this checkpoint to compare the receipt birth with both
+the broker record and live OS observation, then require a certain terminal
+receipt and agreement between native, coordinator and original-owner exit
+codes. That native rerun passes in 38.76 seconds (116.14 seconds including
+preparation and cleanup), with the same limits. Live-state polling tolerates
+only transient Windows open contention; complete malformed records still fail.
+Each recovery leg owns a distinct private mux target while retaining the
+same native conversation. Immediate reuse of a retiring mux name is not
+silently treated as qualified.

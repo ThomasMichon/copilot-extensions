@@ -109,6 +109,53 @@ def test_unrelated_base_merge_preserves_exact_review(branch):
     assert checks.before_publish(branch, BASE, POLICY)["ok"]
 
 
+@pytest.mark.parametrize("moved", ["none", "source", "base", "after-create"])
+def test_github_foreign_publication_uses_real_provider_and_keeps_ref_fences(branch, monkeypatch, moved):
+    import subprocess
+    from urllib.parse import unquote
+
+    from agent_worktrees import pr_foreign_checks
+    from agent_worktrees.providers import github
+
+    git(branch, "remote", "add", "origin", "https://github.com/example/project.git")
+    head, base = git(branch, "rev-parse", "HEAD"), git(branch, "rev-parse", BASE)
+    record(branch)
+    repo = cfg.RepoConfig(
+        anchor=str(branch), worktree_root=str(branch.parent / "worktrees"),
+        remote="origin", default_branch="main",
+        pr=cfg.PRConfig(enabled=True, provider="github", publication_checks=POLICY),
+    )
+    reads = []
+
+    def run(args, **kwargs):
+        selected = unquote(args[-1].split("/heads/", 1)[1])
+        reads.append(selected)
+        sha = head if selected == "change" else base
+        if (moved == "source" and selected == "change" and len(reads) > 2
+                or moved == "base" and selected == "main" and len(reads) > 2
+                or moved == "after-create" and len(reads) > 4):
+            sha = "f" * 40
+        return subprocess.CompletedProcess(args, 0, json.dumps({
+            "ref": "refs/heads/" + selected, "object": {"type": "commit", "sha": sha},
+        }), "")
+
+    monkeypatch.setattr(github, "run_cli", run)
+    provider = github.GitHubProvider()
+    if moved in {"source", "base"}:
+        with pytest.raises(checks.CheckError, match="moved while qualifying"):
+            pr_foreign_checks.qualify(str(branch), "example/project", "change", head, repo, provider)
+    else:
+        evidence = pr_foreign_checks.qualify(
+            str(branch), "example/project", "change", head, repo, provider,
+        )
+        assert evidence["ok"] and reads == ["change", "main", "change", "main"]
+        result = pr_foreign_checks.after_create(evidence, "example/project", repo, provider)
+        assert result["ok"] is (moved == "none")
+        assert result["outcome"] == (
+            "verified-after-create" if moved == "none" else "changed-after-create"
+        )
+
+
 def test_optional_ssh_binding_preserves_legacy_receipt_identity_when_unset(branch):
     legacy = asdict(POLICY)
     del legacy["ssh_url"]

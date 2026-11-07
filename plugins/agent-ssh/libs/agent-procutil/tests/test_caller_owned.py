@@ -39,6 +39,39 @@ def _run(code: str, *, timeout: float = 5, stdout: int = 4096, stderr: int = 409
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows creation audit")
+@pytest.mark.parametrize("refuse", [False, True])
+def test_native_launch_audit_precedes_child_creation(tmp_path, monkeypatch, refuse):
+    marker = tmp_path / "child-ran"
+    argv = [
+        sys.executable, "-I", "-c",
+        "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(marker),
+    ]
+    environment = dict(os.environ)
+    events = []
+    original = sys.audit
+
+    def audit(event, *args):
+        if event == "subprocess.Popen" and args[1] == argv:
+            events.append(args)
+            if refuse:
+                raise PermissionError("fixture audit refused launch")
+        return original(event, *args)
+
+    monkeypatch.setattr(sys, "audit", audit)
+    options = dict(
+        timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+        cwd=tmp_path, env=environment,
+    )
+    if refuse:
+        with pytest.raises(PermissionError, match="fixture audit refused launch"):
+            run_caller_owned(argv, **options)
+    else:
+        assert run_caller_owned(argv, **options).returncode == 0
+    assert events == [(sys.executable, argv, str(tmp_path), environment)]
+    assert marker.exists() is not refuse
+
+
 @native_execution
 @pytest.mark.parametrize("capture", [True, False])
 def test_binary_capture_preserves_non_utf8_and_exact_newline_bytes(capture):

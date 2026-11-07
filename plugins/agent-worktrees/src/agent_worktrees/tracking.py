@@ -2337,11 +2337,8 @@ def _save_record_contents_unlocked(
     ``preserve_handoff_reservations=False`` while setting/clearing reservations
     under the required record lock.
 
-    The universal serializer, called under ``_save_record_unlocked``'s pair
-    fence: not only
-    ``save_record``, but also several already-locked direct callers (e.g.
-    the execution-leg CLI). Refreshing :mod:`record_cache` HERE, not only in
-    ``save_record``, reaches every one of them.
+    All locked writers pass here. Refresh the record cache after persistence;
+    native owner notifications remain deferred until record/pair release.
 
     **Every revision-merge below only protects a stale-snapshot writer on
     current code** -- a still-live OLDER-code process has no such field and
@@ -2351,6 +2348,9 @@ def _save_record_contents_unlocked(
     if path is None:
         path = record.yaml_path
     capture_before = save_notifications.prepare(current, path)
+    from .checkout_relocation_state import preserve as preserve_checkout_location
+
+    preserve_checkout_location(record, current, path)
     receiving_allocation.preserve(record, current, path)
     resource_producer.preserve_incarnation(record, current)
     if preserve_handoff_reservations and current is not None:
@@ -2956,6 +2956,7 @@ def _save_record_contents_unlocked(
 
     pr_authority.write_record(record, path, content)
     record_cache.store(path, record, content=content, capture_before=capture_before)
+    save_notifications.worktree_changed(record.worktree_path)
     receiving_allocation.persist_conclusion(record)
 
 

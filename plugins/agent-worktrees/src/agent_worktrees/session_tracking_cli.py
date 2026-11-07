@@ -5,13 +5,10 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import re
+import sys
 from pathlib import Path
 
-from . import config as cfg
-from . import output
-from . import installer as inst
-from . import profile_assignment, sessions, terminal_conclusion, tracking, worktree_identity
-from . import reap_cli, retained_record_writer, status_monitor_runtime
+from . import config as cfg, output, sessions, tracking, worktree_identity, retained_record_writer
 
 
 def _core():
@@ -28,8 +25,17 @@ def _core_helper(name: str, local):
     return local
 
 
+def add_head_parser(sub) -> None:
+    sp = sub.add_parser("head-session", help="Show a worktree's asserted head (current) session + state (JSON)")
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id", required=True,
+                    help="Worktree ID (full or 4-char suffix)")
+    sp.add_argument("--json", action="store_true", help="Emit JSON (default; accepted for caller compatibility)")
+
+
 def add_parsers(sub) -> None:
     """Register parser wiring for cross-project session-tracking commands."""
+    from . import terminal_conclusion
+
     # list-sessions -- enumerate a worktree's Copilot sessions as JSON
     sp = sub.add_parser(
         "list-sessions",
@@ -72,22 +78,7 @@ def add_parsers(sub) -> None:
     )
 
     # head-session -- a worktree's asserted head session + lifecycle state (JSON)
-    sp = sub.add_parser(
-        "head-session",
-        help="Show a worktree's asserted head (current) session + state (JSON)",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or 4-char suffix)",
-    )
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
+    add_head_parser(sub)
 
     sp = sub.add_parser(
         "worktree-lineage",
@@ -300,6 +291,8 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     worktree's resolved interface and origin. Always emits the versioned JSON
     envelope (machine-facing -- consumed by agent-bridge).
     """
+    from . import profile_assignment
+
     wt_id = getattr(args, "worktree_id", None)
     all_projects = bool(getattr(args, "all_projects", False))
     if all_projects:
@@ -396,6 +389,8 @@ def _all_tracking_dirs() -> list[Path]:
     which project owns it. Never raises: a project that cannot resolve a dir is
     skipped.
     """
+    from . import installer as inst
+
     dirs: list[Path] = []
     seen: set[Path] = set()
 
@@ -522,6 +517,7 @@ def cmd_head_session(args: argparse.Namespace) -> int:
         }
         for handoff in record.pending_handoffs
     ]
+    core = sys.modules.get("agent_worktrees.__main__")
     output._json_output(
         {
             "worktree_id": record.worktree_id or raw,
@@ -533,8 +529,8 @@ def cmd_head_session(args: argparse.Namespace) -> int:
             "head_revision": transition.revision if transition is not None else 0,
             "pending_handoffs": pending,
             "controller_revision": record.controller_revision,
-            "controllers": _core()._controller_metadata(record),
-            "controller_findings": _core()._controller_findings(record),
+            "controllers": getattr(core, "_controller_metadata", tracking._controller_metadata)(record),
+            "controller_findings": getattr(core, "_controller_findings", tracking._controller_findings)(record),
         }
     )
     return 0
@@ -613,6 +609,8 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
     def _fallback() -> dict:
         return fallback(project, worktree_id)
 
+    from . import status_monitor_runtime
+
     lock = _core_helper("_monitor_lock_path", status_monitor_runtime._monitor_lock_path)()
     payload = {"project": project, "worktree_id": worktree_id, "force": force}
     monitor_enabled = _core_helper("_status_monitor_enabled", status_monitor_runtime._status_monitor_enabled)()
@@ -652,7 +650,7 @@ def _dispatch_session_lifecycle(verb: str, verb_args: dict):
     so an older daemon cannot bypass receiving-side execution-space authority.
     """
     from . import locks as _locks
-    from . import tracking_write
+    from . import status_monitor_runtime, tracking_write
 
     return tracking_write.dispatch(
         verb,
@@ -738,6 +736,8 @@ def _find_tracking_file_exact(raw_id: str) -> Path | None:
 
 def _project_for_tracking_file(path: Path) -> str | None:
     """Resolve the project whose machine-local tracking dir contains ``path``."""
+    from . import installer as inst
+
     names: list[str] = []
     active = cfg.active_project()
     if active:
@@ -789,6 +789,8 @@ def _relocate_active_project_for_worktree(wt_id: str) -> bool:
 
 def cmd_conclude_disposable(args: argparse.Namespace) -> int:
     """Conclude one exact disposable worker and optionally remove it."""
+    from . import reap_cli, terminal_conclusion
+
     raw = args.worktree_id
     if not raw or re.search(r"[/\\]|\.\.", raw):
         return output._json_error(f"Invalid exact worktree id: {raw!r}")

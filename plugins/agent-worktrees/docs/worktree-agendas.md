@@ -75,6 +75,47 @@ commit-before-notification and held-reader lifecycle. A version change is not
 permission to reset a revision, replace a same-head store, or clear observed
 evidence through a null availability update.
 
+## Optional display graph
+
+A resident that also advertises `worktree-agendas-graph-v1` admits an optional
+top-level `graph` member on a version-2 observation. It is a bounded,
+display-only projection of the planning owner's queue, frame stack, cursor and
+recent history:
+
+```text
+{version: 1, revision, cursor: {frame, item, stack[]},
+ frames: [{id, parent, via, state, label, returns}],
+ items: [{id, frame, label, state, attempts}],
+ history: [{at, kind, frame, item, text}],
+ omitted: {frames, items, history}}
+```
+
+`revision` matches the observation's. Frames form a tree, `via` naming the
+parent item a subqueue expanded from. The cursor names the active frame and an
+item of that frame, and `stack` lists frame ids from the root frame down to the active
+frame. Counts in `omitted` report what the bound dropped. The graph is
+validated with the observation, so it has the same size limit.
+
+Read and feed callers receive `graph` only when they request it with
+`--agenda-graph 1` (request field `graph: 1`), which needs
+`--contract-version 2`. The CLI checks both resident capabilities before it
+sends the request. Without that request, the reply omits `graph` and is
+otherwise unchanged, so existing consumers see the same body. Publishing
+commits the graph as part of the body. A publisher must drop it for a resident
+that does not advertise the capability, and must not tunnel it through
+another field. `agenda-publish` requests and checks the graph capability
+whenever its input body carries a graph. Revision identity excludes the graph:
+the same committed revision may be republished with or without it (after a
+capability upgrade or rollback) and replaces the cached projection, while any
+other difference is still a `revision-conflict`. The resident stores the graph
+in its own table, bound to the cached revision identity, so the durable
+agenda cache keeps the graph-free body an older resident can reopen after a
+rollback. A cached graph is rejoined only while its identity still matches the
+cached revision. The publisher keeps the
+active stack, deferred frames and every kept frame's ancestors in the graph,
+and omits the graph when that structure exceeds its bound. The graph never
+grants acceptance, permission or an action.
+
 ## Version-1 control contract
 
 `agenda-read` and `agenda-feed` accept exactly:

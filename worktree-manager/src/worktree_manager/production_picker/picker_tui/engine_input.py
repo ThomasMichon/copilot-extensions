@@ -72,6 +72,11 @@ class PickerScreenInputMixin:
         if key == "s" and self._kind() == "worktrees":
             self._wt_remap(lambda: self.list_view.cycle_sort(derive.WT_SORT_KEYS))
             return
+        if key in ("g", "f") and self._kind() == "worktrees":
+            self._wt_remap(
+                self.list_view.cycle_group if key == "g" else self.list_view.cycle_status,
+            )
+            return
         # "o" opens the read-only local claims-orphanage screen
         # (worktree-claims-transitive-finalization Phase 4 item 2) --
         # Worktrees only, matching "/" / "s" above; a no-op (never opens an
@@ -178,6 +183,9 @@ class PickerScreenInputMixin:
             # quit-confirm (#1429) -- only when all three are already clear.
             if key == "escape" and self.list_view.query:
                 self._wt_remap(self.list_view.clear)
+                return
+            if key == "escape" and self.list_view.status_index:
+                self._wt_remap(self.list_view.clear_filters)
                 return
             if key == "escape" and self._wt_collapse_selection():
                 return

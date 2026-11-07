@@ -306,7 +306,11 @@ It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
 without fallback or prerequisite skips on Windows. A private executable adapter
 adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
 control and cleanup calls use that same namespace. The adapter restores the
-backend's original PATH. Two small native controls cover direct and adapted
+backend's original PATH. A separate native executable carries the synthetic
+Python owner's literal argv, stdin and exit status; it is not a PowerShell
+script substituted for a Python executable. The actual hosting-admission
+function is also checked before and after a real private mux probe, retaining
+BOM-free JSON input despite console-encoding changes. Two small native controls cover direct and adapted
 private mux startup. Four concurrent admitted
 Resume plans traverse the unchanged production launcher, copied pane assets,
 argument receipt and startup reader,
@@ -2346,6 +2350,21 @@ against an actual stalled child, without retries or a resident waiter.
 Run the expensive current-runtime matrix explicitly on Windows with
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
 The existing `native` discovery exclusion keeps it out of ordinary unit CI.
+
+For the actual Worktrees Python launch owner, select
+`tests/native/test_headed_worktrees_copilot.py` with
+`COPILOT_DRIVER_HEADED_MUX_E2E=1`, `COPILOT_NATIVE_TEST_EXECUTABLE` naming an
+existing native Copilot executable, and an existing PSMux/PowerShell installation.
+Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+This focused lane uses the managed test environment, a loopback-only model
+provider, disposable Copilot state and the runner's private mux namespace.
+It checks a literal staged seed, fresh launch and same-session native resume,
+broker prompts, real child PID/birth receipts, seed non-replay and exact
+fixture retirement. Discovery uses a read-only adapter to the real private mux,
+not the host's default server or fabricated successful replies.
+It does not install a runtime or qualify copied setup, the full Manager/embody
+planner, guarded-head recovery, physical terminal input or survival after
+caller cleanup Jobs. Those remain separate acceptance lanes.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
@@ -5096,6 +5115,11 @@ the same monotonic idle grace. Generation, admission, malformed and expired
 notifications cannot renew it or invoke policy. Actual sockets, the final
 idle-check/drain interleaving and Windows shell delivery remain in the explicit
 Worktrees consumer packet, not this actor-free inventory.
+The same in-memory handler fixture covers optional `worktreeChanged` delivery:
+current generation/admission accepts the wake, while stale, closed, legacy,
+malformed and expired frames neither reply nor invoke tool policy. Associated
+application-marker units supply a synthetic marker environment; dependency
+evaluation must not discover the test host's identity.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
 once per test session, then execute that code in fresh per-case module globals.
 They do not share module state, results, provider observations or qualification

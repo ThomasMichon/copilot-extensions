@@ -72,6 +72,14 @@ def _small_stage(tmp_path: Path, plugin: str):
         names.update(("command_binding.py", "command_lifecycle.py"))
         shutil.copytree(original / "installation-context", scripts / "installation-context")
         shutil.copytree(original / "_lifecycle_human", scripts / "_lifecycle_human")
+    else:
+        # Vault installers gate on the payload's activation reader before staging.
+        names.update(("runtime-activation.ps1", "runtime-activation.py", "runtime-activation.sh"))
+        shutil.copytree(original / "configuration-layers", scripts / "configuration-layers")
+        shutil.copytree(
+            REPOSITORY / "plugins" / plugin / "src", payload / "src",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
     for name in names:
         shutil.copy2(original / name, scripts / name)
     for path in (REPOSITORY / "libs" / "installer-engine").iterdir():

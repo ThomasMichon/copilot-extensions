@@ -21,6 +21,15 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Picker notices and diagnostics
 
+Mux uncertainty is separate from process liveness: `MUX(?)` means last-known
+mux hosting cannot be confirmed, and `HOST(?)` means a live process's hosting
+is unknown. Neither is a zero-client detached session or proof of a safe cold
+launch. Passive PSMux CLI discovery, attachment refresh and status validation
+are unavailable rather than executing commands that can perform startup cleanup.
+Existing mappings and counts are preserved, not revalidated. See
+[preservation-first recovery](../plugins/agent-worktrees/docs/mux.md#preserve-first-when-discovery-is-unavailable)
+for the scope, older-consumer limitation and separately authorized recovery.
+
 The Picker reserves two fixed notice rows for Knowledge setup and cached-source
 refresh status. Updates to these notices do not insert entries into the worktree
 list or move its selection. Claim-coverage warnings appear as a compact warning
@@ -28,6 +37,26 @@ icon; impacted worktrees offer **Doctor** in Actions for read-only diagnostics
 and full claim inspection. Inspection does not repair or release resources.
 Re-homed resources without a worktree row retain the compact `o: Doctor`
 footer shortcut to their existing inspection screen.
+
+## Worktree list controls
+
+The default list keeps **Active** separate and combines dormant and completed
+work in **Recent**, ordered by USED. The always-visible controls row exposes
+`s` **Sort** (used/title/state), `g` **Group** (Active/Recent, detailed status,
+or none), `f` **Status** (all/live/unfinished/completed), and `/` **Search**.
+Unowned and controller-owned workspaces retain their separate safety sections.
+
+Search still preserves live rows. An explicit nonlive status filter may hide
+them and visibly says **live hidden**. Escape clears search, then a status
+filter, before collapsing selection or asking to quit. Grouping and sorting
+remain selected. Live reordering preserves source-qualified focus, range
+anchor and multiselection; filtering never changes an action's target identity.
+
+USED and its default sort share the latest real worktree message timestamp
+when the selected engine supplies the optional versioned message fact.
+Older engines retain resume/completion/start fallback. See the
+[engine contract](../plugins/agent-worktrees/docs/engine-picker-contract.md#message-activity-and-native-mutation-wakes)
+for message, timezone and compatibility semantics.
 
 ## Staged launch prompts
 
@@ -769,6 +798,15 @@ Request status, recovery and authentication inspection instead use the current
 CLI outside installation submission. Read-only queries never authorize implicit
 fence repair; explicit recovery does not enqueue a new job that would hold its
 own recovery lock. Structured results remain on stdout, separate from diagnostics.
+If worker startup fails after bootstrap admission, detached JSON mode returns the
+admitted request ID, log path and admission snapshot with the caller error.
+The caller still fails; a pending receipt is not a running worker or completed
+installation. Inspect that same request before any further submission. The
+receipt does not authorize replay, foreground fallback or a different launch
+boundary.
+Foreground waits preserve the admitted identity on stderr when a worker exits
+between acknowledgment and claiming the request. Foreground `--json` remains
+unsupported and is rejected before admission; this receipt does not enable it.
 POSIX dispatch also waits when it owns a completion scope but deliberately
 forwards no witness. An unowned non-update
 launch retains process replacement. Source-only entries resolve their current

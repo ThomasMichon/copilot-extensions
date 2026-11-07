@@ -233,6 +233,61 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [documentary and retained-wake study](<journal/2026/11.06 documentary-and-retained-wake-study.md>)
+keeps the three Manager/MCP contracts separate and preserves the complete
+eight-effort layout and retained-conversation wake obligations. Whole-source
+holds, extract-only evidence and static partial credit establish no new
+closure or custody release. Two equal complete scans remain at 812 whole OPEN,
+83 above fixed 729; Phase 2 remains Active and every completion checkbox is
+unchanged.
+
+After reviewed #11272, complete actual #6917 receiving and separate fresh
+judgments, #11263/#11266 are retired NOT_PLANNED without technical completion
+or custody release. The [receiving follow-through](<journal/2026/11.06 independent-managed-validation-intake.md>)
+records two equal complete scans: 812 whole OPEN, 83 above fixed 729,
+and 1,039 audited closure outcomes. Phase 2 continues with bounded study of
+new provider evidence under #5293; its original completion gate stays intact.
+
+The [independent managed-validation intake](<journal/2026/11.06 independent-managed-validation-intake.md>)
+preserves complete #11263/#11266 directly in OPEN #6917 as independent
+MR7/MR8 and MRV8/MRV9 lanes. Existing acceptance, check states, discussions,
+and source/resource custody remain unchanged; both originals stay OPEN
+pending review and separate tracking judgments. Two equal complete scans
+measure unchanged 814 whole OPEN, 85 above fixed 729; Phase 2 continues.
+
+After reviewed #11261 and a separate fresh source audit, #11219 is CLOSED
+COMPLETED without a runtime or custody claim. Two complete equal scans measure
+814 whole OPEN: new #11263/#11266 inflow outweighed that one source closure.
+The linked [follow-through](<journal/2026/11.06 branch-observation-and-streaming-followthrough.md>)
+retains both complete validation contracts for the next cohort; Phase 2
+continues 85 above fixed 729, with 1,037 audited closure outcomes.
+
+The [branch-observation and streaming follow-through](<journal/2026/11.06 branch-observation-and-streaming-followthrough.md>)
+verifies #11219's newly merged finite source repair without adding a rollout
+gate, while preserving #11210's whole streaming acceptance and #11245's
+OPEN implementation provider. Protected sources remain withheld. The
+813-whole checkpoint includes new #11255 inflow offsetting the preceding
+tracking retirement, and stays 84 above fixed 729; Phase 2 and custody stay Active.
+
+After reviewed #11252 and complete actual #6394 receiving/readback, #11181
+is separately retired NOT_PLANNED without technical completion or custody
+release. Two complete equal scans measure 812 whole OPEN, 83 above fixed
+729; 516 original-cohort and 296 inflow remain. Phase 2 continues.
+
+The [exact-session receiving contract](<journal/2026/11.06 exact-session-receiving-contract.md>)
+receives #11181's complete admission, retirement and RPC-boundary requirements
+directly in OPEN #6394, preserving its original alternatives, all existing
+acceptance and source/resource custody. Normal review and a separate current
+source judgment precede any tracking retirement. Two complete equal scans
+measure 813 whole OPEN, 84 above fixed 729; Phase 2 remains Active.
+
+The [late-provider and incremental-capture study](<journal/2026/11.06 late-provider-and-incremental-capture-boundaries.md>)
+confirms the current pre-filter enumeration defect and keeps two OPEN MCP
+providers, a merged strict-mode correction and daemon observation qualification
+at their actual evidence boundaries. New guidance-floor and independent-writer
+originals retain distinct acceptance. The 813-whole checkpoint remains 84 above
+fixed 729; Phase 2, original acceptance and all source/resource custody stay Active.
+
 The [provider-guard and consumer qualification study](<journal/2026/11.06 provider-guard-and-consumer-qualification.md>)
 credits delivered fake-provider and author-roster corrections without calling
 unfiltered tests, cold dispatch or consumer subscription complete. Eight
@@ -2851,6 +2906,40 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [documentary and retained-wake study](<journal/2026/11.06 documentary-and-retained-wake-study.md>)
+records independent current metadata/source-identity checks, exhausted bounded
+studies and the original-packet sequencing deviation without retroactive repair.
+Eight-effort migration, complete hosted-wake route/lifecycle acceptance and
+the compatibility root's whole-program gate remain unresolved. Existing
+technical acceptance, source/resource custodians and campaign completion stay
+unchanged; no product or native validation is claimed.
+
+The [reviewed receiving follow-through](<journal/2026/11.06 independent-managed-validation-intake.md>)
+resolves only the two separate tracking judgments after exact-head review/CI
+and independent current whole-parent audits. #6917's technical lanes and all
+custodians remain open; #5293's new linked merge is a bounded research input,
+not whole-program acceptance. Campaign completion remains unchanged at
+812 whole OPEN.
+
+The [independent managed-validation intake](<journal/2026/11.06 independent-managed-validation-intake.md>)
+records actual complete receiving and readback, not fixture repair, accepted
+flakiness, installed-consumer acceptance, native permission, or custody
+transfer. Loaded agenda semantics and actual installed-wheel/source-root
+validation remain independent and unchecked. Normal review and separate
+current tracking judgments remain owed; campaign completion is unchanged.
+
+The [reviewed source-closure follow-through](<journal/2026/11.06 branch-observation-and-streaming-followthrough.md>)
+resolves #11219's separate finite tracker judgment after exact-head review/CI
+and a fresh original/source audit. It does not resolve whole streaming,
+Manager diagnostics, either new validation contract, release or custody.
+All campaign completion checkboxes remain unchanged at 814 whole OPEN.
+
+The [branch-observation and streaming follow-through](<journal/2026/11.06 branch-observation-and-streaming-followthrough.md>)
+separates exact-head provider review/CI, inspected source and attributed test
+reports from release, installed behavior and whole streaming acceptance.
+The source-only completion candidate still requires a separate fresh tracker
+judgment; all original check states and source/resource custodians remain.
 
 The [board-waiter receiving matrix](board-waiter-receiving-cohort.md)
 preserves the author's withdrawn universal claim, complete affected-module

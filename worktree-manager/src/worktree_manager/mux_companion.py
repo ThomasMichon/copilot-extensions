@@ -248,6 +248,11 @@ class MuxCompanionApp(CompanionPrMixin, App):
         padding: 1 2;
     }
 
+    #agenda.agenda-graph {
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
+
     #pr-controls {
         height: auto;
         margin: 0 2;
@@ -541,9 +546,15 @@ class MuxCompanionApp(CompanionPrMixin, App):
         )
 
     def _update_agenda(self) -> None:
-        self.query_one("#agenda", Static).update(agenda_text(
-            self._data.agenda, self._data.agenda_error,
-        ))
+        agenda = self.query_one("#agenda", Static)
+        frame = self._data.agenda
+        # Graph lanes only line up unwrapped, so long rows end in an ellipsis.
+        agenda.set_class(
+            self._data.agenda_error is None and isinstance(frame, dict)
+            and isinstance(frame.get("observation"), dict) and "graph" in frame["observation"],
+            "agenda-graph",
+        )
+        agenda.update(agenda_text(frame, self._data.agenda_error))
 
     def _receive_agenda(self, data, generation, cancelled, frame, error) -> None:
         if (

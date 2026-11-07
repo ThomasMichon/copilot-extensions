@@ -12,6 +12,7 @@ import yaml
 
 from . import config as cfg, execution_spaces, finalize as fin, git_ops
 from . import creation_repair_identity
+from . import paired_allocation_location
 from . import installer, knowledge_plugins, launch_admission, launch_seed_state, local_cache_refresh
 from . import output, permissions, repos, sessions, state_root, tracking
 from . import worktree_creation
@@ -74,10 +75,9 @@ def _validate(
     ):
         raise ValueError("creation repair requires this project's active local session worktree")
     checkout = Path(record.worktree_path)
-    expected_path = Path(config.default_repo.worktree_root) / record.worktree_id
     if (
         not checkout.is_dir() or checkout.is_symlink()
-        or checkout.resolve() != expected_path.resolve()
+        or not creation_repair_identity._repair_namespace_matches(record, config)
         or record.branch != f"worktree/{record.worktree_id}"
     ):
         raise ValueError("retained creation checkout is missing, moved, or mismatched")
@@ -198,9 +198,10 @@ def _retained_sibling(
             raise ValueError("retained paired allocation identity does not match")
         if child.owner_ref is not None and child.owner_ref != harness_ref:
             raise ValueError("retained paired allocation has a different parent owner")
-        expected_path = Path(cfg.derive_worktree_root(root.path)) / knowledge_id
+        expected_path = Path(child.worktree_path)
+        receiving = cfg.load_project_config(root.repo, include_control_plane_related_pr=False)
         if (
-            Path(child.worktree_path).resolve() != expected_path.resolve()
+            not creation_repair_identity._repair_namespace_matches(child, receiving)
             or not expected_path.is_dir() or expected_path.is_symlink()
             or child.status != "active"
         ):
@@ -236,7 +237,7 @@ def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
             if error:
                 raise ValueError(f"retained companion is not stopped: {error}")
         elif existing is None and repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
-            target = Path(cfg.derive_worktree_root(root.path)) / f"{record.worktree_id}-k"
+            target = paired_allocation_location.original(record, root)
             if target.exists():
                 raise ValueError("untracked paired checkout exists; do not allocate another")
     return root, existing, allocation, child
@@ -267,9 +268,8 @@ def _prepare_pair(
             entry = repos.find_repo(root.repo)
             if entry is None:
                 raise ValueError("knowledge repository registration is missing")
-            knowledge_id = f"{record.worktree_id}-k"
             if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
-                target = Path(cfg.derive_worktree_root(root.path)) / knowledge_id
+                target = paired_allocation_location.original(record, root)
                 if target.exists():
                     raise ValueError("untracked paired checkout exists; do not allocate another")
 
@@ -291,6 +291,7 @@ def _prepare_pair(
                 machine_identity=record.machine_identity,
                 legacy_machine=record.machine if record.machine_identity is None else None,
                 revalidate_creation=revalidate_creation,
+                retained_pair_path=paired_allocation_location.original(record, root),
             )
             if stamp is None:
                 raise ValueError("paired creation did not establish its required companion")

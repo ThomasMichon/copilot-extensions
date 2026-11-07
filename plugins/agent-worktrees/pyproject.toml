@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktrees"
-version = "1.24.517-dev1"
+version = "1.25.0-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -36,9 +36,11 @@ dependencies = [
     "agent-update-telemetry",
     "agent-update-driver",
     "agent-repository-policy",
+    "agent-copilot-driver-core",
 ]
 
 [tool.uv.sources]
+agent-copilot-driver-core = { path = "libs/copilot-driver-core" }
 agent-configuration-layers = { path = "libs/configuration-layers" }
 agent-repository-policy = { path = "libs/repository-policy" }
 agent-worktree-identity = { path = "libs/worktree-identity" }
