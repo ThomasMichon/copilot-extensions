@@ -2274,3 +2274,23 @@ PowerShell setup consumers. This is bounded argument composition and native
 setup evidence, not Manager broker admission or complete caller lifetime.
 The existing setup envelope and CLI remain unchanged; the compatibility
 repair adds no protocol, dependency or deployment. The parent stays Active.
+
+The next review identifies two additional supported spellings: legacy
+resource-bearing wheels in a flat version environment, and physical package
+paths beneath an aliased installation root. Sixteen wrapped/deferred controls
+fail before the correction; the eight prepared-copy controls already pass.
+Normalize the installation and candidate paths to their physical spelling,
+constrain the result to that installation, and distinguish flat undeclared
+wheel slots from declared nested applications. A declared application cannot
+admit leftover flat wheel assets, and an asset alias cannot escape the root.
+
+All 108 boundary controls pass in 49.42 seconds (105.08 including preparation
+and cleanup), including the real Windows junction and legacy-wheel producers.
+The preceding seventeen packaged-path controls also qualified at their exact
+published head on hosted Windows with no skips in 40.77 seconds
+([run 42390665519](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42390665519)).
+That source attribution remains explicit; the expanded cases need their own
+updated-head evidence. Required CI also finds the HTTP registry's stale source
+pin. Refresh the existing non-semantic local-invocation source record through
+the canonical lossless metadata owner; HTTP fixtures, generations and archived
+provenance remain unchanged. No readiness, wire or lifetime claim is expanded.

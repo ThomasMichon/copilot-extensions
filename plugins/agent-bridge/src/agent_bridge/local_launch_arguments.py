@@ -90,20 +90,19 @@ def _prepared_script(script: Path, record: Path | None, name: str) -> bool:
 
 
 def _packaged_script(script: Path, root: Path, name: str) -> bool:
+    root, script = root.resolve(), script.resolve()
     try:
         relative = script.relative_to(root / "versions")
     except ValueError:
         return False
     parts = relative.parts
+    suffix = ("Lib", "site-packages", "agent_worktrees", "_runtime_assets", "scripts", name)
+    application = parts[1:] == (".venv", *suffix)
     return (
-        len(parts) == 8 and parts[0] != "dev"
-        and parts[1:] == (
-            ".venv", "Lib", "site-packages", "agent_worktrees",
-            "_runtime_assets", "scripts", name,
-        )
-        and (root / "versions" / parts[0] / "application.json").is_file()
+        bool(parts) and parts[0] != "dev"
+        and (application or parts[1:] == suffix)
+        and (root / "versions" / parts[0] / "application.json").is_file() == application
         and script.is_file()
-        and script.resolve() == root.resolve() / "versions" / relative
     )
 
 

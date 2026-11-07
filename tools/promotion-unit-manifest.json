@@ -4916,7 +4916,7 @@
         "plugins/agent-bridge/src/agent_bridge/hosting_admission_cli.py": "b851565e2466f995016a1b8348785c019ebe00abd2d79e91a452b64930ba045f",
         "plugins/agent-bridge/src/agent_bridge/hosting_policy.py": "41fbd06f6daca492a75975d2392dae85590f53fcf53941c87f741f24db12b9eb",
         "plugins/agent-bridge/src/agent_bridge/live_turn_state.py": "7cc256ae9df554f76101c4519c38da6f000408e507ef1edfa6fc971a5b5d013f",
-        "plugins/agent-bridge/src/agent_bridge/local_launch_arguments.py": "4a762b76700efdcf6c69af33d06b7f32efb67b297bc45677208e97432df4d6aa",
+        "plugins/agent-bridge/src/agent_bridge/local_launch_arguments.py": "a17f6fd8e435132948ded79d02c6d8eb66164c4a17b4fef55736ed802c75b386",
         "plugins/agent-bridge/src/agent_bridge/owned_workspace.py": "ca4f234460c79857429438f92ebf9944be75b87fc39f088f6a45c1d6465df2bc",
         "plugins/agent-bridge/src/agent_bridge/protocol.py": "8f29b3bcd9ebaeb1883fa3836f2c4dccd723c9e9eddd821b972cb4cfd5e4b884",
         "plugins/agent-bridge/src/agent_bridge/reader_admission.py": "3114cdb53c6f11f82f2c01e1cf4d46b4afaeebd28aa34e2d7f8459bb7fcc23c3",
