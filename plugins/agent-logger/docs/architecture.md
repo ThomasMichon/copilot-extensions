@@ -354,7 +354,11 @@ Transcripts can be very large, so the provider keeps bounded memory: it reads
 `events.jsonl` line by line through `sessions.open_events_stream` (a live file,
 or a streamed tar.gz/zip archive member via the codec's `open_member`) and
 writes the `{"session": ..., "events": [...]}` payload to stdout one event at a
-time. The bytes are identical to serializing the whole payload at once. The
+time. A tar.gz member is found in one forward pass over the headers and
+streamed from there, so the archive is decompressed once; if a name repeats,
+the first entry wins (the archive writer never repeats one, and the strict
+member scan used for archive comparison and bounded reads rejects repeats).
+The bytes are identical to serializing the whole payload at once. The
 not-found decision is made before anything is written; a read error discovered
 mid-stream (for example a corrupt archive) exits nonzero after partial output,
 which callers already discard. `collate-session` and `ramp-up-session` stream
