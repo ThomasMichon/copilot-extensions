@@ -118,7 +118,7 @@ document the existing trusted-operator boundary.
   the current built-in structured form is native-qualified and both ordinary
   pending-RPC families have focused protocol tests. Do not close the umbrella
   as though that remaining native compatibility qualification ran.
-- [ ] Run affected lint, unit/contract checks and mandatory source gates;
+- [x] Run affected lint, unit/contract checks and mandatory source gates;
   audit public artifacts for private context.
 - [ ] Verify actual provider merge and resolve every remaining gate or
   transfer it explicitly to a named tracked objective.
@@ -204,3 +204,18 @@ requested protocol-only scope.
   old audit records remain visible without blocking new snapshots.
 - Added focused rollover/lost-evidence controls. The corrected final source
   will receive fresh capture and verification before publication readiness.
+
+### 2026-11-07 - Final source acceptance
+
+- The final source checkpoint passed the complete 281-case capture,
+  independent verification, historical publication guards and export.
+  Verified source-bound outputs were materialized through the native owner;
+  the independent contract guard passed again with 1,061 retained fixtures.
+- All 11 question-extension controls passed, including rollover and unavailable
+  original audit recovery. The real native form and actual extension-loader
+  packet passed again after that correction.
+- Enforced type pre-validation passed for all 40 currently admitted strict
+  projects on both declared targets. Bridge remains independently pending
+  type admission; no broader qualification is inferred.
+- Source implementation and evidence are ready for normal review and CI.
+  Merge, effort closeout and finalization remain open. No rollout occurred.

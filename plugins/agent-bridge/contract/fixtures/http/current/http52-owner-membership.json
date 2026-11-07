@@ -2020,8 +2020,8 @@
       "sha256": "9a4bd618b2f2c32dba26a70d07ad9b29ab33a8b40c889db32d9c766cefc9565b"
     },
     "plugins/agent-bridge/docs/live-question-answers.md": {
-      "blob": "bfc72a5eb95c2da77e226f381e3774c3c6084330",
-      "sha256": "fd4a47556686c147111122fabb04c13c1ae27a6ad0b0b87031b938e166f63d77"
+      "blob": "53e5e20a3f409643432d02accc63489924a1b6ba",
+      "sha256": "f93ba89e4b121f4cfef8507e8b452ac0bf1662faa48a4a39645a2bd2120907a8"
     },
     "plugins/agent-bridge/docs/owner-membership.md": {
       "blob": "1be17b32b986aac7757962fba25d099428caae82",
@@ -2048,8 +2048,8 @@
       "sha256": "170254e860d0038d5a5c7a134378cf7b6822361e8c5330622fdb1db5e8b4f447"
     },
     "plugins/agent-bridge/extensions/agent-bridge/extension.mjs": {
-      "blob": "e436fbb4a60192659e9446b723b5412ec21c9dfe",
-      "sha256": "11f24afa8af94d058b254cb745f2acd72377f7698951a35a03eae4de6ce2758c"
+      "blob": "b156741796368d286b1521a55b6a99ff29c20e5f",
+      "sha256": "c350c7132800ba2d80be6f4b343d655b5a589d0c747c9394bf7b0c7bfe81db72"
     },
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs": {
       "blob": "7e44e7c381aaa3a29bb0bc5abeb23313143b93ad",
@@ -2060,8 +2060,8 @@
       "sha256": "593ea7c41e3b75507447367ae68b665a4195c532d10052321e1f05c407e98eda"
     },
     "plugins/agent-bridge/extensions/agent-bridge/questions.mjs": {
-      "blob": "88abc866480f3e4513c390d04d4e0f649f852f1a",
-      "sha256": "2afe7f257a2df1a5d1d2bccd387a21a3bdd17fd90295c3bb84107b0cc46f080d"
+      "blob": "4e4984e55541b8355ae6c94a3bc7f80653ed5f77",
+      "sha256": "4a92ca27fb5ddf3a5dc8b531de73421fac6c9ea3d7e4eeca63d1ac764e3ac7ad"
     },
     "plugins/agent-bridge/extensions/agent-bridge/remote-driver.mjs": {
       "blob": "fe6f7db92a6e2f07134138bff00d857ea3736315",
@@ -3820,8 +3820,8 @@
       "sha256": "e412f19fa182d2468677fca8078bf29d197eab5c61f5ff3773bd2071919f6a88"
     },
     "plugins/agent-bridge/tests/questions.test.mjs": {
-      "blob": "84c3bafd2594d4339a7d2b9503e50b7b8e83e628",
-      "sha256": "079b6cd952cccd8c482476afcd0fb560e11758e65a4ff1493aff378bcaf7d424"
+      "blob": "e6e49f9412338b49152b3b869a365c544d9e94a2",
+      "sha256": "250f36eca59bc75d23b5762d75d50c9558a185c0e0d1cdc9ae146cbcc1a525ac"
     },
     "plugins/agent-bridge/tests/retained-extension.test.mjs": {
       "blob": "2c07f92c1ef4c75a4182a1248ce2cfc368da0b19",
@@ -8960,7 +8960,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "45a93c4efd5cacfaa4980a7a936f2efe5a0704a7694e50336fc6a7e6995df4f5",
+  "execution_closure_sha256": "f8baeaf688f430e7b26e15156273207aa6160901cfad406e94cb72baa3911f3f",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -9090,7 +9090,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "e1bbc7041bd2e75308bdb2cb39e4eb9c25f8be47",
+    "commit": "300eb00b64f38a8630a8ea224534ad7e46f9c4e6",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
