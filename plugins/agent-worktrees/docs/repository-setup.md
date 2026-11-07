@@ -163,6 +163,34 @@ engine/Fleet-owned orchestration, not a new responsibility hidden in that script
 
 ### Explicit selected SSH setup
 
+The engine's optional `fleet-ssh` extra declares its Fleet service-Gateway and
+SSH-client SDK dependencies. Select it through the existing complete Source/profile
+preparation (`local_install_profile.py --prepare-profile --component agent-worktrees --extra fleet-ssh`,
+with the normal source, output and UV arguments), using the associated Fleet and
+SSH first-party wheel inputs. This is a dependency selection, not a second installer
+or permission to install packages into a running engine. The normal construction
+owner must retain that selected extra and complete profile on installation/update.
+The default engine dependencies are unchanged; selecting the SDK alone neither
+enrolls a machine nor activates a role. A dependency declaration or prepared profile
+does not replace the executable capability checks below.
+
+The SDK's `[tool.copilot-extensions.application-sources]` declaration maps
+`fleet-manager` to the canonical `standalone:fleet-manager` project. This is
+an associated application input, not a UV vendored-library override. Prepare the
+input snapshot with the existing repeated `local_install_source.py --project`
+selections for `agent-worktrees`, `standalone:fleet-manager` and `agent-ssh`,
+then select `--prepare-profile --component agent-worktrees --extra fleet-ssh` through the normal
+profile command. Existing application builders retain Fleet's resources.
+The profile reader checks the declaration against the actual associated wheel's
+project owner before registry compilation. A missing or different selected Fleet
+input refuses rather than resolving Fleet from a public registry. Without the
+extra, Fleet is not required. Fleet similarly binds its selected SSH-client SDK
+to the canonical `agent-ssh` application input. The dependency-age audit attributes
+the same explicit association to its contained canonical source and still audits
+external dependencies.
+This path uses the already-merged profile APIs; it does not depend on unrelated
+constructor changes or establish the complete installed Manager cohort.
+
 Declaration version `3` retains version-two entrypoints and contexts, adding
 one required `ssh_setup` field to each context. `null` retains outbound-only
 behavior. An absolute/home-relative private request reference explicitly selects

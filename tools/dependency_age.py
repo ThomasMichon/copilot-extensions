@@ -32,6 +32,7 @@ from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS, _default_fetch
 from seasoned_uv import _bundled_dbus_next
 from standalone_consumers import local_dependency_source
 from python_project_inventory import contained_path as _contained_path, manifests as manifests
+from application_sources import application_sources, canonical_application, is_application
 
 MIN_AGE_SECONDS = DEFAULT_MIN_AGE_DAYS * 86400
 _SourceTrees = dict[Path, tuple[str, ast.Module]]
@@ -368,6 +369,8 @@ def contract_source(
 ) -> Path | None:
     """Attribute existing first-party source installs without changing UV packaging.
 
+    Explicit application associations are consumed by the native profile reader,
+    which refuses absent or different selected inputs before registry access.
     Test runners explicitly supply canonical path sources where published
     metadata intentionally has no UV pointer. Extract those literal
     paths from the exact consumer's prepare branch, never a package-name
@@ -377,6 +380,26 @@ def contract_source(
     platforms. Canonical inventory supplies each external
     closure; absence, replacement or drift of this evidence revokes exemption.
     """
+    try:
+        application = application_sources(projects[path]).get(canonicalize_name(req.name))
+        if application is not None:
+            if not is_application(root, path.parent):
+                raise ValueError("application source declaration requires a canonical application consumer")
+            target = canonical_application(root, application)
+            manifest = target / "pyproject.toml"
+            if manifest not in projects:
+                raise ValueError("application source is not an inventoried canonical project")
+            attributed_project(req, target, projects, root)
+            project = projects[manifest]["project"]
+            if not req.specifier.contains(project["version"], prereleases=True):
+                raise ValueError("application source version violates its dependency")
+            if not {canonicalize_name(extra) for extra in req.extras} <= {
+                canonicalize_name(extra) for extra in project.get("optional-dependencies", {})
+            }:
+                raise ValueError("application source dependency requests an unknown extra")
+            return manifest
+    except ValueError as exc:
+        raise DeclarationError(str(exc)) from exc
     consumer = path.parent.relative_to(root).as_posix()
     runner = root / "tools" / "run-standalone-tests.py"
     registry = root / "tools" / "standalone_consumers.py"
