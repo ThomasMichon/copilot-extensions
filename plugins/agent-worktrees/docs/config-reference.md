@@ -671,7 +671,8 @@ Absence/false preserves the prior behavior; nonboolean values are invalid.
 The observation uses the selected Machines runtime's existing
 [`installation-repair --required`](../../agent-machines/README.md) contract, not
 another health database or an executable found on PATH. It is caller-contained
-and bounded to 60 seconds. A refused, interrupted, changed, unsupported or
+and bounded to one 60-second selection/observation/cleanup budget, reserving five
+seconds for settlement. A refused, interrupted, changed, unsupported or
 not-ready result cannot pass. A fully observed empty required set can pass.
 Open **Configuration > Application Readiness** to inspect and explicitly repair;
 use **Installation & Updates** when its owner/runtime is unavailable, then retry.

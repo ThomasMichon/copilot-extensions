@@ -31,7 +31,7 @@ def _observation(source):
 
 
 def test_unselected_repository_does_not_resolve_or_run_machines(tmp_path, monkeypatch):
-    monkeypatch.setattr(admission, "_selected_runtime", lambda: pytest.fail("unselected owner"))
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **k: pytest.fail("unselected owner"))
     assert admission.new_application_error(_config(tmp_path), source=str(tmp_path)) is None
 
 
@@ -47,7 +47,7 @@ def test_unselected_repository_does_not_resolve_or_run_machines(tmp_path, monkey
 def test_unsatisfied_or_unqualified_result_refuses_new(tmp_path, monkeypatch, change):
     config = _required(_config(tmp_path))
     data = {**_observation(config.default_repo.anchor), **change}
-    monkeypatch.setattr(admission, "_selected_runtime", lambda: (["owner"], {}))
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **k: (["owner"], {}))
     monkeypatch.setattr(admission, "run_caller_owned", lambda *a, **k: subprocess.CompletedProcess(
         a[0], 0, json.dumps(data), "",
     ))
@@ -58,7 +58,7 @@ def test_unsatisfied_or_unqualified_result_refuses_new(tmp_path, monkeypatch, ch
 def test_qualified_empty_required_set_is_not_an_unobserved_pass(tmp_path, monkeypatch):
     config = _required(_config(tmp_path))
     calls = []
-    monkeypatch.setattr(admission, "_selected_runtime", lambda: (["selected-owner"], {}))
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **k: (["selected-owner"], {}))
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
@@ -76,6 +76,35 @@ def test_unselected_pending_restart_does_not_create_a_new_requirement(tmp_path):
     data = _observation(str(tmp_path))
     data["restarts"]["pending"] = [{"module": "unselected::optional/app"}]
     assert admission._ready(subprocess.CompletedProcess([], 0, json.dumps(data), ""), str(tmp_path))
+
+
+@pytest.mark.parametrize("selection_seconds,observation_seconds,ready", [
+    (14, 58, False), (14, 10, True), (60, 0, False),
+])
+def test_selection_observation_and_settlement_share_one_deadline(
+    tmp_path, monkeypatch, selection_seconds, observation_seconds, ready,
+):
+    config = _required(_config(tmp_path))
+    clock = [100.0]
+    monkeypatch.setattr(admission.time, "monotonic", lambda: clock[0])
+    budgets = []
+
+    def select(*, budget):
+        budgets.append(budget)
+        clock[0] += selection_seconds
+        return ["selected-owner"], {}
+
+    def observe(argv, *, timeout, budget, **kwargs):
+        assert budget is budgets[0]
+        assert timeout == 55 - selection_seconds
+        clock[0] += observation_seconds
+        return subprocess.CompletedProcess(argv, 0, json.dumps(_observation(config.default_repo.anchor)), "")
+
+    monkeypatch.setattr(admission, "_selected_runtime", select)
+    monkeypatch.setattr(admission, "run_caller_owned", observe)
+    result = admission.new_application_error(config, source=config.default_repo.anchor)
+    assert (result is None) is ready
+    assert budgets[0].deadline == 160
 
 
 def test_knowledge_refusal_does_not_probe_applications(tmp_path, monkeypatch):
@@ -162,9 +191,15 @@ def test_legacy_observation_uses_owner_selection_and_retained_build(tmp_path, mo
     payload, root = tmp_path / "payload", tmp_path / "runtime"
     python = root / "versions" / "selected" / ".venv" / "Scripts" / "python.exe"
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: payload)
-    monkeypatch.setattr(reconcile, "resolve_runtime_installation", lambda name, path: SimpleNamespace(
-        actual_mode="legacy", status="ready", context=None, runtime_root=root,
-    ))
+    seen_budgets = []
+
+    def installation(name, path, *, budget):
+        seen_budgets.append(budget)
+        return SimpleNamespace(
+            actual_mode="legacy", status="ready", context=None, runtime_root=root,
+        )
+
+    monkeypatch.setattr(reconcile, "resolve_runtime_installation", installation)
     selected = []
 
     def select(context):
@@ -181,11 +216,13 @@ def test_legacy_observation_uses_owner_selection_and_retained_build(tmp_path, mo
 
     monkeypatch.setattr(_peer_launch, "retained_runtime_prefix", prefix)
     monkeypatch.setattr(admission, "_supports_required_read", lambda actual: actual == python)
-    command, environment = admission._selected_runtime()
+    budget = admission.OwnedExecutionBudget(160, 5)
+    command, environment = admission._selected_runtime(budget=budget)
     assert command == ["retained-legacy-owner"]
     assert selected[0]["payloadRoot"] == str(payload)
     assert selected[0]["versionsRoot"] == str(root / "versions")
     assert pinned == [(root, python, "agent_machines", "retained-build")]
+    assert seen_budgets == [budget]
     assert "COPILOT_PLUGIN_ROOT" not in environment
 
 
@@ -195,7 +232,7 @@ def test_direct_new_refuses_before_create_mutations(tmp_path, monkeypatch, capfd
     config = _required(_config(tmp_path))
     monkeypatch.setattr(main.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(launch_preflight, "new_knowledge_error", lambda *a, **k: None)
-    monkeypatch.setattr(admission, "_selected_runtime", lambda: (_ for _ in ()).throw(
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **k: (_ for _ in ()).throw(
         ValueError("selected runtime is unsupported"),
     ))
     _forbid_create_mutations(monkeypatch)
@@ -232,7 +269,7 @@ def test_native_machines_read_is_consumed_without_repair(tmp_path, monkeypatch):
     for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
         environment[key] = str(home)
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    monkeypatch.setattr(admission, "_selected_runtime", lambda: (
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **k: (
         [owner_python, "-m", "agent_machines"], environment,
     ))
     config = _required(_config(tmp_path))

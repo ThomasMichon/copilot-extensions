@@ -6,8 +6,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 
-from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+from agent_procutil.owned_process import OwnedCleanupError, OwnedExecutionBudget, run_caller_owned
 
 SCHEMA = "copilot-extensions.installation-repair"
 
@@ -38,7 +39,7 @@ def _supports_required_read(python: Path) -> bool:
     )
 
 
-def _selected_runtime() -> tuple[list[str], dict[str, str]]:
+def _selected_runtime(*, budget: OwnedExecutionBudget | None = None) -> tuple[list[str], dict[str, str]]:
     from . import _peer_launch, peer_launch_adapter, reconcile
 
     if "COPILOT_EXTENSIONS_CONTEXT" in os.environ:
@@ -53,7 +54,9 @@ def _selected_runtime() -> tuple[list[str], dict[str, str]]:
         payload = reconcile.core_installed_payload_dir("agent-machines")
         if payload is None:
             raise ValueError("Machines payload is unavailable; use Installation & Updates")
-        selected = reconcile.resolve_runtime_installation("agent-machines", payload)
+        selected = reconcile.resolve_runtime_installation(
+            "agent-machines", payload, **({"budget": budget} if budget is not None else {}),
+        )
         if selected.actual_mode != "legacy" or selected.status != "ready" or selected.context is not None:
             raise ValueError("Machines observation requires the selected installation's native context")
         root = selected.runtime_root
@@ -123,13 +126,17 @@ def new_application_error(config, *, source: str) -> str | None:
         return None
     reason = "Required application observation is incomplete or not ready."
     try:
-        prefix, environment = _selected_runtime()
+        budget = OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5)
+        prefix, environment = _selected_runtime(budget=budget)
+        remaining = budget.execution_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Required application selection exhausted its budget")
         result = run_caller_owned(
             [*prefix, "installation-repair", "--project-root", source, "--required"],
-            timeout=60, max_stdout_bytes=1024 * 1024, max_stderr_bytes=65536,
-            cwd=source, env=environment,
+            timeout=remaining, max_stdout_bytes=1024 * 1024, max_stderr_bytes=65536,
+            cwd=source, env=environment, budget=budget,
         )
-        if _ready(result, source):
+        if _ready(result, source) and time.monotonic() < budget.deadline:
             return None
     except OwnedCleanupError:
         raise
