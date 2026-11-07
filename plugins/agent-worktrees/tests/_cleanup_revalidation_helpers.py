@@ -8,6 +8,8 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import __main__ as cli
 from agent_worktrees import git_ops, sessions, tracking, worktree_identity
 
@@ -300,6 +302,21 @@ class CleanupHarness:
             return seq[idx]
 
         self.monkeypatch.setattr(cli.sessions, "has_mux_session", _has_mux)
+
+    def use_real_build_active_paths_with_mux_catalogs(self, catalogs) -> None:
+        self.mux_list_calls = 0
+        self.monkeypatch.setattr(cli, "_build_active_paths", _REAL_BUILD_ACTIVE_PATHS)
+
+        def _list_mux():
+            index = min(self.mux_list_calls, len(catalogs) - 1)
+            self.mux_list_calls += 1
+            return catalogs[index]
+
+        self.monkeypatch.setattr(cli.sessions, "_list_mux_sessions", _list_mux)
+        self.monkeypatch.setattr(
+            cli.sessions, "has_mux_session",
+            lambda *a, **kw: pytest.fail("complete catalog must not fall back to a probe"),
+        )
 
     def install_record_lock_wrapper(
         self,

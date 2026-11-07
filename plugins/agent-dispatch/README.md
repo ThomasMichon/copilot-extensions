@@ -543,6 +543,15 @@ and probes the executable in isolation for supported 64-bit CPython 3.10+.
 It uses that base before PATH or launcher discovery, without changing the global
 Python default, PATH, or other plugins' interpreter selection.
 
+Source-validation and construction helpers separately require Python 3.11+.
+The Windows installer retains native admission's executable for these helpers,
+or qualifies compatible PATH applications, launcher registrations/version
+selectors and standard Python installation roots, excluding WindowsApps
+aliases. An explicit signed 3.10+ choice still controls the runtime venv; it
+does not lower the helper floor. Without an explicit runtime choice, venv
+fallbacks carry the qualified helper base, including `uv --python`. Failure to
+find a compatible helper is explicit and never changes global PATH or Python.
+
 After a qualified candidate publishes, Dispatch atomically stores the choice in
 `base-python.json` under its runtime root. Later updates use that preference
 without needing the environment input again; an explicit process input takes

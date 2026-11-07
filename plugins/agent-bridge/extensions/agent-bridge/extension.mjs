@@ -34,7 +34,7 @@ import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { metadataRefresher, processIdentity, registrationMetadata, resolveMetadataAsync } from "./metadata.mjs";
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
-import { createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
+import { createHeadedDriverSession, createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -55,8 +55,10 @@ const DELIVERY_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
 );
 // Selected only by an explicit consumer opt-in. Unsupported retained delivery
 // must hold the original work, never fall through to the legacy ACK path.
+const HEADED_CLIENT = process.env.COPILOT_DRIVER_HEADED_CLIENT;
+delete process.env.COPILOT_DRIVER_HEADED_CLIENT;
 const RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX)
-  || Boolean(process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT);
+  || Boolean(process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT) || HEADED_CLIENT !== undefined;
 // SDK event types we represent (Phase 5). Everything else is intentionally not
 // forwarded -- the bridge-side translator maps exactly this subset into its
 // event vocabulary; keeping the whitelist here avoids buffering noise.
@@ -156,6 +158,7 @@ function resolveToken() {
 // bridge-endpoint.mjs); state.base/state.token mirror it for the guards below.
 let endpoint = null;
 let retainedInbox = null;
+let headedControl = null;
 
 async function fetchBridge(method, path, body) {
   const res = await endpoint.call(method, path, body);
@@ -401,7 +404,13 @@ const session = await joinSession({
 
 if (RETAINED_INBOX) {
   const driverRoot = process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT;
-  const deliverySession = driverRoot ? createRemoteDriverSession(session, {
+  const deliverySession = HEADED_CLIENT !== undefined ? await createHeadedDriverSession(session, {
+    declaration: HEADED_CLIENT, cwd: process.cwd(), nativePid: process.ppid,
+    ...(driverRoot ? {
+      pluginRoot: driverRoot, bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
+      expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
+    } : {}),
+  }) : driverRoot ? createRemoteDriverSession(session, {
     pluginRoot: driverRoot,
     descriptorDirectory: join(process.env.AGENT_REMOTE_DRIVER_CONFIG_DIR
       || join(homedir(), ".copilot", "remote-driver"), "sessions"),
@@ -410,11 +419,12 @@ if (RETAINED_INBOX) {
     ownerId: process.env.AGENT_BRIDGE_DRIVER_OWNER,
     bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
   }) : session;
+  if (HEADED_CLIENT !== undefined) headedControl = deliverySession;
   retainedInbox = createRetainedInbox({
     session: deliverySession, request: retainedBridgeRequest, processIdentity: processIdentity(),
     cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
     canSend: () => state.deliveryEnabled && state.registered, log: extLog,
-    ...(driverRoot ? { sourceAllowed: isRemoteDriverSource } : {}),
+    ...(driverRoot || HEADED_CLIENT !== undefined ? { sourceAllowed: isRemoteDriverSource } : {}),
     ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
       ? { portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null } : {}),
   });
@@ -530,6 +540,7 @@ try {
 function shutdown() {
   try {
     retainedInbox?.close();
+    headedControl?.close();
     if (state.heartbeat) {
       clearInterval(state.heartbeat);
       state.heartbeat = null;

@@ -8,7 +8,7 @@ modules and per-machine data stay in each harness repo.
 from __future__ import annotations
 
 # Fallback only for running from a source tree with no installed distribution.
-_FALLBACK_VERSION = "0.3.98-dev1"
+_FALLBACK_VERSION = "0.3.99-dev1"
 
 
 def __getattr__(name: str) -> str:

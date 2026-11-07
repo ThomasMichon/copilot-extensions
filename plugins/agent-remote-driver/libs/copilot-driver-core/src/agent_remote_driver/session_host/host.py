@@ -91,8 +91,10 @@ class SessionHost:
                  on_child_exit: Callable[[int], None] | None = None,
                  preference_receipt: dict[str, Any] | None = None,
                  lifetime_policy: str = "legacy") -> None:
-        if lifetime_policy not in {"legacy", "acp"}:
+        if lifetime_policy not in {"legacy", "acp", "cli"}:
             raise ValueError("Unsupported Session Host lifetime policy")
+        if lifetime_policy == "cli" and not callable(getattr(child, "terminate", None)):
+            raise ValueError("CLI lifetime requires its exact native termination owner")
         self._lifetime_policy = lifetime_policy
         self._child = child
         self._preference_receipt = validate_receipt(preference_receipt, child.pid or 0)
@@ -236,7 +238,7 @@ class SessionHost:
             await asyncio.shield(writer.wait_closed())
 
         try:
-            if self._lifetime_policy == "acp":
+            if self._lifetime_policy != "legacy":
                 tasks = [
                     asyncio.create_task(self._handle_front(reader, writer)),
                     asyncio.create_task(disconnected()),
@@ -333,13 +335,13 @@ class SessionHost:
         # child lifetime state. Keep this transition synchronous until publication.
         old = self._front
         if old is not None and not old.closed:
-            if self._lifetime_policy == "acp":
+            if self._lifetime_policy != "legacy":
                 writer.close()
                 return
             old.closed = True
             with _suppress_close(old.writer):
                 old.writer.close()
-        if self._lifetime_policy == "acp" and last_acked > self._max_seq:
+        if self._lifetime_policy != "legacy" and last_acked > self._max_seq:
             writer.close()
             return
         self._cancel_reap_timer()
@@ -397,7 +399,7 @@ class SessionHost:
                 writer.close()
 
     def _on_ack(self, seq: int) -> None:
-        if self._lifetime_policy == "acp" and seq > self._max_seq:
+        if self._lifetime_policy != "legacy" and seq > self._max_seq:
             return
         self._ack_cursor = max(self._ack_cursor, seq)
         # Trim durably-acked frames from the buffer.
@@ -480,6 +482,10 @@ class SessionHost:
         if rc is not None:
             return
         proc = self._child
+        terminate = getattr(proc, "terminate", None)
+        if self._lifetime_policy == "cli" and callable(terminate):
+            await terminate()
+            return
         # Tree-kill, not just the copilot pid: copilot spawns MCP-bridge
         # (agent_mcp) and sub-agent processes as descendants, and a bare
         # proc.kill() reaps only copilot and leaves that subtree orphaned to
@@ -637,7 +643,7 @@ class SessionHost:
                 if self._closing or self._instance_guard is not None:
                     raise RuntimeError("Session Host is already serving or closed")
                 self._instance_guard = guard
-                if self._lifetime_policy == "acp":
+                if self._lifetime_policy != "legacy":
                     loop = asyncio.get_running_loop()
                     self._server = await loop.create_server(
                         lambda: _AcpFrontProtocol(

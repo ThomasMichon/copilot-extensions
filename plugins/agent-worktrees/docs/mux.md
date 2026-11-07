@@ -64,6 +64,81 @@ non-persistent diagnostic path.
 
 ## Recovery after a maintenance window
 
+### Preserve first when discovery is unavailable
+
+A missing listing is not proof of process death or a safe replacement target.
+PSMux can run registration cleanup on startup even for nominal reads such as
+`has-session`, `list-sessions` and version queries. Public reports
+[psmux/psmux#622](https://github.com/psmux/psmux/issues/622),
+[psmux/psmux#546](https://github.com/psmux/psmux/issues/546) and
+[psmux/psmux#650](https://github.com/psmux/psmux/issues/650) describe live registration loss
+or subsequent orphan reaping. A successful but incomplete listing is another
+failure class ([psmux/psmux#809](https://github.com/psmux/psmux/issues/809)).
+
+The resident Worktrees mux enumeration and batched status reads therefore do
+not execute PSMux. Manager's periodic client observer, native discovery and
+status-target validation also leave it unqueried. There is no qualified
+non-mutating PSMux observation adapter in these paths yet: observation is
+explicitly unavailable, not an empty catalog. Independent worktree, Git and
+process facts can still publish. Last-known mux presence retains its original
+timestamp; it is not refreshed into current proof. TMux retains bounded CLI
+observations, but malformed rows, duplicate sessions, diagnostics and failed
+fallback probes cannot establish absence.
+
+Cleanup retains checkouts and tracking records whenever mux presence is
+unknown, including its lock-held recheck and final managed-removal guard.
+This is not a positive activity verdict: without independent live evidence,
+classification still reads the checkout's actual Git disposition and counts.
+Expired or negative cache hints do not waive this protection, nor does
+`--force` on session cleanup. Fleet `status --mux-details`, nonresident list
+reads and legacy Picker refreshes still return independent facts without
+clearing last-known mux positives. A project publication failure is isolated
+so unrelated resident rosters remain available.
+Actions-menu liveness refinement also retains mux fields and uncertainty
+unless it receives a complete current mux observation.
+Complete refinement removes only superseded mux provenance and last-known
+hints; unrelated provenance and stale source-envelope evidence remain intact.
+
+Picker shows **`MUX(?)`** for known but unconfirmed mux hosting and
+**`HOST(?)`** for a live process whose mux hosting is unknown. A client count
+is not inferred from either. Proven process-only and ACP hosting remain
+distinct. Old providers without this evidence retain their legacy rendering;
+an old consumer may not render the new uncertainty, so use a compatible
+Manager when relying on these badges.
+
+When a current-roster feed becomes stale or disconnects, normalized attachment
+and mux-live controls become unavailable along with the badge; preserved raw
+client counts and Git facts do not remain current control evidence. A fresh
+publication restores the normal controls.
+
+This mitigation deliberately freezes automatic PSMux discovery, client-count
+refresh and status painting that requires it. It does **not** make explicit
+creation, attachment, recovery or shutdown commands harmless, upgrade PSMux,
+repair a running server, or qualify another executable with the same protocol.
+Explicit strict action-time checks retain their existing query path; they are
+not passive reads or qualified as harmless. A silent failed PSMux presence
+query is now unknown, not confirmed absence, and cannot authorize a cold
+replacement. Failed reachability does not make a mux-homed process reclaimable.
+
+For an affected host:
+
+1. Keep working attachments open; checkpoint surviving agents and preserve
+   source changes through their existing owners. Detachment is not death.
+2. Separately authorize containment through the owning service if old observers
+   are still polling. A source merge alone does not stop installed observers.
+3. Inspect the on-disk executable through file/package metadata, not by running
+   a version query. Identify already-running servers independently; replacing
+   an executable does not upgrade them.
+4. With bounded authorization, recover one checkpointed session at a time
+   through its managed worktree and original durable conversation. Reconcile
+   pending effects before resuming them. Preserve an unreachable survivor
+   rather than starting a duplicate under the same name.
+
+Do not fabricate port/PID registrations, perform global orphan cleanup, or
+restart all mux servers to repair one failed observation. Version 3.4.0 was
+verified against the specific psmux/psmux#622 sequence; that is not proof of every
+discovery guarantee or of the build used by a running server.
+
 The [planned-maintenance contract](../../../visions/agent-fabric/README.md#planned-maintenance-windows)
 applies equally to disruptive mux replacement and machine restart. It calls for
 advance notice, an opportunity for cooperative checkpoint/drain, a durable
@@ -154,18 +229,19 @@ because they don't share a server the same way:
 - **psmux (Windows) runs a separate server per `wt-<id>` session** (each
   session's keybind config is sourced into its own server, never a shared
   one). A single psmux server exiting only takes down **its own** session —
-  it cannot by itself explain several unrelated Windows sessions dying at
-  the same time. On Windows, simultaneous multi-session loss points instead
+  its own exit cannot by itself explain several unrelated Windows sessions dying at
+  the same time. However, a PSMux command can inspect shared registration and
+  reap other server trees during startup; separate servers do not isolate that
+  cleanup path. On Windows, simultaneous multi-session loss can also point
   at something **common to all of those independent server processes**: the
   console-host layer each one depends on, or a host-wide event (e.g. a
   Windows Update reboot, a shared binary crash-looping under every server).
 
 Check the host's crash/application event log for the shell binary (`pwsh.exe`
 on Windows, the Application log, Event ID 1000) **and** for `psmux.exe`/
-`conhost.exe` themselves — on Windows a cluster of simultaneous session
-deaths is most consistent with a shared console-host defect common to every
-session's otherwise-independent server, not one server's exit explaining the
-rest.
+`conhost.exe` themselves. Correlate observation/cleanup activity as well as
+shared console-host faults; simultaneous disappearance alone does not select
+one of these causes.
 
 **An observed compatibility signature:** PowerShell 7.6.6 (ARM64)'s
 `Console Host` (`Microsoft.PowerShell.ConsoleHost.dll`) has been seen

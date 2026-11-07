@@ -102,7 +102,7 @@ try:
         and value.get("contract") == "agent-worktrees.native-seed"
         and type(value.get("version")) is int and value["version"] == 1
     )
-    if sys.argv[1] == "setup":
+    if sys.argv[1] in ("setup", "setup-admission"):
         supported = (
         supported and value.get("nul_reply_schema") == "agent-worktrees.native-seed-reply.v1"
         and all(isinstance(value.get(key), list) and item in value[key] for key, item in (
@@ -111,6 +111,16 @@ try:
             ("backend_execution_modes", "posix-exec-env-v1"),
             ("preparation_environment_modes", "execution-hint"),
         ))
+        )
+        if sys.argv[1] == "setup-admission":
+            supported = (
+                supported and isinstance(value.get("setup_admission_modes"), list)
+                and "posix-live-owner-v1" in value["setup_admission_modes"]
+            )
+    elif sys.argv[1] == "headed-exec":
+        supported = (
+            supported and isinstance(value.get("backend_execution_modes"), list)
+            and "posix-headed-env-v1" in value["backend_execution_modes"]
         )
 except (ValueError, TypeError, OSError):
     raise SystemExit(3)
@@ -127,6 +137,14 @@ raise SystemExit(0 if supported else 4)
 
 aw_native_seed_supports_posix_setup() {
     _aw_native_seed_supports_contract "$1" setup
+}
+
+aw_native_seed_supports_posix_admission() {
+    _aw_native_seed_supports_contract "$1" setup-admission
+}
+
+aw_native_seed_supports_posix_headed() {
+    _aw_native_seed_supports_contract "$1" headed-exec
 }
 
 aw_native_seed_return() {

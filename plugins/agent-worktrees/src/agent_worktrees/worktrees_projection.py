@@ -46,11 +46,11 @@ pair_kind current_profile_assignment state ahead behind dirty current_branch
 branch_drift cleanup_bucket closure ff_eligible mux_session mux_clients
 mux_attached turn_count session_head_mismatch session_head_mismatch_scanned_id
 live_session_ids session_lock_live session_lock_stale stale_lock_pids
-live_intent live_intent_at live_intent_idle live_rest live_rest_at pr pr_count
+live_intent live_intent_at live_intent_idle live_rest live_rest_at message_activity pr pr_count
 caller_state delegate_finalizable delegate_finalizable_reason
 claims_summary claims_links claims_assets claims_link_count claims_links_complete claims_projection
 session_bare_orphan session_bound_live
-session_bridge_live fact_provenance
+session_bridge_live fact_provenance mux_last_known
 """.split())
 _BOOL_FIELDS = frozenset("""
 execution_leg_live checkout_managed checkout_present picker_hidden follow_up paused
@@ -66,8 +66,8 @@ turn_count pr_count claims_link_count machine_identity_version
 """.split())
 _OBJECT_FIELDS = frozenset("""
 execution_leg dispatch_attempt active_effort reciprocal_relation
-current_profile_assignment closure pr fact_provenance claims_assets claims_projection
-caller_state
+current_profile_assignment closure pr fact_provenance mux_last_known claims_assets claims_projection
+caller_state message_activity
 """.split())
 _ARRAY_FIELDS = frozenset("""
 controllers controller_findings live_session_ids stale_lock_pids claims_links

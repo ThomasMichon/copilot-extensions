@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
+from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
 
@@ -197,8 +198,9 @@ def _native_setup_command(
                 VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"}
             )
             option += 2 if takes_value else 1
-        # Finite native setup cannot retain the admission-only owner's fence.
-        if admission_only or not supports_posix_setup(installer.install_dir()):
+        if not supports_posix_setup(
+            installer.install_dir(), **({"admission_only": True} if admission_only else {}),
+        ):
             return None
     elif not copy_only:
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir
@@ -394,6 +396,8 @@ def launch(
     native_resume_session: str | None = None,
     correlation: launch_execution.Correlation | None = None,
 ) -> int:
+    if invoke and _headed_session(command) is not None and correlation is None:
+        correlation = launch_execution.Correlation(uuid4().hex, uuid4().hex)
     def work(execution=None):
         return _admitted_launch(
             record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
@@ -401,6 +405,76 @@ def launch(
             execution=execution,
         )
     return launch_execution.run(record_path, correlation, work) if correlation else work()
+
+
+def _headed_session(command: list[str]) -> str | None:
+    if not command or Path(command[0]).name.lower() not in {"copilot", "copilot.exe"}:
+        return None
+    selected = []
+    index = 1
+    while index < len(command):
+        name, separator, value = command[index].partition("=")
+        if name == "--":
+            break
+        if name in {
+            "--acp", "--stdio", "-p", "--prompt", "--connect", "--ahp", "--continue",
+            "--environment-host", "--environment-compute-id", "--help", "-h", "--version", "-v",
+        }:
+            return None
+        if name in {"--session-id", "--resume"}:
+            if not separator:
+                index += 1
+                if index == len(command) or command[index].startswith("-"):
+                    return None
+                value = command[index]
+            selected.append(value)
+        elif not separator and name in VALUE_OPTIONS:
+            index += 1
+        index += 1
+    return selected[0] if len(selected) == 1 and selected[0] else None
+
+
+def _launch_headed(
+    record_path: Path, prepared: PreparedLaunch, execution: launch_execution.Execution,
+    session_id: str,
+) -> int:
+    from agent_remote_driver.headed.caller import execute
+    from . import launch_seed_native
+
+    subject = execution.subject
+    correlation = launch_execution.Correlation(
+        subject["attempt_id"], subject["resolution_id"], subject["parent_id"],
+    )
+
+    def admit() -> None:
+        launch_seed_native.admit(record_path, correlation, subject["operation_id"])
+
+    def spawned(pid: int, birth: str) -> None:
+        launch_seed_native.spawned(
+            record_path, correlation, subject["operation_id"],
+            pid=pid, process_start_time=birth,
+        )
+
+    attempt = record_path.parent / "launch-attempts" / subject["attempt_id"] / subject["operation_id"]
+    try:
+        code, certain = execute(
+            prepared.argv, session_id=session_id, attempt_directory=attempt,
+            state_file=attempt / "headed.json", cwd=os.getcwd(),
+            environment=prepared.environment or os.environ.copy(),
+            admit=admit, spawned=spawned, interactive=_interactive_console(),
+        )
+    except OSError as exc:
+        restored = launch_seed_state.restore(record_path, prepared.receipt) if prepared.receipt else None
+        print(f"Could not start headed coordinator: {exc}; seed restoration: {restored}", file=sys.stderr)
+        return 3
+    execution.process_exit_code = code
+    execution.failed = execution.failed or not certain
+    if not certain:
+        print(
+            "Headed native receipt is unconfirmed; the original handoff was not replayed or restored.",
+            file=sys.stderr,
+        )
+    return code if code or certain else 3
 
 
 def _admitted_launch(
@@ -568,6 +642,11 @@ def _launch(
     )
     if isinstance(prepared, int):
         return prepared
+    headed_session = _headed_session(prepared.argv) if invoke else None
+    if headed_session is not None:
+        if execution is None:
+            raise ValueError("Headed execution requires the original launch attempt")
+        return _launch_headed(record_path, prepared, execution, headed_session)
     argv, receipt, child_environment = prepared.argv, prepared.receipt, prepared.environment
     try:
         if os.name != "nt" and not invoke and not admission_only and execution is None:

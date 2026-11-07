@@ -66,10 +66,10 @@ class PickerFooterMixin:
             nsel = len(self.wt_sel)
             if nsel:
                 return (f"Space: select/deselect · Enter: actions for "
-                        f"{nsel} selected · / filter · s sort"
+                        f"{nsel} selected · / search · s sort · g group · f status"
                         f" · Tab region · ^◀▶ machine")
             return (f"Space: select · Enter: sub-menu for worktree {wid}"
-                    f" · / filter · s sort · Tab region · ^◀▶ machine")
+                    f" · / search · s sort · g group · f status · Tab region")
         if zone == "C":
             rec = self._selected_record()
             wid = rec.get("id4") if rec else "?"
