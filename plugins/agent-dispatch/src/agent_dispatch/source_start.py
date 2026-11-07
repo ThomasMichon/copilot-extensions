@@ -99,7 +99,21 @@ def config_identity(cfg) -> str:
     return hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest()
 
 
-def accept_readiness(payload, *, handle, version: str, config_identity: str, active=False) -> bool:
+def behavior_identity(cfg) -> str:
+    """Fingerprint the version-1 nonsecret coordinator behavior settings."""
+    selected = {
+        "sweep_interval": float(cfg.sweep_interval),
+        "orphan_grace": float(cfg.orphan_grace),
+        "handoff_fallback_enabled": cfg.handoff_fallback_enabled,
+        "handoff_fallback_grace": float(cfg.handoff_fallback_grace),
+    }
+    return hashlib.sha256(json.dumps(selected, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+
+def accept_readiness(
+    payload, *, handle, version: str, config_identity: str,
+    active=False, expected_behavior: str | None = None,
+) -> bool:
     from zdd.diagnostics import process_start_time
 
     slot = payload.get("slot") if isinstance(payload, dict) else None
@@ -113,6 +127,7 @@ def accept_readiness(payload, *, handle, version: str, config_identity: str, act
         type(handle.pid) is int and handle.pid > 0 and bool(birth)
         and payload.get("version") == version and payload.get("status") == "ok"
         and payload.get("runtime_config_identity") == config_identity
+        and (expected_behavior is None or payload.get("runtime_behavior_identity_v1") == expected_behavior)
         and slot.get("pid") == handle.pid and slot.get("process_start_time") == birth
         and (not active or slot.get("role") == "active")
         and process_start_time(handle.pid) == birth
@@ -168,6 +183,7 @@ def run_coordinator(
 
         _loopback(old.client_host)
     identity = config_identity(cfg)
+    behavior = behavior_identity(cfg) if not start_if_missing else None
     handles = {}
 
     if old is not None and old.version == __version__ and _route_owner_state(old) in {"dead", "reused"}:
@@ -264,18 +280,9 @@ def run_coordinator(
             )
         return accept_readiness(
             payload, handle=handle, version=__version__, config_identity=identity, active=active,
+            expected_behavior=behavior,
         )
 
-    if old is not None and old.version == __version__:
-        if not probe(old.client_host, old.port, active=True):
-            raise RuntimeError("selected coordinator owner failed native application readiness")
-        verify_selected()
-        if (
-            (routing.read_table(routing_root, strict=True) or {}).get("active") != raw
-            or not old_is_live()
-        ):
-            raise RuntimeError("selected coordinator owner changed during readiness")
-        return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
     if old is not None:
         payload = read_health(old.client_host, old.port)
         handle = SimpleNamespace(
@@ -285,6 +292,16 @@ def run_coordinator(
             payload, handle=handle, version=old.version, config_identity=identity, active=True,
         ):
             raise RuntimeError("incumbent effective configuration or native ownership is unconfirmed")
+        if old.version == __version__ and (
+            start_if_missing or payload.get("runtime_behavior_identity_v1") == behavior
+        ):
+            verify_selected()
+            if (
+                (routing.read_table(routing_root, strict=True) or {}).get("active") != raw
+                or not old_is_live()
+            ):
+                raise RuntimeError("selected coordinator owner changed during readiness")
+            return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
     if breadcrumb.read_breadcrumb(routing_root) is not None:
         raise RuntimeError("previous cutover remains unsettled; owner-led recovery is required")
 

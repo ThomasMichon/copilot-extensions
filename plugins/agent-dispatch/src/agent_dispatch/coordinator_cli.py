@@ -210,6 +210,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         token=effective_token,
         control_token=getattr(args, "control_token", None) or _config.resolve_control_token(),
         sweep_interval=base.sweep_interval,
+        orphan_grace=base.orphan_grace,
+        handoff_fallback_enabled=base.handoff_fallback_enabled,
+        handoff_fallback_grace=base.handoff_fallback_grace,
         pool_publication_enabled=base.pool_publication_enabled,
         relationship_admission=base.relationship_admission,
         relationship_authority=base.relationship_authority,
@@ -615,7 +618,7 @@ def _cmd_cutover(
                 expected_table = routing.read_table(captured_routing_dir, strict=True) or {}
                 observe(
                     cfg, captured_routing_dir, run_dir=_config.run_dir(), token=token,
-                    environment=effective_env, timeout=args.health_timeout,
+                    environment=effective_env, timeout=args.health_timeout, require_behavior=False,
                 )
                 if (routing.read_table(captured_routing_dir, strict=True) or {}) != expected_table:
                     raise RuntimeError("coordinator preflight route changed")
@@ -623,7 +626,7 @@ def _cmd_cutover(
                 def confirm_inactive(_table):
                     return observe(
                         cfg, captured_routing_dir, run_dir=_config.run_dir(), token=token,
-                        environment=effective_env, timeout=args.health_timeout,
+                        environment=effective_env, timeout=args.health_timeout, require_behavior=False,
                     ) == {"state": "inactive", "generation": None}
 
                 options = {

@@ -81,6 +81,7 @@ def register_status_routes(
             "status": "draining" if gate.draining else "ok",
             "version": __version__,
             "runtime_config_identity": getattr(request.app.state, "runtime_config_identity", None),
+            "runtime_behavior_identity_v1": getattr(request.app.state, "runtime_behavior_identity_v1", None),
             "data_auth_required": data_auth_required,
             "draining": gate.draining,
             "subscribers": bus.subscriber_count,

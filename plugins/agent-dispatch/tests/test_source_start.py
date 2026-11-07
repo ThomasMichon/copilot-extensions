@@ -275,6 +275,7 @@ def test_reconcile_rechecks_selected_generation_before_reusing_coordinator(tmp_p
             return {
                 "status": "ok", "version": source_start.__version__,
                 "runtime_config_identity": source_start.config_identity(cfg),
+                "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
                 "slot": {"pid": os.getpid(), "process_start_time": birth, "role": "active"},
             }
 
@@ -582,7 +583,9 @@ def test_coordinator_legacy_listener_uses_native_bind_evidence(monkeypatch, occu
     assert coordinator_observation._legacy_listener(Config(host="127.0.0.1", port=43123)) is occupied
 
 
-@pytest.mark.parametrize("changed", ["none", "version", "birth", "config", "route", "remote", "auth", "auth-type"])
+@pytest.mark.parametrize(
+    "changed", ["none", "version", "birth", "config", "route", "remote", "auth", "auth-type", "behavior"],
+)
 def test_coordinator_observation_requires_authenticated_generation_and_birth(
     tmp_path, monkeypatch, changed,
 ):
@@ -604,6 +607,7 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
     active = routing.read_table(tmp_path, strict=True)["active"]
     health = {
         "status": "ok", "version": version, "runtime_config_identity": source_start.config_identity(cfg),
+        "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
         "data_auth_required": True,
         "slot": {"pid": pid, "process_start_time": birth, "role": "active", "active": active.copy()},
     }
@@ -619,6 +623,8 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
         health["data_auth_required"] = False
     elif changed == "auth-type":
         health["data_auth_required"] = "yes"
+    elif changed == "behavior":
+        health["runtime_behavior_identity_v1"] = "different"
 
     calls = []
     local_transport = object()
@@ -655,6 +661,86 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
             coordinator_observation.observe(cfg, tmp_path, run_dir=tmp_path, token="fixture", environment={})
         if changed == "remote":
             assert calls == []
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("sweep_interval", 123.0), ("orphan_grace", 456.0),
+    ("handoff_fallback_enabled", True), ("handoff_fallback_grace", 789.0),
+])
+def test_behavior_identity_binds_coordinator_settings(tmp_path, field, value):
+    from dataclasses import replace
+    from agent_dispatch import source_start
+    from agent_dispatch.config import Config
+
+    cfg = Config(db_path=str(tmp_path / "tasks.db"))
+    assert source_start.behavior_identity(cfg) != source_start.behavior_identity(replace(cfg, **{field: value}))
+
+
+def test_behavior_identity_excludes_credentials(tmp_path):
+    from dataclasses import replace
+    from agent_dispatch import source_start
+    from agent_dispatch.config import Config
+
+    cfg = Config(db_path=str(tmp_path / "tasks.db"))
+    assert source_start.behavior_identity(cfg) == source_start.behavior_identity(
+        replace(cfg, token="fixture-data", control_token="fixture-control"),
+    )
+
+
+@pytest.mark.parametrize(("behavior", "expected"), [
+    ("missing", "transitioned"), ("different", "transitioned"), ("matching", "reused"),
+])
+def test_reconcile_checks_same_generation_behavior(tmp_path, monkeypatch, behavior, expected):
+    from agent_dispatch import client, source_start
+    from agent_dispatch.config import Config
+    from zdd import cutover, diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=source_start.__version__, process_start_time=birth,
+    )
+    health = {
+        "status": "ok", "version": source_start.__version__, "data_auth_required": False,
+        "runtime_config_identity": source_start.config_identity(cfg),
+        "slot": {"pid": pid, "process_start_time": birth, "role": "active"},
+    }
+    if behavior == "different":
+        health["runtime_behavior_identity_v1"] = "different"
+    elif behavior == "matching":
+        health["runtime_behavior_identity_v1"] = source_start.behavior_identity(cfg)
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return health
+
+    class Orchestrator:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, **_kwargs):
+            return SimpleNamespace(to_dict=lambda: {"ok": True, "status": "transitioned"})
+
+    monkeypatch.setattr(client, "DispatchClient", Client)
+    monkeypatch.setattr(cutover, "CutoverOrchestrator", Orchestrator)
+    result = source_start.run_coordinator(
+        cfg, tmp_path, token=None, spawn_passive=lambda _port: pytest.fail("fixture must not spawn"),
+        pick_free_port=lambda: 43124, timeout=1.0, verify_selected=lambda: None,
+        start_if_missing=False, confirm_inactive=lambda _table: True,
+    )
+    assert result["status"] == expected
 
 
 @pytest.mark.parametrize("enforced", [False, True])
@@ -699,13 +785,19 @@ def test_coordinator_observation_challenges_legacy_auth_enforcement(tmp_path, mo
 
         monkeypatch.setattr(coordinator_observation, "_local_client", local_client)
         if enforced:
+            with pytest.raises(coordinator_observation.ServingObservationError):
+                coordinator_observation.observe(
+                    cfg, tmp_path, run_dir=tmp_path, token="fixture-token", environment={},
+                )
             assert coordinator_observation.observe(
                 cfg, tmp_path, run_dir=tmp_path, token="fixture-token", environment={},
+                require_behavior=False,
             ) == {"state": "ready", "generation": version}
         else:
             with pytest.raises(coordinator_observation.ServingObservationError):
                 coordinator_observation.observe(
                     cfg, tmp_path, run_dir=tmp_path, token="fixture-token", environment={},
+                    require_behavior=False,
                 )
 
 
@@ -767,6 +859,7 @@ def test_coordinator_observation_rejects_exited_owner_with_readable_birth(tmp_pa
     active = routing.read_table(tmp_path, strict=True)["active"]
     health = {
         "status": "ok", "version": version, "runtime_config_identity": source_start.config_identity(cfg),
+        "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
         "slot": {"pid": pid, "process_start_time": birth, "role": "active", "active": active},
     }
     exited = exit_phase == "before"

@@ -212,8 +212,12 @@ Selected, complete physical Source or repair generations also provide
 The version-1 `agent-dispatch.coordinator-serving-observation` JSON contract
 reports a verified local serving generation, an evidenced inactive state, or
 an explicit unknown result. Observation checks routed process liveness and
-birth, effective configuration and route identity. Health advertises only
-whether data authentication is required; when a token is configured, an
+birth, effective configuration and route identity. The version-1 behavior
+fingerprint covers sweep cadence, orphan grace and handoff-fallback settings
+without including credentials. An incumbent lacking or differing in that
+fingerprint is not reused, even when its code generation matches; a verified
+owner can instead be transitioned to the selected configuration. Health
+advertises only whether data authentication is required; when a token is configured, an
 unauthenticated health request must also be rejected, including by older
 coordinators that lack the advertisement. Legacy discovery or an unverified
 endpoint is not treated as inactive. Local control uses loopback without
@@ -221,8 +225,8 @@ environment proxies and does not pass update-driver custody to the daemon.
 `--apply` reuses the existing guarded coordinator cutover without starting an
 absent service or running broad reaping. It rechecks incumbent liveness before
 spawn and bounds each native routing-lock wait by the requested timeout. It
-does not update the supervisor or claim
-suite-wide readiness. Older runtimes without this module remain unchanged:
+does not update the supervisor or claim suite-wide readiness. Older runtimes
+without this module remain unchanged:
 callers must establish support before invoking the new form and must not replay
 an effectful request through another command after an uncertain result.
 

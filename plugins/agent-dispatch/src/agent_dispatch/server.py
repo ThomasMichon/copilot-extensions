@@ -116,9 +116,10 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         cohort_sources=RegistrarSources(),
         pool_publication_enabled=cfg.pool_publication_enabled,
     )
-    from .source_start import config_identity
+    from .source_start import behavior_identity, config_identity
 
     app.state.runtime_config_identity = config_identity(cfg)
+    app.state.runtime_behavior_identity_v1 = behavior_identity(cfg)
     return app
 
 
