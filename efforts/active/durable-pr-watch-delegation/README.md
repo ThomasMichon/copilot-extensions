@@ -1068,6 +1068,31 @@ callback an implicit credential store.
   consumer qualification, retaining allocation, correlation and separately
   authorized adoption as unfinished work.
 
+### 2026-11-07 - Preserve the partial authorized Windows update
+
+- The operator separately authorized a normal unified update on one Windows
+  target followed by isolated installed PR-owner validation, preserving
+  updater serialization, configuration, credentials, sessions and subscriptions.
+  Other machines, fleet deployment, UAC, forced takeover, delegation activation
+  and retained-resource cleanup remain outside that grant.
+- Durable worker launch was refused by the caller's Windows Job. The supported
+  supervised mode then reused the same pending request and completed through
+  the canonical serialized executor, without weakening containment. The full
+  update returned exit 6; this is partial installation, not successful rollout.
+- PR-owner `0.3.227-dev1` is selected. Its actual installed version, root help
+  and watch help commands all pass. Those entry checks do not certify complete
+  installed-cell or deployed-delegation acceptance.
+- Bridge selected `0.9.348-dev1` but its successor failed startup on the missing
+  acquisition Worktrees writer trigger; the healthy `0.9.304.dev1` incumbent
+  remains undrained. Existing #11144 / contributor PR #11153 owns that repair.
+  Supplied actual upgrade evidence and the precise contract-registry CI
+  refusal to the author rather than opening a competing patch.
+- MCP rolled back because four attached sessions were busy; unconfirmed
+  retirement remains retained. Do not force those sessions or retire their
+  runtimes. Continue after the existing Bridge fix clears review, CI and
+  release, then reconcile the ordinary update and remaining installed proof.
+  Parent requirements and all retained-resource holds remain open.
+
 ### 2026-11-07 - Confirm normal release of the qualified PR-owner repair
 
 - Normal promotion `42314791785` completed successfully, including candidate
