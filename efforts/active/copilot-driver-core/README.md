@@ -1738,3 +1738,302 @@ external-venue tests do not apply to this isolated Windows fixture. The full
 Manager launch-session planner, all caller cleanup Jobs, auth-wait/recovery,
 pending-aware lifetime and receiving/skew gates remain open. No parent Plan
 or Validation item is closed solely by this narrower result.
+
+#11287 merged at 09:02:13 UTC as
+`348c386cbe8c3698ed4c1c06b269f408e775f581`. Copilot review `5811195429`
+approved exact head `a2b8909967d0d21b33de982c3be7cbe8692ee4cb` with no
+open issues or inline findings, and required
+[CI 42357638312](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42357638312)
+passed. The managed merge used the normal Maintainer CODEOWNER exception,
+not a CI bypass. Preserved the source head and synced through the native owner.
+Re-read the parent Plan/Validation gates: continue with the actual Manager
+launch-session planner and real caller matrix before pending-aware lifetime
+and receiving acceptance. The parent remains Active; no installed rollout
+or source-worktree finalization is implied.
+
+### 2026-11-07 - Actual Manager no-mux caller convergence
+
+The actual Manager launcher and Worktrees resolver exposed two gaps hidden by
+direct native fixtures: unseeded custom direct plans did not enter the common
+core, and Windows split a drive-qualified `-C=...` token at a PowerShell script
+boundary. Retain the canonical launch-command wrapper, copy it through the
+existing session-shell owner, and use its existing startup manifest to carry
+literal argv. The inner admission-only Python owner now invokes the retained
+core, keeps the creation fence through the wait and records the real native
+PID/birth and actual exit. No new launcher service or transport is introduced.
+
+Ordinary unseeded execution preserves its existing semantics: it cannot claim
+a seed or ignore changed intent, but does not require mux absence. The
+seeded and special native-head recovery paths retain their existing cold-stop
+checks. #11274 intentionally makes negative PSMux presence unknown; do not
+reintroduce a false absence to satisfy native tests. The current native
+fresh/resume and input-fencing controls therefore use explicit native startup
+input with unseeded admission. A real PowerShell cold-seed control verifies
+refusal before backend entry and preservation of the original staged seed.
+
+The actual Manager no-mux fresh/resume control passes in 63.09 seconds
+(85.28 seconds including preparation and cleanup), using one conversation and
+the common broker, with no installed runtime or shared mux mutation. Five
+initial focused owner/transport controls passed; the expanded affected
+shell/owner/resolver packet produced 297 passes and 15 platform/optional skips,
+plus one old Windows cold-seed expectation inconsistent with #11274. That
+expectation now checks refusal and non-entry rather than weakening admission.
+The combined native/corrected cold-refusal packet produced three passes and
+one native-input pane startup failure before its first owner marker, in
+93.04 seconds. Move that marker before optional imports and retain native
+stderr diagnostics; the failed native-input case alone then passes in
+24.40 seconds (83.98 seconds including preparation and cleanup). This does
+not claim the intermittent pre-entry startup symptom is solved. The actual
+Manager, direct broker and cold-refusal results were not repeated.
+
+Current F/E9 lint, all source module ceilings, headless launch, installation
+contract, documentation consistency and effort structure pass. The changed
+Worktrees project remains in the declared pending type-admission scope; no
+admitted strict project input changed, so the prior strict portfolio was not
+repeated or widened. These are isolated native real-consumer and portable
+unit contracts, not installation/rollout or desktop visibility proof. A full
+installer clean-room lane is not applicable because installation code is
+unchanged; fresh copied-shell behavior is covered in the isolated fixtures.
+No qualified external native CLI lane or observable desktop is supplied here.
+
+This closes part of the reviewed caller-convergence intent without changing
+CLI syntax, service schemas, independent peer support or the vision. The
+internal admission callback's cold-stop option is restricted to ordinary
+admission-only execution; it cannot be selected for seeded or special
+native-head recovery. Existing current-runtime wrapper support is checked
+before migration; unsupported forms retain their original path. No installed
+rollout, all-caller Job lifetime, complete pending-work evidence or receiving
+parity is claimed, and the broader parent items remain open.
+
+Review of #11294 found that early Windows serialization hid a stale resume
+argument from Manager's later authoritative AHP-binding rewrite. Defer
+serialization until that existing consumer has finished its runtime/binding
+mutations, rather than introducing an additional manifest reader/rewriter.
+Refresh the inner Python owner as well as exposed runtime arguments, then
+use the existing mux or direct-launch serialization boundary. Inline and split
+resume forms are replaced consistently on Windows and POSIX.
+
+The Windows producer now requires a per-call declaration that its consumer
+owns final serialization. Manager scopes the declaration to resolution and
+restores the prior process environment; older Manager callers retain the
+legacy producer path, and older Worktrees providers can ignore the declaration
+without being asked to accept new CLI syntax. The earlier reader-based
+investigation passed two AHP consumer controls, then an expanded packet
+reported 98 passes, seven platform skips and four extracted-harness failures.
+After correcting their prerequisites, nine selected controls passed. Those
+reader-specific cases are not evidence for the simpler final design: the
+extra reader and its dedicated tests were removed. Focused final-boundary
+contracts and actual native no-mux revalidation remain required before this
+correction is published. Binding/token inputs remain synthetic; no
+authenticated or live AHP effect is authorized or claimed.
+
+The simpler final-boundary design passes eight focused Manager controls in
+17.92 seconds (154.69 seconds including preparation and cleanup). The three
+Windows/POSIX producer/capability controls also pass. Native revalidation
+directly from the source checkout reached a generic process-spawn receipt
+without headed metadata at 30 and 60 seconds; that source-location behavior
+is not qualified by this result and is not declared repaired.
+
+The isolated copied-payload diagnostic then completed the full native flow.
+After removing its temporary command capture, the byte-identical private
+Manager scripts pass fresh/resume through the real resolver and common broker
+in 87.58 seconds (177.38 seconds including preparation and cleanup), including
+exact native history, PID/birth, owner exit and retirement checks. The Manager
+frontend has a sixty-second internal binding wait, within the unchanged
+180-second case, 300-second group and 600-second aggregate limits. No further
+timeout increase or claim of startup stability is made. The copied-payload
+qualification does not stand in for source-checkout, installed, auth-wait,
+attached/new-window or all-caller Job qualification. Current scoped source
+gates pass; the corrected head still needs fresh review and required CI.
+
+The next review found that hoisting Bash ahead of the admission owner bypassed
+the existing effective-`BASH_ENV` guard. A startup primer can exit or exec before
+that inner owner runs. The headed and native-setup paths now share that guard
+and the existing `env BASH_ENV=` prefix: nonempty or unknown mux environments
+retain outer admission, while an explicitly empty plan is pinned before Bash.
+Real POSIX exit/exec refusal controls complement the portable composition tests.
+
+The same correction preserves selector-shaped native option values during
+AHP rebinding on both platforms, using the existing canonical argument tables.
+Only real options count for experimental-mode insertion. Inner runtime refresh
+also requires a Python executable, so a native model argument cannot resemble
+and replace the owner. Nine focused Worktrees controls pass in 1.30 seconds
+(70.19 seconds including preparation and cleanup); twelve Manager controls pass
+in 29.95 seconds (184.17 seconds total), with two native-Bash cases skipped on
+Windows. The new real Bash primer controls require a POSIX lane; portable
+branch checks are not equivalent evidence. The binding path adds one
+local interpreter invocation to read the selected runtime's existing argument
+tables, without a new CLI/schema or optional peer feature. No settled native
+Windows lifecycle test was repeated for these scoped argument/environment
+changes. Parent acceptance and the source-location startup discrepancy remain
+open; this correction still needs fresh review and required CI.
+
+The next review confirms the Bash guard correction, but finds two further
+argument-boundary gaps. Bare `--resume` has an optional selector and must not
+consume the next option during AHP rebinding. Both launchers now use lookahead.
+The retained Driver validator must also skip ordinary value options before
+interpreting selectors or execution modes. Move the existing native option
+table into the standalone core, retaining Worktrees' original import as a
+re-export, and include that module in the retained artifact. This changes no
+CLI/schema or independent peer feature and adds no dependency.
+
+Thirteen focused Driver controls pass in 3.38 seconds (26.84 seconds total),
+with one POSIX signal skip. They include actual retained-archive execution and
+native exit with a selector-shaped log-directory value. Two Worktrees
+copied-wrapper/real-validator controls pass in 1.87 seconds (63.41 seconds total).
+Six Manager final-consumer rebinding controls pass in 36.95 seconds (144.36
+seconds total), with two native-Bash skips. Native Copilot, the source-location
+discrepancy and the remaining parent gates are not requalified by this packet.
+
+The final bare-resume/model-order selection at `52d735872e` passes both cases
+on disposable hosted Windows in 37.77 seconds through the owner-only escape
+hatch ([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42370030834)).
+The result validates the exact source, selection, Windows runtime and actual
+test identities; it is not inferred from workflow success. Source transport
+retains the one reserved non-branch ref without a new upstream branch.
+
+Required CI then refuses before unit execution because the Worktrees argument
+module was an explicitly hash-bound unit input. Its shared table must join that
+admitted closure. The existing actor-free local-launch fixture now loads the
+exact core table and Worktrees re-export under restored synthetic namespaces,
+without importing application actors. Update only those source hashes and the
+fixture hash; unit nodes, coverage targets, effect restrictions and deadlines
+remain unchanged. The fixed admission still needs the required complete packet.
+
+The normal required unit packet passes at `d264b15e88`, confirming the repaired
+actor-free closure without dropping nodes or restrictions. The source guard
+still identifies a missing Bridge consumer changefile, also found in review:
+the shared core is packaged by Bridge as well as Worktrees and Driver. Add
+that consumer's patch declaration rather than bypassing the release guard.
+
+Worktrees' session detector also needs the same split `-C` value boundary that
+Driver already honors. A selector-shaped directory must not invent a session
+or hide a real one. Four focused detector/copied-wrapper/real-validator
+controls pass in 1.63 seconds (65.95 seconds including preparation and cleanup).
+These narrow corrections still require exact-head review and required CI.
+
+The next review confirms both findings resolved and identifies the matching
+Bash inner-runtime refresh gap. After an independent update, the copied wrapper
+must invoke the newly selected Python rather than a path from the resolved
+plan. The Bash consumer now refreshes only the typed inner Python owner,
+including recovery and the existing empty-`BASH_ENV` prefix; native executable
+arguments remain literal. This is the same boundary already covered in the
+PowerShell consumer, with no new process or protocol.
+
+Six final Bash grammar controls pass in 2.97 seconds (88.53 seconds including
+preparation and cleanup), using actual Git Bash on Windows. They cover normal/
+recovery/prefixed owners, native non-rewrite and authoritative AHP argument
+preservation. This also executes the two AHP grammar cases previously skipped
+on this host. It does not claim stock macOS Bash, native POSIX process lifetime
+or a complete Manager launch; those remain separate gates.
+
+The subsequent review has no inline findings but flags option-parsing risks.
+Direct assessment identifies two real extension-injection boundaries: appending
+flags after an option terminator makes them positional, and an experimental
+flag spelled only as an option value must not suppress the real flag.
+The core now inserts the scoped plugin and experimental flag at the native
+option boundary, skipping canonical value options and preserving positional
+arguments. An already-present actual experimental flag is not duplicated.
+This closes the existing launch-injection intent without changing a public
+contract, dependency, permission or receiving owner.
+
+Eighteen focused controls pass in 15.56 seconds (36.24 seconds including
+preparation and cleanup), with one POSIX-only signal skip. Four new cases
+execute the real retained archive and observe actual child argv, including
+a delimiter-shaped value, a positional experimental literal and an existing
+flag. This is finite-process consumer proof, not another native Copilot,
+external-venue, installation or complete caller-lifecycle qualification.
+Those tiers are unchanged and remain explicit parent gates. Fresh exact-head
+review and required CI still gate this correction.
+
+The next review identifies another concrete option-boundary defect in the
+persisted AHP rewrite: positional selector-like text after the native `--`
+was removed, and authoritative options were appended too late. Both launchers
+now use one bundled read-only argv adapter instead of separate filter loops.
+It preserves typed copied-wrapper and inner-owner transport boundaries,
+canonical option values and the complete native positional tail, inserting
+the authoritative binding before the native terminator. It replaces the
+existing one-shot option-table lookup, not a new process or service boundary.
+The helper is packaged beside the launchers through the existing bin-resource
+declaration and uses existing Worktrees imports; no new peer capability is
+required.
+
+Twenty focused controls pass in 44.97 seconds (136.89 seconds including
+preparation and cleanup), including both real final-consumer grammar paths and
+nested transport controls. Four initial Git Bash failures exposed a test-only
+MSYS helper-path conversion setting; the corrected fixture keeps native option
+arguments literal while allowing that helper path to reach Windows Python.
+This remains grammar/finite-consumer evidence, not native POSIX lifecycle or
+an authenticated AHP connection.
+
+The next application-layout checkpoint also now has real first-touch evidence.
+Canonical construction and installation succeed in a private home with an
+empty project registry and pytest-suppressed resident startup. After source
+removal, the installed application's native provider rejects its own selected
+`.venv` runtime. The failure reproduces in 249.85 seconds (318.52 seconds
+including preparation and cleanup), within the original 300-second case bound.
+No completion marker, health response or installed code was fabricated.
+
+Normalize the physical runtime slot using the existing application layout
+and physical installation-root owner, retaining current selection, completion
+and bootstrap checks. The registry/data root is not the physical runtime root.
+Legacy/application and negative selection controls retain these protections.
+This is incoming-readiness work under
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement);
+it changes neither outgoing retirement nor operator configuration/state,
+automatic/manual classification, delayed cleanup or independent connectivity.
+The complete first-touch rerun remains pending; full Manager/default-setup,
+caller lifetime and native authentication/recovery gates stay open.
+
+The corrected real application rerun passes all thirteen selected controls in
+235.31 seconds (300.75 seconds including preparation and cleanup): twelve
+legacy/application selection controls plus the actual first-touch build,
+installation, source removal and native-admission check. No deadline or
+selection protection was widened. This closes only the physical-slot
+admission discrepancy, not the remaining caller/default-setup or lifetime
+matrix. Fresh review and required CI remain mandatory.
+
+At `807d7cabac`, the hosted Windows escape hatch qualifies both selected AHP
+positional-tail controls in 53.30 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42375128057)).
+The separate one-case application request returns incomplete: the hosted VM
+has no configured governed feed, so the test skips rather than claiming
+first-touch qualification
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42375193659)).
+Both returned manifests validate source, selection, controller, run/attempt
+and actual Windows runtime. Local real application proof remains the pass
+above. No new transport ref or source branch was created.
+
+The next review identifies obsolete filter-loop assertions in the existing
+AHP launcher contract file and a real custom env-prefix gap. Update only those
+obsolete implementation pins to the bundled-helper delegation, retaining every
+credential, hard-binding and post-exit assertion. The helper now traverses
+environment assignments, unset/chdir options and env's own option terminator
+before the native boundary. Opaque env split-string forms are explicitly
+unsupported rather than reinterpreted.
+
+All three coupled launcher/contract files pass: seventy controls and four
+platform skips in 69.72 seconds (173.09 seconds including preparation and
+cleanup). This includes both final consumers, original contract guards and
+new custom environment-prefix regressions. The native application and retained
+core inputs are unchanged, so their prior actual passes remain scoped proof;
+the changed AHP helper still needs fresh hosted qualification, review and CI.
+
+At `1fd1d934a0`, all five selected custom-env and final-consumer cases qualify
+on hosted Windows, without skips, in 45.84 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42376106390)).
+The source/selection/controller/run/attempt/Windows manifest is validated.
+No new transport ref or source branch is needed for the published candidate.
+
+The fresh review then finds that valid attached env short options were refused.
+Use the standard option parser for the same supported env grammar, rather than
+maintaining a partial hand-written spelling parser. Attached unset/chdir values,
+combined short flags and split/long spellings retain the exact prefix. Add
+regressions for the three affected forms and explicit no-command refusal for
+an incomplete unset and an opaque split-string invocation.
+
+Thirty focused controls pass without skips in 47.86 seconds (142.33 seconds
+including preparation and cleanup), including both final consumers and the
+existing credential/post-exit contract guards. Native application and retained
+core inputs are unchanged. The new helper still requires fresh exact-source
+hosted evidence, review and required CI; no review gate is bypassed.

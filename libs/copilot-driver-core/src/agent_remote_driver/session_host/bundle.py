@@ -15,6 +15,7 @@ _LEGACY_MAIN = "agent_remote_driver.session_host.legacy_launcher:main"
 _DRIVER_MODULES = (
     "__init__.py",
     "winjob.py",
+    "native_arguments.py",
     "session_preferences.py",
     "preference_attestation.py",
     "preference_exec.py",
