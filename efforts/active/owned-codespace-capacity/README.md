@@ -105,7 +105,7 @@ and existing resource custody.
 
 ### Phase 4a - Review then prove generation-qualified return recovery
 - [x] Review the receiver-first recovery proposal below before implementation. (#11355; #11343 remains the recovery objective)
-- [ ] Expand only the existing native lease receiver, advertise selected-runtime support, and preserve the legacy baseline; merge its focused parser/store/compaction proof before migrating callers.
+- [x] Expand only the existing native lease receiver, advertise selected-runtime support, and preserve the legacy baseline; merge its focused parser/store/compaction proof before migrating callers. (#11359; source-only, selected installed/live gates remain)
 - [ ] Capture the original generation before return and conditionally consume receiver-owned evidence through the existing return operation; unknown or unsupported evidence retains custody.
 - [ ] Prove interrupted return, successor preservation, bounded evidence eviction, compaction/GC and mixed-version refusal through the real native CLI and Codespaces consumer.
 

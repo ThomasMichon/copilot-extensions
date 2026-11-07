@@ -1262,8 +1262,77 @@ with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.St
     retried = cli.main(["create", "example/project", "--no-wait"])
 assert retried == 4 and selected == ["fixture-owner"]
 assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 2
+import base64
+proof_record = {
+    "schema_version": 1,
+    "resource": {"kind": "codespace", "key": "venue-1",
+                 "identity": "codespace:" + base64.urlsafe_b64encode(b"venue-1").decode().rstrip("=")},
+    "state": "released", "event": "release", "lease_id": "4" * 32,
+    "holder": "machine/project/previous", "token": "e" * 40, "live": False,
+    "issued_at": "2026-11-07T12:00:00Z", "renewed_at": "2026-11-07T12:00:00Z",
+    "expires_at": "2026-11-07T12:00:00Z", "ttl_seconds": 0, "context": {},
+}
+old_transport = coordination._run
+def proof_transport(args, **kwargs):
+    calls.append(["proof", *args])
+    if args == ["--project", "project", "coordination-readiness"]:
+        data = {"version": 1, "ready": True, "code": "ready",
+                "capabilities": [coordination.RELEASED_ONLY_CAPABILITY, coordination.RETURN_PROOF_CAPABILITY]}
+    elif args[:2] == ["claims", "add"] and args[3] == "venue-1":
+        obligations.append({"kind": "codespace", "ref": "venue-1", "state": "active"})
+        data = {"worktree_id": "current-worktree", "kind": "codespace", "ref": "venue-1", "state": "active"}
+    elif args[:2] == ["claims", "settle"] and args[2] == "venue-1":
+        obligations[:] = [item for item in obligations if item["ref"] != "venue-1"]
+        data = {"worktree_id": "current-worktree", "ref": "venue-1", "disposition": "released"}
+    elif args[:2] == ["lease", "inspect"] and args[3] == "venue-1":
+        data = proof_record
+    elif args[:2] == ["lease", "acquire"] and args[3] == "venue-1":
+        proof_record.update(state="leased", event="acquire", live=True,
+                            holder="machine/project/current-worktree",
+                            expires_at="2026-11-07T13:00:00Z", ttl_seconds=3600)
+        data = proof_record
+    elif args[:2] == ["lease", "release"] and args[3] == "venue-1":
+        assert "--retain-return-proof" in args
+        pending = json.loads(lease.LEASE_FILE.read_text())["__agent_codespaces_returns_v1__"]["returns"]
+        assert pending["venue-1"]["lease_id"] == "4" * 32
+        proof = {"lease_id": "4" * 32, "holder": "machine/project/current-worktree",
+                 "released_at": "2026-11-07T12:01:00Z"}
+        proof_record.update(schema_version=2, state="released", event="release", live=False,
+                            token="f" * 40, renewed_at=proof["released_at"],
+                            expires_at=proof["released_at"], ttl_seconds=0, returned_generations=[proof])
+        data = proof_record
+    else:
+        return old_transport(args, **kwargs)
+    return subprocess.CompletedProcess(args, 0, json.dumps(data), "")
+coordination._run = proof_transport
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    lease.claim("venue-1", "current-worktree", holder_ref="machine/project/current-worktree")
+    from agent_codespaces.claim_return import RETURN_KEY
+    def lose_return_confirmation(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("venue-1")
+        if path == lease.LEASE_FILE and (progress and progress["phase"] == "released" or "venue-1" not in payload):
+            raise OSError("return confirmation unavailable")
+        write(path, payload)
+    lease._write_private_json = lose_return_confirmation
+    try:
+        lease.release_claim("venue-1", "current-worktree")
+    except OSError:
+        pass
+    else:
+        raise AssertionError("return confirmation unexpectedly durable")
+    lease._write_private_json = write
+    proof_record.update(state="leased", event="acquire", live=True, lease_id="5" * 32,
+                        holder="other-machine/project/successor", token="a" * 40,
+                        issued_at="2026-11-07T12:02:00Z", renewed_at="2026-11-07T12:02:00Z",
+                        expires_at="2026-11-07T13:02:00Z", ttl_seconds=3600)
+    successor_wire = json.dumps(proof_record, sort_keys=True)
+    proof_returned = lease.release_claim("venue-1", "current-worktree")
+assert proof_returned and lease.get_lease("venue-1") is None
+assert json.dumps(proof_record, sort_keys=True) == successor_wire
+assert obligations == [{"kind": "codespace", "ref": "venue-0", "state": "active"}]
+assert len([args for args in calls if args[:4] == ["proof", "lease", "release", "codespace"]]) == 1
 print(json.dumps({"results": results, "created": created, "reused": reused,
-                  "returned": returned, "uncertain_retry": retried}))
+                  "returned": returned, "uncertain_retry": retried, "proof_returned": proof_returned}))
 '''
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True,
@@ -1275,6 +1344,7 @@ print(json.dumps({"results": results, "created": created, "reused": reused,
     assert observed["created"] == ["fixture-owner", "fixture-owner"]
     assert observed["reused"] == 0 and observed["returned"] is True
     assert observed["uncertain_retry"] == 4
+    assert observed["proof_returned"] is True
 
 
 # --- Top-level --project (command-surface <repo> <slug> surface) ---
