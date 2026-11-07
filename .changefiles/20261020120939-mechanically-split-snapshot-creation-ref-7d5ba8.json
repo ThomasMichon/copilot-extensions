@@ -1,9 +1,0 @@
-{
-  "comment": "Mechanically split snapshot creation, refspec and head-privacy tests without changing fixtures or assertions.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix native wrapper publication by constructing helper source paths from the canonical plugin root.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

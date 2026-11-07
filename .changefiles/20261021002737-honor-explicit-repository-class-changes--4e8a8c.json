@@ -1,9 +1,0 @@
-{
-  "comment": "Honor explicit repository class changes while preserving omitted class and independent agent preferences",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

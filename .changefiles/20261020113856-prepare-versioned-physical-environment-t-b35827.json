@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare versioned physical/environment tracking metadata and execution-owner consumers without changing ordinary record producers",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

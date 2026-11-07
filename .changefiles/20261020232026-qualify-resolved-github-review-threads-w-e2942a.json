@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify resolved GitHub review threads without disabling authorized self-merge",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

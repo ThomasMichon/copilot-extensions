@@ -1,9 +1,0 @@
-{
-  "comment": "Reuse private published topology in post-publication PR tests.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

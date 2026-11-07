@@ -1,9 +1,0 @@
-{
-  "comment": "Respect installation-owned runtime deployment policy during reconciliation planning and execution.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

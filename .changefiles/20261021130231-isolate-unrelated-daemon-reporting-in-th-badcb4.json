@@ -1,9 +1,0 @@
-{
-  "comment": "Isolate unrelated daemon reporting in the persisted pair-integrity doctor test.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

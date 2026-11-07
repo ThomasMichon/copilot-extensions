@@ -1,9 +1,0 @@
-{
-  "comment": "Assert missing identity receipt refusal before namespaced registration persists its config directory.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
