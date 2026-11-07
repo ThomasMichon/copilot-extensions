@@ -272,7 +272,8 @@ def test_enforced_goals_require_evidence_and_scope_g5_to_recurring() -> None:
     for requirement in (
         "Confidence cadence:",
         "Healthy sweeps to relax:",
-        "any waste finding returns to the confidence cadence",
+        "Any waste finding returns to the confidence cadence",
+        "A coverage gap or unknown target earns no healthy-sweep credit",
         "a missing goal marks the sweep incomplete",
     ):
         assert requirement in charter, requirement

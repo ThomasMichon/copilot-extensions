@@ -52,7 +52,7 @@ never widen the charter's mode, steering, answer or source-change authority.
 | G2 | **Keep every target on-charter**: correct detours, tangents and loops | A disposition per live head (running, required wait, productive wait or waste) and, for every waste, a steer within scope or a recorded reason not to send one (in read-only mode, the recommended steer) |
 | G3 | **Find weak points in guidance, efforts and charters** that let agents drift, and propose fixes | Each new finding mapped to a [weak-point catalogue](assets/WEAK-POINTS.md) pattern with a proposed fix, or "no new pattern" |
 | G4 | **Find weak points in this monitor's own charter, skill and readers**, and recommend improvements | Reader corrections and monitor blind spots captured per [self-improvement](references/self-improvement.md), or "none" |
-| G5 | **Recur until confident** every target works under optimum guidance (recorded recurring assignments only) | Current cadence and consecutive healthy-sweep count; the confidence cadence relaxes only after the charter's required healthy sweeps (default two), and any waste finding returns it to the confidence cadence |
+| G5 | **Recur until confident** every target works under optimum guidance (recorded recurring assignments only) | Current cadence and consecutive healthy-sweep count; the confidence cadence relaxes only after the charter's required healthy sweeps (default two), a sweep with a coverage gap or unknown target earns no healthy credit, and any waste finding returns it to the confidence cadence |
 
 Cadences and the healthy-sweep count are charter parameters; a consumer's
 adapter may override the defaults. The end state is **a fleet that stays

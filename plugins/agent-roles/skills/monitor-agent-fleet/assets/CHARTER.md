@@ -27,10 +27,12 @@ Mode: read-only sweep | recurring observation | steering | dormant correction
   Confidence cadence: <tight cadence used until confident, e.g. 15 minutes;
     recurring only>
   Healthy sweeps to relax: <consecutive healthy sweeps before leaving the
-    confidence cadence, default 2; a sweep is healthy when every target is
-    read or a recorded gap, no disposition is waste and no target exceeds
-    the unknown-state limit; any waste finding returns to the confidence
-    cadence>
+    confidence cadence, default 2; a sweep is healthy only when every target
+    was read and classified with no waste disposition. A coverage gap or
+    unknown target earns no healthy-sweep credit (unreadable state is never
+    healthy) unless the charter explicitly excludes that venue; the
+    unknown-state limit governs reporting, not health. Any waste finding
+    returns to the confidence cadence>
   Active and parked cadences: <e.g. 30 minutes active, 2 hours parked>
   Early-check triggers: <question at half its revisit time, two observations
     without delta, validation over budget, unanswered change request past its
