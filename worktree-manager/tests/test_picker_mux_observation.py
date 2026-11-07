@@ -100,6 +100,11 @@ def test_actions_query_preserves_unavailable_mux_until_complete_current_observat
     raw = {
         "id": "one", "mux_session": True, "mux_attached": True, "mux_clients": 7,
         "mux_observation_unavailable": True,
+        "fact_provenance": {
+            "mux": {"quality": "unavailable", "observed_at": None},
+            "git": {"quality": "current", "observed_at": 12},
+        },
+        "mux_last_known": {"present": True, "observed_at": "2020-01-01T00:00:00"},
     }
     rec = derive.norm(raw, "host", "Win")
     source = SimpleNamespace(is_local=lambda *a: True)
@@ -118,3 +123,22 @@ def test_actions_query_preserves_unavailable_mux_until_complete_current_observat
     row, _ = worktree_detail_queries.verify_liveness(rec, source, "project")
     data_local._stamp_from_raw(None, raw, row)
     assert raw["mux_clients"] == 0 and derive._sess(raw) == "PROC"
+    assert raw["fact_provenance"] == {"git": {"quality": "current", "observed_at": 12}}
+    assert "mux_last_known" not in raw
+
+
+def test_complete_mux_refinement_does_not_clear_stale_source_envelope():
+    availability = {"status": "stale", "reason": "source disconnected"}
+    raw = {
+        "id": "one", "_availability": availability,
+        "fact_provenance": {"mux": {"quality": "unavailable"}},
+        "mux_last_known": {"present": True, "observed_at": "2020-01-01T00:00:00"},
+    }
+    data_local._merge_reconcile_row(raw, {
+        "mux_session": True, "mux_clients": 2, "mux_attached": True,
+    })
+    assert raw["_availability"] is availability
+    assert "mux" not in raw["fact_provenance"] and "mux_last_known" not in raw
+    row = derive.norm(raw, "host", "Win")
+    assert row["sess"] == "MUX(?)"
+    assert row["attached"] is False and row["mux_live"] is False

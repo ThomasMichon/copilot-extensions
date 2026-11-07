@@ -309,3 +309,17 @@ not only its parser. Deployment and repairs to running sessions are separate.
   module checks passed. These corrections address the two new inline findings
   and the review's additional Actions-menu observation; fresh exact-source
   review and CI remain required.
+
+### 2026-11-07 - Complete mux refinement supersedes stale mux provenance
+
+- Current-head review accepted the activity and independent-liveness
+  corrections, then identified stale mux provenance surviving a successful
+  Actions-menu refinement. Complete current evidence now invalidates only
+  superseded mux provenance and the last-known hint; unrelated Git provenance
+  and source-envelope uncertainty remain untouched.
+- Extended the recovery test from a producer-shaped row and added a stale
+  source-envelope control. All 22 mux/query presentation tests passed, along
+  with source lint and full-tree module ceilings.
+- The prior published head passed required CI and the hosted Cold roster
+  Linux/Windows lanes. This is roster-consumer evidence, not live PSMux server
+  recovery. The latest small correction still requires its own review and CI.

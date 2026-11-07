@@ -96,6 +96,8 @@ clearing last-known mux positives. A project publication failure is isolated
 so unrelated resident rosters remain available.
 Actions-menu liveness refinement also retains mux fields and uncertainty
 unless it receives a complete current mux observation.
+Complete refinement removes only superseded mux provenance and last-known
+hints; unrelated provenance and stale source-envelope evidence remain intact.
 
 Picker shows **`MUX(?)`** for known but unconfirmed mux hosting and
 **`HOST(?)`** for a live process whose mux hosting is unknown. A client count
