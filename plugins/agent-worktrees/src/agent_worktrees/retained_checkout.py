@@ -54,6 +54,18 @@ def matches(record, config) -> bool:
         repo = config.repos.get(record.repo)
         if repo is None or config.repo_name != record.repo:
             return False
+        native = cfg.detect_platform()
+        if record.platform != native or config.platform != native:
+            return False
+        execution_spaces.require_current_execution_space(config)
+        context = execution_spaces.current_execution_context(config)
+        if record.machine_identity is not None and (
+            context is None
+            or record.machine_identity.machine != context.machine
+            or record.machine_identity.environment != context.environment
+            or record.machine_identity.execution_machine != context.execution_machine
+        ):
+            return False
         checkout = Path(record.worktree_path)
         ledger = cfg.project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
         if (

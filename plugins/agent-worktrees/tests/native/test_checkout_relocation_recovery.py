@@ -574,3 +574,27 @@ def test_historical_companion_without_intent_keeps_its_anchor_derived_root(check
     selected, retained = paired.receiver_root(checkout.config, checkout.record.worktree_id, root, None)
     assert Path(selected) == Path(receiver.default_repo.worktree_root)
     assert retained == Path(selected) / (checkout.record.worktree_id + "-k")
+
+
+@pytest.mark.parametrize("foreign", ["record", "configuration"])
+def test_retained_foreign_platform_never_acquires_publication_authority(checkout, foreign):
+    from agent_worktrees import pr_source_publication, retained_checkout, tracking
+
+    config = replace(checkout.config, repos={"sample": replace(
+        checkout.config.default_repo, worktree_root=str(checkout.home / "future-allocation"),
+    )})
+    checkout.record.status = "active"
+    tracking.save_record(checkout.record)
+    assert retained_checkout.matches(checkout.record, config)
+    assert pr_source_publication._caller(checkout.record.worktree_id, config).worktree_path == str(checkout.source)
+    other = "linux" if checkout.record.platform != "linux" else "windows"
+    if foreign == "record":
+        checkout.record.platform = other
+        tracking.save_record(checkout.record)
+    else:
+        config = replace(config, platform=other)
+    before = checkout.record.yaml_path.read_bytes()
+    assert retained_checkout.matches(checkout.record, config) is False
+    with pytest.raises(pr_source_publication.SourcePublicationError, match="does not own"):
+        pr_source_publication._caller(checkout.record.worktree_id, config)
+    assert checkout.record.yaml_path.read_bytes() == before
