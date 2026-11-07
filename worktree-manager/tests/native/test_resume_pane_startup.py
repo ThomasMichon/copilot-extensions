@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 import yaml
 from _manager_process_fixture import boundary_runtime
+from _native_python_owner import native_python_owner
 from test_launch_admission_ordering import _fixture
 from test_pane_args_file import PWSH, WRAPPER, _test_env
 from test_pane_startup import _copied_setup
@@ -28,6 +29,12 @@ import json, os, subprocess, sys
 from pathlib import Path
 
 args = sys.argv[1:]
+if args == ["-I", "-X", "utf8", "-m", "agent_remote_driver.mux_creation", "--describe-contract"]:
+    result = subprocess.run(
+        [sys.executable, *args], stdin=subprocess.DEVNULL, timeout=25,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    raise SystemExit(result.returncode)
 if args[:1] == ["-c"]:
     result = subprocess.run(
         [sys.executable, *args], input=sys.stdin.buffer.read(), timeout=25,
@@ -208,6 +215,10 @@ def _resume_fixture(root, shared_env, manager_bin, index):
     }
     env.update(TEST_SOURCE_ROOT=str(ROOT), WORKTREE_PANE_WAIT_TIMEOUT="0")
     (root / "owner.py").write_text(OWNER, encoding="utf-8")
+    runtime_python = native_python_owner(root, env)
+    (root / "runtime/bin/resolve-runtime.ps1").write_text(
+        "$AwPy = '" + str(runtime_python).replace("'", "''") + "'\n", encoding="utf-8",
+    )
     (target / ".copilot-extensions/agent-worktrees/config.yaml").write_text(
         "expose_agent: true\n", encoding="utf-8",
     )
@@ -233,7 +244,7 @@ def _resume_fixture(root, shared_env, manager_bin, index):
         "exit 0\n", encoding="utf-8",
     )
     expected = [
-        "-Project", "example", "-WorktreeId", ident, "-RuntimePython", str(root / "owner.ps1"),
+        "-Project", "example", "-WorktreeId", ident, "-RuntimePython", str(runtime_python),
         "--resume=" + str(uuid4()), "--experimental", "--allow-all", "", "two words", "a'quote", 'a"quote',
         "trailing\\", "$literal; & text", "\u03bb", "2026-10-08T12:00:00Z",
         *[f"fixture-{index}-{value}" for value in range(11)],
@@ -267,6 +278,79 @@ def _resume_fixture(root, shared_env, manager_bin, index):
         "env": env, "target": target, "capture": capture,
         "expected": expected, "name": "wt-" + ident, "root": root, "state": state,
     }
+
+
+def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
+    from _terminal_console_fixture import Console
+    from plugin_test_command_safety import private_mux_args
+
+    env = _test_env(tmp_path)
+    psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
+    assert PWSH and psmux, "PowerShell 7 and PSMux are required for this native packet"
+    namespace = private_mux_args(tmp_path)
+    _private_psmux(tmp_path / "mux-bin", psmux, namespace[1], env)
+    launch = _resume_fixture(tmp_path / "launch", env, tmp_path / "manager-bin", 0)
+    argv = ["", "two words", "a'quote", 'a"quote', "trailing\\", "\u03bb"]
+    result = subprocess.run(
+        [str(launch["root"] / "owner.exe"), "-c",
+         "import json,sys; print(json.dumps([sys.argv[1:], sys.stdin.read()]))", *argv],
+        input="native stdin\n", cwd=launch["target"], env=launch["env"],
+        capture_output=True, text=True, timeout=20, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == [argv, "native stdin\n"]
+    rejected = subprocess.run(
+        [str(launch["root"] / "owner.exe"), "-c", "raise SystemExit(17)"],
+        input="", cwd=launch["target"], env=launch["env"],
+        capture_output=True, text=True, timeout=20, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert rejected.returncode == 17, rejected.stdout + rejected.stderr
+    probe = subprocess.run(
+        [str(launch["root"] / "owner.exe"), "-I", "-X", "utf8", "-m",
+         "agent_remote_driver.mux_creation", "--describe-contract"],
+        stdin=subprocess.DEVNULL, cwd=launch["target"], env=launch["env"],
+        capture_output=True, text=True, timeout=20, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    contract = json.loads(probe.stdout)
+    assert contract["contract"] == "copilot-driver.mux-creation"
+    assert "windows-psmux-create-or-join" in contract["operations"]
+    assert Path(contract["python"]).resolve() == Path(sys.executable).resolve()
+    assert Path(contract["entrypoint"]).is_file()
+    script = launch["root"] / "pipeline.ps1"
+    script.write_text(
+        "$VenvPython = '" + str(launch["root"] / "owner.exe").replace("'", "''") + "'\n"
+        "$target = '" + str(launch["target"]).replace("'", "''") + "'\n"
+        "$tokens = $null; $errors = $null\n"
+        "$ast = [Management.Automation.Language.Parser]::ParseFile('"
+        + str(WRAPPER.parent / "launch-session.ps1").replace("'", "''")
+        + "', [ref]$tokens, [ref]$errors)\n"
+        "if ($errors.Count) { throw 'Launcher parse failed' }\n"
+        "$admission = $ast.Find({ param($node) "
+        "$node -is [Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -eq 'Assert-LaunchTarget' }, $true)\n"
+        "if (-not $admission) { throw 'Admission function missing' }\n"
+        "Invoke-Expression $admission.Extent.Text\n"
+        "Assert-LaunchTarget -Path $target\n"
+        "& $VenvPython -m agent_worktrees register-launch *> $null\n"
+        "& '" + str(psmux).replace("'", "''") + "' "
+        + " ".join("'" + value.replace("'", "''") + "'" for value in namespace)
+        + " has-session -t fixture *> $null\n"
+        "if ($LASTEXITCODE -notin @(0,1)) { exit $LASTEXITCODE }\n"
+        "Assert-LaunchTarget -Path $target\n"
+        "[Console]::WriteLine('pipeline stdin')\nexit 0\n",
+        encoding="utf-8",
+    )
+    with Console([PWSH, "-NoProfile", "-File", str(script)],
+                 env=launch["env"], cwd=launch["target"]) as console:
+        assert console.wait() == 0, (
+            console.output.decode("utf-8", "replace")
+            + (launch["root"] / "calls.jsonl").read_text("utf-8")
+        )
+        assert console.output.decode("utf-8", "replace").count("pipeline stdin") == 1
 
 
 @pytest.mark.parametrize("use_fixture_dependency", [False, True])

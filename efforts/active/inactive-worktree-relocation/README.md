@@ -758,3 +758,27 @@ adopter pilot feedback gates subsequent widening.
   Active. Await separately owned first-flow adoption feedback or explicit next
   source steering before widening. No installed runtime, service, allocation
   default or real retained worktree was changed by source delivery.
+
+### 2026-11-07 — Bounded repository-wide release prerequisite
+- Claimed only the distinct native-executable fixture follow-up on #10945 and
+  #10946 after checking current source, open/merged PRs and existing ownership.
+  The earlier dependency and private-mux repairs remain separate accepted work.
+- The synthetic Python owner must be a native executable, preserve literal
+  argv/stdin/exit status, and delegate the current finite Driver contract probe
+  to the actual selected test runtime instead of forcing an older fallback.
+  Its Framework stdin writer must not insert a UTF-8 preamble when a native
+  mux query changes the console code page. Production launchers remain unchanged.
+- The corrected complete native Windows packet passes all seven cases,
+  including both real four-concurrent Resume/prewarming variants, copied setup,
+  argument receipts, ConPTY attachment/detach and exact owned retirement.
+  The additional control exercises the actual admission function before and
+  after a real private mux query, plus native argv/stdin/nonzero exit status.
+- This below-altitude fixture repair is a source release prerequisite, not
+  broader relocation acceptance or installed-generation qualification.
+  Keep this effort and #10879 Active; normal source review/CI/merge and actual
+  automatic Main qualification/publication remain independent gates.
+- A later pull-forward changed independent shared-source dependencies. The fresh
+  current-source owner/admission control passed, but both concurrent cases
+  reported unconfirmed native mux creation. Preserve that exact-source gate;
+  the initial complete pass is not a replacement for current qualification.
+  Use the bounded hosted Windows lane before treating the repair as reviewable.

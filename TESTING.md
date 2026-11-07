@@ -306,7 +306,11 @@ It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
 without fallback or prerequisite skips on Windows. A private executable adapter
 adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
 control and cleanup calls use that same namespace. The adapter restores the
-backend's original PATH. Two small native controls cover direct and adapted
+backend's original PATH. A separate native executable carries the synthetic
+Python owner's literal argv, stdin and exit status; it is not a PowerShell
+script substituted for a Python executable. The actual hosting-admission
+function is also checked before and after a real private mux probe, retaining
+BOM-free JSON input despite console-encoding changes. Two small native controls cover direct and adapted
 private mux startup. Four concurrent admitted
 Resume plans traverse the unchanged production launcher, copied pane assets,
 argument receipt and startup reader,
