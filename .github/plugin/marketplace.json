@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.346-dev1",
+      "version": "0.9.347-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -116,7 +116,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.10.237-dev1",
+      "version": "0.10.238-dev1",
       "source": "plugins/agent-index"
     },
     {

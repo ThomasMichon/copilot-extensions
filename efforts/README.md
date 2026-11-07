@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Windows Qualification Escape Hatch](active/windows-qualification-escape-hatch/README.md) | Draft; reviewed owner-only hosted Windows request/result flow before implementation | #11169; one reusable transport ref, focused selections, existing #10765/#6237/#7122 owners and gates retained |
 | [Bridge and Dispatch Worker Contract Qualification](active/bridge-dispatch-worker-contract-qualification/README.md) | Draft; handoff proposal, no implementation claimed | #6467/#3556/#7268 existing owners; #11106 result bindings and #11108 effective profiles; no new driver or rollout |
 | [Inactive Worktree Relocation](active/inactive-worktree-relocation/README.md) | Active; proposal before implementation, complete stopped-clean flow first | #10879; mixed roots and broader inactive continuity; existing owners retained, no live migration or rollout |
 | [Maintainer Vision Adherence Review](active/maintainer-vision-adherence-review/README.md) | Active; public lens and paired skill proposed | #10864; existing vision/pattern/conformance and review owners retained, no runtime rollout |

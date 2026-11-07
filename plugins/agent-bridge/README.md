@@ -29,6 +29,11 @@ listener under this daemon's existing lifecycle. See the
 forward the legacy relay as an account-scoped endpoint or infer credential
 permission from ordinary Bridge/Gateway membership.
 
+The finite [source-account file adapters](docs/source-account-file-auth.md)
+can acquire a declared HTTP source lease and renew an existing approved POSIX
+native plaintext account slot. They remain unactivated source APIs, not a
+renewal daemon, new login flow or native execution auth-wait implementation.
+
 Persistent inter-agent communication service for Copilot CLI. One instance per
 machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
