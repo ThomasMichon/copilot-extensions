@@ -1621,12 +1621,17 @@ breadcrumb (schema, purpose, retention reason, creation time, PID and owner
 references such as the Copilot session, bound worktree and launch IDs taken
 from the environment) and removes the directory on exit. Removal is best
 effort and never follows symlinks or junctions: a link is unlinked, not
-traversed. `create_labeled_scratch` / `remove_scratch` serve callers whose
+traversed, and each directory is pinned before it is entered (descriptor-
+relative traversal on POSIX, a no-share-delete handle on Windows) so a
+directory swapped for a link mid-cleanup is never followed. Incomplete
+cleanup keeps the breadcrumb, so retained scratch stays labeled.
+`create_labeled_scratch` / `remove_scratch` serve callers whose
 scratch outlives one `with` block.
 
 `python -m agent_procutil.scratch report [--root DIR] [--json]` is a
 read-only inventory of a temp root: entries grouped by name prefix with
-counts, bytes, oldest/newest age and how many carry a breadcrumb. It has no
+counts, bytes, oldest/newest age and how many carry a breadcrumb (only a
+regular-file breadcrumb is read). It has no
 deletion capability; stale content is left for the operator to review.
 
 ## Vendoring

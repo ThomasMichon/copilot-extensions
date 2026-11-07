@@ -83,6 +83,72 @@ def test_removal_handles_missing_path(tmp_path):
     assert scratch.remove_scratch(tmp_path / "absent")
 
 
+def test_directory_swapped_for_link_after_inspection_is_not_followed(tmp_path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("precious")
+    path = scratch.create_labeled_scratch("swap", "race", root=tmp_path / "root")
+    (path / "inner").mkdir()
+    (path / "inner" / "data.txt").write_text("x")
+    real_pin = scratch._pin
+
+    def swapping_pin(parent, child_path, expected):
+        if os.path.basename(child_path) == "inner":
+            os.rename(child_path, os.path.join(os.path.dirname(child_path), "moved"))
+            _make_dir_link(child_path, outside)
+        return real_pin(parent, child_path, expected)
+
+    monkeypatch.setattr(scratch, "_pin", swapping_pin)
+    try:
+        removed = scratch.remove_scratch(path)
+    except subprocess.CalledProcessError as exc:
+        pytest.skip(f"directory links unavailable: {exc}")
+    assert not removed
+    assert (outside / "keep.txt").read_text() == "precious"
+    assert (path / scratch.BREADCRUMB).is_file()
+
+
+def test_incomplete_cleanup_keeps_breadcrumb(tmp_path, monkeypatch):
+    path = scratch.create_labeled_scratch("partial", "stuck child", root=tmp_path)
+    original = (path / scratch.BREADCRUMB).read_bytes()
+    (path / "stuck.bin").write_bytes(b"1")
+    (path / "free.bin").write_bytes(b"2")
+    real_remove = scratch._remove_file
+
+    def refusing_remove(target, st, dir_fd=None):
+        if os.path.basename(target) == "stuck.bin":
+            raise PermissionError("in use")
+        real_remove(target, st, dir_fd)
+
+    monkeypatch.setattr(scratch, "_remove_file", refusing_remove)
+    assert not scratch.remove_scratch(path)
+    assert sorted(os.listdir(path)) == [scratch.BREADCRUMB, "stuck.bin"]
+    assert (path / scratch.BREADCRUMB).read_bytes() == original
+
+
+def test_final_rmdir_failure_restores_breadcrumb(tmp_path, monkeypatch):
+    path = scratch.create_labeled_scratch("final", "rmdir refused", root=tmp_path)
+    original = (path / scratch.BREADCRUMB).read_bytes()
+    real_rmdir = os.rmdir
+
+    def refusing_rmdir(target, *args, **kwargs):
+        if os.fspath(target) == str(path):
+            raise PermissionError("directory in use")
+        return real_rmdir(target, *args, **kwargs)
+
+    monkeypatch.setattr(scratch.os, "rmdir", refusing_rmdir)
+    assert not scratch.remove_scratch(path)
+    assert (path / scratch.BREADCRUMB).read_bytes() == original
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
+def test_report_does_not_block_on_fifo_breadcrumb(tmp_path):
+    (tmp_path / "odd-x1").mkdir()
+    os.mkfifo(tmp_path / "odd-x1" / scratch.BREADCRUMB)
+    groups = {(g["prefix"], g["kind"]): g for g in scratch.scratch_report(tmp_path)}
+    assert groups[("odd-*", "dir")]["unlabeled"] == 1
+
+
 def test_prefix_normalization_groups_random_suffixes():
     assert scratch.prefix_of("agbridge-host-ab12cd") == "agbridge-host-*"
     assert scratch.prefix_of("agbridge-host-abcdefgh") == "agbridge-host-*"

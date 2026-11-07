@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -1204,6 +1205,45 @@ def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
         launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
     assert seen and all(name.startswith("agbridge-host-") for name in seen)
     assert list(scratch_root.iterdir()) == []
+
+
+def test_launch_session_host_fallback_scratch_kept_when_interrupted_after_spawn(
+    tmp_path, monkeypatch,
+):
+    """An interruption while a spawned host may still be running keeps the
+    labeled fallback directory, since that host may still use its records."""
+    hang_script = tmp_path / "hang.py"
+    hang_script.write_text("import time\ntime.sleep(30)\n")
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch_root))
+    real_popen = subprocess.Popen
+    spawned: dict[str, subprocess.Popen] = {}
+
+    def _fake_popen(argv, **kwargs):
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
+        spawned["proc"] = real_popen([sys.executable, str(hang_script)], **kwargs)
+        return spawned["proc"]
+
+    def _interrupt(_seconds):
+        if "proc" in spawned:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(
+        launcher._core, "time", types.SimpleNamespace(time=time.time, sleep=_interrupt),
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=30.0)
+        kept = [entry for entry in scratch_root.iterdir() if entry.name.startswith("agbridge-host-")]
+        assert len(kept) == 1 and (kept[0] / "scratch-owner.json").is_file()
+    finally:
+        proc = spawned.get("proc")
+        if proc is not None:
+            proc.kill()
+            proc.wait(timeout=10)
 
 
 def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):

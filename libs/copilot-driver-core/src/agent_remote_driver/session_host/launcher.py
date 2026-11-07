@@ -265,8 +265,9 @@ def launch_session_host(
 
     Without ``state_dir`` the host's records live in a labeled scratch
     directory (``scratch-owner.json`` breadcrumb). A launch that fails before
-    any caller can hold the host's authority removes that directory; a ready
-    host keeps it because its authority record is read after the host exits.
+    spawning, or whose host is confirmed to have exited, removes that
+    directory; any other outcome keeps it because a live host or a later
+    authority read may still need it.
     """
     # Frontend-only helper; the compact host archive does not carry it.
     from agent_procutil.scratch import create_labeled_scratch, remove_scratch
@@ -279,6 +280,7 @@ def launch_session_host(
             owner_refs={"session_id": session_id} if session_id else None,
             retention="retained while its host authority may be read; removed on failed launch",
         )
+    phase = {"spawn_attempted": False, "exited": False}
     try:
         return _launch_in(
             sd, child_argv, cwd=cwd, env=env, ready_timeout=ready_timeout, nonce=nonce,
@@ -286,12 +288,14 @@ def launch_session_host(
             unexpected_reap_seconds=unexpected_reap_seconds,
             active_reap_seconds=active_reap_seconds, acquisition_launch=acquisition_launch,
             host_entrypoint=host_entrypoint, policy_context=policy_context,
-            lifetime_policy=lifetime_policy,
+            lifetime_policy=lifetime_policy, phase=phase,
         )
-    except BaseException as exc:
-        # A timed-out host may still be exiting, and custody owners keep their evidence.
-        if fallback is not None and acquisition_launch is None and not isinstance(
-            exc, TimeoutError,
+    except BaseException:
+        # Only a proven pre-spawn failure or a confirmed host exit releases the
+        # records; any other post-spawn outcome may leave a live host behind.
+        # Custody owners always keep their evidence.
+        if fallback is not None and acquisition_launch is None and (
+            not phase["spawn_attempted"] or phase["exited"]
         ):
             remove_scratch(fallback)
         raise
@@ -313,6 +317,7 @@ def _launch_in(
     host_entrypoint: str,
     policy_context: str | None,
     lifetime_policy: str,
+    phase: dict[str, bool],
 ) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
 
@@ -401,6 +406,7 @@ def _launch_in(
 
     spawn_options = host_spawn_kwargs()
     try:
+        phase["spawn_attempted"] = True
         if acquisition_launch is not None:
             acquisition_launch.begin_host()
         proc = spawn_instance(
@@ -434,6 +440,7 @@ def _launch_in(
     deadline = time.time() + ready_timeout
     while True:
         if proc.poll() is not None:
+            phase["exited"] = True
             if startup is not None:
                 startup.close()
             # The process has exited, but the OS pipe may still hold bytes

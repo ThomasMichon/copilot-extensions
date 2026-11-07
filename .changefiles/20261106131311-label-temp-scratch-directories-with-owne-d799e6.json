@@ -1,5 +1,5 @@
 {
-  "comment": "Label temp scratch directories with ownership breadcrumbs, clean up failed Session Host fallback state, remove released sync locks, and keep uv build lock files out of the shared temp root.",
+  "comment": "Label temp scratch directories with ownership breadcrumbs, clean up Session Host fallback state when no host can still use it, and keep uv build lock files out of the shared temp root.",
   "changes": [
     {
       "plugin": "agent-bridge",
@@ -55,10 +55,6 @@
     },
     {
       "plugin": "budget-guidance",
-      "type": "patch"
-    },
-    {
-      "plugin": "customizing-copilot",
       "type": "patch"
     },
     {

@@ -4675,7 +4675,7 @@
         "libs/agent-procutil/src/agent_procutil/daemon_instances.py": "59fa2d8f1bf612d020e68b4a9674cfbe3ec8b34b46cb5230aa54f743d9907322",
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113",
         "libs/agent-procutil/src/agent_procutil/owned_process.py": "ef71356dc633d17a88c025f69fde3559cf5297fef60ea84ab126e809de5b74dd",
-        "libs/agent-procutil/src/agent_procutil/scratch.py": "b9077051028271995573dc53b73d65bde4ed773bc03653b2f659b349a17d8c7a",
+        "libs/agent-procutil/src/agent_procutil/scratch.py": "dd0b006f5ff8b3288f18f06adc0b40934e6e0a3070d3323721bae8b6bcb85712",
         "libs/agent-procutil/src/agent_procutil/startup.py": "986b9973485ea50e00c52e8292316bd811062e59b652f514d9829d4a8d66bee0",
         "libs/agent-procutil/src/agent_procutil/streaming.py": "d5b32b9aca844c7e764646848174fbc3e550d33443a1f8c666d948f9ce7c32a9",
         "libs/agent-procutil/src/agent_procutil/job_activity.py": "26fa7e77370d06e3775eefb8a530ab8d8d7a7ba866e33bed5af0b41515951f69",
