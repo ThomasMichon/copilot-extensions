@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Live Question Answers](active/live-question-answers/README.md) | Draft; correlated native-question protocol proposal before implementation | #4418; existing permissions remain terminal-owned, no shared-session answers or rollout |
 | [Owned Codespace Capacity](active/owned-codespace-capacity/README.md) | Active; reviewed intent accepted, independent admission flow first; sequential reuse and consumer qualification open | Bounded #4187 slice; preserves recycler, capture and owner-wave integration owners; no live cleanup or rollout |
 | [Worktree Activity Convergence](active/worktree-activity-convergence/README.md) | Active; reviewed plan accepted, lifecycle/activity/event and list-control implementation open | #11195; preserves #5953/#6748/#2619 owners; selected local rollout after release only |
 | [Bridge and Dispatch Worker Contract Qualification](active/bridge-dispatch-worker-contract-qualification/README.md) | Draft; handoff proposal, no implementation claimed | #6467/#3556/#7268 existing owners; #11106 result bindings and #11108 effective profiles; no new driver or rollout |
