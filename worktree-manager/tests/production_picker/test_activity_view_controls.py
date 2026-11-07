@@ -1,7 +1,8 @@
 """Conversation recency and native, selection-safe list controls."""
 
 import asyncio
-from datetime import datetime
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,6 +44,43 @@ def test_invalid_legacy_resume_falls_back_to_the_same_valid_instant_for_display_
     }, "host", "Win")
     assert row["used"] == "1h"
     assert derive._last_active_secs(row) == 3600
+
+
+def test_producer_normalizes_naive_message_before_another_timezone_consumes_it(tmp_path, monkeypatch):
+    from agent_worktrees import sessions_messages as messages
+
+    class ProducerDateTime(datetime):
+        def astimezone(self, tz=None):
+            if self.tzinfo is None:
+                return self.replace(tzinfo=timezone(timedelta(hours=-7))).astimezone(tz)
+            return super().astimezone(tz)
+
+    monkeypatch.setattr(messages, "datetime", ProducerDateTime)
+    (tmp_path / "events.jsonl").write_text(json.dumps({
+        "type": "user.message", "timestamp": "2026-11-06T18:00:00",
+    }) + "\n", encoding="utf-8")
+    _turns, published = messages.read(tmp_path)
+    assert published == "2026-11-07T01:00:00+00:00"
+    assert json.loads((tmp_path / ".aw-turns.json").read_text())["last_message_at"] == published
+    monkeypatch.setattr(derive, "NOW", datetime(2026, 11, 7, 1, 1, tzinfo=timezone.utc))
+    raw = {"message_activity": {"version": 1, "last_message_at": published}}
+    assert derive._last_active_secs(raw) == 60
+    assert derive._last_active_display(raw) == "1m"
+
+
+def test_used_and_sort_compare_utc_instants_across_repeated_dst_hour(monkeypatch):
+    monkeypatch.setattr(derive, "NOW", datetime.fromisoformat("2026-11-01T02:10:00-05:00"))
+    rows = [
+        {"id": name, "message_activity": {"version": 1, "last_message_at": timestamp}}
+        for name, timestamp in (
+            ("old", "2026-11-01T01:50:00-04:00"),
+            ("newer", "2026-11-01T01:10:00-05:00"),
+            ("newest", "2026-11-01T01:50:00-05:00"),
+        )
+    ]
+    assert [derive._last_active_secs(row) for row in rows] == [4800, 3600, 1200]
+    assert [derive._last_active_display(row) for row in rows] == ["1h", "1h", "20m"]
+    assert [row["id"] for row in sorted(rows, key=derive._last_active_secs)] == ["newest", "newer", "old"]
 
 
 @pytest.mark.parametrize("width", [48, 118])

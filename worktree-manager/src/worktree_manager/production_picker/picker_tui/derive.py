@@ -129,7 +129,10 @@ def _age(ts):
     t = _parse_pulse_ts(ts)
     if t is None:
         return "?"
-    s = max(0, (NOW - t).total_seconds())
+    return _relative_age(max(0, (NOW - t).total_seconds()))
+
+
+def _relative_age(s):
     if s < 3600:
         return f"{int(s // 60)}m"
     if s < 86400:
@@ -436,29 +439,38 @@ def _age_secs(w):
 
 def _last_active_secs(w):
     """Use exactly the USED instant, including the documented legacy fallback."""
-    dt = _parse_pulse_ts(w.get("used_at") or _last_active_timestamp(w))
-    return max(0, (NOW - dt).total_seconds()) if dt else w.get("age_secs", 1 << 40)
+    dt = _activity_instant(w.get("used_at") or _last_active_timestamp(w))
+    return max(0, (NOW.astimezone(_dt.timezone.utc) - dt).total_seconds()) if dt else w.get("age_secs", 1 << 40)
+
+
+def _activity_instant(ts):
+    if not isinstance(ts, str) or not ts:
+        return None
+    try:
+        return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(_dt.timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return None
 
 
 def _last_active_timestamp(w):
     activity = w.get("message_activity")
     if isinstance(activity, dict) and type(activity.get("version")) is int and activity["version"] == 1:
         message_at = activity.get("last_message_at")
-        if _parse_pulse_ts(message_at) is not None:
+        if _activity_instant(message_at) is not None:
             return message_at
     for candidate in (
         w.get("last_resumed_at"),
         w.get("completed_at") if w.get("status") == "finalized" else w.get("started_at"),
     ):
-        if _parse_pulse_ts(candidate) is not None:
+        if _activity_instant(candidate) is not None:
             return candidate
     return None
 
 
 def _last_active_display(w):
     """Relative USED age from the same message/legacy instant as its sort key."""
-    dt = _parse_pulse_ts(_last_active_timestamp(w))
-    return _age(dt.isoformat()) if dt else "-"
+    dt = _activity_instant(_last_active_timestamp(w))
+    return _relative_age(max(0, (NOW.astimezone(_dt.timezone.utc) - dt).total_seconds())) if dt else "-"
 
 
 def time_fields(w):

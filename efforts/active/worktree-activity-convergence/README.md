@@ -268,6 +268,26 @@ focus, selection, range anchors and action targets.
 
 ## Journal
 
+### 2026-11-07 - Cross-timezone and repeated-hour corrections
+- The second review confirmed both native-selection fixes, then identified
+  two previously missed recency defects. Historical naive message values now
+  normalize in the producer before caching/publication, preserving existing
+  offset-bearing representations. USED display and ordering compare UTC
+  instants rather than naive local wall times; unrelated pulse/AGE semantics
+  remain unchanged.
+- A real message-log/cache read under a synthetic UTC-minus-seven producer
+  clock is consumed under a UTC clock. Repeated-hour cases prove actual ages
+  of 80, 60 and 20 minutes and correct ordering. The focused Manager packet,
+  including the connected event-only flow, passed 13 tests. The backend
+  message/record-release packet passed 36.
+- The upstream rebase retained the existing checkout-relocation writer
+  generation and location-preservation hook. Their combined source hashes,
+  not either side's old hashes, bind unit admission. The owned message-field
+  serialization remains one ordinary inline dictionary so module growth
+  stays inside its strict existing ceiling.
+- Required current-head review/CI must run again after publication; source
+  release, local rollout and installed-consumer acceptance remain open.
+
 ### 2026-11-07 - Implementation review and unit admission corrections
 - #11257 opened through the managed publication flow. The first current-head
   review identified two concrete gaps: native fingerprints used unqualified

@@ -531,6 +531,8 @@ and filesystem timestamps are not messages. Session discovery remains
 registry-driven. The existing incremental turns sidecar caches only counts,
 file identity and message timestamps, not conversation bodies; legacy caches
 rebuild once when first read by the new counter.
+Historical timezone-less message timestamps are interpreted by their producer
+and normalized to an offset-bearing UTC instant before caching or publication.
 
 The passive extension also writes `messageActivityVersion: 1` and
 `lastMessageAt` to its own `substatus.json`, including sessions without an
@@ -540,8 +542,11 @@ instant. Normal pulse coalescing remains bounded to 2.5 seconds.
 
 Manager uses a supported message timestamp for both USED and recency sorting.
 Missing, invalid or unknown-version optional facts retain the legacy resume,
-then completion/start fallback; future-clock ages clamp to zero. Existing
-bounded additive JSON readers ignore the new property. New readers work with
+then completion/start fallback; future-clock ages clamp to zero. Display and
+sort ages compare UTC instants, so a daylight-saving repeated hour
+cannot reverse recency. Legacy timezone-less fallback values retain local
+interpretation.
+Existing bounded additive JSON readers ignore the new property. New readers work with
 old producers and provider rollback without new CLI syntax. An old producer's
 strict saved-row validator may reject an expanded advisory snapshot until that
 producer makes its own current publication; it must report unavailable rather

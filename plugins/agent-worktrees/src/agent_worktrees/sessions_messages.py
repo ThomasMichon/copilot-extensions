@@ -22,7 +22,12 @@ def timestamp(value: object) -> datetime | None:
 def newest(*values: object) -> str | None:
     """Select the latest valid timestamp by instant, not lexical offset."""
     valid = [(parsed, value) for value in values if (parsed := timestamp(value)) is not None]
-    return max(valid, key=lambda item: item[0])[1] if valid else None
+    if not valid:
+        return None
+    parsed, value = max(valid, key=lambda item: item[0])
+    if isinstance(value, str) and datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is not None:
+        return value
+    return parsed.isoformat()
 
 
 def read(entry: Path) -> tuple[int, str | None]:
