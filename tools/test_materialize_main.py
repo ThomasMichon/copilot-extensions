@@ -113,15 +113,30 @@ def test_invocation_promotion_refuses_foreign_manifest_before_writes(tmp_path: P
     assert not (manifest.parent / "scripts/command_binding.py").exists()
 
 
+def _invocation_preparation_source(tmp_path: Path) -> Path:
+    canonical, _candidate = _invocation_candidate(tmp_path)
+    consumer = canonical / "plugins/sample"
+    shutil.copytree(canonical / "plugins/agent-worktrees/scripts", consumer / "scripts")
+    (consumer / "pyproject.toml").write_text('[project]\nname = "sample"\nversion = "1"\n')
+    (consumer / "payload-invocation.json").write_text(json.dumps({
+        "schema": "copilot-extensions.payload-invocation", "version": 1,
+        "command": "sample", "module": "sample.cli", "purpose": "Sample command",
+        "runtimeRoot": ".sample", "noSelfProvisionEnv": "SAMPLE_NO_PROVISION",
+    }))
+    return canonical
+
+
 def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path) -> None:
     repo = Path(__file__).resolve().parents[1]
-    source, payload = tmp_path / "source", tmp_path / "payload"
+    source, payload = _invocation_preparation_source(tmp_path), tmp_path / "payload"
     consumer = source / "worktree-manager"
-    consumer.mkdir(parents=True)
+    consumer.mkdir(parents=True, exist_ok=True)
     manifest = repo / "worktree-manager/packaged-assets.json"
     shutil.copyfile(manifest, consumer / manifest.name)
+    shutil.copyfile(repo / "worktree-manager/launch-wrapper-assets.json",
+                    consumer / "launch-wrapper-assets.json")
     tools = source / "tools"
-    tools.mkdir()
+    tools.mkdir(exist_ok=True)
     for name in json.loads(manifest.read_text())["files"]:
         shutil.copyfile(repo / "tools" / name, tools / name)
     shutil.copytree(
@@ -132,27 +147,44 @@ def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path) ->
         source_consumer_dir=consumer, dest_consumer_dir=payload, canonical_root=source,
     )
     assert log and not any(line.startswith("SKIP") for line in log), log
+    for name in ("generate.py", "runtime_admission.py"):
+        (source / "libs/payload-invocation" / name).write_text(
+            'raise RuntimeError("candidate tooling must never execute")\n',
+        )
+    before = {path.relative_to(source): path.read_bytes()
+              for path in source.rglob("*") if path.is_file()}
+    script = """
+import pathlib, sys
+payload, source, output = map(pathlib.Path, sys.argv[1:])
+sys.path.insert(0, str(payload / "scripts/runtime-source-tools"))
+import prepare_runtime_source
+prepare_runtime_source._materialize(source, "sample", output)
+assert b"sample.cli" in (output / "bin/sample.ps1").read_bytes()
+sys.path.insert(0, str(payload / "scripts"))
+import bootstrap_inputs, standalone_build
+assets = bootstrap_inputs._preparation_assets(source / "worktree-manager")
+resources = standalone_build.application_resources(payload, "worktree_manager")
+for name in ("generate.py", "runtime_admission.py"):
+    assert assets[pathlib.Path("scripts/libs/payload-invocation") / name] == (
+        source / "libs/payload-invocation" / name
+    )
+    assert "_runtime_assets/scripts/libs/payload-invocation/" + name in resources
+print("copied-manager-generation-ok")
+"""
     result = subprocess.run(
-        [sys.executable, "-I", "-B", str(payload / "scripts/runtime-source-tools/prepare_runtime_source.py"),
-         "--help"],
+        [sys.executable, "-I", "-B", "-c", script, str(payload), str(source), str(tmp_path / "prepared")],
         cwd=tmp_path, capture_output=True, text=True, timeout=10,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
-    assert "--source" in result.stdout
+    assert result.stdout.strip() == "copied-manager-generation-ok"
+    assert before == {path.relative_to(source): path.read_bytes()
+                      for path in source.rglob("*") if path.is_file()}
 
 
 def test_copied_invocation_toolkit_prepares_source_with_pinned_generators(tmp_path: Path) -> None:
     repo = Path(__file__).resolve().parents[1]
-    canonical, _candidate = _invocation_candidate(tmp_path)
-    consumer = canonical / "plugins/sample"
-    shutil.copytree(canonical / "plugins/agent-worktrees/scripts", consumer / "scripts")
-    (consumer / "pyproject.toml").write_text('[project]\nname = "sample"\nversion = "1"\n')
-    (consumer / "payload-invocation.json").write_text(json.dumps({
-        "schema": "copilot-extensions.payload-invocation", "version": 1,
-        "command": "sample", "module": "sample.cli", "purpose": "Sample command",
-        "runtimeRoot": ".sample", "noSelfProvisionEnv": "SAMPLE_NO_PROVISION",
-    }))
+    canonical = _invocation_preparation_source(tmp_path)
     spec = importlib.util.spec_from_file_location(
         "_copied_preparer_packager", repo / "libs/payload-invocation/runtime_admission.py",
     )

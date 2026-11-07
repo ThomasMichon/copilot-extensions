@@ -167,6 +167,28 @@ def test_preparation_assets_are_retained_addressed_and_rechecked(preparation_ass
         helper.retain(payload, driver)
 
 
+def test_invocation_tooling_is_retained_and_rechecked_with_preparer(preparation_assets):
+    helper, payload, driver, _tool = preparation_assets
+    tooling = payload.parent / "libs/payload-invocation"
+    tooling.mkdir(parents=True)
+    names = ("generate.py", "runtime_admission.py")
+    for name in names:
+        (tooling / name).write_text("# pinned " + name + "\n", encoding="utf-8")
+    (payload / "launch-wrapper-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.launch-wrapper-assets", "version": 1,
+        "canonicalDir": "libs/payload-invocation", "payloadDir": "scripts/libs/payload-invocation",
+        "files": list(names),
+    }), encoding="utf-8")
+    retained, _share = helper.retain(payload, driver)
+    for name in names:
+        assert (retained / "scripts/libs/payload-invocation" / name).read_bytes() == (
+            tooling / name
+        ).read_bytes()
+    (retained / "scripts/libs/payload-invocation/generate.py").write_text("damaged\n")
+    with pytest.raises(RuntimeError, match="preparation assets differ"):
+        helper.retain(payload, driver)
+
+
 def test_preparation_asset_change_during_freezing_is_not_published(preparation_assets, monkeypatch):
     helper, payload, driver, tool = preparation_assets
     freeze = helper.engine.freeze_inputs
