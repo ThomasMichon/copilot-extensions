@@ -93,7 +93,8 @@ is retained to expose provider incompatibility instead of claiming zero rows.
 
 Finite streaming lists retain the 30-second initial-publication/silence budget.
 A valid published row, delta, removal or summary renews that communication
-budget after a first row; arbitrary text and `begin` do not. A separate one-hour
+budget atomically with publication after a first row, so an older expiry cannot
+reject newly committed progress; arbitrary text and `begin` do not. A separate one-hour
 process deadline remains finite even while progress continues. Timeout retains
 partial rows as failed observations, not a completed inventory, and retires the
 owned producer. Finite envelopes also require `done` and exit zero; rows followed

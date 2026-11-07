@@ -517,6 +517,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     self._cache[machine] = ("ready", [by_id[i] for i in order], "")
                     self._summaries[machine] = dict(summary)
                 deadline.commit()
+                deadline.progress()
             self._release_startup(machine)
 
         try:
@@ -541,7 +542,6 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     by_id[rid] = entry
                     ready = True
                     publish()
-                    deadline.progress()
                 elif typ == "removed":
                     saw_envelope = True
                     rid = obj.get("id")
@@ -553,7 +553,6 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                             del by_id[rid]
                             order[:] = [i for i in order if i != rid]
                             publish()
-                            deadline.progress()
                 elif typ == "summary":
                     saw_envelope = True
                     raw_summary = obj.get("summary")
@@ -562,7 +561,6 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     }
                     if ready or done:
                         publish()
-                        deadline.progress()
                 elif typ == "done":
                     saw_envelope = True
                     done = True
